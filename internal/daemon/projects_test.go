@@ -280,36 +280,82 @@ func TestFederationProjectsStayOnTheirHostAndArchiveRoutesThere(t *testing.T) {
 	})
 }
 
-func TestSnapshotNamesEachProjectsCoordinatorAndTheSessionItIs(t *testing.T) {
+func TestEveryProjectSurfaceKnowsItsCoordinatorIncludingOneNotStartedYet(t *testing.T) {
 	d, r, _, repo := projectsFixture(t)
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	call := func(method, path, body string, into any) {
+		t.Helper()
+		request := httptest.NewRequest(method, path, strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s %s: %d %s", method, path, response.Code, response.Body)
+		}
+		if into != nil {
+			if err := json.Unmarshal(response.Body.Bytes(), into); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	projects := func() map[string]dashboardProject {
+		t.Helper()
+		var state dashboardState
+		call(http.MethodGet, "/api/v1/snapshot?fresh=1", "", &state)
+		byID := map[string]dashboardProject{}
+		for _, found := range state.Projects {
+			byID[found.ID] = found
+		}
+		return byID
+	}
+	launchable := func(id string) bool {
+		t.Helper()
+		var options struct {
+			Projects []launchProject `json:"projects"`
+		}
+		call(http.MethodGet, "/api/v1/session-options", "", &options)
+		for _, found := range options.Projects {
+			if found.ID == id {
+				return true
+			}
+		}
+		return false
+	}
 	other := filepath.Join(t.TempDir(), "unstarted")
 	if err := os.MkdirAll(other, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	state, err := d.dashboardState(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	var widget string
+	for id := range projects() {
+		widget = id
 	}
-	widget := state.Projects[0].ID
 	if err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: widget, ProjectRoot: repo, Name: "widget-lead", Surface: "claude", Cwd: repo}, "to"); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: "project-unstarted", ProjectRoot: other, Name: "unstarted-lead", Surface: "codex", Cwd: other}, ""); err != nil {
 		t.Fatal(err)
 	}
-	state, err = d.dashboardState(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	byID := map[string]dashboardProject{}
-	for _, found := range state.Projects {
-		byID[found.ID] = found
-	}
+	byID := projects()
 	if lead := byID[widget].Coordinator; lead == nil || lead.Name != "widget-lead" || lead.SessionID != "to" || lead.Surface != "claude" {
 		t.Fatalf("widget coordinator=%+v", lead)
 	}
 	unstarted := byID["project-unstarted"]
-	if lead := unstarted.Coordinator; lead == nil || lead.Name != "unstarted-lead" || lead.SessionID != "" || unstarted.DisplayName != "unstarted" || unstarted.SessionCount != 0 {
+	if lead := unstarted.Coordinator; lead == nil || lead.Name != "unstarted-lead" || lead.SessionID != "" || unstarted.DisplayName != "unstarted" || unstarted.RootPath != other || unstarted.Kind != project.KindGit || unstarted.SessionCount != 0 || unstarted.Archived {
 		t.Fatalf("unstarted project=%+v coordinator=%+v", unstarted, lead)
+	}
+	if !launchable("project-unstarted") {
+		t.Fatal("a coordinator's project without sessions is not offered for a new session")
+	}
+
+	call(http.MethodPost, "/api/v1/actions", `{"action":"project-archive","projectId":"project-unstarted"}`, nil)
+	if found := projects()["project-unstarted"]; !found.Archived || found.Coordinator == nil {
+		t.Fatalf("archived project=%+v", found)
+	}
+	if launchable("project-unstarted") {
+		t.Fatal("an archived project is offered for a new session")
+	}
+	call(http.MethodPost, "/api/v1/actions", `{"action":"project-unarchive","projectId":"project-unstarted"}`, nil)
+	if found := projects()["project-unstarted"]; found.Archived || !launchable("project-unstarted") {
+		t.Fatalf("unarchived project=%+v", found)
 	}
 }

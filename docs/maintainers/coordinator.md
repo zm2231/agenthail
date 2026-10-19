@@ -12,7 +12,7 @@ The owning host keeps one row per project in the `coordinators` table, keyed by 
 
 `coordinator set <target>` makes an existing session its project's coordinator and saves its agent, working directory and configured model. `coordinator new <claude|codex>` saves a spec with no session for the project of `--cwd` (default: the current folder), starting in that folder or the project root, so the first message starts it. `coordinator list` shows every project's coordinator.
 
-Each project in the daemon snapshot carries its `coordinator`: name, agent and, once started, `sessionId`. A project with a coordinator and no sessions yet still appears. The dashboard shows `@<name>` in the project header and opens the coordinator's conversation from it; `project list` prints it in the LEAD column. Only the owning host's coordinators appear, so a paired host's projects show none.
+Each project in the daemon snapshot carries its `coordinator`: name, agent and, once started, `sessionId`. A project with a coordinator and no sessions yet is still a project: it appears in the snapshot and the new-session picker, and can be archived. The dashboard shows `@<name>` in the project header and opens the coordinator's conversation from it; `project list` prints it in the LEAD column. Only the owning host's coordinators appear, so a paired host's projects show none.
 
 ## Addresses
 

@@ -155,6 +155,25 @@ func (r *Registry) CoordinatorOfSession(sessionID string) (CoordinatorSpec, bool
 	return CoordinatorSpec{}, false, nil
 }
 
+// CoordinatorSessions maps each project id to the session its coordinator's
+// name points at, leaving out coordinators that have not started.
+func (r *Registry) CoordinatorSessions() (map[string]string, error) {
+	rows, err := r.read.Query(`SELECT c.project_id,a.session_id FROM coordinators c JOIN aliases a ON a.name=c.name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	sessions := map[string]string{}
+	for rows.Next() {
+		var projectID, sessionID string
+		if err := rows.Scan(&projectID, &sessionID); err != nil {
+			return nil, err
+		}
+		sessions[projectID] = sessionID
+	}
+	return sessions, rows.Err()
+}
+
 func (r *Registry) CoordinatorSessionID(spec CoordinatorSpec) (string, error) {
 	id, err := r.LookupAlias(spec.Name)
 	if errors.Is(err, sql.ErrNoRows) {

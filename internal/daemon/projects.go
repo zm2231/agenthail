@@ -122,15 +122,22 @@ func (d *Daemon) projectCoordinators() ([]projectCoordinator, error) {
 	if err != nil {
 		return nil, err
 	}
+	sessions, err := d.Registry.CoordinatorSessions()
+	if err != nil {
+		return nil, err
+	}
 	coordinators := make([]projectCoordinator, 0, len(specs))
 	for _, spec := range specs {
-		sessionID, err := d.Registry.CoordinatorSessionID(spec)
-		if err != nil {
-			return nil, err
-		}
-		coordinators = append(coordinators, projectCoordinator{spec: spec, sessionID: sessionID})
+		coordinators = append(coordinators, projectCoordinator{spec: spec, sessionID: sessions[spec.ProjectID]})
 	}
 	return coordinators, nil
+}
+
+// coordinatorProject is the project a coordinator spec defines when no session
+// or folder record names it. Folder projects always have a record, so it is a
+// Git project.
+func coordinatorProject(spec registry.CoordinatorSpec) registry.ProjectRecord {
+	return registry.ProjectRecord{ID: spec.ProjectID, Kind: project.KindGit, RootPath: spec.ProjectRoot, DisplayName: project.Name(spec.ProjectRoot)}
 }
 
 // catalogScopes lists the session scopes every client renders. A scope counts
@@ -207,6 +214,10 @@ func catalogScopeCounts(rows []dashboardSession) map[string]int {
 func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, coordinators []projectCoordinator, local dashboardHost) []dashboardProject {
 	byID := map[string]*dashboardProject{}
 	order := []string{}
+	archived := map[string]bool{}
+	for _, record := range records {
+		archived[record.ID] = !record.ArchivedAt.IsZero()
+	}
 	for _, row := range rows {
 		if row.Project == nil || row.Project.ID == "" {
 			continue
@@ -233,7 +244,7 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 			continue
 		}
 		host := local
-		byID[record.ID] = &dashboardProject{ID: record.ID, DisplayName: record.DisplayName, RootPath: record.RootPath, Kind: record.Kind, Host: &host, Archived: !record.ArchivedAt.IsZero()}
+		byID[record.ID] = &dashboardProject{ID: record.ID, DisplayName: record.DisplayName, RootPath: record.RootPath, Kind: record.Kind, Host: &host, Archived: archived[record.ID]}
 		order = append(order, record.ID)
 	}
 	for _, coordinator := range coordinators {
@@ -241,7 +252,8 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 		found, ok := byID[spec.ProjectID]
 		if !ok {
 			host := local
-			found = &dashboardProject{ID: spec.ProjectID, DisplayName: project.Name(spec.ProjectRoot), RootPath: spec.ProjectRoot, Kind: project.KindGit, Host: &host}
+			record := coordinatorProject(spec)
+			found = &dashboardProject{ID: record.ID, DisplayName: record.DisplayName, RootPath: record.RootPath, Kind: record.Kind, Host: &host, Archived: archived[record.ID]}
 			byID[spec.ProjectID] = found
 			order = append(order, spec.ProjectID)
 		}
@@ -339,6 +351,16 @@ func (d *Daemon) catalogProjectRecord(projectID string) (registry.ProjectRecord,
 		}
 	}
 	raw, err := d.Registry.CatalogProjectByID(projectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		spec, specErr := d.Registry.Coordinator(projectID)
+		if errors.Is(specErr, registry.ErrNoCoordinator) {
+			return registry.ProjectRecord{}, err
+		}
+		if specErr != nil {
+			return registry.ProjectRecord{}, specErr
+		}
+		return coordinatorProject(spec), nil
+	}
 	if err != nil {
 		return registry.ProjectRecord{}, err
 	}

@@ -63,8 +63,8 @@ type launchProject struct {
 }
 
 // launchProjects lists this host's projects, the most recently active first,
-// followed by registered folders without sessions. Archived projects are left
-// out.
+// followed by registered folders and coordinators' projects without sessions.
+// Archived projects are left out.
 func (d *Daemon) launchProjects() ([]launchProject, error) {
 	snapshot, err := d.Registry.CatalogSnapshot()
 	if err != nil {
@@ -107,6 +107,18 @@ func (d *Daemon) launchProjects() ([]launchProject, error) {
 		if _, found := byID[record.ID]; found || !record.Registered || !record.ArchivedAt.IsZero() {
 			continue
 		}
+		byID[record.ID] = &candidate{project: launchProject{ID: record.ID, DisplayName: record.DisplayName, RootPath: record.RootPath, Kind: record.Kind}}
+	}
+	specs, err := d.Registry.Coordinators()
+	if err != nil {
+		return nil, err
+	}
+	for _, spec := range specs {
+		_, archived := archive.Projects[spec.ProjectID]
+		if _, found := byID[spec.ProjectID]; found || archived {
+			continue
+		}
+		record := coordinatorProject(spec)
 		byID[record.ID] = &candidate{project: launchProject{ID: record.ID, DisplayName: record.DisplayName, RootPath: record.RootPath, Kind: record.Kind}}
 	}
 	candidates := make([]*candidate, 0, len(byID))
