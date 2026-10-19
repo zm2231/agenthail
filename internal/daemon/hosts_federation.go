@@ -61,6 +61,9 @@ type pairedHost struct {
 	detail string
 	epoch  string
 	drain  sync.Mutex
+	// hidden holds rows the host serves whose id is already a local session,
+	// guarded by mu. Only the mirror loop writes it.
+	hidden map[string]dashboardSession
 }
 
 func newFederation() *federation {
@@ -71,6 +74,47 @@ func (h *pairedHost) status() (string, string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.state, h.detail
+}
+
+func (h *pairedHost) setHidden(id string, row *dashboardSession) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if row == nil {
+		delete(h.hidden, id)
+		return
+	}
+	if h.hidden == nil {
+		h.hidden = map[string]dashboardSession{}
+	}
+	h.hidden[id] = *row
+}
+
+func (h *pairedHost) hiddenRows() []dashboardSession {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	rows := make([]dashboardSession, 0, len(h.hidden))
+	for _, row := range h.hidden {
+		rows = append(rows, row)
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+	return rows
+}
+
+// notice names the host's sessions this daemon does not show because their
+// conversation is also a local session.
+func (h *pairedHost) notice() string {
+	rows := h.hiddenRows()
+	switch len(rows) {
+	case 0:
+		return ""
+	case 1:
+		return fmt.Sprintf("1 session on %s not shown: conversation %s is also a local session", h.record.Name, rows[0].ID)
+	}
+	ids := make([]string, len(rows))
+	for index, row := range rows {
+		ids[index] = row.ID
+	}
+	return fmt.Sprintf("%d sessions on %s not shown: conversations %s are also local sessions", len(rows), h.record.Name, strings.Join(ids, ", "))
 }
 
 func (h *pairedHost) ref() dashboardHost {
@@ -366,12 +410,15 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 	if err := host.client.GetJSON(ctx, "/api/v1/snapshot", url.Values{"fresh": []string{"1"}}, &snapshot); err != nil {
 		return 0, err
 	}
+	host.mu.Lock()
+	host.hidden = nil
+	host.mu.Unlock()
 	keep := map[string]struct{}{}
 	for _, row := range snapshot.Sessions {
 		if !servedByHost(row, host.record.ID) {
 			continue
 		}
-		if err := d.mirrorRemoteRow(host, row); err != nil {
+		if err := d.mirrorOrHide(host, row); err != nil {
 			d.logRuntimeError("host "+host.record.Name+" mirror "+row.ID, err)
 			continue
 		}
@@ -456,7 +503,7 @@ func (d *Daemon) applyHostCatalogEvent(host *pairedHost, envelope catalogStreamE
 		if !servedByHost(payload.Session, host.record.ID) {
 			return nil
 		}
-		return d.mirrorRemoteRow(host, payload.Session)
+		return d.mirrorOrHide(host, payload.Session)
 	case "session.removed":
 		var payload struct {
 			SessionID string `json:"sessionId"`
@@ -467,6 +514,7 @@ func (d *Daemon) applyHostCatalogEvent(host *pairedHost, envelope catalogStreamE
 		if payload.SessionID == "" || strings.Contains(payload.SessionID, hosts.Separator) {
 			return nil
 		}
+		host.setHidden(payload.SessionID, nil)
 		return d.removeHostRow(host.record.ID, payload.SessionID, "removed_by_host")
 	case "session.queue":
 		var payload struct {
@@ -498,6 +546,22 @@ func (d *Daemon) updateMirroredQueueCount(host *pairedHost, sessionID string, co
 		return d.applyMirroredProjection(host.record.ID, row.Session, projection, row.HostProject, row.Checkout)
 	}
 	return nil
+}
+
+// mirrorOrHide mirrors a host row, or records it as hidden when its id is
+// already a local session. A local session row is never deleted, so a hidden
+// row stays hidden until the host stops serving it.
+func (d *Daemon) mirrorOrHide(host *pairedHost, row dashboardSession) error {
+	err := d.mirrorRemoteRow(host, row)
+	var owned registry.SessionOwnedError
+	if errors.As(err, &owned) && owned.HostID == "" {
+		host.setHidden(row.ID, &row)
+		return nil
+	}
+	if err == nil {
+		host.setHidden(row.ID, nil)
+	}
+	return err
 }
 
 func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession) error {
@@ -691,6 +755,7 @@ func (d *Daemon) publicSessionID(sessionID string) string {
 type dashboardHostHealth struct {
 	dashboardHost
 	Detail string `json:"detail,omitempty"`
+	Notice string `json:"notice,omitempty"`
 }
 
 func (d *Daemon) hostSummaries() []dashboardHostHealth {
@@ -698,7 +763,7 @@ func (d *Daemon) hostSummaries() []dashboardHostHealth {
 	result := make([]dashboardHostHealth, 0, len(paired))
 	for _, host := range paired {
 		state, detail := host.status()
-		result = append(result, dashboardHostHealth{dashboardHost: dashboardHost{ID: host.record.ID, Name: host.record.Name, State: state}, Detail: detail})
+		result = append(result, dashboardHostHealth{dashboardHost: dashboardHost{ID: host.record.ID, Name: host.record.Name, State: state}, Detail: detail, Notice: host.notice()})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result

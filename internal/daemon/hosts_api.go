@@ -28,6 +28,7 @@ const hostPairTimeout = 20 * time.Second
 type hostView struct {
 	registry.PairedHost
 	Detail       string `json:"detail,omitempty"`
+	Notice       string `json:"notice,omitempty"`
 	SessionCount int    `json:"sessionCount"`
 }
 
@@ -94,6 +95,7 @@ func (d *Daemon) hostViews() ([]hostView, error) {
 		view := hostView{PairedHost: record, SessionCount: counts[record.ID]}
 		if host, found := d.pairedHost(record.ID); found {
 			view.State, view.Detail = host.status()
+			view.Notice = host.notice()
 		}
 		views = append(views, view)
 	}

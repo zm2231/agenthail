@@ -55,9 +55,13 @@ Each paired host has one mirror loop:
 
 A conversation moved between machines keeps its id, so a local row and a
 host's row can name the same session. Whichever registered first keeps it. A
-host row whose id is already local is refused: the local row is unchanged, the
-host's copy is not shown, the refusal is logged, and the mirror carries on with
-the host's other rows. Neither discovery nor any local registration can take
+host row whose id is already local is refused: the local row is unchanged and
+the mirror carries on with the host's other rows. The host's copy is not
+shown; instead the host's entry in `agenthail hosts`, `GET /api/v1/hosts`, the
+snapshot's `daemon.hosts` and the Mac and iPhone host lists carries a notice
+such as `1 session on forge not shown: conversation <id> is also a local
+session`. A local session row is never deleted, so the notice clears when the
+host stops serving that session. Neither discovery nor any local registration can take
 over a mirrored row (`SessionOwnedError`). A
 mirror write for a host that is no longer paired is refused, and removing a
 host waits for its mirror and delivery loops to exit before deleting its rows.

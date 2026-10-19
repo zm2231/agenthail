@@ -1193,6 +1193,9 @@ struct SettingsView: View {
                             if let detail = host.detail, !detail.isEmpty {
                                 Text(detail).font(.footnote).foregroundStyle(.secondary)
                             }
+                            if let notice = host.notice, !notice.isEmpty {
+                                Text(notice).font(.footnote).foregroundStyle(.orange)
+                            }
                         }
                     }
                 }

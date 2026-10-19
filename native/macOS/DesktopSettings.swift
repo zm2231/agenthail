@@ -192,6 +192,12 @@ private struct HostsSection: View {
                             .foregroundStyle(DesktopPalette.text2)
                             .textSelection(.enabled)
                     }
+                    if let notice = host.notice, !notice.isEmpty {
+                        Text(notice)
+                            .font(.system(size: 12))
+                            .foregroundStyle(DesktopPalette.amber)
+                            .textSelection(.enabled)
+                    }
                 }
                 .accessibilityElement(children: .combine)
             }

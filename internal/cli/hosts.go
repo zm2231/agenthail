@@ -498,6 +498,7 @@ func hostsList(ctx context.Context, client *daemonAPIClient, jsonOut bool) error
 		Hosts []struct {
 			registry.PairedHost
 			Detail       string `json:"detail"`
+			Notice       string `json:"notice"`
 			SessionCount int    `json:"sessionCount"`
 		} `json:"hosts"`
 	}
@@ -528,6 +529,9 @@ func hostsList(ctx context.Context, client *daemonAPIClient, jsonOut bool) error
 			fmt.Printf("  %s\n", detail)
 		} else if host.LastError != "" {
 			fmt.Printf("  %s\n", host.LastError)
+		}
+		if host.Notice != "" {
+			fmt.Printf("  %s\n", host.Notice)
 		}
 	}
 	return nil

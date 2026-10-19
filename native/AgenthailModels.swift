@@ -150,6 +150,7 @@ struct HostHealth: Decodable, Hashable, Identifiable {
     let name: String
     let state: String
     var detail: String? = nil
+    var notice: String? = nil
 
     var stateLabel: String {
         switch state {

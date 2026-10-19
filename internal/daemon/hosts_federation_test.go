@@ -441,6 +441,41 @@ func TestFederationHostRowCollidingWithLocalSessionLeavesTheLocalRow(t *testing.
 	if session, err := local.reg.Session("moved"); err != nil || session.Name != "work moved" {
 		t.Fatalf("local row after remote upsert=%+v err=%v", session, err)
 	}
+	want := "1 session on forge not shown: conversation moved is also a local session"
+	if notice := hostNotice(t, local, record.ID); notice != want {
+		t.Fatalf("hosts notice=%q, want %q", notice, want)
+	}
+	delete(remote.fake.sessions, "moved")
+	awaitFederation(t, "notice cleared once the host stops serving the session", func() bool {
+		remote.daemon.discoverCatalog(context.Background())
+		return hostNotice(t, local, record.ID) == ""
+	})
+	if session, err := local.reg.Session("moved"); err != nil || session.Name != "work moved" {
+		t.Fatalf("local row after host removal=%+v err=%v", session, err)
+	}
+}
+
+func hostNotice(t *testing.T, node *federationNode, hostID string) string {
+	t.Helper()
+	response := node.request(t, http.MethodGet, "/api/v1/hosts", nil)
+	var listing struct {
+		Hosts []hostView `json:"hosts"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &listing); err != nil {
+		t.Fatalf("hosts status=%d body=%s", response.Code, response.Body.String())
+	}
+	notice := ""
+	for _, host := range listing.Hosts {
+		if host.ID == hostID {
+			notice = host.Notice
+		}
+	}
+	for _, host := range node.daemon.hostSummaries() {
+		if host.ID == hostID && host.Notice != notice {
+			t.Fatalf("snapshot notice=%q, hosts API notice=%q", host.Notice, notice)
+		}
+	}
+	return notice
 }
 
 func TestFederationPairedBothWaysShowsEachSessionOnce(t *testing.T) {
