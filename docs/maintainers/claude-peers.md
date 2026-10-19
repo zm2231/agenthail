@@ -75,4 +75,3 @@ starting at the posted event. An accepted request whose response or effect is no
 observed before the deadline is `unknown`, carries its request id, and is not
 retried. History records each control under the kind that reads back as its
 evidence, with the request id as the result.
-
