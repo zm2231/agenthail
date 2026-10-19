@@ -6,7 +6,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-// recordRuntimeKinds is schema step 16. Every session row without a runtime
+// recordRuntimeKinds is schema step 17. Every session row without a runtime
 // kind gets the runtime that carries it, derived from the attachments it was
 // registered with, in one transaction with the column: before this step each
 // surface had exactly one runtime, and a Codex thread's runtime followed its
