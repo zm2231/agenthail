@@ -46,18 +46,19 @@ jobs:
       DERIVED: ${{ github.workspace }}/../ios-derived
     steps:
       - uses: actions/checkout@v5
-      - name: Start simulator
+      - name: Boot simulator
         env:
           AGENTHAIL_SIMULATOR_NAME: ${{ runner.environment == 'self-hosted' && format('Agenthail CI {0}', runner.name) || '' }}
         run: |
           udid="$(scripts/ios-simulator.sh iphone)"
           echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
           xcrun simctl boot "$udid"
+      - name: Wait for simulator boot
+        run: xcrun simctl bootstatus "$SIMULATOR_UDID" -b
       - name: Build for simulator tests
         run: xcodebuild build-for-testing -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED"
       - name: iOS simulator tests
         run: |
-          xcrun simctl bootstatus "$SIMULATOR_UDID" -b
           xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" -parallel-testing-enabled NO
           plist="$DERIVED/Build/Products/Debug-iphonesimulator/Agenthail.app/Info.plist"
           test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your Mac, or take a photo to send to an agent."

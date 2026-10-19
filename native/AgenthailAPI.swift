@@ -128,7 +128,7 @@ final class AgenthailAPI: @unchecked Sendable {
     func sessionDetail(id: String, includeTimeline: Bool = false, timelineBefore: Int64? = nil) async throws -> SessionDetail {
         var components = URLComponents()
         components.path = "/api/v1/session"
-        components.queryItems = [URLQueryItem(name: "id", value: id), URLQueryItem(name: "limit", value: "40")]
+        components.queryItems = [URLQueryItem(name: "id", value: id), URLQueryItem(name: "limit", value: "20")]
         if includeTimeline { components.queryItems?.append(URLQueryItem(name: "timeline", value: "1")) }
         if let timelineBefore { components.queryItems?.append(URLQueryItem(name: "timelineBefore", value: String(timelineBefore))) }
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
@@ -366,6 +366,14 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await post("/api/v1/actions", body: body, idempotencyKey: idempotencyKey)
     }
 
+    func control(_ action: String, sessionID: String, message: String? = nil, model: String? = nil) async throws -> DeliveryReceipt? {
+        var body: [String: Any] = ["action": action, "sessionId": sessionID]
+        if let message { body["message"] = message }
+        if let model { body["model"] = model }
+        let response: ActionReceipt = try await post("/api/v1/actions", body: body)
+        return response.result
+    }
+
     func projectAction(_ action: String, projectID: String? = nil, path: String? = nil) async throws -> ProjectIdentity? {
         let response: ProjectActionResponse = try await postAction(ProjectActionRequest(action: action, projectId: projectID, path: path))
         return response.project
@@ -539,6 +547,10 @@ final class AgenthailAPI: @unchecked Sendable {
                     if object["unknown"] as? Bool == true { throw AgenthailAPIError.outcomeUnknown(detail) }
                     message = detail
                 }
+                if let error = object["error"] as? [String: Any], error["code"] as? String == "control_failed",
+                   (object["result"] as? [String: Any])?["evidence"] as? String == "unknown" {
+                    throw AgenthailAPIError.outcomeUnknown(message)
+                }
                 if let error = object["error"] as? [String: Any], error["code"] as? String == "history_gap" {
                     throw AgenthailAPIError.historyGap("The oldest activity is no longer retained. Current activity is still available here; no new session is needed.")
                 }
@@ -611,6 +623,8 @@ struct ActionReceipt: Decodable {
 }
 struct DeliveryReceipt: Decodable {
     let deliveryId: Int64?
+    var requestId: String? = nil
+    var output: String? = nil
     let evidence: String?
     let status: String?
     let queueId: Int64?
