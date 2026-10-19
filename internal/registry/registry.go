@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/surface"
 	_ "modernc.org/sqlite"
 )
@@ -19,10 +20,35 @@ import (
 // separate pool. In WAL mode readers never wait for the write lock, so a write
 // blocked on another process's lock does not stall API reads.
 type Registry struct {
-	db   *sql.DB
-	read *sql.DB
-	path string
-	now  func() time.Time
+	db         *sql.DB
+	read       *sql.DB
+	path       string
+	now        func() time.Time
+	busyPolicy func() (deliverypolicy.Mode, error)
+}
+
+// SetBusyPolicy sets the live busy-delivery policy. A queued message records
+// only a per-message choice; one without a choice follows this policy when it
+// is drained. Without a policy it queues.
+func (r *Registry) SetBusyPolicy(policy func() (deliverypolicy.Mode, error)) {
+	r.busyPolicy = policy
+}
+
+func (r *Registry) busyMode() (deliverypolicy.Mode, error) {
+	if r.busyPolicy == nil {
+		return deliverypolicy.Queue, nil
+	}
+	return r.busyPolicy()
+}
+
+// Steers reports whether a queued message with this per-message choice is a
+// steer into a busy turn under the live policy.
+func (r *Registry) Steers(busyDelivery string) (bool, error) {
+	if busyDelivery != "" {
+		return busyDelivery == string(deliverypolicy.Steer), nil
+	}
+	mode, err := r.busyMode()
+	return mode == deliverypolicy.Steer, err
 }
 
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
@@ -1332,8 +1358,12 @@ func (r *Registry) QueueCount(sessionID string) int {
 }
 
 func (r *Registry) PendingSteer(sessionID string) (bool, error) {
+	mode, err := r.busyMode()
+	if err != nil {
+		return false, err
+	}
 	var found int
-	err := r.read.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND busy_delivery=? AND model='' AND (turn_options='' OR turn_options='{}')`, sessionID, "steer").Scan(&found)
+	err = r.read.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND `+queueSteerRow("message_queue", mode), sessionID).Scan(&found)
 	return found > 0, err
 }
 
@@ -1618,26 +1648,36 @@ const (
 // exception, since the daemon resumes it to drain its queue.
 const queueTargetStatus = `CASE WHEN s.id IS NOT NULL AND (s.status='offline' OR NOT EXISTS (SELECT 1 FROM catalog_sessions cs WHERE cs.session_id=s.id)) THEN CASE WHEN s.surface='claude' AND s.pid>0 THEN 'idle' ELSE 'offline' END ELSE COALESCE(CASE WHEN sr.turn_observed=1 THEN sr.last_status END,s.status,'unknown') END`
 
-// queueSteerRow matches a message a busy turn can take as a steer.
-const queueSteerRow = `%[1]s.busy_delivery='steer' AND %[1]s.model='' AND (%[1]s.turn_options='' OR %[1]s.turn_options='{}')`
+// queueSteerRow matches a message a busy turn can take as a steer under the
+// live policy: one that asks to steer, or that makes no choice while the
+// policy steers.
+func queueSteerRow(alias string, mode deliverypolicy.Mode) string {
+	choice := `%[1]s.busy_delivery='steer'`
+	if mode == deliverypolicy.Steer {
+		choice = `%[1]s.busy_delivery IN ('steer','')`
+	}
+	return fmt.Sprintf(choice+` AND %[1]s.model='' AND (%[1]s.turn_options='' OR %[1]s.turn_options='{}')`, alias)
+}
 
 // queueHoldCase derives why a pending message is held by the rules the
 // daemon drains by. A drain claims only the earliest open message of a
 // session, or of its steerable messages while a turn runs, so a message
 // behind an earlier one is held by it. A busy turn holds a message but not a
-// steer into it when the target can steer. An unloaded conversation is
+// steer into it when the target can steer. A Claude peer socket takes a peer
+// message whether the turn runs or waits on its user. An unloaded conversation is
 // drained only when Codex Desktop can load it. A message whose last attempt
 // the target refused to start waits out its backoff as refused. Its first
 // argument is the current time.
-func queueHoldCase(canSteer bool) string {
+func queueHoldCase(canSteer bool, mode deliverypolicy.Mode) string {
 	earliest := `(SELECT MIN(m.id) FROM message_queue m WHERE m.session_id=q.session_id AND m.status IN ('pending','inflight')%s)`
 	steer := ""
 	if canSteer {
 		steer = `
-		WHEN ` + queueTargetStatus + `='busy' AND ` + fmt.Sprintf(queueSteerRow, "q") + ` THEN CASE WHEN q.id!=` + fmt.Sprintf(earliest, " AND "+fmt.Sprintf(queueSteerRow, "m")) + ` THEN 'behind' WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END`
+		WHEN ` + queueTargetStatus + `='busy' AND ` + queueSteerRow("q", mode) + ` THEN CASE WHEN q.id!=` + fmt.Sprintf(earliest, " AND "+queueSteerRow("m", mode)) + ` THEN 'behind' WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END`
 	}
 	return `CASE WHEN q.status!='pending' THEN ''
 		WHEN q.host_request!='' THEN 'hostUnreachable'
+		WHEN COALESCE(s.surface,'')='claude' AND COALESCE(s.transport,'')='uds' AND ` + fmt.Sprintf(queuePeerRow, "q") + ` THEN CASE WHEN q.id!=` + fmt.Sprintf(earliest, "") + ` THEN 'behind' WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END
 		WHEN COALESCE(sr.waiting_id,'')!='' THEN 'waiting'` + steer + `
 		WHEN ` + queueTargetStatus + `='busy' THEN 'busy'
 		WHEN ` + queueTargetStatus + `='offline' THEN 'offline'
@@ -1650,12 +1690,15 @@ func queueHoldCase(canSteer bool) string {
 }
 
 // queueRowSelect reads queue rows with the hold reason for a target that can
-// steer and for one that cannot, and the target facts that decide which.
-var queueRowSelect = `SELECT q.id,q.session_id,q.message,q.model,q.source_session_id,q.turn_options,q.status,q.attempts,q.last_error,q.queued_at,q.dead_at_ms,q.evidence,q.operation,q.busy_delivery,
-	` + queueHoldCase(true) + `,
-	` + queueHoldCase(false) + `,
+// steer and for one that cannot under the live policy, and the target facts
+// that decide which.
+func queueRowSelect(mode deliverypolicy.Mode) string {
+	return `SELECT q.id,q.session_id,q.message,q.model,q.source_session_id,q.turn_options,q.status,q.attempts,q.last_error,q.queued_at,q.dead_at_ms,q.evidence,q.operation,q.busy_delivery,
+	` + queueHoldCase(true, mode) + `,
+	` + queueHoldCase(false, mode) + `,
 	COALESCE(s.surface,''),COALESCE(s.transport,''),COALESCE(s.bridge,''),COALESCE(s.runtime_kind,'')
 	FROM message_queue q LEFT JOIN sessions s ON s.id=q.session_id LEFT JOIN session_runtime sr ON sr.session_id=q.session_id`
+}
 
 type queueRowScanner interface{ Scan(...any) error }
 
@@ -1681,7 +1724,11 @@ func scanQueueRow(scanner queueRowScanner, adapters surface.Adapters, now time.T
 
 func (r *Registry) ListQueue(includeDelivered bool, adapters surface.Adapters) ([]QueueRow, error) {
 	now := r.now()
-	query := queueRowSelect
+	mode, err := r.busyMode()
+	if err != nil {
+		return nil, err
+	}
+	query := queueRowSelect(mode)
 	args := []any{now.UnixMilli()}
 	if !includeDelivered {
 		query += ` WHERE q.status NOT IN ('delivered','canceled') AND (q.status!='dead' OR q.dead_at_ms>?)`
@@ -1706,7 +1753,11 @@ func (r *Registry) ListQueue(includeDelivered bool, adapters surface.Adapters) (
 
 func (r *Registry) QueueItem(id int64, adapters surface.Adapters) (*QueueRow, error) {
 	now := r.now()
-	row, err := scanQueueRow(r.read.QueryRow(queueRowSelect+` WHERE q.id=?`, now.UnixMilli(), id), adapters, now)
+	mode, err := r.busyMode()
+	if err != nil {
+		return nil, err
+	}
+	row, err := scanQueueRow(r.read.QueryRow(queueRowSelect(mode)+` WHERE q.id=?`, now.UnixMilli(), id), adapters, now)
 	if err != nil {
 		return nil, err
 	}
@@ -1935,17 +1986,32 @@ func (r *Registry) ClaimNextSteerMessage(sessionID string, now time.Time) (*Queu
 	return r.claimNextMessage(sessionID, now, "steer")
 }
 
+// ClaimNextPeerMessage claims the session's next queued message while a turn
+// runs, when that message can ride a Claude peer socket.
+func (r *Registry) ClaimNextPeerMessage(sessionID string, now time.Time) (*QueuedMessage, error) {
+	return r.claimNextMessage(sessionID, now, claimPeer)
+}
+
+// claimPeer selects the session's next queued message only when it is a
+// peer message: a Claude peer socket delivers it to a running turn, so
+// nothing holds it there. A message with a per-message choice (an explicit
+// queue or steer), a person's turn and a message that needs per-message
+// options keep their own handling.
+const claimPeer = "peer"
+
+// queuePeerRow matches a message a Claude peer socket takes during a turn.
+const queuePeerRow = `%[1]s.operation='message' AND %[1]s.author!='person' AND %[1]s.busy_delivery='' AND %[1]s.model='' AND (%[1]s.turn_options='' OR %[1]s.turn_options='{}') AND (%[1]s.uploads='' OR %[1]s.uploads='[]')`
+
 // claimCandidateFilter selects the session's next queued message, the one a
 // claim acts on.
-func claimCandidateFilter(sessionID, busyDelivery string) (string, []any) {
+func claimCandidateFilter(sessionID, busyDelivery string, mode deliverypolicy.Mode) (string, []any) {
 	filter := `session_id=? AND host_request='' AND status IN ('pending','inflight')`
 	args := []any{sessionID}
-	if busyDelivery != "" {
-		filter += ` AND busy_delivery=?`
-		args = append(args, busyDelivery)
-		if busyDelivery == "steer" {
-			filter += ` AND model='' AND (turn_options='' OR turn_options='{}')`
-		}
+	if busyDelivery == claimPeer {
+		filter += ` AND id=(SELECT MIN(m.id) FROM message_queue m WHERE m.session_id=? AND m.host_request='' AND m.status IN ('pending','inflight')) AND ` + fmt.Sprintf(queuePeerRow, "message_queue")
+		args = append(args, sessionID)
+	} else if busyDelivery == "steer" {
+		filter += ` AND ` + queueSteerRow("message_queue", mode)
 	}
 	return filter + ` ORDER BY id LIMIT 1`, args
 }
@@ -1968,11 +2034,15 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 	if err := r.ReconcileAttentionItems(now); err != nil {
 		return nil, err
 	}
-	filter, args := claimCandidateFilter(sessionID, busyDelivery)
+	mode, err := r.busyMode()
+	if err != nil {
+		return nil, err
+	}
+	filter, args := claimCandidateFilter(sessionID, busyDelivery, mode)
 	var peekStatus string
 	var peekOperation QueueOperation
 	var peekAvailableAt, peekInflightAt int64
-	err := r.read.QueryRow(`SELECT status,available_at_ms,inflight_at_ms,operation FROM message_queue WHERE `+filter, args...).Scan(&peekStatus, &peekAvailableAt, &peekInflightAt, &peekOperation)
+	err = r.read.QueryRow(`SELECT status,available_at_ms,inflight_at_ms,operation FROM message_queue WHERE `+filter, args...).Scan(&peekStatus, &peekAvailableAt, &peekInflightAt, &peekOperation)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
