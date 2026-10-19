@@ -196,6 +196,10 @@ Matching voice-enabled builds also offer **Talk to orchestrator**: a real Codex
 Voice conversation that can inspect agents, delegate work, and read replies through
 one persistent operator. [Voice setup, flow, and current limits](docs/maintainers/codex-voice.md).
 
+## See agents on your other machines
+
+Pair the Agenthail daemon on another machine in your tailnet and its sessions appear in the same list, app and phone. Run `agenthail hosts invite` there and `agenthail hosts add '<link>'` here, then address its sessions as `forge::@builder`. If a machine goes offline, its sessions stay listed as unavailable, and messages to them wait up to an hour for it to return; after that they expire and show in delivery history. [How paired hosts work](docs/maintainers/hosts.md).
+
 ## What Agenthail remembers
 
 Agenthail keeps a local record of messages it moved, work still waiting, retries, failures, and automatic handoffs. The Audit view makes it possible to come back hours later and understand what happened.

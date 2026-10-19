@@ -27,6 +27,9 @@ enum SessionFacts {
 
     static func rowDetail(_ session: SessionState) -> String {
         var parts = [SessionRefinement.surfaceLabel(session.surface), presenceLabel(session)]
+        if let host = session.remoteHostName {
+            parts[1] = session.isUnavailable ? "Unavailable on \(host)" : "\(parts[1]) on \(host)"
+        }
         if session.queueCount > 0 { parts.append(queuedLabel(session.queueCount)) }
         return parts.joined(separator: " · ")
     }
