@@ -20,6 +20,8 @@ var bundledPushRelayURL string
 
 var pushHTTPClient = &http.Client{Timeout: 12 * time.Second}
 
+var devicePushRetryDelay = 250 * time.Millisecond
+
 type pushRelayError struct {
 	status int
 	detail string
@@ -72,7 +74,7 @@ func sendDevicePushWithRetry(ctx context.Context, target registry.DevicePushTarg
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			delay := time.Duration(attempt*attempt) * 250 * time.Millisecond
+			delay := time.Duration(attempt*attempt) * devicePushRetryDelay
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
