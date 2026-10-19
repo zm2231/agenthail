@@ -207,15 +207,79 @@ func TestAddingAFolderProjectClaimsItsSessions(t *testing.T) {
 		t.Fatalf("row=%+v", row.Project)
 	}
 
-	repoResponse := runDashboardAction(t, d, `{"action":"project-add","path":"`+fake.sessions["to"].Cwd+`"}`)
-	var repoProject struct {
+	if response := runDashboardAction(t, d, `{"action":"project-remove","projectId":"`+added.Project.ID+`"}`); response.Code != http.StatusOK {
+		t.Fatalf("remove: %d %s", response.Code, response.Body)
+	}
+	d.discoverCatalog(context.Background())
+	if row := storedProjection(t, r, "scratch"); row.Project != nil {
+		t.Fatalf("a removed folder kept its sessions: %+v", row.Project)
+	}
+}
+
+func TestAWorktreeSessionLandsInTheDeepestAddedProject(t *testing.T) {
+	d, r, fake, _, _ := daemonFixture(t)
+	repo := catalogTestRepo(t)
+	gitRun(t, repo, "remote", "add", "origin", "https://github.com/example/merchantry.git")
+	if err := os.MkdirAll(filepath.Join(repo, "apps", "web", "src"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "apps", "web", "src", "index.ts"), []byte("export {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "apps")
+	gitRun(t, repo, "commit", "-m", "web")
+	worktree := filepath.Join(repo, ".worktrees", "task-f6")
+	gitRun(t, repo, "worktree", "add", "-b", "feature/f6", worktree)
+	for id, cwd := range map[string]string{"from": filepath.Join(worktree, "apps", "web", "src"), "to": worktree} {
+		session := fake.sessions[id]
+		session.Cwd = cwd
+		fake.sessions[id] = session
+		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add := func(path string) *httptest.ResponseRecorder {
+		return runDashboardAction(t, d, `{"action":"project-add","path":"`+path+`"}`)
+	}
+	if response := add(filepath.Join(repo, "apps")); response.Code != http.StatusOK {
+		t.Fatalf("add apps: %d %s", response.Code, response.Body)
+	}
+	web := add(filepath.Join(worktree, "apps", "web"))
+	var added struct {
 		Project catalogProject `json:"project"`
 	}
-	if err := json.Unmarshal(repoResponse.Body.Bytes(), &repoProject); err != nil || repoProject.Project.Kind != catalogProjectGit || repoProject.Project.ID != storedProjection(t, r, "to").Project.ID {
-		t.Fatalf("a repository folder was registered on its own: %s", repoResponse.Body)
+	if web.Code != http.StatusOK || json.Unmarshal(web.Body.Bytes(), &added) != nil {
+		t.Fatalf("add web: %d %s", web.Code, web.Body)
 	}
-	if projects, err := r.ListProjects(); err != nil || len(projects) != 1 {
-		t.Fatalf("projects=%+v err=%v", projects, err)
+	canonicalRepo, err := workspace.NormalizeCWD(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added.Project.RootPath != filepath.Join(canonicalRepo, "apps", "web") || added.Project.ID != "repo:github.com/example/merchantry::apps/web" || added.Project.Kind != catalogProjectGit || added.Project.DisplayName != "web" {
+		t.Fatalf("a worktree folder was not added at the main checkout: %+v", added.Project)
+	}
+	if again := add(filepath.Join(repo, "apps", "web")); again.Code != http.StatusConflict || !strings.Contains(again.Body.String(), "Workspace "+filepath.Join(canonicalRepo, "apps", "web")+" already belongs to project "+added.Project.LocalID+".") {
+		t.Fatalf("duplicate add: %d %s", again.Code, again.Body)
+	}
+
+	d.discoverCatalog(context.Background())
+	from, to := storedProjection(t, r, "from").Project, storedProjection(t, r, "to").Project
+	if from == nil || from.ID != added.Project.ID || from.LocalID != added.Project.LocalID || !from.Added {
+		t.Fatalf("from=%+v", from)
+	}
+	if to == nil || to.ID != "repo:github.com/example/merchantry" || to.Added || to.RootPath != canonicalRepo || to.DisplayName != "merchantry" {
+		t.Fatalf("to=%+v", to)
+	}
+
+	if response := runDashboardAction(t, d, `{"action":"project-remove","projectId":"`+added.Project.ID+`"}`); response.Code != http.StatusOK {
+		t.Fatalf("remove: %d %s", response.Code, response.Body)
+	}
+	d.discoverCatalog(context.Background())
+	if from := storedProjection(t, r, "from").Project; from == nil || from.ID != "repo:github.com/example/merchantry::apps" {
+		t.Fatalf("after remove from=%+v", from)
+	}
+	if response := runDashboardAction(t, d, `{"action":"project-remove","projectId":"`+to.ID+`"}`); response.Code != http.StatusConflict {
+		t.Fatalf("removing an implicit project: %d %s", response.Code, response.Body)
 	}
 }
 
@@ -259,7 +323,7 @@ func TestFederationProjectsStayOnTheirHostAndArchiveRoutesThere(t *testing.T) {
 	}
 	awaitFederation(t, "remote project mirrored", func() bool {
 		project := mirroredProject()
-		return project != nil && project.SessionCount == 2 && len(project.Checkouts) == 1 && project.Checkouts[0].Host.ID == record.ID
+		return project != nil && project.SessionCount == 2 && len(project.Checkouts) == 1 && project.Checkouts[0].Host.ID == record.ID && project.Checkouts[0].ProjectID == qualified
 	})
 
 	archived := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-archive", "projectId": qualified})
@@ -283,6 +347,9 @@ func cloneAt(t *testing.T, origin, path string) string {
 	t.Helper()
 	gitRun(t, origin, "clone", "--quiet", origin, path)
 	gitRun(t, path, "remote", "set-url", "origin", "https://github.com/example/gadget.git")
+	if err := os.MkdirAll(filepath.Join(path, "src"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	return path
 }
 
@@ -308,11 +375,21 @@ func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing
 	localRoot := cloneAt(t, upstream, filepath.Join(t.TempDir(), "mac-gadget"))
 	worktree := filepath.Join(localRoot, ".worktrees", "task-e5")
 	gitRun(t, localRoot, "worktree", "add", "-b", "feature/e5", worktree)
-	moveSessions(t, local, worktree)
+	moveSessions(t, local, filepath.Join(worktree, "src"))
 	local.start(t, testRoots(remote.server))
 	record := local.pair(t, remote, "forge")
+	for _, node := range []*federationNode{local, remote} {
+		folder := map[*federationNode]string{local: filepath.Join(localRoot, "src"), remote: remote.fake.sessions["remote-a"].Cwd}[node]
+		if response := node.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-add", "path": folder}); response.Code != http.StatusOK {
+			t.Fatalf("add: %d %s", response.Code, response.Body)
+		}
+		node.daemon.discoverCatalog(context.Background())
+	}
 
 	projectID := storedProjection(t, local.reg, "local-a").Project.ID
+	if projectID != "repo:github.com/example/gadget::src" {
+		t.Fatalf("project id=%q", projectID)
+	}
 	merged := func() []dashboardProject {
 		var found []dashboardProject
 		for _, project := range local.snapshot(t).Projects {
@@ -327,7 +404,8 @@ func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing
 		return len(projects) == 1 && projects[0].ID == projectID && len(projects[0].Checkouts) == 2 && projects[0].SessionCount == 3
 	})
 	project := merged()[0]
-	if project.DisplayName != "gadget" || project.Checkouts[0].Host.State != hostStateLocal || project.Checkouts[1].Host.ID != record.ID || project.Checkouts[0].SessionCount != 1 || project.Checkouts[1].SessionCount != 2 {
+	remoteLocalID := storedProjection(t, remote.reg, "remote-a").Project.LocalID
+	if project.DisplayName != "src" || project.Key != projectID || !project.Checkouts[0].Added || project.Checkouts[0].Host.State != hostStateLocal || project.Checkouts[1].Host.ID != record.ID || project.Checkouts[0].SessionCount != 1 || project.Checkouts[1].SessionCount != 2 {
 		t.Fatalf("project=%+v", project)
 	}
 
@@ -342,7 +420,7 @@ func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing
 	if response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-unarchive", "projectId": projectID}); response.Code != http.StatusOK {
 		t.Fatalf("unarchive everywhere: %d %s", response.Code, response.Body)
 	}
-	if state, err := remote.reg.ArchiveState(); err != nil || !state.Projects[projectID].IsZero() {
+	if state, err := remote.reg.ArchiveState(); err != nil || len(state.Projects) != 0 {
 		t.Fatalf("forge kept the archive: %+v err=%v", state, err)
 	}
 	archived := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-archive", "projectId": projectID})
@@ -353,7 +431,7 @@ func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing
 		projects := merged()
 		return len(projects) == 1 && projects[0].Archived && projects[0].Checkouts[0].Archived && projects[0].Checkouts[1].Archived
 	})
-	if state, err := remote.reg.ArchiveState(); err != nil || state.Projects[projectID].IsZero() {
+	if state, err := remote.reg.ArchiveState(); err != nil || len(state.Projects) != 1 || state.Projects[remoteLocalID].IsZero() {
 		t.Fatalf("forge did not record the archive: %+v err=%v", state, err)
 	}
 }

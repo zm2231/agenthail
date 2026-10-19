@@ -66,9 +66,11 @@ Each paired host has one mirror loop:
 - It imports only sessions the remote serves itself: a row that is already
   host-qualified, or that names another host, is skipped. Two daemons paired
   both ways therefore show each other's sessions exactly once.
-- A mirrored row's project id is qualified with the host, unless the project
-  is `portable`: a repository keyed by its remote or root commit keeps its id,
-  so a host's checkout and this machine's checkout of it are one project.
+- A mirrored row's project `id` stays as it is when it is a `repo:` key, so
+  the same folder of the same repository is one project on both hosts. A
+  project without a key, and every project's `localId`, is qualified with the
+  host. A `repo:` id is never host-qualified, even though a key for a folder
+  inside a repository contains `::`.
 
 A conversation moved between machines keeps its id, so a local row and a
 host's row can name the same session. Whichever registered first keeps it. A
@@ -162,7 +164,7 @@ delivers to local members directly.
 `GET /api/v1/session-options?host=<host>` is that host's launch catalog: the
 host it came from, the agents it can start and whether each is connected, its
 launchers, and its projects (`projects`: id, display name, root path and kind;
-the most recently active first, registered folders without sessions after,
+the most recently active first, added projects without sessions after,
 archived projects left out).
 `GET /api/v1/models?surface=<agent>&host=<host>` lists that host's models
 with their reasoning efforts. `session-create` with `host` starts the

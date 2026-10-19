@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/project"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/workspace"
@@ -51,7 +53,7 @@ func (d *Daemon) settleArchiveActivity(rows []dashboardSession, view catalogView
 	for _, row := range rows {
 		projectID := ""
 		if row.Project != nil {
-			projectID = row.Project.ID
+			projectID = row.Project.LocalID
 		}
 		needsYou := row.Status == surface.StatusBusy || row.QueueCount > 0 || view.attention[row.ID]
 		sessionAt, sessionArchived := view.archive.Sessions[row.ID]
@@ -85,19 +87,22 @@ func applyCatalogView(row *dashboardSession, view catalogViewState) {
 	projectArchived := false
 	if row.Project != nil {
 		project := *row.Project
-		_, projectArchived = view.archive.Projects[project.ID]
+		_, projectArchived = view.archive.Projects[project.LocalID]
 		project.Archived = projectArchived
 		row.Project = &project
 	}
 	row.Archived = sessionArchived || projectArchived
 }
 
-// dashboardProject is one repository or folder across every host that has a
-// checkout of it. It is archived when every checkout is.
+// dashboardProject is one project across every host: each checkout is one
+// host's project with the same key, or the host's only checkout of a project
+// without one. It is archived when every checkout is.
 type dashboardProject struct {
 	ID           string                     `json:"id"`
 	DisplayName  string                     `json:"displayName"`
 	Kind         string                     `json:"kind"`
+	Key          string                     `json:"key,omitempty"`
+	Repository   *project.Repository        `json:"repository,omitempty"`
 	Checkouts    []dashboardProjectCheckout `json:"checkouts"`
 	LastActive   time.Time                  `json:"lastActive,omitempty"`
 	SessionCount int                        `json:"sessionCount"`
@@ -106,7 +111,9 @@ type dashboardProject struct {
 
 type dashboardProjectCheckout struct {
 	Host         dashboardHost `json:"host"`
+	ProjectID    string        `json:"projectId"`
 	RootPath     string        `json:"rootPath"`
+	Added        bool          `json:"added"`
 	SessionCount int           `json:"sessionCount"`
 	Archived     bool          `json:"archived"`
 }
@@ -180,27 +187,28 @@ func catalogScopeCounts(rows []dashboardSession) map[string]int {
 	return counts
 }
 
-// catalogProjects adds registered folder projects that have no sessions yet.
+// catalogProjects groups the rows by project and adds the added projects that
+// have no sessions yet.
 func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, local dashboardHost) []dashboardProject {
 	byID := map[string]*dashboardProject{}
 	order := []string{}
-	checkout := func(found *dashboardProject, host dashboardHost, root string, archived bool) *dashboardProjectCheckout {
-		for index := range found.Checkouts {
-			if found.Checkouts[index].Host.ID == host.ID {
-				return &found.Checkouts[index]
+	entry := func(found *catalogProject) *dashboardProject {
+		project, ok := byID[found.ID]
+		if !ok {
+			project = &dashboardProject{ID: found.ID, DisplayName: found.DisplayName, Kind: found.Kind, Key: found.Key, Repository: found.Repository}
+			byID[found.ID] = project
+			order = append(order, found.ID)
+		}
+		return project
+	}
+	checkout := func(project *dashboardProject, host dashboardHost, found *catalogProject) *dashboardProjectCheckout {
+		for index := range project.Checkouts {
+			if project.Checkouts[index].Host.ID == host.ID && project.Checkouts[index].ProjectID == found.LocalID {
+				return &project.Checkouts[index]
 			}
 		}
-		found.Checkouts = append(found.Checkouts, dashboardProjectCheckout{Host: host, RootPath: root, Archived: archived})
-		return &found.Checkouts[len(found.Checkouts)-1]
-	}
-	entry := func(id, name, kind string) *dashboardProject {
-		found, ok := byID[id]
-		if !ok {
-			found = &dashboardProject{ID: id, DisplayName: name, Kind: kind}
-			byID[id] = found
-			order = append(order, id)
-		}
-		return found
+		project.Checkouts = append(project.Checkouts, dashboardProjectCheckout{Host: host, ProjectID: found.LocalID, RootPath: found.RootPath, Added: found.Added, Archived: found.Archived})
+		return &project.Checkouts[len(project.Checkouts)-1]
 	}
 	for _, row := range rows {
 		if row.Project == nil || row.Project.ID == "" {
@@ -210,39 +218,44 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 		if row.Host != nil {
 			host = *row.Host
 		}
-		found := entry(row.Project.ID, row.Project.DisplayName, row.Project.Kind)
-		at := checkout(found, host, row.Project.RootPath, row.Project.Archived)
+		project := entry(row.Project)
+		at := checkout(project, host, row.Project)
 		if row.Archived || (row.Subagent != nil && row.Subagent.ParentID != "") {
 			continue
 		}
-		found.SessionCount++
+		project.SessionCount++
 		at.SessionCount++
-		if row.LastActive.After(found.LastActive) {
-			found.LastActive = row.LastActive
+		if row.LastActive.After(project.LastActive) {
+			project.LastActive = row.LastActive
 		}
 	}
 	for _, record := range records {
-		if !record.Registered {
+		if !record.Added {
 			continue
 		}
-		found := entry(record.ID, record.DisplayName, record.Kind)
-		checkout(found, local, record.RootPath, !record.ArchivedAt.IsZero())
+		found := addedCatalogProject(record, false)
+		found.Archived = !record.ArchivedAt.IsZero()
+		project := entry(found)
+		checkout(project, local, found)
 	}
 	projects := make([]dashboardProject, 0, len(order))
 	for _, id := range order {
-		found := byID[id]
-		found.Archived = true
-		for _, at := range found.Checkouts {
-			found.Archived = found.Archived && at.Archived
+		project := byID[id]
+		project.Archived = true
+		for _, at := range project.Checkouts {
+			project.Archived = project.Archived && at.Archived
 		}
-		sort.SliceStable(found.Checkouts, func(i, j int) bool {
-			left, right := found.Checkouts[i].Host, found.Checkouts[j].Host
-			if (left.ID == local.ID) != (right.ID == local.ID) {
-				return left.ID == local.ID
+		sort.SliceStable(project.Checkouts, func(i, j int) bool {
+			left, right := project.Checkouts[i], project.Checkouts[j]
+			if (left.Host.ID == local.ID) != (right.Host.ID == local.ID) {
+				return left.Host.ID == local.ID
 			}
-			return left.Name < right.Name
+			if left.Host.Name != right.Host.Name {
+				return left.Host.Name < right.Host.Name
+			}
+			return left.RootPath < right.RootPath
 		})
-		projects = append(projects, *found)
+		projects = append(projects, *project)
 	}
 	sort.SliceStable(projects, func(i, j int) bool { return projects[i].LastActive.After(projects[j].LastActive) })
 	return projects
@@ -255,41 +268,62 @@ func (d *Daemon) requestCatalogDiscovery() {
 	}
 }
 
-func (d *Daemon) projectAction(r *http.Request, w http.ResponseWriter, action, projectID, path string) {
+func (d *Daemon) projectAction(r *http.Request, w http.ResponseWriter, request projectRequest) {
 	ctx := r.Context()
-	switch action {
+	switch request.Action {
 	case "project-add":
-		project, err := d.addProject(ctx, path)
+		project, err := d.addProject(ctx, request.Path, request.Title)
+		var taken *registry.WorkspaceTakenError
+		if errors.As(err, &taken) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "project": project})
 		return
-	case "project-archive", "project-unarchive":
+	case "project-remove", "project-archive", "project-unarchive":
 	default:
 		http.Error(w, "unknown project action", http.StatusBadRequest)
 		return
 	}
-	if projectID == "" {
+	if request.ProjectID == "" {
 		http.Error(w, "projectId is required", http.StatusBadRequest)
 		return
 	}
-	archive := action == "project-archive"
-	local, err := d.archiveLocalProject(projectID, archive)
+	targets, err := d.localProjectCheckouts(request.ProjectID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	var checkouts []map[string]any
-	if local {
-		checkouts = append(checkouts, map[string]any{"host": d.localHost().Name, "ok": true})
+	if request.Action == "project-remove" {
+		d.removeProject(w, request.ProjectID, targets)
+		return
 	}
+	archive := request.Action == "project-archive"
+	var checkouts []map[string]any
 	failed := false
-	// A paired host forwarding this action archives only its own checkout,
+	for _, target := range targets {
+		result := map[string]any{"host": d.localHost().Name, "projectId": target.ID, "rootPath": target.WorkspaceRoot, "ok": true}
+		if err := d.archiveLocalProject(target, archive); err != nil {
+			result["ok"], result["error"] = false, err.Error()
+			failed = true
+		}
+		checkouts = append(checkouts, result)
+	}
+	if len(targets) > 0 {
+		d.publishCatalogPresence()
+		// A catalog pass that read the archive state before this change may
+		// still publish its rows; the pass this requests runs after it and
+		// settles them.
+		d.requestCatalogDiscovery()
+	}
+	// A paired host forwarding this action archives only its own checkouts,
 	// so the action never travels back.
 	if _, fromHost := requestingHost(ctx); !fromHost {
-		hostIDs, err := d.Registry.CatalogProjectHosts(projectID)
+		hostIDs, err := d.Registry.CatalogProjectHosts(request.ProjectID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -298,7 +332,7 @@ func (d *Daemon) projectAction(r *http.Request, w http.ResponseWriter, action, p
 			result := map[string]any{"host": hostID, "ok": true}
 			if host, found := d.pairedHost(hostID); found {
 				result["host"] = host.record.Name
-				if err := d.forwardProjectArchive(r, host, action, projectID); err != nil {
+				if err := d.forwardProjectArchive(r, host, request.Action, request.ProjectID); err != nil {
 					result["ok"], result["error"] = false, err.Error()
 					failed = true
 				}
@@ -317,32 +351,85 @@ func (d *Daemon) projectAction(r *http.Request, w http.ResponseWriter, action, p
 	if failed {
 		status = http.StatusBadGateway
 	}
-	writeDashboardJSON(w, status, map[string]any{"ok": !failed, "projectId": projectID, "archived": archive, "checkouts": checkouts})
+	writeDashboardJSON(w, status, map[string]any{"ok": !failed, "projectId": request.ProjectID, "archived": archive, "checkouts": checkouts})
 }
 
-// archiveLocalProject archives or unarchives this host's checkout of the
-// project, reporting false when this host has none.
-func (d *Daemon) archiveLocalProject(projectID string, archive bool) (bool, error) {
-	record, err := d.catalogProjectRecord(projectID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
+type projectRequest struct {
+	Action    string
+	ProjectID string
+	Path      string
+	Title     string
+}
+
+// localProjectCheckouts lists this host's projects a project id names: the
+// project with that local id, or every one with that key.
+func (d *Daemon) localProjectCheckouts(projectID string) ([]registry.ProjectRecord, error) {
+	records, err := d.Registry.ListProjects()
 	if err != nil {
-		return false, err
+		return nil, err
 	}
+	seen := map[string]bool{}
+	var targets []registry.ProjectRecord
+	for _, record := range records {
+		if record.ID == projectID || (record.Added && record.Key == projectID) {
+			targets = append(targets, record)
+			seen[record.ID] = true
+		}
+	}
+	raws, err := d.Registry.CatalogLocalProjects(projectID)
+	if err != nil {
+		return nil, err
+	}
+	for _, raw := range raws {
+		var found catalogProject
+		if json.Unmarshal(raw, &found) != nil || found.LocalID == "" || seen[found.LocalID] {
+			continue
+		}
+		seen[found.LocalID] = true
+		targets = append(targets, registry.ProjectRecord{ID: found.LocalID, WorkspaceRoot: found.RootPath, Title: found.DisplayName, Added: found.Added})
+	}
+	return targets, nil
+}
+
+func (d *Daemon) archiveLocalProject(target registry.ProjectRecord, archive bool) error {
 	if archive {
-		err = d.Registry.ArchiveProject(record, time.Now().UTC())
-	} else {
-		err = d.Registry.UnarchiveProject(projectID)
+		return d.Registry.ArchiveProject(target, time.Now().UTC())
 	}
-	if err != nil {
-		return true, err
+	return d.Registry.UnarchiveProject(target.ID)
+}
+
+// removeProject removes one added project of this host. Its sessions move to
+// the next project that contains them on the following catalog pass.
+func (d *Daemon) removeProject(w http.ResponseWriter, projectID string, targets []registry.ProjectRecord) {
+	var added []registry.ProjectRecord
+	for _, target := range targets {
+		if target.Added {
+			added = append(added, target)
+		}
 	}
-	d.publishCatalogPresence()
-	// A catalog pass that read the archive state before this change may still
-	// publish its rows; the pass this requests runs after it and settles them.
+	switch len(added) {
+	case 0:
+		if len(targets) > 0 {
+			http.Error(w, "project "+projectID+" was not added, so it cannot be removed; archive it to hide it", http.StatusConflict)
+			return
+		}
+		http.Error(w, "project not found", http.StatusNotFound)
+		return
+	case 1:
+	default:
+		roots := make([]string, 0, len(added))
+		for _, target := range added {
+			roots = append(roots, target.ID+" ("+target.WorkspaceRoot+")")
+		}
+		http.Error(w, "project "+projectID+" names several added folders on this host: "+strings.Join(roots, ", ")+"; remove one by its id", http.StatusConflict)
+		return
+	}
+	if err := d.Registry.RemoveProject(added[0].ID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	d.requestCatalogDiscovery()
-	return true, nil
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "projectId": added[0].ID, "rootPath": added[0].WorkspaceRoot})
 }
 
 func (d *Daemon) forwardProjectArchive(r *http.Request, host *pairedHost, action, projectID string) error {
@@ -391,30 +478,10 @@ func (d *Daemon) sessionArchiveAction(w http.ResponseWriter, action, sessionID s
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "sessionId": sessionID, "archived": action == "session-archive"})
 }
 
-func (d *Daemon) catalogProjectRecord(projectID string) (registry.ProjectRecord, error) {
-	records, err := d.Registry.ListProjects()
-	if err != nil {
-		return registry.ProjectRecord{}, err
-	}
-	for _, record := range records {
-		if record.ID == projectID {
-			return record, nil
-		}
-	}
-	raw, err := d.Registry.CatalogProjectByID(projectID)
-	if err != nil {
-		return registry.ProjectRecord{}, err
-	}
-	var project catalogProject
-	if err := json.Unmarshal(raw, &project); err != nil {
-		return registry.ProjectRecord{}, err
-	}
-	return registry.ProjectRecord{ID: project.ID, Kind: project.Kind, RootPath: project.RootPath, DisplayName: project.DisplayName}, nil
-}
-
-// addProject makes a folder a project. A folder inside a Git repository is
-// already part of that repository's project and is returned unchanged.
-func (d *Daemon) addProject(ctx context.Context, path string) (catalogProject, error) {
+// addProject adds a folder as a project of this host. A folder in a linked
+// worktree is added at the same place in the main checkout, so the project
+// holds that folder in every worktree.
+func (d *Daemon) addProject(ctx context.Context, path, title string) (catalogProject, error) {
 	path, err := workspace.NormalizeCWD(path)
 	if err != nil || path == "" {
 		return catalogProject{}, fmt.Errorf("a folder path is required")
@@ -422,17 +489,47 @@ func (d *Daemon) addProject(ctx context.Context, path string) (catalogProject, e
 	if info, err := os.Stat(path); err != nil || !info.IsDir() {
 		return catalogProject{}, fmt.Errorf("%s is not a folder", path)
 	}
-	repository, notRepository, err := resolveCatalogRepository(ctx, path, nil)
-	if err == nil {
-		return *repository.project(), nil
+	if path, err = canonicalCatalogPath(path); err != nil {
+		return catalogProject{}, err
 	}
-	if !notRepository {
+	record := registry.ProjectRecord{ID: "p-" + uuid.NewString(), WorkspaceRoot: path, Title: strings.TrimSpace(title), CreatedAt: time.Now().UTC()}
+	repository, notRepository, err := resolveCatalogRepository(ctx, path, nil)
+	inRepository := err == nil
+	switch {
+	case inRepository:
+		record.WorkspaceRoot = repository.translate(path)
+		if record.Key = repository.key(record.WorkspaceRoot); record.Key != "" {
+			record.Repository, _ = json.Marshal(repository.repository)
+		}
+	case !notRepository:
 		return catalogProject{}, fmt.Errorf("read repository for %s: %w", path, err)
 	}
-	project := catalogProject{ID: catalogPathID("project", path), DisplayName: filepath.Base(path), RootPath: path, Kind: catalogProjectFolder}
-	if err := d.Registry.RegisterFolderProject(project.ID, project.RootPath, project.DisplayName); err != nil {
+	if record.Title == "" {
+		record.Title = filepath.Base(record.WorkspaceRoot)
+	}
+	if err := d.Registry.AddProject(record); err != nil {
 		return catalogProject{}, err
 	}
 	d.requestCatalogDiscovery()
-	return project, nil
+	return *addedCatalogProject(record, inRepository), nil
+}
+
+// refreshProjectRepositories keeps each added project's key current with its
+// repository's remote.
+func (d *Daemon) refreshProjectRepositories(ctx context.Context, records []registry.ProjectRecord, now time.Time) {
+	for index := range records {
+		record := &records[index]
+		if !record.Added {
+			continue
+		}
+		key, repository, ok := d.catalogIdentities.rootRepository(ctx, record.WorkspaceRoot, now)
+		if !ok || (key == record.Key && bytes.Equal(repository, record.Repository)) {
+			continue
+		}
+		if err := d.Registry.SetProjectRepository(record.ID, key, repository); err != nil {
+			d.log.Printf("project %s repository: %s", record.WorkspaceRoot, err)
+			continue
+		}
+		record.Key, record.Repository = key, repository
+	}
 }

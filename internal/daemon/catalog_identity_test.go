@@ -99,7 +99,7 @@ func TestCatalogIdentityLeavesUnregisteredFoldersOutOfProjects(t *testing.T) {
 	}
 }
 
-func TestCatalogIdentityUsesTheNearestRegisteredFolder(t *testing.T) {
+func TestCatalogIdentityUsesTheDeepestAddedProject(t *testing.T) {
 	root, err := workspace.NormalizeCWD(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -111,14 +111,14 @@ func TestCatalogIdentityUsesTheNearestRegisteredFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	cache := newCatalogIdentityCache()
-	cache.setFolders([]registry.ProjectRecord{
-		{ID: "project-outer", Kind: catalogProjectFolder, RootPath: outer, DisplayName: "notes", Registered: true},
-		{ID: "project-inner", Kind: catalogProjectFolder, RootPath: inner, DisplayName: "drafts", Registered: true},
-		{ID: "project-archived-only", Kind: catalogProjectGit, RootPath: root, DisplayName: "root"},
+	cache.setProjects([]registry.ProjectRecord{
+		{ID: "p-outer", WorkspaceRoot: outer, Title: "notes", Added: true},
+		{ID: "p-inner", WorkspaceRoot: inner, Title: "drafts", Added: true},
+		{ID: "implicit:" + root, WorkspaceRoot: root, Title: "root"},
 	})
 	identity := cache.identity(context.Background(), surface.Session{Cwd: work}, time.Now(), noStoredProject)
-	if identity.Project == nil || identity.Project.ID != "project-inner" || identity.Project.Kind != catalogProjectFolder || identity.Project.RootPath != inner {
-		t.Fatalf("identity=%+v", identity)
+	if identity.Project == nil || identity.Project.ID != "p-inner" || identity.Project.LocalID != "p-inner" || !identity.Project.Added || identity.Project.Kind != catalogProjectFolder || identity.Project.RootPath != inner {
+		t.Fatalf("identity=%+v", identity.Project)
 	}
 	if outside := cache.identity(context.Background(), surface.Session{Cwd: root}, time.Now(), noStoredProject); outside.Project != nil {
 		t.Fatalf("outside=%+v", outside.Project)
@@ -172,61 +172,38 @@ func gitRun(t *testing.T, dir string, args ...string) {
 	}
 }
 
-func catalogProjectAt(t *testing.T, cache *catalogIdentityCache, path string, now time.Time) *catalogProject {
+func catalogProjectAt(t *testing.T, cache *catalogIdentityCache, path string) *catalogProject {
 	t.Helper()
-	identity := cache.identity(context.Background(), surface.Session{Cwd: path}, now, noStoredProject)
+	identity := cache.identity(context.Background(), surface.Session{Cwd: path}, time.Now(), noStoredProject)
 	if identity.UnavailableReason != "" || identity.Project == nil {
 		t.Fatalf("identity for %s: %+v", path, identity)
 	}
 	return identity.Project
 }
 
-func TestCatalogIdentityNamesARepositoryByItsRemoteOnEveryClone(t *testing.T) {
+func TestImplicitProjectsShareARepositoryOnlyThroughItsRemote(t *testing.T) {
 	first := catalogTestRepo(t)
-	gitRun(t, first, "remote", "add", "origin", "https://github.com/example/gadget.git")
+	gitRun(t, first, "remote", "add", "origin", "https://github.com/Example/Gadget.git")
+	gitRun(t, first, "remote", "add", "upstream", "https://github.com/upstream-org/gadget.git")
 	second := filepath.Join(t.TempDir(), "checkout-two")
 	gitRun(t, first, "clone", "--quiet", first, second)
 	gitRun(t, second, "remote", "set-url", "origin", "git@github.com:example/gadget")
-	worktree := filepath.Join(second, ".worktrees", "task-d4")
-	gitRun(t, second, "worktree", "add", "-b", "feature/d4", worktree)
+	alone := filepath.Join(t.TempDir(), "alone")
+	gitRun(t, first, "clone", "--quiet", first, alone)
+	gitRun(t, alone, "remote", "remove", "origin")
 
 	cache := newCatalogIdentityCache()
-	now := time.Now()
-	one := catalogProjectAt(t, cache, filepath.Join(first, "src", "lib"), now)
-	two := catalogProjectAt(t, cache, worktree, now)
-	if one.ID != two.ID || !one.Portable || one.DisplayName != "gadget" || two.DisplayName != "gadget" || one.RootPath == two.RootPath {
+	one := catalogProjectAt(t, cache, filepath.Join(first, "src", "lib"))
+	two := catalogProjectAt(t, cache, second)
+	if one.ID != "repo:github.com/example/gadget" || two.ID != one.ID || one.LocalID == two.LocalID || one.DisplayName != "gadget" || one.Added || one.Repository == nil || one.Repository.RemoteName != "origin" {
 		t.Fatalf("one=%+v two=%+v", one, two)
 	}
-
-	gitRun(t, second, "remote", "set-url", "origin", "https://github.com/someone-else/gadget.git")
-	fork := catalogProjectAt(t, cache, worktree, now.Add(catalogIdentityTTL))
-	if fork.ID == one.ID || !fork.Portable {
-		t.Fatalf("a fork kept the upstream project: fork=%+v one=%+v", fork, one)
+	canonicalAlone, err := workspace.NormalizeCWD(alone)
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestCatalogIdentityFallsBackToTheRootCommitThenThePath(t *testing.T) {
-	first := catalogTestRepo(t)
-	second := filepath.Join(t.TempDir(), "copy")
-	gitRun(t, first, "clone", "--quiet", first, second)
-	cache := newCatalogIdentityCache()
-	one := catalogProjectAt(t, cache, first, time.Now())
-	two := catalogProjectAt(t, cache, second, time.Now())
-	if one.ID != two.ID || !one.Portable || one.DisplayName != "widget" || two.DisplayName != "copy" {
-		t.Fatalf("clones without a usable remote: one=%+v two=%+v", one, two)
-	}
-
-	empty := filepath.Join(t.TempDir(), "empty")
-	other := filepath.Join(t.TempDir(), "empty")
-	for _, repo := range []string{empty, other} {
-		if err := os.MkdirAll(repo, 0700); err != nil {
-			t.Fatal(err)
-		}
-		gitRun(t, repo, "init", "-b", "main")
-	}
-	unborn := catalogProjectAt(t, cache, empty, time.Now())
-	unbornOther := catalogProjectAt(t, cache, other, time.Now())
-	if unborn.Portable || unborn.ID == unbornOther.ID || unborn.DisplayName != "empty" {
-		t.Fatalf("repositories without commits: %+v %+v", unborn, unbornOther)
+	local := catalogProjectAt(t, cache, alone)
+	if local.Key != "" || local.ID != "implicit:"+canonicalAlone || local.LocalID != local.ID || local.Repository != nil || local.DisplayName != "alone" {
+		t.Fatalf("a repository without a remote: %+v", local)
 	}
 }

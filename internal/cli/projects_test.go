@@ -6,13 +6,13 @@ import (
 )
 
 const projectsSnapshot = `{"projects":[
-{"id":"project-widget","displayName":"widget","kind":"git","sessionCount":3,"checkouts":[
- {"host":{"id":"local","name":"mac","state":"local"},"rootPath":"/work/widget","sessionCount":2},
- {"host":{"id":"h0123456789ab","name":"forge","state":"connected"},"rootPath":"/home/remote/widget","sessionCount":1}]},
-{"id":"h0123456789ab::project-scratch","displayName":"widget","kind":"git","sessionCount":1,"checkouts":[
- {"host":{"id":"h0123456789ab","name":"forge","state":"connected"},"rootPath":"/home/remote/scratch/widget","sessionCount":1}]},
-{"id":"project-notes","displayName":"notes","kind":"folder","archived":true,"checkouts":[
- {"host":{"id":"local","name":"mac","state":"local"},"rootPath":"/work/notes","archived":true}]}]}`
+{"id":"repo:github.com/example/widget","displayName":"widget","kind":"git","key":"repo:github.com/example/widget","sessionCount":3,"checkouts":[
+ {"host":{"id":"local","name":"mac","state":"local"},"projectId":"p-widget-mac","rootPath":"/work/widget","added":true,"sessionCount":2},
+ {"host":{"id":"h0123456789ab","name":"forge","state":"connected"},"projectId":"h0123456789ab::implicit:/home/remote/widget","rootPath":"/home/remote/widget","sessionCount":1}]},
+{"id":"h0123456789ab::implicit:/home/remote/scratch/widget","displayName":"widget","kind":"git","sessionCount":1,"checkouts":[
+ {"host":{"id":"h0123456789ab","name":"forge","state":"connected"},"projectId":"h0123456789ab::implicit:/home/remote/scratch/widget","rootPath":"/home/remote/scratch/widget","sessionCount":1}]},
+{"id":"p-notes","displayName":"notes","kind":"folder","archived":true,"checkouts":[
+ {"host":{"id":"local","name":"mac","state":"local"},"projectId":"p-notes","rootPath":"/work/notes","added":true,"archived":true}]}]}`
 
 func TestProjectListHidesArchivedUnlessAll(t *testing.T) {
 	app, _, _, api := federatedCLIFixture(t, true)
@@ -35,7 +35,7 @@ func TestProjectArchiveResolvesByIdAndRejectsAmbiguousNames(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 	if _, err := captureStdout(t, func() error {
-		return app.Run([]string{"project", "archive", "h0123456789ab::project-scratch"})
+		return app.Run([]string{"project", "archive", "h0123456789ab::implicit:/home/remote/scratch/widget"})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -43,21 +43,37 @@ func TestProjectArchiveResolvesByIdAndRejectsAmbiguousNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	actions, _ := api.recorded()
-	if len(actions) != 2 || actions[0]["action"] != "project-archive" || actions[0]["projectId"] != "h0123456789ab::project-scratch" || actions[1]["action"] != "project-unarchive" || actions[1]["projectId"] != "project-notes" {
+	if len(actions) != 2 || actions[0]["action"] != "project-archive" || actions[0]["projectId"] != "h0123456789ab::implicit:/home/remote/scratch/widget" || actions[1]["action"] != "project-unarchive" || actions[1]["projectId"] != "p-notes" {
 		t.Fatalf("actions=%v", actions)
 	}
 }
 
-func TestProjectAddSendsAnAbsolutePath(t *testing.T) {
+func TestProjectAddSendsAnAbsolutePathAndTitle(t *testing.T) {
 	app, _, _, api := federatedCLIFixture(t, true)
 	folder := t.TempDir()
-	api.response = `{"ok":true,"project":{"id":"project-x","displayName":"x","rootPath":"` + folder + `","kind":"folder"}}`
-	output, err := captureStdout(t, func() error { return app.Run([]string{"project", "add", folder}) })
-	if err != nil || !strings.Contains(output, "added project x") {
+	api.response = `{"ok":true,"project":{"id":"p-x","localId":"p-x","displayName":"Web app","rootPath":"` + folder + `","kind":"folder","added":true}}`
+	output, err := captureStdout(t, func() error { return app.Run([]string{"project", "add", folder, "--name", "Web app"}) })
+	if err != nil || !strings.Contains(output, "added project Web app") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
 	actions, _ := api.recorded()
-	if len(actions) != 1 || actions[0]["action"] != "project-add" || actions[0]["path"] != folder {
+	if len(actions) != 1 || actions[0]["action"] != "project-add" || actions[0]["path"] != folder || actions[0]["title"] != "Web app" {
+		t.Fatalf("actions=%v", actions)
+	}
+}
+
+func TestProjectRemoveSendsTheAddedCheckout(t *testing.T) {
+	app, _, _, api := federatedCLIFixture(t, true)
+	api.snapshot = projectsSnapshot
+	api.response = `{"ok":true}`
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"project", "remove", "/work/widget"}) }); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Run([]string{"project", "remove", "h0123456789ab::implicit:/home/remote/scratch/widget"}); err == nil || !strings.Contains(err.Error(), "was not added") {
+		t.Fatalf("err=%v", err)
+	}
+	actions, _ := api.recorded()
+	if len(actions) != 1 || actions[0]["action"] != "project-remove" || actions[0]["projectId"] != "p-widget-mac" {
 		t.Fatalf("actions=%v", actions)
 	}
 }
