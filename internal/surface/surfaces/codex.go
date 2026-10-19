@@ -1321,7 +1321,7 @@ func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string
 		return surface.DeliveryUnavailable(err)
 	}
 	if turnID == "" {
-		return surface.DeliveryUnavailable(errors.New("session idle; nothing to steer (use 'send' instead)"))
+		return surface.DeliveryUnavailable(fmt.Errorf("%w (use 'send' instead)", surface.ErrNothingToSteer))
 	}
 	if _, err := conn.Request(ctx, "turn/steer", map[string]any{
 		"threadId":       sess.ID,
