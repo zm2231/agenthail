@@ -171,7 +171,13 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey)
     }
 
-    func sessionOptions() async throws -> SessionCreationOptions { try await get("/api/v1/session-options") }
+    func sessionOptions(host: String? = nil) async throws -> SessionCreationOptions {
+        var components = URLComponents()
+        components.path = "/api/v1/session-options"
+        if let host { components.queryItems = [URLQueryItem(name: "host", value: host)] }
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await get(path)
+    }
     func queuedInstructions() async throws -> [QueueState] {
         let response: QueueResponse = try await get("/api/v1/queue")
         return response.items
@@ -181,21 +187,22 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await post("/api/v1/actions", body: ["action": "alias", "sessionId": id, "alias": alias])
     }
 
-    func creationModels(surface: String) async throws -> [ModelOption] {
+    func creationModels(surface: String, host: String? = nil) async throws -> [ModelOption] {
         var components = URLComponents()
         components.path = "/api/v1/models"
-        components.queryItems = [URLQueryItem(name: "surface", value: surface)]
+        components.queryItems = [URLQueryItem(name: "surface", value: surface)] + (host.map { [URLQueryItem(name: "host", value: $0)] } ?? [])
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
         let response: CreationModels = try await get(path)
         return response.models
     }
 
-    static func creationBody(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil) throws -> Data {
+    static func creationBody(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, host: String? = nil) throws -> Data {
         if launcher?.isTerminal == true && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
             throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
         }
         var body: [String: Any] = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
         if let launcher { body["launcher"] = launcher.id }
+        if let host { body["host"] = host }
         if surface == "codex" {
             if let effort = turnSettings.effort { body["effort"] = effort }
             if let mode = turnSettings.mode { body["mode"] = mode.rawValue }
@@ -205,8 +212,8 @@ final class AgenthailAPI: @unchecked Sendable {
         return try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
     }
 
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
-        try await createSession(body: Self.creationBody(surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings, claude: claude, launcher: launcher), idempotencyKey: idempotencyKey, failureReceipts: failureReceipts)
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, host: String? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
+        try await createSession(body: Self.creationBody(surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings, claude: claude, launcher: launcher, host: host), idempotencyKey: idempotencyKey, failureReceipts: failureReceipts)
     }
 
     func createSession(body: Data, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {

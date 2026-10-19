@@ -539,7 +539,7 @@ func TestQueueRetryReturnsAnUnconfirmedHostSendToItsReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-thread"
-	if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
+	if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	id, err := r.QueueHostDelivery("remote-thread", "retry me", "key-retry", []byte(`{"action":"send"}`), true)
@@ -1283,7 +1283,7 @@ func TestListShowsAPairedHostSessionWaitingOnItsUser(t *testing.T) {
 	entity := hostID + "::remote-asking"
 	mirror := func(projection string) {
 		t.Helper()
-		if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-asking", Name: "remote-asking", Surface: surface.KindCodex, Status: surface.StatusBusy}, EntityID: entity, Projection: json.RawMessage(projection), ObservedAt: time.Now()}); err != nil {
+		if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-asking", Name: "remote-asking", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}, EntityID: entity, Projection: json.RawMessage(projection), ObservedAt: time.Now()}); err != nil {
 			t.Fatal(err)
 		}
 	}

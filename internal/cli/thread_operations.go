@@ -49,9 +49,13 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 		}
 	}
 	if session == nil {
-		session, adapter, err = a.resolveTarget(ctx, target)
+		var remote *remoteTarget
+		session, adapter, remote, err = a.resolveAnyTarget(ctx, target)
 		if err != nil {
 			return err
+		}
+		if remote != nil {
+			return a.threadOperationRemote(ctx, remote, operation, positional, args)
 		}
 	}
 	var output any

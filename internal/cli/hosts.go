@@ -63,7 +63,7 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 		return nil, nil, err
 	}
 	if remote != nil {
-		return nil, nil, fmt.Errorf("%s is a session on host %s; this command only acts on sessions on this host", remote.label(), remote.Host.Name)
+		return nil, nil, fmt.Errorf("%s is a session on host %s; this command is not available for sessions on another host yet", remote.label(), remote.Host.Name)
 	}
 	return session, adapter, nil
 }

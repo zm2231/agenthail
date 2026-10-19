@@ -176,10 +176,12 @@ struct SessionRouteView: View {
         if let value = model.searchResults.first(where: { $0.id == sessionID })?.session { return value }
         if let value = model.fetchedSubagents.session(sessionID) { return value }
         guard let detail = model.selectedDetail, detail.session.id == sessionID else { return nil }
-        return SessionState(id: sessionID, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
-                            status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: false,
-                            current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly,
-                            readOnlyReason: detail.readOnlyReason)
+        var unlisted = SessionState(id: sessionID, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
+                                    status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: false,
+                                    current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly,
+                                    readOnlyReason: detail.readOnlyReason)
+        unlisted.host = model.snapshot?.daemon.pairedHost(owning: sessionID)
+        return unlisted
     }
     var body: some View {
         Group {
@@ -523,7 +525,7 @@ struct SessionScreen: View {
                     VStack(spacing: 2) {
                         Text(displayTitle).font(.body.weight(.semibold)).lineLimit(1)
                         if let cwd = detail?.session.cwd, !cwd.isEmpty {
-                            Text(URL(fileURLWithPath: cwd).lastPathComponent + " · Mac").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            Text(URL(fileURLWithPath: cwd).lastPathComponent + " · " + (session.remoteHostID == nil ? "Mac" : session.host?.name ?? "Mac")).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
                 }
@@ -534,8 +536,10 @@ struct SessionScreen: View {
                             Text("Chat").tag(false)
                             Text("All events").tag(true)
                         }
-                        Button("Call this session", systemImage: "phone.fill") {
-                            showingVoice = true
+                        if session.canCallByVoice {
+                            Button("Call this session", systemImage: "phone.fill") {
+                                showingVoice = true
+                            }
                         }
                     } label: { Image(systemName: "ellipsis") }
                     .accessibilityLabel("Session menu")
@@ -694,7 +698,7 @@ struct IOSComposer: View {
         return options.first { $0.id == detail.model } ?? (detail.model == nil ? options.first { $0.default == true } : nil)
     }
     private func loadModels() async throws -> [ModelOption] {
-        let options = try await model.creationModels(surface: session.surface)
+        let options = try await model.creationModels(surface: session.surface, host: session.remoteHostID)
         loadedModels = options
         return options
     }
@@ -1055,7 +1059,7 @@ struct SessionInspector: View {
                     }
                 }
                 Section("Controls") {
-                    if detail.session.runtime?.focusable == true {
+                    if session.runtime?.focusable == true {
                         Button("Open in host", systemImage: "arrow.up.forward.app") { model.focusSession(session); dismiss() }
                     }
                     if detail.readOnly { Label(detail.readOnlyReason, systemImage: "lock").font(.footnote) }
@@ -1083,7 +1087,7 @@ struct SessionInspector: View {
                         model.action("model", session: session, model: value)
                         dismiss()
                     }
-                }, reload: { try await model.creationModels(surface: session.surface) })
+                }, reload: { try await model.creationModels(surface: session.surface, host: session.remoteHostID) })
             }
         }
     }

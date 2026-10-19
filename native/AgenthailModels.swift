@@ -12,10 +12,94 @@ struct ClaudeCreationSettings {
 }
 
 struct SessionCreationOptions: Decodable {
-    struct Surface: Decodable, Identifiable { let id: String; let workspace: Bool }
+    struct Surface: Decodable, Identifiable { let id: String; let workspace: Bool; var connected: Bool? = nil }
+    var host: SessionHost? = nil
     let surfaces: [Surface]
     let workspaces: [String]
     var launchers: [LauncherOption]? = nil
+}
+
+struct CreationHost: Hashable, Identifiable {
+    let id: String
+    let name: String
+    let state: String
+    var isLocal: Bool { id.isEmpty }
+    var isAvailable: Bool { state == "connected" }
+    var stateLabel: String { HostHealth(id: id, name: name, state: state).stateLabel }
+}
+
+/// Where a new session starts and the launch catalog read from that host.
+/// An empty host id is this machine. Loads carry the generation they were
+/// started for, so an answer for a host the user already left is dropped.
+struct CreationHostPicker {
+    private(set) var hosts: [CreationHost] = []
+    private(set) var selected = ""
+    private(set) var options: SessionCreationOptions?
+    private(set) var models: [String: [ModelOption]] = [:]
+    private(set) var loadError: String?
+    private(set) var generation = 0
+
+    init(daemon: DaemonState?, selectedSession: SessionState?) {
+        update(daemon: daemon)
+        if let host = selectedSession?.host, host.state != "local", hosts.contains(where: { $0.id == host.id && $0.isAvailable }) {
+            selected = host.id
+        }
+    }
+
+    var isVisible: Bool { hosts.count > 1 }
+    var selectedHost: CreationHost? { hosts.first { $0.id == selected } }
+    var hostQuery: String? { selected.isEmpty ? nil : selected }
+    var isLoading: Bool { options == nil && loadError == nil }
+    var canStart: Bool { options != nil && (selected.isEmpty || selectedHost?.isAvailable == true) }
+    var folders: [String] { options?.workspaces ?? [] }
+
+    mutating func update(daemon: DaemonState?) {
+        let paired = daemon?.hosts ?? []
+        if let local = daemon?.host, !paired.isEmpty {
+            hosts = [CreationHost(id: "", name: local.name, state: "connected")] + paired.map { CreationHost(id: $0.id, name: $0.name, state: $0.state) }
+        } else {
+            hosts = []
+        }
+        if !selected.isEmpty && selectedHost == nil {
+            selected = ""
+            options = nil
+            models = [:]
+            loadError = nil
+            generation += 1
+        }
+    }
+
+    @discardableResult
+    mutating func select(_ id: String) -> Bool {
+        guard id != selected, hosts.contains(where: { $0.id == id && $0.isAvailable }) else { return false }
+        selected = id
+        options = nil
+        models = [:]
+        loadError = nil
+        generation += 1
+        return true
+    }
+
+    func owns(_ session: SessionState?) -> Bool {
+        guard let session else { return false }
+        return (session.remoteHostName == nil ? "" : session.host?.id ?? "") == selected
+    }
+
+    mutating func receive(options next: SessionCreationOptions, for loaded: Int) {
+        guard loaded == generation else { return }
+        options = next
+        loadError = nil
+    }
+
+    mutating func receive(models next: [ModelOption], agent: String, for loaded: Int) {
+        guard loaded == generation else { return }
+        models[agent] = next
+    }
+
+    mutating func fail(_ message: String, for loaded: Int) {
+        guard loaded == generation else { return }
+        loadError = message
+    }
 }
 struct CreationModels: Decodable { let models: [ModelOption] }
 struct QueueResponse: Decodable { let items: [QueueState] }
@@ -146,6 +230,13 @@ struct SessionState: Codable, Identifiable, Hashable {
         remoteHostName.map { name in String(name.split(separator: ".", maxSplits: 1).first ?? Substring(name)) }
     }
     var isUnavailable: Bool { remoteHostName != nil && !(unavailableReason ?? "").isEmpty }
+    /// The paired host that owns this session, or nil for this machine.
+    var remoteHostID: String? { remoteHostName == nil ? nil : host?.id }
+    var modelCatalogKey: String { "\(remoteHostID ?? "")/\(surface)" }
+    var canCallByVoice: Bool { remoteHostID == nil }
+    /// Attachments are sent as this machine's file paths, which mean nothing
+    /// to an agent on another host.
+    var acceptsLocalFiles: Bool { remoteHostID == nil }
 }
 
 struct SessionHost: Codable, Hashable {
@@ -623,6 +714,14 @@ struct DaemonState: Decodable, Equatable {
     let refreshError: String?
     var host: SessionHost? = nil
     var hosts: [HostHealth]? = nil
+
+    /// The paired host a host-qualified session id names, for a session the
+    /// snapshot has not listed yet.
+    func pairedHost(owning sessionID: String) -> SessionHost? {
+        guard let range = sessionID.range(of: "::") else { return nil }
+        let hostID = String(sessionID[..<range.lowerBound])
+        return hosts?.first { $0.id == hostID }.map { SessionHost(id: $0.id, name: $0.name, state: $0.state) }
+    }
 }
 
 struct DashboardSnapshot: Decodable {

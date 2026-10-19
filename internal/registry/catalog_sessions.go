@@ -696,27 +696,11 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 	if err := rows.Err(); err != nil {
 		return CatalogSnapshot{}, err
 	}
-	surfaceRows, err := tx.Query(`SELECT surface,health,detail,observed_at FROM catalog_surfaces ORDER BY surface`)
+	surfaces, err := catalogSurfaces(tx)
 	if err != nil {
 		return CatalogSnapshot{}, err
 	}
-	defer surfaceRows.Close()
-	for surfaceRows.Next() {
-		var state CatalogSurfaceState
-		var observedAt string
-		if err := surfaceRows.Scan(&state.Surface, &state.Health, &state.Detail, &observedAt); err != nil {
-			return CatalogSnapshot{}, err
-		}
-		parsed, err := time.Parse(time.RFC3339Nano, observedAt)
-		if err != nil {
-			return CatalogSnapshot{}, fmt.Errorf("parse catalog surface observation: %w", err)
-		}
-		state.ObservedAt = parsed
-		snapshot.Surfaces = append(snapshot.Surfaces, state)
-	}
-	if err := surfaceRows.Err(); err != nil {
-		return CatalogSnapshot{}, err
-	}
+	snapshot.Surfaces = surfaces
 	if snapshot.Listing, err = catalogListingTx(tx); err != nil {
 		return CatalogSnapshot{}, err
 	}
@@ -724,4 +708,34 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		return CatalogSnapshot{}, err
 	}
 	return snapshot, nil
+}
+
+// CatalogSurfaces returns the last health each surface's discovery recorded.
+func (r *Registry) CatalogSurfaces() ([]CatalogSurfaceState, error) {
+	return catalogSurfaces(r.read)
+}
+
+func catalogSurfaces(q interface {
+	Query(string, ...any) (*sql.Rows, error)
+}) ([]CatalogSurfaceState, error) {
+	rows, err := q.Query(`SELECT surface,health,detail,observed_at FROM catalog_surfaces ORDER BY surface`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	surfaces := []CatalogSurfaceState{}
+	for rows.Next() {
+		var state CatalogSurfaceState
+		var observedAt string
+		if err := rows.Scan(&state.Surface, &state.Health, &state.Detail, &observedAt); err != nil {
+			return nil, err
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, observedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse catalog surface observation: %w", err)
+		}
+		state.ObservedAt = parsed
+		surfaces = append(surfaces, state)
+	}
+	return surfaces, rows.Err()
 }

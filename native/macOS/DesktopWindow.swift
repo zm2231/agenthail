@@ -610,7 +610,7 @@ struct ConversationPane: View {
         if let session = pane.displayedSession {
             TranscriptView(model: model, pane: pane, session: session)
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id ? nil : {
+                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)
                         NSApplication.shared.activate()
                         openWindow(id: "voice")
@@ -1431,16 +1431,18 @@ struct ComposerView: View {
                         .padding(.bottom, 4)
                         .onSubmit { submit(alternate: false) }
                     HStack(spacing: 4) {
-                        Button(action: chooseAttachments) {
-                            Image(systemName: "paperclip")
-                                .font(.system(size: 13))
-                                .frame(width: 28, height: 28)
+                        if session.acceptsLocalFiles {
+                            Button(action: chooseAttachments) {
+                                Image(systemName: "paperclip")
+                                    .font(.system(size: 13))
+                                    .frame(width: 28, height: 28)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(DesktopPalette.text2)
+                            .help("Attach files or images")
+                            .accessibilityLabel("Attach files or images")
+                            .padding(.leading, 5)
                         }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(DesktopPalette.text2)
-                        .help("Attach files or images")
-                        .accessibilityLabel("Attach files or images")
-                        .padding(.leading, 5)
                         if session.surface == "codex" {
                             TurnSettingsMenu(model: model, sessionID: session.id, detail: pane.detail)
                         }
@@ -1482,7 +1484,7 @@ struct ComposerView: View {
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(dropTargeted ? DesktopPalette.accent : DesktopPalette.line, lineWidth: dropTargeted ? 2 : 1))
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
                 .dropDestination(for: URL.self) { urls, _ in
-                    guard let files = ComposerDrop.files(urls) else { return false }
+                    guard session.acceptsLocalFiles, let files = ComposerDrop.files(urls) else { return false }
                     draft.attachments = ComposerDrop.adding(files, to: draft.attachments)
                     focused = true
                     return true
@@ -1823,7 +1825,7 @@ struct DetailsTab: View {
     @State private var showTokens = false
     private var modelOptions: [ModelOption] {
         if let options = pane.detail?.models, !options.isEmpty { return options }
-        return model.modelCatalog[session.surface] ?? []
+        return model.modelCatalog[session.modelCatalogKey] ?? []
     }
 
     private var catalogNeeded: String? {
@@ -1915,7 +1917,7 @@ struct DetailsTab: View {
             ClaudeObservationsSection(detail: pane.detail)
         }
         .task(id: catalogNeeded) {
-            if let surface = catalogNeeded { await model.loadModelCatalog(surface: surface) }
+            if catalogNeeded != nil { await model.loadModelCatalog(for: session) }
         }
         .task(id: SubagentFetchKey(session, revision: model.fetchedSubagents.revision(session.id))) { await model.loadSubagents(of: session) }
     }

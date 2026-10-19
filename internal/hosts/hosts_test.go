@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -119,7 +120,9 @@ func TestClientTreatsIntermediaryAnswerAsUnanswered(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if daemonUp {
 			w.Header().Set(ResponseHeader, "h0123456789ab")
-			w.WriteHeader(http.StatusOK)
+			if r.URL.Path == "/api/v1/version" {
+				_, _ = w.Write([]byte(currentVersion))
+			}
 			return
 		}
 		http.Error(w, "bad gateway", http.StatusBadGateway)
@@ -130,6 +133,9 @@ func TestClientTreatsIntermediaryAnswerAsUnanswered(t *testing.T) {
 	port := server.Listener.Addr().(*net.TCPAddr).Port
 	client, err := NewClient("https://example.com:"+strconv.Itoa(port), "127.0.0.1", "ahd_secret-token", ClientOptions{RootCAs: roots})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Version(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	response, err := client.Do(context.Background(), http.MethodPost, "/api/v1/actions", nil, []byte(`{}`), nil)
@@ -143,6 +149,59 @@ func TestClientTreatsIntermediaryAnswerAsUnanswered(t *testing.T) {
 	var notSent NotSentError
 	if !errors.As(err, &unanswered) || unanswered.Status != http.StatusBadGateway || errors.As(err, &notSent) {
 		t.Fatalf("err=%v, want UnansweredError and not NotSentError", err)
+	}
+}
+
+var currentVersion = fmt.Sprintf(`{"hostId":"h0123456789ab","minimumProtocol":%d,"maximumProtocol":%d,"minimumFederation":%d,"maximumFederation":%d}`, ProtocolVersion, ProtocolVersion, FederationVersion, FederationVersion)
+
+func TestClientSendsNothingUntilTheLatestVersionCheckPasses(t *testing.T) {
+	allowLoopback(t)
+	var version atomic.Value
+	version.Store(currentVersion)
+	var beyond atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(ResponseHeader, "h0123456789ab")
+		if r.URL.Path == "/api/v1/version" {
+			_, _ = w.Write([]byte(version.Load().(string)))
+			return
+		}
+		beyond.Add(1)
+	}))
+	defer server.Close()
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	endpoint := "https://example.com:" + strconv.Itoa(server.Listener.Addr().(*net.TCPAddr).Port)
+	client, err := NewClient(endpoint, "127.0.0.1", "ahd_token", ClientOptions{RootCAs: roots, HostID: "h0123456789ab"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := func() error {
+		response, err := client.Do(context.Background(), http.MethodPost, "/api/v1/actions", nil, []byte(`{}`), nil)
+		if err == nil {
+			response.Body.Close()
+		}
+		return err
+	}
+	var notSent NotSentError
+	if err := send(); !errors.As(err, &notSent) || !errors.Is(err, ErrUnverified) {
+		t.Fatalf("before any version check err=%v", err)
+	}
+	if _, err := client.Version(context.Background()); err != nil || send() != nil {
+		t.Fatalf("a confirmed host refused: %v", err)
+	}
+	version.Store(`{"hostId":"h0123456789ab","minimumProtocol":1,"maximumProtocol":1}`)
+	if _, err := client.Version(context.Background()); err == nil {
+		t.Fatal("an older federation range passed")
+	}
+	if err := send(); !errors.Is(err, ErrUnverified) {
+		t.Fatalf("after a failed version check err=%v", err)
+	}
+	version.Store(strings.Replace(currentVersion, "h0123456789ab", "h0000000000ff", 1))
+	if _, err := client.Version(context.Background()); !errors.Is(err, ErrHostIdentityChanged) {
+		t.Fatalf("a different host passed: %v", err)
+	}
+	if err := send(); !errors.Is(err, ErrUnverified) || beyond.Load() != 1 {
+		t.Fatalf("err=%v requests beyond version=%d", err, beyond.Load())
 	}
 }
 

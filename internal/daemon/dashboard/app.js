@@ -35,6 +35,8 @@ const app = {
   remoteQRVisible: false,
   remoteQRHideTimer: null,
   startModels: {},
+  startHost: "",
+  startOptions: null,
   launchers: [],
   codexSearch: { query: "", results: [], loading: false, error: "", timer: null, controller: null },
   rekeyed: {},
@@ -1244,7 +1246,7 @@ function renderChat() {
   }
   const toolRows = [
     `<details class="session-details"><summary>Conversation settings</summary>${settings.join("")}</details>`,
-    `<details class="session-details"><summary>Voice</summary><p>Call this exact conversation through Codex Voice, or transfer an active call here.</p><button class="soft-button" type="button" data-voice-session="${escape(session.id)}">Call this session</button></details>`,
+    remoteHostName(session) ? "" : `<details class="session-details"><summary>Voice</summary><p>Call this exact conversation through Codex Voice, or transfer an active call here.</p><button class="soft-button" type="button" data-voice-session="${escape(session.id)}">Call this session</button></details>`,
   ];
   if (session.surface === "claude") toolRows.push(renderClaudeMetadata(claudeRuns, claudeSubagents));
   const timeline = app.history?.timeline?.items || [];
@@ -1370,7 +1372,7 @@ function isNetworkFailure(error) {
   return error?.networkFailure === true || error?.name === "TypeError";
 }
 function logicalRequest(scope, actionName, payload) {
-  const sessionId = app.selected?.id || "";
+  const sessionId = scope === "session-create" ? "" : app.selected?.id || "";
   const serializedPayload = JSON.stringify({ action: actionName, sessionId, ...payload });
   const current = app.pendingIdempotency.get(scope);
   if (current?.fingerprint === serializedPayload) return current;
@@ -1937,20 +1939,70 @@ $("#session-search").addEventListener("input", () => {
   }
   renderSessions();
 });
+function startable(name, connected) {
+  return (connected || name === "claude") && ["codex", "claude", "notion"].includes(name);
+}
 function startableSurfaces() {
-  return app.state.surfaces.filter(
-    (item) => (item.connected || item.name === "claude") && ["codex", "claude", "notion"].includes(item.name),
-  );
+  if (app.startOptions) return (app.startOptions.surfaces || []).filter((item) => startable(item.id, item.connected)).map((item) => item.id);
+  return app.state.surfaces.filter((item) => startable(item.name, item.connected)).map((item) => item.name);
+}
+const hostStateLabels = { connecting: "Connecting", unreachable: "Unreachable", unauthorized: "Pairing revoked", incompatible: "Needs update" };
+const hostIcon = '<svg aria-hidden="true" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="2.5" width="13" height="8.5" rx="1.5"/><path d="M5.5 13.5h5M8 11v2.5"/></svg>';
+function startHosts() {
+  const local = app.state.daemon?.host;
+  const paired = app.state.daemon?.hosts || [];
+  if (!local || paired.length === 0) return [];
+  return [{ id: "", name: local.name, local: true, state: "connected" }, ...paired.map((host) => ({ id: host.id, name: host.name, state: host.state }))];
+}
+function defaultStartHost() {
+  const host = app.selected?.host;
+  if (!host || host.state === "local") return "";
+  return (app.state.daemon?.hosts || []).some((paired) => paired.id === host.id && paired.state === "connected") ? host.id : "";
+}
+function startHostQuery(prefix) {
+  return app.startHost ? `${prefix}host=${encodeURIComponent(app.startHost)}` : "";
+}
+function renderStartHost() {
+  const button = $("#new-conversation-host");
+  const menu = $("#new-conversation-host-menu");
+  const hosts = startHosts();
+  if (app.startHost && !hosts.some((host) => host.id === app.startHost)) {
+    app.startHost = "";
+    clearLogicalRequest("session-create");
+    if (!$("#new-conversation-form").hidden) {
+      reloadStartCatalog();
+      return;
+    }
+  }
+  button.hidden = hosts.length === 0;
+  const submit = $("#new-conversation-form").querySelector('button[type="submit"]');
+  if (hosts.length === 0) {
+    menu.hidden = true;
+    submit.disabled = false;
+    return;
+  }
+  const current = hosts.find((host) => host.id === app.startHost) || hosts[0];
+  submit.disabled = current.state !== "connected";
+  button.innerHTML = `${hostIcon}<span>${escape(current.name)}</span>`;
+  button.title = `Starts on ${current.name}`;
+  button.setAttribute("aria-label", `Starts on ${current.name}. Choose where to start`);
+  button.setAttribute("aria-expanded", String(!menu.hidden));
+  menu.innerHTML = hosts.map((host) => {
+    const ready = host.state === "connected";
+    return `<button type="button" role="option" data-start-host="${escape(host.id)}" aria-selected="${host.id === app.startHost}"${ready ? "" : " disabled"}><span>${escape(host.name)}${host.local ? " · this machine" : ""}</span>${ready ? "" : `<small>${escape(hostStateLabels[host.state] || host.state)}</small>`}</button>`;
+  }).join("");
 }
 function renderStartSurfaceOptions() {
   const select = $("#new-conversation-surface");
   const current = select.value;
   const surfaces = startableSurfaces();
   select.innerHTML = surfaces
-    .map((item) => `<option value="${escape(item.name)}">${escape(labels[item.name] || item.name)}</option>`)
+    .map((name) => `<option value="${escape(name)}">${escape(labels[name] || name)}</option>`)
     .join("");
-  if (surfaces.some((item) => item.name === current)) select.value = current;
-  $("#new-conversation-toggle").hidden = surfaces.length === 0;
+  if (surfaces.includes(current)) select.value = current;
+  $("#new-conversation-toggle").hidden = app.state.surfaces.every((item) => !startable(item.name, item.connected));
+  $("#new-conversation-workspaces").innerHTML = (app.startOptions?.workspaces || []).map((path) => `<option value="${escape(path)}"></option>`).join("");
+  renderStartHost();
   syncStartForm();
 }
 function syncStartForm() {
@@ -1982,31 +2034,38 @@ function renderStartLaunchers() {
     document.querySelectorAll("[data-launch-option]").forEach(field => { field.hidden = true; field.querySelectorAll("input,select,textarea").forEach(input => input.disabled = true); });
   }
 }
-async function loadStartLaunchers() {
-  const response = await fetch("/api/v1/session-options");
+async function loadStartOptions() {
+  const host = app.startHost;
+  const response = await fetch(`/api/v1/session-options${startHostQuery("?")}`);
   if (!response.ok) throw Error(await response.text());
   const options = await response.json();
+  if (host !== app.startHost) return;
+  app.startOptions = options;
   app.launchers = options.launchers || [];
-  renderStartLaunchers();
+  renderStartSurfaceOptions();
 }
 async function loadStartModels() {
   const surfaceName = $("#new-conversation-surface").value;
   if (surfaceName !== "codex") return;
   const select = $("#new-conversation-model");
-  if (!app.startModels.codex) {
-    const response = await fetch("/api/models?surface=codex");
+  const host = app.startHost;
+  const cacheKey = `${host}/codex`;
+  if (!app.startModels[cacheKey]) {
+    const response = await fetch(`/api/models?surface=codex${startHostQuery("&")}`);
     if (!response.ok) throw Error(await response.text());
     const payload = await response.json();
-    app.startModels.codex = payload.models || [];
+    app.startModels[cacheKey] = payload.models || [];
   }
+  if (host !== app.startHost) return;
+  const models = app.startModels[cacheKey];
   const current = select.value;
   select.innerHTML = [
     '<option value="">Use Codex default</option>',
-    ...app.startModels.codex.map(
+    ...models.map(
       (model) => `<option value="${escape(model.id)}">${escape(model.displayName || model.id)}${model.default ? " (default)" : ""}</option>`,
     ),
   ].join("");
-  if (app.startModels.codex.some((model) => model.id === current)) select.value = current;
+  if (models.some((model) => model.id === current)) select.value = current;
 }
 function toggleNewConversationForm(show) {
   const form = $("#new-conversation-form");
@@ -2016,9 +2075,9 @@ function toggleNewConversationForm(show) {
     return;
   }
   clearLogicalRequest("session-create");
-  renderStartSurfaceOptions();
-  loadStartModels().catch((error) => toast(friendlyError(error)));
-  loadStartLaunchers().catch((error) => toast(friendlyError(error)));
+  app.startHost = defaultStartHost();
+  $("#new-conversation-host-menu").hidden = true;
+  reloadStartCatalog();
   form.querySelector('input[name="alias"]').focus();
 }
 $("#new-conversation-toggle").addEventListener("click", () => toggleNewConversationForm(true));
@@ -2028,18 +2087,51 @@ $("#new-conversation-surface").addEventListener("change", () => {
   loadStartModels().catch((error) => toast(friendlyError(error)));
 });
 $("#new-conversation-launcher").addEventListener("change", syncStartForm);
+function reloadStartCatalog() {
+  app.startOptions = null;
+  app.launchers = [];
+  renderStartSurfaceOptions();
+  loadStartOptions().then(() => loadStartModels()).catch((error) => toast(friendlyError(error)));
+}
+$("#new-conversation-host").addEventListener("click", () => {
+  const menu = $("#new-conversation-host-menu");
+  menu.hidden = !menu.hidden;
+  renderStartHost();
+});
+$("#new-conversation-host-menu").addEventListener("click", (event) => {
+  const option = event.target.closest("[data-start-host]");
+  if (!option || option.disabled) return;
+  $("#new-conversation-host-menu").hidden = true;
+  if (option.dataset.startHost === app.startHost) {
+    renderStartHost();
+    return;
+  }
+  app.startHost = option.dataset.startHost;
+  const form = $("#new-conversation-form");
+  for (const name of ["launcher", "model", "effort", "cwd"]) form.querySelectorAll(`[name="${name}"]`).forEach((field) => { field.value = name === "cwd" ? "~" : ""; });
+  clearLogicalRequest("session-create");
+  reloadStartCatalog();
+});
 $("#new-conversation-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const button = form.querySelector('button[type="submit"]');
   const values = Object.fromEntries(new FormData(form).entries());
+  if (app.startHost) {
+    const host = startHosts().find((item) => item.id === app.startHost);
+    if (host?.state !== "connected") {
+      toast(`${host?.name || "That host"} is not connected.`);
+      return;
+    }
+    values.host = app.startHost;
+  }
   button.disabled = true;
   try {
     if (values.outputSchema?.trim()) values.outputSchema = JSON.parse(values.outputSchema); else delete values.outputSchema;
     const createAction = values.surface === "notion" ? "notion-create" : "session-create";
     const response = createAction === "session-create"
       ? await logicalAction("session-create", createAction, values)
-      : await action(createAction, values);
+      : await action(createAction, values, crypto.randomUUID(), "");
     form.reset();
     toggleNewConversationForm(false);
     await load(true);

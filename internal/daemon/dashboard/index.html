@@ -118,8 +118,12 @@
             <form class="new-thread-form" id="new-conversation-form" hidden>
               <div class="new-thread-heading">
                 <strong>New conversation</strong>
-                <button type="button" id="new-conversation-close" aria-label="Close new conversation form">×</button>
+                <span class="new-thread-heading-actions">
+                  <button class="host-picker-button" type="button" id="new-conversation-host" aria-haspopup="listbox" aria-expanded="false" hidden></button>
+                  <button type="button" id="new-conversation-close" aria-label="Close new conversation form">×</button>
+                </span>
               </div>
+              <div class="host-picker-menu" id="new-conversation-host-menu" role="listbox" aria-label="Start on" hidden></div>
               <label>
                 <span>Surface</span>
                 <select name="surface" id="new-conversation-surface"></select>
@@ -135,7 +139,8 @@
               </label>
               <label data-code-start>
                 <span>Working directory</span>
-                <input name="cwd" value="~" placeholder="~/project" />
+                <input name="cwd" value="~" placeholder="~/project" list="new-conversation-workspaces" />
+                <datalist id="new-conversation-workspaces"></datalist>
               </label>
               <label data-codex-start>
                 <span>Model</span>

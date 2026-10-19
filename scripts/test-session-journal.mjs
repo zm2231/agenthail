@@ -193,7 +193,7 @@ const launcherContext = vm.createContext({app: {launchers: [
 document: {querySelectorAll: selector => selector === '[data-launch-option]' ? [launchOption] : []},
 escape: value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;')});
 const launcherStart = source.indexOf('function renderStartLaunchers()');
-const launcherEnd = source.indexOf('async function loadStartLaunchers()', launcherStart);
+const launcherEnd = source.indexOf('async function loadStartOptions()', launcherStart);
 vm.runInContext(source.slice(launcherStart, launcherEnd), launcherContext);
 vm.runInContext('renderStartLaunchers()', launcherContext);
 assert.equal(launcherSelect.value, 'tmux');
