@@ -39,7 +39,7 @@ const elements = {
   },
 };
 const context = {
-  app: { expandedTurns: new Set(), slashCommands: [], pendingEntryScroll: false, transcriptSignature: null },
+  app: { slashCommands: [], pendingEntryScroll: false, transcriptSignature: null },
   labels: { claude: "Claude Code", codex: "Codex" },
   $: (selector) => elements[selector],
   mobileConversationView: () => false,
@@ -84,7 +84,19 @@ for (const expected of ["Read the report", "report.md", "report contents", "call
 }
 assert(html.includes("<details"), "tool and reasoning items should be collapsible");
 assert(html.includes('data-copy-text="report contents"'), "tool results should offer their raw text for copying");
-assert.equal((html.match(/data-copy-text=/g) || []).length, 1, "only tool results with text offer Copy output");
+assert.equal((html.match(/class="soft-button copy-output"/g) || []).length, 1, "only tool results with text offer Copy output");
+const longReply = Array.from({ length: 40 }, (_, index) => `- synthetic line ${index + 1} of a long reply`).join("\n");
+const conversation = context.renderTimeline([
+  { id: "m-user", kind: "message", role: "user", text: "Synthetic **request**" },
+  { id: "m-handoff", kind: "message", role: "user", text: "[from @peer] Synthetic handoff" },
+  { id: "m-peer", kind: "message", role: "peer", sender: "@peer", text: "Synthetic peer note" },
+  { id: "m-agent", kind: "message", role: "assistant", text: longReply },
+], session);
+assert(conversation.includes("synthetic line 40 of a long reply") && !conversation.includes("Show full message"), "long replies render in full without a crop");
+assert(conversation.includes(`data-copy-text="${longReply}"`), "Copy on a reply carries its whole Markdown");
+assert(conversation.includes('data-copy-text="Synthetic **request**"') && conversation.includes('data-copy-text="Synthetic peer note"'), "every message offers Copy");
+assert.equal((conversation.match(/data-edit-message=/g) || []).length, 1, "only your own typed message offers Edit");
+assert(conversation.includes('data-edit-message="Synthetic **request**"'), "Edit carries the message text");
 const quoted = context.renderTimeline([{ id: "result-2", kind: "toolResult", title: "Result", text: `say "hi" <b>` }], session);
 assert(quoted.includes('data-copy-text="say &quot;hi&quot; &lt;b&gt;"'), "copied text must be attribute-escaped");
 assert(!html.includes("<script>alert"), "timeline body must not permit arbitrary HTML");
