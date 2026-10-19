@@ -1186,6 +1186,7 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 		return session, adapter, nil
 	}
 	subagentPath := strings.HasPrefix(target, "@") && strings.Contains(target, "/")
+	named := strings.HasPrefix(target, "@") && !subagentPath && a.Registry != nil
 	if !subagentPath {
 		target = strings.TrimPrefix(target, "@")
 	}
@@ -1193,7 +1194,11 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 		return nil, nil, fmt.Errorf("subagent target %q needs the session registry", target)
 	}
 	if a.Registry != nil {
-		sid, err := a.Registry.ResolveTarget(target)
+		resolve := a.Registry.ResolveTarget
+		if named {
+			resolve = func(name string) (string, error) { return a.Registry.ExactTarget("", name) }
+		}
+		sid, err := resolve(target)
 		if err != nil && subagentPath {
 			return nil, nil, err
 		}
@@ -1218,6 +1223,9 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, err
 		}
+	}
+	if named {
+		return nil, nil, targetNotFoundError{target: "@" + target}
 	}
 	type resolvedMatch struct {
 		session *surface.Session

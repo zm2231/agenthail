@@ -339,7 +339,12 @@ func (d *Daemon) resolveLocal(ctx context.Context, target string) ([]resolveMatc
 	if !strings.HasPrefix(target, "@") || !strings.Contains(target, "/") {
 		lookup = strings.TrimPrefix(target, "@")
 	}
-	sid, err := d.Registry.ResolveTarget(lookup)
+	named := strings.HasPrefix(target, "@") && !strings.Contains(target, "/")
+	resolve := d.Registry.ResolveTarget
+	if named {
+		resolve = func(name string) (string, error) { return d.Registry.ExactTarget("", name) }
+	}
+	sid, err := resolve(lookup)
 	if err == nil {
 		session, lookupErr := d.Registry.Session(sid)
 		if lookupErr != nil {
@@ -352,6 +357,9 @@ func (d *Daemon) resolveLocal(ctx context.Context, target string) ([]resolveMatc
 		return nil, err
 	}
 	matches := []resolveMatch{}
+	if named {
+		return matches, nil
+	}
 	for _, adapter := range d.Surfaces {
 		session, resolveErr := adapter.Resolve(ctx, lookup)
 		if resolveErr != nil {
