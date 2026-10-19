@@ -115,9 +115,6 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 	}
 	d.identity = identity
 	d.transportResolver = NewSessionTransportResolver(surface.NewLaunchers(surfaces))
-	if err := reg.EnsureCatalogState(); err != nil {
-		d.log.Printf("catalog state: %s", err)
-	}
 	kinds := make([]surface.SurfaceKind, 0, len(surfaces))
 	for _, adapter := range surfaces {
 		kinds = append(kinds, adapter.Name())

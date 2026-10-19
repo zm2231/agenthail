@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/zm2231/agenthail/internal/surface"
 )
 

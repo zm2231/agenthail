@@ -2,6 +2,7 @@ package registry
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -34,7 +35,7 @@ func TestDeliveryIntentsCarryAUUIDFromBeforeTheyHadOne(t *testing.T) {
 	if _, err := r.db.Exec(`DROP INDEX delivery_intents_uuid`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.db.Exec(`UPDATE delivery_intents SET uuid=''; PRAGMA user_version=17`); err != nil {
+	if _, err := r.db.Exec(`ALTER TABLE delivery_intents DROP COLUMN uuid; PRAGMA user_version=17`); err != nil {
 		t.Fatal(err)
 	}
 	r.Close()
@@ -44,6 +45,10 @@ func TestDeliveryIntentsCarryAUUIDFromBeforeTheyHadOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
+	var index string
+	if err := r.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='index' AND name='delivery_intents_uuid'`).Scan(&index); err != nil || !strings.Contains(index, "UNIQUE") {
+		t.Fatalf("uuid index %q: %v", index, err)
+	}
 	seen := map[string]bool{}
 	for _, id := range ids {
 		intent, err := r.DeliveryIntent(id)
