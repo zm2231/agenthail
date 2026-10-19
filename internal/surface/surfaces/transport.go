@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"github.com/zm2231/agenthail/internal/signin"
 )
 
 const chromeUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
@@ -34,23 +36,64 @@ func diagnosticExcerpt(value string) string {
 	return fmt.Sprintf("%s... [truncated; %d bytes total]", strings.TrimSpace(cut), len(value))
 }
 
-var chromeProfile = "Default"
-
 type cookieHeaderCacheEntry struct {
 	header    string
 	err       error
 	expiresAt time.Time
 }
 
+// Reads for one source are serialized; a slow browser never delays another.
 var cookieHeaderCache = struct {
 	sync.Mutex
 	entries map[string]cookieHeaderCacheEntry
-}{entries: map[string]cookieHeaderCacheEntry{}}
+	reads   map[string]*sync.Mutex
+}{entries: map[string]cookieHeaderCacheEntry{}, reads: map[string]*sync.Mutex{}}
 
-func SetChromeProfile(name string) {
-	if name != "" {
-		chromeProfile = name
+func cachedCookieHeader(key string) (cookieHeaderCacheEntry, bool) {
+	cookieHeaderCache.Lock()
+	defer cookieHeaderCache.Unlock()
+	entry, ok := cookieHeaderCache.entries[key]
+	return entry, ok && time.Now().Before(entry.expiresAt)
+}
+
+func storeCookieHeader(key string, entry cookieHeaderCacheEntry) {
+	cookieHeaderCache.Lock()
+	cookieHeaderCache.entries[key] = entry
+	cookieHeaderCache.Unlock()
+}
+
+func cookieReadLock(key string) *sync.Mutex {
+	cookieHeaderCache.Lock()
+	defer cookieHeaderCache.Unlock()
+	lock := cookieHeaderCache.reads[key]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		cookieHeaderCache.reads[key] = lock
 	}
+	return lock
+}
+
+// CookieSource is everything one request needs to read its cookies: the
+// bridge script, the site, and the browser profile resolved for the request.
+type CookieSource struct {
+	Bridge string
+	URL    string
+	Signin signin.Source
+}
+
+func (s CookieSource) cacheKey() string {
+	return strings.Join([]string{s.Bridge, s.URL, s.Signin.ProfileID, string(s.Signin.Browser), s.Signin.Dir}, "\x00")
+}
+
+func (s CookieSource) bridgeArgs() []string {
+	args := []string{s.Bridge, "--browser", string(s.Signin.Browser)}
+	if s.Signin.Dir != "" {
+		args = append(args, "--profile-dir", s.Signin.Dir)
+	}
+	if s.URL != "" {
+		args = append(args, s.URL)
+	}
+	return args
 }
 
 func sidecarPath() (string, error) {
@@ -120,59 +163,61 @@ func processGroupCommand(ctx context.Context, path string, args ...string) *exec
 	return cmd
 }
 
-func cookieHeaderCacheKey(bridge, cookieURL, profile string) string {
-	return bridge + "\x00" + cookieURL + "\x00" + profile
-}
-
-func loadCookieHeader(parent context.Context, bridge, cookieURL string) (string, error) {
-	if bridge == "" {
+func loadCookieHeader(parent context.Context, source CookieSource) (string, error) {
+	if source.Bridge == "" {
 		return "", nil
 	}
-	key := cookieHeaderCacheKey(bridge, cookieURL, chromeProfile)
-	cookieHeaderCache.Lock()
-	defer cookieHeaderCache.Unlock()
-	if entry, ok := cookieHeaderCache.entries[key]; ok && time.Now().Before(entry.expiresAt) {
+	if source.Signin.Browser == "" {
+		return "", fmt.Errorf("cookie bridge: no browser profile resolved")
+	}
+	key := source.cacheKey()
+	if entry, ok := cachedCookieHeader(key); ok {
+		return entry.header, entry.err
+	}
+	lock := cookieReadLock(key)
+	lock.Lock()
+	defer lock.Unlock()
+	if entry, ok := cachedCookieHeader(key); ok {
 		return entry.header, entry.err
 	}
 	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 	defer cancel()
-	args := []string{bridge}
-	if cookieURL != "" {
-		args = append(args, cookieURL)
-	}
-	cmd := processGroupCommand(ctx, "node", args...)
-	if chromeProfile != "" {
-		cmd.Env = append(os.Environ(), "AGENTHAIL_CHROME_PROFILE="+chromeProfile)
-	}
+	cmd := processGroupCommand(ctx, "node", source.bridgeArgs()...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	output, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() != nil {
-			return "", ctx.Err()
+			return "", fmt.Errorf("cookie bridge (%s): %w", source.Signin.Browser.Label(), ctx.Err())
 		}
-		err = fmt.Errorf("cookie bridge: %w", err)
-		cookieHeaderCache.entries[key] = cookieHeaderCacheEntry{err: err, expiresAt: time.Now().Add(cookieHeaderFailureTTL)}
+		if detail := strings.TrimSpace(stderr.String()); detail != "" {
+			err = fmt.Errorf("cookie bridge (%s): %w: %s", source.Signin.Browser.Label(), err, diagnosticExcerpt(detail))
+		} else {
+			err = fmt.Errorf("cookie bridge (%s): %w", source.Signin.Browser.Label(), err)
+		}
+		storeCookieHeader(key, cookieHeaderCacheEntry{err: err, expiresAt: time.Now().Add(cookieHeaderFailureTTL)})
 		return "", err
 	}
 	header := strings.TrimSpace(string(output))
 	if header == "" {
 		err := fmt.Errorf("cookie bridge returned no cookies")
-		cookieHeaderCache.entries[key] = cookieHeaderCacheEntry{err: err, expiresAt: time.Now().Add(cookieHeaderFailureTTL)}
+		storeCookieHeader(key, cookieHeaderCacheEntry{err: err, expiresAt: time.Now().Add(cookieHeaderFailureTTL)})
 		return "", err
 	}
-	cookieHeaderCache.entries[key] = cookieHeaderCacheEntry{header: header, expiresAt: time.Now().Add(cookieHeaderTTL)}
+	storeCookieHeader(key, cookieHeaderCacheEntry{header: header, expiresAt: time.Now().Add(cookieHeaderTTL)})
 	return header, nil
 }
 
-func invalidateCookieHeader(bridge, cookieURL string) {
-	if bridge == "" {
+func invalidateCookieHeader(source CookieSource) {
+	if source.Bridge == "" {
 		return
 	}
 	cookieHeaderCache.Lock()
-	delete(cookieHeaderCache.entries, cookieHeaderCacheKey(bridge, cookieURL, chromeProfile))
+	delete(cookieHeaderCache.entries, source.cacheKey())
 	cookieHeaderCache.Unlock()
 }
 
-func sidecarRequestWithCookies(parent context.Context, method, url string, headers map[string]string, body string, cookieBridge string, cookieURL string, timeout time.Duration) (int, string, error) {
+func sidecarRequestWithCookies(parent context.Context, method, url string, headers map[string]string, body string, cookies CookieSource, timeout time.Duration) (int, string, error) {
 	worker, err := sidecarPath()
 	if err != nil {
 		return 0, "", err
@@ -181,7 +226,7 @@ func sidecarRequestWithCookies(parent context.Context, method, url string, heade
 	if err != nil {
 		return 0, "", err
 	}
-	cookie, err := loadCookieHeader(parent, cookieBridge, cookieURL)
+	cookie, err := loadCookieHeader(parent, cookies)
 	if err != nil {
 		return 0, "", err
 	}
@@ -201,15 +246,11 @@ func sidecarRequestWithCookies(parent context.Context, method, url string, heade
 	if body != "" {
 		req["body"] = body
 	}
-	if chromeProfile != "" {
-		req["profile"] = chromeProfile
-	}
 	input, _ := json.Marshal(req)
 
 	ctx, cancel := context.WithTimeout(parent, timeout+10*time.Second)
 	defer cancel()
 	cmd := processGroupCommand(ctx, python, worker)
-	cmd.Env = append(os.Environ(), "AGENTHAIL_COOKIE_BRIDGE=")
 	cmd.Stdin = strings.NewReader(string(input))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -240,7 +281,7 @@ func sidecarRequestWithCookies(parent context.Context, method, url string, heade
 		return 0, "", fmt.Errorf("sidecar: %s", resp.Error)
 	}
 	if resp.Status == 401 || resp.Status == 403 {
-		invalidateCookieHeader(cookieBridge, cookieURL)
+		invalidateCookieHeader(cookies)
 	}
 	return resp.Status, resp.Body, nil
 }

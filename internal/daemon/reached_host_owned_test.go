@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/zm2231/agenthail/internal/signin"
 	"net/http"
 	"os"
 	"strings"
@@ -59,7 +60,7 @@ func newReachedHostOwnedFixture(t *testing.T) (*orphanFixture, string) {
 	t.Helper()
 	f := newOrphanFixture(t)
 	hostID := pairForgeOwning(t, f.r, reachedRemoteID)
-	f.daemon = New(f.r, []surface.Surface{&conversationMovingClaude{Claude: surfaces.NewClaudeWithRequest("", f.claude.Home, f.posts.request), to: reachedRemoteID}})
+	f.daemon = New(f.r, []surface.Surface{&conversationMovingClaude{Claude: surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, f.claude.Home, f.posts.request), to: reachedRemoteID}})
 	f.handler = dashboardRouter(f.daemon)
 	return f, hostID
 }
@@ -74,7 +75,7 @@ func TestDiscoveringLiveProcessOfHostOwnedConversationLeavesTheHostRow(t *testin
 	hostID := pairForgeOwning(t, r, reachedRemoteID)
 	fixture.Transcript(reachedRemoteID, fixture.Home)
 	fixture.Record(reachedRemoteID, fixture.Home, "session_copied_bridge")
-	d := New(r, []surface.Surface{surfaces.NewClaudeWithRequest("", fixture.Home, (&orphanPosts{}).request)})
+	d := New(r, []surface.Surface{surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, (&orphanPosts{}).request)})
 	d.discoverCatalog(context.Background())
 	if owner, err := r.SessionHost(reachedRemoteID); err != nil || owner != hostID {
 		t.Fatalf("owner=%q err=%v", owner, err)

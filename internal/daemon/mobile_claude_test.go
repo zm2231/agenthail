@@ -31,7 +31,7 @@ fi
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", executable)
-	d := New(registry, []surface.Surface{surfaces.NewClaude("", home)})
+	d := New(registry, []surface.Surface{surfaces.NewClaude(nil, home)})
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-options", nil)
 	request.Header.Set("Authorization", "Bearer secret")

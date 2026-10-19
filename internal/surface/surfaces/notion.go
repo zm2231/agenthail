@@ -12,35 +12,60 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 var langTagRe = regexp.MustCompile(`(?i)^<lang[^>]*/?>\s*`)
 
 type Notion struct {
-	spaceID      string
-	userID       string
-	userName     string
-	timezone     string
-	cookieBridge string
-	modelMu      sync.Mutex
-	modelLabels  map[string]string
-	modelsAt     time.Time
+	signins          signin.Resolver
+	configuredSpace  string
+	configuredUser   string
+	accountMu        sync.Mutex
+	accountProfileID string
+	spaceID          string
+	userID           string
+	userName         string
+	timezone         string
+	cookieBridge     string
+	modelMu          sync.Mutex
+	modelLabels      map[string]string
+	modelsAt         time.Time
+	modelsProfileID  string
 }
 
-func NewNotion(spaceID, userID string) *Notion {
+func NewNotion(signins signin.Resolver, spaceID, userID string) *Notion {
 	return &Notion{
-		spaceID:  spaceID,
-		userID:   userID,
-		timezone: os.Getenv("AGENTHAIL_NOTION_TZ"),
+		signins:         signins,
+		configuredSpace: spaceID,
+		configuredUser:  userID,
+		spaceID:         spaceID,
+		userID:          userID,
+		timezone:        os.Getenv("AGENTHAIL_NOTION_TZ"),
 	}
 }
 
-func (n *Notion) bridge() string {
+// cookies resolves the browser profile for one app.notion.com request before
+// anything is sent. A different profile can be a different Notion account, so
+// the detected space and user are dropped when the profile changes.
+func (n *Notion) cookies() (CookieSource, error) {
+	source, err := signin.Resolve(n.signins, signin.Target{Consumer: signin.Notion})
+	if err != nil {
+		return CookieSource{}, err
+	}
+	n.accountMu.Lock()
+	if n.accountProfileID != source.ProfileID {
+		if n.accountProfileID != "" {
+			n.spaceID, n.userID, n.userName = n.configuredSpace, n.configuredUser, ""
+		}
+		n.accountProfileID = source.ProfileID
+	}
+	n.accountMu.Unlock()
 	if n.cookieBridge == "" {
 		n.cookieBridge = cookieBridgePath("cookie")
 	}
-	return n.cookieBridge
+	return CookieSource{Bridge: n.cookieBridge, URL: "https://app.notion.com/", Signin: source}, nil
 }
 
 func (n *Notion) ensureContext(ctx context.Context) error {
@@ -84,9 +109,13 @@ func newNotionThreadID(spaceID string) (string, error) {
 }
 
 func (n *Notion) autoDetect(ctx context.Context) error {
+	cookies, err := n.cookies()
+	if err != nil {
+		return err
+	}
 	status, respBody, err := sidecarRequestWithCookies(ctx, "POST",
 		"https://app.notion.com/api/v3/getSpaces",
-		n.headers(), "{}", n.bridge(), "https://app.notion.com/", 15*time.Second)
+		n.headers(), "{}", cookies, 15*time.Second)
 	if err != nil {
 		return fmt.Errorf("detect Notion context: %w", err)
 	}
@@ -189,6 +218,10 @@ func (n *Notion) inferenceURL(action string) string {
 }
 
 func (n *Notion) List(ctx context.Context) ([]surface.Session, error) {
+	cookies, err := n.cookies()
+	if err != nil {
+		return nil, err
+	}
 	if err := n.ensureContext(ctx); err != nil {
 		return nil, err
 	}
@@ -203,7 +236,7 @@ func (n *Notion) List(ctx context.Context) ([]surface.Session, error) {
 	})
 	status, respBody, err := sidecarRequestWithCookies(ctx, "POST",
 		n.inferenceURL("getInferenceTranscriptsForUser"),
-		n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
+		n.headers(), string(body), cookies, 15*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("list threads: %w", err)
 	}
@@ -274,6 +307,13 @@ func (n *Notion) Send(ctx context.Context, sess *surface.Session, message string
 var notionInferenceRequest = sidecarRequestWithCookies
 
 func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
+	cookies, err := n.cookies()
+	if signin.IsNotConfigured(err) {
+		return nil, surface.DeliveryTerminal(err, surface.DeliverySigninNotConfigured)
+	}
+	if err != nil {
+		return nil, surface.DeliveryTerminal(err, surface.DeliveryAuthenticationNeeded)
+	}
 	if err := n.ensureContext(ctx); err != nil {
 		return nil, err
 	}
@@ -375,7 +415,7 @@ func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, mes
 
 	status, respBody, err := notionInferenceRequest(ctx, "POST",
 		n.inferenceURL("runInferenceTranscript"),
-		headers, string(bodyBytes), n.bridge(), "https://app.notion.com/", 60*time.Second)
+		headers, string(bodyBytes), cookies, 60*time.Second)
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("notion send: %w", err))
 	}
@@ -412,16 +452,20 @@ func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, mes
 }
 
 func (n *Notion) fetchModels(ctx context.Context) error {
+	cookies, err := n.cookies()
+	if err != nil {
+		return err
+	}
 	if err := n.ensureContext(ctx); err != nil {
 		return err
 	}
 	n.modelMu.Lock()
 	defer n.modelMu.Unlock()
-	if n.modelLabels != nil && time.Since(n.modelsAt) < 5*time.Minute {
+	if n.modelLabels != nil && n.modelsProfileID == cookies.Signin.ProfileID && time.Since(n.modelsAt) < 5*time.Minute {
 		return nil
 	}
 	body, _ := json.Marshal(map[string]any{"spaceId": n.spaceID})
-	status, responseBody, err := sidecarRequestWithCookies(ctx, "POST", n.inferenceURL("getAvailableModels"), n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
+	status, responseBody, err := sidecarRequestWithCookies(ctx, "POST", n.inferenceURL("getAvailableModels"), n.headers(), string(body), cookies, 15*time.Second)
 	if err != nil {
 		return fmt.Errorf("list Notion models: %w", err)
 	}
@@ -445,6 +489,7 @@ func (n *Notion) fetchModels(ctx context.Context) error {
 		}
 	}
 	n.modelsAt = time.Now()
+	n.modelsProfileID = cookies.Signin.ProfileID
 	return nil
 }
 

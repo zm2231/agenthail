@@ -53,7 +53,7 @@ func runSidecar(t *testing.T, pythonPath string, input string, extraEnv ...strin
 	t.Helper()
 	cmd := exec.Command("python3", "sidecar.py")
 	cmd.Stdin = strings.NewReader(input)
-	cmd.Env = append(os.Environ(), append([]string{"PYTHONPATH=" + pythonPath, "AGENTHAIL_COOKIE_BRIDGE=", "AGENTHAIL_DEBUG="}, extraEnv...)...)
+	cmd.Env = append(os.Environ(), append([]string{"PYTHONPATH=" + pythonPath, "AGENTHAIL_DEBUG="}, extraEnv...)...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("sidecar failed: %v: %s", err, output)
@@ -73,22 +73,10 @@ func TestSidecarRejectsOversizedResponseWhileStreaming(t *testing.T) {
 	}
 }
 
-func TestSidecarFailsClosedWhenCookieBridgeFails(t *testing.T) {
+func TestSidecarSendsOnlyTheCookieHeaderItIsGiven(t *testing.T) {
 	root := fakeCurlCFFI(t)
 	marker := filepath.Join(t.TempDir(), "requested")
-	response := runSidecar(t, root, `{"url":"https://example.test","cookie_bridge":"/does/not/exist.mjs"}`, "FAKE_REQUEST_MARKER="+marker)
-	if response.Status != 0 || response.Error == "" || response.Body != "" {
-		t.Fatalf("response=%+v", response)
-	}
-	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatal("network request occurred after credential acquisition failed")
-	}
-}
-
-func TestSidecarDoesNotReadBridgeWhenCookieHeaderIsProvided(t *testing.T) {
-	root := fakeCurlCFFI(t)
-	marker := filepath.Join(t.TempDir(), "requested")
-	response := runSidecar(t, root, `{"url":"https://example.test","headers":{"cookie":"session=cached"}}`, "AGENTHAIL_COOKIE_BRIDGE=/does/not/exist.mjs", "FAKE_REQUEST_MARKER="+marker)
+	response := runSidecar(t, root, `{"url":"https://example.test","headers":{"cookie":"session=cached"},"cookie_bridge":"/does/not/exist.mjs"}`, "AGENTHAIL_COOKIE_BRIDGE=/does/not/exist.mjs", "FAKE_REQUEST_MARKER="+marker)
 	if response.Status != 200 || response.Error != "" {
 		t.Fatalf("response=%+v", response)
 	}

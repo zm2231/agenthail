@@ -103,8 +103,12 @@ func (n *Notion) ReadSession(ctx context.Context, sess *surface.Session, request
 }
 
 func (n *Notion) notionThreadMessageIDs(ctx context.Context, threadID string) ([]string, error) {
+	cookies, err := n.cookies()
+	if err != nil {
+		return nil, err
+	}
 	body, _ := json.Marshal(map[string]any{"requests": []map[string]any{{"pointer": map[string]any{"table": "thread", "id": threadID}, "version": -1}}})
-	status, responseBody, err := notionRecordRequest(ctx, "POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
+	status, responseBody, err := notionRecordRequest(ctx, "POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), cookies, 15*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("notion session read thread: %w", err)
 	}
@@ -133,12 +137,16 @@ func (n *Notion) notionThreadMessageIDs(ctx context.Context, threadID string) ([
 }
 
 func (n *Notion) notionThreadMessages(ctx context.Context, messageIDs []string) ([]notionThreadMessage, error) {
+	cookies, err := n.cookies()
+	if err != nil {
+		return nil, err
+	}
 	requests := make([]map[string]any, len(messageIDs))
 	for i, id := range messageIDs {
 		requests[i] = map[string]any{"pointer": map[string]any{"table": "thread_message", "id": id}, "version": -1}
 	}
 	body, _ := json.Marshal(map[string]any{"requests": requests})
-	status, responseBody, err := notionRecordRequest(ctx, "POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
+	status, responseBody, err := notionRecordRequest(ctx, "POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), cookies, 15*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("notion session read messages: %w", err)
 	}

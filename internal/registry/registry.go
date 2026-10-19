@@ -28,7 +28,7 @@ type Registry struct {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 14
+	schemaVersion   = 15
 	queueMessageTTL = time.Hour
 	readConnections = 4
 )
@@ -585,6 +585,18 @@ CREATE TABLE IF NOT EXISTS hosts (
 CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	host_epoch TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS signin_profiles (
+	id TEXT PRIMARY KEY,
+	label TEXT NOT NULL UNIQUE,
+	browser TEXT NOT NULL,
+	profile TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	UNIQUE(browser, profile)
+);
+CREATE TABLE IF NOT EXISTS signin_bindings (
+	consumer TEXT PRIMARY KEY,
+	profile_id TEXT NOT NULL REFERENCES signin_profiles(id) ON DELETE CASCADE
 );
 `
 

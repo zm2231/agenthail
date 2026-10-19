@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
+	"github.com/zm2231/agenthail/internal/signin"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ func TestNotionReadSessionUsesBoundedProviderMessageIDs(t *testing.T) {
 	original := notionRecordRequest
 	t.Cleanup(func() { notionRecordRequest = original })
 	var requested [][]string
-	notionRecordRequest = func(_ context.Context, _ string, _ string, _ map[string]string, body, _, _ string, _ time.Duration) (int, string, error) {
+	notionRecordRequest = func(_ context.Context, _ string, _ string, _ map[string]string, body string, _ CookieSource, _ time.Duration) (int, string, error) {
 		var request struct {
 			Requests []struct {
 				Pointer struct {
@@ -52,7 +53,7 @@ func TestNotionReadSessionUsesBoundedProviderMessageIDs(t *testing.T) {
 		return 200, string(response), nil
 	}
 
-	notion := NewNotion("00000000-0000-0000-0000-000000000000", "user")
+	notion := NewNotion(signin.Fixed{Browser: signin.Chrome}, "00000000-0000-0000-0000-000000000000", "user")
 	read, err := surface.ReadSession(context.Background(), notion, &surface.Session{ID: "thread-1", Surface: surface.KindNotion}, surface.SessionReadRequest{Limit: 2})
 	if err != nil {
 		t.Fatal(err)

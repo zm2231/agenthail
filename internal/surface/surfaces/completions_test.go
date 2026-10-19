@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/zm2231/agenthail/internal/signin"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,7 +36,7 @@ func TestClaudeCompletionReplayPreservesBurstAndPartialRecordAcrossRestart(t *te
 	path := filepath.Join(t.TempDir(), "transcript.jsonl")
 	appendCompletionTranscript(t, path, "old", "old response", "end_turn")
 	session := &surface.Session{ID: "source", Transcript: path}
-	reader := NewClaude("", t.TempDir())
+	reader := NewClaude(nil, t.TempDir())
 	baseline, err := reader.ReadCompletions(context.Background(), session, "")
 	if err != nil || len(baseline.Events) != 0 {
 		t.Fatalf("baseline=%+v err=%v", baseline, err)
@@ -53,7 +54,7 @@ func TestClaudeCompletionReplayPreservesBurstAndPartialRecordAcrossRestart(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	batch, err := NewClaude("", t.TempDir()).ReadCompletions(context.Background(), session, baseline.Cursor)
+	batch, err := NewClaude(nil, t.TempDir()).ReadCompletions(context.Background(), session, baseline.Cursor)
 	if err != nil || len(batch.Events) != 7 {
 		t.Fatalf("events=%+v err=%v", batch.Events, err)
 	}
@@ -172,7 +173,7 @@ func TestNotionCompletionReplayPreservesBurstAndInputProvenance(t *testing.T) {
 	ids := []string{"old"}
 	missing := ""
 	toolOnly := ""
-	notionRecordRequest = func(_ context.Context, _, _ string, _ map[string]string, body, _, _ string, _ time.Duration) (int, string, error) {
+	notionRecordRequest = func(_ context.Context, _, _ string, _ map[string]string, body string, _ CookieSource, _ time.Duration) (int, string, error) {
 		if strings.Contains(body, `"table":"thread"`) {
 			payload, _ := json.Marshal(map[string]any{"recordMap": map[string]any{"thread": map[string]any{"source": map[string]any{"value": map[string]any{"value": map[string]any{"messages": ids}}}}}})
 			return 200, string(payload), nil
@@ -196,7 +197,7 @@ func TestNotionCompletionReplayPreservesBurstAndInputProvenance(t *testing.T) {
 		payload, _ := json.Marshal(map[string]any{"recordMap": map[string]any{"thread_message": records}})
 		return 200, string(payload), nil
 	}
-	reader := NewNotion("00000000-0000-0000-0000-000000000000", "user")
+	reader := NewNotion(signin.Fixed{Browser: signin.Chrome}, "00000000-0000-0000-0000-000000000000", "user")
 	session := &surface.Session{ID: "source", Surface: surface.KindNotion}
 	baseline, err := reader.ReadCompletions(context.Background(), session, "")
 	if err != nil || len(baseline.Events) != 0 {

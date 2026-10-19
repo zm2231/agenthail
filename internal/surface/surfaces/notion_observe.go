@@ -26,8 +26,12 @@ func (n *Notion) threadExists(ctx context.Context, threadID string) (bool, error
 	if err := n.ensureContext(ctx); err != nil {
 		return false, err
 	}
+	cookies, err := n.cookies()
+	if err != nil {
+		return false, err
+	}
 	body, _ := json.Marshal(map[string]any{"requests": []map[string]any{{"pointer": map[string]any{"table": "thread", "id": threadID}, "version": -1}}})
-	status, responseBody, err := sidecarRequestWithCookies(ctx, "POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
+	status, responseBody, err := sidecarRequestWithCookies(ctx, "POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), cookies, 15*time.Second)
 	if err != nil {
 		return false, fmt.Errorf("resolve Notion thread: %w", err)
 	}
@@ -86,11 +90,15 @@ func (n *Notion) agentCompletions(ctx context.Context, sess *surface.Session, af
 	if err := n.ensureContext(ctx); err != nil {
 		return nil, err
 	}
+	cookies, err := n.cookies()
+	if err != nil {
+		return nil, err
+	}
 	body, _ := json.Marshal(map[string]any{
 		"requests": []map[string]any{{"pointer": map[string]any{"table": "thread", "id": sess.ID}, "version": -1}},
 	})
 	status, responseBody, err := notionRecordRequest(ctx,
-		"POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
+		"POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), cookies, 15*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("notion reply: %w", err)
 	}
@@ -138,7 +146,7 @@ func (n *Notion) agentCompletions(ctx context.Context, sess *surface.Session, af
 	}
 	body, _ = json.Marshal(map[string]any{"requests": requests})
 	status, responseBody, err = notionRecordRequest(ctx,
-		"POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
+		"POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), cookies, 15*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("notion reply messages: %w", err)
 	}

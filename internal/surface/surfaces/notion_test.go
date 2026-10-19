@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/zm2231/agenthail/internal/signin"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +14,7 @@ import (
 )
 
 func TestNotionCatalogListIsNotComplete(t *testing.T) {
-	if NewNotion("", "").CatalogListComplete() {
+	if NewNotion(signin.Fixed{Browser: signin.Chrome}, "", "").CatalogListComplete() {
 		t.Fatal("Notion List is bounded and must not reconcile omissions")
 	}
 }
@@ -39,7 +40,7 @@ func TestNotionObservationIsUnknownWithoutAProvenLifecycleState(t *testing.T) {
 }
 
 func TestNotionMalformedConfiguredSpaceFailsWithoutPanic(t *testing.T) {
-	notion := NewNotion("not-a-uuid", "user")
+	notion := NewNotion(signin.Fixed{Browser: signin.Chrome}, "not-a-uuid", "user")
 	_, err := notion.Send(context.Background(), &surface.Session{ID: "new"}, "message")
 	if err == nil || surface.IsDeliveryOutcomeUnknown(err) || !strings.Contains(err.Error(), "AGENTHAIL_NOTION_SPACE") {
 		t.Fatalf("err=%v", err)
@@ -64,10 +65,11 @@ func TestNotionPostDispatchFailuresHaveUnknownOutcome(t *testing.T) {
 		{name: "oversized error", status: 200, body: `{"type":"error","error":"` + strings.Repeat("界", 1_000_000) + `"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			notionInferenceRequest = func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+			notionInferenceRequest = func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
 				return test.status, test.body, test.err
 			}
 			notion := &Notion{
+				signins: signin.Fixed{Browser: signin.Chrome},
 				spaceID: "00000000-0000-0000-0000-000000000000",
 				userID:  "user",
 				modelLabels: map[string]string{
@@ -91,12 +93,12 @@ func TestNotionRepeatSendsToExistingThreadReturnPerTurnKeys(t *testing.T) {
 	t.Cleanup(func() { notionInferenceRequest, notionRecordRequest = originalInference, originalRecord })
 	const threadID = "11111111-1111-1111-1111-111111111111"
 	messages := []string{"reply-0"}
-	notionInferenceRequest = func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+	notionInferenceRequest = func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
 		next := len(messages)
 		messages = append(messages, fmt.Sprintf("user-%d", next), fmt.Sprintf("reply-%d", next+1))
 		return 200, `{"type":"agent-inference","value":[]}`, nil
 	}
-	notionRecordRequest = func(_ context.Context, _ string, _ string, _ map[string]string, body, _, _ string, _ time.Duration) (int, string, error) {
+	notionRecordRequest = func(_ context.Context, _ string, _ string, _ map[string]string, body string, _ CookieSource, _ time.Duration) (int, string, error) {
 		if strings.Contains(body, `"table":"thread"`) {
 			payload, _ := json.Marshal(map[string]any{"recordMap": map[string]any{"thread": map[string]any{threadID: map[string]any{"value": map[string]any{"value": map[string]any{"messages": messages}}}}}})
 			return 200, string(payload), nil
@@ -114,6 +116,7 @@ func TestNotionRepeatSendsToExistingThreadReturnPerTurnKeys(t *testing.T) {
 		return 200, string(payload), nil
 	}
 	notion := &Notion{
+		signins:     signin.Fixed{Browser: signin.Chrome},
 		spaceID:     "00000000-0000-0000-0000-000000000000",
 		userID:      "user",
 		modelLabels: map[string]string{"almond-croissant-low": "Default"},
