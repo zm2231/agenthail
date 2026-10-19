@@ -111,7 +111,7 @@ func pairedControlToken(t *testing.T, r *registry.Registry) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, token, err := r.CompleteDevicePairing(pairing.Secret, "Phone")
+	_, token, err := r.CompleteDevicePairing(pairing.Secret, "Phone", "")
 	if err != nil {
 		t.Fatal(err)
 	}

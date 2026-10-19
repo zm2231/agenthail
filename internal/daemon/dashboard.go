@@ -1066,6 +1066,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Handoff         string                     `json:"handoff"`
 		Once            bool                       `json:"once"`
 		RelayID         int64                      `json:"relayId"`
+		RelayHops       int                        `json:"relayHops"`
 		DeliveryID      int64                      `json:"deliveryId"`
 		Surface         string                     `json:"surface"`
 		Cwd             string                     `json:"cwd"`
@@ -1389,6 +1390,17 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				failed++
 				continue
 			}
+			if owner, ownerErr := d.Registry.SessionHost(session.ID); ownerErr != nil {
+				failed++
+				continue
+			} else if owner != "" {
+				if _, err := d.Registry.QueueHostSend(registry.HostSend{SessionID: session.ID, Message: request.Message, Key: "channel:" + channel + ":" + session.ID + ":" + uuid.NewString(), SourceSessionID: request.SourceSessionID}); err != nil {
+					failed++
+				} else {
+					queued++
+				}
+				continue
+			}
 			adapter, adapterErr := d.adapters().For(session)
 			if adapterErr != nil {
 				failed++
@@ -1398,7 +1410,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				failed++
 				continue
 			}
-			receipt, deliverErr := d.dispatcher().Deliver(operationCtx, adapter, session, request.Message, "")
+			receipt, deliverErr := d.dispatcher().DeliverWithOptions(operationCtx, adapter, session, request.Message, "", surface.SendOptions{SourceSessionID: request.SourceSessionID})
 			if deliverErr != nil {
 				failed++
 				continue
@@ -1424,7 +1436,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "channel and targetId are required", http.StatusBadRequest)
 			return
 		}
-		targetID, resolveErr := d.Registry.ResolveTarget(request.TargetID)
+		targetID, resolveErr := d.resolveLinkTarget(request.TargetID)
 		if resolveErr != nil {
 			http.Error(w, fmt.Sprintf("resolve agent: %s", resolveErr), http.StatusBadRequest)
 			return
@@ -1436,14 +1448,16 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				http.Error(w, "session not found", http.StatusNotFound)
 				return
 			}
-			adapter, adapterErr := d.adapters().For(target)
-			if adapterErr != nil {
-				http.Error(w, "target surface is not configured", http.StatusConflict)
-				return
-			}
-			if err := d.ensureDashboardWritable(r.Context(), adapter, target); err != nil {
-				http.Error(w, err.Error(), http.StatusConflict)
-				return
+			if !d.hostOwned(target.ID) {
+				adapter, adapterErr := d.adapters().For(target)
+				if adapterErr != nil {
+					http.Error(w, "target surface is not configured", http.StatusConflict)
+					return
+				}
+				if err := d.ensureDashboardWritable(r.Context(), adapter, target); err != nil {
+					http.Error(w, err.Error(), http.StatusConflict)
+					return
+				}
 			}
 			actionErr = d.Registry.AddToChannel(strings.TrimPrefix(strings.TrimSpace(request.Channel), "#"), targetID)
 		} else {
@@ -1466,7 +1480,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, fmt.Sprintf("resolve source agent: %s", fromErr), http.StatusBadRequest)
 			return
 		}
-		toID, toErr := d.Registry.ResolveTarget(request.ToID)
+		toID, toErr := d.resolveLinkTarget(request.ToID)
 		if toErr != nil {
 			http.Error(w, fmt.Sprintf("resolve destination agent: %s", toErr), http.StatusBadRequest)
 			return
@@ -1476,14 +1490,16 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "destination session not found", http.StatusNotFound)
 			return
 		}
-		adapter, adapterErr := d.adapters().For(toSession)
-		if adapterErr != nil {
-			http.Error(w, "destination surface is not configured", http.StatusConflict)
-			return
-		}
-		if err := d.ensureDashboardWritable(r.Context(), adapter, toSession); err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
+		if !d.hostOwned(toSession.ID) {
+			adapter, adapterErr := d.adapters().For(toSession)
+			if adapterErr != nil {
+				http.Error(w, "destination surface is not configured", http.StatusConflict)
+				return
+			}
+			if err := d.ensureDashboardWritable(r.Context(), adapter, toSession); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
 		}
 		pattern := request.Pattern
 		if pattern == "" {
@@ -1681,6 +1697,14 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				http.Error(w, "source session not found", http.StatusBadRequest)
 				return
 			}
+		}
+		if request.RelayHops != 0 {
+			if len(attached) > 0 {
+				http.Error(w, "a relay leg carries no attached files", http.StatusBadRequest)
+				return
+			}
+			d.queueHostRelay(w, r, session, request.Message, request.SourceSessionID, request.BusyDelivery, request.RelayHops)
+			return
 		}
 		receipt, actionErr := d.dispatcher().DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, Uploads: attached})
 		if actionErr != nil {

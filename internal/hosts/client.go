@@ -319,12 +319,14 @@ func ParsePairingLink(link string) (PairingLink, error) {
 }
 
 // Pair redeems a pairing secret on the remote and returns the device token.
-func Pair(ctx context.Context, link PairingLink, address, deviceName string, options ClientOptions) (string, Version, error) {
+// hostID names this daemon, so the remote trusts a session this daemon
+// forwards as the sender only as one of this host's sessions.
+func Pair(ctx context.Context, link PairingLink, address, deviceName, hostID string, options ClientOptions) (string, Version, error) {
 	anonymous, err := NewClient(link.Endpoint, address, "", options)
 	if err != nil {
 		return "", Version{}, err
 	}
-	payload, _ := json.Marshal(map[string]string{"secret": link.Secret, "name": deviceName})
+	payload, _ := json.Marshal(map[string]string{"secret": link.Secret, "name": deviceName, "hostId": hostID})
 	response, err := anonymous.do(ctx, anonymous.http, http.MethodPost, "/api/v1/pair", nil, payload, nil)
 	if err != nil {
 		return "", Version{}, err

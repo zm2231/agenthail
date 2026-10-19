@@ -551,6 +551,39 @@ func queueHasExpiry(r *Registry) (bool, error) {
 	return columnExists(tx, "message_queue", "expires_at_ms")
 }
 
+func TestOpenGivesDevicesOnARegistryAtTheVersionBeforeNoHostBinding(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`ALTER TABLE paired_devices DROP COLUMN host_id`,
+		`INSERT INTO paired_devices(id,name,token_hash,scopes,created_at) VALUES('device-1','forge','hash-1','control,host,read','2026-10-19T08:00:00Z')`,
+		`PRAGMA user_version=20`,
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var version int
+	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("user_version=%d err=%v", version, err)
+	}
+	devices, err := r.ListDevices(false)
+	if err != nil || len(devices) != 1 || !devices[0].IsHost() || devices[0].HostID != "" {
+		t.Fatalf("devices=%+v err=%v", devices, err)
+	}
+}
+
 func TestOpenAddsQueueUploadsToARegistryAtTheVersionBefore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	r, err := Open(path)
@@ -576,7 +609,7 @@ func TestOpenAddsQueueUploadsToARegistryAtTheVersionBefore(t *testing.T) {
 	}
 	defer r.Close()
 	var version int
-	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 20 {
+	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
 		t.Fatalf("user_version=%d err=%v", version, err)
 	}
 	claimed, err := r.ClaimNextMessage("target", time.Now())

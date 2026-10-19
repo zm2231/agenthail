@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 
+	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -79,8 +80,8 @@ func claudeRecordLive(record map[string]any) bool {
 	if started == "" {
 		return true
 	}
-	if isClockTicks(started) {
-		actual, err := procStartTicks(int(pid))
+	if claudepeer.IsClockTicks(started) {
+		actual, err := claudepeer.ProcStartTicks(int(pid))
 		return err == nil && actual == started
 	}
 	actual, err := processStartTime(int(pid))

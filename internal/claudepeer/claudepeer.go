@@ -53,6 +53,18 @@ type Config struct {
 	ProcessToken string
 	ReplyRelay   bool
 	BusyDelivery string
+	// HostName names the paired host that owns Session, empty for this
+	// host's own sessions. It prefixes the peer's name so a remote session is
+	// never mistaken for a local one.
+	HostName string
+}
+
+// PeerName is the name Claude lists for an Agenthail peer.
+func PeerName(hostName string, kind surface.SurfaceKind, name string) string {
+	if hostName != "" {
+		name = hostName + "/" + name
+	}
+	return "agenthail/" + string(kind) + ": " + name
 }
 
 type Ready struct {
@@ -215,7 +227,7 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 	started := time.Now().UnixMilli()
 	record := sessionRecord{PID: pid, SessionID: claudeID, Cwd: c.Session.Cwd, StartedAt: started, ProcStart: procStart,
 		Version: "agenthail", PeerProtocol: peerProtocol, Kind: "interactive", Entrypoint: "cli", MessagingSocketPath: socketPath,
-		Name: "agenthail/" + string(c.Session.Surface) + ": " + c.Session.Name, NameSince: started, Status: status(c.Session), UpdatedAt: started, StatusUpdatedAt: started, Agenthail: "peer-worker", ProcessToken: c.ProcessToken}
+		Name: PeerName(c.HostName, c.Session.Surface, c.Session.Name), NameSince: started, Status: status(c.Session), UpdatedAt: started, StatusUpdatedAt: started, Agenthail: "peer-worker", ProcessToken: c.ProcessToken}
 	controlDevice, controlInode, err := socketIdentity(controlPath)
 	if err != nil {
 		ln.Close()
@@ -268,7 +280,10 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 	defer cancel()
 	var listeners, handlers sync.WaitGroup
 	listeners.Add(3)
-	go func() { defer listeners.Done(); heartbeat(ctx.Done(), recordPath, record, reg, c.Session.ID) }()
+	go func() {
+		defer listeners.Done()
+		heartbeat(ctx.Done(), recordPath, record, reg, c.Session.ID, c.HostName)
+	}()
 	go func() { defer listeners.Done(); acceptPeers(&handlers, ln, reg, c, socketPath) }()
 	go func() { defer listeners.Done(); acceptControls(&handlers, cl, reg, c, socketPath) }()
 	defer func() {
@@ -348,7 +363,7 @@ func SendNative(ctx context.Context, home string, sender surface.Session, sender
 		return nil, err
 	}
 	id := uuid.New().String()
-	content := peerContent(sender, senderSocket, message)
+	content := peerContent("", sender, senderSocket, message)
 	payload, _ := json.Marshal(frame{MsgV: peerProtocol, MsgID: id, Type: "user", Message: mustJSON(messageBody{Role: "user", Content: content}), Priority: "next", From: "uds:" + senderSocket})
 	if len(payload) >= maxLineBytes {
 		return nil, surface.DeliveryTerminal(errors.New("Claude peer message exceeds the 64 KiB frame limit"), surface.DeliveryInvalidRequest)
@@ -566,7 +581,7 @@ func replaceManifest(path string, current, replacement OwnershipManifest) error 
 	return os.Rename(tmp, path)
 }
 
-func heartbeat(stop <-chan struct{}, path string, record sessionRecord, reg *registry.Registry, id string) {
+func heartbeat(stop <-chan struct{}, path string, record sessionRecord, reg *registry.Registry, id, hostName string) {
 	t := time.NewTicker(heartbeatInterval)
 	defer t.Stop()
 	for {
@@ -576,9 +591,9 @@ func heartbeat(stop <-chan struct{}, path string, record sessionRecord, reg *reg
 		case now := <-t.C:
 			next := record
 			if session, err := reg.Session(id); err == nil {
-				next.Name = "agenthail/" + string(session.Surface) + ": " + session.Name
+				next.Name = PeerName(hostName, session.Surface, session.Name)
 				if alias, err := reg.ReverseAlias(id); err == nil && alias != "" {
-					next.Name = "agenthail/" + string(session.Surface) + ": " + alias
+					next.Name = PeerName(hostName, session.Surface, alias)
 				}
 				next.Cwd = session.Cwd
 				next.Status = status(*session)
@@ -722,6 +737,50 @@ func validManifest(root, socketDir, path string, manifest OwnershipManifest) boo
 	}
 	home := filepath.Dir(filepath.Dir(filepath.Dir(root)))
 	return manifest.RecordPath == filepath.Join(surface.ClaudeConfigDir(home), "sessions", strconv.Itoa(manifest.PID)+".json")
+}
+
+// On Linux Claude Code records procStart as the starttime field of
+// /proc/<pid>/stat, in clock ticks since boot.
+func IsClockTicks(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func ProcStartTicks(pid int) (string, error) {
+	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return "", err
+	}
+	return procStatStartTime(string(data))
+}
+
+func procStatStartTime(stat string) (string, error) {
+	end := strings.LastIndexByte(stat, ')')
+	if end < 0 {
+		return "", fmt.Errorf("malformed /proc stat")
+	}
+	fields := strings.Fields(stat[end+1:])
+	if len(fields) < 20 {
+		return "", fmt.Errorf("malformed /proc stat")
+	}
+	return fields[19], nil
+}
+
+// nativeProcessMatches reports whether pid is the process a native Claude
+// record names, by the start time Claude recorded for it.
+func nativeProcessMatches(pid int, recorded string) bool {
+	if IsClockTicks(recorded) {
+		actual, err := ProcStartTicks(pid)
+		return err == nil && actual == recorded
+	}
+	return processMatches(pid, recorded)
 }
 
 func processMatches(pid int, expected string) bool {
@@ -906,7 +965,7 @@ func validateNativeSender(home, socketDir, from string) error {
 	if json.Unmarshal(data, &record) != nil || record.MessagingSocketPath != socket || record.Agenthail != "" {
 		return errors.New("sender is not a current native Claude endpoint")
 	}
-	if record.PID != pid || record.ProcStart == "" || !processMatches(pid, record.ProcStart) {
+	if record.PID != pid || record.ProcStart == "" || !nativeProcessMatches(pid, record.ProcStart) {
 		return errors.New("sender native process identity is stale")
 	}
 	return nil
@@ -999,6 +1058,13 @@ func queueFrame(reg *registry.Registry, c Config, f frame, ownSocket string) err
 	if target.Surface == surface.SurfaceKind("agenthail") {
 		return reg.RecordHistory(registry.HistoryEntry{Kind: "peer_received", SessionID: target.ID, SourceSessionID: sourceEvidence(f), Message: body.Content, Result: "operator sink; no model queue"})
 	}
+	key := "peer:" + target.ID + ":" + f.From + ":" + f.MsgID
+	// The host that owns a session decides whether it can take a message.
+	if owner, err := reg.SessionHost(target.ID); err != nil {
+		return err
+	} else if owner != "" {
+		return queueHostFrame(reg, c, f, target.ID, key, body.Content)
+	}
 	if target.Status == surface.StatusOffline || surface.IsReadOnlySession(target) {
 		reason := surface.ReadOnlySessionReason(target)
 		if reason == "" {
@@ -1006,7 +1072,6 @@ func queueFrame(reg *registry.Registry, c Config, f frame, ownSocket string) err
 		}
 		return surface.DeliveryTerminal(errors.New(reason), surface.DeliveryAccessDenied)
 	}
-	key := "peer:" + target.ID + ":" + f.From + ":" + f.MsgID
 	mode := c.BusyDelivery
 	if mode == "" {
 		var modeErr error
@@ -1029,6 +1094,50 @@ func queueFrame(reg *registry.Registry, c Config, f frame, ownSocket string) err
 }
 
 func sourceEvidence(f frame) string { return f.From }
+
+// queueHostFrame holds a message for a session another host owns, to be sent
+// to that host as this sender's own message once it is reachable. The sender
+// is named as one of this host's sessions so the owner can reply across the
+// pairing; a sender that is not a current native Claude endpoint goes as
+// this host's operator.
+func queueHostFrame(reg *registry.Registry, c Config, f frame, targetID, key, content string) error {
+	send := registry.HostSend{SessionID: targetID, Message: content, Key: key}
+	if sender, ok := nativeSenderSession(reg, c, f.From); ok {
+		send.SourceSessionID = sender
+	} else {
+		send.Message = "[Claude peer message from " + f.From + "]\n" + content
+	}
+	queueID, err := reg.QueueHostSend(send)
+	if err != nil {
+		return err
+	}
+	return reg.RecordHistory(registry.HistoryEntry{Kind: "peer_received", SessionID: targetID, SourceSessionID: sourceEvidence(f), QueueID: queueID, Message: content, Result: "held for its host; sent once the host is reachable"})
+}
+
+// nativeSenderSession resolves a frame's sender to this host's registered
+// Claude session behind its messaging socket.
+func nativeSenderSession(reg *registry.Registry, c Config, from string) (string, bool) {
+	if validateNativeSender(c.Home, c.SocketDir, from) != nil {
+		return "", false
+	}
+	pid := strings.TrimSuffix(filepath.Base(strings.TrimPrefix(from, "uds:")), ".sock")
+	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.Home), "sessions", pid+".json"))
+	if err != nil {
+		return "", false
+	}
+	var record sessionRecord
+	if json.Unmarshal(data, &record) != nil || record.SessionID == "" {
+		return "", false
+	}
+	session, err := reg.Session(record.SessionID)
+	if err != nil {
+		return "", false
+	}
+	if owner, err := reg.SessionHost(session.ID); err != nil || owner != "" {
+		return "", false
+	}
+	return session.ID, true
+}
 
 func acceptControls(wg *sync.WaitGroup, ln net.Listener, reg *registry.Registry, c Config, ownSocket string) {
 	sem := make(chan struct{}, 8)
@@ -1080,7 +1189,7 @@ func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket st
 			}
 			senderSocket = req.ReplySocket
 		}
-		content := peerContent(*session, senderSocket, req.Message)
+		content := peerContent(c.HostName, *session, senderSocket, req.Message)
 		f, _ := json.Marshal(frame{MsgV: 1, MsgID: id, Type: "user", Message: mustJSON(messageBody{Role: "user", Content: content}), Priority: "next", From: "uds:" + senderSocket})
 		var sendErr error
 		if len(f) >= maxLineBytes {
@@ -1239,13 +1348,13 @@ func mustJSON(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 
 var closingPeerTag = regexp.MustCompile(`(?i)<(\s*/\s*cross-session-message\b)`)
 
-func peerContent(session surface.Session, socket, message string) string {
+func peerContent(hostName string, session surface.Session, socket, message string) string {
 	name := strings.Map(func(r rune) rune {
 		if r == '"' || r == '<' || r == '>' || unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Cs, unicode.Zl, unicode.Zp) {
 			return -1
 		}
 		return r
-	}, "agenthail/"+string(session.Surface)+": "+session.Name)
+	}, PeerName(hostName, session.Surface, session.Name))
 	name = strings.TrimSpace(name)
 	if runes := []rune(name); len(runes) > 64 {
 		name = string(runes[:64]) + "…"

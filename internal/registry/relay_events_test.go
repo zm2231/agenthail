@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -337,6 +338,75 @@ func TestQuotedRelayEnvelopeKeepsTheQueuedHopCount(t *testing.T) {
 					t.Fatalf("events=%+v err=%v", events, err)
 				}
 			})
+		}
+	}
+}
+
+func TestRelayToAHostsSessionIsHeldForThatHostWithItsHopCount(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "source")
+	if _, err := r.AddHost(PairedHost{ID: "h0123456789ab", Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.ApplyHostCatalogRow("h0123456789ab", HostCatalogRow{Session: surface.Session{ID: "remote", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}, EntityID: "h0123456789ab::remote", Projection: []byte(`{"id":"h0123456789ab::remote"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.AddRoute("source", "remote", ".*"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CaptureRelayCompletions("source", "", surface.CompletionBatch{Cursor: "one", Events: []surface.Completion{{ID: "one", Text: "reply"}}}); err != nil {
+		t.Fatal(err)
+	}
+	routes, _ := r.ListRoutes()
+	events, _ := r.PendingRelayEvents(routes[0])
+	if _, err := r.ConsumeRelay(routes[0], events[0], "[agenthail relay hops=1] reply", "queue", ""); err != nil {
+		t.Fatal(err)
+	}
+	held, err := r.HostDeliveries("h0123456789ab")
+	if err != nil || len(held) != 1 || held[0].Key != fmt.Sprintf("relay:%d:one", routes[0].ID) {
+		t.Fatalf("held=%+v err=%v", held, err)
+	}
+	identity, _ := r.HostIdentity()
+	var request map[string]any
+	if err := json.Unmarshal(held[0].Request, &request); err != nil {
+		t.Fatal(err)
+	}
+	if request["sessionId"] != "remote" || request["sourceSessionId"] != identity.ID+"::source" || request["relayHops"] != float64(1) || request["busyDelivery"] != "queue" {
+		t.Fatalf("held relay request=%v", request)
+	}
+	routes, _ = r.ListRoutes()
+	if again, _ := r.PendingRelayEvents(routes[0]); len(again) != 0 {
+		t.Fatalf("the relay event was not consumed: %+v", again)
+	}
+}
+
+func TestAHeldSendNamesOnlyThisHostsSessionAsItsSender(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "local")
+	if _, err := r.AddHost(PairedHost{ID: "h0123456789ab", Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"remote", "remote-sibling"} {
+		if _, _, err := r.ApplyHostCatalogRow("h0123456789ab", HostCatalogRow{Session: surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}, EntityID: "h0123456789ab::" + id, Projection: []byte(`{"id":"h0123456789ab::` + id + `"}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	identity, _ := r.HostIdentity()
+	for _, test := range []struct{ source, want string }{
+		{"local", identity.ID + "::local"},
+		{"remote-sibling", ""},
+		{"unregistered", ""},
+	} {
+		if _, err := r.QueueHostSend(HostSend{SessionID: "remote", Message: "hi", Key: "held:" + test.source, SourceSessionID: test.source}); err != nil {
+			t.Fatal(err)
+		}
+		held, _ := r.HostDeliveries("h0123456789ab")
+		var request map[string]any
+		if err := json.Unmarshal(held[len(held)-1].Request, &request); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := request["sourceSessionId"].(string); got != test.want {
+			t.Fatalf("source %s went as %q, want %q", test.source, got, test.want)
 		}
 	}
 }

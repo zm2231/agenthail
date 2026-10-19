@@ -134,7 +134,7 @@ func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, fro
 						err = targetErr
 						break
 					}
-					if surface.IsReadOnlySession(target) {
+					if !d.hostOwned(target.ID) && surface.IsReadOnlySession(target) {
 						err = fmt.Errorf("destination is read-only: %s", surface.ReadOnlySessionReason(target))
 						break
 					}
