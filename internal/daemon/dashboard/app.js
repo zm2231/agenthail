@@ -192,11 +192,33 @@ function handoffMessage(value) {
   }
   return { label, text };
 }
-function renderMessage(text, kind, label, turnKey) {
+function renderMessage(text, kind, label, turnKey, files = []) {
   const safeText = String(text || "");
   const editable = kind === "user" && label === "Conversation input";
   const edit = editable ? `<button class="turn-action" type="button" data-edit-message="${escape(safeText)}">Edit</button>` : "";
-  return `<article class="turn ${kind}" data-turn-key="${escape(turnKey)}"><header class="turn-header"><span class="turn-label">${escape(label)}</span></header><div class="turn-content">${markdown(safeText)}</div><div class="turn-actions"><button class="turn-action" type="button" data-copy-text="${escape(safeText)}">Copy</button>${edit}</div></article>`;
+  const content = safeText ? `<div class="turn-content">${markdown(safeText)}</div>` : "";
+  const actions = safeText ? `<div class="turn-actions"><button class="turn-action" type="button" data-copy-text="${escape(safeText)}">Copy</button>${edit}</div>` : "";
+  return `<article class="turn ${kind}" data-turn-key="${escape(turnKey)}"><header class="turn-header"><span class="turn-label">${escape(label)}</span></header>${content}${renderAttachedFiles(files)}${actions}</article>`;
+}
+function fileSize(bytes) {
+  if (!bytes) return "";
+  const units = ["bytes", "KB", "MB", "GB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1000 && unit < units.length - 1) {
+    value /= 1000;
+    unit += 1;
+  }
+  return unit === 0 ? `${value} ${units[0]}` : `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+}
+// A sent file lives on the host that owns the session; the chip copies the
+// path the agent read it from.
+function renderAttachedFiles(files) {
+  if (!files?.length) return "";
+  return `<div class="attached-files">${files.map(file => {
+    const size = fileSize(file.bytes);
+    return `<button class="attached-file" type="button" data-copy-text="${escape(file.path || "")}" data-copy-done="Path copied." title="${escape(file.path || "")}"><span class="attached-file-name">${escape(file.name || "File")}</span>${size ? `<span class="attached-file-size">${escape(size)}</span>` : ""}</button>`;
+  }).join("")}</div>`;
 }
 function stopLiveStream(clear = false) {
   if (app.liveSource) app.liveSource.close();
@@ -267,7 +289,7 @@ function startLiveStream() {
     app.history.transcriptWarning = "";
     const items = app.history.timeline?.items || [];
     const index = items.findIndex((value) => value.id === item.itemId);
-    const projected = { id: item.itemId, kind: item.kind, role: item.role, origin: item.origin, sender: item.sender, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, truncated: item.truncated, bodyRef: item.bodyRef, attachment: item.attachment, callId: item.callId };
+    const projected = { id: item.itemId, kind: item.kind, role: item.role, origin: item.origin, sender: item.sender, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, truncated: item.truncated, bodyRef: item.bodyRef, attachment: item.attachment, files: item.files, callId: item.callId };
     if (item.op === "remove") { if (index >= 0) items.splice(index, 1); }
     else if (index >= 0) items[index] = projected;
     else items.push(projected);
@@ -1155,7 +1177,7 @@ function renderTimelineItem(item, session) {
   if (["text", "message", "assistant"].includes(kind)) {
     const user = item.role === "user";
     const content = user ? handoffMessage(item.text) : { text: item.text, label: labels[session.surface] || session.surface };
-    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(content.text, user ? "user" : "agent", content.label, `${session.id}:${item.id}`)}${metadata}</section>`;
+    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(content.text, user ? "user" : "agent", content.label, `${session.id}:${item.id}`, user ? item.files : [])}${metadata}</section>`;
   }
   if (["toolCall", "toolResult", "reasoning"].includes(kind)) {
     const title = item.title || kind;
@@ -1660,7 +1682,7 @@ document.addEventListener("click", async (event) => {
   if (copyOutput) {
     try {
       await navigator.clipboard.writeText(copyOutput.dataset.copyText);
-      toast("Copied.");
+      toast(copyOutput.dataset.copyDone || "Copied.");
     } catch (error) {
       toast("Couldn't copy.");
     }

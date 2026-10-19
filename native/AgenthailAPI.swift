@@ -166,9 +166,31 @@ final class AgenthailAPI: @unchecked Sendable {
         return data
     }
 
-    func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), busyDelivery: String? = nil, author: String? = nil, idempotencyKey: String? = nil) async throws -> ActionReceipt {
-        let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings, busyDelivery: busyDelivery, author: author)
+    func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), busyDelivery: String? = nil, author: String? = nil, attachments: [String] = [], idempotencyKey: String? = nil) async throws -> ActionReceipt {
+        let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings, busyDelivery: busyDelivery, author: author, attachments: attachments)
         return try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey)
+    }
+
+    func upload(_ attachment: ComposerAttachment, sessionID: String) async throws -> UploadedAttachment {
+        var components = URLComponents()
+        components.path = "/api/v1/uploads"
+        components.queryItems = [URLQueryItem(name: "sessionId", value: sessionID), URLQueryItem(name: "name", value: attachment.name)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        var request = authorizedRequest(path: path)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue(attachment.mediaType, forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await session.upload(for: request, from: attachment.data)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(UploadResponse.self, from: data).upload
+    }
+
+    func upload(_ attachments: [ComposerAttachment], sessionID: String) async throws -> [UploadedAttachment] {
+        var uploaded: [UploadedAttachment] = []
+        for attachment in attachments {
+            uploaded.append(try await upload(attachment, sessionID: sessionID))
+        }
+        return uploaded
     }
 
     func sessionOptions(host: String? = nil) async throws -> SessionCreationOptions {
@@ -549,8 +571,9 @@ private struct InstructionRequest: Encodable {
     let turnSettings: TurnSettings
     var busyDelivery: String? = nil
     var author: String? = nil
+    var attachments: [String] = []
 
-    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case effort; case mode; case busyDelivery; case author }
+    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case effort; case mode; case busyDelivery; case author; case attachments }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -559,6 +582,7 @@ private struct InstructionRequest: Encodable {
         try container.encode(message, forKey: .message)
         try container.encodeIfPresent(busyDelivery, forKey: .busyDelivery)
         try container.encodeIfPresent(author, forKey: .author)
+        if !attachments.isEmpty { try container.encode(attachments, forKey: .attachments) }
         if action != "steer" {
             try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
             try container.encodeIfPresent(turnSettings.mode, forKey: .mode)
@@ -567,6 +591,10 @@ private struct InstructionRequest: Encodable {
 }
 
 private struct EmptyResponse: Decodable {}
+
+private struct UploadResponse: Decodable {
+    let upload: UploadedAttachment
+}
 
 private struct ProjectActionRequest: Encodable {
     let action: String

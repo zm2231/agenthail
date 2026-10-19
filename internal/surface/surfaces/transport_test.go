@@ -133,7 +133,7 @@ func TestClaudeSendHumanTurnUsesAuthenticatedBridgeForUDSSession(t *testing.T) {
 		return http.StatusOK, `{}`, nil
 	})
 	session := &surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: pid, Transport: "uds", Status: surface.StatusIdle, Transcript: transcript}
-	result, err := claude.SendHumanTurn(context.Background(), session, "Please inspect the failure.")
+	result, err := claude.SendHumanTurn(context.Background(), session, "Please inspect the failure.", nil)
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -165,7 +165,7 @@ func TestClaudeSendHumanTurnRejectsNativeOnlySession(t *testing.T) {
 		t.Fatal("human turn attempted a web request without a bridge identity")
 		return 0, "", nil
 	})
-	_, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "native-session", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", PID: os.Getpid(), Status: surface.StatusIdle}, "hello")
+	_, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "native-session", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", PID: os.Getpid(), Status: surface.StatusIdle}, "hello", nil)
 	if !surface.IsDeliveryUnavailable(err) {
 		t.Fatalf("err=%v", err)
 	}
@@ -182,7 +182,7 @@ func TestClaudeSendHumanTurnUsesBridgeOnlySessionID(t *testing.T) {
 		requestURL = url
 		return http.StatusOK, `{}`, nil
 	})
-	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: pid, Transport: "remote-control", Status: surface.StatusIdle, Transcript: transcript}, "continue")
+	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: pid, Transport: "remote-control", Status: surface.StatusIdle, Transcript: transcript}, "continue", nil)
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -201,7 +201,7 @@ func TestClaudeSendHumanTurnRetainsIdleGate(t *testing.T) {
 		return 0, "", nil
 	})
 	active := writeTranscript(t, `{"type":"user","uuid":"u2","message":{"content":"running"}}`)
-	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: pid, Transport: "uds", Status: surface.StatusIdle, Transcript: active}, "wait")
+	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: pid, Transport: "uds", Status: surface.StatusIdle, Transcript: active}, "wait", nil)
 	if err != nil || result == nil || result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}

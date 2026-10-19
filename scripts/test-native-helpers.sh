@@ -9,6 +9,7 @@ SOURCES=(
   AgenthailAPI.swift
   AgenthailModel.swift
   AgenthailModels.swift
+  ComposerAttachment.swift
   DuplicateApplicationPolicy.swift
   EventRetryBackoff.swift
   OperationsRefreshPolicy.swift
@@ -24,7 +25,6 @@ SOURCES=(
   macOS/AuditFacts.swift
   macOS/BoundedDock.swift
   macOS/CatalogPosition.swift
-  macOS/ComposerDrop.swift
   macOS/ContextBreakdown.swift
   macOS/LocalSend.swift
   macOS/MetadataOverlay.swift

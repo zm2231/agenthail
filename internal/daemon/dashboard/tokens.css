@@ -2082,6 +2082,36 @@ select {
 .copy-output {
   margin: 8px 0 4px;
 }
+.attached-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.attached-file {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--raised);
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.attached-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attached-file-size {
+  color: var(--quiet);
+  font-size: 12px;
+}
 @media (hover: none) {
   .project-header .link-button {
     opacity: 1;

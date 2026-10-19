@@ -21,6 +21,7 @@ import (
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/uploads"
 )
 
 const hostPairTimeout = 20 * time.Second
@@ -400,8 +401,8 @@ func (d *Daemon) resolveMirrored(host *pairedHost, target string) []resolveMatch
 	return matches
 }
 
-// hostRouted forwards a GET whose session (param) or host query names a
-// paired host; everything else reaches next unchanged.
+// hostRouted forwards a request whose session (param) or host query names a
+// paired host, body included; everything else reaches next unchanged.
 func (d *Daemon) hostRouted(param string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
@@ -447,7 +448,16 @@ func (d *Daemon) hostRouted(param string, next http.HandlerFunc) http.HandlerFun
 			d.relayHostStream(w, r, host, query)
 			return
 		}
-		d.forwardHostRequest(w, r, host, r.Method, query, nil)
+		var body []byte
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			read, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxForwardedBodyBytes))
+			if err != nil {
+				writeAPIError(w, http.StatusRequestEntityTooLarge, "request_too_large", "The request body is too large to forward.")
+				return
+			}
+			body = read
+		}
+		d.forwardHostRequest(w, r, host, r.Method, query, body)
 	}
 }
 
@@ -494,10 +504,16 @@ func writeHostReadError(w http.ResponseWriter, host *pairedHost, err error) {
 	writeAPIError(w, http.StatusServiceUnavailable, "host_unreachable", fmt.Sprintf("Host %s is unreachable: %s", host.record.Name, err))
 }
 
+// maxForwardedBodyBytes admits the largest upload with room for nothing else.
+const maxForwardedBodyBytes = uploads.MaxFileBytes + 1
+
 func (d *Daemon) forwardHostRequest(w http.ResponseWriter, r *http.Request, host *pairedHost, method string, query url.Values, body []byte) {
 	header := http.Header{}
 	if key := r.Header.Get(actionIdempotencyHeader); key != "" {
 		header.Set(actionIdempotencyHeader, key)
+	}
+	if contentType := r.Header.Get("Content-Type"); body != nil && contentType != "" {
+		header.Set("Content-Type", contentType)
 	}
 	response, err := host.client.Do(r.Context(), method, apiPath(r.URL.Path), query, body, header)
 	if err != nil {
