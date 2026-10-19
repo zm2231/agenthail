@@ -109,6 +109,26 @@ final class NativeVoiceAudioTests: XCTestCase {
         XCTAssertEqual(peer.activations, [true])
     }
 
+    func testSimulatorCallActivatesVoiceAudioWithoutCallKitAndReleasesItOnHangup() async throws {
+        let peer = VoicePeerFixture()
+        let bridge = NativeVoiceAudio(makePeer: { peer }, permission: { true })
+        bridge.load(URLRequest(url: URL(string: "https://paired.test/api/v1/voice")!))
+        var messages: [String] = []
+        bridge.onMessage = { type, value in messages.append("\(type):\(value)") }
+        try await bridge.start()
+        XCTAssertEqual(peer.activations, [true])
+        XCTAssertEqual(AVAudioSession.sharedInstance().category, .playAndRecord)
+        XCTAssertEqual(AVAudioSession.sharedInstance().mode, .voiceChat)
+        XCTAssertTrue(messages.contains("offer:v=0 native-fixture"))
+        bridge.mute(true)
+        XCTAssertEqual(peer.mutes.last, true)
+        bridge.end()
+        XCTAssertEqual(peer.ends, 1)
+        try await bridge.start()
+        XCTAssertEqual(peer.starts, 2)
+        bridge.end()
+    }
+
     func testNativeSDKProducesAudioAndDataOfferWithoutActivatingMicrophone() async throws {
         let peer = NativeVoicePeer()
         defer { peer.end() }

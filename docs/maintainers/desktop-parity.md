@@ -109,7 +109,7 @@ Open gaps are tracked as td stories under td-5f222f (listed at the end). Each on
 
 ## iOS where web and Mac differ
 
-- Voice: iOS adds typed messages, a new orchestrator conversation and an inline activity timeline to the shared call (native/iOS/VoiceOperator.swift), and runs the call as a CallKit system call that continues in the background (native/iOS/NativeVoiceAudio.swift). The Mac matches the web dialog and links to the full timeline.
+- Voice: iOS adds typed messages, a new orchestrator conversation and an inline activity timeline to the shared call (native/iOS/VoiceOperator.swift), and runs the call as a CallKit system call that continues in the background (native/iOS/NativeVoiceAudio.swift); Simulator builds activate the audio session directly because the Simulator refuses CallKit. The Mac matches the web dialog and links to the full timeline.
 - Manual refresh: iOS uses pull to refresh with `refresh(fresh: true)` (native/iOS/AgenthailIOSViews.swift:310, native/iOS/SessionControls.swift:125).
 - Queue last error: iOS shows `lastError` on queued items (native/iOS/SessionControls.swift:156).
 

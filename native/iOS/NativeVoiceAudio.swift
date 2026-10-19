@@ -25,7 +25,7 @@ final class NativeVoiceAudio: VoiceAudioClient {
     private var muted = false
     private var held = false
 
-    init(system: any VoiceSystemCalling = VoiceSystemCall(),
+    init(system: any VoiceSystemCalling = NativeVoiceAudio.systemCall(),
          makePeer: @escaping () -> any VoicePeerClient = { NativeVoicePeer() },
          permission: @escaping () async -> Bool = {
              await withCheckedContinuation { continuation in
@@ -35,6 +35,14 @@ final class NativeVoiceAudio: VoiceAudioClient {
         self.system = system
         self.makePeer = makePeer
         self.permission = permission
+    }
+
+    static func systemCall() -> any VoiceSystemCalling {
+#if targetEnvironment(simulator)
+        SimulatorSystemCall()
+#else
+        VoiceSystemCall()
+#endif
     }
 
     func configureCall(id: UUID, name: String) { callID = id; self.name = name }
@@ -51,7 +59,12 @@ final class NativeVoiceAudio: VoiceAudioClient {
         let current = generation
         let id = callID ?? UUID()
         muted = false; held = false
+#if DEBUG && targetEnvironment(simulator)
+        if VoiceEvaluation.enabled { try VoiceEvaluation.prepare() }
+        let allowed = VoiceEvaluation.enabled ? true : await permission()
+#else
         let allowed = await permission()
+#endif
         guard current == generation else { throw CancellationError() }
         onMessage?("permission", allowed ? "granted" : "denied")
         guard allowed else { throw VoiceMicrophoneDenied() }
@@ -61,6 +74,9 @@ final class NativeVoiceAudio: VoiceAudioClient {
         nextPeer.onMessage = { [weak self] type, value in
             guard let self, current == self.generation else { return }
             if type == "connection", value == "connected" { self.system.connected() }
+#if DEBUG && targetEnvironment(simulator)
+            if VoiceEvaluation.enabled, type == "channel", value == "open" { VoiceEvaluation.device.speakNext() }
+#endif
             self.onMessage?(type, value)
         }
         system.onEnd = { [weak self] cause in

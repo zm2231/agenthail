@@ -36,6 +36,16 @@ struct AgenthailVoiceOperatorSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
                     if model.isPreview { Text("Sample conversation").font(.caption).foregroundStyle(.secondary) }
+#if DEBUG && targetEnvironment(simulator)
+                    if VoiceEvaluation.enabled {
+                        HStack {
+                            Text("Simulated microphone · Real Codex").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Speak next request") { VoiceEvaluation.device.speakNext() }
+                                .font(.caption).disabled(!model.audioConnected)
+                        }
+                    }
+#endif
                     HStack(spacing: 12) {
                         Image(systemName: model.audioConnected ? "waveform" : "waveform.slash")
                             .font(.title2).foregroundStyle(model.audioConnected ? Color.accentColor : Color.secondary)

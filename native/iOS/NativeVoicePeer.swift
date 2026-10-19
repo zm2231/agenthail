@@ -5,7 +5,14 @@ import Foundation
 @MainActor
 final class NativeVoicePeer: VoicePeerClient {
     var onMessage: ((String, String) -> Void)?
-    private lazy var factory = RTCPeerConnectionFactory()
+    private lazy var factory: RTCPeerConnectionFactory = {
+#if DEBUG && targetEnvironment(simulator)
+        if VoiceEvaluation.enabled {
+            return RTCPeerConnectionFactory(encoderFactory: nil, decoderFactory: nil, audioDevice: VoiceEvaluation.device)
+        }
+#endif
+        return RTCPeerConnectionFactory()
+    }()
     private var connection: RTCPeerConnection?
     private var channel: RTCDataChannel?
     private var microphone: RTCAudioTrack?

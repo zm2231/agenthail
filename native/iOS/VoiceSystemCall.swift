@@ -141,3 +141,37 @@ final class VoiceSystemCall: NSObject, VoiceSystemCalling, @preconcurrency CXPro
         onActivation?(audioSession, false)
     }
 }
+
+#if targetEnvironment(simulator)
+// The Simulator refuses CallKit call requests, so it activates the voice audio
+// session directly. Everything else in the call is the same as on a phone.
+@MainActor
+final class SimulatorSystemCall: VoiceSystemCalling {
+    var onEnd: ((String) -> Void)?
+    var onMute: ((Bool) -> Void)?
+    var onHold: ((Bool) -> Void)?
+    var onActivation: ((AVAudioSession, Bool) -> Void)?
+    private var active = false
+
+    func start(id: UUID, name: String) async throws {
+        guard !active else { throw AgenthailAPIError.unavailable("A call is already active.") }
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP, .defaultToSpeaker])
+        try session.setActive(true)
+        active = true
+        onActivation?(session, true)
+    }
+
+    func connected() {}
+
+    func end() {
+        guard active else { return }
+        active = false
+        let session = AVAudioSession.sharedInstance()
+        try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        onActivation?(session, false)
+    }
+
+    func mute(_ muted: Bool) { if active { onMute?(muted) } }
+}
+#endif

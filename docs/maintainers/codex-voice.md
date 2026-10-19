@@ -279,14 +279,14 @@ entitlements reliably.
 ### Actual iOS app evaluation
 
 The [2026-09-12 Simulator receipt](codex-voice-simulator-evidence.md) records a real
-Codex conversation through the native app when it still used a WebKit peer with
-a recorded microphone. The current app places every call through CallKit, and
-the iOS Simulator refuses CallKit call requests
-(`com.apple.CallKit.error.requesttransaction` code 2), so a live call needs a
-physical iPhone. The Simulator still runs the unit tests, including a real
-WebRTC offer, and the call screens.
+Codex conversation through the native app when it still used a WebKit peer.
+The current app uses the same native WebRTC peer on the Simulator and on a phone.
+The Simulator refuses CallKit call requests
+(`com.apple.CallKit.error.requesttransaction` code 2), so Simulator builds
+activate the voice audio session directly instead of reporting a system call.
+Everything else in the call is the same: coordinator, heartbeat, peer and hangup.
 
-Use a dedicated test phone and an isolated registry. Reuse a test-owned operator
+Use the dedicated Simulator and an isolated registry. Reuse a test-owned operator
 whose audio is confirmed ended; do not copy an active production call or create
 tasks as a substitute for discovery. The following opt-in host serves the ordinary
 pairing/session/voice APIs, not a mock app or browser-only UI:
@@ -302,11 +302,25 @@ go test -tags voice_live ./internal/daemon -run '^TestNativeVoiceHost$' \
 
 In a second terminal, point a **dedicated** Tailscale HTTPS Serve port at the
 printed loopback upstream. Do not overwrite the production Serve rule. The host
-writes a private `pairing.json`; open its `pairingURL` on the test phone and
+writes a private `pairing.json`; open its `pairingURL` on the test Simulator and
 confirm the normal pairing UI. Pairing links expire after 15 minutes; the host
 has a 45-minute evaluation window.
 
-Install the Debug iOS app on a physical iPhone and speak the requests.
+Build the Debug iOS app normally. Without launch arguments, a call uses the
+Simulator's microphone. For a repeatable conversation, place two user-speech WAV
+recordings in its data container at `Documents/VoiceEvaluation/request-1.wav`
+and `request-2.wav` and launch the app with `--voice-evaluation`. The screen
+explicitly says **Simulated microphone · Real Codex**. This mode is compiled only
+for Debug Simulator builds:
+
+- A WebRTC audio device replaces the microphone and speaker. It skips microphone
+  permission and refuses to call if either recording is missing.
+- **Start voice call** sends the first recording after the real data channel
+  opens. Wait for the spoken result; **Speak next request** sends the second.
+  Silence is sent between requests, as a live microphone would.
+- Received Codex audio is recorded, not played aloud. **Hang up** saves the
+  mixed user/Codex dialogue as `real-codex-dialogue.wav` in the same directory;
+  `diagnostics.jsonl` records input and output audio energy every five seconds.
 
 Give the existing worker bounded, meaningful work, then independently inspect its
 actual command output and completion. Check the spoken summary against those
@@ -314,7 +328,7 @@ results, not a predetermined phrase. Compare worktree state before and after a
 read-only request. The host test's successful exit only means the host closed;
 it is **not** the conversation's acceptance verdict.
 
-After confirmed native hangup, preserve the receipts, create the
+After confirmed native hangup, preserve the recording and receipts, create the
 isolated directory's `finished` marker, close its app connection, and remove only
 the dedicated test Serve rule. Confirm the production rule is unchanged. Revoke
 or discard only this isolated pairing; never reset the user's phone or host.
@@ -366,7 +380,8 @@ request, inspect the target's reply, mute from the app and from the system call
 controls, lock the phone and switch apps while talking (audio should continue),
 take a system hold or incoming call, hang up from the Lock Screen, and reopen
 the same operator. Installing/restarting the live host remains an explicit
-operator action. Simulator/sample screenshots are not live voice receipts.
+operator action. The Simulator cannot show the system call UI, Lock Screen
+controls, background audio or Bluetooth routing; those need a phone.
 
 ## References and protocol provenance
 
