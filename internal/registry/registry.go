@@ -28,7 +28,7 @@ type Registry struct {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 17
+	schemaVersion   = 18
 	queueMessageTTL = time.Hour
 	readConnections = 4
 )
@@ -226,11 +226,13 @@ func (r *Registry) migrate() error {
 	if err := r.ensureColumn("delivery_intents", "uuid", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
-	if _, err := r.db.Exec(`UPDATE delivery_intents SET uuid=` + sqlRandomUUID + ` WHERE uuid=''`); err != nil {
-		return err
-	}
-	if _, err := r.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS delivery_intents_uuid ON delivery_intents(uuid)`); err != nil {
-		return err
+	if version < 18 {
+		if _, err := r.db.Exec(`UPDATE delivery_intents SET uuid=` + sqlRandomUUID + ` WHERE uuid=''`); err != nil {
+			return err
+		}
+		if _, err := r.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS delivery_intents_uuid ON delivery_intents(uuid)`); err != nil {
+			return err
+		}
 	}
 	if version < 13 {
 		if _, err := r.db.Exec(`UPDATE delivery_intents SET relayed=1 WHERE queue_id IN (SELECT id FROM message_queue WHERE relay_hops>0) OR provider_key LIKE 'relay:%'`); err != nil {

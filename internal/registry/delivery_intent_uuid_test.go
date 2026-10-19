@@ -34,7 +34,7 @@ func TestDeliveryIntentsCarryAUUIDFromBeforeTheyHadOne(t *testing.T) {
 	if _, err := r.db.Exec(`DROP INDEX delivery_intents_uuid`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.db.Exec(`UPDATE delivery_intents SET uuid=''`); err != nil {
+	if _, err := r.db.Exec(`UPDATE delivery_intents SET uuid=''; PRAGMA user_version=17`); err != nil {
 		t.Fatal(err)
 	}
 	r.Close()
