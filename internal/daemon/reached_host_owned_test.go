@@ -12,25 +12,80 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
-const reachedRemoteID = "session_remote_owned"
+// reachedRemoteID is a conversation that was copied to a paired host and is
+// mirrored from there, so the same id names a local transcript and a
+// host-owned row.
+const reachedRemoteID = "3d1c8e52-6a0f-4b8e-9f7d-2a51c0e4b7a1"
 
-// newReachedHostOwnedFixture makes the ended local session resume into a
-// conversation id a paired host already owns.
+// conversationMovingClaude is the real Claude adapter whose send or compact
+// reports the session under the conversation a paired host owns.
+type conversationMovingClaude struct {
+	*surfaces.Claude
+	to string
+}
+
+func (c *conversationMovingClaude) Send(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
+	result, err := c.Claude.Send(ctx, sess, message)
+	sess.ID = c.to
+	return result, err
+}
+
+func (c *conversationMovingClaude) Compact(ctx context.Context, sess *surface.Session) error {
+	err := c.Claude.Compact(ctx, sess)
+	sess.ID = c.to
+	return err
+}
+
+func pairForgeOwning(t *testing.T, r *registry.Registry, sessionID string) string {
+	t.Helper()
+	hostID := "h0123456789ab"
+	if _, err := r.AddHost(registry.PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	entity := hostID + "::" + sessionID
+	if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: sessionID, Surface: surface.KindClaude, Name: "remote"}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	return hostID
+}
+
+// newReachedHostOwnedFixture makes the ended local session come back under
+// the conversation id a paired host already owns.
 func newReachedHostOwnedFixture(t *testing.T) (*orphanFixture, string) {
 	t.Helper()
 	f := newOrphanFixture(t)
-	hostID := "h0123456789ab"
-	if _, err := f.r.AddHost(registry.PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
-		t.Fatal(err)
-	}
-	entity := hostID + "::" + reachedRemoteID
-	if _, _, err := f.r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: reachedRemoteID, Surface: surface.KindClaude, Name: "remote"}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
-		t.Fatal(err)
-	}
-	f.claude.ResumeBridge(reachedRemoteID)
+	hostID := pairForgeOwning(t, f.r, reachedRemoteID)
+	f.daemon = New(f.r, []surface.Surface{&conversationMovingClaude{Claude: surfaces.NewClaudeWithRequest("", f.claude.Home, f.posts.request), to: reachedRemoteID}})
+	f.handler = dashboardRouter(f.daemon)
 	return f, hostID
+}
+
+func TestDiscoveringLiveProcessOfHostOwnedConversationLeavesTheHostRow(t *testing.T) {
+	fixture := claudetest.New(t)
+	r, err := registry.Open(t.TempDir() + "/registry.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = r.Close() })
+	hostID := pairForgeOwning(t, r, reachedRemoteID)
+	fixture.Transcript(reachedRemoteID, fixture.Home)
+	fixture.Record(reachedRemoteID, fixture.Home, "session_copied_bridge")
+	d := New(r, []surface.Surface{surfaces.NewClaudeWithRequest("", fixture.Home, (&orphanPosts{}).request)})
+	d.discoverCatalog(context.Background())
+	if owner, err := r.SessionHost(reachedRemoteID); err != nil || owner != hostID {
+		t.Fatalf("owner=%q err=%v", owner, err)
+	}
+	if _, found, err := r.RuntimeState(reachedRemoteID); err != nil || found {
+		t.Fatalf("runtime state under host-owned id found=%v err=%v", found, err)
+	}
+	session, err := r.Session(reachedRemoteID)
+	if err != nil || session.PID != 0 || session.Transcript != "" || session.Name != "remote" {
+		t.Fatalf("host row rewritten by local discovery: %+v err=%v", session, err)
+	}
 }
 
 func assertNothingRecordedUnder(t *testing.T, f *orphanFixture, hostID string) {

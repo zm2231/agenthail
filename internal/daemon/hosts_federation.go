@@ -513,8 +513,8 @@ func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession) error {
 	hostProject, _ := json.Marshal(row.HostProject)
 	checkout, _ := json.Marshal(row.Checkout)
 	row.ID = hosts.Qualify(host.record.ID, row.ID)
-	for index := range row.SharedWith {
-		row.SharedWith[index].ID = hosts.Qualify(host.record.ID, row.SharedWith[index].ID)
+	if row.ForkedFrom != "" {
+		row.ForkedFrom = hosts.Qualify(host.record.ID, row.ForkedFrom)
 	}
 	if row.Runtime != nil {
 		runtime := *row.Runtime

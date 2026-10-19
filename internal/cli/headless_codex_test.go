@@ -14,7 +14,7 @@ import (
 )
 
 func TestHeadlessCodexCLICreatesListsReadsAndDrivesAThread(t *testing.T) {
-	for _, key := range []string{"AGENTHAIL_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_SESSION_ID"} {
+	for _, key := range []string{"AGENTHAIL_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"} {
 		t.Setenv(key, "")
 	}
 	lifecycle := codextest.InstallLifecycle(t, codextest.Home(t), nil)

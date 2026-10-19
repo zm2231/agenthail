@@ -463,14 +463,6 @@ struct SessionRowView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(SessionFamilies.subagentSummary(family))
             }
-            if let shared = SharedConversation.badge(session) {
-                Text(shared)
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(DesktopPalette.accentText)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(SharedConversation.badgeLabel(session))
-                    .help(SharedConversation.badgeLabel(session))
-            }
             if session.queueCount > 0 {
                 Text(SessionFacts.queuedLabel(session.queueCount))
                     .font(.system(size: 10.5))
@@ -575,9 +567,6 @@ struct ConversationPane: View {
         if let session = pane.displayedSession {
             VStack(spacing: 0) {
                 ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) })
-                if let note = SharedConversation.note(session) {
-                    SharedConversationBanner(note: note, peers: SharedConversation.peers(session), leadingInset: headerInset, onOpen: pane.select)
-                }
                 TranscriptView(model: model, pane: pane, session: session)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         if pane.removedSession?.id == session.id {

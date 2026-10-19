@@ -296,3 +296,28 @@ func isHumanTranscriptText(text string) bool {
 	}
 	return true
 }
+
+// claudeForkedFrom returns the conversation a transcript was branched from.
+// Claude copies the original's lines into a branch and marks each copy with
+// forkedFrom, so the first record carries it.
+func claudeForkedFrom(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxClaudeTranscriptRecordBytes)
+	if !scanner.Scan() {
+		return ""
+	}
+	var record struct {
+		ForkedFrom struct {
+			SessionID string `json:"sessionId"`
+		} `json:"forkedFrom"`
+	}
+	if json.Unmarshal(scanner.Bytes(), &record) != nil {
+		return ""
+	}
+	return record.ForkedFrom.SessionID
+}

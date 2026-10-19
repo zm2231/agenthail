@@ -402,6 +402,47 @@ func TestFederationMirrorsReadsAndDrivesRemoteSessions(t *testing.T) {
 	}
 }
 
+func TestFederationHostRowCollidingWithLocalSessionLeavesTheLocalRow(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	remote := newFederationNode(t, "remote-a", "moved")
+	remote.serve(t, nil)
+	local := newFederationNode(t, "moved")
+	local.start(t, testRoots(remote.server))
+	record := local.pair(t, remote, "forge")
+	awaitFederation(t, "remote sessions mirrored", func() bool {
+		return len(sessionsOf(local.snapshot(t), record.ID)) == 1
+	})
+	if owner, err := local.reg.SessionHost("moved"); err != nil || owner != "" {
+		t.Fatalf("owner=%q err=%v", owner, err)
+	}
+	rows, err := local.reg.HostCatalogRows(record.ID)
+	if err != nil || len(rows) != 1 || rows[0].Session.ID != "remote-a" {
+		t.Fatalf("mirrored rows=%+v err=%v", rows, err)
+	}
+	for _, session := range local.snapshot(t).Sessions {
+		if session.ID == hosts.Qualify(record.ID, "moved") {
+			t.Fatalf("colliding host row shown: %+v", session)
+		}
+		if session.ID == "moved" && (session.Host == nil || session.Host.State != hostStateLocal || session.Name != "work moved") {
+			t.Fatalf("local row changed: %+v", session)
+		}
+	}
+	for _, id := range []string{"moved", "remote-a"} {
+		session := remote.fake.sessions[id]
+		session.Name = "renamed " + id
+		session.LastActive = time.Now()
+		remote.fake.sessions[id] = session
+	}
+	remote.daemon.discoverCatalog(context.Background())
+	awaitFederation(t, "later upserts still mirrored", func() bool {
+		rows := sessionsOf(local.snapshot(t), record.ID)
+		return len(rows) == 1 && rows[0].Name == "renamed remote-a"
+	})
+	if session, err := local.reg.Session("moved"); err != nil || session.Name != "work moved" {
+		t.Fatalf("local row after remote upsert=%+v err=%v", session, err)
+	}
+}
+
 func TestFederationPairedBothWaysShowsEachSessionOnce(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	mac := newFederationNode(t, "mac-a")
@@ -842,10 +883,11 @@ func TestFederationRenameRacesReadsAndLocalRouting(t *testing.T) {
 	}
 }
 
+// The launching closures are on the stack from creation, so a loop not yet scheduled still counts.
 func hostLoopsRunning() int {
 	buffer := make([]byte, 1<<22)
 	stacks := string(buffer[:runtime.Stack(buffer, true)])
-	return strings.Count(stacks, "daemon.(*Daemon).runHostMirror(") + strings.Count(stacks, "daemon.(*Daemon).runHostDeliveries(")
+	return strings.Count(stacks, "daemon.(*Daemon).attachHostLocked.func")
 }
 
 func TestFederationOverlappingAttachesLeaveOneLoopPairAndRemoveStopsIt(t *testing.T) {

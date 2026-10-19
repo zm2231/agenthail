@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -243,13 +242,11 @@ func parseThreadCreateRequest(args []string) (threadCreateRequest, error) {
 	if request.message == "" {
 		request.message = strings.Join(positional, " ")
 	}
-	if request.message == "-" {
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return threadCreateRequest{}, fmt.Errorf("read stdin: %w", err)
-		}
-		request.message = string(data)
+	message, err := messageText(request.message)
+	if err != nil {
+		return threadCreateRequest{}, err
 	}
+	request.message = message
 	request.message = strings.TrimSpace(request.message)
 	if request.message == "" {
 		return threadCreateRequest{}, fmt.Errorf("message is required\n%s", threadUsage)

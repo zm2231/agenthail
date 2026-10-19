@@ -222,6 +222,11 @@ func TestTMUXLaunchPassesMessageAsDirectArgument(t *testing.T) {
 	if !containsLine(got, claude) || containsLine(got, "claude") {
 		t.Fatalf("tmux launch did not use the resolved Claude executable: %#v", got)
 	}
+	for _, variable := range []string{"AGENTHAIL_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_BRIDGE_SESSION_ID", "CODEX_THREAD_ID"} {
+		if index := slices.Index(got, variable); index < 1 || got[index-1] != "-u" || index > slices.Index(got, claude) {
+			t.Fatalf("tmux launch does not clear %s before starting Claude: %#v", variable, got)
+		}
+	}
 }
 
 func TestTMUXLaunchClassifiesPostDispatchFailureAsAccepted(t *testing.T) {

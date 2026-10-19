@@ -53,8 +53,12 @@ Each paired host has one mirror loop:
   host-qualified, or that names another host, is skipped. Two daemons paired
   both ways therefore show each other's sessions exactly once.
 
-A mirrored row cannot take over a local row, and neither discovery nor any
-local registration can take over a mirrored one (`SessionOwnedError`). A
+A conversation moved between machines keeps its id, so a local row and a
+host's row can name the same session. Whichever registered first keeps it. A
+host row whose id is already local is refused: the local row is unchanged, the
+host's copy is not shown, the refusal is logged, and the mirror carries on with
+the host's other rows. Neither discovery nor any local registration can take
+over a mirrored row (`SessionOwnedError`). A
 mirror write for a host that is no longer paired is refused, and removing a
 host waits for its mirror and delivery loops to exit before deleting its rows.
 Pairing, attaching, detaching and removing a host are serialized by one
@@ -142,8 +146,8 @@ Every place that treats `host_id = ''` as "this daemon's session":
   (`host_request <> ''`); only the host delivery loop touches them.
 - `registerSessionTx` (behind `RegisterSession` and
   `RegisterSessionAndDeletePending`) refuses a session another host owns.
-- `Dispatcher.RegisterReached`: a send, queued send or compact that resumes a
-  closed Claude session into an id a paired host owns ends as an unknown
+- `Dispatcher.RegisterReached`: a send, queued send or compact whose provider
+  reports the session under an id a paired host owns ends as an unknown
   outcome naming that host, recorded only under the addressed session.
 - `dashboardState` and `publishCatalogQueueCounts` render mirrored rows from
   their stored projection; `RefreshHostQueueCounts` keeps its queue count.

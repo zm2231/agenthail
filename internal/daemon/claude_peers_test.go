@@ -86,7 +86,7 @@ func TestNativeClaudeCapabilitiesMatchSocketContract(t *testing.T) {
 }
 
 func TestBridgedClaudeCapabilitiesUseRemoteControlContract(t *testing.T) {
-	caps := surface.EffectiveCapabilities(&surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Transport: "uds"}, surface.Capabilities{Send: true, Stream: true, Reply: true, Compact: true, Model: true, Interrupt: true, Steer: true})
+	caps := surface.EffectiveCapabilities(&surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, Transport: "uds"}, surface.Capabilities{Send: true, Stream: true, Reply: true, Compact: true, Model: true, Interrupt: true, Steer: true})
 	if caps.ReadOnly || !caps.Send || !caps.Reply || caps.Stream || !caps.Compact || !caps.Model || !caps.Interrupt || !caps.Steer {
 		t.Fatalf("caps=%+v readOnly=%v", caps, caps.ReadOnly)
 	}

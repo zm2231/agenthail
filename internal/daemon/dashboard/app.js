@@ -35,6 +35,7 @@ const app = {
   startModels: {},
   launchers: [],
   codexSearch: { query: "", results: [], loading: false, error: "", timer: null, controller: null },
+  rekeyed: {},
   voice: { state: null, attemptId: "", localAudio: false, connection: false, channel: false, script: null, requestedTarget: null, poll: null, appliedSDP: "" },
 };
 const labels = { claude: "Claude Code", codex: "Codex", notion: "Notion" };
@@ -396,34 +397,6 @@ function presenceTone(session) {
   if (session.status === "idle" || ["queued", "blocked"].includes(session.currentReason)) return "idle";
   return session.status;
 }
-function sharedPeers(session) {
-  return Array.isArray(session?.sharedWith) ? session.sharedWith : [];
-}
-function sharedBadge(session) {
-  const count = sharedPeers(session).length + 1;
-  if (count < 2) return "";
-  const label = `Open in ${count} processes`;
-  return `<span class="shared-badge" title="${label}" aria-label="${label}">⧉${count}</span>`;
-}
-function processStarted(value) {
-  const started = value ? new Date(value) : null;
-  if (!started || Number.isNaN(started.getTime())) return "start time unknown";
-  return `started ${started.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
-}
-function renderSharedNote(session) {
-  const note = $("#chat-shared");
-  const peers = sharedPeers(session);
-  const open = (peer) => `<button class="soft-button" type="button" data-session="${escape(peer.id)}" aria-label="Open other process, pid ${escape(peer.pid)}">Open other</button>`;
-  const html = peers.length === 1
-    ? `<p>Also open in pid ${escape(peers[0].pid)} (${escape(processStarted(peers[0].startedAt))}). Messages here go to this process.</p>${open(peers[0])}`
-    : peers.length
-      ? `<p>Also open in ${peers.length} other processes. Messages here go to this process.</p><ul>${peers.map((peer) => `<li><span>pid ${escape(peer.pid)} (${escape(processStarted(peer.startedAt))})</span>${open(peer)}</li>`).join("")}</ul>`
-      : "";
-  if (note.sharedSignature === html) return;
-  note.sharedSignature = html;
-  note.innerHTML = html;
-  note.hidden = !peers.length;
-}
 function conversationMeta(session, model = "") {
   const parts = [statusLabel(session.status), `${session.queueCount || 0} queued`];
   if (session.status !== "busy") parts.push(`last active ${timeAgo(session.lastActive)}`);
@@ -605,7 +578,7 @@ function renderSessions() {
     visible
       .map(
         (session) =>
-          `<button class="session ${app.selected?.id === session.id ? "selected" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span>${sharedBadge(session)}</div><div class="session-detail">${hostBadge(session)}<span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}</div></button>`,
+          `<button class="session ${app.selected?.id === session.id ? "selected" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail">${hostBadge(session)}<span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}</div></button>`,
       )
       .join("");
   const historyItems = historyResults
@@ -915,13 +888,23 @@ async function load(fresh = false) {
       ? "daemon-presence online"
       : "daemon-presence offline";
     app.hasState = true;
+    const rekeyed = state.rekeyed || {};
+    applyRekeys(rekeyed);
+    let followSelection = null;
     if (app.selected) {
       const replacement = app.state.sessions.find(
         (session) => session.id === app.selected.id,
       );
       if (replacement) app.selected = replacement;
+      else if (rekeyed[app.selected.id]) {
+        followSelection = rekeyed[app.selected.id];
+        app.drafts.set(followSelection, $("#message").value);
+        stopLiveStream(true);
+        app.selected = null;
+      }
     }
     renderAll();
+    if (followSelection) await selectSession(followSelection);
     if (app.audit.loaded) await loadAudit(true, true);
     if (app.selected && app.history) renderChat();
     if (!app.selected && location.hash === "#conversations" && !mobileConversationView()) {
@@ -961,7 +944,6 @@ async function selectSession(id, focus = false) {
   $("#chat-surface").textContent = labels[session.surface] || session.surface;
   $("#chat-title").textContent = displayName(session);
   $("#chat-subtitle").textContent = conversationMeta(session);
-  renderSharedNote(session);
   $("#message").disabled = Boolean(session.readOnly);
   $("#message").value = app.drafts.get(session.id) || "";
   resizeComposer();
@@ -1118,7 +1100,6 @@ function renderChat() {
   syncComposerAction();
   renderSlashMenu();
   $("#chat-subtitle").textContent = conversationMeta(session, model);
-  renderSharedNote(session);
   $("#thread-count").textContent =
     `${exchanges.length} recent exchange${exchanges.length === 1 ? "" : "s"}`;
   renderContextUsage(context);
@@ -1384,6 +1365,20 @@ async function ensureVoicePeer() {
   }
   await app.voice.script;
 }
+function currentSessionID(id) {
+  return app.rekeyed[id] || id;
+}
+function applyRekeys(rekeyed) {
+  app.rekeyed = rekeyed;
+  for (const [retired, current] of Object.entries(rekeyed)) {
+    if (!app.drafts.has(retired)) continue;
+    if (!app.drafts.has(current)) app.drafts.set(current, app.drafts.get(retired));
+    app.drafts.delete(retired);
+  }
+  if (app.voice.requestedTarget) app.voice.requestedTarget = currentSessionID(app.voice.requestedTarget);
+  const target = $("#voice-target");
+  if (target?.value.trim()) target.value = currentSessionID(target.value.trim());
+}
 async function openVoice(targetID = "") {
   const dialog = $("#voice-dialog");
   app.voice.requestedTarget = targetID;
@@ -1396,7 +1391,7 @@ async function openVoice(targetID = "") {
   } catch (error) { toast(error.message); }
 }
 async function startVoice() {
-  const targetID = $("#voice-target").value.trim();
+  const targetID = currentSessionID($("#voice-target").value.trim());
   try {
     await voiceRequest("select", { targetId: targetID });
     app.voice.requestedTarget = null;
@@ -1414,7 +1409,7 @@ async function startVoice() {
   }
 }
 async function transferVoice() {
-  try { await voiceRequest("transfer", { targetId: $("#voice-target").value.trim() }); }
+  try { await voiceRequest("transfer", { targetId: currentSessionID($("#voice-target").value.trim()) }); }
   catch (error) { toast(error.message); }
 }
 async function interruptVoiceTarget() {
