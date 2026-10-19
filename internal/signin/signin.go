@@ -6,10 +6,12 @@ package signin
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 )
 
 type Browser string
@@ -122,40 +124,155 @@ type Resolver interface {
 	ResolveSignin(Target) (Source, error)
 }
 
-func SetupHint(consumer Consumer) string {
-	return fmt.Sprintf("run `agenthail signin use %s <profile>` (see `agenthail signin list`) or open Settings > Browser Sign-in", consumer)
+// Mode is how a consumer picks its browser profile: the system default
+// browser, a profile the user chose, or no browser at all.
+type Mode string
+
+const (
+	Automatic Mode = "automatic"
+	Chosen    Mode = "profile"
+	Off       Mode = "off"
+)
+
+// RefAutomatic and RefOff are the profile references that choose the system
+// default browser and no browser.
+const (
+	RefAutomatic = "auto"
+	RefOff       = "none"
+)
+
+// Choice is what the user decided for one consumer. Profile is set only when
+// Mode is Chosen.
+type Choice struct {
+	Mode    Mode
+	Profile *Profile
 }
 
-type NotConfiguredError struct {
+// Selection is the browser profile a choice resolves to.
+type Selection struct {
+	Mode         Mode    `json:"mode"`
+	ProfileID    string  `json:"profileId,omitempty"`
+	Browser      Browser `json:"browser,omitempty"`
+	BrowserLabel string  `json:"browserLabel,omitempty"`
+	Profile      string  `json:"profile,omitempty"`
+	Name         string  `json:"name,omitempty"`
+}
+
+// Status is a consumer's choice, the browser profile it resolves to on this
+// computer, and why that profile cannot be read.
+type Status struct {
+	ConsumerInfo
+	ProfileID    *string `json:"profileId"`
+	Mode         Mode    `json:"mode"`
+	Browser      Browser `json:"browser,omitempty"`
+	BrowserLabel string  `json:"browserLabel,omitempty"`
+	Profile      string  `json:"profile,omitempty"`
+	ProfileName  string  `json:"profileName,omitempty"`
+	Problem      string  `json:"problem,omitempty"`
+}
+
+func NewStatus(consumer ConsumerInfo, selection Selection, err error) Status {
+	status := Status{ConsumerInfo: consumer, Mode: selection.Mode, Browser: selection.Browser, BrowserLabel: selection.BrowserLabel, Profile: selection.Profile, ProfileName: selection.Name}
+	if selection.ProfileID != "" {
+		id := selection.ProfileID
+		status.ProfileID = &id
+	}
+	var problem ProblemError
+	switch {
+	case err == nil || IsOff(err):
+	case errors.As(err, &problem):
+		status.Problem = problem.Err.Error()
+	default:
+		status.Problem = err.Error()
+	}
+	return status
+}
+
+// ChangeHint says how to point a consumer at another profile, or back at the
+// system default browser.
+func ChangeHint(consumer Consumer) string {
+	return fmt.Sprintf("to change it, run `agenthail signin use %s <profile|auto|none>` (see `agenthail signin list`) or open Settings > Browser Sign-in", consumer)
+}
+
+type OffError struct {
 	Consumer Consumer
 }
 
-func (e NotConfiguredError) Error() string {
-	return fmt.Sprintf("%s: choose a browser sign-in profile; %s", e.Consumer.Label(), SetupHint(e.Consumer))
+func (e OffError) Error() string {
+	return fmt.Sprintf("%s: browser sign-in is turned off; to turn it back on, run `agenthail signin use %s auto` or open Settings > Browser Sign-in", e.Consumer.Label(), e.Consumer)
 }
 
-func IsNotConfigured(err error) bool {
-	var target NotConfiguredError
+func IsOff(err error) bool {
+	var target OffError
 	return errors.As(err, &target)
 }
+
+// ProblemError is why a consumer cannot read the profile it resolves to.
+type ProblemError struct {
+	Consumer Consumer
+	Err      error
+}
+
+func (e ProblemError) Error() string {
+	return fmt.Sprintf("%s: %v; %s", e.Consumer.Label(), e.Err, ChangeHint(e.Consumer))
+}
+
+func (e ProblemError) Unwrap() error { return e.Err }
 
 type Fixed Source
 
 func (f Fixed) ResolveSignin(Target) (Source, error) { return Source(f), nil }
 
-// A nil resolver has nothing configured.
+// A nil resolver reads no browser.
 func Resolve(resolver Resolver, target Target) (Source, error) {
 	if resolver == nil {
-		return Source{}, NotConfiguredError{Consumer: target.Consumer}
+		return Source{}, OffError{Consumer: target.Consumer}
 	}
 	return resolver.ResolveSignin(target)
 }
 
+// Select resolves a consumer's choice to a browser profile and checks that
+// its cookie store can be opened. The selection is filled in as far as it
+// resolved, so a problem still names the browser and profile it is about.
+func Select(home string, consumer Consumer, choice Choice) (Selection, Source, error) {
+	selection := Selection{Mode: choice.Mode}
+	var profile Profile
+	switch choice.Mode {
+	case Off:
+		return selection, Source{}, OffError{Consumer: consumer}
+	case Chosen:
+		if choice.Profile == nil {
+			return selection, Source{}, fmt.Errorf("%s: no sign-in profile given", consumer.Label())
+		}
+		profile = *choice.Profile
+		selection.ProfileID = profile.ID
+	case Automatic:
+		var err error
+		if profile, err = DefaultProfile(home); err != nil {
+			selection.Browser, selection.BrowserLabel = profile.Browser, profile.Browser.Label()
+			return selection, Source{}, ProblemError{Consumer: consumer, Err: err}
+		}
+	default:
+		return selection, Source{}, fmt.Errorf("%s: unknown sign-in mode %q", consumer.Label(), choice.Mode)
+	}
+	selection.Browser, selection.BrowserLabel, selection.Profile, selection.Name = profile.Browser, profile.Browser.Label(), profile.Profile, profile.Label
+	source, err := SourceFor(home, profile)
+	if err != nil {
+		return selection, Source{}, ProblemError{Consumer: consumer, Err: err}
+	}
+	return selection, source, nil
+}
+
+// SourceFor locates a profile's directory and opens its cookie store to prove
+// it is readable. The store is closed unread.
 func SourceFor(home string, profile Profile) (Source, error) {
 	source := Source{ProfileID: profile.ID, Browser: profile.Browser}
 	switch {
 	case profile.Browser == Safari:
-		return source, nil
+		if runtime.GOOS != "darwin" {
+			return Source{}, fmt.Errorf("Safari is not supported on %s", runtime.GOOS)
+		}
+		return source, openCookieStore(profile, safariCookieStores(home))
 	case profile.Browser == Firefox:
 		root := firefoxRoot(home)
 		dir := profile.Profile
@@ -163,7 +280,7 @@ func SourceFor(home string, profile Profile) (Source, error) {
 			if root == "" {
 				return Source{}, fmt.Errorf("Firefox is not supported on %s", runtime.GOOS)
 			}
-			dir = filepath.Join(root, dir)
+			dir = filepath.Join(root, filepath.FromSlash(dir))
 		}
 		source.Dir = dir
 	case profile.Browser.chromiumFamily():
@@ -178,10 +295,65 @@ func SourceFor(home string, profile Profile) (Source, error) {
 	default:
 		return Source{}, fmt.Errorf("unsupported browser %q", profile.Browser)
 	}
-	if info, err := os.Stat(source.Dir); err != nil || !info.IsDir() {
-		return Source{}, fmt.Errorf("%s profile %q (%s) no longer exists at %s", profile.Browser.Label(), profile.Profile, profile.Label, source.Dir)
+	info, err := os.Stat(source.Dir)
+	if errors.Is(err, fs.ErrPermission) {
+		return Source{}, permissionError(profile, source.Dir, err)
 	}
-	return source, nil
+	if err != nil || !info.IsDir() {
+		return Source{}, fmt.Errorf("%s profile %q no longer exists at %s", profile.Browser.Label(), profile.Profile, source.Dir)
+	}
+	return source, openCookieStore(profile, cookieStores(profile.Browser, source.Dir))
+}
+
+func cookieStores(browser Browser, dir string) []string {
+	if browser == Firefox {
+		return []string{filepath.Join(dir, "cookies.sqlite")}
+	}
+	return []string{filepath.Join(dir, "Network", "Cookies"), filepath.Join(dir, "Cookies")}
+}
+
+// safariCookieStores lists the places Safari keeps cookies, in the order the
+// cookie bridge reads them.
+func safariCookieStores(home string) []string {
+	return []string{
+		filepath.Join(home, "Library", "Cookies", "Cookies.binarycookies"),
+		filepath.Join(home, "Library", "Containers", "com.apple.Safari", "Data", "Library", "Cookies", "Cookies.binarycookies"),
+	}
+}
+
+// openCookieStore succeeds when the first cookie store that exists opens. A
+// store that exists but cannot be opened is a permission problem, never an
+// empty browser.
+func openCookieStore(profile Profile, paths []string) error {
+	for _, path := range paths {
+		file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+		if err == nil {
+			return file.Close()
+		}
+		if errors.Is(err, fs.ErrPermission) {
+			return permissionError(profile, path, err)
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("cannot open %s cookies at %s: %w", profile.Browser.Label(), path, err)
+		}
+	}
+	if profile.Browser == Safari {
+		return fmt.Errorf("Safari has no cookie store at %s; open Safari and sign in once", paths[len(paths)-1])
+	}
+	return fmt.Errorf("%s profile %q has no cookie store in %s; open that profile and sign in once", profile.Browser.Label(), profile.Profile, filepath.Dir(paths[len(paths)-1]))
+}
+
+// macOS privacy protection refuses with EPERM, which Full Disk Access lifts;
+// file modes refuse with EACCES.
+func permissionError(profile Profile, path string, err error) error {
+	if runtime.GOOS != "darwin" || !errors.Is(err, syscall.EPERM) {
+		return fmt.Errorf("permission denied reading %s data at %s; make it readable by the user that runs Agenthail", profile.Browser.Label(), path)
+	}
+	exe, exeErr := os.Executable()
+	if exeErr != nil {
+		exe = "the agenthail daemon"
+	}
+	return fmt.Errorf("permission denied reading %s data at %s (macOS needs Full Disk Access for this); add %s in System Settings > Privacy & Security > Full Disk Access, then restart Agenthail", profile.Browser.Label(), path, exe)
 }
 
 func validProfileDir(name string) bool {

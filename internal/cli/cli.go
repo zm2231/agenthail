@@ -2550,7 +2550,7 @@ func (a *App) cmdDoctor(args []string) error {
 		WritePath    string                 `json:"writePath"`
 		OK           bool                   `json:"ok"`
 		Error        string                 `json:"error,omitempty"`
-		NotSetUp     string                 `json:"notSetUp,omitempty"`
+		SigninOff    string                 `json:"signinOff,omitempty"`
 		Runtime      *surface.RuntimeStatus `json:"runtime,omitempty"`
 	}
 	var results []doctorResult
@@ -2588,9 +2588,9 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		var sessions []surface.Session
 		var err error
-		notSetUp := ""
-		if signin.IsNotConfigured(healthErr) {
-			notSetUp = healthErr.Error()
+		signinOff := ""
+		if signin.IsOff(healthErr) {
+			signinOff = healthErr.Error()
 			healthErr = nil
 		}
 		if healthErr == nil {
@@ -2598,11 +2598,11 @@ func (a *App) cmdDoctor(args []string) error {
 		} else {
 			err = healthErr
 		}
-		if signin.IsNotConfigured(err) {
-			notSetUp = err.Error()
+		if signin.IsOff(err) {
+			signinOff = err.Error()
 			err = nil
 		}
-		result := doctorResult{Surface: e.Name, Capabilities: enabled, Sessions: len(sessions), WritePath: "checked immediately before delivery", OK: err == nil, NotSetUp: notSetUp}
+		result := doctorResult{Surface: e.Name, Capabilities: enabled, Sessions: len(sessions), WritePath: "checked immediately before delivery", OK: err == nil, SigninOff: signinOff}
 		if provider, ok := e.Surface.(surface.RuntimeStatusProvider); ok {
 			runtimeStatus := provider.RuntimeStatus(ctx)
 			if runtimeStatus.Name != "" {
@@ -2636,7 +2636,7 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		results = append(results, result)
 	}
-	signins := a.signinStatus()
+	signins := a.signinStatus(ctx)
 	home, _ := os.UserHomeDir()
 	claudeConfigDir := surface.ClaudeConfigDir(home)
 	service := a.service()
@@ -2659,13 +2659,11 @@ func (a *App) cmdDoctor(args []string) error {
 			}
 		}
 		for _, status := range signins {
-			if status.Profile != nil {
-				fmt.Printf("[sign-in] %s: %s (%s %q)\n", status.Consumer, status.Profile.Label, status.Profile.Browser.Label(), status.Profile.Profile)
-			} else if status.Error != "" {
-				fmt.Printf("[sign-in] %s: %s\n", status.Consumer, status.Error)
-			} else {
-				fmt.Printf("[sign-in] %s: not set up, needed only for %s\n  fix: %s\n", status.Consumer, status.Label, signin.SetupHint(status.Consumer))
+			fmt.Printf("[sign-in] %s: %s\n", status.ID, describeSignin(status))
+			if status.Problem != "" {
+				fmt.Printf("  problem: %s\n", status.Problem)
 			}
+			fmt.Printf("  change: agenthail signin use %s <profile|auto|none>, or Settings > Browser Sign-in\n", status.ID)
 		}
 		for _, result := range results {
 			fmt.Printf("[%s] capabilities: %s\n", result.Surface, strings.Join(result.Capabilities, ", "))
@@ -2694,8 +2692,8 @@ func (a *App) cmdDoctor(args []string) error {
 					}
 				}
 			}
-			if result.NotSetUp != "" {
-				fmt.Printf("  not set up: %s\n", result.NotSetUp)
+			if result.SigninOff != "" {
+				fmt.Printf("  sign-in off: %s\n", result.SigninOff)
 			}
 			if result.OK {
 				fmt.Printf("  sessions: %d\n", result.Sessions)

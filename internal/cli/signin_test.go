@@ -5,6 +5,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -37,16 +40,19 @@ func (f *fakeSigninAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	profile := `{"id":"sp_0123456789ab","label":"Work Chrome","browser":"chrome","profile":"Profile 2","createdAt":"2026-10-18T00:00:00Z"}`
 	switch r.Method + " " + r.URL.Path {
 	case "GET /api/v1/signin":
-		_, _ = io.WriteString(w, `{"profiles":[`+profile+`],"consumers":[{"id":"notion","label":"Notion","purpose":"p","profileId":"sp_0123456789ab"},{"id":"claude","label":"Claude Remote Control","purpose":"p","profileId":null}],"browsers":[{"browser":"chrome","label":"Google Chrome","available":true,"profiles":[{"profile":"Default","name":"Personal"},{"profile":"Profile 2","name":"Work","profileId":"sp_0123456789ab"}]},{"browser":"edge","label":"Microsoft Edge","available":false,"detail":"reading this browser's profiles did not finish in time","profiles":[]}]}`)
+		_, _ = io.WriteString(w, `{"profiles":[`+profile+`],"consumers":[{"id":"notion","label":"Notion","purpose":"p","profileId":"sp_0123456789ab","mode":"profile","browser":"chrome","browserLabel":"Google Chrome","profile":"Profile 2","profileName":"Work Chrome"},{"id":"claude","label":"Claude Remote Control","purpose":"p","profileId":null,"mode":"automatic","browser":"safari","browserLabel":"Safari","profile":"Default","profileName":"Safari","problem":"permission denied reading Safari data at /fixture/Cookies.binarycookies (macOS needs Full Disk Access for this)"}],"browsers":[{"browser":"chrome","label":"Google Chrome","available":true,"profiles":[{"profile":"Default","name":"Personal"},{"profile":"Profile 2","name":"Work","profileId":"sp_0123456789ab"}]},{"browser":"edge","label":"Microsoft Edge","available":false,"detail":"reading this browser's profiles did not finish in time","profiles":[]}]}`)
 	case "POST /api/v1/signin/profiles":
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, `{"profile":`+profile+`}`)
 	case "PUT /api/v1/signin/bindings":
-		if request.Body["profileId"] == nil {
-			_, _ = io.WriteString(w, `{"consumer":"claude","profile":null}`)
-			return
+		switch request.Body["profileId"] {
+		case "none":
+			_, _ = io.WriteString(w, `{"id":"claude","label":"Claude Remote Control","purpose":"p","profileId":null,"mode":"off"}`)
+		case "auto":
+			_, _ = io.WriteString(w, `{"id":"claude","label":"Claude Remote Control","purpose":"p","profileId":null,"mode":"automatic","browser":"chrome","browserLabel":"Google Chrome","profile":"Default","profileName":"Personal"}`)
+		default:
+			_, _ = io.WriteString(w, `{"id":"notion","label":"Notion","purpose":"p","profileId":"sp_0123456789ab","mode":"profile","browser":"chrome","browserLabel":"Google Chrome","profile":"Profile 2","profileName":"Work Chrome"}`)
 		}
-		_, _ = io.WriteString(w, `{"consumer":"notion","profile":`+profile+`}`)
 	case "DELETE /api/v1/signin/profiles":
 		if r.URL.Query().Get("id") == "missing" {
 			w.WriteHeader(http.StatusNotFound)
@@ -78,11 +84,12 @@ func TestSigninCommandsCallTheDaemonAPI(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"signin"}, []string{"notion  Work Chrome (sp_0123456789ab)", "claude  not set up", `"Profile 2"  Work  added as Work Chrome`, "edge (Microsoft Edge): unavailable"}},
+		{[]string{"signin"}, []string{`notion  Work Chrome (Google Chrome "Profile 2")`, "claude  Safari, automatic (system default browser)", "problem: permission denied reading Safari data", "change: agenthail signin use <notion|claude> <profile|auto|none>", `"Profile 2"  Work  added as Work Chrome`, "edge (Microsoft Edge): unavailable"}},
 		{[]string{"signin", "add", "chrome", "Profile 2", "--label", "Work Chrome"}, []string{"Added Work Chrome (sp_0123456789ab, Google Chrome \"Profile 2\")", "agenthail signin use <notion|claude> sp_0123456789ab"}},
 		{[]string{"signin", "use", "notion", "Work Chrome"}, []string{`Notion reads cookies from Work Chrome (Google Chrome "Profile 2")`}},
-		{[]string{"signin", "use", "claude", "none"}, []string{"Claude Remote Control is not set up and reads no cookies"}},
-		{[]string{"signin", "rm", "Work Chrome"}, []string{"Removed Work Chrome. Consumers that used it are not set up"}},
+		{[]string{"signin", "use", "claude", "none"}, []string{"Claude Remote Control sign-in is off and reads no cookies"}},
+		{[]string{"signin", "use", "claude", "auto"}, []string{`Claude Remote Control reads cookies from Google Chrome "Default" (Personal), automatic (system default browser)`}},
+		{[]string{"signin", "rm", "Work Chrome"}, []string{"Removed Work Chrome. Consumers that used it read the system default browser again"}},
 	} {
 		output, err := captureStdout(t, func() error { return app.Run(test.args) })
 		if err != nil {
@@ -95,7 +102,7 @@ func TestSigninCommandsCallTheDaemonAPI(t *testing.T) {
 		}
 	}
 	got := api.requests
-	if len(got) != 5 {
+	if len(got) != 6 {
 		t.Fatalf("requests=%+v", got)
 	}
 	if got[1].Method != http.MethodPost || got[1].Body["browser"] != "chrome" || got[1].Body["profile"] != "Profile 2" || got[1].Body["label"] != "Work Chrome" {
@@ -104,11 +111,11 @@ func TestSigninCommandsCallTheDaemonAPI(t *testing.T) {
 	if got[2].Method != http.MethodPut || got[2].Body["consumer"] != "notion" || got[2].Body["profileId"] != "Work Chrome" {
 		t.Fatalf("use=%+v", got[2])
 	}
-	if _, hasProfile := got[3].Body["profileId"]; !hasProfile || got[3].Body["profileId"] != nil {
-		t.Fatalf("use none must send profileId null: %+v", got[3])
+	if got[3].Body["profileId"] != "none" || got[4].Body["profileId"] != "auto" {
+		t.Fatalf("use none and use auto must pass their choice: %+v %+v", got[3], got[4])
 	}
-	if got[4].Method != http.MethodDelete || got[4].Query != "id=Work+Chrome" {
-		t.Fatalf("rm=%+v", got[4])
+	if got[5].Method != http.MethodDelete || got[5].Query != "id=Work+Chrome" {
+		t.Fatalf("rm=%+v", got[5])
 	}
 }
 
@@ -123,38 +130,52 @@ func TestSigninCommandReportsDaemonErrors(t *testing.T) {
 	}
 }
 
-func TestDoctorShowsUnsetSigninAsNotSetUpWithoutFailing(t *testing.T) {
+func TestDoctorShowsTheResolvedSigninAndHowToChangeIt(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the browser fixture uses macOS locations")
+	}
+	home := t.TempDir()
+	chrome := filepath.Join(home, "Library", "Application Support", "Google", "Chrome")
+	for path, content := range map[string]string{
+		filepath.Join(chrome, "Local State"):          `{"profile":{"last_used":"Profile 2","info_cache":{"Profile 2":{"name":"Work"}}}}`,
+		filepath.Join(chrome, "Profile 2", "Cookies"): "",
+		filepath.Join(home, "Library", "Preferences", "com.apple.LaunchServices", "com.apple.launchservices.secure.plist"): `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>LSHandlers</key><array><dict><key>LSHandlerURLScheme</key><string>https</string><key>LSHandlerRoleAll</key><string>com.google.chrome</string></dict></array></dict></plist>`,
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", home)
 	t.Setenv("AGENTHAIL_COOKIE_BRIDGE", "")
 	app, reg := cliFixture(t, &cliSurface{kind: surface.KindCodex})
-	app.Surfaces = []SurfaceEntry{{Name: "notion", Surface: surfaces.NewNotion(reg, "", "")}}
+	if _, err := reg.BindSignin(signin.Claude, signin.RefOff); err != nil {
+		t.Fatal(err)
+	}
+	app.Surfaces = []SurfaceEntry{{Name: "claude", Surface: surfaces.NewClaude(reg, home)}}
 	output, err := captureStdout(t, func() error { return app.Run([]string{"doctor"}) })
 	if err != nil {
-		t.Fatalf("an unset sign-in profile failed doctor: err=%v output=%s", err, output)
+		t.Fatalf("doctor failed: err=%v output=%s", err, output)
 	}
 	for _, want := range []string{
-		"[sign-in] notion: not set up, needed only for Notion",
-		"fix: run `agenthail signin use notion <profile>` (see `agenthail signin list`) or open Settings > Browser Sign-in",
-		"[sign-in] claude: not set up, needed only for Claude Remote Control",
-		"[notion] capabilities",
-		"not set up: Notion: choose a browser sign-in profile",
+		`[sign-in] notion: Google Chrome "Profile 2" (Work), automatic (system default browser)`,
+		"change: agenthail signin use notion <profile|auto|none>, or Settings > Browser Sign-in",
+		"[sign-in] claude: off, reads no cookies",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output=%q missing %q", output, want)
 		}
 	}
+	if strings.Contains(output, "not set up") {
+		t.Fatalf("doctor still says sign-in needs setup: %q", output)
+	}
 	output, err = captureStdout(t, func() error { return app.Run([]string{"doctor", "--json"}) })
 	var report struct {
-		OK       bool `json:"ok"`
-		Surfaces []struct {
-			OK       bool   `json:"ok"`
-			NotSetUp string `json:"notSetUp"`
-		} `json:"surfaces"`
-		Signin []struct {
-			Consumer signin.Consumer `json:"consumer"`
-			Profile  *signin.Profile `json:"profile"`
-		} `json:"signin"`
+		Signin []signin.Status `json:"signin"`
 	}
-	if err != nil || json.Unmarshal([]byte(output), &report) != nil || !report.OK || len(report.Surfaces) != 1 || !report.Surfaces[0].OK || report.Surfaces[0].NotSetUp == "" || len(report.Signin) != 2 || report.Signin[0].Profile != nil {
+	if err != nil || json.Unmarshal([]byte(output), &report) != nil || len(report.Signin) != 2 || report.Signin[0].Mode != signin.Automatic || report.Signin[0].Profile != "Profile 2" || report.Signin[1].Mode != signin.Off {
 		t.Fatalf("err=%v output=%s", err, output)
 	}
 }
