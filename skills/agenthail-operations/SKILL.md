@@ -87,7 +87,8 @@ Claude's control capabilities depend on its transport. Native UDS messages
 cannot execute slash commands, steer a running turn, or correlate message IDs
 with transcript turns for `send --reply` / `--stream`. Use `last` to inspect
 the transcript or native `SendMessage` for an explicit reply. Compact, model,
-interrupt, and steer are typed controls that require a Remote Control attachment.
+interrupt, and steer are typed controls that require a Remote Control attachment;
+a session the Claude host runs takes interrupt and steer through the host.
 A receipt with `evidence: "transport_accepted"` only proves socket acceptance;
 receiver policy can still hold or deny the message. Do not claim model delivery
 from it. Report the immediate send status and target as returned: Sent, Queued,
@@ -126,14 +127,18 @@ target has no writable transport.
 
 ## Find And Resolve Targets
 
-For a user-facing current view, show open Claude sessions, busy or loaded Codex
-sessions active within the configured recent window (five hours by default),
-and busy or recently active Notion threads. Use `--all` only when the user asks
-for history or a target is older or missing from the current view.
+With the daemon running, `list` shows the daemon's current scope: open Claude
+sessions, busy or loaded Codex sessions active within the configured recent
+window (five hours by default), and busy or recently active Notion threads.
+`--all` lists every session that is not archived, and `--archived`
+lists the archived ones. Use `--all` only when the user asks for history or a
+target is older or missing from the current view. `--project <name|id>` keeps
+one project's sessions; `agenthail project list` names the projects.
 
 ```bash
 agenthail list --json
 agenthail list --all --json
+agenthail list --all --project agenthail --json
 ```
 
 `doctor` is a health probe. Its per-surface session counts are full discovery
@@ -196,7 +201,10 @@ terminal thread with `agenthail codex` in a human TTY. It uses the caller's
 current directory unless `--cd` is provided. `agenthail launch codex` starts
 Desktop with a writable bridge but does not itself create a thread.
 
-Create Claude background sessions with `agenthail thread create claude "task" --alias worker --json`.
+Create Claude sessions with `agenthail thread create claude "task" --alias worker --json`.
+The session runs in Agenthail's Claude host, which needs the daemon running. It
+has no Remote Control and the host denies tools its permission mode would prompt
+for, so pick a permission mode that allows the work.
 A Claude session ID is the conversation ID (the transcript name). The process,
 messaging socket and Remote Control session are attachments; Remote Control is
 never the identity. `/branch` and `/clear` create a new session without an alias
@@ -204,19 +212,20 @@ never the identity. `/branch` and `/clear` create a new session without an alias
 After `/branch`, `agenthail whoami` names the branch. Move an alias only with
 `agenthail identify <target> <name>`.
 
-Use `thread status`, `logs`, `stop` or `resume` with the alias. Preserve unknown
-launch outcomes; inspect `claude agents --json --all` before retrying.
+Use `thread status`, `stop` or `resume` with the alias; a host session has no
+`logs`, so read it with `agenthail last`. Preserve unknown launch outcomes;
+inspect `agenthail list` before retrying.
 Send to a Claude session whose process has ended (a stopped or finished
 background job, or a closed terminal session) like any other session: the send
-resumes it in the background by its session ID and delivers the message once.
+resumes it in the Claude host by its session ID and delivers the message once.
 This holds for every sender, voice delegation included. Do not run `thread resume` first. The alias and session ID keep working
 afterwards. If another process still holds the conversation but cannot take
 messages yet, the send is queued and goes out once it can, or once that process
 exits and the session is resumed. An `unknown` or `submitted` outcome means the
 resume or the delivery may have happened; inspect the session before sending
-again. `thread resume` remains for waking a background job without a message;
-it returns once the job can take messages, and a job that fails to start
-returns Claude's failure detail.
+again. `thread resume` remains for waking a session without a message; it
+returns once the session can take messages, and a session Claude refuses to
+start returns Claude's output.
 
 Codex supports `thread fork <target>` and `thread queue <target> <list|add|update|delete|reorder|start>`.
 Native queue adds require `--client-id <stable-id>`; reuse it only for retries
@@ -341,7 +350,9 @@ audit history and are never automatically resent. Proven problems are reported
 by the daemon. Pending messages never expire; they leave the queue only when
 delivered, canceled, or failed. Each pending row reports `heldBy` (`waiting`,
 `busy`, `offline`, `unknown`, `retrying`, `notLoaded`, `hostUnreachable` (a send a paired host has not received), `behind` an earlier
-message) and its age in text output. A target whose turn is waiting on its user
+message) and its age in text output. Text output shows each row's status, with
+its delivery evidence beside it when they differ: `delivered (remote queued)`
+is a send a paired host accepted into its own queue. A target whose turn is waiting on its user
 (a Claude question, plan approval or permission prompt, a Codex approval or
 input request) carries `waitingOn` and lists as `wait`; messages to it,
 including steers, are queued until the user answers. Do not interrupt it to get
@@ -447,8 +458,8 @@ agenthail codex
 is reachable and on Codex's app-server daemon otherwise. `launch codex`
 opens Codex if needed and verifies its local connection. `agenthail codex` starts
 an interactive writable terminal session and requires a human TTY.
-Claude background sessions start with `thread create claude`; Claude authentication
-must already be configured. Notion requires a signed-in browser.
+Claude sessions start in the Claude host with `thread create claude`, which
+needs the daemon running; Claude authentication must already be configured. Notion requires a signed-in browser.
 
 ## Verification Boundary
 

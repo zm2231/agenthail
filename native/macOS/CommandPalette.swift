@@ -24,7 +24,7 @@ struct CommandPalette: View {
         let attention = model.attentionSessionIDs
         let sessions = model.knownSessions
             .filter { session in
-                trimmed.isEmpty || [session.title, session.name, session.alias, session.hostProject?.displayName, session.checkout?.branch]
+                trimmed.isEmpty || [session.title, session.name, session.alias, session.project?.displayName, session.checkout?.branch]
                     .compactMap { $0 }
                     .contains { $0.localizedCaseInsensitiveContains(trimmed) }
             }
@@ -44,7 +44,7 @@ struct CommandPalette: View {
                     id: "session:\(session.id)",
                     icon: "",
                     title: session.title,
-                    detail: [session.hostProject?.displayName, session.checkout?.branch, session.surface.capitalized].compactMap { $0 }.joined(separator: " · "),
+                    detail: [session.project?.displayName, session.checkout?.branch, session.surface.capitalized].compactMap { $0 }.joined(separator: " · "),
                     session: session
                 ) { pane.select(session.id) }
             }

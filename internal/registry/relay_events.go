@@ -216,6 +216,20 @@ func (r *Registry) SetRelayError(routeID int64, message string) error {
 // ConsumeRelay commits route progress, the queue item, delivery intent, one-shot
 // deactivation and receipt together. An empty payload explicitly skips an event.
 func (r *Registry) ConsumeRelay(route RouteRow, event RelayEvent, payload, busyDelivery, goalKey string) (int64, error) {
+	// A destination a paired host owns gets the relay as a held send to that
+	// host, written in the same transaction that advances the cursor.
+	var hostSend []byte
+	if payload != "" {
+		owner, err := r.SessionHost(route.ToSession)
+		if err != nil {
+			return 0, err
+		}
+		if owner != "" {
+			if hostSend, err = r.hostSendRequest(HostSend{SessionID: route.ToSession, Message: payload, SourceSessionID: route.FromSession, BusyDelivery: busyDelivery, RelayHops: event.RelayHops + 1}); err != nil {
+				return 0, err
+			}
+		}
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return 0, err
@@ -235,7 +249,11 @@ func (r *Registry) ConsumeRelay(route RouteRow, event RelayEvent, payload, busyD
 	var queueID int64
 	if payload != "" {
 		key := fmt.Sprintf("relay:%d:%s", route.ID, event.CompletionID)
-		queueID, _, err = enqueueMessageTx(tx, r.now(), route.ToSession, payload, key, surface.SendOptions{SourceSessionID: route.FromSession, BusyDelivery: busyDelivery}, event.RelayHops+1, QueueOperationMessage, true)
+		if hostSend != nil {
+			queueID, err = queueHostDeliveryTx(tx, r.now(), route.ToSession, payload, key, hostSend, false)
+		} else {
+			queueID, _, err = enqueueMessageTx(tx, r.now(), route.ToSession, payload, key, surface.SendOptions{SourceSessionID: route.FromSession, BusyDelivery: busyDelivery}, event.RelayHops+1, QueueOperationMessage, true)
+		}
 		if err != nil {
 			return 0, err
 		}

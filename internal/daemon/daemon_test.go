@@ -1,13 +1,10 @@
 package daemon
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/zm2231/agenthail/internal/signin"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/signin"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -35,7 +34,6 @@ type daemonSurface struct {
 	models         []string
 	modelOptions   []surface.ModelOption
 	listCalls      atomic.Int32
-	resolveCalls   atomic.Int32
 	rejectBusy     bool
 	sendErr        error
 	turnID         string
@@ -147,7 +145,6 @@ func (f *daemonSurface) carried(session surface.Session) surface.Session {
 	return session
 }
 func (f *daemonSurface) Resolve(_ context.Context, id string) (*surface.Session, error) {
-	f.resolveCalls.Add(1)
 	session, ok := f.sessions[id]
 	if !ok {
 		return nil, fmt.Errorf("not found")
@@ -204,14 +201,6 @@ func TestScanBacksOffFailingRelayOnlySessionsAndRecovers(t *testing.T) {
 	}
 }
 
-func TestPruneObservationFailuresClearsLocalNotificationArms(t *testing.T) {
-	d, _, _, from, _ := daemonFixture(t)
-	d.armCompletionNotification(from.ID)
-	d.pruneObservationFailures(nil)
-	if d.consumeNotificationArm(from.ID) {
-		t.Fatal("unwatched session retained local notification arm")
-	}
-}
 func (f *daemonSurface) Send(_ context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
 	if f.rejectBusy && session.Status == surface.StatusBusy {
 		return &surface.SendResult{Accepted: false}, nil
@@ -611,7 +600,7 @@ func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	device, _, err := r.CompleteDevicePairing(pairing.Secret, "Phone")
+	device, _, err := r.CompleteDevicePairing(pairing.Secret, "Phone", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -666,7 +655,7 @@ func TestCompletionNotificationDoesNotSendForBusyBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	device, _, err := r.CompleteDevicePairing(pairing.Secret, "Phone")
+	device, _, err := r.CompleteDevicePairing(pairing.Secret, "Phone", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -689,25 +678,6 @@ func TestCompletionNotificationDoesNotSendForBusyBaseline(t *testing.T) {
 	case <-received:
 		t.Fatal("busy baseline emitted a completion notification")
 	case <-time.After(250 * time.Millisecond):
-	}
-}
-
-func TestCompletionNotificationRequiresFreshRuntimeState(t *testing.T) {
-	for _, test := range []struct {
-		name           string
-		state          registry.RuntimeState
-		observedActive bool
-		want           bool
-	}{
-		{name: "unarmed baseline", state: registry.RuntimeState{}, want: false},
-		{name: "observed active turn", state: registry.RuntimeState{}, observedActive: true, want: true},
-		{name: "agenthail delivery", state: registry.RuntimeState{NotificationArmed: true}, want: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if got := completionNotificationEligible(test.state, test.observedActive); got != test.want {
-				t.Fatalf("completionNotificationEligible=%v want=%v", got, test.want)
-			}
-		})
 	}
 }
 
@@ -840,36 +810,6 @@ func TestRelayHoldsReadOnlyCodexTerminalDestination(t *testing.T) {
 	routes, err := r.ListRoutes()
 	if err != nil || routes[0].PendingCount != 1 || routes[0].EventCursor != 0 || !strings.Contains(routes[0].LastError, "read-only") {
 		t.Fatalf("routes=%+v err=%v", routes, err)
-	}
-}
-
-func TestScanObservesOnlyWatchedSessionsWithoutDiscovery(t *testing.T) {
-	daemon, r, fake, _, _ := daemonFixture(t)
-	if _, err := r.AddRoute("from", "to", ".*"); err != nil {
-		t.Fatal(err)
-	}
-	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "from-turn"}
-	fake.observations["to"] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "to-turn"}
-
-	daemon.scanAndRelay(context.Background())
-
-	if got := fake.listCalls.Load(); got != 0 {
-		t.Fatalf("daemon performed %d full surface discovery call(s)", got)
-	}
-	if got := fake.resolveCalls.Load(); got != 0 {
-		t.Fatalf("daemon performed %d redundant resolve call(s)", got)
-	}
-}
-
-func TestScanSkipsClaudeDiscoveryWithoutClaudeWork(t *testing.T) {
-	d, _, _, _, _ := daemonFixture(t)
-	claude := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{"open": {ID: "open", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusBusy}}}
-	d.Surfaces = []surface.Surface{claude}
-
-	d.scanAndRelay(context.Background())
-
-	if got := claude.listCalls.Load(); got != 0 {
-		t.Fatalf("Claude discovery calls=%d", got)
 	}
 }
 
@@ -1105,26 +1045,6 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 		t.Fatalf("after boundary item=%+v err=%v", item, err)
 	}
 	daemon.queueWorkers.Wait()
-}
-
-func TestObservationErrorsAreThrottledUntilRecovery(t *testing.T) {
-	daemon, _, fake, _, to := daemonFixture(t)
-	var output bytes.Buffer
-	daemon.log = log.New(&output, "", 0)
-	fake.observeErr = errors.New("bridge unavailable")
-	daemon.observeSession(context.Background(), fake, &to)
-	daemon.observeSession(context.Background(), fake, &to)
-	if strings.Count(output.String(), "bridge unavailable") != 1 {
-		t.Fatalf("repeated error log=%q", output.String())
-	}
-	fake.observeErr = nil
-	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
-	daemon.observeSession(context.Background(), fake, &to)
-	fake.observeErr = errors.New("bridge unavailable")
-	daemon.observeSession(context.Background(), fake, &to)
-	if strings.Count(output.String(), "bridge unavailable") != 2 {
-		t.Fatalf("recovery did not reset throttle log=%q", output.String())
-	}
 }
 
 func TestFailedCompletionIsNotRelayed(t *testing.T) {

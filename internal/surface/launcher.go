@@ -29,13 +29,15 @@ type Runtime struct {
 	Focusable bool      `json:"focusable"`
 }
 
+// LaunchRequest asks a launcher to start a session of Surface with the
+// session options. A launcher refuses an option it cannot apply with
+// ErrLaunchOptionUnsupported.
 type LaunchRequest struct {
-	Agent   SurfaceKind
-	Cwd     string
-	Message string
-	Model   string
-	Name    string
+	Surface SurfaceKind
+	Options SessionStartOptions
 }
+
+var ErrLaunchOptionUnsupported = errors.New("launcher does not support this session option")
 
 type LaunchResult struct {
 	SessionID string
@@ -50,6 +52,9 @@ type Launcher interface {
 	Available(context.Context) (bool, string)
 	Launch(context.Context, LaunchRequest) (LaunchResult, error)
 	Locate(context.Context, []Session) map[string]Location
+	// SessionOptions reports whether the launcher applies every session
+	// option; one that does not takes only the cwd, message, model and name.
+	SessionOptions() bool
 }
 
 type Focuser interface {
@@ -76,6 +81,7 @@ type starterLauncher struct {
 func (l starterLauncher) ID() string                                            { return l.id }
 func (l starterLauncher) Agents() []SurfaceKind                                 { return append([]SurfaceKind(nil), l.agents...) }
 func (l starterLauncher) Locate(context.Context, []Session) map[string]Location { return nil }
+func (l starterLauncher) SessionOptions() bool                                  { return true }
 func (l starterLauncher) Available(context.Context) (bool, string) {
 	if l.starter == nil {
 		return false, "session starter is not configured"
@@ -84,12 +90,10 @@ func (l starterLauncher) Available(context.Context) (bool, string) {
 }
 
 func (l starterLauncher) Launch(ctx context.Context, request LaunchRequest) (LaunchResult, error) {
-	if !contains(l.agents, request.Agent) {
-		return LaunchResult{}, fmt.Errorf("launcher %s does not support agent %q", l.id, request.Agent)
+	if !contains(l.agents, request.Surface) {
+		return LaunchResult{}, fmt.Errorf("launcher %s does not support agent %q", l.id, request.Surface)
 	}
-	session, sent, err := l.starter.StartSession(ctx, SessionStartOptions{
-		Cwd: request.Cwd, Message: request.Message, Model: request.Model, Name: request.Name,
-	})
+	session, sent, err := l.starter.StartSession(ctx, request.Options)
 	if session == nil || session.ID == "" {
 		if err != nil {
 			return LaunchResult{}, err
@@ -108,9 +112,16 @@ type unavailableLauncher struct {
 func (l unavailableLauncher) ID() string                                            { return l.id }
 func (l unavailableLauncher) Agents() []SurfaceKind                                 { return append([]SurfaceKind(nil), l.agents...) }
 func (l unavailableLauncher) Locate(context.Context, []Session) map[string]Location { return nil }
+func (l unavailableLauncher) SessionOptions() bool                                  { return false }
 func (l unavailableLauncher) Available(context.Context) (bool, string)              { return false, l.detail }
 func (l unavailableLauncher) Launch(context.Context, LaunchRequest) (LaunchResult, error) {
 	return LaunchResult{}, fmt.Errorf("launcher %s is unavailable: %s", l.id, l.detail)
+}
+
+// BackgroundStarterSource is a surface that can also start a conversation
+// outside the Claude host, as a Claude Code background job.
+type BackgroundStarterSource interface {
+	BackgroundStarter() SessionStarter
 }
 
 // NewLaunchers injects existing surface starters into the launcher registry.
@@ -124,13 +135,15 @@ func NewLaunchers(surfaces []Surface) []Launcher {
 		}
 		switch candidate.Name() {
 		case KindClaude:
-			launchers = append(launchers, starterLauncher{id: LauncherClaudeBG, agents: []SurfaceKind{KindClaude}, starter: starter})
+			launchers = append(launchers, starterLauncher{id: LauncherClaudeSDK, agents: []SurfaceKind{KindClaude}, starter: starter})
+			if background, ok := candidate.(BackgroundStarterSource); ok {
+				launchers = append(launchers, starterLauncher{id: LauncherClaudeBG, agents: []SurfaceKind{KindClaude}, starter: background.BackgroundStarter()})
+			}
 		case KindCodex:
 			launchers = append(launchers, starterLauncher{id: LauncherCodexAppServer, agents: []SurfaceKind{KindCodex}, starter: starter})
 		}
 	}
 	launchers = append(launchers,
-		unavailableLauncher{id: LauncherClaudeSDK, agents: []SurfaceKind{KindClaude}, detail: "SDK runtime is not implemented"},
 		unavailableLauncher{id: LauncherExternal, detail: "external command policy is not configured"},
 	)
 	return launchers

@@ -1,11 +1,16 @@
 package registry
 
 import (
+	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,7 +19,7 @@ import (
 
 var migrationFixtureClock = time.Date(2026, 9, 1, 0, 30, 0, 0, time.UTC)
 
-func openMigrationFixture(t *testing.T, name string, stampVersion int) *Registry {
+func openMigrationFixture(t *testing.T, name string) *Registry {
 	t.Helper()
 	dump, err := os.ReadFile(filepath.Join("testdata", "migrations", name+".sql"))
 	if err != nil {
@@ -29,12 +34,6 @@ func openMigrationFixture(t *testing.T, name string, stampVersion int) *Registry
 		db.Close()
 		t.Fatal(err)
 	}
-	if stampVersion > 0 {
-		if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, stampVersion)); err != nil {
-			db.Close()
-			t.Fatal(err)
-		}
-	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -48,17 +47,15 @@ func openMigrationFixture(t *testing.T, name string, stampVersion int) *Registry
 
 func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 	for _, fixture := range []struct {
-		name         string
-		stampVersion int
-		wantVersion  int
-		source       string
-		check        func(*testing.T, *Registry)
+		name        string
+		wantVersion int
+		source      string
+		check       func(*testing.T, *Registry)
 	}{
 		{name: "v0", wantVersion: schemaVersion},
 		{name: "v1", wantVersion: schemaVersion, check: assertLegacyStatusNotNormalized},
 		{name: "v2", wantVersion: schemaVersion, source: "sender"},
 		{name: "v3", wantVersion: schemaVersion, source: "sender"},
-		{name: "v3", stampVersion: schemaVersion + 1, wantVersion: schemaVersion + 1, source: "sender"},
 		{name: "v4", wantVersion: schemaVersion, source: "sender"},
 		{name: "v5", wantVersion: schemaVersion, source: "sender"},
 		{name: "v7", wantVersion: schemaVersion, source: "sender"},
@@ -67,18 +64,14 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 		{name: "v10", wantVersion: schemaVersion, source: "sender", check: assertV10SeedStatusMigrated},
 		{name: "v11", wantVersion: schemaVersion, source: "sender", check: assertV11SeedCheckpointMigrated},
 	} {
-		label := fixture.name
-		if fixture.stampVersion > 0 {
-			label += "-stamped-newer"
-		}
-		t.Run(label, func(t *testing.T) {
-			r := openMigrationFixture(t, fixture.name, fixture.stampVersion)
+		t.Run(fixture.name, func(t *testing.T) {
+			r := openMigrationFixture(t, fixture.name)
 			var version int
 			if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != fixture.wantVersion {
 				t.Fatalf("user_version=%d err=%v, want %d", version, err, fixture.wantVersion)
 			}
 			assertMigratedSessionsAndRoutes(t, r)
-			if exists, err := r.columnExists("message_queue", "expires_at_ms"); fixture.stampVersion == 0 && (err != nil || exists) {
+			if exists, err := queueHasExpiry(r); err != nil || exists {
 				t.Fatalf("expires_at_ms exists=%v err=%v", exists, err)
 			}
 			assertMigratedQueue(t, r, fixture.source)
@@ -86,11 +79,122 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 				fixture.check(t, r)
 			}
 			assertMigratedRegistryAcceptsCurrentWrites(t, r)
+			assertSchemaMatchesFreshRegistry(t, r)
 			if identity, err := r.HostIdentity(); err != nil || !ValidHostID(identity.ID) || !ValidHostName(identity.Name) {
 				t.Fatalf("host identity=%+v err=%v", identity, err)
 			}
 		})
 	}
+}
+
+func assertSchemaMatchesFreshRegistry(t *testing.T, migrated *Registry) {
+	t.Helper()
+	fresh := openTestRegistry(t)
+	assertSameColumns(t, schemaColumns(t, fresh.db), schemaColumns(t, migrated.db))
+	want, got := schemaIndexes(t, fresh.db), schemaIndexes(t, migrated.db)
+	for name, definition := range want {
+		if got[name] != definition {
+			t.Errorf("index %s migrated=%q fresh=%q", name, got[name], definition)
+		}
+	}
+	for name := range got {
+		if _, ok := want[name]; !ok {
+			t.Errorf("index %s exists only in the migrated registry", name)
+		}
+	}
+}
+
+func TestSchemaDeclaresEveryColumn(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "schema.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatal(err)
+	}
+	assertSameColumns(t, schemaColumns(t, openTestRegistry(t).db), schemaColumns(t, db))
+}
+
+func assertSameColumns(t *testing.T, want, got map[string]map[string]string) {
+	t.Helper()
+	for table, columns := range want {
+		if got[table] == nil {
+			t.Errorf("missing table %s", table)
+			continue
+		}
+		for name, declaration := range columns {
+			migrated := got[table][name]
+			if strings.HasSuffix(declaration, " default=expression") {
+				migrated = migrated[:max(strings.LastIndex(migrated, " default="), 0)] + " default=expression"
+			}
+			if migrated != declaration {
+				t.Errorf("%s.%s got=%q want=%q", table, name, migrated, declaration)
+			}
+		}
+		for name := range got[table] {
+			if _, ok := columns[name]; !ok {
+				t.Errorf("%s.%s is unexpected", table, name)
+			}
+		}
+	}
+	for table := range got {
+		if want[table] == nil {
+			t.Errorf("table %s is unexpected", table)
+		}
+	}
+}
+
+func schemaIndexes(t *testing.T, db *sql.DB) map[string]string {
+	t.Helper()
+	rows, err := db.Query(`SELECT name, sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	indexes := map[string]string{}
+	for rows.Next() {
+		var name, definition string
+		if err := rows.Scan(&name, &definition); err != nil {
+			t.Fatal(err)
+		}
+		indexes[name] = strings.Join(strings.Fields(definition), " ")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return indexes
+}
+
+// schemaColumns reports each column's declaration. ALTER TABLE cannot add a
+// column whose default is an expression, so upgraded rows carry a constant
+// default there; every writer sets those columns explicitly.
+func schemaColumns(t *testing.T, db *sql.DB) map[string]map[string]string {
+	t.Helper()
+	rows, err := db.Query(`SELECT m.name, p.name, p.type, p."notnull", COALESCE(p.dflt_value, '') FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type='table' AND m.name NOT LIKE 'sqlite_%'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	tables := map[string]map[string]string{}
+	for rows.Next() {
+		var table, name, kind, fallback string
+		var notNull int
+		if err := rows.Scan(&table, &name, &kind, &notNull, &fallback); err != nil {
+			t.Fatal(err)
+		}
+		if tables[table] == nil {
+			tables[table] = map[string]string{}
+		}
+		if strings.HasPrefix(fallback, "datetime(") {
+			fallback = "expression"
+		}
+		tables[table][name] = fmt.Sprintf("%s notnull=%d default=%s", kind, notNull, fallback)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return tables
 }
 
 func assertMigratedSessionsAndRoutes(t *testing.T, r *Registry) {
@@ -329,7 +433,7 @@ func TestOpenRetiresQueueExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	if exists, err := r.columnExists("message_queue", "expires_at_ms"); err != nil || exists {
+	if exists, err := queueHasExpiry(r); err != nil || exists {
 		t.Fatalf("expires_at_ms exists=%v err=%v", exists, err)
 	}
 	if row, err := r.QueueItem(50, nil); err != nil || row.Status != "canceled" || row.Evidence != surface.EvidenceCanceled || row.LastError != "expired before delivery" || !row.Historical {
@@ -384,14 +488,14 @@ func TestRuntimeKindStepDerivesEachRowsKindFromItsSurfaceAndTransport(t *testing
 			t.Fatal(err)
 		}
 	}
-	if err := r.recordRuntimeKinds(); err != nil {
+	if err := r.migrate(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.db.Exec(`INSERT INTO sessions(id,surface,name,transport,runtime_kind) VALUES('recorded','codex','recorded','managed','codex-desktop')`); err != nil {
 		t.Fatal(err)
 	}
 	want["recorded"] = surface.RuntimeCodexDesktop
-	if err := r.recordRuntimeKinds(); err != nil {
+	if err := r.migrate(); err != nil {
 		t.Fatal(err)
 	}
 	for id, kind := range want {
@@ -412,7 +516,7 @@ func TestOpenRetiresQueueExpiryLeftOnARegistryAtTheVersionBefore(t *testing.T) {
 	for _, statement := range []string{
 		`ALTER TABLE message_queue ADD COLUMN expires_at_ms INTEGER NOT NULL DEFAULT 0`,
 		`INSERT INTO message_queue(id,session_id,message,queued_at,status,evidence,last_error,expires_at_ms,updated_at) VALUES(60,'target','old report','2026-10-18 08:08:00','expired','expired','message expired after 1 hour',1,'2026-10-18 09:08:00')`,
-		fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion-1),
+		`PRAGMA user_version=16`,
 	} {
 		if _, err := r.db.Exec(statement); err != nil {
 			t.Fatal(err)
@@ -430,10 +534,214 @@ func TestOpenRetiresQueueExpiryLeftOnARegistryAtTheVersionBefore(t *testing.T) {
 	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
 		t.Fatalf("user_version=%d err=%v", version, err)
 	}
-	if exists, err := r.columnExists("message_queue", "expires_at_ms"); err != nil || exists {
+	if exists, err := queueHasExpiry(r); err != nil || exists {
 		t.Fatalf("expires_at_ms exists=%v err=%v", exists, err)
 	}
 	if row, err := r.QueueItem(60, nil); err != nil || row.Status != "canceled" || row.LastError != "expired before delivery" {
 		t.Fatalf("expired row=%+v err=%v", row, err)
 	}
+}
+
+func queueHasExpiry(r *Registry) (bool, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	return columnExists(tx, "message_queue", "expires_at_ms")
+}
+
+func TestOpenGivesDevicesOnARegistryAtTheVersionBeforeNoHostBinding(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`ALTER TABLE paired_devices DROP COLUMN host_id`,
+		`INSERT INTO paired_devices(id,name,token_hash,scopes,created_at) VALUES('device-1','forge','hash-1','control,host,read','2026-10-19T08:00:00Z')`,
+		`PRAGMA user_version=20`,
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var version int
+	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("user_version=%d err=%v", version, err)
+	}
+	devices, err := r.ListDevices(false)
+	if err != nil || len(devices) != 1 || !devices[0].IsHost() || devices[0].HostID != "" {
+		t.Fatalf("devices=%+v err=%v", devices, err)
+	}
+}
+
+func TestOpenAddsQueueUploadsToARegistryAtTheVersionBefore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, r, "target")
+	for _, statement := range []string{
+		`ALTER TABLE message_queue DROP COLUMN uploads`,
+		`INSERT INTO message_queue(id,session_id,message,status,updated_at) VALUES(70,'target','read the report','pending','2026-10-19 09:00:00')`,
+		`PRAGMA user_version=19`,
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var version int
+	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("user_version=%d err=%v", version, err)
+	}
+	claimed, err := r.ClaimNextMessage("target", time.Now())
+	if err != nil || claimed == nil || claimed.ID != 70 || claimed.Message != "read the report" || len(claimed.Uploads) != 0 {
+		t.Fatalf("claimed=%+v err=%v", claimed, err)
+	}
+}
+
+func TestOpenRefusesARegistryANewerAgenthailMigrated(t *testing.T) {
+	for _, journal := range []string{"WAL", "DELETE"} {
+		t.Run(journal, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "registry.db")
+			r, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			register(t, r, "target")
+			newer := schemaVersion + 3
+			if _, err := r.db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, newer)); err != nil {
+				t.Fatal(err)
+			}
+			if journal == "DELETE" {
+				if _, err := r.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := r.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if journal == "DELETE" {
+				plain, err := sql.Open("sqlite", path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var mode string
+				if err := plain.QueryRow(`PRAGMA journal_mode=DELETE`).Scan(&mode); err != nil || mode != "delete" {
+					t.Fatalf("journal_mode=%q err=%v", mode, err)
+				}
+				plain.Close()
+			}
+			before := registryFiles(t, path)
+			opened, err := Open(path)
+			var refused *NewerSchemaError
+			if !errors.As(err, &refused) || refused.Found != newer || refused.Supported != schemaVersion {
+				if opened != nil {
+					opened.Close()
+				}
+				t.Fatalf("Open err=%v, want a NewerSchemaError for schema %d", err, newer)
+			}
+			if want := fmt.Sprintf("registry is schema %d; this agenthail supports %d; install a newer agenthail", newer, schemaVersion); err.Error() != want {
+				t.Fatalf("message=%q want %q", err.Error(), want)
+			}
+			if after := registryFiles(t, path); !reflect.DeepEqual(after, before) {
+				t.Fatalf("refused open changed the registry files: before=%v after=%v", before, after)
+			}
+		})
+	}
+}
+
+func TestOpenWaitingOnANewerAgenthailsMigrationRefusesItsSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var accepted string
+	if err := r.db.QueryRow(`PRAGMA journal_mode`).Scan(&accepted); err != nil || accepted != "wal" {
+		t.Fatalf("an accepted registry is in journal_mode %q (err %v), want wal", accepted, err)
+	}
+	if _, err := r.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	newer, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(15000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer newer.Close()
+	newer.SetMaxOpenConns(1)
+	var mode string
+	if err := newer.QueryRow(`PRAGMA journal_mode=DELETE`).Scan(&mode); err != nil || mode != "delete" {
+		t.Fatalf("journal_mode=%q err=%v", mode, err)
+	}
+	ctx := context.Background()
+	conn, err := newer.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+	opened := make(chan error, 1)
+	go func() {
+		r, err := Open(path)
+		if r != nil {
+			r.Close()
+		}
+		opened <- err
+	}()
+	time.Sleep(200 * time.Millisecond)
+	stamp := schemaVersion + 1
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version=%d`, stamp)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		t.Fatal(err)
+	}
+	var refused *NewerSchemaError
+	if err := <-opened; !errors.As(err, &refused) || refused.Found != stamp {
+		t.Fatalf("Open err=%v, want a NewerSchemaError for schema %d", err, stamp)
+	}
+	if err := conn.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "delete" {
+		t.Fatalf("refused open changed journal_mode to %q (err %v)", mode, err)
+	}
+}
+
+// registryFiles is the content of the database and its journals, keyed by name.
+func registryFiles(t *testing.T, path string) map[string]string {
+	t.Helper()
+	files := map[string]string{}
+	for _, name := range []string{path, path + "-wal", path + "-journal"} {
+		data, err := os.ReadFile(name)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(data) > 0 {
+			files[filepath.Base(name)] = fmt.Sprintf("%x", sha256.Sum256(data))
+		}
+	}
+	return files
 }

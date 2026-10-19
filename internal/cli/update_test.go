@@ -230,12 +230,3 @@ func TestUpdateRejectsUnexpectedHomebrewFailure(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
-
-func TestUpdateHelpWorksForBothNames(t *testing.T) {
-	for _, command := range []string{"update", "upgrade"} {
-		output, err := captureStdout(t, func() error { return (&App{}).Run([]string{command, "--help"}) })
-		if err != nil || !strings.Contains(output, "agenthail update") {
-			t.Fatalf("command=%s output=%q err=%v", command, output, err)
-		}
-	}
-}

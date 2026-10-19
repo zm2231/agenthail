@@ -18,7 +18,6 @@ final class AgenthailModel: ObservableObject {
     @Published var newSessionVisible = false
     @Published var newSessionMessage: String?
     @Published var paletteVisible = false
-    @Published private(set) var creationOptions: SessionCreationOptions?
     @Published var searchQuery = ""
     @Published private(set) var searchResults: [SessionSearchItem] = []
     @Published private(set) var searching = false
@@ -46,6 +45,7 @@ final class AgenthailModel: ObservableObject {
     @Published var sessionRefinement = SessionRefinement()
     @Published private(set) var localSends: [String: [LocalSend]] = [:]
     @Published private var turnSettingsDrafts: [String: TurnSettings] = [:]
+    @Published private(set) var fetchedSubagents = SubagentPageCache()
 
     private(set) var api: AgenthailAPI?
     let actionKeys = ActionRetryKeys()
@@ -70,13 +70,6 @@ final class AgenthailModel: ObservableObject {
         cache.countLimit = 100
         return cache
     }()
-    private struct PendingSendRequest {
-        let busyDelivery: String?
-        let turnSettings: TurnSettings
-        let message: String
-        let idempotencyKey: String
-    }
-    private var pendingSendRequests: [String: PendingSendRequest] = [:]
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
@@ -86,9 +79,9 @@ final class AgenthailModel: ObservableObject {
         return listed + pinnedSessions.filter { !listedIDs.contains($0.id) }
     }
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
-    var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.map(\.sessionId)) }
+    var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.compactMap(\.attentionSessionId)) }
     var sessionTree: SessionTree {
-        SessionTree.build(knownSessions, filter: sessionFilter, refinement: sessionRefinement, attentionSessionIDs: attentionSessionIDs, now: Date())
+        SessionTree.build(knownSessions, filter: sessionFilter, refinement: sessionRefinement, attentionSessionIDs: attentionSessionIDs)
     }
 
     init(connecting: Bool = true, api: AgenthailAPI? = nil) {
@@ -159,6 +152,26 @@ final class AgenthailModel: ObservableObject {
                 try? await Task.sleep(for: .seconds(delay))
             }
         }
+    }
+
+    /// Fetches the direct subagents a session list only counts, so they can
+    /// be shown and opened.
+    func loadSubagents(of session: SessionState) async {
+        guard let api else { return }
+        guard (session.hiddenSubagents?.count ?? 0) > 0 else {
+            fetchedSubagents.drop(session.id)
+            return
+        }
+        do {
+            let loaded = try await api.subagents(of: session.id)
+            if !Task.isCancelled { fetchedSubagents.store(loaded, for: session.id) }
+        } catch {
+            if !Task.isCancelled { fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id) }
+        }
+    }
+
+    func subagents(of sessionID: String) -> [SessionState] {
+        SessionFamilies.children(of: sessionID, listed: knownSessions, fetched: fetchedSubagents.children(of: sessionID))
     }
 
     @discardableResult
@@ -274,18 +287,14 @@ final class AgenthailModel: ObservableObject {
         if next != finishedUnseen { finishedUnseen = next }
     }
 
-    func loadCreationOptions() async {
-        guard let api else { return }
-        do {
-            creationOptions = try await api.sessionOptions()
-        } catch {
-            if !error.isCancellation { operationError = AgenthailAPIError.userMessage(error) }
-        }
+    func creationOptions(host: String?) async throws -> SessionCreationOptions {
+        guard let api else { throw AgenthailAPIError.unavailable("Agenthail isn't connected.") }
+        return try await api.sessionOptions(host: host)
     }
 
-    func creationModels(for agent: String) async throws -> [ModelOption] {
+    func creationModels(for agent: String, host: String?) async throws -> [ModelOption] {
         guard let api else { throw AgenthailAPIError.unavailable("Agenthail isn't connected.") }
-        return try await api.creationModels(surface: agent)
+        return try await api.creationModels(surface: agent, host: host)
     }
 
     func launchSession(_ form: SessionLaunchForm) async -> SessionLaunchOutcome {
@@ -303,7 +312,7 @@ final class AgenthailModel: ObservableObject {
         do {
             let body = try form.creationBody()
             let receipt = try await api.createSession(body: body, idempotencyKey: actionKeys.key(for: body, scope: .creation), failureReceipts: true)
-            let decision = SessionLaunchDecision(receipt, launcher: form.launcher, agent: form.agent)
+            let decision = SessionLaunchDecision(receipt, launcher: form.launcher?.id, agent: form.agent)
             switch decision {
             case .open(let id):
                 operationError = nil
@@ -336,7 +345,9 @@ final class AgenthailModel: ObservableObject {
     func openCreatedSession(_ id: String, in pane: SessionPane? = nil) async {
         await refresh(fresh: true)
         if !knownSessions.contains(where: { AgenthailLink.matches($0, reference: id) }), let api, let detail = try? await api.sessionDetail(id: id) {
-            pin(SessionState(id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias.flatMap { $0.isEmpty ? nil : $0 }, status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly, readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd))
+            var created = SessionState(id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias.flatMap { $0.isEmpty ? nil : $0 }, status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly, readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd)
+            created.host = snapshot?.daemon.pairedHost(owning: detail.session.id)
+            pin(created)
         }
         if let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: id) }) { (pane ?? mainPane).select(session.id) }
     }
@@ -395,6 +406,11 @@ final class AgenthailModel: ObservableObject {
     func openSearchResult(_ session: SessionState) {
         pin(session)
         mainPane.select(session.id)
+    }
+
+    func openSubagent(_ session: SessionState, in pane: SessionPane) {
+        pin(session)
+        pane.select(session.id)
     }
 
     private func pin(_ session: SessionState) {
@@ -623,47 +639,79 @@ final class AgenthailModel: ObservableObject {
         if settings.isEmpty { turnSettingsDrafts.removeValue(forKey: sessionID) } else { turnSettingsDrafts[sessionID] = settings }
     }
 
-    func send(_ message: String, attachments: [URL] = [], to sessionID: String, busyDelivery: String? = nil, turnSettings: TurnSettings = .init(), completion: ((Bool) -> Void)? = nil) {
-        let text = ComposerDrop.message(text: message, attachments: attachments).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let api else {
-            restoreToComposer(message.trimmingCharacters(in: .whitespacesAndNewlines), attachments: attachments, sessionID: sessionID)
+    func send(_ message: String, attachments: [ComposerAttachment] = [], to sessionID: String, busyDelivery: String? = nil, turnSettings: TurnSettings = .init(), completion: ((Bool) -> Void)? = nil) {
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !ComposerAttachments.isEmpty(text: text, attachments: attachments), let api else {
+            restoreToComposer(text, attachments: attachments, sessionID: sessionID)
             completion?(false)
             return
         }
-        let idempotencyKey: String
-        if let retry = pendingSendRequests[sessionID], retry.busyDelivery == busyDelivery, retry.turnSettings == turnSettings, retry.message == text {
-            idempotencyKey = retry.idempotencyKey
-        } else {
-            idempotencyKey = UUID().uuidString
-            pendingSendRequests[sessionID] = PendingSendRequest(busyDelivery: busyDelivery, turnSettings: turnSettings, message: text, idempotencyKey: idempotencyKey)
-        }
-        let pending = LocalSend(text: text, sentAt: Date(), status: nil)
+        let pending = LocalSend(text: text, attachments: attachments, sentAt: Date(), status: nil, busyDelivery: busyDelivery, turnSettings: turnSettings)
         localSends[sessionID, default: []].append(pending)
+        deliver(pending, to: sessionID, api: api, completion: completion)
+    }
+
+    func retrySend(_ send: LocalSend, in sessionID: String) {
+        guard let api, let index = localSends[sessionID]?.firstIndex(where: { $0.id == send.id }) else { return }
+        localSends[sessionID]?[index].failure = nil
+        deliver(send, to: sessionID, api: api)
+    }
+
+    private func deliver(_ send: LocalSend, to sessionID: String, api: AgenthailAPI, completion: ((Bool) -> Void)? = nil) {
         Task {
             do {
-                let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: text, turnSettings: turnSettings, busyDelivery: busyDelivery, author: "person", idempotencyKey: idempotencyKey)
-                if pendingSendRequests[sessionID]?.idempotencyKey == idempotencyKey { pendingSendRequests.removeValue(forKey: sessionID) }
-                if !turnSettings.isEmpty, turnSettingsDrafts[sessionID] == turnSettings { turnSettingsDrafts.removeValue(forKey: sessionID) }
-                updateLocalSend(pending.id, in: sessionID, status: LocalSend.label(for: receipt.result?.status, waitingOnYou: receipt.result?.waitingOn != nil))
+                let uploaded = try await api.upload(send.attachments, sessionID: sessionID)
+                updateLocalSend(send.id, in: sessionID) { $0.uploaded = uploaded }
+                let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: send.text, turnSettings: send.turnSettings, busyDelivery: send.busyDelivery, author: "person", attachments: uploaded.map(\.id), idempotencyKey: send.idempotencyKey)
+                if !send.turnSettings.isEmpty, turnSettingsDrafts[sessionID] == send.turnSettings { turnSettingsDrafts.removeValue(forKey: sessionID) }
+                updateLocalSend(send.id, in: sessionID) { $0.status = LocalSend.label(for: receipt.result?.status, waitingOnYou: receipt.result?.waitingOn != nil) }
                 operationError = nil
                 completion?(true)
             } catch {
-                localSends[sessionID]?.removeAll { $0.id == pending.id }
-                restoreToComposer(message.trimmingCharacters(in: .whitespacesAndNewlines), attachments: attachments, sessionID: sessionID)
-                operationError = AgenthailAPIError.userMessage(error)
+                updateLocalSend(send.id, in: sessionID) { $0.failure = AgenthailAPIError.userMessage(error) }
                 completion?(false)
             }
         }
     }
 
+    func discardSend(_ send: LocalSend, in sessionID: String) {
+        localSends[sessionID]?.removeAll { $0.id == send.id }
+    }
+
     @Published private(set) var modelCatalog: [String: [ModelOption]] = [:]
     private var modelCatalogLoads: Set<String> = []
 
-    func loadModelCatalog(surface: String) async {
-        guard modelCatalog[surface] == nil, !modelCatalogLoads.contains(surface), let api else { return }
-        modelCatalogLoads.insert(surface)
-        defer { modelCatalogLoads.remove(surface) }
-        if let options = try? await api.creationModels(surface: surface) { modelCatalog[surface] = options }
+    func loadModelCatalog(for session: SessionState) async {
+        let key = session.modelCatalogKey
+        guard modelCatalog[key] == nil, !modelCatalogLoads.contains(key), let api else { return }
+        modelCatalogLoads.insert(key)
+        defer { modelCatalogLoads.remove(key) }
+        if let options = try? await api.creationModels(surface: session.surface, host: session.remoteHostID) { modelCatalog[key] = options }
+    }
+
+    func setArchived(sessionID: String, _ archived: Bool) {
+        perform(action: archived ? "session-archive" : "session-unarchive", sessionID: sessionID)
+    }
+
+    func setProjectArchived(_ projectID: String, _ archived: Bool) {
+        projectAction(archived ? "project-archive" : "project-unarchive", projectID: projectID)
+    }
+
+    func addProject(path: String) {
+        projectAction("project-add", path: path)
+    }
+
+    private func projectAction(_ action: String, projectID: String? = nil, path: String? = nil) {
+        guard let api else { return }
+        Task {
+            do {
+                _ = try await api.projectAction(action, projectID: projectID, path: path)
+                operationError = nil
+            } catch {
+                operationError = AgenthailAPIError.userMessage(error)
+            }
+            _ = await refresh(fresh: true)
+        }
     }
 
     func rename(_ sessionID: String, to alias: String) async -> String? {
@@ -779,13 +827,14 @@ final class AgenthailModel: ObservableObject {
         restoreToComposer(problem.message, sessionID: problem.sessionId)
     }
 
-    private func restoreToComposer(_ text: String, attachments: [URL] = [], sessionID: String) {
+    private func restoreToComposer(_ text: String, attachments: [ComposerAttachment] = [], sessionID: String) {
         draft(for: sessionID).restore(text, attachments: attachments)
     }
 
-    private func updateLocalSend(_ id: UUID, in sessionID: String, status: String) {
+    private func updateLocalSend(_ id: UUID, in sessionID: String, _ change: (inout LocalSend) -> Void) {
+        let sessionID = rekeys.resolve(sessionID)
         guard let index = localSends[sessionID]?.firstIndex(where: { $0.id == id }) else { return }
-        localSends[sessionID]?[index].status = status
+        change(&localSends[sessionID]![index])
     }
 
     private func startCatalogStream() {
@@ -824,10 +873,11 @@ final class AgenthailModel: ObservableObject {
         case "session.removed":
             guard let id = event.data.sessionId else { return }
             current.sessions.removeAll { $0.id == id }
+            fetchedSubagents.sessionRemoved(id, unlisted: event.data.reason == "unlisted")
             if let next = event.data.rekeyedTo { rekeys.record([id: next]) }
         case "delivery.problem":
             guard let deliveryID = event.data.deliveryId, let sessionID = event.data.sessionId else { return }
-            let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", status: event.data.status, at: event.data.at ?? "")
+            let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, attentionSessionId: event.data.attentionSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", status: event.data.status, at: event.data.at ?? "")
             var problems = current.deliveryProblems ?? []
             problems.removeAll { $0.deliveryId == deliveryID }
             problems.insert(problem, at: 0)
@@ -933,7 +983,6 @@ final class AgenthailModel: ObservableObject {
     private func reconcilePanes() {
         if !rekeys.isEmpty {
             _ = rekeys.carry(&drafts)
-            _ = rekeys.carry(&pendingSendRequests)
             var sends = localSends
             if rekeys.carry(&sends) { localSends = sends }
             var settings = turnSettingsDrafts
@@ -975,14 +1024,14 @@ enum FollowUpAction: String {
 
 final class ComposerDraft: ObservableObject {
     @Published var text = ""
-    @Published var attachments: [URL] = []
+    @Published var attachments: [ComposerAttachment] = []
 
-    var isEmpty: Bool { ComposerDrop.isEmpty(text: text, attachments: attachments) }
+    var isEmpty: Bool { ComposerAttachments.isEmpty(text: text, attachments: attachments) }
 
-    func restore(_ restored: String, attachments restoredAttachments: [URL] = []) {
+    func restore(_ restored: String, attachments restoredAttachments: [ComposerAttachment] = []) {
         if !restored.isEmpty {
             text = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? restored : "\(text)\n\n\(restored)"
         }
-        attachments = ComposerDrop.adding(restoredAttachments, to: attachments)
+        attachments = ComposerAttachments.adding(restoredAttachments, to: attachments).attachments
     }
 }

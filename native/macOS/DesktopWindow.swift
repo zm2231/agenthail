@@ -156,7 +156,12 @@ struct SessionSidebar: View {
                         let shown = expanded ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: pane.selectedSessionID)
                         let single = project.checkouts.count == 1 ? project.checkouts.first : nil
                         VStack(alignment: .leading, spacing: 1) {
-                            ProjectHeaderView(name: project.name, branch: single?.branchLabel, dirty: single?.dirty ?? false)
+                            ProjectHeaderView(name: project.name, host: project.host, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived)
+                                .contextMenu {
+                                    if let identity = project.identity {
+                                        Button(project.archived ? "Unarchive Project" : "Archive Project") { model.setProjectArchived(identity.id, !project.archived) }
+                                    }
+                                }
                             ForEach(shown.checkouts) { checkout in
                                 if single == nil {
                                     CheckoutRowView(checkout: checkout)
@@ -178,7 +183,7 @@ struct SessionSidebar: View {
                         }
                     }
                     if tree.projects.isEmpty {
-                        Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is running." : "No sessions yet.")
+                        Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is running." : model.sessionFilter == .archived ? "Nothing is archived." : "No sessions yet.")
                             .font(.system(size: 12.5))
                             .foregroundStyle(DesktopPalette.text2)
                             .padding(.horizontal, 8)
@@ -271,7 +276,7 @@ extension SessionSidebar {
     private var searchMatches: (local: [SessionState], remote: [SessionSearchItem]) {
         let query = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let local = SessionTree.newestFirst(model.knownSessions.filter { session in
-            [session.title, session.name, session.hostProject?.displayName, session.checkout?.branch]
+            [session.title, session.name, session.project?.displayName, session.checkout?.branch]
                 .compactMap { $0 }
                 .contains { $0.localizedCaseInsensitiveContains(query) }
         })
@@ -355,6 +360,11 @@ extension SessionSidebar {
         .contextMenu {
             Button("Open in New Window") { openWindow(id: "session", value: session.id) }
             Button("Rename…") { pane.renamingSession = session }
+            Divider()
+            Button(session.archived == true ? "Unarchive" : "Archive") { model.setArchived(sessionID: session.id, session.archived != true) }
+            if session.project == nil, session.remoteHostName == nil, let cwd = session.cwd, !cwd.isEmpty {
+                Button("Add Folder as Project") { model.addProject(path: cwd) }
+            }
         }
     }
 }
@@ -374,8 +384,10 @@ struct SidebarCaption: View {
 
 struct ProjectHeaderView: View {
     let name: String
+    var host: String? = nil
     var branch: String? = nil
     var dirty = false
+    var archived = false
 
     var body: some View {
         HStack(spacing: 7) {
@@ -383,12 +395,15 @@ struct ProjectHeaderView: View {
                 .font(.system(size: 10.5, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 18, height: 18)
-                .background(DesktopPalette.accent, in: RoundedRectangle(cornerRadius: 5))
+                .background(archived ? DesktopPalette.text2 : DesktopPalette.accent, in: RoundedRectangle(cornerRadius: 5))
                 .accessibilityHidden(true)
             Text(name)
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(DesktopPalette.text)
                 .lineLimit(1)
+            if let host {
+                HostBadge(name: host)
+            }
             if let branch {
                 Text(branch)
                     .font(.system(size: 11, design: .monospaced))
@@ -403,6 +418,26 @@ struct ProjectHeaderView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
+    }
+}
+
+/// A one-line host label for remote sessions and projects. It truncates
+/// rather than wrapping so it never squeezes the row's status.
+struct HostBadge: View {
+    let name: String
+    var unavailable = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: unavailable ? "wifi.slash" : "server.rack")
+            Text(name)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .font(.system(size: 10.5))
+        .foregroundStyle(unavailable ? DesktopPalette.amber : DesktopPalette.text2)
+        .frame(maxWidth: 96, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -443,14 +478,9 @@ struct SessionRowView: View {
             Text(title ?? session.title)
                 .lineLimit(1)
                 .foregroundStyle(!session.isUnavailable && (session.open || session.isWorking) ? DesktopPalette.text : DesktopPalette.text2)
-            if let host = session.remoteHostName {
-                HStack(spacing: 3) {
-                    Image(systemName: session.isUnavailable ? "wifi.slash" : "server.rack")
-                    Text(host)
-                }
-                .font(.system(size: 10.5))
-                .foregroundStyle(session.isUnavailable ? DesktopPalette.amber : DesktopPalette.text2)
-                .help(session.unavailableReason ?? "On \(host)")
+            if let host = session.shortRemoteHostName {
+                HostBadge(name: host, unavailable: session.isUnavailable)
+                    .help(session.unavailableReason ?? "On \(session.remoteHostName ?? host)")
             }
             Spacer(minLength: 4)
             if let family, family.subagentCount > 0 {
@@ -578,21 +608,22 @@ struct ConversationPane: View {
 
     var body: some View {
         if let session = pane.displayedSession {
-            VStack(spacing: 0) {
-                ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id ? nil : {
-                    voice.route(to: session.id)
-                    NSApplication.shared.activate()
-                    openWindow(id: "voice")
-                })
-                TranscriptView(model: model, pane: pane, session: session)
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
-                        if pane.removedSession?.id == session.id {
-                            RemovedSessionBar(onClose: pane.closeRemovedSession)
-                        } else {
-                            ComposerView(model: model, pane: pane, session: session)
-                        }
+            TranscriptView(model: model, pane: pane, session: session)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
+                        voice.route(to: session.id)
+                        NSApplication.shared.activate()
+                        openWindow(id: "voice")
+                    })
+                    .background(DesktopPalette.window)
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if pane.removedSession?.id == session.id {
+                        RemovedSessionBar(onClose: pane.closeRemovedSession)
+                    } else {
+                        ComposerView(model: model, pane: pane, session: session)
                     }
-            }
+                }
             .background(DesktopPalette.window)
             .environmentObject(pane)
         } else {
@@ -737,6 +768,7 @@ struct TranscriptView: View {
     var body: some View {
         let blocks = TranscriptBlock.build(pane.timelineItems)
         let sends = model.localSends[session.id] ?? []
+        let canResend = pane.removedSession?.id != session.id && session.capabilities.send && !session.isReadOnly
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
                 if (pane.olderCursor ?? 0) > 0 || pane.olderError != nil {
@@ -759,11 +791,14 @@ struct TranscriptView: View {
                     .padding(.top, 60)
                 }
                 ForEach(blocks) { block in
-                    TranscriptBlockView(block: block)
+                    TranscriptBlockView(block: block, onEdit: canResend ? { resend($0) } : nil)
                         .timelineDetails(block.source)
                 }
                 ForEach(sends) { send in
-                    UserBubble(text: send.text, receipt: send.status)
+                    UserBubble(text: send.text, receipt: send.status, files: send.files, failure: send.failure, onEdit: canResend ? { text in
+                        if send.failure != nil { model.discardSend(send, in: session.id) }
+                        resend(text, attachments: send.failure != nil ? send.attachments : [])
+                    } : nil, onRetry: send.failure == nil || !canResend ? nil : { model.retrySend(send, in: session.id) })
                 }
                 if session.isWorking {
                     HStack(spacing: 8) {
@@ -893,6 +928,11 @@ struct TranscriptView: View {
         }
     }
 
+    private func resend(_ text: String, attachments: [ComposerAttachment] = []) {
+        pane.resend(text, attachments: attachments)
+        jumpToLatest()
+    }
+
     private func jumpToLatest() {
         pinned = true
         withAnimation(.easeOut(duration: 0.25)) { position.scrollTo(edge: .bottom) }
@@ -901,12 +941,13 @@ struct TranscriptView: View {
 
 struct TranscriptBlockView: View {
     let block: TranscriptBlock
+    var onEdit: ((String) -> Void)? = nil
     @State private var expanded = false
 
     var body: some View {
         switch block.kind {
-        case .user(let text):
-            UserBubble(text: text, receipt: nil)
+        case .user(let text, let files):
+            UserBubble(text: text, receipt: nil, files: files, onEdit: onEdit)
         case .assistant(let text):
             AssistantReply(text: text)
         case .peer(let sender, let text):
@@ -998,8 +1039,14 @@ struct AttachmentImageView: View {
 struct UserBubble: View {
     let text: String
     let receipt: String?
+    var files: [AttachedFile] = []
     var sender: String? = nil
+    var failure: String? = nil
+    var onEdit: ((String) -> Void)? = nil
+    var onRetry: (() -> Void)? = nil
     @State private var expanded = false
+    @State private var editing = false
+    @State private var hovering = false
 
     var body: some View {
         let envelope = sender.map { PeerEnvelope(sender: $0, body: text) } ?? PeerEnvelope(text)
@@ -1009,56 +1056,119 @@ struct UserBubble: View {
                     .font(.system(size: 11))
                     .foregroundStyle(DesktopPalette.text2)
             }
-            Text(envelope.body)
-                .font(.system(size: 14))
-                .lineSpacing(3)
-                .lineLimit(expanded ? nil : 8)
-                .textSelection(.enabled)
-                .padding(.horizontal, 13)
-                .padding(.vertical, 9)
-                .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 14))
-            if envelope.body.split(separator: "\n", omittingEmptySubsequences: false).count > 8 || envelope.body.count > 700 {
-                Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(DesktopPalette.text2)
-            }
-            if let receipt {
-                Text(receipt)
-                    .font(.system(size: 11))
-                    .foregroundStyle(DesktopPalette.text2)
+            if editing, let onEdit {
+                MessageEditor(text: envelope.body, onCancel: { editing = false }, onSend: { edited in
+                    editing = false
+                    onEdit(edited)
+                })
+            } else {
+                bubble(envelope.body)
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 120)
+        .onHover { hovering = $0 }
+    }
+
+    @ViewBuilder private func bubble(_ message: String) -> some View {
+        Text(message)
+            .font(.system(size: 14))
+            .lineSpacing(3)
+            .lineLimit(expanded ? nil : 8)
+            .textSelection(.enabled)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 9)
+            .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 14))
+        if message.split(separator: "\n", omittingEmptySubsequences: false).count > 8 || message.count > 700 {
+            Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
+                .buttonStyle(.plain)
+                .font(.system(size: 11.5))
+                .foregroundStyle(DesktopPalette.text2)
+        }
+        if let failure {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.circle")
+                Text("Not sent · \(failure)")
+                    .lineLimit(2)
+                if let onRetry {
+                    Button("Retry", action: onRetry)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(DesktopPalette.accentText)
+                }
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(DesktopPalette.red)
+        } else if let receipt {
+            Text(receipt)
+                .font(.system(size: 11))
+                .foregroundStyle(DesktopPalette.text2)
+        }
+        MessageActions(text: message, emphasized: hovering, onEdit: onEdit == nil ? nil : { editing = true })
+    }
+}
+
+struct AttachedFileChip: View {
+    let file: AttachedFile
+    @State private var copied = false
+
+    var body: some View {
+        let local = !file.path.isEmpty && FileManager.default.fileExists(atPath: file.path)
+        Button {
+            if local {
+                NSWorkspace.shared.open(URL(fileURLWithPath: file.path))
+            } else {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(file.path, forType: .string)
+                copied = true
+            }
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "doc")
+                    .foregroundStyle(DesktopPalette.text2)
+                Text(file.name)
+                    .foregroundStyle(DesktopPalette.text)
+                if let size = file.sizeLabel {
+                    Text(size)
+                        .foregroundStyle(DesktopPalette.text2)
+                }
+                if copied {
+                    Text("Path copied")
+                        .foregroundStyle(DesktopPalette.text2)
+                }
+            }
+            .font(.system(size: 13))
+            .lineLimit(1)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .disabled(file.path.isEmpty)
+        .help(file.path.isEmpty ? file.name : (local ? "Open \(file.path)" : "Copy \(file.path)"))
+        .accessibilityLabel(local ? "Open \(file.name)" : "Copy the path of \(file.name)")
+        .task(id: copied) {
+            guard copied else { return }
+            try? await Task.sleep(for: .seconds(2))
+            copied = false
+        }
     }
 }
 
 struct AssistantReply: View {
     let text: String
-    @State private var expanded = false
+    @State private var hovering = false
 
     var body: some View {
-        let long = LongReply.isLong(text)
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             StructuredText(markdown: text)
                 .font(.system(size: 15.5, design: .serif))
                 .lineSpacing(4)
                 .foregroundStyle(DesktopPalette.text)
-                .textSelection(.enabled)
+                .textual.textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxHeight: long && !expanded ? 420 : nil, alignment: .top)
-                .clipped()
-                .overlay(alignment: .bottom) {
-                    if long && !expanded { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
-                }
-            if long {
-                Button(expanded ? "Show less" : "Show full message") { expanded.toggle() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(DesktopPalette.accentText)
-            }
+            MessageActions(text: text, emphasized: hovering)
         }
+        .onHover { hovering = $0 }
     }
 }
 
@@ -1220,7 +1330,7 @@ struct ReasoningRow: View {
                     StructuredText(markdown: item.text)
                         .font(.system(size: 13, design: .serif))
                         .foregroundStyle(DesktopPalette.text2)
-                        .textSelection(.enabled)
+                        .textual.textSelection(.enabled)
                     TimelineMetaLine(item: item)
                 }
                 .padding(.leading, 21)
@@ -1369,16 +1479,18 @@ struct ComposerView: View {
                         .padding(.bottom, 4)
                         .onSubmit { submit(alternate: false) }
                     HStack(spacing: 4) {
-                        Button(action: chooseAttachments) {
-                            Image(systemName: "paperclip")
-                                .font(.system(size: 13))
-                                .frame(width: 28, height: 28)
+                        if session.capabilities.attach {
+                            Button(action: chooseAttachments) {
+                                Image(systemName: "paperclip")
+                                    .font(.system(size: 13))
+                                    .frame(width: 28, height: 28)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(DesktopPalette.text2)
+                            .help("Attach files or images")
+                            .accessibilityLabel("Attach files or images")
+                            .padding(.leading, 5)
                         }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(DesktopPalette.text2)
-                        .help("Attach files or images")
-                        .accessibilityLabel("Attach files or images")
-                        .padding(.leading, 5)
                         if session.surface == "codex" {
                             TurnSettingsMenu(model: model, sessionID: session.id, detail: pane.detail)
                         }
@@ -1420,11 +1532,10 @@ struct ComposerView: View {
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(dropTargeted ? DesktopPalette.accent : DesktopPalette.line, lineWidth: dropTargeted ? 2 : 1))
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
                 .dropDestination(for: URL.self) { urls, _ in
-                    guard let files = ComposerDrop.files(urls) else { return false }
-                    draft.attachments = ComposerDrop.adding(files, to: draft.attachments)
-                    focused = true
+                    guard session.capabilities.attach, !urls.isEmpty, urls.allSatisfy(\.isFileURL) else { return false }
+                    attach(urls)
                     return true
-                } isTargeted: { dropTargeted = $0 }
+                } isTargeted: { dropTargeted = $0 && session.capabilities.attach }
             }
             if let error = model.operationError {
                 Text(error)
@@ -1479,10 +1590,25 @@ struct ComposerView: View {
     private func chooseAttachments() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = true
+        panel.canChooseDirectories = false
         panel.prompt = "Attach"
         guard panel.runModal() == .OK else { return }
-        draft.attachments = ComposerDrop.adding(panel.urls, to: draft.attachments)
+        attach(panel.urls)
+    }
+
+    private func attach(_ urls: [URL]) {
+        var read: [ComposerAttachment] = []
+        var problem: ComposerAttachmentProblem?
+        for url in urls {
+            do throws(ComposerAttachmentProblem) {
+                read.append(try ComposerAttachments.file(at: url))
+            } catch {
+                problem = problem ?? error
+            }
+        }
+        let added = ComposerAttachments.adding(read, to: draft.attachments)
+        draft.attachments = added.attachments
+        model.operationError = (problem ?? added.problem)?.message
         focused = true
     }
     private var primarySymbol: String {
@@ -1656,36 +1782,31 @@ struct QueueDock: View {
 }
 
 struct AttachmentDock: View {
-    @Binding var attachments: [URL]
+    @Binding var attachments: [ComposerAttachment]
     let roundedTop: Bool
 
     var body: some View {
         let shape = UnevenRoundedRectangle(topLeadingRadius: roundedTop ? 14 : 0, topTrailingRadius: roundedTop ? 14 : 0)
         VStack(spacing: 0) {
-            ForEach(attachments, id: \.self) { url in
+            ForEach(attachments) { attachment in
                 HStack(spacing: 10) {
-                    Image(systemName: ComposerDrop.isImage(url) ? "photo" : url.hasDirectoryPath ? "folder" : "doc")
-                        .font(.system(size: 11))
-                        .foregroundStyle(DesktopPalette.text2)
-                        .frame(width: 14)
+                    AttachmentThumbnail(attachment: attachment)
                     HStack(spacing: 6) {
-                        Text(url.lastPathComponent)
+                        Text(attachment.name)
                             .foregroundStyle(DesktopPalette.text)
-                        Text(url.deletingLastPathComponent().path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
+                        Text(ByteCountFormatter.string(fromByteCount: Int64(attachment.data.count), countStyle: .file))
                             .foregroundStyle(DesktopPalette.text2)
-                            .truncationMode(.head)
                     }
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .help(url.path)
                     Button {
-                        attachments.removeAll { $0 == url }
+                        attachments.removeAll { $0.id == attachment.id }
                     } label: {
                         Image(systemName: "xmark")
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(DesktopPalette.text2)
-                    .accessibilityLabel("Remove \(url.lastPathComponent)")
+                    .accessibilityLabel("Remove \(attachment.name)")
                 }
                 .font(.system(size: 13))
                 .padding(.horizontal, 14)
@@ -1695,6 +1816,26 @@ struct AttachmentDock: View {
         .padding(.vertical, 4)
         .background(DesktopPalette.dock, in: shape)
         .overlay(shape.strokeBorder(DesktopPalette.line))
+    }
+}
+
+struct AttachmentThumbnail: View {
+    let attachment: ComposerAttachment
+
+    var body: some View {
+        if attachment.isImage, let image = NSImage(data: attachment.data) {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 28, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .accessibilityHidden(true)
+        } else {
+            Image(systemName: "doc")
+                .font(.system(size: 11))
+                .foregroundStyle(DesktopPalette.text2)
+                .frame(width: 28, height: 28)
+        }
     }
 }
 
@@ -1761,7 +1902,7 @@ struct DetailsTab: View {
     @State private var showTokens = false
     private var modelOptions: [ModelOption] {
         if let options = pane.detail?.models, !options.isEmpty { return options }
-        return model.modelCatalog[session.surface] ?? []
+        return model.modelCatalog[session.modelCatalogKey] ?? []
     }
 
     private var catalogNeeded: String? {
@@ -1838,7 +1979,7 @@ struct DetailsTab: View {
                 } else if let modelName {
                     detailRow("Model", modelName)
                 }
-                if let project = session.hostProject?.displayName { detailRow("Project", project) }
+                if let project = session.project?.displayName { detailRow("Project", project) }
                 if let branch = session.checkout?.branch ?? session.checkout?.detachedHead { detailRow("Branch", branch, monospaced: true) }
                 if let path = session.checkout?.path ?? session.cwd { detailRow("Checkout", (path as NSString).abbreviatingWithTildeInPath, monospaced: true) }
             }
@@ -1853,8 +1994,9 @@ struct DetailsTab: View {
             ClaudeObservationsSection(detail: pane.detail)
         }
         .task(id: catalogNeeded) {
-            if let surface = catalogNeeded { await model.loadModelCatalog(surface: surface) }
+            if catalogNeeded != nil { await model.loadModelCatalog(for: session) }
         }
+        .task(id: SubagentFetchKey(session, revision: model.fetchedSubagents.revision(session.id))) { await model.loadSubagents(of: session) }
     }
 
     private var canControl: Bool { !session.isReadOnly && pane.removedSession == nil }

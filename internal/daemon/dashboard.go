@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -85,6 +86,8 @@ type dashboardSurface struct {
 type dashboardSession struct {
 	ID                string                     `json:"id"`
 	Surface           surface.SurfaceKind        `json:"surface"`
+	RuntimeKind       surface.RuntimeKind        `json:"runtimeKind,omitempty"`
+	ConfiguredModel   string                     `json:"configuredModel,omitempty"`
 	Name              string                     `json:"name"`
 	Cwd               string                     `json:"cwd,omitempty"`
 	Alias             string                     `json:"alias,omitempty"`
@@ -94,6 +97,7 @@ type dashboardSession struct {
 	QueueCount        int                        `json:"queueCount"`
 	Open              bool                       `json:"open"`
 	Current           bool                       `json:"current"`
+	Archived          bool                       `json:"archived,omitempty"`
 	CurrentReason     string                     `json:"currentReason,omitempty"`
 	Capabilities      surface.Capabilities       `json:"capabilities"`
 	ReadOnly          bool                       `json:"readOnly,omitempty"`
@@ -101,7 +105,7 @@ type dashboardSession struct {
 	Source            string                     `json:"source,omitempty"`
 	Transport         string                     `json:"transport,omitempty"`
 	ForkedFrom        string                     `json:"forkedFrom,omitempty"`
-	HostProject       *catalogHostProject        `json:"hostProject,omitempty"`
+	Project           *catalogProject            `json:"project,omitempty"`
 	Checkout          *catalogCheckout           `json:"checkout,omitempty"`
 	ObservedAt        time.Time                  `json:"observedAt,omitempty"`
 	UnavailableReason string                     `json:"unavailableReason,omitempty"`
@@ -109,6 +113,9 @@ type dashboardSession struct {
 	Freshness         *registry.CatalogFreshness `json:"freshness,omitempty"`
 	Subagent          *surface.Subagent          `json:"subagent,omitempty"`
 	Subagents         *surface.SubagentRollup    `json:"subagents,omitempty"`
+	ObservedSubagents *surface.SubagentRollup    `json:"observedSubagents,omitempty"`
+	HiddenSubagents   *surface.SubagentRollup    `json:"hiddenSubagents,omitempty"`
+	Listed            bool                       `json:"listed"`
 	Host              *dashboardHost             `json:"host,omitempty"`
 }
 
@@ -121,6 +128,8 @@ type dashboardState struct {
 	Surfaces           []dashboardSurface         `json:"surfaces"`
 	Sessions           []dashboardSession         `json:"sessions"`
 	TotalSessions      int                        `json:"totalSessions"`
+	Counts             map[string]int             `json:"counts,omitempty"`
+	Projects           []dashboardProject         `json:"projects,omitempty"`
 	NextCursor         string                     `json:"nextCursor,omitempty"`
 	Queue              []dashboardQueue           `json:"queue"`
 	Channels           []dashboardChannel         `json:"channels"`
@@ -270,7 +279,7 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/api/session-stream", dashboard.guard(d.hostRouted("id", d.apiSessionStreamHandler)))
 	mux.HandleFunc("/api/models", dashboard.guard(d.hostRouted("id", d.dashboardModelsHandler)))
 	mux.HandleFunc("/api/search", dashboard.guard(d.dashboardSearchHandler))
-	mux.HandleFunc("/api/history", dashboard.guard(d.dashboardHistoryHandler))
+	mux.HandleFunc("/api/history", dashboard.guard(d.hostRouted("sessionId", d.dashboardHistoryHandler)))
 	mux.HandleFunc("/api/action", dashboard.guard(d.idempotentActionHandler(d.hostRoutedAction(d.dashboardActionHandler))))
 	mux.HandleFunc("/api/settings", dashboard.guard(d.dashboardSettingsHandler))
 	mux.HandleFunc("/api/settings/remote-qr", dashboard.guard(d.dashboardRemoteQRHandler))
@@ -342,7 +351,9 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		if request.BusyDelivery != "" {
 			config.BusyDelivery = deliverypolicy.Mode(request.BusyDelivery)
 		}
-		err = SaveDashboardConfig(config)
+		if err = SaveDashboardConfig(config); err == nil {
+			d.publishCatalogPresence()
+		}
 	case "notifications-enable":
 		_, err = EnableNotifications()
 	case "notifications-disable":
@@ -397,10 +408,15 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	limit := 25
+	sessionID := strings.TrimSpace(r.URL.Query().Get("sessionId"))
+	maxLimit := 100
+	if sessionID != "" {
+		maxLimit = 200
+	}
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > 100 {
-			http.Error(w, "limit must be between 1 and 100", http.StatusBadRequest)
+		if err != nil || parsed < 1 || parsed > maxLimit {
+			http.Error(w, fmt.Sprintf("limit must be between 1 and %d", maxLimit), http.StatusBadRequest)
 			return
 		}
 		limit = parsed
@@ -420,7 +436,18 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "history filters are too long", http.StatusBadRequest)
 		return
 	}
-	entries, hasMore, err := d.Registry.ListHistoryPage(limit, beforeID, kind, queryText)
+	var entries []registry.HistoryEntry
+	hasMore := false
+	var err error
+	if sessionID != "" {
+		if beforeID != 0 || kind != "" || queryText != "" {
+			http.Error(w, "a session's history takes only a limit", http.StatusBadRequest)
+			return
+		}
+		entries, err = d.Registry.ListHistory(limit, sessionID)
+	} else {
+		entries, hasMore, err = d.Registry.ListHistoryPage(limit, beforeID, kind, queryText)
+	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf("read delivery history: %s", err), http.StatusInternalServerError)
 		return
@@ -459,10 +486,11 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		writeAPIError(w, http.StatusBadRequest, code, pageErr.Error())
 		return
 	}
+	cacheable := page == nil && !catalogMirror(r.Context())
 	hostEpoch, catalogSeq, catalogErr := d.Registry.CatalogState()
 	dashboard.stateMu.Lock()
 	version := dashboard.stateVersion.Load()
-	if page == nil && catalogErr == nil && r.URL.Query().Get("fresh") != "1" && dashboard.cachedVersion == version && dashboard.state.HostEpoch == hostEpoch && dashboard.state.CatalogSeq == catalogSeq && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
+	if cacheable && catalogErr == nil && r.URL.Query().Get("fresh") != "1" && dashboard.cachedVersion == version && dashboard.state.HostEpoch == hostEpoch && dashboard.state.CatalogSeq == catalogSeq && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
 		state := dashboard.state
 		dashboard.stateMu.Unlock()
 		d.writeDashboardSnapshot(w, r, state)
@@ -480,11 +508,7 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		state, err = d.dashboardState(refreshCtx, *page)
 	}
 	if err != nil {
-		if page != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if hadPrevious {
+		if cacheable && hadPrevious {
 			stale := previous
 			stale.Daemon = cloneDashboardDaemon(stale.Daemon)
 			stale.Daemon["stale"] = true
@@ -495,7 +519,7 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if page == nil {
+	if cacheable {
 		dashboard.stateMu.Lock()
 		dashboard.state = state
 		dashboard.stateAt = time.Now()
@@ -523,20 +547,17 @@ func (d *Daemon) writeDashboardSnapshot(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	scope := r.URL.Query().Get("scope")
-	if scope != "" && scope != "all" && scope != "recent" && scope != "current" && scope != "running" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_scope", "Use all, recent, current, or running.")
+	if !validCatalogScope(scope) {
+		writeAPIError(w, http.StatusBadRequest, "invalid_scope", "Use running, current, recent, all, or archived.")
 		return
 	}
 	projectID, query := r.URL.Query().Get("projectId"), strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	rows := make([]dashboardSession, 0, len(state.Sessions))
 	for _, row := range state.Sessions {
-		if (scope == "recent" || scope == "current") && !row.Current {
+		if scope != "" && !catalogScopeMatches(scope, row) {
 			continue
 		}
-		if scope == "running" && row.Status != surface.StatusBusy {
-			continue
-		}
-		if projectID != "" && (row.HostProject == nil || row.HostProject.ID != projectID) {
+		if projectID != "" && (row.Project == nil || row.Project.ID != projectID) {
 			continue
 		}
 		if query != "" && !strings.Contains(strings.ToLower(row.Name+" "+row.Cwd+" "+row.Alias), query) {
@@ -605,12 +626,13 @@ func catalogPageRequestFromHTTP(r *http.Request) (*registry.CatalogPageRequest, 
 		return nil, fmt.Errorf("use a limit between 1 and 200")
 	}
 	scope := r.URL.Query().Get("scope")
-	if scope != "" && scope != "all" && scope != "recent" && scope != "current" && scope != "running" {
-		return nil, fmt.Errorf("use all, recent, current, or running")
+	if !validCatalogScope(scope) {
+		return nil, fmt.Errorf("use running, current, recent, all, or archived")
 	}
 	projectID, query := r.URL.Query().Get("projectId"), strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
-	filter := scope + "\x00" + projectID + "\x00" + query
-	request := &registry.CatalogPageRequest{Scope: scope, ProjectID: projectID, Query: query, Limit: limit, CodexRecentHours: 24}
+	parentID := r.URL.Query().Get("parentId")
+	filter := scope + "\x00" + projectID + "\x00" + query + "\x00" + parentID
+	request := &registry.CatalogPageRequest{Scope: scope, ProjectID: projectID, ParentID: parentID, Query: query, Limit: limit}
 	if raw := r.URL.Query().Get("cursor"); raw != "" {
 		decoded, err := base64.RawURLEncoding.DecodeString(raw)
 		var cursor catalogPageCursor
@@ -712,7 +734,6 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	var page *registry.CatalogPage
 	if len(pageRequest) > 0 {
 		request := pageRequest[0]
-		request.CodexRecentHours = config.CodexRecentHours
 		loaded, err := d.Registry.CatalogSnapshotPage(request)
 		if err != nil {
 			return dashboardState{}, fmt.Errorf("read catalog page: %w", err)
@@ -765,15 +786,26 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	for index := range deliveryProblems {
 		deliveryProblems[index].SessionID = d.publicSessionID(deliveryProblems[index].SessionID)
 		deliveryProblems[index].SourceSessionID = d.publicSessionID(deliveryProblems[index].SourceSessionID)
+		if deliveryProblems[index].AttentionSessionID != "" {
+			deliveryProblems[index].AttentionSessionID = d.publicSessionID(deliveryProblems[index].AttentionSessionID)
+		}
 	}
 	rekeyed, err := d.Registry.SessionRekeys()
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read session rekeys: %w", err)
 	}
-	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Rekeyed: rekeyed}
+	view, err := d.loadCatalogViewState()
+	if err != nil {
+		return dashboardState{}, err
+	}
+	projectRecords, err := d.Registry.ListProjects()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read projects: %w", err)
+	}
+	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Sessions: []dashboardSession{}, Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Rekeyed: rekeyed}
 	if page != nil {
 		state.catalogPageApplied = true
-		state.catalogPageFilter = pageRequest[0].Scope + "\x00" + pageRequest[0].ProjectID + "\x00" + pageRequest[0].Query
+		state.catalogPageFilter = pageRequest[0].Scope + "\x00" + pageRequest[0].ProjectID + "\x00" + pageRequest[0].Query + "\x00" + pageRequest[0].ParentID
 		state.catalogPageOffset = page.Offset
 		state.catalogPageLimit = page.Limit
 		state.catalogPageHasMore = page.HasMore
@@ -823,7 +855,11 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	}
 	catalogSessions := map[string]registry.CatalogSessionState{}
 	sessions := make([]surface.Session, 0, len(catalogSnapshot.Sessions))
+	mirror := catalogMirror(ctx)
 	for _, record := range catalogSnapshot.Sessions {
+		if !mirror && (catalogSnapshot.Listing.Hidden[record.Session.ID] || page == nil && catalogSnapshot.Listing.Retired[record.Session.ID]) {
+			continue
+		}
 		catalogSessions[record.Session.ID] = record
 		sessions = append(sessions, record.Session)
 	}
@@ -834,6 +870,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			return dashboardState{}, fmt.Errorf("read session catalog: %w", err)
 		}
 	}
+	local := make([]int, 0, len(sessions))
 	for _, session := range sessions {
 		if record, found := catalogSessions[session.ID]; found && record.HostID != "" {
 			var mirrored dashboardSession
@@ -842,6 +879,8 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			}
 			mirrored.ObservedAt = record.ObservedAt
 			mirrored.Freshness = &record.Freshness
+			mirrored.HiddenSubagents = catalogSnapshot.Listing.HiddenSubagents(session.ID)
+			mirrored.Subagents = addSubagentRollups(mirrored.ObservedSubagents, mirrored.HiddenSubagents)
 			state.Sessions = append(state.Sessions, mirrored)
 			continue
 		}
@@ -852,7 +891,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		identity := catalogIdentity{}
 		observedAt := time.Time{}
 		if record, found := catalogSessions[session.ID]; found {
-			_ = json.Unmarshal(record.HostProject, &identity.HostProject)
+			_ = json.Unmarshal(record.Project, &identity.Project)
 			_ = json.Unmarshal(record.Checkout, &identity.Checkout)
 			identity.UnavailableReason = record.UnavailableReason
 			observedAt = record.ObservedAt
@@ -864,16 +903,27 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		if record, found := catalogSessions[session.ID]; found {
 			entry.Freshness = &record.Freshness
 		}
+		entry.QueueCount = counts[session.ID]
 		if record, found := catalogSessions[session.ID]; found && record.ProjectionFingerprint != "" {
 			var saved dashboardSession
 			if json.Unmarshal([]byte(record.ProjectionFingerprint), &saved) == nil {
-				entry.Open = saved.Open
-				entry.Subagents = saved.Subagents
+				entry.Open, entry.Listed = saved.Open, saved.Listed
+				entry.ObservedSubagents = saved.ObservedSubagents
+				entry.Current, entry.CurrentReason = saved.Current, saved.CurrentReason
 			}
 		}
-		entry.QueueCount = counts[session.ID]
-		entry.Current, entry.CurrentReason = surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: entry.QueueCount, Open: entry.Open, Now: now, CodexRecentHours: config.CodexRecentHours})
+		entry.HiddenSubagents = catalogSnapshot.Listing.HiddenSubagents(session.ID)
+		entry.Subagents = addSubagentRollups(entry.ObservedSubagents, entry.HiddenSubagents)
+		local = append(local, len(state.Sessions))
 		state.Sessions = append(state.Sessions, entry)
+	}
+	localRows := make([]dashboardSession, 0, len(local))
+	for _, index := range local {
+		localRows = append(localRows, state.Sessions[index])
+	}
+	d.settleArchiveActivity(localRows, view)
+	for _, index := range local {
+		applyCatalogView(&state.Sessions[index], view)
 	}
 	sort.Slice(state.Surfaces, func(i, j int) bool { return state.Surfaces[i].Name < state.Surfaces[j].Name })
 	if page == nil {
@@ -891,6 +941,8 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		state.TotalSessions = page.TotalMatching
 	} else {
 		state.TotalSessions = len(state.Sessions)
+		state.Counts = catalogScopeCounts(state.Sessions)
+		state.Projects = catalogProjects(state.Sessions, projectRecords, d.localHost())
 	}
 	return state, nil
 }
@@ -1014,15 +1066,27 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Handoff         string                     `json:"handoff"`
 		Once            bool                       `json:"once"`
 		RelayID         int64                      `json:"relayId"`
+		RelayHops       int                        `json:"relayHops"`
 		DeliveryID      int64                      `json:"deliveryId"`
 		Surface         string                     `json:"surface"`
 		Cwd             string                     `json:"cwd"`
 		Launcher        string                     `json:"launcher"`
 		Approval        string                     `json:"approvalPolicy"`
 		Author          surface.Author             `json:"author"`
+		ProjectID       string                     `json:"projectId"`
+		Path            string                     `json:"path"`
+		Attachments     []string                   `json:"attachments"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid dashboard request", http.StatusBadRequest)
+		return
+	}
+	if len(request.Attachments) > 0 && request.Action != "send" {
+		http.Error(w, "attachments are only accepted with send", http.StatusBadRequest)
+		return
+	}
+	if strings.HasPrefix(request.Action, "project-") {
+		d.projectAction(r.Context(), w, request.Action, request.ProjectID, request.Path)
 		return
 	}
 	if request.Action == "delivery-dismiss" {
@@ -1047,11 +1111,15 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if request.Action == "session-create" {
+		approval := strings.TrimSpace(request.Approval)
+		if approval != "" && approval != "untrusted" && approval != "on-request" && approval != "never" {
+			http.Error(w, "approval policy is invalid", http.StatusBadRequest)
+			return
+		}
+		startOptions := func(cwd string) surface.SessionStartOptions {
+			return surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode}
+		}
 		if request.Launcher != "" {
-			if request.Worktree != "" || request.PermissionMode != "" || request.Approval != "" || !request.TurnOptions.Empty() {
-				http.Error(w, "launcher does not support advanced session options", http.StatusBadRequest)
-				return
-			}
 			if strings.TrimSpace(request.Message) == "" {
 				http.Error(w, "message is required", http.StatusBadRequest)
 				return
@@ -1096,11 +1164,16 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 			defer cancel()
-			launchResult, launchErr := launcher.Launch(ctx, surface.LaunchRequest{Agent: surface.SurfaceKind(request.Surface), Cwd: cwd, Message: request.Message, Model: request.Model, Name: request.Name})
+			messageUUID := uuid.NewString()
+			ctx = surface.WithMessageUUID(ctx, messageUUID)
+			launchResult, launchErr := launcher.Launch(ctx, surface.LaunchRequest{Surface: surface.SurfaceKind(request.Surface), Options: startOptions(cwd)})
 			startErr := launchErr
 			if launchErr != nil && launchResult.Session == nil {
 				var acceptedErr surface.LaunchAcceptedError
 				switch {
+				case errors.Is(launchErr, surface.ErrLaunchOptionUnsupported):
+					http.Error(w, launchErr.Error(), http.StatusBadRequest)
+					return
 				case errors.As(launchErr, &acceptedErr):
 					d.writeAcceptedLaunch(w, request.Launcher, launchResult.Location, launchErr.Error())
 					return
@@ -1146,7 +1219,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			launchFields := map[string]any{"launcher": request.Launcher, "location": location, "sessionId": session.ID}
 			if launchResult.Session != nil {
-				d.writeStartedSessionOutcome(w, session, alias, request.Message, launchResult.Sent, startErr, launchFields)
+				d.writeStartedSessionOutcome(w, session, alias, messageUUID, request.Message, launchResult.Sent, startErr, launchFields)
 				return
 			}
 			launchFields["ok"] = true
@@ -1178,14 +1251,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			return
 		}
-		approval := strings.TrimSpace(request.Approval)
-		if approval != "" && approval != "untrusted" && approval != "on-request" && approval != "never" {
-			http.Error(w, "approval policy is invalid", http.StatusBadRequest)
-			return
-		}
 		ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 		defer cancel()
-		session, sent, startErr := starter.StartSession(ctx, surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode})
+		messageUUID := uuid.NewString()
+		ctx = surface.WithMessageUUID(ctx, messageUUID)
+		session, sent, startErr := starter.StartSession(ctx, startOptions(cwd))
 		if session != nil {
 			session.Runtime = &surface.Runtime{Launcher: defaultLauncherForSurface(surface.SurfaceKind(request.Surface)), Focusable: false}
 			if registerErr := d.Registry.RegisterSession(*session); registerErr != nil {
@@ -1198,7 +1268,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 					return
 				}
 			}
-			d.writeStartedSessionOutcome(w, session, alias, request.Message, sent, startErr, nil)
+			d.writeStartedSessionOutcome(w, session, alias, messageUUID, request.Message, sent, startErr, nil)
 			return
 		}
 		if startErr == nil {
@@ -1320,6 +1390,17 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				failed++
 				continue
 			}
+			if owner, ownerErr := d.Registry.SessionHost(session.ID); ownerErr != nil {
+				failed++
+				continue
+			} else if owner != "" {
+				if _, err := d.Registry.QueueHostSend(registry.HostSend{SessionID: session.ID, Message: request.Message, Key: "channel:" + channel + ":" + session.ID + ":" + uuid.NewString(), SourceSessionID: request.SourceSessionID}); err != nil {
+					failed++
+				} else {
+					queued++
+				}
+				continue
+			}
 			adapter, adapterErr := d.adapters().For(session)
 			if adapterErr != nil {
 				failed++
@@ -1329,7 +1410,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				failed++
 				continue
 			}
-			receipt, deliverErr := d.dispatcher().Deliver(operationCtx, adapter, session, request.Message, "")
+			receipt, deliverErr := d.dispatcher().DeliverWithOptions(operationCtx, adapter, session, request.Message, "", surface.SendOptions{SourceSessionID: request.SourceSessionID})
 			if deliverErr != nil {
 				failed++
 				continue
@@ -1355,7 +1436,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "channel and targetId are required", http.StatusBadRequest)
 			return
 		}
-		targetID, resolveErr := d.Registry.ResolveTarget(request.TargetID)
+		targetID, resolveErr := d.resolveLinkTarget(request.TargetID)
 		if resolveErr != nil {
 			http.Error(w, fmt.Sprintf("resolve agent: %s", resolveErr), http.StatusBadRequest)
 			return
@@ -1367,14 +1448,16 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				http.Error(w, "session not found", http.StatusNotFound)
 				return
 			}
-			adapter, adapterErr := d.adapters().For(target)
-			if adapterErr != nil {
-				http.Error(w, "target surface is not configured", http.StatusConflict)
-				return
-			}
-			if err := d.ensureDashboardWritable(r.Context(), adapter, target); err != nil {
-				http.Error(w, err.Error(), http.StatusConflict)
-				return
+			if !d.hostOwned(target.ID) {
+				adapter, adapterErr := d.adapters().For(target)
+				if adapterErr != nil {
+					http.Error(w, "target surface is not configured", http.StatusConflict)
+					return
+				}
+				if err := d.ensureDashboardWritable(r.Context(), adapter, target); err != nil {
+					http.Error(w, err.Error(), http.StatusConflict)
+					return
+				}
 			}
 			actionErr = d.Registry.AddToChannel(strings.TrimPrefix(strings.TrimSpace(request.Channel), "#"), targetID)
 		} else {
@@ -1397,7 +1480,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, fmt.Sprintf("resolve source agent: %s", fromErr), http.StatusBadRequest)
 			return
 		}
-		toID, toErr := d.Registry.ResolveTarget(request.ToID)
+		toID, toErr := d.resolveLinkTarget(request.ToID)
 		if toErr != nil {
 			http.Error(w, fmt.Sprintf("resolve destination agent: %s", toErr), http.StatusBadRequest)
 			return
@@ -1407,14 +1490,16 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "destination session not found", http.StatusNotFound)
 			return
 		}
-		adapter, adapterErr := d.adapters().For(toSession)
-		if adapterErr != nil {
-			http.Error(w, "destination surface is not configured", http.StatusConflict)
-			return
-		}
-		if err := d.ensureDashboardWritable(r.Context(), adapter, toSession); err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
+		if !d.hostOwned(toSession.ID) {
+			adapter, adapterErr := d.adapters().For(toSession)
+			if adapterErr != nil {
+				http.Error(w, "destination surface is not configured", http.StatusConflict)
+				return
+			}
+			if err := d.ensureDashboardWritable(r.Context(), adapter, toSession); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
 		}
 		pattern := request.Pattern
 		if pattern == "" {
@@ -1544,6 +1629,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "launcher": session.Runtime.Launcher, "location": session.Runtime.Location, "sessionId": session.ID})
 		return
 	}
+	if request.Action == "session-archive" || request.Action == "session-unarchive" {
+		d.sessionArchiveAction(w, request.Action, session.ID)
+		return
+	}
 	if request.Action == "alias" {
 		alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@")
 		if alias == "" || strings.ContainsAny(alias, " \t\r\n/#") || len(alias) > 80 {
@@ -1582,8 +1671,17 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	var result any
 	switch request.Action {
 	case "send":
-		if strings.TrimSpace(request.Message) == "" {
+		if strings.TrimSpace(request.Message) == "" && len(request.Attachments) == 0 {
 			http.Error(w, "message is required", http.StatusBadRequest)
+			return
+		}
+		attached, uploadErr := d.resolveUploads(request.Attachments)
+		if uploadErr != nil {
+			http.Error(w, uploadErr.Error(), http.StatusBadRequest)
+			return
+		}
+		if len(attached) > 0 && !effective.Attach {
+			http.Error(w, "this session cannot take attached files", http.StatusBadRequest)
 			return
 		}
 		if request.Author != "" && request.Author != surface.AuthorPerson {
@@ -1600,7 +1698,15 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 		}
-		receipt, actionErr := d.dispatcher().DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author})
+		if request.RelayHops != 0 {
+			if len(attached) > 0 {
+				http.Error(w, "a relay leg carries no attached files", http.StatusBadRequest)
+				return
+			}
+			d.queueHostRelay(w, r, session, request.Message, request.SourceSessionID, request.BusyDelivery, request.RelayHops)
+			return
+		}
+		receipt, actionErr := d.dispatcher().DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, Uploads: attached})
 		if actionErr != nil {
 			http.Error(w, actionErr.Error(), http.StatusBadGateway)
 			return
@@ -2058,9 +2164,9 @@ func writeDashboardJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-func (d *Daemon) writeStartedSessionOutcome(w http.ResponseWriter, session *surface.Session, alias, message string, sent *surface.SendResult, startErr error, extra map[string]any) {
+func (d *Daemon) writeStartedSessionOutcome(w http.ResponseWriter, session *surface.Session, alias, messageUUID, message string, sent *surface.SendResult, startErr error, extra map[string]any) {
 	if startErr != nil {
-		intent, intentErr := d.Registry.RecordSessionCreationIntent(session.ID, message)
+		intent, intentErr := d.Registry.RecordSessionCreationIntent(session.ID, messageUUID, message)
 		if intentErr != nil {
 			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: fmt.Sprintf("%s; durable delivery intent failed: %s", startErr, intentErr)})
 			writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but its delivery intent could not be persisted: %s; do not retry automatically", intentErr), extra)

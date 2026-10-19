@@ -37,8 +37,8 @@ func (a *App) signinStatus() []signinStatusEntry {
 	entries := make([]signinStatusEntry, 0, len(signin.Consumers))
 	var bindings map[signin.Consumer]string
 	var readErr error
-	if a.Registry != nil {
-		bindings, readErr = a.Registry.SigninBindings()
+	if a.registry() != nil {
+		bindings, readErr = a.registry().SigninBindings()
 	}
 	for _, consumer := range signin.Consumers {
 		entry := signinStatusEntry{Consumer: consumer.ID, Label: consumer.Label}
@@ -46,13 +46,13 @@ func (a *App) signinStatus() []signinStatusEntry {
 		case readErr != nil:
 			entry.Error = readErr.Error()
 		case bindings[consumer.ID] != "":
-			profile, err := a.Registry.SigninProfile(bindings[consumer.ID])
+			profile, err := a.registry().SigninProfile(bindings[consumer.ID])
 			if err != nil {
 				entry.Error = err.Error()
 				break
 			}
 			entry.Profile = &profile
-			if _, err := a.Registry.ResolveSignin(signin.Target{Consumer: consumer.ID}); err != nil {
+			if _, err := a.registry().ResolveSignin(signin.Target{Consumer: consumer.ID}); err != nil {
 				entry.Error = err.Error()
 			}
 		}

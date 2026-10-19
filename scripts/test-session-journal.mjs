@@ -182,14 +182,18 @@ assert.ok(rendered.chat >= 3);
 const launcherSelect = {value: 'tmux', innerHTML: ''};
 const launcherDetail = {};
 const launcherAgent = {value: 'claude'};
+const launchInput = {disabled: false};
+const launchOption = {hidden: false, querySelectorAll: () => [launchInput]};
 const launcherContext = vm.createContext({app: {launchers: [
-  {id: 'tmux', label: 'tmux', agents: ['claude', 'codex'], available: true, detail: 'Terminal session'},
-  {id: 'cmux', label: '<cmux>', agents: ['claude', 'codex'], available: false, detail: 'Not installed'},
-  {id: 'codex-app-server', label: 'Codex', agents: ['codex'], available: true, detail: ''},
+  {id: 'tmux', label: 'tmux', agents: ['claude', 'codex'], available: true, detail: 'Terminal session', sessionOptions: false},
+  {id: 'cmux', label: '<cmux>', agents: ['claude', 'codex'], available: false, detail: 'Not installed', sessionOptions: false},
+  {id: 'claude-sdk', label: 'claude-sdk', agents: ['claude'], available: true, detail: '', sessionOptions: true},
+  {id: 'codex-app-server', label: 'Codex', agents: ['codex'], available: true, detail: '', sessionOptions: true},
 ]}, $: selector => selector.endsWith('detail') ? launcherDetail : selector.endsWith('surface') ? launcherAgent : launcherSelect,
+document: {querySelectorAll: selector => selector === '[data-launch-option]' ? [launchOption] : []},
 escape: value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;')});
 const launcherStart = source.indexOf('function renderStartLaunchers()');
-const launcherEnd = source.indexOf('async function loadStartLaunchers()', launcherStart);
+const launcherEnd = source.indexOf('async function loadStartOptions()', launcherStart);
 vm.runInContext(source.slice(launcherStart, launcherEnd), launcherContext);
 vm.runInContext('renderStartLaunchers()', launcherContext);
 assert.equal(launcherSelect.value, 'tmux');
@@ -197,6 +201,12 @@ assert.equal(launcherDetail.textContent, 'Terminal session');
 assert.ok(launcherSelect.innerHTML.includes('value="cmux" disabled'));
 assert.ok(launcherSelect.innerHTML.includes('&lt;cmux&gt;'));
 assert.ok(!launcherSelect.innerHTML.includes('codex-app-server'));
+assert.ok(launchOption.hidden && launchInput.disabled, 'a terminal launcher hides the settings it cannot apply');
+Object.assign(launchOption, {hidden: false});
+Object.assign(launchInput, {disabled: false});
+launcherSelect.value = 'claude-sdk';
+vm.runInContext('renderStartLaunchers()', launcherContext);
+assert.ok(!launchOption.hidden && !launchInput.disabled, 'a launcher that applies every setting keeps them');
 launcherSelect.value = 'cmux';
 vm.runInContext('renderStartLaunchers()', launcherContext);
 assert.equal(launcherSelect.value, '', 'an unavailable launcher cannot remain selected');

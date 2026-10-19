@@ -3,13 +3,14 @@ package surface
 import "fmt"
 
 // RuntimeKind is what currently carries a session's conversation. A surface
-// can have several (a Claude conversation runs in a CLI process or, later, the
+// can have several (a Claude conversation runs in a CLI process or in the
 // Claude host); the adapter that serves a session is chosen by its runtime
 // kind, never by its surface alone.
 type RuntimeKind string
 
 const (
 	RuntimeClaudeCLI      RuntimeKind = "claude-cli"
+	RuntimeClaudeHost     RuntimeKind = "claude-host"
 	RuntimeCodexDesktop   RuntimeKind = "codex-desktop"
 	RuntimeCodexAppServer RuntimeKind = "codex-app-server"
 	RuntimeNotionWeb      RuntimeKind = "notion-web"

@@ -62,6 +62,7 @@ func TestPushRelayURLUsesBuildDefaultAndEnvironmentOverride(t *testing.T) {
 }
 
 func TestSendDevicePushRetriesTransientFailures(t *testing.T) {
+	shortenDevicePushRetries(t)
 	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if attempts.Add(1) < 3 {
@@ -100,6 +101,7 @@ func TestSendDevicePushDoesNotRetryTerminalFailures(t *testing.T) {
 }
 
 func TestNotifyPairedDevicesRetiresOnlyTerminalTargets(t *testing.T) {
+	shortenDevicePushRetries(t)
 	for _, test := range []struct {
 		name      string
 		status    int
@@ -120,7 +122,7 @@ func TestNotifyPairedDevicesRetiresOnlyTerminalTargets(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			device, _, err := reg.CompleteDevicePairing(pairing.Secret, "")
+			device, _, err := reg.CompleteDevicePairing(pairing.Secret, "", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -144,4 +146,10 @@ func registryTestRegistry(t *testing.T) *registry.Registry {
 	}
 	t.Cleanup(func() { reg.Close() })
 	return reg
+}
+
+func shortenDevicePushRetries(t *testing.T) {
+	previous := devicePushRetryDelay
+	devicePushRetryDelay = time.Millisecond
+	t.Cleanup(func() { devicePushRetryDelay = previous })
 }

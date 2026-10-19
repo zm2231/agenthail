@@ -396,6 +396,10 @@ func (m *Manager) ensureLocked(ctx context.Context, id string, send bool) error 
 			return err
 		}
 	}
+	hostName, err := m.owningHostName(id)
+	if err != nil {
+		return err
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -438,7 +442,7 @@ func (m *Manager) ensureLocked(ctx context.Context, id string, send bool) error 
 	}
 	controlPath := claudepeer.WorkerControlPath(m.home, m.generation, command.Process.Pid)
 	manifestPath := claudepeer.WorkerManifestPath(m.home, m.generation, command.Process.Pid)
-	config := claudepeer.Config{Home: m.home, RegistryPath: m.registry.Path(), Session: *session, SocketDir: m.socketDir, ControlPath: controlPath, ManifestPath: manifestPath, Generation: m.generation, ProcessToken: processToken}
+	config := claudepeer.Config{Home: m.home, RegistryPath: m.registry.Path(), Session: *session, SocketDir: m.socketDir, ControlPath: controlPath, ManifestPath: manifestPath, Generation: m.generation, ProcessToken: processToken, HostName: hostName}
 	if err := json.NewEncoder(input).Encode(config); err != nil {
 		return startupFailure(err)
 	}
@@ -479,6 +483,23 @@ func (m *Manager) ensureLocked(ctx context.Context, id string, send bool) error 
 	}
 	m.children[id] = entry
 	return nil
+}
+
+// owningHostName names the paired host that owns a session, empty for this
+// host's own sessions.
+func (m *Manager) owningHostName(id string) (string, error) {
+	if id == OperatorID {
+		return "", nil
+	}
+	hostID, err := m.registry.SessionHost(id)
+	if err != nil || hostID == "" {
+		return "", err
+	}
+	host, err := m.registry.Host(hostID)
+	if err != nil {
+		return "", fmt.Errorf("load the host that owns %q: %w", id, err)
+	}
+	return host.Name, nil
 }
 
 func (m *Manager) Send(ctx context.Context, sourceID, targetSocket, message string) (*surface.SendResult, error) {
