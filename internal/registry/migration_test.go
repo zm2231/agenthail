@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,7 +79,7 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 				t.Fatalf("user_version=%d err=%v, want %d", version, err, fixture.wantVersion)
 			}
 			assertMigratedSessionsAndRoutes(t, r)
-			if exists, err := r.columnExists("message_queue", "expires_at_ms"); fixture.stampVersion == 0 && (err != nil || exists) {
+			if exists, err := queueHasExpiry(r); fixture.stampVersion == 0 && (err != nil || exists) {
 				t.Fatalf("expires_at_ms exists=%v err=%v", exists, err)
 			}
 			assertMigratedQueue(t, r, fixture.source)
@@ -86,11 +87,124 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 				fixture.check(t, r)
 			}
 			assertMigratedRegistryAcceptsCurrentWrites(t, r)
+			if fixture.stampVersion == 0 {
+				assertSchemaMatchesFreshRegistry(t, r)
+			}
 			if identity, err := r.HostIdentity(); err != nil || !ValidHostID(identity.ID) || !ValidHostName(identity.Name) {
 				t.Fatalf("host identity=%+v err=%v", identity, err)
 			}
 		})
 	}
+}
+
+func assertSchemaMatchesFreshRegistry(t *testing.T, migrated *Registry) {
+	t.Helper()
+	fresh := openTestRegistry(t)
+	assertSameColumns(t, schemaColumns(t, fresh.db), schemaColumns(t, migrated.db))
+	want, got := schemaIndexes(t, fresh.db), schemaIndexes(t, migrated.db)
+	for name, definition := range want {
+		if got[name] != definition {
+			t.Errorf("index %s migrated=%q fresh=%q", name, got[name], definition)
+		}
+	}
+	for name := range got {
+		if _, ok := want[name]; !ok {
+			t.Errorf("index %s exists only in the migrated registry", name)
+		}
+	}
+}
+
+func TestSchemaDeclaresEveryColumn(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "schema.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatal(err)
+	}
+	assertSameColumns(t, schemaColumns(t, openTestRegistry(t).db), schemaColumns(t, db))
+}
+
+func assertSameColumns(t *testing.T, want, got map[string]map[string]string) {
+	t.Helper()
+	for table, columns := range want {
+		if got[table] == nil {
+			t.Errorf("missing table %s", table)
+			continue
+		}
+		for name, declaration := range columns {
+			migrated := got[table][name]
+			if strings.HasSuffix(declaration, " default=expression") {
+				migrated = migrated[:max(strings.LastIndex(migrated, " default="), 0)] + " default=expression"
+			}
+			if migrated != declaration {
+				t.Errorf("%s.%s got=%q want=%q", table, name, migrated, declaration)
+			}
+		}
+		for name := range got[table] {
+			if _, ok := columns[name]; !ok {
+				t.Errorf("%s.%s is unexpected", table, name)
+			}
+		}
+	}
+	for table := range got {
+		if want[table] == nil {
+			t.Errorf("table %s is unexpected", table)
+		}
+	}
+}
+
+func schemaIndexes(t *testing.T, db *sql.DB) map[string]string {
+	t.Helper()
+	rows, err := db.Query(`SELECT name, sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	indexes := map[string]string{}
+	for rows.Next() {
+		var name, definition string
+		if err := rows.Scan(&name, &definition); err != nil {
+			t.Fatal(err)
+		}
+		indexes[name] = strings.Join(strings.Fields(definition), " ")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return indexes
+}
+
+// schemaColumns reports each column's declaration. ALTER TABLE cannot add a
+// column whose default is an expression, so upgraded rows carry a constant
+// default there; every writer sets those columns explicitly.
+func schemaColumns(t *testing.T, db *sql.DB) map[string]map[string]string {
+	t.Helper()
+	rows, err := db.Query(`SELECT m.name, p.name, p.type, p."notnull", COALESCE(p.dflt_value, '') FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type='table' AND m.name NOT LIKE 'sqlite_%'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	tables := map[string]map[string]string{}
+	for rows.Next() {
+		var table, name, kind, fallback string
+		var notNull int
+		if err := rows.Scan(&table, &name, &kind, &notNull, &fallback); err != nil {
+			t.Fatal(err)
+		}
+		if tables[table] == nil {
+			tables[table] = map[string]string{}
+		}
+		if strings.HasPrefix(fallback, "datetime(") {
+			fallback = "expression"
+		}
+		tables[table][name] = fmt.Sprintf("%s notnull=%d default=%s", kind, notNull, fallback)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return tables
 }
 
 func assertMigratedSessionsAndRoutes(t *testing.T, r *Registry) {
@@ -329,7 +443,7 @@ func TestOpenRetiresQueueExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	if exists, err := r.columnExists("message_queue", "expires_at_ms"); err != nil || exists {
+	if exists, err := queueHasExpiry(r); err != nil || exists {
 		t.Fatalf("expires_at_ms exists=%v err=%v", exists, err)
 	}
 	if row, err := r.QueueItem(50, nil); err != nil || row.Status != "canceled" || row.Evidence != surface.EvidenceCanceled || row.LastError != "expired before delivery" || !row.Historical {
@@ -384,14 +498,14 @@ func TestRuntimeKindStepDerivesEachRowsKindFromItsSurfaceAndTransport(t *testing
 			t.Fatal(err)
 		}
 	}
-	if err := r.recordRuntimeKinds(); err != nil {
+	if err := r.migrate(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.db.Exec(`INSERT INTO sessions(id,surface,name,transport,runtime_kind) VALUES('recorded','codex','recorded','managed','codex-desktop')`); err != nil {
 		t.Fatal(err)
 	}
 	want["recorded"] = surface.RuntimeCodexDesktop
-	if err := r.recordRuntimeKinds(); err != nil {
+	if err := r.migrate(); err != nil {
 		t.Fatal(err)
 	}
 	for id, kind := range want {
@@ -430,10 +544,19 @@ func TestOpenRetiresQueueExpiryLeftOnARegistryAtTheVersionBefore(t *testing.T) {
 	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
 		t.Fatalf("user_version=%d err=%v", version, err)
 	}
-	if exists, err := r.columnExists("message_queue", "expires_at_ms"); err != nil || exists {
+	if exists, err := queueHasExpiry(r); err != nil || exists {
 		t.Fatalf("expires_at_ms exists=%v err=%v", exists, err)
 	}
 	if row, err := r.QueueItem(60, nil); err != nil || row.Status != "canceled" || row.LastError != "expired before delivery" {
 		t.Fatalf("expired row=%+v err=%v", row, err)
 	}
+}
+
+func queueHasExpiry(r *Registry) (bool, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	return columnExists(tx, "message_queue", "expires_at_ms")
 }

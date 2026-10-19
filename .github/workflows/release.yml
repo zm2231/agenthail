@@ -65,6 +65,30 @@ jobs:
         working-directory: push-relay
         run: npm test
 
+  macos-test:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sidecar/package-lock.json
+      - name: Cookie bridge dependencies
+        working-directory: sidecar
+        run: npm ci --ignore-scripts
+      - name: Test source
+        run: |
+          go test ./... -race -count=1
+          go vet ./...
+
   macos-package:
     needs: guard
     if: needs.guard.outputs.run == 'true'
@@ -110,18 +134,6 @@ jobs:
           : "${NOTARY_KEY:?missing APPLE_NOTARY_KEY_BASE64}"
           printf '%s' "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
           xcrun notarytool store-credentials agenthail-ci --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: sidecar/package-lock.json
-      - name: Cookie bridge dependencies
-        working-directory: sidecar
-        run: npm ci --ignore-scripts
-      - name: Test source
-        run: |
-          go test ./... -race -count=1
-          go vet ./...
       - name: Build package
         timeout-minutes: 30
         env:
@@ -375,7 +387,7 @@ jobs:
           retention-days: 7
 
   publish:
-    needs: [push-relay-check, macos-package, linux-archive, ios-archive]
+    needs: [push-relay-check, macos-test, macos-package, linux-archive, ios-archive]
     runs-on: macos-15
     timeout-minutes: 55
     env:

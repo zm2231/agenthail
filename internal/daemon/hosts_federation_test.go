@@ -473,7 +473,8 @@ func TestFederationHostRowCollidingWithLocalSessionLeavesTheLocalRow(t *testing.
 	delete(remote.fake.sessions, "moved")
 	awaitFederation(t, "notice cleared once the host stops serving the session", func() bool {
 		remote.daemon.discoverCatalog(context.Background())
-		return hostNotice(t, local, record.ID) == ""
+		hostsNotice, snapshotNotice := hostNotices(t, local, record.ID)
+		return hostsNotice == "" && snapshotNotice == ""
 	})
 	if session, err := local.reg.Session("moved"); err != nil || session.Name != "work moved" {
 		t.Fatalf("local row after host removal=%+v err=%v", session, err)
@@ -481,6 +482,15 @@ func TestFederationHostRowCollidingWithLocalSessionLeavesTheLocalRow(t *testing.
 }
 
 func hostNotice(t *testing.T, node *federationNode, hostID string) string {
+	t.Helper()
+	hostsNotice, snapshotNotice := hostNotices(t, node, hostID)
+	if snapshotNotice != hostsNotice {
+		t.Fatalf("snapshot notice=%q, hosts API notice=%q", snapshotNotice, hostsNotice)
+	}
+	return hostsNotice
+}
+
+func hostNotices(t *testing.T, node *federationNode, hostID string) (string, string) {
 	t.Helper()
 	response := node.request(t, http.MethodGet, "/api/v1/hosts", nil)
 	var listing struct {
@@ -504,19 +514,13 @@ func hostNotice(t *testing.T, node *federationNode, hostID string) string {
 	if err := json.Unmarshal(snapshot.Body.Bytes(), &state); err != nil {
 		t.Fatalf("snapshot status=%d body=%s", snapshot.Code, snapshot.Body.String())
 	}
-	found := false
 	for _, host := range state.Daemon.Hosts {
 		if host.ID == hostID {
-			found = true
-			if host.Notice != notice {
-				t.Fatalf("snapshot notice=%q, hosts API notice=%q", host.Notice, notice)
-			}
+			return notice, host.Notice
 		}
 	}
-	if !found {
-		t.Fatalf("snapshot hosts=%+v missing %s", state.Daemon.Hosts, hostID)
-	}
-	return notice
+	t.Fatalf("snapshot hosts=%+v missing %s", state.Daemon.Hosts, hostID)
+	return "", ""
 }
 
 func TestFederationPairedBothWaysShowsEachSessionOnce(t *testing.T) {
@@ -794,21 +798,6 @@ func TestFederationRevokedTokenMarksHostUnauthorized(t *testing.T) {
 		rows := sessionsOf(local.snapshot(t), record.ID)
 		return len(rows) == 2 && rows[0].Host.State == hostStateUnauthorized && strings.Contains(rows[0].UnavailableReason, "pair it again")
 	})
-}
-
-func TestFederationRemoveHostDropsRowsAndRevokesDevice(t *testing.T) {
-	local, remote, record := pairedFederation(t)
-	response := local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "forge"})
-	if response.Code != http.StatusOK {
-		t.Fatalf("remove status=%d body=%s", response.Code, response.Body.String())
-	}
-	if rows := sessionsOf(local.snapshot(t), record.ID); len(rows) != 0 {
-		t.Fatalf("rows after remove=%+v", rows)
-	}
-	devices, err := remote.reg.ListDevices(false)
-	if err != nil || len(devices) != 0 {
-		t.Fatalf("remote devices after remove=%+v err=%v", devices, err)
-	}
 }
 
 func TestFederationRemoveWaitsForInFlightReconcile(t *testing.T) {

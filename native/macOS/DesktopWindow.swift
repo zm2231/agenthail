@@ -578,21 +578,22 @@ struct ConversationPane: View {
 
     var body: some View {
         if let session = pane.displayedSession {
-            VStack(spacing: 0) {
-                ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
-                    voice.route(to: session.id)
-                    NSApplication.shared.activate()
-                    openWindow(id: "voice")
-                })
-                TranscriptView(model: model, pane: pane, session: session)
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
-                        if pane.removedSession?.id == session.id {
-                            RemovedSessionBar(onClose: pane.closeRemovedSession)
-                        } else {
-                            ComposerView(model: model, pane: pane, session: session)
-                        }
+            TranscriptView(model: model, pane: pane, session: session)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
+                        voice.route(to: session.id)
+                        NSApplication.shared.activate()
+                        openWindow(id: "voice")
+                    })
+                    .background(DesktopPalette.window)
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if pane.removedSession?.id == session.id {
+                        RemovedSessionBar(onClose: pane.closeRemovedSession)
+                    } else {
+                        ComposerView(model: model, pane: pane, session: session)
                     }
-            }
+                }
             .background(DesktopPalette.window)
             .environmentObject(pane)
         } else {
@@ -737,6 +738,7 @@ struct TranscriptView: View {
     var body: some View {
         let blocks = TranscriptBlock.build(pane.timelineItems)
         let sends = model.localSends[session.id] ?? []
+        let canResend = pane.removedSession?.id != session.id && session.capabilities.send && !session.isReadOnly
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
                 if (pane.olderCursor ?? 0) > 0 || pane.olderError != nil {
@@ -759,11 +761,14 @@ struct TranscriptView: View {
                     .padding(.top, 60)
                 }
                 ForEach(blocks) { block in
-                    TranscriptBlockView(block: block)
+                    TranscriptBlockView(block: block, onEdit: canResend ? { resend($0) } : nil)
                         .timelineDetails(block.source)
                 }
                 ForEach(sends) { send in
-                    UserBubble(text: send.text, receipt: send.status)
+                    UserBubble(text: send.text, receipt: send.status, failure: send.failure, onEdit: canResend ? { text in
+                        if send.failure != nil { model.discardSend(send, in: session.id) }
+                        resend(text)
+                    } : nil, onRetry: send.failure == nil || !canResend ? nil : { model.retrySend(send, in: session.id) })
                 }
                 if session.isWorking {
                     HStack(spacing: 8) {
@@ -893,6 +898,11 @@ struct TranscriptView: View {
         }
     }
 
+    private func resend(_ text: String) {
+        pane.resend(text)
+        jumpToLatest()
+    }
+
     private func jumpToLatest() {
         pinned = true
         withAnimation(.easeOut(duration: 0.25)) { position.scrollTo(edge: .bottom) }
@@ -901,12 +911,13 @@ struct TranscriptView: View {
 
 struct TranscriptBlockView: View {
     let block: TranscriptBlock
+    var onEdit: ((String) -> Void)? = nil
     @State private var expanded = false
 
     var body: some View {
         switch block.kind {
         case .user(let text):
-            UserBubble(text: text, receipt: nil)
+            UserBubble(text: text, receipt: nil, onEdit: onEdit)
         case .assistant(let text):
             AssistantReply(text: text)
         case .peer(let sender, let text):
@@ -999,7 +1010,12 @@ struct UserBubble: View {
     let text: String
     let receipt: String?
     var sender: String? = nil
+    var failure: String? = nil
+    var onEdit: ((String) -> Void)? = nil
+    var onRetry: (() -> Void)? = nil
     @State private var expanded = false
+    @State private var editing = false
+    @State private var hovering = false
 
     var body: some View {
         let envelope = sender.map { PeerEnvelope(sender: $0, body: text) } ?? PeerEnvelope(text)
@@ -1009,56 +1025,72 @@ struct UserBubble: View {
                     .font(.system(size: 11))
                     .foregroundStyle(DesktopPalette.text2)
             }
-            Text(envelope.body)
-                .font(.system(size: 14))
-                .lineSpacing(3)
-                .lineLimit(expanded ? nil : 8)
-                .textSelection(.enabled)
-                .padding(.horizontal, 13)
-                .padding(.vertical, 9)
-                .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 14))
-            if envelope.body.split(separator: "\n", omittingEmptySubsequences: false).count > 8 || envelope.body.count > 700 {
-                Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(DesktopPalette.text2)
-            }
-            if let receipt {
-                Text(receipt)
-                    .font(.system(size: 11))
-                    .foregroundStyle(DesktopPalette.text2)
+            if editing, let onEdit {
+                MessageEditor(text: envelope.body, onCancel: { editing = false }, onSend: { edited in
+                    editing = false
+                    onEdit(edited)
+                })
+            } else {
+                bubble(envelope.body)
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 120)
+        .onHover { hovering = $0 }
+    }
+
+    @ViewBuilder private func bubble(_ message: String) -> some View {
+        Text(message)
+            .font(.system(size: 14))
+            .lineSpacing(3)
+            .lineLimit(expanded ? nil : 8)
+            .textSelection(.enabled)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 9)
+            .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 14))
+        if message.split(separator: "\n", omittingEmptySubsequences: false).count > 8 || message.count > 700 {
+            Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
+                .buttonStyle(.plain)
+                .font(.system(size: 11.5))
+                .foregroundStyle(DesktopPalette.text2)
+        }
+        if let failure {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.circle")
+                Text("Not sent · \(failure)")
+                    .lineLimit(2)
+                if let onRetry {
+                    Button("Retry", action: onRetry)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(DesktopPalette.accentText)
+                }
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(DesktopPalette.red)
+        } else if let receipt {
+            Text(receipt)
+                .font(.system(size: 11))
+                .foregroundStyle(DesktopPalette.text2)
+        }
+        MessageActions(text: message, emphasized: hovering, onEdit: onEdit == nil ? nil : { editing = true })
     }
 }
 
 struct AssistantReply: View {
     let text: String
-    @State private var expanded = false
+    @State private var hovering = false
 
     var body: some View {
-        let long = LongReply.isLong(text)
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             StructuredText(markdown: text)
                 .font(.system(size: 15.5, design: .serif))
                 .lineSpacing(4)
                 .foregroundStyle(DesktopPalette.text)
-                .textSelection(.enabled)
+                .textual.textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxHeight: long && !expanded ? 420 : nil, alignment: .top)
-                .clipped()
-                .overlay(alignment: .bottom) {
-                    if long && !expanded { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
-                }
-            if long {
-                Button(expanded ? "Show less" : "Show full message") { expanded.toggle() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(DesktopPalette.accentText)
-            }
+            MessageActions(text: text, emphasized: hovering)
         }
+        .onHover { hovering = $0 }
     }
 }
 
@@ -1220,7 +1252,7 @@ struct ReasoningRow: View {
                     StructuredText(markdown: item.text)
                         .font(.system(size: 13, design: .serif))
                         .foregroundStyle(DesktopPalette.text2)
-                        .textSelection(.enabled)
+                        .textual.textSelection(.enabled)
                     TimelineMetaLine(item: item)
                 }
                 .padding(.leading, 21)
