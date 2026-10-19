@@ -70,6 +70,31 @@ func TestCodexCatalogSweepListsEveryStoredThreadAndSkipsInternalThreads(t *testi
 	}
 }
 
+func TestCodexCatalogSweepWithAnUnreadableLoadedThreadIsIncomplete(t *testing.T) {
+	const (
+		readableID   = "019f004a-0000-7000-8000-0000000000b1"
+		unreadableID = "019f004a-0000-7000-8000-0000000000b2"
+	)
+	startManagedCodex(t, func(method string, params map[string]any) map[string]any {
+		switch method {
+		case "thread/loaded/list":
+			return map[string]any{"data": []any{readableID, unreadableID}}
+		case "thread/read":
+			if params["threadId"] == unreadableID {
+				return map[string]any{"error": map[string]any{"code": -32603, "message": "synthetic read failure"}}
+			}
+			return map[string]any{"thread": map[string]any{"id": readableID, "name": "readable", "source": "vscode", "status": map[string]any{"type": "idle"}}}
+		case "thread/list":
+			return map[string]any{"data": []any{}}
+		}
+		return nil
+	})
+	codex := isolatedManagedRuntime(t)
+	if _, complete, err := codex.CatalogList(context.Background()); complete {
+		t.Fatalf("sweep with an unreadable loaded thread complete=%v err=%v", complete, err)
+	}
+}
+
 func TestCodexSearchFallsBackToManagedRuntime(t *testing.T) {
 	home := startManagedCodex(t, managedDiscovery).Home
 	logPath := filepath.Join(home, "managed-runtime.log")

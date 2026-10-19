@@ -338,11 +338,15 @@ func (c *Codex) listCurrent(ctx context.Context, conn codexClient, runtimes *cod
 }
 
 // listAll returns every loaded thread and every page of the thread list. A
-// failed page fails the sweep, since a partial sweep cannot retire threads.
+// failed read or page fails the sweep, since a partial sweep cannot retire
+// threads.
 func (c *Codex) listAll(ctx context.Context, conn codexClient, runtimes *codexRuntimes) ([]surface.Session, error) {
-	loaded, err := c.listLoaded(ctx, conn, 0, runtimes)
+	loaded, readErrors, err := c.readLoaded(ctx, conn, 0, runtimes)
 	if err != nil {
 		return nil, err
+	}
+	if len(readErrors) > 0 {
+		return nil, fmt.Errorf("read loaded Codex threads: %s", strings.Join(readErrors, "; "))
 	}
 	var all []surface.Session
 	params := map[string]any{"limit": codexSweepPageLimit, "sortKey": "recency_at", "sortDirection": "desc", "useStateDbOnly": true}
@@ -361,9 +365,20 @@ func (c *Codex) listAll(ctx context.Context, conn codexClient, runtimes *codexRu
 }
 
 func (c *Codex) listLoaded(ctx context.Context, conn codexClient, limit int, runtimes *codexRuntimes) ([]surface.Session, error) {
-	ids, err := c.loadedThreadIDs(ctx, conn, limit)
+	sessions, readErrors, err := c.readLoaded(ctx, conn, limit, runtimes)
 	if err != nil {
 		return nil, err
+	}
+	if len(sessions) == 0 && len(readErrors) > 0 {
+		return nil, fmt.Errorf("read loaded Codex threads: %s", strings.Join(readErrors, "; "))
+	}
+	return sessions, nil
+}
+
+func (c *Codex) readLoaded(ctx context.Context, conn codexClient, limit int, runtimes *codexRuntimes) ([]surface.Session, []string, error) {
+	ids, err := c.loadedThreadIDs(ctx, conn, limit)
+	if err != nil {
+		return nil, nil, err
 	}
 	sessions := make([]surface.Session, 0, len(ids))
 	var readErrors []string
@@ -377,10 +392,7 @@ func (c *Codex) listLoaded(ctx context.Context, conn codexClient, limit int, run
 			sessions = append(sessions, runtimes.session(thread))
 		}
 	}
-	if len(sessions) == 0 && len(ids) > 0 && len(readErrors) > 0 {
-		return nil, fmt.Errorf("read loaded Codex threads: %s", strings.Join(readErrors, "; "))
-	}
-	return sessions, nil
+	return sessions, readErrors, nil
 }
 
 func (c *Codex) loadedThreadIDs(ctx context.Context, conn codexClient, limit int) ([]string, error) {
