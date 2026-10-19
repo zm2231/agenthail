@@ -518,7 +518,10 @@ func (d *Daemon) publishSurfaceHealth(health dashboardSurface, observedAt time.T
 	_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: surface.SurfaceKind(health.Name), Health: health.Health, Detail: health.HealthDetail, ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + health.Name + ":" + health.Health, Type: "surface.health", EntityID: health.Name, Payload: payload})
 }
 
-func (d *Daemon) publishCatalogQueueCounts() {
+// publishCatalogPresence keeps each local row's queue count and presence
+// current between discovery passes, so a new queue count, a changed Codex
+// window or a lapsed recent session is published on the next tick.
+func (d *Daemon) publishCatalogPresence() {
 	defer d.refreshHostQueueCounts()
 	counts, err := d.Registry.QueueCounts()
 	if err != nil {
@@ -550,11 +553,11 @@ func (d *Daemon) publishCatalogQueueCounts() {
 			if json.Unmarshal([]byte(record.ProjectionFingerprint), &projection) != nil {
 				break
 			}
-			if projection.QueueCount == count {
+			current, reason := surface.PresenceFor(adapter, record.Session, surface.PresenceInput{QueueCount: count, Open: projection.Open, Now: now, CodexRecentHours: config.CodexRecentHours})
+			if projection.QueueCount == count && projection.Current == current && projection.CurrentReason == reason {
 				break
 			}
-			projection.QueueCount = count
-			projection.Current, projection.CurrentReason = surface.PresenceFor(adapter, record.Session, surface.PresenceInput{QueueCount: count, Open: projection.Open, Now: now, CodexRecentHours: config.CodexRecentHours})
+			projection.QueueCount, projection.Current, projection.CurrentReason = count, current, reason
 			fingerprint, err := json.Marshal(projection)
 			if err != nil {
 				break

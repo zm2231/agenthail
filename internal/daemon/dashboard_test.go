@@ -23,6 +23,7 @@ import (
 
 	registrypkg "github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 const dashboardTestToken = "secret"
@@ -1155,4 +1156,35 @@ func TestDashboardStateReadsPersistedCatalogStatus(t *testing.T) {
 		}
 	}
 	t.Fatal("live session missing from dashboard state")
+}
+
+func TestChangingTheCodexWindowRepublishesPresence(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := SaveDashboardConfig(DashboardConfig{CodexRecentHours: 5}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := registrypkg.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	session := surface.Session{ID: "019f004a-0000-7000-8000-0000000000c1", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", LastActive: time.Now().Add(-3 * time.Hour)}
+	projection := `{"id":"` + session.ID + `","surface":"codex","status":"idle","current":true,"currentReason":"recent"}`
+	if _, _, err := r.RecordCatalogSession(registrypkg.CatalogSessionState{Session: session, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: projection}, registrypkg.CatalogEvent{DedupeKey: "session.upserted:" + session.ID, Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
+		t.Fatal(err)
+	}
+	d := New(r, []surface.Surface{&surfaces.Codex{}})
+	handler := dashboardRouter(d)
+	if response := serveDashboardRequest(handler, http.MethodPost, "/api/settings", `{"action":"dashboard-config","codexRecentHours":1}`); response.Code != http.StatusOK {
+		t.Fatalf("settings status=%d body=%s", response.Code, response.Body.String())
+	}
+	page, err := r.CatalogSnapshotPage(registrypkg.CatalogPageRequest{Scope: "current", Limit: 10, Now: time.Now()})
+	if err != nil || len(page.Sessions) != 0 {
+		t.Fatalf("current page after narrowing the window=%+v err=%v", page.Sessions, err)
+	}
+	for _, listed := range readDashboardState(t, handler).Sessions {
+		if listed.ID == session.ID && (listed.Current || listed.CurrentReason != "") {
+			t.Fatalf("snapshot still current after narrowing the window: %+v", listed)
+		}
+	}
 }

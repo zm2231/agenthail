@@ -342,7 +342,9 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		if request.BusyDelivery != "" {
 			config.BusyDelivery = deliverypolicy.Mode(request.BusyDelivery)
 		}
-		err = SaveDashboardConfig(config)
+		if err = SaveDashboardConfig(config); err == nil {
+			d.publishCatalogPresence()
+		}
 	case "notifications-enable":
 		_, err = EnableNotifications()
 	case "notifications-disable":
