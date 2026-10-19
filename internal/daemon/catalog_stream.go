@@ -306,6 +306,11 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 	for _, alias := range aliases {
 		aliasByID[alias.SessionID] = alias.Name
 	}
+	view, err := d.loadCatalogViewState()
+	if err != nil {
+		d.log.Printf("catalog view state: %s", err)
+		return
+	}
 	openClaude := claudeOpenProcesses(ctx)
 	if projects, err := d.Registry.ListProjects(); err != nil {
 		d.log.Printf("catalog projects: %s", err)
@@ -361,7 +366,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			identity := d.catalogIdentities.identity(ctx, session, observedAt, func() *catalogProject { return d.storedCatalogProject(session.ID) })
 			open := session.Surface == surface.KindClaude && openClaude[session.PID]
 			alias := aliasByID[session.ID]
-			if !d.publishCatalogSession(adapter, session, identity, alias, counts[session.ID], open, config, observedAt) {
+			if !d.publishCatalogSession(adapter, session, identity, alias, counts[session.ID], open, config, view, observedAt) {
 				delete(d.catalogLive, session.ID)
 				continue
 			}
@@ -388,6 +393,16 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		d.publishSurfaceHealth(health, time.Now().UTC())
 	}
 	d.catalogIdentities.prune(time.Now())
+	d.publishUnarchivedProjects()
+}
+
+// publishUnarchivedProjects republishes the other rows of a project that a
+// session's activity unarchived during a catalog pass.
+func (d *Daemon) publishUnarchivedProjects() {
+	if d.catalogProjectUnarchived {
+		d.catalogProjectUnarchived = false
+		d.publishCatalogViewState()
+	}
 }
 
 // forgetCatalogLive drops a surface's live sessions that are not in keep, so
@@ -407,8 +422,10 @@ func (d *Daemon) forgetCatalogLive(kind surface.SurfaceKind, keep map[string]str
 // local status files show it, without waiting for the next discovery pass.
 // Only status transitions publish; other fields follow discovery.
 func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
+	defer d.publishUnarchivedProjects()
 	var config *DashboardConfig
 	var counts map[string]int
+	var view catalogViewState
 	for id, live := range d.catalogLive {
 		stamps := catalogFileStamps(live.files)
 		if live.stamps != nil && equalStrings(live.stamps, stamps) {
@@ -436,8 +453,12 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 				d.log.Printf("catalog queue counts: %s", err)
 				return
 			}
+			if view, err = d.loadCatalogViewState(); err != nil {
+				d.log.Printf("catalog view state: %s", err)
+				return
+			}
 		}
-		if d.publishCatalogSession(live.adapter, refreshed, live.identity, live.alias, counts[id], live.open, *config, time.Now().UTC()) {
+		if d.publishCatalogSession(live.adapter, refreshed, live.identity, live.alias, counts[id], live.open, *config, view, time.Now().UTC()) {
 			live.session = refreshed
 		} else {
 			live.stamps = nil
@@ -447,7 +468,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 
 // publishCatalogSession records one session row, rebuilding the projection
 // when the queue count changed under it. It reports whether the row committed.
-func (d *Daemon) publishCatalogSession(adapter surface.Surface, session surface.Session, identity catalogIdentity, alias string, queueCount int, open bool, config DashboardConfig, observedAt time.Time) bool {
+func (d *Daemon) publishCatalogSession(adapter surface.Surface, session surface.Session, identity catalogIdentity, alias string, queueCount int, open bool, config DashboardConfig, view catalogViewState, observedAt time.Time) bool {
 	project, err := json.Marshal(identity.Project)
 	if err != nil {
 		return false
@@ -458,6 +479,10 @@ func (d *Daemon) publishCatalogSession(adapter surface.Surface, session surface.
 	}
 	for attempt := 0; attempt < 3; attempt++ {
 		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, open, config)
+		if d.settleArchiveActivity([]dashboardSession{row}, view) {
+			d.catalogProjectUnarchived = true
+		}
+		applyCatalogView(&row, view, observedAt)
 		payload, err := json.Marshal(map[string]any{"session": row})
 		if err != nil {
 			return false
@@ -513,7 +538,9 @@ func (d *Daemon) publishSurfaceHealth(health dashboardSurface, observedAt time.T
 	_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: surface.SurfaceKind(health.Name), Health: health.Health, Detail: health.HealthDetail, ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + health.Name + ":" + health.Health, Type: "surface.health", EntityID: health.Name, Payload: payload})
 }
 
-func (d *Daemon) publishCatalogQueueCounts() {
+// publishCatalogViewState republishes every local row whose queue count,
+// presence or archive state changed since it was last published.
+func (d *Daemon) publishCatalogViewState() {
 	defer d.refreshHostQueueCounts()
 	counts, err := d.Registry.QueueCounts()
 	if err != nil {
@@ -530,24 +557,35 @@ func (d *Daemon) publishCatalogQueueCounts() {
 		d.log.Printf("catalog config: %s", err)
 		return
 	}
+	view, err := d.loadCatalogViewState()
+	if err != nil {
+		d.log.Printf("catalog view state: %s", err)
+		return
+	}
 	now := time.Now()
+	type localRow struct {
+		record     registry.CatalogSessionState
+		projection dashboardSession
+	}
+	rows := make([]localRow, 0, len(snapshot.Sessions))
+	projections := make([]dashboardSession, 0, len(snapshot.Sessions))
 	for _, record := range snapshot.Sessions {
-		if record.HostID != "" {
+		var projection dashboardSession
+		if record.HostID != "" || json.Unmarshal([]byte(record.ProjectionFingerprint), &projection) != nil {
 			continue
 		}
-		count := counts[record.Session.ID]
+		projection.QueueCount = counts[record.Session.ID]
+		projection.Current, projection.CurrentReason = dashboardSessionPresence(record.Session, projection.QueueCount, projection.Open, config.CodexRecentHours, now)
+		rows = append(rows, localRow{record: record, projection: projection})
+		projections = append(projections, projection)
+	}
+	d.settleArchiveActivity(projections, view)
+	for _, row := range rows {
+		record, projection := row.record, row.projection
 		for attempt := 0; attempt < 3; attempt++ {
-			var projection dashboardSession
-			if json.Unmarshal([]byte(record.ProjectionFingerprint), &projection) != nil {
-				break
-			}
-			if projection.QueueCount == count {
-				break
-			}
-			projection.QueueCount = count
-			projection.Current, projection.CurrentReason = dashboardSessionPresence(record.Session, count, projection.Open, config.CodexRecentHours, now)
+			applyCatalogView(&projection, view, now)
 			fingerprint, err := json.Marshal(projection)
-			if err != nil {
+			if err != nil || string(fingerprint) == record.ProjectionFingerprint {
 				break
 			}
 			if err := d.catalog.updateProjection(record.Session.ID, record.ProjectionFingerprint, string(fingerprint)); err == nil {
@@ -555,10 +593,11 @@ func (d *Daemon) publishCatalogQueueCounts() {
 			} else {
 				var conflict *registry.CatalogQueueProjectionConflict
 				if !errors.As(err, &conflict) {
-					d.log.Printf("catalog queue projection %s: %s", d.resolveDisplay(record.Session.ID), err)
+					d.log.Printf("catalog view projection %s: %s", d.resolveDisplay(record.Session.ID), err)
 					break
 				}
-				count = conflict.QueueCount
+				projection.QueueCount = conflict.QueueCount
+				projection.Current, projection.CurrentReason = dashboardSessionPresence(record.Session, projection.QueueCount, projection.Open, config.CodexRecentHours, now)
 				if attempt == 2 {
 					d.log.Printf("catalog queue projection %s remained unstable", d.resolveDisplay(record.Session.ID))
 				}

@@ -662,6 +662,23 @@ func (d *Daemon) routeActionRequest(request map[string]any) (*pairedHost, bool, 
 			}
 		}
 	}
+	if value, ok := request["projectId"].(string); ok {
+		if hostRef, target, qualified := hosts.Split(strings.TrimSpace(value)); qualified {
+			var owner *pairedHost
+			if !d.isLocalHostRef(hostRef) {
+				found, exists := d.pairedHost(hostRef)
+				if !exists {
+					return nil, false, fmt.Errorf("%w %q", errUnknownHost, hostRef)
+				}
+				owner = found
+			}
+			if err := assign(owner); err != nil {
+				return nil, false, err
+			}
+			request["projectId"] = target
+			rewritten = true
+		}
+	}
 	for _, field := range actionSessionFields {
 		value, ok := request[field].(string)
 		if !ok || strings.TrimSpace(value) == "" {

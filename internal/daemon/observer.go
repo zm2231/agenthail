@@ -14,7 +14,7 @@ const (
 )
 
 func (d *Daemon) scanAndRelay(ctx context.Context) {
-	defer d.publishCatalogQueueCounts()
+	defer d.publishCatalogViewState()
 	if expired, err := d.Registry.ExpireMessages(time.Now()); err != nil {
 		d.log.Printf("expire queued messages: %s", err)
 	} else {

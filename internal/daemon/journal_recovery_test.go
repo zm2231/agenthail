@@ -212,7 +212,7 @@ func TestCatalogQueueChangesAdvanceWatermarkAndKeepStaleness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d.publishCatalogQueueCounts()
+	d.publishCatalogViewState()
 	if err := reg.QueueMessage(to.ID, "queued while busy"); err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestCatalogQueueChangesAdvanceWatermarkAndKeepStaleness(t *testing.T) {
 	if err != nil || failed <= before {
 		t.Fatalf("failure seq=%d before=%d err=%v", failed, before, err)
 	}
-	d.publishCatalogQueueCounts()
+	d.publishCatalogViewState()
 	_, after, err := reg.CatalogState()
 	if err != nil || after <= failed {
 		t.Fatalf("queue change did not advance catalog watermark: before=%d after=%d err=%v", failed, after, err)
@@ -247,7 +247,7 @@ func TestCatalogQueueChangesAdvanceWatermarkAndKeepStaleness(t *testing.T) {
 		if err != nil || len(window.Events) != 1 || !strings.Contains(string(window.Events[0].Payload), `"queueCount":1`) || !strings.Contains(string(window.Events[0].Payload), `"stale":true`) {
 			t.Fatalf("queue event=%+v err=%v", window.Events, err)
 		}
-		d.publishCatalogQueueCounts()
+		d.publishCatalogViewState()
 		if _, unchanged, _ := reg.CatalogState(); unchanged != after {
 			t.Fatalf("unchanged queue republished: %d -> %d", after, unchanged)
 		}
@@ -387,7 +387,7 @@ func TestCatalogQueueProjectionReconcilesAfterStaleDiscoveryWrite(t *testing.T) 
 	if err := reg.QueueMessage(to.ID, "queued during discovery"); err != nil {
 		t.Fatal(err)
 	}
-	d.publishCatalogQueueCounts()
+	d.publishCatalogViewState()
 	if _, _, err := reg.RecordCatalogSession(registry.CatalogSessionState{Session: stale.Session, Project: stale.Project, Checkout: stale.Checkout, ObservedAt: time.Now(), ProjectionFingerprint: stale.ProjectionFingerprint}, registry.CatalogEvent{DedupeKey: "session.upserted:" + to.ID, Type: "session.upserted", EntityID: to.ID, Payload: []byte(`{"session":{}}`)}); err == nil {
 		t.Fatal("stale discovery projection was accepted")
 	} else {
@@ -396,7 +396,7 @@ func TestCatalogQueueProjectionReconcilesAfterStaleDiscoveryWrite(t *testing.T) 
 			t.Fatalf("unexpected stale discovery error: %v", err)
 		}
 	}
-	d.publishCatalogQueueCounts()
+	d.publishCatalogViewState()
 	var projection dashboardSession
 	if err := json.Unmarshal([]byte(staleRecord().ProjectionFingerprint), &projection); err != nil {
 		t.Fatal(err)

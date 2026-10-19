@@ -37,7 +37,7 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 		return CatalogPage{}, fmt.Errorf("catalog page offset must not be negative")
 	}
 	switch request.Scope {
-	case "", "all", "recent", "current", "running":
+	case "", "all", "recent", "current", "running", "archived":
 	default:
 		return CatalogPage{}, fmt.Errorf("invalid catalog page scope %q", request.Scope)
 	}
@@ -125,24 +125,36 @@ func catalogPageSQL(request CatalogPageRequest) (string, string, []any) {
 		conditions = append(conditions, "instr(lower(s.name||' '||s.cwd||' '||coalesce(a.name,json_extract(cs.projection_fingerprint,'$.alias'),'')),?)>0")
 		args = append(args, query)
 	}
-	if request.Scope == "running" {
-		conditions = append(conditions, "s.status=?")
+	archived := "COALESCE(json_extract(cs.projection_fingerprint,'$.archived'),0)=1"
+	codexCutoff := request.Now.Add(-time.Duration(request.CodexRecentHours) * time.Hour).UnixMilli()
+	recentCutoff := request.Now.Add(-CatalogRecentWindow).UnixMilli()
+	switch request.Scope {
+	case "running":
+		conditions = append(conditions, "NOT "+archived, "s.status=?")
 		args = append(args, string(surface.StatusBusy))
-	} else if request.Scope == "recent" || request.Scope == "current" {
-		conditions = append(conditions, catalogCurrentSQL(request.CodexRecentHours))
-		codexCutoff := request.Now.Add(-time.Duration(request.CodexRecentHours) * time.Hour).UnixMilli()
-		genericCutoff := request.Now.Add(-24 * time.Hour).UnixMilli()
-		args = append(args, codexCutoff, genericCutoff)
+	case "current":
+		conditions = append(conditions, "NOT "+archived, catalogCurrentSQL)
+		args = append(args, codexCutoff, recentCutoff)
+	case "recent":
+		conditions = append(conditions, "NOT "+archived, "("+catalogCurrentSQL+" OR (s.last_active_ms>0 AND s.last_active_ms>=?))")
+		args = append(args, codexCutoff, recentCutoff, recentCutoff)
+	case "all":
+		conditions = append(conditions, "NOT "+archived)
+	case "archived":
+		conditions = append(conditions, archived)
 	}
 	return from, strings.Join(conditions, " AND "), args
 }
 
-func catalogCurrentSQL(codexRecentHours int) string {
-	_ = codexRecentHours
-	return `((s.surface='claude' AND (COALESCE(qc.queue_count,0)>0 OR COALESCE(json_extract(cs.projection_fingerprint,'$.open'),0)=1))
+// CatalogRecentWindow is how long an idle session stays in the recent scope.
+const CatalogRecentWindow = 24 * time.Hour
+
+// catalogCurrentSQL is the SQL form of the daemon's current rule: working,
+// queued, waiting on the user, an open Claude session, or recent activity.
+const catalogCurrentSQL = `(EXISTS(SELECT 1 FROM attention_items ai WHERE ai.session_id=s.id AND ai.resolved_at='')
+		OR (s.surface='claude' AND (COALESCE(qc.queue_count,0)>0 OR COALESCE(json_extract(cs.projection_fingerprint,'$.open'),0)=1))
 		OR (s.surface='codex' AND (s.status='busy' OR COALESCE(qc.queue_count,0)>0 OR (s.status!='notLoaded' AND s.last_active_ms>0 AND s.last_active_ms>=?)))
 		OR (s.surface NOT IN ('claude','codex') AND (s.status='busy' OR COALESCE(qc.queue_count,0)>0 OR (s.last_active_ms>0 AND s.last_active_ms>=?))))`
-}
 
 func scanCatalogSession(scanner interface{ Scan(...any) error }) (CatalogSessionState, error) {
 	var state CatalogSessionState

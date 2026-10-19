@@ -13,7 +13,7 @@ import (
 type CatalogSessionState struct {
 	Session               surface.Session
 	HostID                string
-	Project           json.RawMessage
+	Project               json.RawMessage
 	Checkout              json.RawMessage
 	UnavailableReason     string
 	ObservedAt            time.Time
@@ -276,7 +276,7 @@ func (r *Registry) catalogSessionUnchanged(state CatalogSessionState, event Cata
 type catalogSessionPrior struct {
 	found                        bool
 	fingerprint, unavailable     string
-	project, checkout        []byte
+	project, checkout            []byte
 	generation, misses, failures int64
 }
 
@@ -583,6 +583,12 @@ func (r *Registry) CatalogSessionProject(sessionID string) (json.RawMessage, err
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
+	return project, err
+}
+
+func (r *Registry) CatalogProjectByID(projectID string) (json.RawMessage, error) {
+	var project []byte
+	err := r.read.QueryRow(`SELECT project FROM catalog_sessions WHERE json_extract(project,'$.id')=? LIMIT 1`, projectID).Scan(&project)
 	return project, err
 }
 

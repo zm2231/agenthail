@@ -67,7 +67,8 @@ Background discovery reads configuration once and gathers Claude process
 presence in one process-list call. Queue counts exclude expired pending work
 without performing expiration writes.
 
-Snapshots accept `scope=all|recent|current|running`, `projectId`, and `q`.
+Snapshots accept `scope=running|current|recent|all|archived` (defined in
+`projects.md`), `projectId`, and `q`.
 Optional `limit` (1–200) returns `nextCursor`; pass it as `cursor` with the same
 filters. A changed catalog or snapshot returns `409 catalog_changed` rather
 than silently skipping or repeating rows. Cache entries are invalidated by

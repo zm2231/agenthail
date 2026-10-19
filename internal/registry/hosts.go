@@ -281,7 +281,7 @@ type HostCatalogRow struct {
 	Session           surface.Session
 	EntityID          string
 	Projection        json.RawMessage
-	Project       json.RawMessage
+	Project           json.RawMessage
 	Checkout          json.RawMessage
 	UnavailableReason string
 	ObservedAt        time.Time

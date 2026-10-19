@@ -593,7 +593,7 @@ func TestFederationQueueCountsCombineHostAndHeldWork(t *testing.T) {
 	if err := remote.reg.QueueMessage("remote-a", "queued on forge"); err != nil {
 		t.Fatal(err)
 	}
-	remote.daemon.publishCatalogQueueCounts()
+	remote.daemon.publishCatalogViewState()
 	awaitFederation(t, "remote queue mirrored", func() bool { return mirroredQueueCount(t, local, qualified) == 1 })
 	remote.stop()
 	awaitFederation(t, "rows marked unavailable", func() bool {
