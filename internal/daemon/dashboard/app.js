@@ -263,21 +263,12 @@ function startLiveStream() {
     app.history.transcriptWarning = "";
     const items = app.history.timeline?.items || [];
     const index = items.findIndex((value) => value.id === item.itemId);
-    const projected = { id: item.itemId, kind: item.kind, role: item.role, origin: item.origin, sender: item.sender, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, truncated: item.truncated, bodyRef: item.bodyRef, attachment: item.attachment, callId: item.callId };
+    const projected = { id: item.itemId, kind: item.kind, role: item.role, origin: item.origin, sender: item.sender, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, truncated: item.truncated, bodyRef: item.bodyRef, attachment: item.attachment, callId: item.callId, turnId: item.turnId };
     if (item.op === "remove") { if (index >= 0) items.splice(index, 1); }
     else if (index >= 0) items[index] = projected;
     else items.push(projected);
     app.history.timeline = { ...(app.history.timeline || {}), items };
-    const exchanges = [];
-    for (const value of items) {
-      if (!["message", "text", "assistant"].includes(value.kind)) continue;
-      if (value.role === "user") exchanges.push({ user: value.text });
-      else if (value.role === "assistant" || value.kind === "text") {
-        if (!exchanges.length || exchanges.at(-1).assistant) exchanges.push({});
-        exchanges.at(-1).assistant = value.text;
-      }
-    }
-    app.history.exchanges = exchanges;
+    app.history.exchanges = exchangesFromItems(items);
     renderChat();
   });
   source.addEventListener("error", () => {
@@ -285,6 +276,31 @@ function startLiveStream() {
     stopLiveStream();
     selectSession(session.id);
   });
+}
+function exchangesFromItems(items) {
+  const exchanges = [];
+  let turn = "";
+  let open = false;
+  for (const value of items) {
+    if (!value.text) continue;
+    const prompt = ["message", "text"].includes(value.kind) && ["user", "peer"].includes(value.role);
+    if (prompt) {
+      exchanges.push({ user: value.text, timestamp: value.timestamp });
+      turn = value.turnId || "";
+      open = true;
+      continue;
+    }
+    const reply = (["message", "assistant"].includes(value.kind) && value.role === "assistant") || (value.kind === "text" && (!value.role || value.role === "assistant"));
+    if (!reply) continue;
+    if (!open || (turn && value.turnId && value.turnId !== turn)) {
+      exchanges.push({ timestamp: value.timestamp });
+      turn = value.turnId || "";
+      open = true;
+    }
+    if (!turn) turn = value.turnId || "";
+    exchanges.at(-1).assistant = value.text;
+  }
+  return exchanges;
 }
 function resizeComposer() {
   const input = $("#message");

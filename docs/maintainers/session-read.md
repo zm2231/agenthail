@@ -1,8 +1,15 @@
 # Session pages and metadata
 
-`GET /api/v1/session?id=<session>&timeline=1&limit=40` returns the recent
-session journal page. `limit` is between 4 and 40; `timelineBefore` requests
-items strictly before the returned `timeline.nextBefore` cursor. Items retain
+`GET /api/v1/session?id=<session>&timeline=1&limit=10` returns the recent
+session journal page. `limit` counts exchanges, between 1 and 40 (default 10).
+An exchange is one turn: the prompt that opened it (a message with role `user`
+or `peer`) and the turn's last assistant message, with the prompt's timestamp.
+A reply from a different turn, or one before any prompt on the page, forms an
+exchange without a prompt. `timeline.items` holds every item of those turns, so
+the page starts at the oldest included prompt; a page holds at most 400 items,
+and a longer turn starts mid-turn. `exchanges` and `timeline.items` describe
+the same turns. `timelineBefore` requests turns strictly before the returned
+`timeline.nextBefore` cursor. Items retain
 their identity, role, title, status and retained body reference. If retention
 has pruned history needed by `timelineBefore`, or the journal has no older-history
 boundary, the endpoint returns `409` with
@@ -27,11 +34,13 @@ transaction as the page. Open `/api/v1/session-stream?id=<session>&after=<journa
 to receive subsequent changes rather than replaying the entire retained journal.
 An older-page request does not change the active stream cursor.
 
-A cold journal is initialized by the shared session source, with at most two
-seconds of waiting for the initial page. The page never calls a provider's
-metadata methods. Saved, non-streaming sessions can still initialize their
-journal through that source; a warm journal page is served immediately while
-the shared source refreshes it in the background. Provider read failures are reported separately
+Every newest-page read goes through the shared session source and waits at
+most two seconds for its first pass. A cold journal is seeded by that pass. A
+seeded journal backed by a transcript (Claude, and Codex with a local
+transcript) catches up by reading the transcript newest-first until it meets
+the journal, so turns written while no source ran appear on the next read.
+Concurrent reads share one source and one pass, and a source that is already
+running returns at once. The page never calls a provider's metadata methods. Provider read failures are reported separately
 from an empty transcript. Sources preserve the provider's truncation flag and
 bound inline bodies; retained body fetches remain session-scoped. Full body
 references count toward the journal byte budget. If a full body cannot fit,

@@ -78,3 +78,40 @@ type sessionPageFixture struct {
 func (f sessionPageFixture) ReadSession(context.Context, *surface.Session, surface.SessionReadRequest) (*surface.SessionReadResult, error) {
 	return f.result, f.err
 }
+
+type pagedSessionPages struct {
+	pages    map[int64]*surface.SessionReadResult
+	requests *[]surface.SessionReadRequest
+}
+
+func (f pagedSessionPages) ReadSession(_ context.Context, _ *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	*f.requests = append(*f.requests, request)
+	return f.pages[request.Before], nil
+}
+
+func TestLastCountReadsOlderPagesUntilItHasThatManyExchanges(t *testing.T) {
+	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
+	provider := &cliReadSurface{cliSurface: &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}}}
+	app, _ := cliFixture(t, provider.cliSurface)
+	app.Surfaces[0].Surface = provider
+	app.catalogDaemonRunning = func() bool { return true }
+	var requests []surface.SessionReadRequest
+	app.daemonSessionPageReader = func() (sessionPageReader, error) {
+		return pagedSessionPages{requests: &requests, pages: map[int64]*surface.SessionReadResult{
+			0:  {Source: "journal", Exchanges: []surface.Exchange{{User: "newest question", Assistant: "newest answer"}}, NextBefore: 17},
+			17: {Source: "journal", Exchanges: []surface.Exchange{{User: "older question", Assistant: "older answer"}}, NextBefore: 9},
+		}}, nil
+	}
+
+	output, err := captureStdout(t, func() error { return app.Run([]string{"last", "codex:s", "2", "--json"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	older, newest := strings.Index(output, "older question"), strings.Index(output, "newest question")
+	if older < 0 || newest < older || !strings.Contains(output, `"nextBefore":9`) {
+		t.Fatalf("output=%s", output)
+	}
+	if len(requests) != 2 || requests[0].Limit != 2 || requests[1].Limit != 1 || requests[1].Before != 17 {
+		t.Fatalf("requests=%+v", requests)
+	}
+}
