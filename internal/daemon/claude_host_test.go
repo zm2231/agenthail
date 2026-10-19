@@ -3,9 +3,11 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -102,6 +104,39 @@ func TestAPersonsMessageToAHostSessionIsDeliveredUnderItsIntentUUID(t *testing.T
 	}
 }
 
+func TestAStoppedDaemonLeavesNoClaudeHostSupervisorRunning(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var returned atomic.Bool
+	manager := &claudehost.Manager{Home: t.TempDir(), Launch: func() (claudehost.Launch, error) {
+		close(entered)
+		<-release
+		returned.Store(true)
+		return claudehost.Launch{}, errors.New("no Claude host in this test")
+	}}
+	d := New(hostRegistry(t), nil)
+	d.SetClaudeHost(manager)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = d.Run(ctx)
+	}()
+	<-entered
+	cancel()
+	select {
+	case <-done:
+		close(release)
+		t.Fatal("Run returned while its Claude host supervisor was still running")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	<-done
+	if !returned.Load() {
+		t.Fatal("Run returned before its Claude host supervisor finished")
+	}
+}
+
 func TestARestartedDaemonAttachesToTheRunningHostAndKeepsItsSessions(t *testing.T) {
 	fixture := claudehosttest.New(t, "")
 	r := hostRegistry(t)
@@ -138,18 +173,25 @@ func TestARestartedDaemonAttachesToTheRunningHostAndKeepsItsSessions(t *testing.
 
 	stop := run(fixture.Manager(t, "1.0.0"))
 	first := hello(0)
+	failf := func(format string, args ...any) {
+		t.Helper()
+		t.Fatalf(format+"\n%s", append(args, fixture.Diagnose(first.PID, nil))...)
+	}
 	id := uuid.NewString()
 	opened := fixture.Open(t, client, id)
 	stop()
 
 	if !claudehosttest.Alive(first.PID) || !claudehosttest.Alive(opened.PID) {
-		t.Fatal("the host and its session outlive the daemon")
+		failf("the host and its session outlive the daemon")
+	}
+	if alone := hello(first.PID); alone.PID != first.PID {
+		failf("with no daemon running, host %d answered, want %d", alone.PID, first.PID)
 	}
 	stop = run(fixture.Manager(t, "1.0.0"))
 	defer stop()
 	time.Sleep(300 * time.Millisecond)
 	if again := hello(first.PID); again.PID != first.PID {
-		t.Fatalf("restarted daemon reached host %d, want the running host %d", again.PID, first.PID)
+		failf("restarted daemon reached host %d, want the running host %d", again.PID, first.PID)
 	}
 	lock, err := os.Open(filepath.Join(fixture.Home, ".agenthail", "claude-host", "lock"))
 	if err != nil {
@@ -157,20 +199,20 @@ func TestARestartedDaemonAttachesToTheRunningHostAndKeepsItsSessions(t *testing.
 	}
 	defer lock.Close()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != syscall.EWOULDBLOCK {
-		t.Fatalf("host lock = %v, want held by the one running host", err)
+		failf("host lock = %v, want held by the one running host", err)
 	}
 	listing, err := client.List(context.Background())
 	if err != nil {
-		t.Fatal(err)
+		failf("list: %v", err)
 	}
 	if len(listing.Sessions) != 1 || listing.Sessions[0].SessionID != id || listing.Sessions[0].PID != opened.PID {
-		t.Fatalf("sessions = %+v, want %s still on pid %d", listing.Sessions, id, opened.PID)
+		failf("sessions = %+v, want %s still on pid %d", listing.Sessions, id, opened.PID)
 	}
 	log, err := os.ReadFile(filepath.Join(fixture.Home, ".agenthail", "claude-host", "host.log"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if starts := strings.Count(string(log), "listening"); starts != 1 {
-		t.Fatalf("host started %d times:\n%s", starts, log)
+		failf("host started %d times", starts)
 	}
 }
