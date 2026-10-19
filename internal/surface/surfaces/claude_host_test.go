@@ -213,6 +213,12 @@ func TestHostErrorsMapToDeliveryOutcomes(t *testing.T) {
 			t.Errorf("%s: %v", tc.name, got)
 		}
 	}
+	if got := claudeHostResumeError(fixtureConversation, host("refused")); !surface.IsDeliveryRefused(got) {
+		t.Errorf("a resume Claude refused: %v", got)
+	}
+	if got := claudeHostResumeError(fixtureConversation, host("open_failed")); !surface.IsDeliveryUnavailable(got) || surface.IsDeliveryRefused(got) || surface.IsDeliveryHeld(got) {
+		t.Errorf("a resume Claude did not start: %v, want a retried unavailable delivery", got)
+	}
 }
 
 func TestAHostSessionIsOpenWhileTheHostListsIt(t *testing.T) {

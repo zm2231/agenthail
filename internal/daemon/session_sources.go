@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,7 +22,6 @@ const (
 	sessionJournalRetentionCount = 2048
 	sessionJournalRetentionBytes = 8 << 20
 	sessionStreamBodyBytes       = 16 << 10
-	sessionPageHandoffGrace      = 5 * time.Second
 	sessionJournalSeedTimeout    = 12 * time.Second
 )
 
@@ -31,7 +29,9 @@ var (
 	sessionSeedRetryDelay          = 2 * time.Second
 	sessionSeedRetryMaxDelay       = time.Minute
 	sessionSnapshotRefreshInterval = 5 * time.Second
+	sessionPageHandoffGrace        = 5 * time.Second
 	ErrSessionSourceManagerClosed  = errors.New("session source manager is closed")
+	errTranscriptReplaced          = fmt.Errorf("transcript identity changed: %w", surface.ErrTranscriptUnavailable)
 )
 
 type sessionJournalPayload struct {
@@ -360,14 +360,6 @@ func (m *sessionSourceManager) seed(ctx context.Context, session *surface.Sessio
 	}
 }
 
-func (m *sessionSourceManager) refresh(session *surface.Session, adapter surface.Surface) {
-	release, err := m.hold(session, adapter, "page-refresh")
-	if err != nil {
-		return
-	}
-	time.AfterFunc(sessionPageHandoffGrace, release)
-}
-
 func (m *sessionSourceManager) readHistory(ctx context.Context, session *surface.Session, adapter surface.Surface, before int64, limit int) (*surface.SessionReadResult, error) {
 	source, release, err := m.holdSource(session, adapter, "history-read")
 	if err != nil {
@@ -446,17 +438,25 @@ func (s *sessionSource) loadSeed() error {
 	if provider, ok := s.adapter.(surface.LocalTranscriptProvider); ok {
 		localTranscript = provider.RequiresLocalTranscript(&s.session)
 	}
+	// Turns written while no source ran exist only in the transcript.
+	transcriptBacked := localTranscript || s.session.Surface == surface.KindClaude
 	streamable := surface.EffectiveCapabilities(s.adapter, &s.session).Stream
-	if statusErr == nil && seedStatus == registry.SessionJournalSeeded && !localTranscript && streamable {
-		return s.resumeClaudeTranscript(trustedIdentity)
+	seeded := statusErr == nil && seedStatus == registry.SessionJournalSeeded
+	if seeded && !transcriptBacked && streamable {
+		return nil
 	}
 	if localTranscript && trustedIdentity == "" && seedSeq > 0 {
 		return fmt.Errorf("Codex local transcript identity checkpoint is unavailable: %w", surface.ErrTranscriptUnavailable)
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, sessionJournalSeedTimeout)
 	defer cancel()
-	if seedStatus == registry.SessionJournalSeeded && localTranscript {
-		return s.catchUpLocalTranscript(ctx, trustedIdentity)
+	if seeded && transcriptBacked {
+		err := s.catchUpLocalTranscript(ctx, trustedIdentity)
+		if localTranscript || !errors.Is(err, errTranscriptReplaced) {
+			return err
+		}
+		// A replaced Claude transcript seeds again from the new file.
+		trustedIdentity = ""
 	}
 	s.providerMu.Lock()
 	read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Limit: 40})
@@ -468,7 +468,7 @@ func (s *sessionSource) loadSeed() error {
 		return err
 	}
 	if trustedIdentity != "" && read.TranscriptIdentity != trustedIdentity {
-		return fmt.Errorf("Codex local transcript was replaced before catch-up: %w", surface.ErrTranscriptUnavailable)
+		return fmt.Errorf("Codex local transcript was replaced before catch-up: %w", errTranscriptReplaced)
 	}
 	if read.TranscriptOffsetSet {
 		s.session.TranscriptOffset = read.TranscriptOffset
@@ -488,50 +488,6 @@ func (s *sessionSource) loadSeed() error {
 	}
 	s.appendSeedItems(read.Items)
 	return s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.TranscriptIdentity)
-}
-
-// resumeClaudeTranscript starts a fresh Claude source at the newest transcript record already in
-// the journal, so turns written while no source was running are delivered instead of skipped.
-// Replaying that one record is idempotent because its provider key is stable.
-func (s *sessionSource) resumeClaudeTranscript(trustedIdentity string) error {
-	if s.session.Surface != surface.KindClaude || trustedIdentity == "" || s.session.TranscriptOffsetSet {
-		return nil
-	}
-	resume := int64(-1)
-	before := uint64(0)
-	for {
-		page, err := s.manager.registry.ReadSessionJournalPage(s.session.ID, before, 200)
-		if err != nil {
-			var gap *registry.SessionJournalHistoryGapError
-			if errors.As(err, &gap) {
-				break
-			}
-			return err
-		}
-		for _, entry := range page.Entries {
-			key, ok := strings.CutPrefix(entry.ProviderKey, "timeline:")
-			if !ok {
-				continue
-			}
-			offset, _, ok := strings.Cut(key, "-")
-			if !ok {
-				continue
-			}
-			if value, err := strconv.ParseInt(offset, 10, 64); err == nil && value > resume {
-				resume = value
-			}
-		}
-		if page.NextBefore == 0 {
-			break
-		}
-		before = page.NextBefore
-	}
-	if resume >= 0 {
-		s.session.TranscriptOffset = resume
-		s.session.TranscriptOffsetSet = true
-		s.session.TranscriptIdentity = trustedIdentity
-	}
-	return nil
 }
 
 func (s *sessionSource) setSeedErr(err error) {
@@ -574,7 +530,7 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 			return err
 		}
 		if !read.TranscriptOffsetSet {
-			return fmt.Errorf("Codex local transcript is unavailable")
+			return fmt.Errorf("%s transcript is unavailable", s.session.Surface)
 		}
 		if transcriptIdentity == "" {
 			transcriptIdentity = read.TranscriptIdentity
@@ -583,7 +539,7 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 			if len(pages) == 0 {
 				phase = "before catch-up"
 			}
-			return fmt.Errorf("Codex local transcript was replaced %s: %w", phase, surface.ErrTranscriptUnavailable)
+			return fmt.Errorf("%s transcript was replaced %s: %w", s.session.Surface, phase, errTranscriptReplaced)
 		}
 		if read.TranscriptOffsetSet && !s.session.TranscriptOffsetSet {
 			s.session.TranscriptOffset = read.TranscriptOffset

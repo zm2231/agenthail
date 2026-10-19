@@ -631,6 +631,7 @@ struct QueueState: Decodable, Identifiable, Equatable {
         case "busy": return "Held: this agent is working"
         case "offline": return "Held: this agent is offline"
         case "unknown": return "Held: this agent's state is unknown"
+        case "refused": return "Held: this agent refused to start"
         case "retrying": return "Held: waiting to retry"
         case "behind": return "Held: behind an earlier message"
         case "notLoaded": return "Held: this conversation is not loaded"

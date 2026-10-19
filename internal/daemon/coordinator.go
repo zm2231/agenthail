@@ -20,7 +20,7 @@ func (d *Daemon) restartCoordinator(ctx context.Context, session *surface.Sessio
 	if current, replaced := coord.ReplacedBy(session.ID); replaced {
 		if err := d.Registry.MoveClaimedMessage(item.ID, current); err != nil {
 			d.log.Printf("move queue item %d to coordinator %s: %s", item.ID, current, err)
-			if err := d.Registry.DeferMessage(item.ID, err, now); err != nil {
+			if _, err := d.Registry.DeferMessage(item.ID, err, now); err != nil {
 				d.log.Printf("defer queue item %d: %s", item.ID, err)
 			}
 		}
