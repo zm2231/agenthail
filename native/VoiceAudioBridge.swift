@@ -11,6 +11,11 @@ protocol VoiceAudioClient: AnyObject {
     func answer(_ sdp: String) async throws
     func mute(_ muted: Bool)
     func close()
+    func configureCall(id: UUID, name: String)
+}
+
+extension VoiceAudioClient {
+    func configureCall(id: UUID, name: String) {}
 }
 
 struct VoiceMicrophoneDenied: LocalizedError {
@@ -23,6 +28,7 @@ struct VoiceMicrophoneDenied: LocalizedError {
     }
 }
 
+#if os(macOS)
 @MainActor
 final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
     let webView: WKWebView
@@ -34,18 +40,11 @@ final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKSc
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.mediaTypesRequiringUserActionForPlayback = []
-#if os(iOS)
-        configuration.allowsInlineMediaPlayback = true
-#endif
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         configuration.userContentController.add(self, name: "voice")
         webView.uiDelegate = self
         webView.navigationDelegate = self
-#if os(iOS)
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
-#endif
     }
 
     func load(_ request: URLRequest) {
@@ -55,14 +54,6 @@ final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKSc
     }
 
     func start() async throws {
-#if DEBUG && targetEnvironment(simulator)
-        if VoiceEvaluation.enabled {
-            let ready = try await webView.evaluateJavaScript("window.agenthailEvaluationReady?.() === true")
-            guard ready as? Bool == true else { throw AgenthailAPIError.unavailable("Simulator speech injection did not initialize. Native microphone capture is disabled for this evaluation.") }
-            try await webView.evaluateJavaScript("void window.agenthailVoice.start()")
-            return
-        }
-#endif
         permissionGeneration += 1
         let generation = permissionGeneration
         let allowed = await withCheckedContinuation { continuation in
@@ -75,9 +66,6 @@ final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKSc
 
     func end() {
         permissionGeneration += 1
-#if DEBUG && targetEnvironment(simulator)
-        if VoiceEvaluation.enabled { webView.evaluateJavaScript("window.agenthailEvaluationRecord?.()", completionHandler: nil) }
-#endif
         webView.evaluateJavaScript("window.agenthailVoice?.end()", completionHandler: nil)
         webView.setMicrophoneCaptureState(.none)
     }
@@ -102,10 +90,6 @@ final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKSc
         guard message.frameInfo.isMainFrame, sameOrigin(message.frameInfo.request.url),
               let body = message.body as? [String: String], let type = body["type"] else { return }
         if type == "ready" { return }
-#if DEBUG && targetEnvironment(simulator)
-        if type == "evaluationDiagnostic" { VoiceEvaluation.saveDiagnostic(body["value"] ?? ""); return }
-        if type == "evaluationRecording" { VoiceEvaluation.saveRecording(body["value"] ?? ""); return }
-#endif
         onMessage?(type, body["value"] ?? "")
     }
 
@@ -136,11 +120,7 @@ final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKSc
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard sameOrigin(webView.url) else { return }
-        var script = "typeof window.agenthailVoice === 'object'"
-#if DEBUG && targetEnvironment(simulator)
-        if VoiceEvaluation.enabled { script = VoiceEvaluation.script + "\n typeof window.agenthailVoice === 'object' && window.agenthailEvaluationReady?.() === true" }
-#endif
-        webView.evaluateJavaScript(script) { [weak self] value, error in
+        webView.evaluateJavaScript("typeof window.agenthailVoice === 'object'") { [weak self] value, error in
             if let error { self?.onMessage?("unavailable", "Audio page initialization: \(error.localizedDescription)") }
             else if value as? Bool == true { self?.onMessage?("ready", "") }
             else { self?.onMessage?("unavailable", "The audio page did not initialize. Reopen Voice after checking the host build.") }
@@ -148,9 +128,6 @@ final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKSc
     }
 
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping @MainActor @Sendable (WKPermissionDecision) -> Void) {
-#if DEBUG && targetEnvironment(simulator)
-        if VoiceEvaluation.enabled { decisionHandler(.deny); return }
-#endif
         guard let expected = self.origin, origin.protocol == expected.scheme, origin.host == expected.host,
               (origin.port == 0 ? VoiceAPI.defaultPort(origin.protocol) : origin.port) == (expected.port ?? VoiceAPI.defaultPort(expected.scheme)),
               frame.isMainFrame, type == .microphone else {
@@ -164,13 +141,6 @@ final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKSc
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { onMessage?("unavailable", "The audio process ended. Hang up and reopen Voice to reconnect.") }
 }
 
-#if os(iOS)
-struct VoiceAudioSurface: UIViewRepresentable {
-    let bridge: VoiceAudioBridge
-    func makeUIView(context: Context) -> WKWebView { bridge.webView }
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
-}
-#else
 struct VoiceAudioSurface: NSViewRepresentable {
     let bridge: VoiceAudioBridge
     func makeNSView(context: Context) -> WKWebView { bridge.webView }

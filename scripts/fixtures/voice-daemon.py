@@ -62,6 +62,9 @@ def apply(action):
     elif name == "target-interrupt":
         if not state.get("target"):
             raise ValueError("no selected session")
+    elif name == "heartbeat":
+        if state["phase"] not in ("starting", "negotiating", "connected", "stopping") or action.get("attemptId") != state.get("attemptId"):
+            raise ValueError("heartbeat requires the current active voice call")
     elif name == "stop":
         state.update(phase="ended", sdp=None)
     else:

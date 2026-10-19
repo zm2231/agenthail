@@ -37,6 +37,7 @@ let package = Package(
                 "AgenthailModel.swift",
                 "VoiceAPI.swift",
                 "VoiceAudioBridge.swift",
+                "VoiceCallDiagnostics.swift",
                 "VoiceOperatorModel.swift",
                 "macOS"
             ],
