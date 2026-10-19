@@ -1,3 +1,4 @@
+@testable import AgenthailHelpers
 import AppKit
 import SwiftUI
 

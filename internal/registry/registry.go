@@ -81,21 +81,35 @@ func (r *Registry) Path() string { return r.path }
 
 func (r *Registry) Close() error { return errors.Join(r.read.Close(), r.db.Close()) }
 
+// migrate brings the database to the current schema in one transaction, so an
+// interrupted upgrade leaves the previous schema intact.
 func (r *Registry) migrate() error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := migrateTx(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func migrateTx(tx *sql.Tx) error {
 	var version int
-	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
-	if _, err := r.db.Exec(schema); err != nil {
+	if _, err := tx.Exec(schema); err != nil {
 		return err
 	}
-	if err := r.ensureHostIdentity(); err != nil {
+	if err := ensureHostIdentity(tx); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("routes", "once_only", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+	if err := ensureColumn(tx, "routes", "once_only", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("routes", "active", `INTEGER NOT NULL DEFAULT 1`); err != nil {
+	if err := ensureColumn(tx, "routes", "active", `INTEGER NOT NULL DEFAULT 1`); err != nil {
 		return err
 	}
 	for _, column := range []struct {
@@ -121,7 +135,7 @@ func (r *Registry) migrate() error {
 		{"author", `TEXT NOT NULL DEFAULT ''`},
 		{"host_request", `BLOB NOT NULL DEFAULT ''`},
 	} {
-		if err := r.ensureColumn("message_queue", column.name, column.decl); err != nil {
+		if err := ensureColumn(tx, "message_queue", column.name, column.decl); err != nil {
 			return err
 		}
 	}
@@ -142,7 +156,7 @@ func (r *Registry) migrate() error {
 		{"agent_role", `TEXT NOT NULL DEFAULT ''`},
 		{"host_id", `TEXT NOT NULL DEFAULT ''`},
 	} {
-		if err := r.ensureColumn("sessions", column.name, column.decl); err != nil {
+		if err := ensureColumn(tx, "sessions", column.name, column.decl); err != nil {
 			return err
 		}
 	}
@@ -157,56 +171,56 @@ func (r *Registry) migrate() error {
 		{"waiting_since_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"waiting_announced", `INTEGER NOT NULL DEFAULT 0`},
 	} {
-		if err := r.ensureColumn("session_runtime", column.name, column.decl); err != nil {
+		if err := ensureColumn(tx, "session_runtime", column.name, column.decl); err != nil {
 			return err
 		}
 	}
-	turnObservedExisted, columnErr := r.columnExists("session_runtime", "turn_observed")
+	turnObservedExisted, columnErr := columnExists(tx, "session_runtime", "turn_observed")
 	if columnErr != nil {
 		return columnErr
 	}
-	if err := r.ensureColumn("session_runtime", "turn_observed", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+	if err := ensureColumn(tx, "session_runtime", "turn_observed", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
 	if !turnObservedExisted {
-		if _, err := r.db.Exec(`UPDATE session_runtime SET turn_observed=1 WHERE last_status<>'unknown' OR active_turn_id<>'' OR completed_turn_id<>'' OR relay_hops<>0`); err != nil {
+		if _, err := tx.Exec(`UPDATE session_runtime SET turn_observed=1 WHERE last_status<>'unknown' OR active_turn_id<>'' OR completed_turn_id<>'' OR relay_hops<>0`); err != nil {
 			return err
 		}
 	}
-	if err := r.ensureColumn("launcher_pending", "alias", `TEXT NOT NULL DEFAULT ''`); err != nil {
+	if err := ensureColumn(tx, "launcher_pending", "alias", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("session_journal_state", "source_epoch", `TEXT NOT NULL DEFAULT ''`); err != nil {
+	if err := ensureColumn(tx, "session_journal_state", "source_epoch", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("session_journal_state", "pruned_before", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+	if err := ensureColumn(tx, "session_journal_state", "pruned_before", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("session_journal_state", "seed_status", `TEXT NOT NULL DEFAULT 'unknown'`); err != nil {
+	if err := ensureColumn(tx, "session_journal_state", "seed_status", `TEXT NOT NULL DEFAULT 'unknown'`); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("session_journal_state", "seed_seq", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+	if err := ensureColumn(tx, "session_journal_state", "seed_seq", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("session_journal_state", "seed_identity", `TEXT NOT NULL DEFAULT ''`); err != nil {
+	if err := ensureColumn(tx, "session_journal_state", "seed_identity", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("session_journal_state", "history_before", `INTEGER NOT NULL DEFAULT -1`); err != nil {
+	if err := ensureColumn(tx, "session_journal_state", "history_before", `INTEGER NOT NULL DEFAULT -1`); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("session_journal", "body_ref", `TEXT NOT NULL DEFAULT ''`); err != nil {
+	if err := ensureColumn(tx, "session_journal", "body_ref", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("delivery_intents", "message", `TEXT NOT NULL DEFAULT ''`); err != nil {
+	if err := ensureColumn(tx, "delivery_intents", "message", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("delivery_intents", "queue_id", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+	if err := ensureColumn(tx, "delivery_intents", "queue_id", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("delivery_intents", "dismissed_at", `TEXT`); err != nil {
+	if err := ensureColumn(tx, "delivery_intents", "dismissed_at", `TEXT`); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("delivery_intents", "retries", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+	if err := ensureColumn(tx, "delivery_intents", "retries", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
 	for _, column := range []struct{ name, decl string }{
@@ -215,25 +229,40 @@ func (r *Registry) migrate() error {
 		{"last_goal_key", `TEXT NOT NULL DEFAULT ''`},
 		{"last_error", `TEXT NOT NULL DEFAULT ''`},
 	} {
-		if err := r.ensureColumn("routes", column.name, column.decl); err != nil {
+		if err := ensureColumn(tx, "routes", column.name, column.decl); err != nil {
 			return err
 		}
 	}
-	if err := r.ensureColumn("delivery_intents", "relayed", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+	for _, column := range []struct{ name, decl string }{
+		{"misses", `INTEGER NOT NULL DEFAULT 0`},
+		{"projection_fingerprint", `TEXT NOT NULL DEFAULT ''`},
+		{"projection_generation", `INTEGER NOT NULL DEFAULT 0`},
+		{"discovery_failures", `INTEGER NOT NULL DEFAULT 0`},
+		{"waiting_on", `BLOB NOT NULL DEFAULT ''`},
+		{"host_queue_count", `INTEGER NOT NULL DEFAULT 0`},
+	} {
+		if err := ensureColumn(tx, "catalog_sessions", column.name, column.decl); err != nil {
+			return err
+		}
+	}
+	if _, err := catalogHostEpochTx(tx, true); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "delivery_intents", "relayed", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
 	if version < 17 {
-		if err := r.dropQueueExpiry(); err != nil {
+		if err := dropQueueExpiry(tx); err != nil {
 			return err
 		}
 	}
 	if version < 13 {
-		if _, err := r.db.Exec(`UPDATE delivery_intents SET relayed=1 WHERE queue_id IN (SELECT id FROM message_queue WHERE relay_hops>0) OR provider_key LIKE 'relay:%'`); err != nil {
+		if _, err := tx.Exec(`UPDATE delivery_intents SET relayed=1 WHERE queue_id IN (SELECT id FROM message_queue WHERE relay_hops>0) OR provider_key LIKE 'relay:%'`); err != nil {
 			return err
 		}
 	}
 	if version < 9 {
-		if _, err := r.db.Exec(`
+		if _, err := tx.Exec(`
 			UPDATE session_journal
 			SET bytes=length(payload)+CASE WHEN body_ref!='' THEN COALESCE((SELECT length(body) FROM session_journal_bodies WHERE session_journal_bodies.session_id=session_journal.session_id AND session_journal_bodies.ref=session_journal.body_ref),0) ELSE 0 END;
 			UPDATE session_journal_state
@@ -241,25 +270,25 @@ func (r *Registry) migrate() error {
 			return err
 		}
 	}
-	if _, err := r.db.Exec(`UPDATE message_queue SET evidence='delivered' WHERE status='delivered' AND evidence=''`); err != nil {
+	if _, err := tx.Exec(`UPDATE message_queue SET evidence='delivered' WHERE status='delivered' AND evidence=''`); err != nil {
 		return err
 	}
 	if version < 14 {
-		if err := r.rekeyClaudeConversations(version); err != nil {
+		if err := rekeyClaudeConversations(tx); err != nil {
 			return err
 		}
 	}
-	if err := r.recordRuntimeKinds(); err != nil {
+	if err := recordRuntimeKinds(tx); err != nil {
 		return err
 	}
 	if version >= schemaVersion {
 		return nil
 	}
 	if version >= 1 {
-		_, err := r.db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
+		_, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
 		return err
 	}
-	_, err := r.db.Exec(fmt.Sprintf(`
+	_, err := tx.Exec(fmt.Sprintf(`
 		UPDATE message_queue SET status=CASE WHEN delivered=1 THEN 'delivered' ELSE 'pending' END
 		WHERE status='' OR (delivered=1 AND status!='delivered');
 		DELETE FROM aliases WHERE rowid NOT IN (SELECT MAX(rowid) FROM aliases GROUP BY session_id);
@@ -269,15 +298,15 @@ func (r *Registry) migrate() error {
 	if err != nil {
 		return err
 	}
-	_, err = r.db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
+	_, err = tx.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
 	return err
 }
 
 // dropQueueExpiry retires the old one-hour queue expiry. Rows it had expired
 // become canceled history; dead rows start their review window at their last
 // update.
-func (r *Registry) dropQueueExpiry() error {
-	exists, err := r.columnExists("message_queue", "expires_at_ms")
+func dropQueueExpiry(tx *sql.Tx) error {
+	exists, err := columnExists(tx, "message_queue", "expires_at_ms")
 	if err != nil || !exists {
 		return err
 	}
@@ -292,15 +321,15 @@ func (r *Registry) dropQueueExpiry() error {
 		{`UPDATE delivery_history SET kind='canceled' WHERE kind='expired'`, nil},
 		{`ALTER TABLE message_queue DROP COLUMN expires_at_ms`, nil},
 	} {
-		if _, err := r.db.Exec(step.query, step.args...); err != nil {
+		if _, err := tx.Exec(step.query, step.args...); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *Registry) columnExists(table, name string) (bool, error) {
-	rows, err := r.db.Query(`PRAGMA table_info(` + table + `)`)
+func columnExists(tx *sql.Tx, table, name string) (bool, error) {
+	rows, err := tx.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
 		return false, err
 	}
@@ -320,15 +349,15 @@ func (r *Registry) columnExists(table, name string) (bool, error) {
 	return found, rows.Close()
 }
 
-func (r *Registry) ensureColumn(table, name, declaration string) error {
-	found, err := r.columnExists(table, name)
+func ensureColumn(tx *sql.Tx, table, name, declaration string) error {
+	found, err := columnExists(tx, table, name)
 	if err != nil {
 		return err
 	}
 	if found {
 		return nil
 	}
-	_, err = r.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + name + ` ` + declaration)
+	_, err = tx.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + name + ` ` + declaration)
 	return err
 }
 
@@ -344,7 +373,11 @@ CREATE TABLE IF NOT EXISTS sessions (
 	bridge TEXT NOT NULL DEFAULT '', forked_from TEXT NOT NULL DEFAULT '',
 	last_active_ms INTEGER NOT NULL DEFAULT 0,
 	registered_at TEXT NOT NULL DEFAULT (datetime('now')),
-	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	parent_session_id TEXT NOT NULL DEFAULT '', root_session_id TEXT NOT NULL DEFAULT '',
+	subagent_depth INTEGER NOT NULL DEFAULT 0,
+	agent_nickname TEXT NOT NULL DEFAULT '', agent_role TEXT NOT NULL DEFAULT '',
+	host_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS session_rekeys (
 	old_id TEXT PRIMARY KEY, new_id TEXT NOT NULL,
@@ -371,7 +404,11 @@ CREATE TABLE IF NOT EXISTS routes (
 	pattern TEXT NOT NULL DEFAULT '.*',
 	once_only INTEGER NOT NULL DEFAULT 0,
 	active INTEGER NOT NULL DEFAULT 1,
-	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	handoff TEXT NOT NULL DEFAULT 'turn_finished',
+	event_cursor INTEGER NOT NULL DEFAULT 0,
+	last_goal_key TEXT NOT NULL DEFAULT '',
+	last_error TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS message_queue (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -388,7 +425,10 @@ CREATE TABLE IF NOT EXISTS message_queue (
 	deferrals INTEGER NOT NULL DEFAULT 0,
 	evidence TEXT NOT NULL DEFAULT '',
 	operation TEXT NOT NULL DEFAULT 'message',
-	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	busy_delivery TEXT NOT NULL DEFAULT '',
+	author TEXT NOT NULL DEFAULT '',
+	host_request BLOB NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS session_runtime (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
@@ -398,7 +438,14 @@ CREATE TABLE IF NOT EXISTS session_runtime (
 	relay_hops INTEGER NOT NULL DEFAULT 0,
 	notification_armed INTEGER NOT NULL DEFAULT 0,
 	turn_observed INTEGER NOT NULL DEFAULT 0,
-	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	runtime_launcher TEXT NOT NULL DEFAULT '',
+	runtime_location BLOB NOT NULL DEFAULT '{}',
+	runtime_focusable INTEGER NOT NULL DEFAULT 0,
+	waiting_kind TEXT NOT NULL DEFAULT '',
+	waiting_id TEXT NOT NULL DEFAULT '',
+	waiting_since_ms INTEGER NOT NULL DEFAULT 0,
+	waiting_announced INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS launcher_pending (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -615,6 +662,25 @@ CREATE TABLE IF NOT EXISTS hosts (
 	created_at TEXT NOT NULL,
 	catalog_epoch TEXT NOT NULL DEFAULT '',
 	catalog_seq INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS catalog_sessions (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	host_project BLOB NOT NULL,
+	checkout BLOB NOT NULL,
+	unavailable_reason TEXT NOT NULL DEFAULT '',
+	observed_at TEXT NOT NULL,
+	misses INTEGER NOT NULL DEFAULT 0,
+	projection_fingerprint TEXT NOT NULL DEFAULT '',
+	projection_generation INTEGER NOT NULL DEFAULT 0,
+	discovery_failures INTEGER NOT NULL DEFAULT 0,
+	waiting_on BLOB NOT NULL DEFAULT '',
+	host_queue_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS catalog_surfaces (
+	surface TEXT PRIMARY KEY,
+	health TEXT NOT NULL,
+	detail TEXT NOT NULL DEFAULT '',
+	observed_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),
