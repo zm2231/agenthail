@@ -148,7 +148,7 @@ func (c *Claude) Control(ctx context.Context, sess *surface.Session, control sur
 	}
 	if observation == nil || observation.Status != surface.StatusBusy {
 		if control.Action == "steer" {
-			return nil, surface.DeliveryUnavailable(errors.New("session idle; nothing to steer (use 'send' instead)"))
+			return nil, surface.DeliveryUnavailable(fmt.Errorf("%w (use 'send' instead)", surface.ErrNothingToSteer))
 		}
 		return nil, fmt.Errorf("session idle; nothing to interrupt")
 	}

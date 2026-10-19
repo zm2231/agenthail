@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -60,13 +61,18 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	var steered *surface.ControlResult
 	route := surface.RouteFor(adapter, session, item.Author)
 	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author, Uploads: item.Uploads}
-	if item.BusyDelivery == "steer" && !options.HoldsForQueue() && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer {
+	steer := item.BusyDelivery == "steer" && !options.HoldsForQueue() && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer
+	if steer {
 		steered, sendErr = surface.SteerWithEvidence(operationCtx, adapter, session, item.Message)
 		if sendErr == nil {
 			result = &surface.SendResult{UUID: steered.RequestID, Accepted: true}
 		}
-	} else if sendErr = route.Validate(adapter, options); sendErr == nil {
-		result, sendErr = route.Send(operationCtx, adapter, session, item.Message, options)
+	}
+	if !steer || errors.Is(sendErr, surface.ErrNothingToSteer) {
+		steered = nil
+		if sendErr = route.Validate(adapter, options); sendErr == nil {
+			result, sendErr = route.Send(operationCtx, adapter, session, item.Message, options)
+		}
 	}
 	cancel()
 	if ownedErr := d.dispatcher().RegisterReached(&addressed, session); ownedErr != nil {

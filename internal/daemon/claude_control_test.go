@@ -132,3 +132,61 @@ func TestClaudeContextCommandReturnsTheOutputJoinedToItsRequest(t *testing.T) {
 		t.Fatalf("history evidence=%q", evidence)
 	}
 }
+
+// The turn ends between the send seeing the session busy and the Remote
+// Control steer reading it, so the message goes as the next turn instead.
+func TestARemoteControlSteerWhoseTurnEndsFirstIsSentAsTheNextTurn(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	process := claudetest.New(t)
+	transcript := process.Transcript("conversation-race", process.Home)
+	process.RecordStatus("conversation-race", process.Home, "session_race", "busy", "", time.Time{})
+	appendClaudeRecords(t, transcript, `{"type":"user","uuid":"turn-active","timestamp":"2026-10-19T10:00:00Z","message":{"content":"Refactor the parser"}}`)
+	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	session := surface.Session{ID: "conversation-race", Bridge: "session_race", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: process.PID, Status: surface.StatusBusy, HasLocal: true, Transcript: transcript}
+	if err := store.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	var once sync.Once
+	posts := &remoteControlPosts{}
+	claude := surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
+		switch {
+		case method == "GET" && strings.HasSuffix(url, "/v1/code/sessions/cse_race"):
+			once.Do(func() {
+				appendClaudeRecords(t, transcript, `{"type":"assistant","uuid":"reply","timestamp":"2026-10-19T10:00:05Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}`, `{"type":"system","subtype":"turn_duration","timestamp":"2026-10-19T10:00:06Z"}`)
+				process.RecordStatus("conversation-race", process.Home, "session_race", "idle", "", time.Time{})
+			})
+			return 200, `{"response_shape":{"id":"cse_race","connection_status":"connected"}}`, nil
+		case method == "GET" && strings.Contains(url, "/v1/sessions/session_race/events"):
+			return 200, `{"data":[],"has_more":false}`, nil
+		case method == "POST" && strings.HasSuffix(url, "/v1/code/sessions/cse_race/events"):
+			var envelope struct {
+				Events []struct {
+					Payload map[string]any `json:"payload"`
+				} `json:"events"`
+			}
+			if err := json.Unmarshal([]byte(body), &envelope); err != nil || len(envelope.Events) != 1 {
+				t.Errorf("body=%s err=%v", body, err)
+				return 400, "", nil
+			}
+			posts.mu.Lock()
+			posts.posts = append(posts.posts, envelope.Events[0].Payload)
+			posts.mu.Unlock()
+			return 200, `{}`, nil
+		}
+		t.Errorf("unexpected %s %s", method, url)
+		return 404, "", nil
+	})
+	h, _ := runDaemon(t, store, claude)
+	receipt := h.receipt(map[string]any{"action": "send", "sessionId": session.ID, "message": "Keep the public API unchanged", "busyDelivery": "steer"})
+	sent := posts.all()
+	if len(sent) != 1 || sent[0]["type"] != "user" || receipt["turnId"] != sent[0]["uuid"] || receipt["evidence"] == string(surface.EvidenceTransportAccepted) {
+		t.Fatalf("receipt=%v posted=%v, want one next-turn send", receipt, sent)
+	}
+	if store.QueueCount(session.ID) != 0 {
+		t.Fatalf("queued=%d", store.QueueCount(session.ID))
+	}
+}

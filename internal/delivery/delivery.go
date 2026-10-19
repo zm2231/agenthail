@@ -95,13 +95,16 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 		}
 		ctx = surface.WithMessageUUID(ctx, intent.UUID)
 	}
-	return d.steer(ctx, adapter, session, message, target, "", "steer", intent)
+	return d.steer(ctx, adapter, session, message, target, "", "steer", intent, false)
 }
 
 // steer reports the evidence the surface proved: a Claude Remote Control steer
 // is accepted by the transport, which does not show it reached the turn.
-func (d Dispatcher) steer(ctx context.Context, adapter surface.Surface, session *surface.Session, message, target, sourceID, label string, intent *registry.DeliveryIntent) (*Receipt, error) {
+func (d Dispatcher) steer(ctx context.Context, adapter surface.Surface, session *surface.Session, message, target, sourceID, label string, intent *registry.DeliveryIntent, sendIfEnded bool) (*Receipt, error) {
 	result, err := surface.SteerWithEvidence(ctx, adapter, session, message)
+	if sendIfEnded && errors.Is(err, surface.ErrNothingToSteer) {
+		return nil, errTurnEnded
+	}
 	if err != nil {
 		if intent != nil {
 			if surface.IsDeliveryOutcomeUnknown(err) {
@@ -175,13 +178,14 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if modeErr != nil {
 		return nil, modeErr
 	}
+	var intent *registry.DeliveryIntent
+	retry := true
 	if route == surface.RoutePeer {
 		observation, observeErr := adapter.Observe(ctx, session)
 		if observeErr != nil {
 			return nil, observeErr
 		}
 		if observation != nil && observation.Status == surface.StatusBusy {
-			var intent *registry.DeliveryIntent
 			if !syntheticNotion {
 				var intentErr error
 				intent, intentErr = d.prepareIntent(options.SourceSessionID, session.ID, message)
@@ -192,7 +196,11 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 					ctx = surface.WithMessageUUID(ctx, intent.UUID)
 				}
 			}
-			return d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, busyMode, "", intent, observation)
+			receipt, err := d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, busyMode, "", intent, observation)
+			if !errors.Is(err, errTurnEnded) {
+				return receipt, err
+			}
+			retry = false
 		}
 	}
 	baselineCompletionID := ""
@@ -209,17 +217,23 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if err := route.Validate(adapter, options); err != nil {
 		return nil, err
 	}
-	var intent *registry.DeliveryIntent
-	if d.Registry != nil && !syntheticNotion {
+	if intent == nil && d.Registry != nil && !syntheticNotion {
 		var intentErr error
 		intent, intentErr = d.prepareIntent(options.SourceSessionID, session.ID, message)
 		if intentErr != nil {
 			return nil, intentErr
 		}
+		if intent != nil {
+			ctx = surface.WithMessageUUID(ctx, intent.UUID)
+		}
 	}
-	if intent != nil {
-		ctx = surface.WithMessageUUID(ctx, intent.UUID)
-	}
+	return d.send(ctx, adapter, session, route, message, deliveryKey, options, allowQueue, busyMode, intent, baselineCompletionID, target, retry)
+}
+
+// send delivers message as the session's next turn. A busy session is
+// steered or queued; when the steer finds the turn already over, the message
+// is sent once more as the next turn, and queued if the session is busy again.
+func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *surface.Session, route surface.Route, message, deliveryKey string, options surface.SendOptions, allowQueue bool, busyMode deliverypolicy.Mode, intent *registry.DeliveryIntent, baselineCompletionID, target string, retry bool) (*Receipt, error) {
 	addressed := *session
 	result, err := route.Send(ctx, adapter, session, message, options)
 	if ownedErr := d.RegisterReached(&addressed, session); ownedErr != nil {
@@ -274,7 +288,14 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result.UUID})
 		return receipt, nil
 	}
-	return d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, busyMode, result.UUID, intent, nil)
+	if !retry {
+		busyMode = deliverypolicy.Queue
+	}
+	receipt, err := d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, busyMode, result.UUID, intent, nil)
+	if errors.Is(err, errTurnEnded) {
+		return d.send(ctx, adapter, session, route, message, deliveryKey, options, allowQueue, busyMode, intent, baselineCompletionID, target, false)
+	}
+	return receipt, err
 }
 
 func (d Dispatcher) prepareIntent(sourceID, targetID, message string) (*registry.DeliveryIntent, error) {
@@ -293,6 +314,10 @@ func (d Dispatcher) prepareIntent(sourceID, targetID, message string) (*registry
 	}
 	return intent, nil
 }
+
+// errTurnEnded is handleBusy finding the target's turn over by the time it
+// steered; the caller sends the message as the next turn instead.
+var errTurnEnded = errors.New("the busy turn ended before the steer")
 
 // handleBusy steers or queues a message for a busy target. observation is the
 // target's state when the caller already has it; without it, a steer observes
@@ -324,7 +349,7 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 		waiting = recorded
 	}
 	if steerable && waiting == nil {
-		return d.steer(ctx, adapter, session, message, target, options.SourceSessionID, "busy steer", intent)
+		return d.steer(ctx, adapter, session, message, target, options.SourceSessionID, "busy steer", intent, true)
 	}
 	if !allowQueue {
 		d.discardIntent(intent, session.ID)
