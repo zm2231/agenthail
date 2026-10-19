@@ -570,7 +570,7 @@ func TestOpenGivesDevicesOnARegistryAtTheVersionBeforeNoHostBinding(t *testing.T
 	for _, statement := range []string{
 		`ALTER TABLE paired_devices DROP COLUMN host_id`,
 		`INSERT INTO paired_devices(id,name,token_hash,scopes,created_at) VALUES('device-1','forge','hash-1','control,host,read','2026-10-19T08:00:00Z')`,
-		`PRAGMA user_version=22`,
+		`PRAGMA user_version=20`,
 	} {
 		if _, err := r.db.Exec(statement); err != nil {
 			t.Fatal(err)
