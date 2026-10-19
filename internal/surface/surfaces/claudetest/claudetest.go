@@ -122,7 +122,21 @@ func (f *Fixture) Job(id, conversation, cwd, state string, pid int) {
 // an empty bridge leaves it without Remote Control or a messaging socket.
 func (f *Fixture) Record(conversation, cwd, bridge string) {
 	f.t.Helper()
-	record := map[string]any{"pid": f.PID, "sessionId": conversation, "cwd": cwd, "status": "idle", "peerFeatures": []string{"notify_idle"}, "startedAt": time.Now().UnixMilli()}
+	f.RecordStatus(conversation, cwd, bridge, "idle", "", time.Time{})
+}
+
+// RecordStatus writes the record with the status Claude reports, such as
+// busy, or waiting with waitingFor "input needed" or "permission prompt"
+// since the given time.
+func (f *Fixture) RecordStatus(conversation, cwd, bridge, status, waitingFor string, since time.Time) {
+	f.t.Helper()
+	record := map[string]any{"pid": f.PID, "sessionId": conversation, "cwd": cwd, "status": status, "peerFeatures": []string{"notify_idle"}, "startedAt": time.Now().UnixMilli()}
+	if waitingFor != "" {
+		record["waitingFor"] = waitingFor
+	}
+	if !since.IsZero() {
+		record["statusUpdatedAt"] = since.UnixMilli()
+	}
 	if bridge != "" {
 		record["bridgeSessionId"] = bridge
 	}

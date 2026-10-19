@@ -25,6 +25,31 @@ const (
 	StatusUnknown SessionStatus = "unknown"
 )
 
+// WaitingKind names what an open turn is waiting for from its user.
+type WaitingKind string
+
+const (
+	WaitingQuestion WaitingKind = "question"
+	WaitingApproval WaitingKind = "approval"
+	WaitingInput    WaitingKind = "input"
+)
+
+// Waiting marks a busy turn that cannot continue until its user answers. ID
+// is stable for one question, so a new ID means a new question.
+type Waiting struct {
+	Kind  WaitingKind `json:"kind"`
+	ID    string      `json:"id"`
+	Since time.Time   `json:"since,omitzero"`
+}
+
+// SameWaiting reports whether two waiting states describe the same question.
+func SameWaiting(left, right *Waiting) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Kind == right.Kind && left.ID == right.ID
+}
+
 // Session is one conversation. ID is the provider's native conversation id
 // (Claude session id, Codex thread id) and never changes. PID, Transport and
 // Bridge (the Claude Remote Control id) describe the process currently
@@ -37,6 +62,7 @@ type Session struct {
 	Cwd                   string          `json:"cwd"`
 	PID                   int             `json:"pid"`
 	Status                SessionStatus   `json:"status"`
+	WaitingOn             *Waiting        `json:"waitingOn,omitempty"`
 	Transcript            string          `json:"transcript"`
 	HasLocal              bool            `json:"hasLocal"`
 	Source                string          `json:"source,omitempty"`
@@ -128,7 +154,6 @@ const (
 	EvidenceReplyObserved     DeliveryEvidence = "reply_observed"
 	EvidenceFailed            DeliveryEvidence = "failed"
 	EvidenceUnknown           DeliveryEvidence = "unknown"
-	EvidenceExpired           DeliveryEvidence = "expired"
 	EvidenceCanceled          DeliveryEvidence = "canceled"
 )
 
@@ -388,6 +413,7 @@ type TurnObservation struct {
 	TerminalTurnID  string        `json:"terminalTurnId,omitempty"`
 	CompletedTurnID string        `json:"completedTurnId,omitempty"`
 	InputTurnID     string        `json:"inputTurnId,omitempty"`
+	WaitingOn       *Waiting      `json:"waitingOn,omitempty"`
 	Reply           *ReplyResult  `json:"reply,omitempty"`
 }
 

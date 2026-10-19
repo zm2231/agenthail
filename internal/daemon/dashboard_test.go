@@ -998,7 +998,7 @@ func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
 			t.Fatalf("body=%s code=%d", response.Body.String(), response.Code)
 		}
 	}
-	item, err := registry.QueueItem(queueID)
+	item, err := registry.QueueItem(queueID, nil)
 	if err != nil || item.Status != "dead" {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}

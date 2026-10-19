@@ -36,11 +36,11 @@ func TestQueuePreservesSourceSessionIDAcrossReopenClaimAndExports(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer r.Close()
-	item, err := r.QueueItem(queueID)
+	item, err := r.QueueItem(queueID, nil)
 	if err != nil || item.SourceSessionID != "source" {
 		t.Fatalf("queue item=%+v err=%v", item, err)
 	}
-	rows, err := r.ListQueue(false)
+	rows, err := r.ListQueue(false, nil)
 	if err != nil || len(rows) != 1 || rows[0].SourceSessionID != "source" {
 		t.Fatalf("queue rows=%+v err=%v", rows, err)
 	}

@@ -271,7 +271,7 @@ final class SessionPane: ObservableObject, Identifiable {
     func submit(busyDelivery: String?) {
         guard let sessionID = selectedSessionID, removedSession == nil else { return }
         if composerDraft.attachments.isEmpty, let session = selectedSession {
-            let input = SlashInput(composer, available: SlashCommand.available(capabilities: session.capabilities, working: session.isWorking))
+            let input = SlashInput(composer, available: SlashCommand.available(capabilities: session.capabilities, working: session.isWorking, waitingOnYou: session.isWaitingOnYou))
             if let problem = input.problem {
                 model.operationError = problem
                 return

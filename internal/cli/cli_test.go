@@ -547,7 +547,7 @@ func TestQueueRetryRejectsReadOnlyCodexTerminalSession(t *testing.T) {
 	if err := app.Run([]string{"queue", "retry", strconv.FormatInt(id, 10)}); err == nil || !strings.Contains(err.Error(), "read only") {
 		t.Fatalf("retry err=%v", err)
 	}
-	item, err := r.QueueItem(id)
+	item, err := r.QueueItem(id, nil)
 	if err != nil || item.Status != "dead" {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
@@ -902,7 +902,7 @@ func TestListWideAndBasenameCollisionRetainFullCwd(t *testing.T) {
 		{ID: "three", Surface: surface.KindCodex, Name: "three", Cwd: "/work/three/" + strings.Repeat("other", 12)},
 	}}
 	app, _ := cliFixture(t, fake)
-	output, err := captureStdout(t, func() error { return app.Run([]string{"list"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
 	if err != nil || !strings.Contains(output, "/work/one/agenthail") || !strings.Contains(output, "/work/two/agenthail") || strings.Contains(output, "/work/three/other") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
@@ -1135,5 +1135,33 @@ func TestQualifiedTargetsFallBackWithinTheirSurfaceWhileItIsUnreachable(t *testi
 	}
 	if _, _, err := app.resolveTarget(context.Background(), "claude:missing"); !surface.IsDeliveryUnavailable(err) {
 		t.Fatalf("err=%v, want the surface's unavailable error for an unknown target", err)
+	}
+}
+
+func TestListAndQueueShowASessionWaitingOnTheUser(t *testing.T) {
+	waiting := &surface.Waiting{Kind: surface.WaitingQuestion, ID: "toolu_synthetic"}
+	asking := surface.Session{ID: "asking", Name: "asking", Surface: surface.KindCodex, Status: surface.StatusBusy, WaitingOn: waiting, LastActive: time.Now()}
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{asking.ID: asking}, listed: []surface.Session{asking}}
+	app, r := cliFixture(t, fake)
+	if err := r.RegisterSession(asking); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.RecordWaiting(asking.ID, waiting, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.QueueMessageWithOptions(asking.ID, "after the answer", "", surface.SendOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
+	if err != nil || !strings.Contains(listed, "wait+q") {
+		t.Fatalf("list=%s err=%v", listed, err)
+	}
+	queued, err := captureStdout(t, func() error { return app.Run([]string{"queue", "list"}) })
+	if err != nil || !strings.Contains(queued, "queued just now; held: target is waiting on you") {
+		t.Fatalf("queue list=%s err=%v", queued, err)
+	}
+	document, err := captureStdout(t, func() error { return app.Run([]string{"queue", "list", "--json"}) })
+	if err != nil || !strings.Contains(document, `"heldBy":"waiting"`) {
+		t.Fatalf("queue list --json=%s err=%v", document, err)
 	}
 }

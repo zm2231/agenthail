@@ -464,9 +464,11 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 		sess.LastActive = time.UnixMilli(int64(ts))
 	}
 	sess.Status = claudePeerStatus(record)
+	sess.WaitingOn = nil
 	if sess.HasLocal {
 		if observation, observeErr := c.Observe(ctx, sess); observeErr == nil && observation.Status != surface.StatusUnknown {
 			sess.Status = observation.Status
+			sess.WaitingOn = observation.WaitingOn
 		}
 	}
 }
@@ -509,7 +511,7 @@ func claudeStatus(status surface.SessionStatus) surface.SessionStatus {
 	switch strings.ToLower(string(status)) {
 	case "idle", "shell":
 		return surface.StatusIdle
-	case "busy", "running", "active", "in_progress", "inprogress":
+	case "busy", "running", "active", "in_progress", "inprogress", "waiting":
 		return surface.StatusBusy
 	case "offline":
 		return surface.StatusOffline
@@ -600,7 +602,54 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 	return observation, err
 }
 
+// observe reads the turn from the transcript and what it waits on from the
+// process record. Claude writes a pending tool call to the transcript only
+// once it resolves, so the record is the one place a question, a plan
+// approval or a permission prompt shows while it is open.
 func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
+	observation, err := c.observeTurn(ctx, sess)
+	if err != nil {
+		return nil, err
+	}
+	if waiting := c.recordWaiting(sess); waiting != nil && observation.Status != surface.StatusOffline {
+		observation.Status = surface.StatusBusy
+		observation.WaitingOn = waiting
+	}
+	return observation, nil
+}
+
+// recordWaiting reads what the session's live process reports it is waiting
+// on: "status":"waiting" with waitingFor "input needed" for AskUserQuestion,
+// and "permission prompt" for a plan approval or a tool permission.
+// statusUpdatedAt is when it started waiting, so it names one question.
+func (c *Claude) recordWaiting(sess *surface.Session) *surface.Waiting {
+	if sess.PID <= 0 {
+		return nil
+	}
+	raw, err := os.ReadFile(c.peerRecordPath(sess.PID))
+	if err != nil {
+		return nil
+	}
+	var record map[string]any
+	if json.Unmarshal(raw, &record) != nil || str(record, "status") != "waiting" {
+		return nil
+	}
+	if str(record, "sessionId") != sess.ID {
+		return nil
+	}
+	kind := surface.WaitingApproval
+	if str(record, "waitingFor") == "input needed" {
+		kind = surface.WaitingQuestion
+	}
+	since, _ := record["statusUpdatedAt"].(float64)
+	waiting := &surface.Waiting{Kind: kind, ID: fmt.Sprintf("%s:%s:%d", sess.ID, kind, int64(since))}
+	if since > 0 {
+		waiting.Since = time.UnixMilli(int64(since)).UTC()
+	}
+	return waiting
+}
+
+func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
