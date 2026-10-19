@@ -61,18 +61,18 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	var result *surface.SendResult
 	var sendErr error
 	addressed := *session
-	steered := false
+	var steered *surface.ControlResult
 	route := surface.RouteFor(adapter, session, item.Author)
 	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author, Uploads: item.Uploads}
 	steer := item.BusyDelivery == "steer" && !options.HoldsForQueue() && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer
 	if steer {
-		sendErr = adapter.Steer(operationCtx, session, item.Message)
+		steered, sendErr = surface.SteerWithEvidence(operationCtx, adapter, session, item.Message)
 		if sendErr == nil {
-			result = &surface.SendResult{Accepted: true}
-			steered = true
+			result = &surface.SendResult{UUID: steered.RequestID, Accepted: true}
 		}
 	}
 	if !steer || errors.Is(sendErr, surface.ErrNothingToSteer) {
+		steered = nil
 		if sendErr = route.Validate(adapter, options); sendErr == nil {
 			result, sendErr = route.Send(operationCtx, adapter, session, item.Message, options)
 		}
@@ -104,14 +104,14 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: busyErr.Error()})
 		return
 	}
-	if !steered && !peerTransport {
+	if steered == nil && !peerTransport {
 		if err := d.Registry.MarkDeliveryStarted(session.ID, result.UUID, ""); err != nil {
 			d.log.Printf("record queue delivery %d start: %s", item.ID, err)
 		}
 	}
 	evidence := surface.EvidenceDelivered
 	historyKind := "delivered"
-	if peerTransport {
+	if peerTransport || steered != nil && steered.Evidence == surface.EvidenceTransportAccepted {
 		evidence = surface.EvidenceTransportAccepted
 		historyKind = "transport-accepted"
 	}

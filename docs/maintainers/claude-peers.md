@@ -21,7 +21,7 @@ A non-Claude source receives a generated `@handle` only when it sends to a Claud
 
 The worker's `/tmp/cc-socks/<pid>.sock` cannot be a restart-stable reply address: Claude validates that destination as a live, PID-named socket and replies to the literal `from` value in the received envelope. A durable design therefore starts one separate, per-source relay process only for a non-Claude source; that relay owns its own live PID-named socket across peer-worker replacement. The manager passes that relay socket through the private worker control request, while the published envelope keeps the source's canonical identity and reserved handle. The relay verifies each inbound Claude sender against a current same-user native record, retains provenance only for the live socket it observed, and queues into the source's logical registry session. It must neither store/reuse a retired worker socket nor infer a source from an untrusted literal ID. Native Claude-to-Claude sends continue to use the caller's actual native socket and do not create a relay or operator peer. Accepted peer frames emit one `received` status receipt; queue insertion remains transport acceptance, not model completion. The acceptance gate is one native reply delivered exactly once after replacing the source helper, using fresh disposable sessions.
 
-`transport_accepted` evidence means the socket closed after accepting bytes. It is not a completed model turn. A receiving Claude may hold or deny a message under its own policy; asynchronous status receipts appear in history. Native message IDs cannot be correlated reliably with transcript turn IDs, so `send --reply`, `--stream`, and slash commands are rejected. Transcript reads remain available. Compact, model, interrupt, and steer require a separately resolved Remote Control attachment. Those controls do not enter the peer message socket or ordinary message queue. A socket failure does not trigger a second send through HTTP.
+`transport_accepted` evidence means the socket closed after accepting bytes. It is not a completed model turn. A receiving Claude may hold or deny a message under its own policy; asynchronous status receipts appear in history. Native message IDs cannot be correlated reliably with transcript turn IDs, so `send --reply`, `--stream`, and slash commands are rejected. Transcript reads remain available. Compact, model, interrupt, and steer require a separately resolved Remote Control attachment; see [Remote Control evidence](#remote-control-evidence). Those controls do not enter the peer message socket or ordinary message queue. A socket failure does not trigger a second send through HTTP.
 
 ## Lifecycle and verification
 
@@ -54,3 +54,24 @@ git diff --check
 ```
 
 The subprocess tests build the real CLI and exercise native sockets against isolated peer fixtures. A plain-body wrapper emitted by Go was additionally accepted by the extracted installed Claude 2.1.263 `oF` parser and its canonical rebuild; that probe does not cover every Unicode body or permission policy. No messages were sent to live user Claude sessions, no model-response round trip was claimed, and the running daemon was not restarted. Review was performed locally under the user's instruction to keep the work with the implementing agent.
+
+## Remote Control evidence
+
+Every Remote Control control first reads `GET /v1/code/sessions/<cse id>` and
+requires that exact session with `connection_status` `connected`. A bridge id in
+the local session record only shows the session was attached at some point.
+
+| Control | Request | Evidence |
+| --- | --- | --- |
+| model | `control_request` `set_model` | `delivered` when a `control_response` with the same `request_id` succeeds; `failed` on its error |
+| interrupt | `control_request` `interrupt` | `delivered` when the response succeeds and the turn that was active ends; a turn that finished on its own also ends |
+| steer | user event | `transport_accepted` with the posted event uuid |
+| context, usage, effort, rename | slash command | `reply_observed` when a `local_command` record with the same `commandRun` is joined to the request by `parentUuid`, or by a cloud event after it; a competing prompt first makes it `unknown` |
+| status | none | `reply_observed`; the model comes from `external_metadata` |
+| compact | `/compact` | `delivered` when a `compact_boundary` follows the exact request |
+
+Responses are read from `GET /v1/sessions/<session id>/events?after_id=<uuid>`,
+starting at the posted event. An accepted request whose response or effect is not
+observed before the deadline is `unknown`, carries its request id, and is not
+retried. History records each control under the kind that reads back as its
+evidence, with the request id as the result.

@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -253,7 +254,7 @@ func TestNativeClaudeRejectsControlsBeforeExternalIO(t *testing.T) {
 	if err := adapter.Interrupt(ctx, session); err != surface.ErrUnsupported {
 		t.Fatalf("interrupt=%v", err)
 	}
-	if _, err := adapter.Model(ctx, session, "sonnet"); err != surface.ErrUnsupported {
+	if _, err := adapter.Model(ctx, session, "sonnet"); !errors.Is(err, surface.ErrUnsupported) {
 		t.Fatalf("model=%v", err)
 	}
 }
