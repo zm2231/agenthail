@@ -29,8 +29,8 @@ Status: **present** means the Mac covers the behavior; **partial** means part of
 
 | Status | Count |
 | --- | --- |
-| Present | 39 |
-| Partial | 11 |
+| Present | 40 |
+| Partial | 10 |
 | Missing | 4 |
 | Decided | 1 |
 | n/a | 1 |
