@@ -126,7 +126,6 @@ cleanup() {
 		if [ "$RUNTIME_STOPPED" -eq 1 ]; then
 			if [ "$REINSTALL_SERVICE" -eq 1 ] && [ -f "$SERVICE_PLIST" ]; then
 				launchctl bootstrap "gui/$UID" "$SERVICE_PLIST" >/dev/null 2>&1 || true
-				launchctl kickstart -k "gui/$UID/com.agenthail.daemon" >/dev/null 2>&1 || true
 			elif [ "$RESTART_DAEMON" -eq 1 ]; then
 				control_wrapper="$INSTALL_DIR/agenthail"
 				if [ ! -x "$control_wrapper" ] && [ -n "$EXISTING_WRAPPER" ]; then
