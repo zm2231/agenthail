@@ -14,6 +14,9 @@ const app = {
   history: null,
   filters: { surface: "all", status: "all" },
   inboxMode: "current",
+  showArchived: false,
+  expandedProjects: new Set(),
+  openArchivedProjects: false,
   operationsTab: "queue",
   audit: { items: [], kinds: [], nextBefore: 0, hasMore: true, loaded: false, loading: false, kind: "all", query: "", searchTimer: null },
   sessionLimit: 0,
@@ -535,21 +538,62 @@ function renderDeliveryProblems() {
   }).join("");
 }
 function sessionIsCurrent(session) {
-  return session.current === true;
+  return session.current === true && !session.archived;
 }
 function scopedSessions() {
   if (app.inboxMode === "current")
     return app.state.sessions.filter(sessionIsCurrent);
-  return app.state.sessions;
+  if (app.inboxMode === "projects")
+    return app.state.sessions.filter((session) => session.project && !session.archived);
+  return app.state.sessions.filter((session) => app.showArchived || !session.archived);
+}
+const collapsedProjectSessions = 5;
+function sessionNeedsYou(session) {
+  return session.status === "busy" || (session.subagents?.working || 0) > 0 || session.queueCount > 0 || (app.state.attention || []).some((item) => item.sessionId === session.id);
+}
+function sessionButton(session) {
+  return `<button class="session ${app.selected?.id === session.id ? "selected" : ""}${session.archived ? " archived" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail">${hostBadge(session)}<span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}${session.archived ? "<span>Archived</span>" : ""}</div></button>`;
+}
+function projectSection(project, sessions) {
+  const expanded = app.expandedProjects.has(project.id);
+  const ordered = [...sessions].sort((a, b) => Date.parse(b.lastActive || 0) - Date.parse(a.lastActive || 0));
+  const shown = expanded ? ordered : ordered.filter((session, index) => index < collapsedProjectSessions || sessionNeedsYou(session));
+  const hidden = ordered.length - shown.length;
+  const host = project.host && project.host.state !== "local" ? `<span class="host-badge" title="On ${escape(project.host.name)}">${escape(shortHostName(project.host.name))}</span>` : "";
+  const toggle = project.archived ? "project-unarchive" : "project-archive";
+  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button></header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
+}
+function renderProjects(query) {
+  const byProject = new Map();
+  for (const session of app.state.sessions) {
+    if (!session.project) continue;
+    if (session.archived && !session.project.archived) continue;
+    if (query && !`${displayName(session)} ${session.project.displayName} ${remoteHostName(session)}`.toLowerCase().includes(query)) continue;
+    if (!byProject.has(session.project.id)) byProject.set(session.project.id, []);
+    byProject.get(session.project.id).push(session);
+  }
+  const projects = app.state.projects || [];
+  const matches = (project) => !query || byProject.has(project.id) || project.displayName.toLowerCase().includes(query);
+  const active = projects.filter((project) => !project.archived && matches(project));
+  const archived = projects.filter((project) => project.archived && matches(project));
+  const sections = active.map((project) => projectSection(project, byProject.get(project.id) || [])).join("");
+  const archivedSections = archived.length
+    ? `<details class="archived-projects" ${app.openArchivedProjects ? "open" : ""}><summary>Archived (${archived.length})</summary>${archived.map((project) => projectSection(project, byProject.get(project.id) || [])).join("")}</details>`
+    : "";
+  return { html: sections + archivedSections, count: active.length };
 }
 function remoteHostName(session) {
   return session?.host && session.host.state !== "local" ? session.host.name : "";
+}
+function shortHostName(name) {
+  return String(name || "").split(".")[0];
 }
 function hostBadge(session) {
   const host = remoteHostName(session);
   if (!host) return "";
   const unavailable = Boolean(session.unavailableReason);
-  return `<span class="host-badge${unavailable ? " unavailable" : ""}" title="${escape(session.unavailableReason || `On ${host}`)}">${escape(unavailable ? `${host} unavailable` : host)}</span>`;
+  const short = shortHostName(host);
+  return `<span class="host-badge${unavailable ? " unavailable" : ""}" title="${escape(session.unavailableReason || `On ${host}`)}">${escape(unavailable ? `${short} unavailable` : short)}</span>`;
 }
 function renderSessions() {
   const mobileViewport = window.matchMedia("(max-width: 800px)").matches;
@@ -559,6 +603,25 @@ function renderSessions() {
   }
   if (!app.sessionLimit) app.sessionLimit = sessionBatchSize();
   const query = $("#session-search").value.trim().toLowerCase();
+  const counts = app.state.counts || {};
+  document.querySelectorAll("[data-inbox-count]").forEach((badge) => {
+    const value = badge.dataset.inboxCount === "projects" ? (app.state.projects || []).filter((project) => !project.archived).length : counts[badge.dataset.inboxCount];
+    badge.textContent = value === undefined ? "" : ` ${value}`;
+  });
+  if (app.inboxMode === "projects") {
+    const projects = renderProjects(query);
+    $("#conversation-count").textContent = `${projects.count}`;
+    $("#session-tools").classList.remove("hidden");
+    $("#session-filters").hidden = true;
+    $("#show-archived-row").hidden = true;
+    syncInboxModeButtons();
+    $("#filter-summary").textContent = projects.count ? `${projects.count} ${projects.count === 1 ? "project" : "projects"}, most recent first` : "No projects yet";
+    $("#session-list").innerHTML = projects.html || '<div class="empty-state compact"><p>Sessions in a Git repository or an added folder appear here.</p></div>';
+    $("#session-more").hidden = true;
+    return;
+  }
+  $("#session-filters").hidden = false;
+  $("#show-archived-row").hidden = false;
   const sessions = scopedSessions().filter((session) => {
     const matchesQuery =
       !query ||
@@ -578,22 +641,7 @@ function renderSessions() {
   const historyResults = app.codexSearch.query === query ? app.codexSearch.results : [];
   $("#conversation-count").textContent = `${sessions.length}`;
   $("#session-tools").classList.toggle("hidden", app.inboxMode !== "all");
-  document
-    .querySelectorAll("[data-inbox-mode]")
-    .forEach((button) =>
-      button.classList.toggle(
-        "active",
-        button.dataset.inboxMode === app.inboxMode,
-      ),
-    );
-  document
-    .querySelectorAll("[data-inbox-mode]")
-    .forEach((button) =>
-      button.setAttribute(
-        "aria-pressed",
-        String(button.dataset.inboxMode === app.inboxMode),
-      ),
-    );
+  syncInboxModeButtons();
   $("#filter-summary").textContent =
     app.inboxMode === "current"
       ? sessions.length
@@ -602,13 +650,7 @@ function renderSessions() {
       : sessions.length > visible.length
         ? `Showing ${visible.length} of ${sessions.length}`
         : `${sessions.length} conversations`;
-  const sessionItems =
-    visible
-      .map(
-        (session) =>
-          `<button class="session ${app.selected?.id === session.id ? "selected" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail">${hostBadge(session)}<span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}</div></button>`,
-      )
-      .join("");
+  const sessionItems = visible.map(sessionButton).join("");
   const historyItems = historyResults
     .map(
       (result) =>
@@ -629,6 +671,13 @@ function renderSessions() {
   const more = $("#session-more");
   more.hidden = app.inboxMode !== "all" || visible.length >= sessions.length;
   more.textContent = `Show more (${sessions.length - visible.length})`;
+}
+function syncInboxModeButtons() {
+  document.querySelectorAll("[data-inbox-mode]").forEach((button) => {
+    const active = button.dataset.inboxMode === app.inboxMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
 }
 function renderSurfaceFilter() {
   const select = $("#session-surface-filter");
@@ -1179,6 +1228,9 @@ function renderChat() {
     controls.push(
       '<button data-action="compact" type="button">Compact</button>',
     );
+  controls.push(`<button data-archive-action="${session.archived ? "session-unarchive" : "session-archive"}" type="button">${session.archived ? "Unarchive" : "Archive"}</button>`);
+  if (!session.project && session.cwd && !remoteHostName(session))
+    controls.push(`<button data-project-add="${escape(session.cwd)}" type="button">Add folder as project</button>`);
   $("#chat-actions").innerHTML = mobileConversationView()
     ? ""
     : controls.join("");
@@ -1376,7 +1428,8 @@ async function action(action, extra = {}, idempotencyKey = crypto.randomUUID(), 
     action === "session-create" ||
     action === "queue-retry" ||
     action === "delivery-dismiss" ||
-    action === "queue-cancel";
+    action === "queue-cancel" ||
+    action.startsWith("project-");
   if (!app.selected && !networkAction)
     throw Error("Choose a conversation first");
   let response;
@@ -1684,8 +1737,23 @@ document.addEventListener("click", async (event) => {
     renderSessions();
     return;
   }
-  const sessionButton = event.target.closest("[data-session]");
-  if (sessionButton) return selectSession(sessionButton.dataset.session, true);
+  const projectExpand = event.target.closest("[data-project-expand]");
+  if (projectExpand) {
+    const id = projectExpand.dataset.projectExpand;
+    if (app.expandedProjects.has(id)) app.expandedProjects.delete(id);
+    else app.expandedProjects.add(id);
+    renderSessions();
+    return;
+  }
+  const archivedProjects = event.target.closest(".archived-projects > summary");
+  if (archivedProjects) {
+    event.preventDefault();
+    app.openArchivedProjects = !app.openArchivedProjects;
+    renderSessions();
+    return;
+  }
+  const sessionTarget = event.target.closest("[data-session]");
+  if (sessionTarget) return selectSession(sessionTarget.dataset.session, true);
   const voiceSession = event.target.closest("[data-voice-session]");
   if (voiceSession) return openVoice(voiceSession.dataset.voiceSession);
   const surfaceButton = event.target.closest("[data-surface]");
@@ -1743,6 +1811,28 @@ document.addEventListener("click", async (event) => {
       await load();
     } catch (error) {
       toast(error.message);
+    }
+    return;
+  }
+  const viewControl = event.target.closest("[data-archive-action], [data-project-action], [data-project-add]");
+  if (viewControl) {
+    viewControl.disabled = true;
+    try {
+      if (viewControl.dataset.archiveAction) {
+        await action(viewControl.dataset.archiveAction);
+        toast(viewControl.dataset.archiveAction === "session-archive" ? "Conversation archived." : "Conversation unarchived.");
+      } else if (viewControl.dataset.projectAction) {
+        await action(viewControl.dataset.projectAction, { projectId: viewControl.dataset.projectId }, crypto.randomUUID(), "");
+        toast(viewControl.dataset.projectAction === "project-archive" ? "Project archived." : "Project unarchived.");
+      } else {
+        const result = await action("project-add", { path: viewControl.dataset.projectAdd }, crypto.randomUUID(), "");
+        toast(result.project?.kind === "git" ? `Already part of ${result.project.displayName}.` : `Added project ${result.project?.displayName || ""}.`);
+      }
+      await load();
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      viewControl.disabled = false;
     }
     return;
   }
@@ -2092,6 +2182,11 @@ $("#session-status-filter").addEventListener("change", (event) => {
   renderSessions();
 });
 window.addEventListener("beforeunload", cancelCodexSearch);
+$("#show-archived").addEventListener("change", (event) => {
+  app.showArchived = event.target.checked;
+  app.sessionLimit = sessionBatchSize();
+  renderSessions();
+});
 $("#session-more").addEventListener("click", () => {
   app.sessionLimit += sessionBatchSize();
   renderSessions();

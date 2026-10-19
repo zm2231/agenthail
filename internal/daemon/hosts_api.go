@@ -696,6 +696,23 @@ func (d *Daemon) routeActionRequest(ctx context.Context, request map[string]any)
 			}
 		}
 	}
+	if value, ok := request["projectId"].(string); ok {
+		if hostRef, target, qualified := hosts.Split(strings.TrimSpace(value)); qualified {
+			var owner *pairedHost
+			if !d.isLocalHostRef(hostRef) {
+				found, exists := d.pairedHost(hostRef)
+				if !exists {
+					return nil, false, fmt.Errorf("%w %q", errUnknownHost, hostRef)
+				}
+				owner = found
+			}
+			if err := assign(owner); err != nil {
+				return nil, false, err
+			}
+			request["projectId"] = target
+			rewritten = true
+		}
+	}
 	action, _ := request["action"].(string)
 	if strings.HasPrefix(action, "channel-") || strings.HasPrefix(action, "relay-") {
 		return d.routeLinkAction(ctx, request, action, host, local, rewritten)

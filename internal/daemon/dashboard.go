@@ -97,6 +97,7 @@ type dashboardSession struct {
 	QueueCount        int                        `json:"queueCount"`
 	Open              bool                       `json:"open"`
 	Current           bool                       `json:"current"`
+	Archived          bool                       `json:"archived,omitempty"`
 	CurrentReason     string                     `json:"currentReason,omitempty"`
 	Capabilities      surface.Capabilities       `json:"capabilities"`
 	ReadOnly          bool                       `json:"readOnly,omitempty"`
@@ -104,7 +105,7 @@ type dashboardSession struct {
 	Source            string                     `json:"source,omitempty"`
 	Transport         string                     `json:"transport,omitempty"`
 	ForkedFrom        string                     `json:"forkedFrom,omitempty"`
-	HostProject       *catalogHostProject        `json:"hostProject,omitempty"`
+	Project           *catalogProject            `json:"project,omitempty"`
 	Checkout          *catalogCheckout           `json:"checkout,omitempty"`
 	ObservedAt        time.Time                  `json:"observedAt,omitempty"`
 	UnavailableReason string                     `json:"unavailableReason,omitempty"`
@@ -127,6 +128,8 @@ type dashboardState struct {
 	Surfaces           []dashboardSurface         `json:"surfaces"`
 	Sessions           []dashboardSession         `json:"sessions"`
 	TotalSessions      int                        `json:"totalSessions"`
+	Counts             map[string]int             `json:"counts,omitempty"`
+	Projects           []dashboardProject         `json:"projects,omitempty"`
 	NextCursor         string                     `json:"nextCursor,omitempty"`
 	Queue              []dashboardQueue           `json:"queue"`
 	Channels           []dashboardChannel         `json:"channels"`
@@ -544,20 +547,17 @@ func (d *Daemon) writeDashboardSnapshot(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	scope := r.URL.Query().Get("scope")
-	if scope != "" && scope != "all" && scope != "recent" && scope != "current" && scope != "running" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_scope", "Use all, recent, current, or running.")
+	if !validCatalogScope(scope) {
+		writeAPIError(w, http.StatusBadRequest, "invalid_scope", "Use running, current, recent, all, or archived.")
 		return
 	}
 	projectID, query := r.URL.Query().Get("projectId"), strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	rows := make([]dashboardSession, 0, len(state.Sessions))
 	for _, row := range state.Sessions {
-		if (scope == "recent" || scope == "current") && !row.Current {
+		if scope != "" && !catalogScopeMatches(scope, row) {
 			continue
 		}
-		if scope == "running" && row.Status != surface.StatusBusy {
-			continue
-		}
-		if projectID != "" && (row.HostProject == nil || row.HostProject.ID != projectID) {
+		if projectID != "" && (row.Project == nil || row.Project.ID != projectID) {
 			continue
 		}
 		if query != "" && !strings.Contains(strings.ToLower(row.Name+" "+row.Cwd+" "+row.Alias), query) {
@@ -626,8 +626,8 @@ func catalogPageRequestFromHTTP(r *http.Request) (*registry.CatalogPageRequest, 
 		return nil, fmt.Errorf("use a limit between 1 and 200")
 	}
 	scope := r.URL.Query().Get("scope")
-	if scope != "" && scope != "all" && scope != "recent" && scope != "current" && scope != "running" {
-		return nil, fmt.Errorf("use all, recent, current, or running")
+	if !validCatalogScope(scope) {
+		return nil, fmt.Errorf("use running, current, recent, all, or archived")
 	}
 	projectID, query := r.URL.Query().Get("projectId"), strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	parentID := r.URL.Query().Get("parentId")
@@ -794,6 +794,14 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read session rekeys: %w", err)
 	}
+	view, err := d.loadCatalogViewState()
+	if err != nil {
+		return dashboardState{}, err
+	}
+	projectRecords, err := d.Registry.ListProjects()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read projects: %w", err)
+	}
 	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Sessions: []dashboardSession{}, Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Rekeyed: rekeyed}
 	if page != nil {
 		state.catalogPageApplied = true
@@ -862,6 +870,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			return dashboardState{}, fmt.Errorf("read session catalog: %w", err)
 		}
 	}
+	local := make([]int, 0, len(sessions))
 	for _, session := range sessions {
 		if record, found := catalogSessions[session.ID]; found && record.HostID != "" {
 			var mirrored dashboardSession
@@ -882,7 +891,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		identity := catalogIdentity{}
 		observedAt := time.Time{}
 		if record, found := catalogSessions[session.ID]; found {
-			_ = json.Unmarshal(record.HostProject, &identity.HostProject)
+			_ = json.Unmarshal(record.Project, &identity.Project)
 			_ = json.Unmarshal(record.Checkout, &identity.Checkout)
 			identity.UnavailableReason = record.UnavailableReason
 			observedAt = record.ObservedAt
@@ -905,7 +914,16 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		}
 		entry.HiddenSubagents = catalogSnapshot.Listing.HiddenSubagents(session.ID)
 		entry.Subagents = addSubagentRollups(entry.ObservedSubagents, entry.HiddenSubagents)
+		local = append(local, len(state.Sessions))
 		state.Sessions = append(state.Sessions, entry)
+	}
+	localRows := make([]dashboardSession, 0, len(local))
+	for _, index := range local {
+		localRows = append(localRows, state.Sessions[index])
+	}
+	d.settleArchiveActivity(localRows, view)
+	for _, index := range local {
+		applyCatalogView(&state.Sessions[index], view)
 	}
 	sort.Slice(state.Surfaces, func(i, j int) bool { return state.Surfaces[i].Name < state.Surfaces[j].Name })
 	if page == nil {
@@ -923,6 +941,8 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		state.TotalSessions = page.TotalMatching
 	} else {
 		state.TotalSessions = len(state.Sessions)
+		state.Counts = catalogScopeCounts(state.Sessions)
+		state.Projects = catalogProjects(state.Sessions, projectRecords, d.localHost())
 	}
 	return state, nil
 }
@@ -1053,6 +1073,8 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Launcher        string                     `json:"launcher"`
 		Approval        string                     `json:"approvalPolicy"`
 		Author          surface.Author             `json:"author"`
+		ProjectID       string                     `json:"projectId"`
+		Path            string                     `json:"path"`
 		Attachments     []string                   `json:"attachments"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
@@ -1061,6 +1083,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if len(request.Attachments) > 0 && request.Action != "send" {
 		http.Error(w, "attachments are only accepted with send", http.StatusBadRequest)
+		return
+	}
+	if strings.HasPrefix(request.Action, "project-") {
+		d.projectAction(r.Context(), w, request.Action, request.ProjectID, request.Path)
 		return
 	}
 	if request.Action == "delivery-dismiss" {
@@ -1601,6 +1627,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "launcher": session.Runtime.Launcher, "location": session.Runtime.Location, "sessionId": session.ID})
+		return
+	}
+	if request.Action == "session-archive" || request.Action == "session-unarchive" {
+		d.sessionArchiveAction(w, request.Action, session.ID)
 		return
 	}
 	if request.Action == "alias" {

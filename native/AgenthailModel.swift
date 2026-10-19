@@ -81,7 +81,7 @@ final class AgenthailModel: ObservableObject {
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
     var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.compactMap(\.attentionSessionId)) }
     var sessionTree: SessionTree {
-        SessionTree.build(knownSessions, filter: sessionFilter, refinement: sessionRefinement, attentionSessionIDs: attentionSessionIDs, now: Date())
+        SessionTree.build(knownSessions, filter: sessionFilter, refinement: sessionRefinement, attentionSessionIDs: attentionSessionIDs)
     }
 
     init(connecting: Bool = true, api: AgenthailAPI? = nil) {
@@ -687,6 +687,31 @@ final class AgenthailModel: ObservableObject {
         modelCatalogLoads.insert(key)
         defer { modelCatalogLoads.remove(key) }
         if let options = try? await api.creationModels(surface: session.surface, host: session.remoteHostID) { modelCatalog[key] = options }
+    }
+
+    func setArchived(sessionID: String, _ archived: Bool) {
+        perform(action: archived ? "session-archive" : "session-unarchive", sessionID: sessionID)
+    }
+
+    func setProjectArchived(_ projectID: String, _ archived: Bool) {
+        projectAction(archived ? "project-archive" : "project-unarchive", projectID: projectID)
+    }
+
+    func addProject(path: String) {
+        projectAction("project-add", path: path)
+    }
+
+    private func projectAction(_ action: String, projectID: String? = nil, path: String? = nil) {
+        guard let api else { return }
+        Task {
+            do {
+                _ = try await api.projectAction(action, projectID: projectID, path: path)
+                operationError = nil
+            } catch {
+                operationError = AgenthailAPIError.userMessage(error)
+            }
+            _ = await refresh(fresh: true)
+        }
     }
 
     func rename(_ sessionID: String, to alias: String) async -> String? {

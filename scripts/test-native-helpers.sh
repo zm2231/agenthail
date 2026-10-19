@@ -14,6 +14,7 @@ SOURCES=(
   EventRetryBackoff.swift
   OperationsRefreshPolicy.swift
   SessionSelection.swift
+  SessionTree.swift
   StatusRefreshPolicy.swift
   TurnSettings.swift
   VoiceAPI.swift
@@ -36,7 +37,6 @@ SOURCES=(
   macOS/SessionOperationControllers.swift
   macOS/SessionOperations.swift
   macOS/SessionPane.swift
-  macOS/SessionTree.swift
   macOS/ShortcutStore.swift
   macOS/SlashCommand.swift
   macOS/SpotlightIndex.swift

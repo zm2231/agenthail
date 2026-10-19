@@ -366,6 +366,11 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await post("/api/v1/actions", body: body, idempotencyKey: idempotencyKey)
     }
 
+    func projectAction(_ action: String, projectID: String? = nil, path: String? = nil) async throws -> ProjectIdentity? {
+        let response: ProjectActionResponse = try await postAction(ProjectActionRequest(action: action, projectId: projectID, path: path))
+        return response.project
+    }
+
     func postAction<Body: Encodable, Response: Decodable>(_ body: Body, idempotencyKey: String? = nil) async throws -> Response {
         try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey)
     }
@@ -589,6 +594,16 @@ private struct EmptyResponse: Decodable {}
 
 private struct UploadResponse: Decodable {
     let upload: UploadedAttachment
+}
+
+private struct ProjectActionRequest: Encodable {
+    let action: String
+    let projectId: String?
+    let path: String?
+}
+
+private struct ProjectActionResponse: Decodable {
+    let project: ProjectIdentity?
 }
 
 struct ActionReceipt: Decodable {

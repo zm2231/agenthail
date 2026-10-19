@@ -13,7 +13,7 @@ import (
 type CatalogSessionState struct {
 	Session               surface.Session
 	HostID                string
-	HostProject           json.RawMessage
+	Project               json.RawMessage
 	Checkout              json.RawMessage
 	UnavailableReason     string
 	ObservedAt            time.Time
@@ -173,7 +173,7 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	if state.ProjectionFingerprint == "" {
 		return CatalogEvent{}, false, fmt.Errorf("catalog session projection fingerprint is required")
 	}
-	if !json.Valid(state.HostProject) || !json.Valid(state.Checkout) {
+	if !json.Valid(state.Project) || !json.Valid(state.Checkout) {
 		return CatalogEvent{}, false, fmt.Errorf("catalog identity must be JSON")
 	}
 	if state.ObservedAt.IsZero() {
@@ -226,7 +226,7 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 		VALUES(?,?,?,?,?,?,?,0,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
 		checkout=excluded.checkout, unavailable_reason=excluded.unavailable_reason, observed_at=excluded.observed_at, misses=0,
 		projection_fingerprint=excluded.projection_fingerprint, projection_generation=excluded.projection_generation, discovery_failures=0, waiting_on=excluded.waiting_on`,
-		state.Session.ID, []byte(state.HostProject), []byte(state.Checkout), state.UnavailableReason, state.ObservedAt.Format(time.RFC3339Nano), state.ProjectionFingerprint, priorGeneration, waitingOn); err != nil {
+		state.Session.ID, []byte(state.Project), []byte(state.Checkout), state.UnavailableReason, state.ObservedAt.Format(time.RFC3339Nano), state.ProjectionFingerprint, priorGeneration, waitingOn); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	if len(event.Payload) > 0 {
@@ -274,13 +274,13 @@ func (r *Registry) catalogSessionUnchanged(state CatalogSessionState, event Cata
 type catalogSessionPrior struct {
 	found                        bool
 	fingerprint, unavailable     string
-	hostProject, checkout        []byte
+	project, checkout            []byte
 	generation, misses, failures int64
 }
 
 func readCatalogSessionPrior(q catalogQuerier, sessionID string) (catalogSessionPrior, error) {
 	var prior catalogSessionPrior
-	err := q.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures,host_project,checkout,unavailable_reason FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&prior.fingerprint, &prior.generation, &prior.misses, &prior.failures, &prior.hostProject, &prior.checkout, &prior.unavailable)
+	err := q.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures,host_project,checkout,unavailable_reason FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&prior.fingerprint, &prior.generation, &prior.misses, &prior.failures, &prior.project, &prior.checkout, &prior.unavailable)
 	if err == sql.ErrNoRows {
 		return catalogSessionPrior{}, nil
 	}
@@ -295,7 +295,7 @@ func (p catalogSessionPrior) changedBy(state CatalogSessionState) bool {
 }
 
 func (p catalogSessionPrior) unchangedBy(q catalogQuerier, state CatalogSessionState) (bool, error) {
-	if p.changedBy(state) || string(p.hostProject) != string(state.HostProject) || string(p.checkout) != string(state.Checkout) || p.unavailable != state.UnavailableReason {
+	if p.changedBy(state) || string(p.project) != string(state.Project) || string(p.checkout) != string(state.Checkout) || p.unavailable != state.UnavailableReason {
 		return false, nil
 	}
 	return sessionRowMatchesTx(q, state.Session)
@@ -628,6 +628,23 @@ func (r *Registry) retireUnobservedSessionTx(tx *sql.Tx, sessionID string, now t
 
 // CatalogProjectionFingerprint returns the committed projection of one
 // catalog session, the same row CatalogSnapshot serves.
+// CatalogSessionProject returns the project last stored for a session, or
+// nil when the session has no catalog row.
+func (r *Registry) CatalogSessionProject(sessionID string) (json.RawMessage, error) {
+	var project []byte
+	err := r.read.QueryRow(`SELECT host_project FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&project)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return project, err
+}
+
+func (r *Registry) CatalogProjectByID(projectID string) (json.RawMessage, error) {
+	var project []byte
+	err := r.read.QueryRow(`SELECT host_project FROM catalog_sessions WHERE json_extract(host_project,'$.id')=? LIMIT 1`, projectID).Scan(&project)
+	return project, err
+}
+
 func (r *Registry) CatalogProjectionFingerprint(sessionID string) (string, bool, error) {
 	var fingerprint string
 	err := r.read.QueryRow(`SELECT cs.projection_fingerprint FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE cs.session_id=?`, sessionID).Scan(&fingerprint)

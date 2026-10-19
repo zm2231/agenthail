@@ -572,6 +572,7 @@ func listRemoteSession(record registry.CatalogSessionState) (surface.Session, li
 
 type listSessionView struct {
 	surface.Session
+	listCatalogView
 	Host              *hostRef `json:"host,omitempty"`
 	UnavailableReason string   `json:"unavailableReason,omitempty"`
 }

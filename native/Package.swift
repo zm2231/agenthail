@@ -30,6 +30,7 @@ let package = Package(
                 "AgenthailAPI.swift",
                 "ComposerAttachment.swift",
                 "SessionSelection.swift",
+                "SessionTree.swift",
                 "EventRetryBackoff.swift",
                 "ToolPresentation.swift",
                 "OperationsRefreshPolicy.swift",

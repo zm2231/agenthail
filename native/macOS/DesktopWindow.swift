@@ -156,7 +156,12 @@ struct SessionSidebar: View {
                         let shown = expanded ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: pane.selectedSessionID)
                         let single = project.checkouts.count == 1 ? project.checkouts.first : nil
                         VStack(alignment: .leading, spacing: 1) {
-                            ProjectHeaderView(name: project.name, branch: single?.branchLabel, dirty: single?.dirty ?? false)
+                            ProjectHeaderView(name: project.name, host: project.host, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived)
+                                .contextMenu {
+                                    if let identity = project.identity {
+                                        Button(project.archived ? "Unarchive Project" : "Archive Project") { model.setProjectArchived(identity.id, !project.archived) }
+                                    }
+                                }
                             ForEach(shown.checkouts) { checkout in
                                 if single == nil {
                                     CheckoutRowView(checkout: checkout)
@@ -178,7 +183,7 @@ struct SessionSidebar: View {
                         }
                     }
                     if tree.projects.isEmpty {
-                        Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is running." : "No sessions yet.")
+                        Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is running." : model.sessionFilter == .archived ? "Nothing is archived." : "No sessions yet.")
                             .font(.system(size: 12.5))
                             .foregroundStyle(DesktopPalette.text2)
                             .padding(.horizontal, 8)
@@ -271,7 +276,7 @@ extension SessionSidebar {
     private var searchMatches: (local: [SessionState], remote: [SessionSearchItem]) {
         let query = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let local = SessionTree.newestFirst(model.knownSessions.filter { session in
-            [session.title, session.name, session.hostProject?.displayName, session.checkout?.branch]
+            [session.title, session.name, session.project?.displayName, session.checkout?.branch]
                 .compactMap { $0 }
                 .contains { $0.localizedCaseInsensitiveContains(query) }
         })
@@ -355,6 +360,11 @@ extension SessionSidebar {
         .contextMenu {
             Button("Open in New Window") { openWindow(id: "session", value: session.id) }
             Button("Rename…") { pane.renamingSession = session }
+            Divider()
+            Button(session.archived == true ? "Unarchive" : "Archive") { model.setArchived(sessionID: session.id, session.archived != true) }
+            if session.project == nil, session.remoteHostName == nil, let cwd = session.cwd, !cwd.isEmpty {
+                Button("Add Folder as Project") { model.addProject(path: cwd) }
+            }
         }
     }
 }
@@ -374,8 +384,10 @@ struct SidebarCaption: View {
 
 struct ProjectHeaderView: View {
     let name: String
+    var host: String? = nil
     var branch: String? = nil
     var dirty = false
+    var archived = false
 
     var body: some View {
         HStack(spacing: 7) {
@@ -383,12 +395,15 @@ struct ProjectHeaderView: View {
                 .font(.system(size: 10.5, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 18, height: 18)
-                .background(DesktopPalette.accent, in: RoundedRectangle(cornerRadius: 5))
+                .background(archived ? DesktopPalette.text2 : DesktopPalette.accent, in: RoundedRectangle(cornerRadius: 5))
                 .accessibilityHidden(true)
             Text(name)
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(DesktopPalette.text)
                 .lineLimit(1)
+            if let host {
+                HostBadge(name: host)
+            }
             if let branch {
                 Text(branch)
                     .font(.system(size: 11, design: .monospaced))
@@ -403,6 +418,26 @@ struct ProjectHeaderView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
+    }
+}
+
+/// A one-line host label for remote sessions and projects. It truncates
+/// rather than wrapping so it never squeezes the row's status.
+struct HostBadge: View {
+    let name: String
+    var unavailable = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: unavailable ? "wifi.slash" : "server.rack")
+            Text(name)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .font(.system(size: 10.5))
+        .foregroundStyle(unavailable ? DesktopPalette.amber : DesktopPalette.text2)
+        .frame(maxWidth: 96, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -443,14 +478,9 @@ struct SessionRowView: View {
             Text(title ?? session.title)
                 .lineLimit(1)
                 .foregroundStyle(!session.isUnavailable && (session.open || session.isWorking) ? DesktopPalette.text : DesktopPalette.text2)
-            if let host = session.remoteHostName {
-                HStack(spacing: 3) {
-                    Image(systemName: session.isUnavailable ? "wifi.slash" : "server.rack")
-                    Text(host)
-                }
-                .font(.system(size: 10.5))
-                .foregroundStyle(session.isUnavailable ? DesktopPalette.amber : DesktopPalette.text2)
-                .help(session.unavailableReason ?? "On \(host)")
+            if let host = session.shortRemoteHostName {
+                HostBadge(name: host, unavailable: session.isUnavailable)
+                    .help(session.unavailableReason ?? "On \(session.remoteHostName ?? host)")
             }
             Spacer(minLength: 4)
             if let family, family.subagentCount > 0 {
@@ -1949,7 +1979,7 @@ struct DetailsTab: View {
                 } else if let modelName {
                     detailRow("Model", modelName)
                 }
-                if let project = session.hostProject?.displayName { detailRow("Project", project) }
+                if let project = session.project?.displayName { detailRow("Project", project) }
                 if let branch = session.checkout?.branch ?? session.checkout?.detachedHead { detailRow("Branch", branch, monospaced: true) }
                 if let path = session.checkout?.path ?? session.cwd { detailRow("Checkout", (path as NSString).abbreviatingWithTildeInPath, monospaced: true) }
             }

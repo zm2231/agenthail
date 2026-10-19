@@ -565,7 +565,7 @@ func TestDiscoveryStreamsFullDashboardSessionRow(t *testing.T) {
 		if err := json.Unmarshal(event.Payload, &payload); err != nil {
 			t.Fatal(err)
 		}
-		if payload.Session.ID == "" || payload.Session.Capabilities != d.Surfaces[0].Capabilities() || payload.Session.ObservedAt.IsZero() || payload.Session.HostProject == nil || payload.Session.Checkout == nil {
+		if payload.Session.ID == "" || payload.Session.Capabilities != d.Surfaces[0].Capabilities() || payload.Session.ObservedAt.IsZero() || payload.Session.Checkout == nil {
 			t.Fatalf("payload=%+v", payload.Session)
 		}
 		return

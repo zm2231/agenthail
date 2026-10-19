@@ -756,7 +756,9 @@ select {
 }
 .session-detail {
   display: flex;
+  min-width: 0;
   gap: 8px;
+  white-space: nowrap;
   margin: 4px 0 0 17px;
   color: var(--muted);
   font-size: 12px;
@@ -764,6 +766,69 @@ select {
 .session-more {
   width: 100%;
   margin-top: 8px;
+}
+.segmented [data-inbox-count] {
+  margin-left: 4px;
+  color: var(--quiet);
+  font-weight: 600;
+}
+.show-archived {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.session.archived {
+  opacity: 0.6;
+}
+.project-group {
+  margin-bottom: 10px;
+}
+.project-group.archived .project-name {
+  color: var(--muted);
+}
+.project-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 4px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+.project-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-header .link-button,
+.project-more {
+  border: 0;
+  background: transparent;
+  color: var(--quiet);
+  font-size: 12px;
+}
+.project-header .link-button {
+  margin-left: auto;
+  opacity: 0;
+}
+.project-header:hover .link-button,
+.project-header .link-button:focus-visible {
+  opacity: 1;
+}
+.project-more {
+  margin-left: 29px;
+  padding: 4px 0;
+}
+.archived-projects > summary {
+  padding: 8px 12px;
+  color: var(--quiet);
+  font-size: 12px;
+  cursor: pointer;
 }
 .notebook {
   display: grid;
@@ -799,7 +864,12 @@ select {
   gap: 8px;
 }
 .host-badge {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 0 6px;
   border-radius: 999px;
   background: var(--raised);
@@ -2041,4 +2111,9 @@ select {
 .attached-file-size {
   color: var(--quiet);
   font-size: 12px;
+}
+@media (hover: none) {
+  .project-header .link-button {
+    opacity: 1;
+  }
 }
