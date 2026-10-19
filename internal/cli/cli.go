@@ -156,6 +156,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdCompact(rest)
 	case "model":
 		return a.cmdModel(rest)
+	case "control":
+		return a.cmdControl(rest)
 	case "interrupt":
 		return a.cmdInterrupt(rest)
 	case "steer":
@@ -229,9 +231,14 @@ Session commands:
   goal <target> [set|edit|pause|resume|budget|clear] [value] [--json]
                                  Read goal usage or control its objective, status and budget
   compact <target>              Compress context (typed control; unsupported for socket-only Claude peers)
-  model <target> [name]         Get or set model
-  interrupt <target>            Stop current turn
-  steer <target> "message"      Inject guidance into a running turn; use send when idle
+  model <target> [name] [--json] [--timeout 30s]
+                                 Get or set model; Claude waits for its own control response
+  interrupt <target> [--json] [--timeout 30s]
+                                 Stop current turn; Claude waits for the turn to end
+  steer <target> "message" [--json] [--timeout 30s]
+                                 Inject guidance into a running turn; use send when idle
+  control <target> <context|usage|status|effort|rename> [value] [--json] [--timeout 30s]
+                                 Run a Claude Remote Control command and show its output
   queue <target> "msg"|-        Hold until target is ready; start daemon to deliver queued work
   queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]
                                  Inspect queued work scoped to a session or workspace
@@ -591,7 +598,7 @@ func validateCommandFlags(command string, args []string) error {
 		"signin": {values: map[string]bool{"--label": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"doctor": {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
-		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {}, "interrupt": {}, "steer": {}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
+		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "interrupt": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "steer": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "control": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
 	}
 	spec, known := specs[command]
 	if !known {
@@ -2133,9 +2140,13 @@ func (a *App) cmdCompact(args []string) error {
 func (a *App) cmdModel(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) < 1 || len(positional) > 2 {
-		return fmt.Errorf("usage: agenthail model <target> [name]")
+		return fmt.Errorf("usage: agenthail model <target> [name] [--json] [--timeout 30s]")
 	}
-	ctx := context.Background()
+	ctx, cancel, err := commandContext(args)
+	if err != nil {
+		return err
+	}
+	defer cancel()
 	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
 		return err
@@ -2145,7 +2156,7 @@ func (a *App) cmdModel(args []string) error {
 		if len(positional) > 1 {
 			name = positional[1]
 		}
-		return a.modelRemote(ctx, remote, name)
+		return a.modelRemote(ctx, remote, name, args)
 	}
 	if !surface.EffectiveCapabilities(surf, sess).Model {
 		return fmt.Errorf("%s does not support model switching", surf.Name())
@@ -2157,14 +2168,21 @@ func (a *App) cmdModel(args []string) error {
 			return err
 		}
 	}
+	if controller, ok := surf.(surface.Controller); ok && name != "" {
+		result, controlErr := controller.Control(ctx, sess, surface.ControlRequest{Action: "model", Value: name})
+		if controlErr == nil && a.registry() != nil {
+			if err := a.registry().RegisterSession(*sess); err != nil {
+				return fmt.Errorf("persist Claude model state: %w", err)
+			}
+		}
+		return a.printControlResult(sess, result, controlErr, args)
+	}
 	current, err := surf.Model(ctx, sess, name)
 	if err != nil {
 		return err
 	}
-	if name != "" && sess.Surface == surface.KindClaude && a.registry() != nil {
-		if err := a.registry().RegisterSession(*sess); err != nil {
-			return fmt.Errorf("persist Claude model state: %w", err)
-		}
+	if hasFlag(args, "--json") {
+		return json.NewEncoder(os.Stdout).Encode(map[string]string{"sessionId": sess.ID, "model": current})
 	}
 	if current != "" {
 		fmt.Println(current)
@@ -2172,18 +2190,96 @@ func (a *App) cmdModel(args []string) error {
 	return nil
 }
 
-func (a *App) cmdInterrupt(args []string) error {
+func (a *App) cmdControl(args []string) error {
 	positional := stripFlags(args)
-	if len(positional) != 1 {
-		return fmt.Errorf("usage: agenthail interrupt <target>")
+	if len(positional) < 2 {
+		return fmt.Errorf("usage: agenthail control <target> <context|usage|status|effort|rename> [value] [--json] [--timeout 30s]")
 	}
-	ctx := context.Background()
+	action, value := positional[1], strings.Join(positional[2:], " ")
+	switch action {
+	case "context", "usage", "status", "effort", "rename":
+	default:
+		return fmt.Errorf("unknown control %q; use model, interrupt, steer or compact for those", action)
+	}
+	ctx, cancel, err := commandContext(args)
+	if err != nil {
+		return err
+	}
+	defer cancel()
 	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
 		return err
 	}
 	if remote != nil {
-		return a.interruptRemote(ctx, remote)
+		return a.controlRemote(ctx, remote, action, value, args)
+	}
+	controller, ok := surf.(surface.Controller)
+	if !ok || !surface.EffectiveCapabilities(surf, sess).Model {
+		return fmt.Errorf("%s does not support Claude Remote Control commands", surf.Name())
+	}
+	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
+		return err
+	}
+	result, controlErr := controller.Control(ctx, sess, surface.ControlRequest{Action: action, Value: value})
+	return a.printControlResult(sess, result, controlErr, args)
+}
+
+// printControlResult shows a control's evidence and request id, also when the
+// control failed or its outcome is unknown, and records it in history.
+func (a *App) printControlResult(sess *surface.Session, result *surface.ControlResult, controlErr error, args []string) error {
+	if result == nil {
+		return controlErr
+	}
+	(delivery.Dispatcher{Registry: a.registry()}).RecordControl(result, controlErr)
+	if hasFlag(args, "--json") {
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			return err
+		}
+		return controlErr
+	}
+	printControl(a.resolveDisplay(sess.ID), result)
+	return controlErr
+}
+
+func printControl(target string, result *surface.ControlResult) {
+	request := ""
+	if result.RequestID != "" {
+		request = " (request " + result.RequestID + ")"
+	}
+	fmt.Printf("%s %s for %s%s\n", result.Action, result.Evidence, target, request)
+	if result.Detail != "" {
+		fmt.Println(result.Detail)
+	}
+	if result.Output != "" {
+		fmt.Println(result.Output)
+	}
+}
+
+func commandContext(args []string) (context.Context, context.CancelFunc, error) {
+	timeout, err := commandTimeout(args, 30*time.Second)
+	if err != nil {
+		return nil, nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	return ctx, cancel, nil
+}
+
+func (a *App) cmdInterrupt(args []string) error {
+	positional := stripFlags(args)
+	if len(positional) != 1 {
+		return fmt.Errorf("usage: agenthail interrupt <target> [--json] [--timeout 30s]")
+	}
+	ctx, cancel, err := commandContext(args)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
+	if err != nil {
+		return err
+	}
+	if remote != nil {
+		return a.interruptRemote(ctx, remote, args)
 	}
 	if !surface.EffectiveCapabilities(surf, sess).Interrupt {
 		return fmt.Errorf("%s does not support interrupt", surf.Name())
@@ -2191,21 +2287,29 @@ func (a *App) cmdInterrupt(args []string) error {
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
+	if controller, ok := surf.(surface.Controller); ok {
+		result, err := controller.Control(ctx, sess, surface.ControlRequest{Action: "interrupt"})
+		return a.printControlResult(sess, result, err, args)
+	}
 	return surf.Interrupt(ctx, sess)
 }
 
 func (a *App) cmdSteer(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) < 2 {
-		return fmt.Errorf("usage: agenthail steer <target> \"message\" ('-' reads stdin)")
+		return fmt.Errorf("usage: agenthail steer <target> \"message\" ('-' reads stdin) [--json] [--timeout 30s]")
 	}
-	ctx := context.Background()
+	ctx, cancel, err := commandContext(args)
+	if err != nil {
+		return err
+	}
+	defer cancel()
 	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
 		return err
 	}
 	if remote != nil {
-		return a.steerRemote(ctx, remote, strings.Join(positional[1:], " "))
+		return a.steerRemote(ctx, remote, strings.Join(positional[1:], " "), hasFlag(args, "--json"))
 	}
 	if !surface.EffectiveCapabilities(surf, sess).Steer {
 		return fmt.Errorf("%s does not support steer", surf.Name())
@@ -2231,15 +2335,24 @@ func (a *App) cmdSteer(args []string) error {
 	if err != nil {
 		return err
 	}
-	target := a.resolveDisplay(sess.ID)
-	if receipt.Evidence == surface.EvidenceQueued {
+	if hasFlag(args, "--json") {
+		return json.NewEncoder(os.Stdout).Encode(receipt)
+	}
+	printSteerReceipt(*receipt, a.resolveDisplay(sess.ID))
+	return nil
+}
+
+func printSteerReceipt(receipt delivery.Receipt, target string) {
+	switch {
+	case receipt.Evidence == surface.EvidenceQueued:
 		fmt.Printf("Queued #%d for %s, which is waiting on you; it delivers after you answer.\n", receipt.QueueID, target)
-	} else if receipt.Status == string(registry.DeliveryIntentSubmitted) {
+	case receipt.Status == string(registry.DeliveryIntentSubmitted):
 		fmt.Printf("Submitted to %s.\n", target)
-	} else {
+	case receipt.Evidence == surface.EvidenceTransportAccepted:
+		fmt.Printf("Steer accepted for %s (request %s); not yet confirmed in the current turn.\n", target, receipt.RequestID)
+	default:
 		fmt.Printf("Sent to %s.\n", target)
 	}
-	return nil
 }
 
 func (a *App) cmdQueue(args []string) error {

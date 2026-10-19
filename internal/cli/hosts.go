@@ -298,7 +298,7 @@ func actionPayload(options surface.TurnOptions) (map[string]any, error) {
 	return payload, nil
 }
 
-func (a *App) steerRemote(ctx context.Context, remote *remoteTarget, message string) error {
+func (a *App) steerRemote(ctx context.Context, remote *remoteTarget, message string, jsonOut bool) error {
 	client, err := a.daemonAPI()
 	if err != nil {
 		return err
@@ -311,23 +311,15 @@ func (a *App) steerRemote(ctx context.Context, remote *remoteTarget, message str
 	if err != nil {
 		return err
 	}
-	if receipt.Status == string(registry.DeliveryIntentSubmitted) {
-		fmt.Printf("Submitted to %s.\n", remote.label())
-	} else {
-		fmt.Printf("Sent to %s.\n", remote.label())
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(receipt)
 	}
+	printSteerReceipt(receipt, remote.label())
 	return nil
 }
 
-func (a *App) interruptRemote(ctx context.Context, remote *remoteTarget) error {
-	client, err := a.daemonAPI()
-	if err != nil {
-		return err
-	}
-	if _, _, err := client.action(ctx, map[string]any{"action": "interrupt", "sessionId": remote.ID}); err != nil {
-		return fmt.Errorf("interrupt %s: %w", remote.label(), err)
-	}
-	return nil
+func (a *App) interruptRemote(ctx context.Context, remote *remoteTarget, args []string) error {
+	return a.controlRemote(ctx, remote, "interrupt", "", args)
 }
 
 func (a *App) isLocalHost(ref string) (bool, error) {

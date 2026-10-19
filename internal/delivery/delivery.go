@@ -17,6 +17,8 @@ type Receipt struct {
 	Evidence   surface.DeliveryEvidence `json:"evidence"`
 	Status     string                   `json:"status"`
 	SessionID  string                   `json:"sessionId"`
+	RequestID  string                   `json:"requestId,omitempty"`
+	Source     string                   `json:"source,omitempty"`
 	TurnID     string                   `json:"turnId,omitempty"`
 	QueueID    int64                    `json:"queueId,omitempty"`
 	DeliveryID int64                    `json:"deliveryId,omitempty"`
@@ -93,19 +95,31 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 		}
 		ctx = surface.WithMessageUUID(ctx, intent.UUID)
 	}
-	if err := adapter.Steer(ctx, session, message); err != nil {
+	return d.steer(ctx, adapter, session, message, target, "", "steer", intent)
+}
+
+// steer reports the evidence the surface proved: a Claude Remote Control steer
+// is accepted by the transport, which does not show it reached the turn.
+func (d Dispatcher) steer(ctx context.Context, adapter surface.Surface, session *surface.Session, message, target, sourceID, label string, intent *registry.DeliveryIntent) (*Receipt, error) {
+	result, err := surface.SteerWithEvidence(ctx, adapter, session, message)
+	if err != nil {
 		if intent != nil {
 			if surface.IsDeliveryOutcomeUnknown(err) {
 				return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
 			}
 			d.failIntent(intent, session.ID, err)
 		}
-		d.record(registry.HistoryEntry{Kind: failureKind(err, "control-failed"), SessionID: session.ID, Message: "steer", Error: err.Error()})
+		d.record(registry.HistoryEntry{Kind: failureKind(err, "control-failed"), SessionID: session.ID, SourceSessionID: sourceID, Message: label, Error: err.Error()})
 		return nil, err
 	}
-	receipt := &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID}
-	d.markSent(receipt, intent, "", target)
-	d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, Message: "steer"})
+	receipt := &Receipt{Evidence: result.Evidence, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, RequestID: result.RequestID, Source: result.Source, TurnID: result.TurnID, Detail: fmt.Sprintf("Sent to %s.", target)}
+	kind := "control-accepted"
+	if result.Evidence == surface.EvidenceTransportAccepted {
+		kind = "transport-accepted"
+		receipt.Detail = fmt.Sprintf("Steer accepted for %s; not yet confirmed in the current turn.", target)
+	}
+	d.markSent(receipt, intent, result.RequestID, target)
+	d.record(registry.HistoryEntry{Kind: kind, SessionID: session.ID, SourceSessionID: sourceID, Message: label, Result: result.RequestID})
 	return receipt, nil
 }
 
@@ -310,20 +324,7 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 		waiting = recorded
 	}
 	if steerable && waiting == nil {
-		if steerErr := adapter.Steer(ctx, session, message); steerErr != nil {
-			if intent != nil {
-				if surface.IsDeliveryOutcomeUnknown(steerErr) {
-					return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
-				}
-				d.failIntent(intent, session.ID, steerErr)
-			}
-			d.record(registry.HistoryEntry{Kind: failureKind(steerErr, "control-failed"), SessionID: session.ID, Message: message, Error: steerErr.Error()})
-			return nil, steerErr
-		}
-		receipt := &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, Detail: fmt.Sprintf("Sent to %s.", target)}
-		d.markSent(receipt, intent, "", target)
-		d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: "busy steer"})
-		return receipt, nil
+		return d.steer(ctx, adapter, session, message, target, options.SourceSessionID, "busy steer", intent)
 	}
 	if !allowQueue {
 		d.discardIntent(intent, session.ID)
@@ -440,4 +441,26 @@ func (d Dispatcher) record(entry registry.HistoryEntry) {
 	if d.Registry != nil {
 		_ = d.Registry.RecordHistory(entry)
 	}
+}
+
+// RecordControl records a control's request id under the history kind that
+// reads back as the control's evidence.
+func (d Dispatcher) RecordControl(result *surface.ControlResult, controlErr error) {
+	if result == nil {
+		return
+	}
+	kind := map[surface.DeliveryEvidence]string{
+		surface.EvidenceTransportAccepted: "transport-accepted",
+		surface.EvidenceDelivered:         "control-accepted",
+		surface.EvidenceReplyObserved:     "reply",
+		surface.EvidenceFailed:            "control-failed",
+	}[result.Evidence]
+	if kind == "" {
+		kind = "unknown"
+	}
+	errorText := ""
+	if controlErr != nil {
+		errorText = controlErr.Error()
+	}
+	d.record(registry.HistoryEntry{Kind: kind, SessionID: result.SessionID, Message: result.Action, Result: result.RequestID, Error: errorText})
 }

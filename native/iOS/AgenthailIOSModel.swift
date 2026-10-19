@@ -23,6 +23,7 @@ final class AgenthailIOSModel: ObservableObject {
     private var attachmentCacheBytes = 0
     private let attachmentCacheLimit = 20 * 1024 * 1024
     @Published var deliveryStatus: [String: String] = [:]
+    @Published var controlOutput: [String: String] = [:]
     @Published var deliveryIDs: [String: Int64] = [:]
     private var deliveryQueueIDs: [String: Int64] = [:]
     private var refreshingDeliveries = false
@@ -90,7 +91,8 @@ final class AgenthailIOSModel: ObservableObject {
         switch evidence {
         case "submitted": return detail ?? "Submitted"
         case "queued": return detail ?? "Queued"
-        case "transport_accepted", "delivered": return detail ?? "Sent"
+        case "transport_accepted": return detail ?? "Accepted; not yet confirmed"
+        case "delivered": return detail ?? "Sent"
         case "failed": return "Delivery failed"
         case "unknown", nil: return "Submitted"
         case "held": return "Delivery held. Review it in Inbox before retrying."
@@ -508,7 +510,8 @@ final class AgenthailIOSModel: ObservableObject {
                 case "failed": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox before retrying."
                 case "unknown-history": deliveryStatus[sessionID] = "Delivery was never confirmed. Review it in Inbox history."
                 case "failed-history": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox history."
-                case "transport_accepted", "delivered": deliveryStatus[sessionID] = "Sent to \(item.target)."
+                case "transport_accepted": deliveryStatus[sessionID] = "Accepted for \(item.target); not yet confirmed."
+                case "delivered": deliveryStatus[sessionID] = "Sent to \(item.target)."
                 case "held": deliveryStatus[sessionID] = "Delivery held. Review it in Inbox before retrying."
                 case "canceled": deliveryStatus[sessionID] = "Instruction canceled."
                 default: continue
@@ -687,13 +690,15 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
-    func action(_ action: String, session: SessionState, model: String? = nil) {
+    func action(_ action: String, session: SessionState, model: String? = nil, message: String? = nil) {
         guard let api, !pendingControls.contains(session.id) else { return }
         pendingControls.insert(session.id)
         Task {
             defer { pendingControls.remove(session.id) }
             do {
-                try await api.action(action, sessionID: session.id, model: model)
+                if let receipt = try await api.control(action, sessionID: session.id, message: message, model: model), receipt.requestId != nil || receipt.output != nil {
+                    controlOutput[session.id] = [receipt.output, receipt.detail, receipt.requestId.map { "Request \($0)" }].compactMap { $0 }.joined(separator: "\n")
+                }
                 await refresh(fresh: true)
                 await refreshSession(session.id)
             } catch {
