@@ -442,12 +442,27 @@ func (d *Daemon) hostRouted(param string, next http.HandlerFunc) http.HandlerFun
 			next(w, r)
 			return
 		}
+		if !writeIncompatibleHost(w, host) {
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "-stream") {
 			d.relayHostStream(w, r, host, query)
 			return
 		}
 		d.forwardHostRequest(w, r, host, r.Method, query, nil)
 	}
+}
+
+// writeIncompatibleHost refuses to forward to a host whose federation
+// version this daemon does not speak, so an older host never answers a
+// request it would misread. It reports whether the request may proceed.
+func writeIncompatibleHost(w http.ResponseWriter, host *pairedHost) bool {
+	state, detail := host.status()
+	if state != hostStateIncompatible {
+		return true
+	}
+	writeAPIError(w, http.StatusConflict, "host_incompatible", fmt.Sprintf("Host %s needs an update: %s", host.record.Name, detail))
+	return false
 }
 
 // writeRouteError answers a request routeSession refused: a qualifier naming
@@ -621,6 +636,9 @@ func (d *Daemon) hostRoutedAction(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
+		if !writeIncompatibleHost(w, host) {
+			return
+		}
 		body, _ := json.Marshal(request)
 		d.forwardHostAction(w, r, host, request, body)
 	}
@@ -682,7 +700,7 @@ func (d *Daemon) routeActionRequest(request map[string]any) (*pairedHost, bool, 
 	if host != nil {
 		action, _ := request["action"].(string)
 		if action == "session-focus" {
-			return nil, false, fmt.Errorf("opening the terminal of a session on host %s is only possible on that host", host.record.Name)
+			return nil, false, fmt.Errorf("opening the terminal is not available for sessions on another host yet; this session runs on host %s", host.record.Name)
 		}
 		if strings.HasPrefix(action, "channel-") || strings.HasPrefix(action, "relay-") || strings.HasPrefix(action, "queue-") || action == "delivery-dismiss" {
 			return nil, false, fmt.Errorf("%s is not available for sessions on another host yet", action)

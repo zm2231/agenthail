@@ -391,10 +391,15 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	limit := 25
+	sessionID := strings.TrimSpace(r.URL.Query().Get("sessionId"))
+	maxLimit := 100
+	if sessionID != "" {
+		maxLimit = 200
+	}
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > 100 {
-			http.Error(w, "limit must be between 1 and 100", http.StatusBadRequest)
+		if err != nil || parsed < 1 || parsed > maxLimit {
+			http.Error(w, fmt.Sprintf("limit must be between 1 and %d", maxLimit), http.StatusBadRequest)
 			return
 		}
 		limit = parsed
@@ -417,7 +422,7 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 	var entries []registry.HistoryEntry
 	hasMore := false
 	var err error
-	if sessionID := strings.TrimSpace(r.URL.Query().Get("sessionId")); sessionID != "" {
+	if sessionID != "" {
 		if beforeID != 0 || kind != "" || queryText != "" {
 			http.Error(w, "a session's history takes only a limit", http.StatusBadRequest)
 			return

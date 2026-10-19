@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -87,17 +88,37 @@ func TestFederationRoutesEverySessionActionToTheOwningHost(t *testing.T) {
 		t.Fatalf("alias on remote id=%q err=%v", id, err)
 	}
 
-	history := local.request(t, http.MethodGet, "/api/v1/history?limit=10&sessionId="+url.QueryEscape(qualified), nil)
-	var page struct {
-		Items []dashboardHistory `json:"items"`
-	}
-	if history.Code != http.StatusOK || json.Unmarshal(history.Body.Bytes(), &page) != nil || len(page.Items) == 0 {
-		t.Fatalf("history status=%d body=%s", history.Code, history.Body.String())
-	}
-	for _, item := range page.Items {
-		if item.SessionID != qualified {
-			t.Fatalf("history item from another session or unqualified: %+v", item)
+	for _, path := range []string{"/api/v1/history?limit=150&sessionId=", "/api/history?sessionId="} {
+		history := local.request(t, http.MethodGet, path+url.QueryEscape(qualified), nil)
+		var page struct {
+			Items []dashboardHistory `json:"items"`
 		}
+		if history.Code != http.StatusOK || json.Unmarshal(history.Body.Bytes(), &page) != nil || len(page.Items) == 0 {
+			t.Fatalf("%s status=%d body=%s", path, history.Code, history.Body.String())
+		}
+		for _, item := range page.Items {
+			if item.SessionID != qualified {
+				t.Fatalf("history item from another session or unqualified: %+v", item)
+			}
+		}
+	}
+}
+
+func TestFederationRetriesAHeldSendWithoutALocalWritabilityCheck(t *testing.T) {
+	local, _, _ := pairedFederation(t)
+	id, err := local.reg.QueueHostDelivery("remote-a", "held", "fwd-synthetic", []byte(`{"action":"send","sessionId":"remote-a","message":"held"}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := local.reg.ExpireMessages(time.Now().Add(2 * time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "queue-retry", "queueId": id})
+	if response.Code != http.StatusOK {
+		t.Fatalf("retry status=%d body=%s", response.Code, response.Body.String())
+	}
+	if item, err := local.reg.QueueItem(id); err != nil || (item.Status != "pending" && item.Status != "inflight" && item.Status != "done") {
+		t.Fatalf("retried item=%+v err=%v", item, err)
 	}
 }
 
@@ -138,7 +159,7 @@ func TestFederationRefusesActionsThatOnlyMeanSomethingOnOneHost(t *testing.T) {
 		request map[string]any
 		reason  string
 	}{
-		{map[string]any{"action": "session-focus", "sessionId": qualified}, "only possible on that host"},
+		{map[string]any{"action": "session-focus", "sessionId": qualified}, "opening the terminal is not available for sessions on another host yet"},
 		{map[string]any{"action": "relay-add", "fromId": qualified, "toId": hosts.Qualify(record.ID, "remote-b"), "pattern": "."}, "relay-add is not available for sessions on another host yet"},
 		{map[string]any{"action": "send", "sessionId": qualified, "sourceSessionId": hosts.Qualify(record.ID, "remote-b"), "message": "hi"}, "not available for sessions on another host yet"},
 	} {
@@ -156,5 +177,47 @@ func TestLaunchWorkspacesListNewestFoldersOnce(t *testing.T) {
 	sessions := []surface.Session{{Cwd: "/work/b"}, {Cwd: "/private/var/folders/x"}, {Cwd: "/work/a"}, {Cwd: "/work/b"}, {Cwd: ""}, {Cwd: "/home/u/.no-mistakes/run"}, {Cwd: "/tmp/scratch"}}
 	if got := launchWorkspaces(sessions); strings.Join(got, ",") != "/work/b,/work/a" {
 		t.Fatalf("workspaces=%v", got)
+	}
+}
+
+func TestFederationReportsAnOlderHostAsNeedingAnUpdate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	remote := newFederationNode(t, "remote-a")
+	remote.serve(t, nil)
+	local := newFederationNode(t)
+	local.start(t, testRoots(remote.server))
+	remote.gate.older.Store(true)
+	refused := local.request(t, http.MethodPost, "/api/v1/hosts", map[string]string{"pairingUrl": remote.invite(t), "address": remote.address, "name": "forge"})
+	if refused.Code == http.StatusCreated || !strings.Contains(refused.Body.String(), "update Agenthail on that host") {
+		t.Fatalf("pairing an older host status=%d body=%s", refused.Code, refused.Body.String())
+	}
+	if devices, _ := remote.reg.ListDevices(false); len(devices) != 0 {
+		t.Fatalf("refused pairing left a device on the host: %+v", devices)
+	}
+
+	remote.gate.older.Store(false)
+	record := local.pair(t, remote, "forge")
+	awaitFederation(t, "remote session mirrored", func() bool { return len(sessionsOf(local.snapshot(t), record.ID)) == 1 })
+	remote.gate.older.Store(true)
+	host, _ := local.daemon.pairedHost(record.ID)
+	host.cancel()
+	if err := local.daemon.attachHost(record); err != nil {
+		t.Fatal(err)
+	}
+	awaitFederation(t, "older host marked incompatible", func() bool {
+		rows := sessionsOf(local.snapshot(t), record.ID)
+		return len(rows) == 1 && rows[0].Host.State == hostStateIncompatible && strings.Contains(rows[0].UnavailableReason, "update Agenthail on that host")
+	})
+	options := local.request(t, http.MethodGet, "/api/v1/session-options?host=forge", nil)
+	if options.Code != http.StatusConflict || !strings.Contains(options.Body.String(), "host_incompatible") {
+		t.Fatalf("an incompatible host's launch catalog status=%d body=%s", options.Code, options.Body.String())
+	}
+	history := local.request(t, http.MethodGet, "/api/v1/history?sessionId="+url.QueryEscape(hosts.Qualify(record.ID, "remote-a")), nil)
+	send := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": hosts.Qualify(record.ID, "remote-a"), "message": "misread"})
+	if history.Code != http.StatusConflict || send.Code != http.StatusConflict || len(remote.fake.delivered()) != 0 {
+		t.Fatalf("history=%d send=%d body=%s delivered=%v", history.Code, send.Code, send.Body.String(), remote.fake.delivered())
+	}
+	if held, _ := local.reg.HostDeliveries(record.ID); len(held) != 0 {
+		t.Fatalf("a refused send was held for the incompatible host: %+v", held)
 	}
 }

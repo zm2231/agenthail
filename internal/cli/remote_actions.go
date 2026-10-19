@@ -216,7 +216,7 @@ func (a *App) historyRemote(ctx context.Context, remote *remoteTarget, limit int
 			Evidence  string `json:"evidence"`
 		} `json:"items"`
 	}
-	query := url.Values{"sessionId": []string{remote.ID}, "limit": []string{fmt.Sprint(min(limit, 100))}}
+	query := url.Values{"sessionId": []string{remote.ID}, "limit": []string{fmt.Sprint(limit)}}
 	data, _, err := client.call(ctx, "GET", "/api/v1/history", query, nil, nil)
 	if err != nil {
 		return fmt.Errorf("read history of %s: %w", remote.label(), err)

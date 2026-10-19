@@ -20,7 +20,11 @@ import (
 )
 
 const (
-	ProtocolVersion   = 1
+	ProtocolVersion = 1
+	// FederationVersion names what one daemon serves another beyond the
+	// client API: the session-options launch catalog and history filtered
+	// by session. A host outside this range is reported as needing an update.
+	FederationVersion = 2
 	ResponseHeader    = "Agenthail-Host"
 	responseBodyLimit = 32 << 20
 )
@@ -224,11 +228,13 @@ func (c *Client) GetJSON(ctx context.Context, path string, query url.Values, val
 }
 
 type Version struct {
-	Protocol        int    `json:"protocol"`
-	MinimumProtocol int    `json:"minimumProtocol"`
-	MaximumProtocol int    `json:"maximumProtocol"`
-	HostID          string `json:"hostId"`
-	HostName        string `json:"hostName"`
+	Protocol          int    `json:"protocol"`
+	MinimumProtocol   int    `json:"minimumProtocol"`
+	MaximumProtocol   int    `json:"maximumProtocol"`
+	MinimumFederation int    `json:"minimumFederation"`
+	MaximumFederation int    `json:"maximumFederation"`
+	HostID            string `json:"hostId"`
+	HostName          string `json:"hostName"`
 }
 
 func (c *Client) Version(ctx context.Context) (Version, error) {
@@ -236,7 +242,7 @@ func (c *Client) Version(ctx context.Context) (Version, error) {
 	if err := c.GetJSON(ctx, "/api/v1/version", nil, &version); err != nil {
 		return Version{}, err
 	}
-	if version.MinimumProtocol > ProtocolVersion || version.MaximumProtocol < ProtocolVersion {
+	if version.MinimumProtocol > ProtocolVersion || version.MaximumProtocol < ProtocolVersion || version.MinimumFederation > FederationVersion || version.MaximumFederation < FederationVersion {
 		return version, ErrProtocolMismatch{Remote: version}
 	}
 	return version, nil
@@ -245,7 +251,13 @@ func (c *Client) Version(ctx context.Context) (Version, error) {
 type ErrProtocolMismatch struct{ Remote Version }
 
 func (e ErrProtocolMismatch) Error() string {
-	return fmt.Sprintf("host speaks protocol %d to %d; this daemon speaks %d", e.Remote.MinimumProtocol, e.Remote.MaximumProtocol, ProtocolVersion)
+	if e.Remote.MinimumProtocol > ProtocolVersion || e.Remote.MaximumProtocol < ProtocolVersion {
+		return fmt.Sprintf("host speaks protocol %d to %d; this daemon speaks %d", e.Remote.MinimumProtocol, e.Remote.MaximumProtocol, ProtocolVersion)
+	}
+	if e.Remote.MaximumFederation < FederationVersion {
+		return fmt.Sprintf("host speaks federation %d to %d; this daemon speaks %d; update Agenthail on that host", e.Remote.MinimumFederation, e.Remote.MaximumFederation, FederationVersion)
+	}
+	return fmt.Sprintf("host speaks federation %d to %d; this daemon speaks %d; update Agenthail on this machine", e.Remote.MinimumFederation, e.Remote.MaximumFederation, FederationVersion)
 }
 
 type PairingLink struct {

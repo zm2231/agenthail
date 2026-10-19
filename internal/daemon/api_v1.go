@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -27,14 +28,16 @@ const (
 )
 
 type apiVersionResponse struct {
-	Protocol        int    `json:"protocol"`
-	MinimumProtocol int    `json:"minimumProtocol"`
-	MaximumProtocol int    `json:"maximumProtocol"`
-	Authentication  string `json:"authentication"`
-	EventTransport  string `json:"eventTransport"`
-	PushRelayURL    string `json:"pushRelayUrl"`
-	HostID          string `json:"hostId"`
-	HostName        string `json:"hostName"`
+	Protocol          int    `json:"protocol"`
+	MinimumProtocol   int    `json:"minimumProtocol"`
+	MaximumProtocol   int    `json:"maximumProtocol"`
+	MinimumFederation int    `json:"minimumFederation"`
+	MaximumFederation int    `json:"maximumFederation"`
+	Authentication    string `json:"authentication"`
+	EventTransport    string `json:"eventTransport"`
+	PushRelayURL      string `json:"pushRelayUrl"`
+	HostID            string `json:"hostId"`
+	HostName          string `json:"hostName"`
 }
 
 func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
@@ -95,7 +98,7 @@ func (d *Daemon) apiVersionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := d.hostIdentity()
-	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolVersion, MaximumProtocol: apiProtocolVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: PushRelayURL(), HostID: identity.ID, HostName: identity.Name})
+	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolVersion, MaximumProtocol: apiProtocolVersion, MinimumFederation: hosts.FederationVersion, MaximumFederation: hosts.FederationVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: PushRelayURL(), HostID: identity.ID, HostName: identity.Name})
 }
 
 func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {

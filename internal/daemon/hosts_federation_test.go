@@ -102,6 +102,7 @@ type actionGate struct {
 	drops     atomic.Int32
 	truncate  atomic.Int32
 	proxyDown atomic.Bool
+	older     atomic.Bool
 	snapshots atomic.Pointer[snapshotHold]
 }
 
@@ -160,6 +161,13 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 	gated := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if n.gate.proxyDown.Load() {
 			http.Error(w, "bad gateway", http.StatusBadGateway)
+			return
+		}
+		if n.gate.older.Load() && r.URL.Path == "/api/v1/version" {
+			identity, _ := n.reg.HostIdentity()
+			w.Header().Set(hosts.ResponseHeader, identity.ID)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"protocol": 1, "minimumProtocol": 1, "maximumProtocol": 1, "hostId": identity.ID, "hostName": identity.Name})
 			return
 		}
 		if hold := n.gate.snapshots.Load(); hold != nil && r.URL.Path == "/api/v1/snapshot" {
@@ -259,6 +267,7 @@ func (n *federationNode) request(t *testing.T, method, target string, body any) 
 	}
 	request := httptest.NewRequest(method, target, reader)
 	request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: dashboardTestToken})
 	response := httptest.NewRecorder()
 	n.handler.ServeHTTP(response, request)
 	return response

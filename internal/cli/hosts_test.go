@@ -5,9 +5,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -241,11 +243,14 @@ func TestRemoteSessionCommandsRouteThroughDaemon(t *testing.T) {
 	if output := run("queue", "forge::@builder", "when", "idle"); !strings.Contains(output, "sent to forge::@builder") {
 		t.Fatalf("queue output=%q", output)
 	}
-	if output := run("history", "forge::@builder", "5"); !strings.Contains(output, "forge::@builder synthetic history line") {
+	if output := run("history", "forge::@builder", "150"); !strings.Contains(output, "forge::@builder synthetic history line") {
 		t.Fatalf("history output=%q", output)
 	}
+	run("thread", "stop", "forge::@builder")
+	run("thread", "resume", "forge::@builder")
+	run("thread", "logs", "forge::@builder")
 	actions, _ := api.recorded()
-	want := []string{"compact", "model", "goal-set", "goal-budget", "alias", "session-fork", "alias", "native-queue", "session-lifecycle-status", "send"}
+	want := []string{"compact", "model", "goal-set", "goal-budget", "alias", "session-fork", "alias", "native-queue", "session-lifecycle-status", "send", "session-lifecycle-stop", "session-lifecycle-resume", "session-lifecycle-logs"}
 	if len(actions) != len(want) {
 		t.Fatalf("actions=%v", actions)
 	}
@@ -275,7 +280,7 @@ func TestRemoteSessionCommandsRouteThroughDaemon(t *testing.T) {
 	if actions[9]["busyDelivery"] != "queue" || actions[9]["message"] != "when idle" {
 		t.Fatalf("queue payload=%v", actions[9])
 	}
-	if len(api.gets) != 3 || !strings.Contains(api.gets[2], "/api/v1/history?") || !strings.Contains(api.gets[2], "limit=5") {
+	if len(api.gets) != 3 || !strings.Contains(api.gets[2], "/api/v1/history?") || !strings.Contains(api.gets[2], "limit=150") {
 		t.Fatalf("gets=%v", api.gets)
 	}
 	if len(fake.sent) != 0 {
@@ -292,6 +297,13 @@ func TestHeldSendForRemoteSessionIsLocalQueueData(t *testing.T) {
 	output, err := captureStdout(t, func() error { return app.Run([]string{"queue", "list", "--target", "forge::@builder"}) })
 	if err != nil || !strings.Contains(output, "held for forge") {
 		t.Fatalf("list output=%q err=%v", output, err)
+	}
+	if _, err := reg.ExpireMessages(time.Now().Add(2 * time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	output, err = captureStdout(t, func() error { return app.Run([]string{"queue", "retry", strconv.FormatInt(id, 10)}) })
+	if err != nil || !strings.Contains(output, "scheduled for retry") {
+		t.Fatalf("retry of a held send output=%q err=%v", output, err)
 	}
 	output, err = captureStdout(t, func() error { return app.Run([]string{"queue", "clear", "forge::@builder"}) })
 	if err != nil || !strings.Contains(output, "canceled 1 queued message(s)") {
