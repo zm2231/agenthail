@@ -6,11 +6,11 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-// recordRuntimeKinds is schema step 17. Every session row without a runtime
-// kind gets the runtime that carries it, derived from the attachments it was
-// registered with, in one transaction with the column: before this step each
-// surface had exactly one runtime, and a Codex thread's runtime followed its
-// transport. It runs on every open because a registry stamped by a newer build
+// recordRuntimeKinds is the runtime kind schema step. Every session row without
+// a runtime kind gets the runtime that carries it, derived from the attachments
+// it was registered with, in one transaction with the column: before this step
+// each surface had exactly one runtime, and a Codex thread's runtime followed
+// its transport. It runs on every open because a registry stamped by a newer build
 // can still lack the column.
 func (r *Registry) recordRuntimeKinds() error {
 	found, err := r.columnExists("sessions", "runtime_kind")
