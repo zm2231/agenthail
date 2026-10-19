@@ -125,7 +125,10 @@ return the reason; for an unrepliable row it names the original sender as
 `<host>::<id>`. A Claude peer message to one gets a `refused` receipt, which
 Claude reports to its model as undelivered, followed by a message that gives
 the same reason (at most once every ten minutes per sender), and delivery
-history records it as `peer_rejected`.
+history records it as `peer_rejected`. A failed or held send from an
+unrepliable row stays in the problem list; no delivery notice is queued for
+it, since nothing would read one. Notices for the operator still queue, for the
+person to see.
 
 Claude peers: while a paired host is connected, its sessions, Claude included,
 are advertised to local Claude sessions as peers named
