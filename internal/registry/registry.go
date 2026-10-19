@@ -1648,13 +1648,17 @@ const (
 // exception, since the daemon resumes it to drain its queue.
 const queueTargetStatus = `CASE WHEN s.id IS NOT NULL AND (s.status='offline' OR NOT EXISTS (SELECT 1 FROM catalog_sessions cs WHERE cs.session_id=s.id)) THEN CASE WHEN s.surface='claude' AND s.pid>0 THEN 'idle' ELSE 'offline' END ELSE COALESCE(CASE WHEN sr.turn_observed=1 THEN sr.last_status END,s.status,'unknown') END`
 
+// queueToPeerSocket matches an agent's message to a Claude session with a
+// native peer socket, which the socket delivers whatever the turn is doing.
+const queueToPeerSocket = `%[1]s.author!='person' AND EXISTS (SELECT 1 FROM sessions ps WHERE ps.id=%[1]s.session_id AND ps.surface='claude' AND ps.transport='uds')`
+
 // queueSteerRow matches a message a busy turn can take as a steer under the
 // live policy: one that asks to steer, or that makes no choice while the
-// policy steers.
+// policy steers and is not bound for a peer socket.
 func queueSteerRow(alias string, mode deliverypolicy.Mode) string {
 	choice := `%[1]s.busy_delivery='steer'`
 	if mode == deliverypolicy.Steer {
-		choice = `%[1]s.busy_delivery IN ('steer','')`
+		choice = `(%[1]s.busy_delivery='steer' OR %[1]s.busy_delivery='' AND NOT (` + queueToPeerSocket + `))`
 	}
 	return fmt.Sprintf(choice+` AND %[1]s.model='' AND (%[1]s.turn_options='' OR %[1]s.turn_options='{}')`, alias)
 }
@@ -1677,7 +1681,7 @@ func queueHoldCase(canSteer bool, mode deliverypolicy.Mode) string {
 	}
 	return `CASE WHEN q.status!='pending' THEN ''
 		WHEN q.host_request!='' THEN 'hostUnreachable'
-		WHEN COALESCE(s.surface,'')='claude' AND COALESCE(s.transport,'')='uds' AND ` + fmt.Sprintf(queuePeerRow, "q") + ` THEN CASE WHEN q.id!=` + fmt.Sprintf(earliest, "") + ` THEN 'behind' WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END
+		WHEN ` + fmt.Sprintf(queueToPeerSocket, "q") + ` AND ` + fmt.Sprintf(queuePeerRow, "q") + ` THEN CASE WHEN q.id!=` + fmt.Sprintf(earliest, "") + ` THEN 'behind' WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END
 		WHEN COALESCE(sr.waiting_id,'')!='' THEN 'waiting'` + steer + `
 		WHEN ` + queueTargetStatus + `='busy' THEN 'busy'
 		WHEN ` + queueTargetStatus + `='offline' THEN 'offline'

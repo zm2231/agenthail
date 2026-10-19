@@ -119,3 +119,30 @@ func TestRelayToABusyCodexSessionFollowsTheLivePolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestQueuedMessagesToABusyBridgedPeerNeverSteerUnderTheSteerPolicy(t *testing.T) {
+	store, process, session := busyClaude(t, true)
+	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: "steer"}); err != nil {
+		t.Fatal(err)
+	}
+	claude := &recordingClaude{Claude: surfaces.NewClaude(nil, process.Home)}
+	ids := []int64{}
+	for _, message := range []string{"first handoff", "second handoff"} {
+		id, _, err := store.QueueDeliveryWithIntent(session.ID, message, "", surface.SendOptions{SourceSessionID: "sender"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if item, err := store.QueueItem(ids[1], surface.Adapters{claude}); err != nil || item.HeldBy != registry.QueueHeldBehind {
+		t.Fatalf("item=%+v err=%v, want the second message behind the first", item, err)
+	}
+	runDaemon(t, store, claude)
+	eventually(t, "both messages over the peer socket", func() bool {
+		sent, _ := claude.delivered()
+		return len(sent) == 2
+	})
+	if sent, steered := claude.delivered(); len(steered) != 0 || sent[0] != "first handoff" || sent[1] != "second handoff" {
+		t.Fatalf("sent=%q steered=%q, want both in order over the socket", sent, steered)
+	}
+}

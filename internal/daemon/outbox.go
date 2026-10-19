@@ -73,6 +73,9 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	if policyErr != nil {
 		d.log.Printf("read busy delivery policy for queue item %d: %s", item.ID, policyErr)
 	}
+	if item.BusyDelivery == "" && route == surface.RoutePeer {
+		steers = false
+	}
 	steer := steers && !options.HoldsForQueue() && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer
 	if steer {
 		steered, sendErr = surface.SteerWithEvidence(operationCtx, adapter, session, item.Message)
