@@ -128,9 +128,8 @@ target has no writable transport.
 
 With the daemon running, `list` shows the daemon's current scope: open Claude
 sessions, busy or loaded Codex sessions active within the configured recent
-window (five hours by default), busy or recently active Notion threads, and
-sessions with open attention items. `--recent` adds anything active in the last
-24 hours, `--all` lists every session that is not archived, and `--archived`
+window (five hours by default), and busy or recently active Notion threads.
+`--all` lists every session that is not archived, and `--archived`
 lists the archived ones. Use `--all` only when the user asks for history or a
 target is older or missing from the current view. `--project <name|id>` keeps
 one project's sessions; `agenthail project list` names the projects.
@@ -138,7 +137,7 @@ one project's sessions; `agenthail project list` names the projects.
 ```bash
 agenthail list --json
 agenthail list --all --json
-agenthail list --recent --project agenthail --json
+agenthail list --all --project agenthail --json
 ```
 
 `doctor` is a health probe. Its per-surface session counts are full discovery

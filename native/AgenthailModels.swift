@@ -112,7 +112,6 @@ struct SessionState: Codable, Identifiable, Hashable {
     let open: Bool
     var current: Bool
     var currentReason: String?
-    var recent: Bool? = nil
     var archived: Bool? = nil
     let capabilities: Capabilities
     let readOnly: Bool?

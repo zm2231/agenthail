@@ -147,8 +147,8 @@ Session commands:
   thread <status|stop|resume|logs> <target>  Manage a Claude background session
   thread <archive|unarchive> <target>  Hide a session until it is active again
   thread queue <target> <list|add|update|delete|reorder|start>  Manage Codex native input
-  list [--recent|--all|--archived] [--project <name|id>] [--cwd <path>] [--wide]
-                                 List current sessions (with the daemon: --recent, --all or --archived);
+  list [--all|--archived] [--project <name|id>] [--cwd <path>] [--wide]
+                                 List current sessions (with the daemon: --all or --archived);
                                  --cwd includes that workspace and descendants
   project list|add <path>|archive <name>|unarchive <name>
                                  List projects, add a non-Git folder, or hide a project
@@ -513,7 +513,7 @@ func validateCommandFlags(command string, args []string) error {
 		bools  map[string]bool
 	}
 	specs := map[string]flagSpec{
-		"list": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--recent": true, "--all": true, "--archived": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--recent": true, "--all": true, "--archived": true, "--wide": true, "--json": true}}, "runs": {bools: map[string]bool{"--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
+		"list": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--wide": true, "--json": true}}, "runs": {bools: map[string]bool{"--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
@@ -608,7 +608,7 @@ func (a *App) cmdClaudeRuns(args []string) error {
 
 func (a *App) cmdList(args []string) error {
 	if len(stripFlags(args)) != 0 {
-		return fmt.Errorf("usage: agenthail list [--recent|--all|--archived] [--project <name|id>] [--cwd <path>] [--wide] [--json]")
+		return fmt.Errorf("usage: agenthail list [--all|--archived] [--project <name|id>] [--cwd <path>] [--wide] [--json]")
 	}
 	scope, err := listScopeFromArgs(args)
 	if err != nil {
@@ -640,8 +640,8 @@ func (a *App) cmdList(args []string) error {
 	successfulSurfaces := 0
 	remoteRows := map[string]listHostRow{}
 	views := map[string]listCatalogView{}
-	if !catalogBacked && (projectSelector != "" || hasFlag(args, "--recent") || hasFlag(args, "--archived")) {
-		return fmt.Errorf("--project, --recent and --archived need the daemon; start it with: agenthail daemon start")
+	if !catalogBacked && (projectSelector != "" || hasFlag(args, "--archived")) {
+		return fmt.Errorf("--project and --archived need the daemon; start it with: agenthail daemon start")
 	}
 	if catalogBacked {
 		successfulSurfaces = 1

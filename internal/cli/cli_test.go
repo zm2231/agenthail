@@ -928,11 +928,11 @@ func TestListUsesTheDaemonScopesAndProjects(t *testing.T) {
 		session    surface.Session
 		projection string
 	}{
-		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "working", Surface: surface.KindCodex, Name: "working", Status: surface.StatusBusy, Cwd: "/work/widget/.worktrees/a", LastActive: observedAt}, `{"project":` + widget + `,"current":true,"recent":true}`},
-		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "yesterday", Surface: surface.KindCodex, Name: "yesterday", Status: surface.StatusIdle, Cwd: "/work/widget", LastActive: observedAt.Add(-20 * time.Hour)}, `{"project":` + widget + `,"recent":true}`},
+		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "working", Surface: surface.KindCodex, Name: "working", Status: surface.StatusBusy, Cwd: "/work/widget/.worktrees/a", LastActive: observedAt}, `{"project":` + widget + `,"current":true}`},
+		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "yesterday", Surface: surface.KindCodex, Name: "yesterday", Status: surface.StatusIdle, Cwd: "/work/widget", LastActive: observedAt.Add(-20 * time.Hour)}, `{"project":` + widget + `}`},
 		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "child", Surface: surface.KindCodex, Name: "child", Status: surface.StatusIdle, Cwd: "/work/widget", LastActive: observedAt.Add(-30 * time.Hour), Subagent: &surface.Subagent{ParentID: "yesterday", RootID: "yesterday"}}, `{"project":` + widget + `}`},
 		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "scratch", Surface: surface.KindCodex, Name: "scratch", Status: surface.StatusIdle, Cwd: "/tmp/scratch", LastActive: observedAt.Add(-40 * time.Hour)}, `{}`},
-		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "hidden", Surface: surface.KindCodex, Name: "hidden", Status: surface.StatusIdle, Cwd: "/work/widget", LastActive: observedAt}, `{"project":` + widget + `,"current":true,"recent":true,"archived":true}`},
+		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "hidden", Surface: surface.KindCodex, Name: "hidden", Status: surface.StatusIdle, Cwd: "/work/widget", LastActive: observedAt}, `{"project":` + widget + `,"current":true,"archived":true}`},
 	} {
 		if err := store.RegisterSession(row.session); err != nil {
 			t.Fatal(err)
@@ -964,7 +964,6 @@ func TestListUsesTheDaemonScopesAndProjects(t *testing.T) {
 		want string
 	}{
 		{nil, "working"},
-		{[]string{"--recent"}, "working,yesterday,child"},
 		{[]string{"--all"}, "working,yesterday,child,scratch"},
 		{[]string{"--archived"}, "hidden"},
 		{[]string{"--all", "--project", "WIDGET"}, "working,yesterday,child"},
@@ -978,7 +977,7 @@ func TestListUsesTheDaemonScopesAndProjects(t *testing.T) {
 	if err != nil || !strings.Contains(text, "PROJECT") || !strings.Contains(text, "widget") || strings.Contains(text, "/work/widget") {
 		t.Fatalf("text=%q err=%v", text, err)
 	}
-	if err := app.Run([]string{"list", "--all", "--recent"}); err == nil {
+	if err := app.Run([]string{"list", "--all", "--archived"}); err == nil {
 		t.Fatal("conflicting scopes were accepted")
 	}
 }

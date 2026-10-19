@@ -7,7 +7,7 @@ struct SessionTreeTest {
         expect(SessionTree.parseTimestamp("2026-10-04 12:00:00") == now, "SQLite UTC timestamps parse as UTC")
         let caps = Capabilities(send: true, stream: true, reply: true, goal: false, compact: false, model: true, interrupt: true, steer: true)
         func session(_ id: String, status: String, lastActive: String, project: String, checkout: String, branch: String?, detached: String? = nil, name: String? = nil) -> SessionState {
-            SessionState(id: id, surface: "codex", name: name ?? id, alias: nil, status: status, lastActive: lastActive, queueCount: 0, open: true, current: false, currentReason: nil, recent: status == "busy" || now.timeIntervalSince(SessionTree.parseTimestamp(lastActive) ?? .distantPast) <= 24 * 60 * 60, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: "/repo/\(checkout)", project: ProjectIdentity(id: project, displayName: project, rootPath: "/repo", kind: "git"), checkout: CheckoutIdentity(id: checkout, path: "/repo/\(checkout)", branch: branch, detachedHead: detached, isMain: checkout == "main", dirty: false))
+            SessionState(id: id, surface: "codex", name: name ?? id, alias: nil, status: status, lastActive: lastActive, queueCount: 0, open: true, current: status == "busy" || now.timeIntervalSince(SessionTree.parseTimestamp(lastActive) ?? .distantPast) <= 24 * 60 * 60, currentReason: nil, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: "/repo/\(checkout)", project: ProjectIdentity(id: project, displayName: project, rootPath: "/repo", kind: "git"), checkout: CheckoutIdentity(id: checkout, path: "/repo/\(checkout)", branch: branch, detachedHead: detached, isMain: checkout == "main", dirty: false))
         }
         let sessions = [
             session("old", status: "idle", lastActive: "2026-10-01T12:00:00Z", project: "agenthail", checkout: "main", branch: "main"),
@@ -20,7 +20,7 @@ struct SessionTreeTest {
         expect(recent.counts == [.running: 1, .recent: 3, .all: 4, .archived: 0], "counts per filter: \(recent.counts)")
         expect(recent.projects.map(\.name) == ["agenthail", "fable"], "projects ordered by latest activity")
         expect(recent.projects[0].checkouts.map(\.label) == ["feat/x", "main"], "checkouts ordered by latest activity")
-        expect(recent.projects[0].checkouts[1].sessions.map(\.id) == ["idle"], "sessions older than a day leave Recent")
+        expect(recent.projects[0].checkouts[1].sessions.map(\.id) == ["idle"], "sessions the daemon does not mark current leave Recent")
         expect(recent.projects[1].checkouts[0].label == "detached at de2fda1", "detached checkout label")
         expect(recent.needsYou.map(\.id) == ["other"], "attention sessions appear under Needs you")
         expect(SessionTree.needsYou(sessions, attentionSessionIDs: ["other", "gone"]).map(\.id) == ["other"], "attention for a session missing from the catalog is not counted")
@@ -39,6 +39,7 @@ struct SessionTreeTest {
         func member(_ id: String, parent: String, root: String, depth: Int, nickname: String, role: String? = nil, status: String, lastActive: String) -> SessionState {
             var state = session(id, status: status, lastActive: lastActive, project: "agenthail", checkout: "main", branch: "main")
             state.subagent = SubagentIdentity(parentId: parent, rootId: root, depth: depth, nickname: nickname, role: role)
+            state.current = status == "busy"
             return state
         }
         let lead = session("lead", status: "idle", lastActive: "2026-10-04T09:00:00Z", project: "agenthail", checkout: "main", branch: "main", name: "Build the parser")
@@ -71,7 +72,7 @@ struct SessionTreeTest {
         expect(capFamily.checkouts.flatMap(\.families).map(\.id) == ["lead"], "selecting a subagent keeps its family visible past the cap")
 
         var offline = session("gone", status: "offline", lastActive: "2026-10-04T11:30:00Z", project: "agenthail", checkout: "main", branch: "main")
-        offline = SessionState(id: offline.id, surface: "claude", name: "gone", alias: nil, status: "offline", lastActive: offline.lastActive, queueCount: 0, open: false, current: false, currentReason: nil, recent: true, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: offline.cwd, project: offline.project, checkout: offline.checkout)
+        offline = SessionState(id: offline.id, surface: "claude", name: "gone", alias: nil, status: "offline", lastActive: offline.lastActive, queueCount: 0, open: false, current: true, currentReason: nil, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: offline.cwd, project: offline.project, checkout: offline.checkout)
         let notLoaded = session("cold", status: "notLoaded", lastActive: "2026-10-04T11:40:00Z", project: "agenthail", checkout: "main", branch: "main")
         let unknown = session("lost", status: "unknown", lastActive: "2026-10-04T11:41:00Z", project: "agenthail", checkout: "main", branch: "main")
         let refined = sessions + [offline, notLoaded, unknown]
@@ -107,7 +108,7 @@ struct SessionTreeTest {
 
         var remote = session("h1::remote", status: "idle", lastActive: "2026-10-04T11:58:00Z", project: "h1::agenthail", checkout: "wt", branch: "history-truth")
         remote.host = SessionHost(id: "h1", name: "forge-agents.tail0000.ts.net", state: "connected")
-        var remoteLoose = SessionState(id: "h1::loose", surface: "codex", name: "remote loose", alias: nil, status: "idle", lastActive: "2026-10-04T11:57:00Z", queueCount: 0, open: true, current: false, currentReason: nil, recent: true, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: "/home/demo")
+        var remoteLoose = SessionState(id: "h1::loose", surface: "codex", name: "remote loose", alias: nil, status: "idle", lastActive: "2026-10-04T11:57:00Z", queueCount: 0, open: true, current: true, currentReason: nil, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: "/home/demo")
         remoteLoose.host = remote.host
         let hosted = SessionTree.build(sessions + [remote, loose, remoteLoose], filter: .all, attentionSessionIDs: [])
         expect(hosted.projects.first { $0.id == "h1::agenthail" }?.host == "forge-agents", "a remote project names its host without the domain")

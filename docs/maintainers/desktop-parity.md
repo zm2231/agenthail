@@ -61,7 +61,7 @@ Open gaps are tracked as td stories under td-5f222f (listed at the end). Each on
 
 | Feature | Web | Endpoint | Mac | Mac evidence |
 | --- | --- | --- | --- | --- |
-| Session scopes and projects | index.html Conversation scope; app.js renderSessions, renderProjects | GET /api/state (`counts`, `projects`, row `recent`/`archived`) | present (Running, Recent, All, Archived, grouped by project) | SessionTree.swift; macOS/DesktopWindow.swift SessionSidebar |
+| Session scopes and projects | index.html Conversation scope; app.js renderSessions, renderProjects | GET /api/state (`counts`, `projects`, row `current`/`archived`) | present (Running, Recent, All, Archived, grouped by project) | SessionTree.swift; macOS/DesktopWindow.swift SessionSidebar |
 | Archive a session or project | app.js data-archive-action, data-project-action | POST /api/action `session-archive`, `project-archive` | present (context menus) | macOS/DesktopWindow.swift context menus; AgenthailModel.setArchived |
 | Search, plus Codex history search from 3 characters | index.html:182-188; app.js:1726-1764 | GET /api/state (local match); GET /api/search (Codex history) | present | macOS/DesktopWindow.swift:114-131, 205-280; native/AgenthailModel.swift:323-346 |
 | Surface and status filters | index.html:189-205; app.js:1878-1891 | GET /api/state (filtered client-side) | present | macOS/SessionRefinementMenu.swift:3-73 |

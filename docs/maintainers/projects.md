@@ -26,14 +26,14 @@ returns it and registers nothing.
 
 ## Scopes
 
-Each row carries `current`, `recent` and `archived`. The snapshot and the
+Each row carries `current`, which the session's surface computes, and
+`archived`, which the daemon sets from the archive state. The snapshot and the
 `scope` filter use these definitions:
 
 | Scope | A session is in it when |
 |---|---|
 | `running` | it is working |
-| `current` | it is working, has queued work, has an open attention item, is an open Claude session, or is a Codex session active within the Codex recent window |
-| `recent` | it is current or was active in the last 24 hours |
+| `current`, `recent` | its row is `current` |
 | `all` | it is not archived |
 | `archived` | it or its project is archived |
 

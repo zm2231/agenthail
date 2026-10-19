@@ -12,13 +12,13 @@ shared database state otherwise. Claude peer `idle` is trusted only from peers a
 notifications or from a readable transcript; otherwise the state is unknown.
 
 With the daemon running, `agenthail list` reads the daemon catalog and applies
-the daemon's scopes: current by default, or `--recent`, `--all` or `--archived`.
+the daemon's scopes: current by default, or `--all` or `--archived`.
 The scopes count session families, so a subagent appears with its root. The
 table's PROJECT column and the JSON `project` field are the daemon's project for
 the session, and `--project <name|id>` keeps one project. See
 [projects](projects.md) for the identity and archive rules. Without the daemon,
 `list` discovers sessions directly, shows every one, and prints the working
-directory in place of the project; `--project`, `--recent` and `--archived` need
+directory in place of the project; `--project` and `--archived` need
 the daemon.
 
 `agenthail project list [--all]`, `project add <path>`, and

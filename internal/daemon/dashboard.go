@@ -93,7 +93,6 @@ type dashboardSession struct {
 	QueueCount        int                        `json:"queueCount"`
 	Open              bool                       `json:"open"`
 	Current           bool                       `json:"current"`
-	Recent            bool                       `json:"recent"`
 	Archived          bool                       `json:"archived,omitempty"`
 	CurrentReason     string                     `json:"currentReason,omitempty"`
 	Capabilities      surface.Capabilities       `json:"capabilities"`
@@ -887,7 +886,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	}
 	d.settleArchiveActivity(localRows, view)
 	for _, index := range local {
-		applyCatalogView(&state.Sessions[index], view, now)
+		applyCatalogView(&state.Sessions[index], view)
 	}
 	sort.Slice(state.Surfaces, func(i, j int) bool { return state.Surfaces[i].Name < state.Surfaces[j].Name })
 	if page == nil {

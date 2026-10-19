@@ -484,7 +484,7 @@ func (d *Daemon) publishCatalogSession(adapter surface.Surface, session surface.
 		if d.settleArchiveActivity([]dashboardSession{row}, view) {
 			d.catalogProjectUnarchived = true
 		}
-		applyCatalogView(&row, view, observedAt)
+		applyCatalogView(&row, view)
 		payload, err := json.Marshal(map[string]any{"session": row})
 		if err != nil {
 			return false
@@ -590,7 +590,7 @@ func (d *Daemon) publishCatalogViewState() {
 	for _, row := range rows {
 		record, projection := row.record, row.projection
 		for attempt := 0; attempt < 3; attempt++ {
-			applyCatalogView(&projection, view, now)
+			applyCatalogView(&projection, view)
 			fingerprint, err := json.Marshal(projection)
 			if err != nil || string(fingerprint) == record.ProjectionFingerprint {
 				break

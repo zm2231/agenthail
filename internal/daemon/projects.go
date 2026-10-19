@@ -76,10 +76,9 @@ func (d *Daemon) settleArchiveActivity(rows []dashboardSession, view catalogView
 	return projectCleared
 }
 
-func applyCatalogView(row *dashboardSession, view catalogViewState, now time.Time) {
-	if view.attention[row.ID] && !row.Current {
-		row.Current, row.CurrentReason = true, "attention"
-	}
+// applyCatalogView sets the row's archive flags. Presence (current) stays as
+// the surface computed it.
+func applyCatalogView(row *dashboardSession, view catalogViewState) {
 	_, sessionArchived := view.archive.Sessions[row.ID]
 	projectArchived := false
 	if row.Project != nil {
@@ -89,7 +88,6 @@ func applyCatalogView(row *dashboardSession, view catalogViewState, now time.Tim
 		row.Project = &project
 	}
 	row.Archived = sessionArchived || projectArchived
-	row.Recent = row.Current || (!row.LastActive.IsZero() && now.Sub(row.LastActive) <= registry.CatalogRecentWindow)
 }
 
 type dashboardProject struct {
@@ -121,7 +119,7 @@ func validCatalogScope(scope string) bool {
 }
 
 func catalogScopeMatches(scope string, row dashboardSession) bool {
-	return ScopeMatches(scope, SessionWorking(row.Status, row.Subagents), row.Current, row.Recent, row.Archived)
+	return ScopeMatches(scope, SessionWorking(row.Status, row.Subagents), row.Current, row.Archived)
 }
 
 // SessionWorking reports whether a session or one of its observed subagents is
@@ -133,14 +131,12 @@ func SessionWorking(status surface.SessionStatus, subagents *surface.SubagentRol
 // ScopeMatches is the one definition of the session scopes, applied to the
 // flags the owning daemon computed for a row. An empty scope matches every
 // row.
-func ScopeMatches(scope string, working, current, recent, archived bool) bool {
+func ScopeMatches(scope string, working, current, archived bool) bool {
 	switch scope {
 	case "running":
 		return !archived && working
-	case "current":
+	case "current", "recent":
 		return !archived && current
-	case "recent":
-		return !archived && recent
 	case "all":
 		return !archived
 	case "archived":

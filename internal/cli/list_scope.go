@@ -22,7 +22,6 @@ type listCatalogView struct {
 	Project   *listProject            `json:"project,omitempty"`
 	Subagents *surface.SubagentRollup `json:"-"`
 	Current   bool                    `json:"current"`
-	Recent    bool                    `json:"recent"`
 	Archived  bool                    `json:"archived,omitempty"`
 }
 
@@ -39,12 +38,12 @@ func catalogListView(record registry.CatalogSessionState) listCatalogView {
 
 func listScopeFromArgs(args []string) (string, error) {
 	scope := ""
-	for _, candidate := range []string{"recent", "all", "archived"} {
+	for _, candidate := range []string{"all", "archived"} {
 		if !hasFlag(args, "--"+candidate) {
 			continue
 		}
 		if scope != "" {
-			return "", fmt.Errorf("choose one of --recent, --all or --archived")
+			return "", fmt.Errorf("choose either --all or --archived")
 		}
 		scope = candidate
 	}
@@ -78,7 +77,7 @@ func filterListScope(sessions []surface.Session, views map[string]listCatalogVie
 		if selector != "" && !listProjectMatches(view.Project, selector) {
 			continue
 		}
-		if daemon.ScopeMatches(scope, daemon.SessionWorking(session.Status, view.Subagents), view.Current, view.Recent, view.Archived) {
+		if daemon.ScopeMatches(scope, daemon.SessionWorking(session.Status, view.Subagents), view.Current, view.Archived) {
 			matched[family(session)] = true
 		}
 	}

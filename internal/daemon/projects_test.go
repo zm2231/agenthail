@@ -84,28 +84,8 @@ func TestSnapshotGroupsWorktreeSessionsIntoOneProject(t *testing.T) {
 	if len(state.Projects) != 1 || state.Projects[0].DisplayName != "widget" || state.Projects[0].RootPath != canonicalRepo || state.Projects[0].SessionCount != 2 || state.Projects[0].Archived {
 		t.Fatalf("projects=%+v", state.Projects)
 	}
-	if from.Recent || from.Current || state.Counts["recent"] != 0 || state.Counts["current"] != 0 || state.Counts["all"] != 2 || state.Counts["archived"] != 0 {
+	if from.Current || state.Counts["recent"] != 0 || state.Counts["current"] != 0 || state.Counts["all"] != 2 || state.Counts["archived"] != 0 {
 		t.Fatalf("from=%+v counts=%v", from, state.Counts)
-	}
-}
-
-func TestRecentCoversTheLastDayAndEveryCurrentSession(t *testing.T) {
-	now := time.Now()
-	view := catalogViewState{attention: map[string]bool{"flagged": true}}
-	for _, test := range []struct {
-		row    dashboardSession
-		recent bool
-	}{
-		{dashboardSession{ID: "earlier", LastActive: now.Add(-10 * time.Hour)}, true},
-		{dashboardSession{ID: "stale", LastActive: now.Add(-30 * time.Hour)}, false},
-		{dashboardSession{ID: "open", LastActive: now.Add(-30 * time.Hour), Current: true}, true},
-		{dashboardSession{ID: "flagged", LastActive: now.Add(-30 * time.Hour)}, true},
-	} {
-		row := test.row
-		applyCatalogView(&row, view, now)
-		if row.Recent != test.recent {
-			t.Fatalf("%s: recent=%v want %v", row.ID, row.Recent, test.recent)
-		}
 	}
 }
 
@@ -243,13 +223,13 @@ func TestScopeCountsCountFamiliesNotSubagents(t *testing.T) {
 	now := time.Now()
 	rows := []dashboardSession{
 		{ID: "root", Status: surface.StatusIdle, LastActive: now.Add(-48 * time.Hour)},
-		{ID: "child", Status: surface.StatusBusy, Current: true, Recent: true, Subagent: &surface.Subagent{ParentID: "root", RootID: "root"}},
-		{ID: "orphan", Status: surface.StatusIdle, Recent: true, Subagent: &surface.Subagent{ParentID: "gone", RootID: "gone"}},
-		{ID: "hidden", Status: surface.StatusIdle, Recent: true, Archived: true},
-		{ID: "lead", Status: surface.StatusIdle, Current: true, Recent: true, Subagents: &surface.SubagentRollup{Count: 2, Working: 1}},
+		{ID: "child", Status: surface.StatusBusy, Current: true, Subagent: &surface.Subagent{ParentID: "root", RootID: "root"}},
+		{ID: "orphan", Status: surface.StatusIdle, Current: true, Subagent: &surface.Subagent{ParentID: "gone", RootID: "gone"}},
+		{ID: "hidden", Status: surface.StatusIdle, Current: true, Archived: true},
+		{ID: "lead", Status: surface.StatusIdle, Current: true, Subagents: &surface.SubagentRollup{Count: 2, Working: 1}},
 	}
 	counts := catalogScopeCounts(rows)
-	want := map[string]int{"running": 2, "current": 2, "recent": 3, "all": 3, "archived": 1}
+	want := map[string]int{"running": 2, "current": 3, "recent": 3, "all": 3, "archived": 1}
 	for scope, count := range want {
 		if counts[scope] != count {
 			t.Fatalf("counts=%v want=%v", counts, want)

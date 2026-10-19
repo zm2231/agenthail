@@ -155,7 +155,7 @@ struct SessionTree: Equatable {
         let archived = session.archived == true
         switch filter {
         case .running: return !archived && (session.isWorking || (session.subagents?.working ?? 0) > 0)
-        case .recent: return !archived && (session.recent == true || session.current)
+        case .recent: return !archived && session.current
         case .all: return !archived
         case .archived: return archived
         }
