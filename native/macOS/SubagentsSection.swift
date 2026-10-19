@@ -7,15 +7,17 @@ struct SubagentsSection: View {
 
     var body: some View {
         let sessions = model.knownSessions
-        let parent = session.subagent.flatMap { identity in sessions.first { $0.id == identity.parentId } }
+        let parent = session.subagent.flatMap { identity in sessions.first { $0.id == identity.parentId } ?? model.fetchedSubagents.session(identity.parentId) }
         let children = SessionTree.newestFirst(model.subagents(of: session.id))
         let observed = pane.detail?.session.id == session.id ? pane.detail?.claudeSubagents ?? [] : []
-        if parent != nil || !children.isEmpty || !observed.isEmpty {
+        let loading = model.fetchedSubagents.loading(session)
+        let error = model.fetchedSubagents.errors[session.id]
+        if parent != nil || !children.isEmpty || !observed.isEmpty || loading || error != nil {
             VStack(alignment: .leading, spacing: 6) {
                 SidebarCaption("Subagents").padding(.horizontal, -8)
                 if let parent {
                     Button {
-                        pane.select(parent.id)
+                        model.openSubagent(parent, in: pane)
                     } label: {
                         Label("Spawned by \(SessionFamilies.title(parent, in: sessions))", systemImage: "arrow.turn.left.up")
                             .lineLimit(1)
@@ -39,6 +41,11 @@ struct SubagentsSection: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityValue(child.isWorking ? "Working" : "Idle")
+                }
+                if loading || error != nil {
+                    Text(error ?? "Loading subagents")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(DesktopPalette.text2)
                 }
                 ForEach(observed) { link in
                     ClaudeSubagentRow(link: link)

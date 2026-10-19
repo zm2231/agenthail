@@ -46,7 +46,7 @@ final class AgenthailModel: ObservableObject {
     @Published var sessionRefinement = SessionRefinement()
     @Published private(set) var localSends: [String: [LocalSend]] = [:]
     @Published private var turnSettingsDrafts: [String: TurnSettings] = [:]
-    @Published private(set) var fetchedSubagents: [String: [SessionState]] = [:]
+    @Published private(set) var fetchedSubagents = SubagentPageCache()
 
     private(set) var api: AgenthailAPI?
     let actionKeys = ActionRetryKeys()
@@ -162,17 +162,24 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    /// Fetches every direct subagent of a session that reports any, so the
-    /// subagents the session list only counts can be shown and opened.
+    /// Fetches the direct subagents a session list only counts, so they can
+    /// be shown and opened.
     func loadSubagents(of session: SessionState) async {
-        guard (session.subagents?.count ?? 0) > 0, let api else { return }
-        if let loaded = try? await api.subagents(of: session.id), !Task.isCancelled {
-            fetchedSubagents[session.id] = loaded
+        guard let api else { return }
+        guard (session.hiddenSubagents?.count ?? 0) > 0 else {
+            fetchedSubagents.drop(session.id)
+            return
+        }
+        do {
+            let loaded = try await api.subagents(of: session.id)
+            if !Task.isCancelled { fetchedSubagents.store(loaded, for: session.id) }
+        } catch {
+            if !Task.isCancelled { fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id) }
         }
     }
 
     func subagents(of sessionID: String) -> [SessionState] {
-        SessionFamilies.children(of: sessionID, listed: knownSessions, fetched: fetchedSubagents[sessionID] ?? [])
+        SessionFamilies.children(of: sessionID, listed: knownSessions, fetched: fetchedSubagents.children(of: sessionID))
     }
 
     @discardableResult
@@ -843,6 +850,7 @@ final class AgenthailModel: ObservableObject {
         case "session.removed":
             guard let id = event.data.sessionId else { return }
             current.sessions.removeAll { $0.id == id }
+            fetchedSubagents.sessionRemoved(id, unlisted: event.data.reason == "unlisted")
             if let next = event.data.rekeyedTo { rekeys.record([id: next]) }
         case "delivery.problem":
             guard let deliveryID = event.data.deliveryId, let sessionID = event.data.sessionId else { return }

@@ -174,7 +174,7 @@ struct SessionRouteView: View {
     private var session: SessionState? {
         if let value = model.snapshot?.sessions.first(where: { $0.id == sessionID }) { return value }
         if let value = model.searchResults.first(where: { $0.id == sessionID })?.session { return value }
-        if let value = model.fetchedSubagents.values.lazy.flatMap({ $0 }).first(where: { $0.id == sessionID }) { return value }
+        if let value = model.fetchedSubagents.session(sessionID) { return value }
         guard let detail = model.selectedDetail, detail.session.id == sessionID else { return nil }
         return SessionState(id: sessionID, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
                             status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: false,
@@ -974,6 +974,7 @@ struct SessionInspector: View {
         guard let liveDetail = model.selectedDetail, liveDetail.session.id == session.id else { return initialDetail }
         return liveDetail
     }
+    private var liveSession: SessionState { model.snapshot?.sessions.first { $0.id == session.id } ?? session }
     var body: some View {
         NavigationStack {
             List {
@@ -1039,8 +1040,13 @@ struct SessionInspector: View {
                     }
                 }
                 let children = model.subagents(of: session.id)
-                if !children.isEmpty {
+                let subagentsLoading = model.fetchedSubagents.loading(liveSession)
+                let subagentsError = model.fetchedSubagents.errors[session.id]
+                if !children.isEmpty || subagentsLoading || subagentsError != nil {
                     Section("Subagents") {
+                        if subagentsLoading || subagentsError != nil {
+                            Text(subagentsError ?? "Loading subagents").foregroundStyle(.secondary)
+                        }
                         ForEach(children) { child in
                             Button {
                                 dismiss()
@@ -1099,7 +1105,7 @@ struct SessionInspector: View {
             }
             .navigationTitle("Session details").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-            .task(id: SubagentFetchKey(session)) { await model.loadSubagents(of: session) }
+            .task(id: SubagentFetchKey(liveSession, revision: model.fetchedSubagents.revision(session.id))) { await model.loadSubagents(of: liveSession) }
             .sheet(isPresented: $showingModels) {
                 SearchableModelSelectionSheet(initialOptions: detail.models ?? [], currentSelectedID: detail.model, allowsDefault: false, onSelect: { value in
                     if let value {

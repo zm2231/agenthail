@@ -96,8 +96,20 @@ final class AgenthailAPI: @unchecked Sendable {
     }
 
     /// Every direct subagent of a session, including the ones the session list
-    /// only counts.
+    /// only counts. A page cursor dies when the catalog changes, so a changed
+    /// catalog restarts from the first page.
     func subagents(of parentID: String) async throws -> [SessionState] {
+        for _ in 0..<3 {
+            do {
+                return try await subagentPages(of: parentID)
+            } catch AgenthailAPIError.request(409, _) {
+                continue
+            }
+        }
+        throw AgenthailAPIError.request(409, "The session list kept changing. Try again.")
+    }
+
+    private func subagentPages(of parentID: String) async throws -> [SessionState] {
         var sessions: [SessionState] = []
         var cursor: String?
         repeat {

@@ -1855,7 +1855,7 @@ struct DetailsTab: View {
         .task(id: catalogNeeded) {
             if let surface = catalogNeeded { await model.loadModelCatalog(surface: surface) }
         }
-        .task(id: SubagentFetchKey(session)) { await model.loadSubagents(of: session) }
+        .task(id: SubagentFetchKey(session, revision: model.fetchedSubagents.revision(session.id))) { await model.loadSubagents(of: session) }
     }
 
     private var canControl: Bool { !session.isReadOnly && pane.removedSession == nil }

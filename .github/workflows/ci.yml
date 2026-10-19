@@ -98,6 +98,8 @@ jobs:
           EOF
           swiftc -parse-as-library native/AgenthailModels.swift native/macOS/SessionTree.swift native/tests/session_tree_test.swift -o "$RUNNER_TEMP/session-tree-test"
           "$RUNNER_TEMP/session-tree-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/AgenthailAPI.swift native/TurnSettings.swift native/tests/subagent_pages_test.swift -o "$RUNNER_TEMP/subagent-pages-test"
+          "$RUNNER_TEMP/subagent-pages-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/macOS/SessionTree.swift native/macOS/Overview.swift native/tests/overview_test.swift -o "$RUNNER_TEMP/overview-test"
           "$RUNNER_TEMP/overview-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/macOS/SessionTree.swift native/macOS/LocalSend.swift native/macOS/PeerEnvelope.swift native/tests/local_send_test.swift -o "$RUNNER_TEMP/local-send-test"

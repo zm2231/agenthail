@@ -65,7 +65,7 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var creationWarning: String?
     @Published var pendingControls: Set<String> = []
     @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
-    @Published private(set) var fetchedSubagents: [String: [SessionState]] = [:]
+    @Published private(set) var fetchedSubagents = SubagentPageCache()
 
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
 
@@ -107,17 +107,24 @@ final class AgenthailIOSModel: ObservableObject {
         turnSettingsDrafts.removeValue(forKey: sessionID)
     }
 
-    /// Fetches every direct subagent of a session that reports any, so the
-    /// subagents the session list only counts can be shown and opened.
+    /// Fetches the direct subagents a session list only counts, so they can
+    /// be shown and opened.
     func loadSubagents(of session: SessionState) async {
-        guard (session.subagents?.count ?? 0) > 0, let api else { return }
-        if let loaded = try? await api.subagents(of: session.id), !Task.isCancelled {
-            fetchedSubagents[session.id] = loaded
+        guard let api else { return }
+        guard (session.hiddenSubagents?.count ?? 0) > 0 else {
+            fetchedSubagents.drop(session.id)
+            return
+        }
+        do {
+            let loaded = try await api.subagents(of: session.id)
+            if !Task.isCancelled { fetchedSubagents.store(loaded, for: session.id) }
+        } catch {
+            if !Task.isCancelled { fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id) }
         }
     }
 
     func subagents(of sessionID: String) -> [SessionState] {
-        SessionFamilies.children(of: sessionID, listed: snapshot?.sessions ?? [], fetched: fetchedSubagents[sessionID] ?? [])
+        SessionFamilies.children(of: sessionID, listed: snapshot?.sessions ?? [], fetched: fetchedSubagents.children(of: sessionID))
     }
 
     func queuedInstructions() async throws -> [QueueState] {
@@ -872,6 +879,7 @@ final class AgenthailIOSModel: ObservableObject {
             current.sessions.removeAll { $0.id == id }
             current.totalSessions = current.sessions.count
             snapshot = current
+            fetchedSubagents.sessionRemoved(id, unlisted: event.data.reason == "unlisted")
             if let next = event.data.rekeyedTo { followRekeys([id: next]) }
         case "surface.health":
             guard let name = event.data.surface, let health = event.data.health,
