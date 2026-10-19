@@ -121,7 +121,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             let captured: String?
             switch request.url?.path {
             case "/api/v1/snapshot":
-                if let parentID = query.first(where: { $0.name == "parentId" })?.value { captured = capture.subagentPageJSON[parentID] }
+                if let parentID = query.first(where: { $0.name == "parentId" })?.value { captured = query.contains { $0.name == "cursor" } ? nil : capture.subagentPageJSON[parentID] }
                 else { captured = capture.snapshotJSON }
             case "/api/v1/queue": captured = capture.queueJSON
             case "/api/v1/session":

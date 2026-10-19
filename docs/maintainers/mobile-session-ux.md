@@ -50,7 +50,7 @@ Tool runs do not cross message or lifecycle boundaries. A collapsed summary can 
 
 The read-only host capture contained 90 sessions. The old API returned no activity or exchanges for the current Codex task after its Desktop history request timed out. Calling the new local transcript reader directly recovered **54 Codex records** in its bounded read window. The inspected Claude session returned **200 records**. These are captured local records, not evidence that a repaired daemon was installed or a live turn succeeded.
 
-Debug-only `--preview-session --preview-capture` loads `Documents/AgenthailCapture.json` into the actual native views using an in-process URLProtocol. It serves captured snapshot, queue, selected session and subagent page responses; unrecorded requests, older pages and actions fail explicitly. Private captures remain in ignored build output and simulator data, never source control. Public fixtures exercise chat, creation, Inbox and the iPad sidebar without pairing. Release excludes these paths.
+Debug-only `--preview-session --preview-capture` loads `Documents/AgenthailCapture.json` into the actual native views using an in-process URLProtocol. It serves captured snapshot, queue, selected session and first subagent page responses; unrecorded requests, older timeline pages, later subagent pages and actions fail explicitly. Private captures remain in ignored build output and simulator data, never source control. Public fixtures exercise chat, creation, Inbox and the iPad sidebar without pairing. Release excludes these paths.
 
 ## Verification receipts
 
