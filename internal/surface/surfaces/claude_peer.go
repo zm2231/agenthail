@@ -2,7 +2,6 @@ package surfaces
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,13 +66,9 @@ func sameClaudeProcessStartInLocation(version, recorded, actual string, localLoc
 }
 
 func (c *Claude) sendPeer(ctx context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
-	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.home), "sessions", strconv.Itoa(session.PID)+".json"))
-	if err != nil {
-		return nil, surface.DeliveryUnavailable(err)
-	}
-	var record map[string]any
-	if err := json.Unmarshal(data, &record); err != nil {
-		return nil, surface.DeliveryUnavailable(err)
+	_, record, found := c.pidRecord(session.PID)
+	if !found {
+		return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude process %d has no session record", session.PID))
 	}
 	if session.ID != str(record, "sessionId") {
 		return nil, surface.DeliveryTerminal(fmt.Errorf("Claude PID no longer belongs to this session"), surface.DeliveryTargetMissing)
@@ -128,15 +123,8 @@ func (c *Claude) nativeCaller(ctx context.Context, id string) (*surface.Session,
 }
 
 func (c *Claude) peerRecord(pid int) (map[string]any, bool) {
-	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.home), "sessions", strconv.Itoa(pid)+".json"))
-	if err != nil {
-		return nil, false
-	}
-	var record map[string]any
-	if json.Unmarshal(data, &record) != nil {
-		return nil, false
-	}
-	return record, true
+	_, record, found := c.pidRecord(pid)
+	return record, found
 }
 
 // idleSince reports when the session's Claude process last recorded going
@@ -151,10 +139,10 @@ func (c *Claude) idleSince(sess *surface.Session) (time.Time, bool) {
 	var record map[string]any
 	if candidate, found := c.peerRecord(sess.PID); sess.PID > 0 && found && str(candidate, "sessionId") == sess.ID {
 		record = candidate
-	} else if records, err := c.records(); err == nil {
+	} else if _, records, err := c.records(); err == nil {
 		for _, candidate := range records {
-			if str(candidate, "sessionId") == sess.ID {
-				record = candidate
+			if str(candidate.fields, "sessionId") == sess.ID {
+				record = candidate.fields
 				break
 			}
 		}

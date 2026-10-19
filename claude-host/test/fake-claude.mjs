@@ -17,8 +17,9 @@ const flag = (name) => {
 };
 const sessionId = flag('session-id') || flag('resume');
 const dir = process.env.FAKE_CLAUDE_DIR;
+const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME, '.claude');
 const transcript = path.join(dir, `${sessionId}.jsonl`);
-fs.appendFileSync(path.join(dir, 'spawns.jsonl'), JSON.stringify({ pid: process.pid, sessionId, argv, cwd: process.cwd(), env: Object.keys(process.env) }) + '\n');
+fs.appendFileSync(path.join(dir, 'spawns.jsonl'), JSON.stringify({ pid: process.pid, sessionId, argv, cwd: process.cwd(), env: Object.keys(process.env), configDir: process.env.CLAUDE_CONFIG_DIR ?? null }) + '\n');
 // A refuse-<session id> file makes the CLI exit before it starts, printing the
 // file's text the way Claude reports a session it cannot open.
 const refusal = path.join(dir, `refuse-${sessionId}`);
@@ -78,11 +79,11 @@ async function turn(message) {
 }
 
 // With FAKE_CLAUDE_RECORD set each turn is also written to the conversation's
-// transcript under ~/.claude/projects in Claude's own record format, appending
+// transcript under its config root's projects in Claude's own record format, appending
 // to an existing transcript of the conversation.
 function claudeTranscript(uuid, text, reply) {
   if (!process.env.FAKE_CLAUDE_RECORD) return;
-  const projects = path.join(process.env.HOME, '.claude', 'projects');
+  const projects = path.join(configDir, 'projects');
   const existing = fs.existsSync(projects)
     ? fs.readdirSync(projects).map((dir) => path.join(projects, dir, `${sessionId}.jsonl`)).find((file) => fs.existsSync(file))
     : undefined;
@@ -103,7 +104,7 @@ function claudeTranscript(uuid, text, reply) {
 // native peer messages reach it.
 if (process.env.FAKE_CLAUDE_RECORD) {
   const socket = `/tmp/cc-socks/${process.pid}.sock`;
-  const record = path.join(process.env.HOME, '.claude', 'sessions', `${process.pid}.json`);
+  const record = path.join(configDir, 'sessions', `${process.pid}.json`);
   fs.mkdirSync('/tmp/cc-socks', { recursive: true, mode: 0o700 });
   fs.mkdirSync(path.dirname(record), { recursive: true });
   const cleanup = () => {

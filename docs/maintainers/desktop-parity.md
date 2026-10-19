@@ -20,7 +20,7 @@ The web calls the unversioned routes and the Mac calls `/api/v1/*`. Each pair sh
 | GET, POST /api/settings | GET, POST /api/v1/settings |
 | GET /api/settings/remote-qr | none (the Mac draws the QR locally) |
 | GET, POST /api/voice | GET, POST /api/v1/voice (same voice service) |
-| GET /voice-peer.js (browser WebRTC script, `voicePeerScriptHandler`, internal/daemon/voice.go:152-161) | no twin. The Mac and iOS load GET /api/v1/voice/peer instead, an authenticated HTML page with its own handler (`voicePeerHandler`, internal/daemon/voice.go:163-177), in the shared WebKit bridge (native/VoiceAudioBridge.swift). The Mac reaches it over loopback HTTP with the dashboard token |
+| GET /voice-peer.js (browser WebRTC script, `voicePeerScriptHandler`, internal/daemon/voice.go:152-161) | no twin. The Mac loads GET /api/v1/voice/peer instead, an authenticated HTML page with its own handler (`voicePeerHandler`, internal/daemon/voice.go:163-177), in its WebKit bridge (native/VoiceAudioBridge.swift). The Mac reaches it over loopback HTTP with the dashboard token. iOS runs a native WebRTC peer under CallKit (native/iOS/NativeVoiceAudio.swift) and loads no page |
 | GET /api/v1/session-options | same route |
 
 Status: **present** means the Mac covers the behavior; **partial** means part of it is missing; **missing** means the Mac has none of it; **decided** means the Mac omits it on purpose; **n/a** means the behavior belongs to another client.
@@ -110,7 +110,7 @@ Open gaps are tracked as td stories under td-5f222f (listed at the end). Each on
 
 ## iOS where web and Mac differ
 
-- Voice: iOS adds typed messages, a new orchestrator conversation and an inline activity timeline to the shared call (native/iOS/VoiceOperator.swift). The Mac matches the web dialog and links to the full timeline.
+- Voice: iOS adds typed messages, a new orchestrator conversation and an inline activity timeline to the shared call (native/iOS/VoiceOperator.swift), and runs the call as a CallKit system call that continues in the background (native/iOS/NativeVoiceAudio.swift); Simulator builds activate the audio session directly because the Simulator refuses CallKit. The Mac matches the web dialog and links to the full timeline.
 - Manual refresh: iOS uses pull to refresh with `refresh(fresh: true)` (native/iOS/AgenthailIOSViews.swift:310, native/iOS/SessionControls.swift:125).
 - Queue last error: iOS shows `lastError` on queued items (native/iOS/SessionControls.swift:156).
 

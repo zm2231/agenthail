@@ -402,9 +402,9 @@ func TestSystemdUnitRecordsClaudeConfigDirAndDoctorFlagsDrift(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", configured)
 	output, _ := captureStdout(t, func() error { return app.Run([]string{"doctor", "--json"}) })
 	var payload struct {
-		ClaudeConfigDir string `json:"claudeConfigDir"`
+		ClaudeConfigDirs []string `json:"claudeConfigDirs"`
 	}
-	if err := json.Unmarshal([]byte(output), &payload); err != nil || payload.ClaudeConfigDir != configured {
+	if err := json.Unmarshal([]byte(output), &payload); err != nil || len(payload.ClaudeConfigDirs) != 1 || payload.ClaudeConfigDirs[0] != configured {
 		t.Fatalf("payload=%+v err=%v output=%s", payload, err, output)
 	}
 }

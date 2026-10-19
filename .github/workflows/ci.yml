@@ -12,18 +12,21 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: macos-26
+    runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
+      - name: Isolate self-hosted job
+        if: runner.environment == 'self-hosted'
+        run: scripts/ci-self-hosted.sh prepare >> "$GITHUB_ENV"
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ runner.environment != 'self-hosted' }}
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
+          cache: ${{ runner.environment != 'self-hosted' && 'npm' || '' }}
           cache-dependency-path: |
             push-relay/package-lock.json
             claude-host/package-lock.json
@@ -75,14 +78,23 @@ jobs:
           scripts/test-macos-app-resources-check.sh
           bash -n packaging/scripts/preinstall packaging/scripts/postinstall
           python3 -m py_compile sidecar/sidecar.py
+      - name: Clean up self-hosted job
+        if: always() && runner.environment == 'self-hosted'
+        run: scripts/ci-self-hosted.sh cleanup
 
   native:
-    runs-on: macos-26
+    runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
+      - name: Isolate self-hosted job
+        if: runner.environment == 'self-hosted'
+        run: scripts/ci-self-hosted.sh prepare >> "$GITHUB_ENV"
       - name: Native helper tests
         run: scripts/test-native-helpers.sh
+      - name: Clean up self-hosted job
+        if: always() && runner.environment == 'self-hosted'
+        run: scripts/ci-self-hosted.sh cleanup
 
   verify-linux:
     runs-on: ubuntu-latest

@@ -122,6 +122,14 @@ test('a host started without the daemon lock exits', async () => {
   assert.ok(!fs.existsSync(f.socket));
 });
 
+test('a host that cannot listen exits with the reason', async () => {
+  const f = fixture();
+  f.socket = path.join(f.root, 'missing', 'h.sock');
+  const host = await startHost(f);
+  assert.equal(await host.exited, 2);
+  assert.match(host.stderrText, /cannot listen on .*missing/);
+});
+
 test('open, send and stream a turn bound to the message uuid', async () => {
   const f = fixture();
   await startHost(f, { version: '1.2.3' });
@@ -166,6 +174,21 @@ test('bypassPermissions opens with explicit consent to skip permissions', async 
   assert.ok(spawnRecord.argv.some((a) => a.includes('bypassPermissions')), spawnRecord.argv.join(' '));
   assert.ok(spawnRecord.argv.includes('--allow-dangerously-skip-permissions'), spawnRecord.argv.join(' '));
   assert.ok(!spawnRecord.argv.some((a) => a.startsWith('--permission-prompt-tool')), spawnRecord.argv.join(' '));
+  c.close();
+});
+
+test('a session opened in a Claude config root runs its Claude there', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  const root = path.join(f.cwd, 'claude-work');
+  const resumed = randomUUID();
+  await c.call('open', { resume: resumed, cwd: f.cwd, configDir: root });
+  await c.call('open', { sessionId: randomUUID(), cwd: f.cwd });
+  const [inRoot, primary] = fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(inRoot.sessionId, resumed);
+  assert.equal(inRoot.configDir, root);
+  assert.equal(primary.configDir, process.env.CLAUDE_CONFIG_DIR ?? null);
   c.close();
 });
 
@@ -382,6 +405,26 @@ test('close ends the session and a send to it is refused', async () => {
   c.close();
 });
 
+test('a client that hangs up before its reply leaves the host running', async () => {
+  const f = fixture();
+  const host = await startHost(f);
+  for (let i = 0; i < 200; i++) {
+    const conn = net.createConnection(f.socket);
+    const connected = await new Promise((resolve) => {
+      conn.once('connect', () => resolve(true));
+      conn.once('error', () => resolve(false));
+    });
+    if (!connected) break;
+    conn.end(JSON.stringify({ id: 1, method: 'hello' }) + '\n');
+    conn.destroy();
+  }
+  await sleep(200);
+  assert.equal(host.exitCode, null, host.stderrText);
+  const client = new Client(f.socket);
+  assert.equal((await client.call('hello')).pid, host.pid);
+  client.close();
+});
+
 test('open rejects a bad request', async () => {
   const f = fixture();
   await startHost(f);
@@ -391,6 +434,7 @@ test('open rejects a bad request', async () => {
   await assert.rejects(c.call('open', { cwd: f.cwd, permissionMode: 'yolo' }), { code: 'invalid' });
   await assert.rejects(c.call('open', { cwd: f.cwd, effort: 'extreme' }), { code: 'invalid' });
   await assert.rejects(c.call('open', { cwd: f.cwd, resume: randomUUID(), name: 'renamed' }), { code: 'invalid' });
+  await assert.rejects(c.call('open', { cwd: f.cwd, configDir: 'relative/claude' }), { code: 'invalid' });
   await assert.rejects(c.call('nope'), { code: 'invalid' });
   c.close();
 });

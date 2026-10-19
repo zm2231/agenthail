@@ -315,9 +315,17 @@ func ObserveAllClaudeSubagents(ctx context.Context, home string) ([]surface.Clau
 			return nil, fmt.Errorf("resolve home: %w", err)
 		}
 	}
-	dirs, err := filepath.Glob(filepath.Join(surface.ClaudeConfigDir(home), "projects", "*", "*", "subagents"))
+	roots, err := surface.ClaudeConfigRoots(home)
 	if err != nil {
-		return nil, fmt.Errorf("discover Claude subagent directories: %w", err)
+		return nil, err
+	}
+	var dirs []string
+	for _, root := range roots {
+		found, err := filepath.Glob(filepath.Join(root, "projects", "*", "*", "subagents"))
+		if err != nil {
+			return nil, fmt.Errorf("discover Claude subagent directories: %w", err)
+		}
+		dirs = append(dirs, found...)
 	}
 	sort.Strings(dirs)
 	observer := newClaudeSubagentObserver()
