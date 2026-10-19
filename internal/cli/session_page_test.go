@@ -115,3 +115,21 @@ func TestLastCountReadsOlderPagesUntilItHasThatManyExchanges(t *testing.T) {
 		t.Fatalf("requests=%+v", requests)
 	}
 }
+
+func TestLastResolvesAnExitedSessionByItsName(t *testing.T) {
+	provider := &cliReadSurface{cliSurface: &cliSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}, resolveErr: surface.ErrSessionNotFound}}
+	app, r := cliFixture(t, provider.cliSurface)
+	app.Surfaces[0].Surface = provider
+	if err := r.RegisterSession(surface.Session{ID: "11111111-2222-3333-4444-555555555555", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "pairing-fixture", Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	app.catalogDaemonRunning = func() bool { return true }
+	app.daemonSessionPageReader = func() (sessionPageReader, error) {
+		return sessionPageFixture{result: &surface.SessionReadResult{Source: "journal", Exchanges: []surface.Exchange{{User: "fixture question", Assistant: "fixture answer"}}}}, nil
+	}
+
+	output, err := captureStdout(t, func() error { return app.Run([]string{"last", "pairing-fixture", "--json"}) })
+	if err != nil || !strings.Contains(output, `"session":"11111111-2222-3333-4444-555555555555"`) || !strings.Contains(output, "fixture answer") {
+		t.Fatalf("output=%s err=%v", output, err)
+	}
+}

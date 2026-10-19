@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -261,5 +262,129 @@ func TestSessionPageWithPreexistingJournalReportsHistoryGapInsteadOfExhaustion(t
 	older := get(fmt.Sprintf("&timelineBefore=%d", body.Timeline.NextBefore))
 	if older.Code != http.StatusConflict || !strings.Contains(older.Body.String(), `"history_gap"`) {
 		t.Fatalf("older read code=%d body=%s", older.Code, older.Body.String())
+	}
+}
+
+func TestSessionPagesWalkOneExchangeAtATimeWithoutGapsOrOverlap(t *testing.T) {
+	d, registry, _, _, _ := daemonFixture(t)
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	journal := []struct{ id, kind, role, turn, body string }{
+		{"p1", "message", "user", "turn-1", "first question"},
+		{"r1", "message", "assistant", "turn-1", "first answer"},
+		{"r2", "text", "assistant", "turn-2", "unprompted answer"},
+		{"p3", "message", "peer", "turn-3", "agent question"},
+		{"t3", "toolCall", "", "turn-3", "lookup"},
+		{"r3", "message", "assistant", "turn-3", "agent answer"},
+	}
+	if err := registry.RecordSessionJournalHistoryBoundary("from", 0); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range journal {
+		payload, _ := json.Marshal(sessionJournalPayload{ItemID: item.id, Kind: item.kind, Role: item.role, TurnID: item.turn, Body: item.body, Op: "upsert", Version: 1})
+		if _, _, err := registry.AppendSessionJournalEntry(registrypkg.SessionJournalEntry{SessionID: "from", Kind: item.kind, ProviderKey: item.id, Payload: payload}, registrypkg.SessionJournalRetention{Count: 32, Bytes: 8192}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var seen []string
+	var exchanges []surface.Exchange
+	cursor := int64(0)
+	for pages := 0; ; pages++ {
+		if pages > len(journal) {
+			t.Fatalf("paging did not end; seen=%v", seen)
+		}
+		target := "/api/v1/session?id=from&timeline=1&limit=1"
+		if cursor > 0 {
+			target += "&timelineBefore=" + strconv.FormatInt(cursor, 10)
+		}
+		request := httptest.NewRequest(http.MethodGet, target, nil)
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("page %d: %s", pages, response.Body.String())
+		}
+		var body struct {
+			Exchanges []surface.Exchange      `json:"exchanges"`
+			Timeline  surface.SessionTimeline `json:"timeline"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Exchanges) != 1 {
+			t.Fatalf("page %d exchanges=%+v", pages, body.Exchanges)
+		}
+		exchanges = append([]surface.Exchange{body.Exchanges[0]}, exchanges...)
+		var ids []string
+		for _, item := range body.Timeline.Items {
+			ids = append(ids, item.ID)
+		}
+		seen = append(ids, seen...)
+		if body.Timeline.NextBefore == 0 {
+			break
+		}
+		cursor = body.Timeline.NextBefore
+	}
+	if strings.Join(seen, ",") != "p1,r1,r2,p3,t3,r3" {
+		t.Fatalf("items across pages=%v", seen)
+	}
+	if len(exchanges) != 3 || exchanges[0].User != "first question" || exchanges[0].Assistant != "first answer" || exchanges[1].User != "" || exchanges[1].Assistant != "unprompted answer" || exchanges[2].User != "agent question" || exchanges[2].Assistant != "agent answer" {
+		t.Fatalf("exchanges=%+v", exchanges)
+	}
+}
+
+type toolHistorySurface struct {
+	*daemonSurface
+	reads []int64
+}
+
+func (s *toolHistorySurface) ReadSession(_ context.Context, _ *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	s.reads = append(s.reads, request.Before)
+	page := request.Before
+	if page == 0 {
+		page = 1000
+	}
+	items := make([]surface.TimelineItem, 40)
+	for index := range items {
+		items[index] = surface.TimelineItem{ID: fmt.Sprintf("tool-%d-%d", page, index), Kind: "toolCall", Title: "Bash", Text: "true"}
+	}
+	return &surface.SessionReadResult{Items: items, NextBefore: page - 1, Source: "local-transcript"}, nil
+}
+
+func TestOlderProviderHistoryPageStopsAtTheItemLimit(t *testing.T) {
+	_, registry, fake, _, _ := daemonFixture(t)
+	adapter := &toolHistorySurface{daemonSurface: fake}
+	d := New(registry, []surface.Surface{adapter})
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	read := func(cursor int64) surface.SessionTimeline {
+		target := "/api/v1/session?id=from&timeline=1&limit=5"
+		if cursor > 0 {
+			target += "&timelineBefore=" + strconv.FormatInt(cursor, 10)
+		}
+		request := httptest.NewRequest(http.MethodGet, target, nil)
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatal(response.Body.String())
+		}
+		var body struct {
+			Timeline surface.SessionTimeline `json:"timeline"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body.Timeline
+	}
+	head := read(0)
+	if len(head.Items) != 40 || head.NextBefore == 0 {
+		t.Fatalf("head=%d items nextBefore=%d", len(head.Items), head.NextBefore)
+	}
+	older := read(head.NextBefore)
+	if len(older.Items) != 400 || older.Items[0].ID != "tool-990-0" || older.Items[399].ID != "tool-999-39" {
+		t.Fatalf("older page held %d items from %s", len(older.Items), older.Items[0].ID)
+	}
+	next := read(older.NextBefore)
+	if len(next.Items) == 0 || next.Items[len(next.Items)-1].ID != "tool-989-39" {
+		t.Fatalf("next page did not resume at the first unread provider page: %d items", len(next.Items))
 	}
 }

@@ -140,14 +140,30 @@ func isReplyItem(item TimelineItem) bool {
 
 // ExchangesFromItems groups ordered timeline items into turns. An exchange is a
 // prompt and the last assistant message of its turn. A reply from another turn,
-// or before any prompt, forms an exchange without a prompt.
+// or before any prompt, forms an exchange without a prompt. An item without a
+// turn ID belongs to the open turn, because transcript pages and live streams do
+// not both record one.
 func ExchangesFromItems(items []TimelineItem, source string) []Exchange {
+	exchanges, _ := groupExchanges(items, source)
+	return exchanges
+}
+
+// ExchangeStarts returns the index of the item that opens each exchange, so a
+// page can begin exactly at an exchange.
+func ExchangeStarts(items []TimelineItem) []int {
+	_, starts := groupExchanges(items, "")
+	return starts
+}
+
+func groupExchanges(items []TimelineItem, source string) ([]Exchange, []int) {
 	exchanges := []Exchange{}
+	starts := []int{}
 	turn, open := "", false
-	for _, item := range items {
+	for index, item := range items {
 		at, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
 		if IsPromptItem(item) {
 			exchanges = append(exchanges, Exchange{User: item.Text, Timestamp: at, Source: source})
+			starts = append(starts, index)
 			turn, open = item.TurnID, true
 			continue
 		}
@@ -156,6 +172,7 @@ func ExchangesFromItems(items []TimelineItem, source string) []Exchange {
 		}
 		if !open || (turn != "" && item.TurnID != "" && item.TurnID != turn) {
 			exchanges = append(exchanges, Exchange{Timestamp: at, Source: source})
+			starts = append(starts, index)
 			turn, open = item.TurnID, true
 		}
 		if turn == "" {
@@ -163,5 +180,5 @@ func ExchangesFromItems(items []TimelineItem, source string) []Exchange {
 		}
 		exchanges[len(exchanges)-1].Assistant = item.Text
 	}
-	return exchanges
+	return exchanges, starts
 }

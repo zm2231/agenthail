@@ -1709,7 +1709,7 @@ func (a *App) cmdReply(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
+	sess, surf, remote, err := a.resolveReadTarget(ctx, positional[0])
 	if err != nil {
 		return err
 	}
@@ -1762,7 +1762,7 @@ func (a *App) cmdLast(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
+	sess, surf, remote, err := a.resolveReadTarget(ctx, positional[0])
 	if err != nil {
 		return err
 	}
@@ -1896,7 +1896,7 @@ func (a *App) readSessionPage(ctx context.Context, adapter surface.Surface, sess
 		}
 		return surface.BoundSessionRead(session, read), nil
 	}
-	request.Limit = max(request.Limit, offlineSessionPageItems)
+	request.Limit = offlineSessionPageItems
 	read, err := readSessionWithContext(ctx, adapter, session, request)
 	if err != nil {
 		return nil, err

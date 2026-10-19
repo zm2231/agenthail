@@ -23,9 +23,11 @@ history; when the provider reported none, it is `0`. A journal whose oldest
 entries predate any recorded boundary keeps `nextBefore` on its oldest entry,
 and requesting it returns the `409` `history_gap` response because older
 activity is not retained.
-Requesting it reads one bounded provider page through the session's shared
-source, serialized with its seed and refresh reads, and returns those items
-with `readSource` set to the provider source and the next provider cursor. The
+Requesting it reads whole provider pages, newest first, through the session's
+shared source, serialized with its seed and refresh reads, until they hold
+`limit` exchanges or the next page would pass 400 items; that page is left for
+the returned provider cursor. The items come back with `readSource` set to the
+provider source. The
 session open never preloads the whole transcript. A failed older read reports
 `timeline.unavailableReason` instead of returning an empty page.
 

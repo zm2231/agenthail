@@ -17,12 +17,13 @@ type journalPageItem struct {
 	payload sessionJournalPayload
 }
 
-// readJournalPage returns the newest limit exchanges before the cursor, each from its prompt, with
-// every item of those turns. A turn longer than the item limit starts mid-turn.
+// readJournalPage returns the newest limit exchanges before the cursor, each from the item that
+// opened it, with every item of those turns. A turn longer than the item limit starts mid-turn.
 func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*surface.SessionReadResult, error) {
 	result := &surface.SessionReadResult{Source: "journal", Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}}
 	var collected []journalPageItem
-	prompts := 0
+	var items []surface.TimelineItem
+	var positions, starts []int
 	cursor := before
 	var page registry.SessionJournalPage
 	for {
@@ -45,29 +46,22 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 				return result, fmt.Errorf("decode journal item: %w", err)
 			}
 			chunk = append(chunk, journalPageItem{seq: entry.Seq, payload: payload})
-			if journalPrompt(payload) {
-				prompts++
-			}
 		}
 		collected = append(chunk, collected...)
-		if prompts >= limit || len(collected) >= sessionPageItemLimit || page.NextBefore == 0 || len(page.Entries) < 200 {
+		items, positions = journalVisibleItems(collected)
+		starts = surface.ExchangeStarts(items)
+		if len(starts) > limit || len(collected) >= sessionPageItemLimit || page.NextBefore == 0 || len(page.Entries) < 200 {
 			break
 		}
 		cursor = page.NextBefore
 	}
-	start := 0
-	for index, seen := len(collected)-1, 0; index >= 0; index-- {
-		if journalPrompt(collected[index].payload) {
-			seen++
-			if seen == limit {
-				start = index
-				break
-			}
-		}
+	first := 0
+	if len(starts) > limit {
+		first = positions[starts[len(starts)-limit]]
 	}
-	start = max(start, len(collected)-sessionPageItemLimit)
-	if start > 0 {
-		result.NextBefore = int64(collected[start].seq)
+	first = max(first, len(collected)-sessionPageItemLimit)
+	if first > 0 {
+		result.NextBefore = int64(collected[first].seq)
 	} else {
 		result.NextBefore = int64(page.NextBefore)
 		if page.HistoryBefore > 0 {
@@ -75,7 +69,7 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 		}
 	}
 	var newestSourceErrorSeq uint64
-	for _, entry := range collected[start:] {
+	for _, entry := range collected[first:] {
 		payload := entry.payload
 		if payload.Kind == "source-error" {
 			newestSourceErrorSeq = entry.seq
@@ -96,8 +90,18 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 	return result, nil
 }
 
-func journalPrompt(payload sessionJournalPayload) bool {
-	return payload.Op != "remove" && surface.IsPromptItem(journalTimelineItem(payload))
+// journalVisibleItems returns the timeline items among entries and each item's entry position.
+func journalVisibleItems(entries []journalPageItem) ([]surface.TimelineItem, []int) {
+	items := make([]surface.TimelineItem, 0, len(entries))
+	positions := make([]int, 0, len(entries))
+	for index, entry := range entries {
+		if entry.payload.Kind == "source-error" || entry.payload.Op == "remove" {
+			continue
+		}
+		items = append(items, journalTimelineItem(entry.payload))
+		positions = append(positions, index)
+	}
+	return items, positions
 }
 
 func journalTimelineItem(payload sessionJournalPayload) surface.TimelineItem {
@@ -132,14 +136,16 @@ func decodeProviderHistoryCursor(cursor int64) (int64, bool) {
 	return cursor - providerHistoryCursorBase, true
 }
 
+// readProviderHistoryPage reads whole provider pages, newest first, until they hold limit
+// exchanges or the next page would pass the item limit; that page is left for the next cursor.
 func (d *Daemon) readProviderHistoryPage(ctx context.Context, session *surface.Session, adapter surface.Surface, before int64, limit int) (*surface.SessionReadResult, error) {
 	var result *surface.SessionReadResult
 	var items []surface.TimelineItem
-	prompts := 0
 	for cursor := before; ; {
 		read, err := d.sources.readHistory(ctx, session, adapter, cursor, 40)
 		if err != nil {
 			if result != nil {
+				result.NextBefore = cursor
 				break
 			}
 			return &surface.SessionReadResult{Source: "history", Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}, UnavailableReason: boundedSessionSourceReason("Older activity could not be read: " + err.Error())}, nil
@@ -153,10 +159,11 @@ func (d *Daemon) readProviderHistoryPage(ctx context.Context, session *surface.S
 					continue
 				}
 			}
-			if surface.IsPromptItem(item) {
-				prompts++
-			}
 			page = append(page, item)
+		}
+		if result != nil && len(items)+len(page) > sessionPageItemLimit {
+			result.NextBefore = cursor
+			break
 		}
 		items = append(page, items...)
 		if result == nil {
@@ -165,7 +172,7 @@ func (d *Daemon) readProviderHistoryPage(ctx context.Context, session *surface.S
 		}
 		result.NextBefore = read.NextBefore
 		result.Truncated = result.Truncated || read.Truncated
-		if prompts >= limit || len(items) >= sessionPageItemLimit || read.NextBefore <= 0 || read.NextBefore >= cursor && cursor > 0 {
+		if len(surface.ExchangeStarts(items)) >= limit || read.NextBefore <= 0 || (cursor > 0 && read.NextBefore >= cursor) {
 			break
 		}
 		cursor = read.NextBefore
