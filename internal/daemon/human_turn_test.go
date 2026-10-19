@@ -302,17 +302,22 @@ func (f *humanTurnFixture) withoutWebBridgeSidecar(t *testing.T) {
 	f.d.Surfaces = []surface.Surface{f.claude}
 }
 
-// withoutCookieBridge installs a sidecar that records any request it receives
-// but no cookie bridge, so the request has no credentials to send.
+// withoutCookieBridge installs a sidecar and an interpreter that records any
+// request it runs, but no cookie bridge, so the request has no credentials.
 func (f *humanTurnFixture) withoutCookieBridge(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	sent := filepath.Join(dir, "sent")
 	sidecar := filepath.Join(dir, "sidecar.py")
-	if err := os.WriteFile(sidecar, []byte("open("+strconv.Quote(sent)+", \"a\").write(\"request\\n\")\n"), 0600); err != nil {
+	python := filepath.Join(dir, "python")
+	if err := os.WriteFile(sidecar, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(python, []byte("#!/bin/sh\nif [ \"$1\" = -c ]; then exit 0; fi\necho request >> "+strconv.Quote(sent)+"\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_SIDECAR", sidecar)
+	t.Setenv("AGENTHAIL_PYTHON", python)
 	t.Setenv("AGENTHAIL_COOKIE_BRIDGE", "")
 	t.Setenv("PATH", "/usr/bin:/bin")
 	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, f.home)}
