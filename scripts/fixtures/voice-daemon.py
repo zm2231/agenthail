@@ -6,6 +6,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 spec = importlib.util.spec_from_file_location("layout_daemon", os.path.join(os.path.dirname(__file__), "layout-daemon.py"))
+if spec is None or spec.loader is None:
+    raise SystemExit("layout-daemon.py fixture is missing")
 layout_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(layout_module)
 layout = vars(layout_module)
