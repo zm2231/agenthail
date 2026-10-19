@@ -76,22 +76,61 @@ func (s Service) Started(spec registry.CoordinatorSpec) bool {
 }
 
 func (s Service) Deliver(ctx context.Context, spec registry.CoordinatorSpec, message string, options surface.SendOptions) (*Outcome, error) {
-	return s.deliver(ctx, spec, message, options, true)
+	return s.deliver(ctx, spec, message, "", options, true)
 }
 
 // DeliverWithoutQueue refuses to wait for a busy or unavailable coordinator,
 // but still starts one whose conversation is gone.
 func (s Service) DeliverWithoutQueue(ctx context.Context, spec registry.CoordinatorSpec, message string, options surface.SendOptions) (*Outcome, error) {
-	return s.deliver(ctx, spec, message, options, false)
+	return s.deliver(ctx, spec, message, "", options, false)
 }
 
-func (s Service) deliver(ctx context.Context, spec registry.CoordinatorSpec, message string, options surface.SendOptions, allowQueue bool) (*Outcome, error) {
+// Sender delivers to a session as delivery.Dispatcher does, except that a
+// message for a coordinator's conversation, current or replaced, goes through
+// the coordinator. A send then updates session to the conversation that took
+// the message.
+type Sender struct{ Service }
+
+func (s Sender) DeliverWithOptions(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions) (*delivery.Receipt, error) {
+	return s.send(ctx, adapter, session, message, deliveryKey, options, true)
+}
+
+func (s Sender) DeliverWithoutQueue(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions) (*delivery.Receipt, error) {
+	return s.send(ctx, adapter, session, message, deliveryKey, options, false)
+}
+
+func (s Sender) send(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool) (*delivery.Receipt, error) {
+	spec, coordinated := s.Of(session.ID)
+	if !coordinated {
+		if allowQueue {
+			return s.Dispatcher.DeliverWithOptions(ctx, adapter, session, message, deliveryKey, options)
+		}
+		return s.Dispatcher.DeliverWithoutQueue(ctx, adapter, session, message, deliveryKey, options)
+	}
+	outcome, err := s.deliver(ctx, spec, message, deliveryKey, options, allowQueue)
+	if err != nil {
+		return nil, err
+	}
+	*session = *outcome.Session
+	return outcome.Receipt, nil
+}
+
+// Canonical returns the coordinator's current conversation when sessionID is
+// one a restart replaced, and sessionID otherwise.
+func (s Service) Canonical(sessionID string) string {
+	if current, replaced := s.ReplacedBy(sessionID); replaced {
+		return current
+	}
+	return sessionID
+}
+
+func (s Service) deliver(ctx context.Context, spec registry.CoordinatorSpec, message, deliveryKey string, options surface.SendOptions, allowQueue bool) (*Outcome, error) {
 	session, adapter, reason, err := s.current(ctx, spec)
 	if err != nil {
 		return s.queueUnavailable(session, message, options, allowQueue, err)
 	}
 	if reason == "" {
-		return s.deliverTo(ctx, adapter, session, message, options, allowQueue)
+		return s.deliverTo(ctx, adapter, session, message, deliveryKey, options, allowQueue)
 	}
 	unlock, err := lock(ctx, s.Registry.CoordinatorLockPath(spec.ProjectID))
 	if err != nil {
@@ -106,7 +145,7 @@ func (s Service) deliver(ctx context.Context, spec registry.CoordinatorSpec, mes
 		return s.queueUnavailable(session, message, options, allowQueue, err)
 	}
 	if reason == "" {
-		return s.deliverTo(ctx, adapter, session, message, options, allowQueue)
+		return s.deliverTo(ctx, adapter, session, message, deliveryKey, options, allowQueue)
 	}
 	previous := ""
 	if session != nil {
@@ -183,16 +222,16 @@ func (s Service) current(ctx context.Context, spec registry.CoordinatorSpec) (*s
 }
 
 // deliverTo steers a busy coordinator unless the sender chose otherwise.
-func (s Service) deliverTo(ctx context.Context, adapter surface.Surface, session *surface.Session, message string, options surface.SendOptions, allowQueue bool) (*Outcome, error) {
+func (s Service) deliverTo(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool) (*Outcome, error) {
 	if options.BusyDelivery == "" {
 		options.BusyDelivery = string(deliverypolicy.Steer)
 	}
 	var receipt *delivery.Receipt
 	var err error
 	if allowQueue {
-		receipt, err = s.Dispatcher.DeliverWithOptions(ctx, adapter, session, message, "", options)
+		receipt, err = s.Dispatcher.DeliverWithOptions(ctx, adapter, session, message, deliveryKey, options)
 	} else {
-		receipt, err = s.Dispatcher.DeliverWithoutQueue(ctx, adapter, session, message, "", options)
+		receipt, err = s.Dispatcher.DeliverWithoutQueue(ctx, adapter, session, message, deliveryKey, options)
 	}
 	if err != nil {
 		return s.queueUnavailable(session, message, options, allowQueue, err)

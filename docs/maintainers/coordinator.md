@@ -20,7 +20,7 @@ Each project in the daemon snapshot carries its `coordinator`: name, agent and, 
 
 ## Delivery
 
-`internal/coordinator` owns every delivery to a coordinator. The CLI `send`, the `send` action of `/api/v1/actions` (dashboard, Mac and iPhone composers, notification replies) and the delivery queue all use it.
+`internal/coordinator` owns every delivery to a coordinator. The CLI `send`, the `send` action of `/api/v1/actions` (dashboard, Mac and iPhone composers, notification replies), channel sends from the CLI and the dashboard, voice delegation and the delivery queue all use it. A channel message sent from a conversation a restart replaced counts as sent by the coordinator, so the coordinator does not receive it back.
 
 | State of the coordinator | What a send does |
 | --- | --- |

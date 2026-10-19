@@ -25,7 +25,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/coordinator"
-	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/project"
@@ -1389,6 +1388,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, membersErr.Error(), http.StatusBadRequest)
 			return
 		}
+		sender := coordinator.Sender{Service: d.coordinator()}
+		if request.SourceSessionID != "" {
+			request.SourceSessionID = sender.Canonical(request.SourceSessionID)
+		}
 		members = slices.DeleteFunc(members, func(member string) bool { return request.SourceSessionID != "" && member == request.SourceSessionID })
 		if len(members) == 0 {
 			http.Error(w, "channel has no members other than the sender", http.StatusBadRequest)
@@ -1423,7 +1426,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				failed++
 				continue
 			}
-			receipt, deliverErr := d.dispatcher().DeliverWithOptions(operationCtx, adapter, session, request.Message, "", surface.SendOptions{SourceSessionID: request.SourceSessionID})
+			receipt, deliverErr := sender.DeliverWithOptions(operationCtx, adapter, session, request.Message, "", surface.SendOptions{SourceSessionID: request.SourceSessionID})
 			if deliverErr != nil {
 				failed++
 				continue
@@ -1720,17 +1723,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, Uploads: attached}
-		var receipt *delivery.Receipt
-		var actionErr error
-		coord := d.coordinator()
-		if spec, coordinated := coord.Of(session.ID); coordinated {
-			var outcome *coordinator.Outcome
-			if outcome, actionErr = coord.Deliver(ctx, spec, request.Message, options); actionErr == nil {
-				receipt = outcome.Receipt
-			}
-		} else {
-			receipt, actionErr = d.dispatcher().DeliverWithOptions(ctx, adapter, session, request.Message, "", options)
-		}
+		receipt, actionErr := coordinator.Sender{Service: d.coordinator()}.DeliverWithOptions(ctx, adapter, session, request.Message, "", options)
 		if actionErr != nil {
 			http.Error(w, actionErr.Error(), http.StatusBadGateway)
 			return
