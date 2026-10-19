@@ -92,10 +92,14 @@ cp "$CLI_SOURCE" "$OUTPUT/Contents/Resources/agenthail"
 "$ROOT/scripts/codesign-with-retry.sh" --force --options runtime --sign "$IDENTITY" "$OUTPUT/Contents/Resources/agenthail"
 SWIFT_ARCH="$ARCH"
 [ "$SWIFT_ARCH" = "amd64" ] && SWIFT_ARCH="x86_64"
+MACOS_MINIMUM=15.0
+SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
 # Dependencies must share the app's deployment target, or mismatched async specializations abort (swiftlang/swift#86204).
-# Swift Build reads it from --triple, the native build system from -Xswiftc -target.
-SWIFT_TARGET="$SWIFT_ARCH-apple-macosx15.0"
-SWIFT_BUILD=(swift build --package-path "$ROOT/native" -c release --triple "$SWIFT_TARGET" -Xswiftc -target -Xswiftc "$SWIFT_TARGET")
+SWIFT_TARGET="$SWIFT_ARCH-apple-macosx$MACOS_MINIMUM"
+# Only Swift Build's resource accessors look in Contents/Resources; the native build system's accessors trap in a shipped app.
+# Swift Build links with the deployment target as the SDK version, which turns off AppKit behavior keyed to the real SDK.
+SWIFT_BUILD=(swift build --package-path "$ROOT/native" -c release --build-system swiftbuild --triple "$SWIFT_TARGET"
+	-Xlinker -platform_version -Xlinker macos -Xlinker "$MACOS_MINIMUM" -Xlinker "$SDK_VERSION")
 SWIFT_BIN="$("${SWIFT_BUILD[@]}" --show-bin-path)"
 rm -rf "$SWIFT_BIN"/*.bundle
 if ! SWIFT_LOG="$("${SWIFT_BUILD[@]}" --product AgenthailMac 2>&1)"; then
@@ -103,10 +107,16 @@ if ! SWIFT_LOG="$("${SWIFT_BUILD[@]}" --product AgenthailMac 2>&1)"; then
 	exit 1
 fi
 cp "$SWIFT_BIN/AgenthailMac" "$OUTPUT/Contents/MacOS/Agenthail"
+LINKED_SDK="$(otool -l "$OUTPUT/Contents/MacOS/Agenthail" | awk '/LC_BUILD_VERSION/ {found=1} found && $1 == "sdk" {print $2; exit}')"
+if [ "$LINKED_SDK" != "$SDK_VERSION" ]; then
+	echo "error: the Mac app is linked against macOS SDK '${LINKED_SDK:-unknown}', not the $SDK_VERSION SDK it was built with" >&2
+	exit 1
+fi
 for bundle in "$SWIFT_BIN"/*.bundle; do
 	cp -R "$bundle" "$OUTPUT/Contents/Resources/"
 done
 "$ROOT/scripts/codesign-with-retry.sh" --force --deep --options runtime --entitlements "$ROOT/packaging/macos-app-entitlements.plist" --sign "$IDENTITY" "$OUTPUT"
 codesign --verify --deep --strict --verbose=2 "$OUTPUT"
 "$ROOT/scripts/test-macos-app-voice.sh" "$OUTPUT"
+"$ROOT/scripts/test-macos-app-resources.sh" "$OUTPUT"
 echo "$OUTPUT"

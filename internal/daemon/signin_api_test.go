@@ -237,7 +237,7 @@ func TestSigninAPIRejectsProfilesThatAreNotOnThisComputer(t *testing.T) {
 func TestSigninAPINeedsTheSettingsScope(t *testing.T) {
 	signinFixtureHome(t)
 	d, _, _, _, _ := daemonFixture(t)
-	_, token, err := d.Registry.CompleteDevicePairing(mustCreatePairing(t, d), "Phone")
+	_, token, err := d.Registry.CompleteDevicePairing(mustCreatePairing(t, d), "Phone", "")
 	if err != nil {
 		t.Fatal(err)
 	}

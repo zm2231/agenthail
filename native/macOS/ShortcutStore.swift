@@ -25,6 +25,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case showRunning
     case showRecent
     case showAll
+    case showArchived
     case toggleInspector
     case jumpToLatest
     case send
@@ -46,6 +47,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .showRunning: "Show Running"
         case .showRecent: "Show Recent"
         case .showAll: "Show All"
+        case .showArchived: "Show Archived"
         case .toggleInspector: "Show or hide inspector"
         case .jumpToLatest: "Jump to latest"
         case .send: "Send"
@@ -67,6 +69,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .showRunning: StoredShortcut(kVK_ANSI_1, cmdKey)
         case .showRecent: StoredShortcut(kVK_ANSI_2, cmdKey)
         case .showAll: StoredShortcut(kVK_ANSI_3, cmdKey)
+        case .showArchived: StoredShortcut(kVK_ANSI_4, cmdKey)
         case .toggleInspector: StoredShortcut(kVK_ANSI_I, cmdKey | optionKey)
         case .jumpToLatest: StoredShortcut(kVK_ANSI_L, cmdKey)
         case .send: StoredShortcut(kVK_Return, cmdKey)

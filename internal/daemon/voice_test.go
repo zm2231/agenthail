@@ -62,7 +62,7 @@ func TestVoiceControlScopeAndRevocationApplyToEveryEndpoint(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		device, token, err := d.Registry.CompleteDevicePairing(pairing.Secret, "")
+		device, token, err := d.Registry.CompleteDevicePairing(pairing.Secret, "", "")
 		if err != nil {
 			t.Fatal(err)
 		}

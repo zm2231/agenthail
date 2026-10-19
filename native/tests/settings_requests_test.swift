@@ -1,3 +1,4 @@
+@testable import AgenthailHelpers
 import Foundation
 
 @main
@@ -40,6 +41,22 @@ struct SettingsRequestsTest {
         model.send("typed by a person", to: "claude-target")
         let composed = await waitFor { $0.path == "/api/v1/actions" && $0.body["action"] as? String == "send" }
         check(composed?.body["author"] as? String == "person" && composed?.body["message"] as? String == "typed by a person", "the composer declares a person's message: \(String(describing: composed?.body))")
+        RecordingProtocol.reset(failing: "/api/v1/actions")
+        model.send("synthetic send A", to: "claude-target", busyDelivery: "queue")
+        let rejectedA = await waitFor { $0.path == "/api/v1/actions" && $0.body["message"] as? String == "synthetic send A" }
+        let failedA = await waitForSend(model) { $0.text == "synthetic send A" && $0.failure != nil }
+        check(failedA?.failure == "codex launch failed", "a failed send stays in the transcript with the daemon's reason: \(String(describing: failedA))")
+        check(model.draft(for: "claude-target").text.isEmpty, "a failed send is retried from the transcript, not restored to the composer")
+        model.send("synthetic send B", to: "claude-target")
+        let rejectedB = await waitFor { $0.path == "/api/v1/actions" && $0.body["message"] as? String == "synthetic send B" }
+        check(rejectedB?.idempotencyKey != nil && rejectedB?.idempotencyKey != rejectedA?.idempotencyKey, "each send has its own idempotency key")
+        RecordingProtocol.reset()
+        if let failedA { model.retrySend(failedA, in: "claude-target") }
+        let retried = await waitFor { $0.path == "/api/v1/actions" && $0.body["message"] as? String == "synthetic send A" }
+        check(retried?.idempotencyKey != nil && retried?.idempotencyKey == rejectedA?.idempotencyKey && retried?.body["busyDelivery"] as? String == "queue", "a retry after another send repeats the original request under its own key: \(String(describing: retried?.body))")
+        let delivered = await waitForSend(model) { $0.text == "synthetic send A" && $0.status != nil }
+        check(delivered?.failure == nil && model.localSends["claude-target"]?.filter({ $0.text == "synthetic send A" }).count == 1, "a successful retry clears the failure on the same message: \(String(describing: model.localSends["claude-target"]))")
+        check(model.localSends["claude-target"]?.first(where: { $0.text == "synthetic send B" })?.failure != nil, "retrying one message leaves another failed message alone")
         RecordingProtocol.reset()
         _ = await model.reply("notification reply", to: "claude-target", connectionTimeout: .seconds(1))
         let replied = await waitFor { $0.path == "/api/v1/actions" && $0.body["message"] as? String == "notification reply" }
@@ -97,6 +114,15 @@ struct SettingsRequestsTest {
     private static func waitFor(_ match: (RecordingProtocol.Request) -> Bool) async -> RecordingProtocol.Request? {
         for _ in 0..<40 {
             if let found = RecordingProtocol.requests.first(where: match) { return found }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return nil
+    }
+
+    @MainActor
+    private static func waitForSend(_ model: AgenthailModel, _ match: (LocalSend) -> Bool) async -> LocalSend? {
+        for _ in 0..<40 {
+            if let found = model.localSends["claude-target"]?.first(where: match) { return found }
             try? await Task.sleep(for: .milliseconds(50))
         }
         return nil

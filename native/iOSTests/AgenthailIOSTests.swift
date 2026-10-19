@@ -108,23 +108,24 @@ final class AgenthailIOSTests: XCTestCase {
     }
 
     @MainActor
-    func testCatalogQueueWatermarkUpdatesCountAndPresenceLocally() async throws {
+    func testCatalogQueueUpdatesCountAndPresenceComesFromTheDaemon() async throws {
         let model = AgenthailIOSModel(autoConnect: false)
         model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))
-        let claude = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":50,"type":"session.upserted","data":{"session":{"id":"queued-claude","surface":"claude","name":"Queued","status":"idle","queueCount":0,"open":false,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}}}}"#.utf8))
-        await model.receiveCatalog(claude)
-        let queued = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":51,"type":"session.queue","data":{"sessionId":"queued-claude","queueCount":2}}"#.utf8))
+        func upserted(_ seq: Int, queueCount: Int, current: Bool, reason: String?) throws -> CatalogStreamEvent {
+            let currentReason = reason.map { #","currentReason":"\#($0)""# } ?? ""
+            return try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":\#(seq),"type":"session.upserted","data":{"session":{"id":"queued-claude","surface":"claude","name":"Queued","status":"idle","queueCount":\#(queueCount),"open":false,"current":\#(current)\#(currentReason),"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}}}}"#.utf8))
+        }
+        await model.receiveCatalog(try upserted(50, queueCount: 0, current: false, reason: nil))
+        let queued = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":51,"type":"session.queue","data":{"sessionId":"queued-claude","queueCount":3}}"#.utf8))
         await model.receiveCatalog(queued)
         var session = model.snapshot?.sessions.first { $0.id == "queued-claude" }
-        XCTAssertEqual(session?.queueCount, 2)
-        XCTAssertEqual(session?.current, true)
-        XCTAssertEqual(session?.currentReason, "queued")
-        let drained = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":52,"type":"session.queue","data":{"sessionId":"queued-claude","queueCount":0}}"#.utf8))
-        await model.receiveCatalog(drained)
-        session = model.snapshot?.sessions.first { $0.id == "queued-claude" }
-        XCTAssertEqual(session?.queueCount, 0)
+        XCTAssertEqual(session?.queueCount, 3)
         XCTAssertEqual(session?.current, false)
         XCTAssertNil(session?.currentReason)
+        await model.receiveCatalog(try upserted(52, queueCount: 3, current: true, reason: "queued"))
+        session = model.snapshot?.sessions.first { $0.id == "queued-claude" }
+        XCTAssertEqual(session?.current, true)
+        XCTAssertEqual(session?.currentReason, "queued")
     }
 
     @MainActor

@@ -10,7 +10,7 @@
     <title>Agenthail</title>
     <link rel="icon" href="/favicon.png" type="image/png" />
     <link rel="apple-touch-icon" href="/logo.png" />
-    <link rel="stylesheet" href="/tokens.css?v=12" />
+    <link rel="stylesheet" href="/tokens.css?v=15" />
   </head>
   <body>
     <main class="shell">
@@ -118,8 +118,12 @@
             <form class="new-thread-form" id="new-conversation-form" hidden>
               <div class="new-thread-heading">
                 <strong>New conversation</strong>
-                <button type="button" id="new-conversation-close" aria-label="Close new conversation form">×</button>
+                <span class="new-thread-heading-actions">
+                  <button class="host-picker-button" type="button" id="new-conversation-host" aria-haspopup="listbox" aria-expanded="false" hidden></button>
+                  <button type="button" id="new-conversation-close" aria-label="Close new conversation form">×</button>
+                </span>
               </div>
+              <div class="host-picker-menu" id="new-conversation-host-menu" role="listbox" aria-label="Start on" hidden></div>
               <label>
                 <span>Surface</span>
                 <select name="surface" id="new-conversation-surface"></select>
@@ -134,7 +138,11 @@
                 <input name="alias" maxlength="80" placeholder="research" />
               </label>
               <label data-code-start>
-                <span>Working directory</span>
+                <span>Project</span>
+                <select id="new-conversation-project"><option value="">Other folder</option></select>
+              </label>
+              <label data-code-start data-start-folder>
+                <span>Folder</span>
                 <input name="cwd" value="~" placeholder="~/project" />
               </label>
               <label data-codex-start>
@@ -153,30 +161,23 @@
                 </select>
               </label>
               <label data-claude-start><span>Claude model (optional)</span><input name="model" placeholder="Use Claude default" /></label>
-              <label data-claude-start><span>Claude agent (optional)</span><input name="agent" /></label>
-              <label data-claude-start><span>Worktree name (optional)</span><input name="worktree" /></label>
-              <label data-claude-start><span>Permission mode</span><select name="permissionMode"><option value="">Use Claude default</option><option>plan</option><option>auto</option><option>manual</option><option>acceptEdits</option><option>dontAsk</option><option>bypassPermissions</option></select></label>
-              <label data-code-start><span>Effort (optional)</span><input name="effort" placeholder="high" /></label>
-              <label data-codex-start><span>Mode</span><select name="mode"><option value="">Use session default</option><option value="plan">Plan</option><option value="default">Default</option></select></label>
-              <label data-codex-start><span>Service tier</span><select name="serviceTier"><option value="">Use default</option><option>default</option><option>fast</option><option>flex</option></select></label>
-              <label data-codex-start><span>Output JSON schema (optional)</span><textarea name="outputSchema" rows="3"></textarea></label>
+              <label data-claude-start data-launch-option><span>Claude agent (optional)</span><input name="agent" /></label>
+              <label data-claude-start data-launch-option><span>Worktree name (optional)</span><input name="worktree" /></label>
+              <label data-claude-start data-launch-option><span>Permission mode</span><select name="permissionMode"><option value="">Use Claude default</option><option>plan</option><option>auto</option><option>manual</option><option>acceptEdits</option><option>dontAsk</option><option>bypassPermissions</option></select></label>
+              <label data-code-start data-launch-option><span>Effort (optional)</span><input name="effort" placeholder="high" /></label>
+              <label data-codex-start data-launch-option><span>Mode</span><select name="mode"><option value="">Use session default</option><option value="plan">Plan</option><option value="default">Default</option></select></label>
+              <label data-codex-start data-launch-option><span>Service tier</span><select name="serviceTier"><option value="">Use default</option><option>default</option><option>fast</option><option>flex</option></select></label>
+              <label data-codex-start data-launch-option><span>Output JSON schema (optional)</span><textarea name="outputSchema" rows="3"></textarea></label>
               <label>
                 <span>First message</span>
                 <textarea name="message" maxlength="120000" rows="4" required placeholder="What should this thread work on?"></textarea>
               </label>
               <button class="primary-button" type="submit">Start conversation</button>
             </form>
-            <div class="segmented two" aria-label="Conversation scope">
-              <button
-                class="active"
-                aria-pressed="true"
-                type="button"
-                data-inbox-mode="current"
-              >
-                Current</button
-              ><button aria-pressed="false" type="button" data-inbox-mode="all">
-                History
-              </button>
+            <div class="segmented" aria-label="Conversation scope">
+              <button class="active" aria-pressed="true" type="button" data-inbox-mode="current">Current<span data-inbox-count="current"></span></button
+              ><button aria-pressed="false" type="button" data-inbox-mode="projects">Projects<span data-inbox-count="projects"></span></button
+              ><button aria-pressed="false" type="button" data-inbox-mode="all">All<span data-inbox-count="all"></span></button>
             </div>
             <div class="session-tools" id="session-tools">
               <label class="search"
@@ -186,7 +187,7 @@
                   type="search"
                   placeholder="Search conversations"
               /></label>
-              <div class="filter-row">
+              <div class="filter-row" id="session-filters">
                 <label
                   ><span>Surface</span
                   ><select id="session-surface-filter">
@@ -203,6 +204,7 @@
                   </select></label
                 >
               </div>
+              <label class="show-archived" id="show-archived-row"><input id="show-archived" type="checkbox" /> Show archived</label>
             </div>
             <div class="filter-summary" id="filter-summary"></div>
             <div class="session-list" id="session-list"></div>
@@ -538,6 +540,6 @@
       </form>
     </dialog>
     <div class="toast" id="toast" role="status" hidden></div>
-    <script src="/app.js?v=14"></script>
+    <script src="/app.js?v=17"></script>
   </body>
 </html>

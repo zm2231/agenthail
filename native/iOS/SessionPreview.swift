@@ -77,15 +77,17 @@ struct SessionPreview: View {
     nonisolated static var snapshotJSON: String {
         let capabilities: [String: Bool] = ["send": true, "stream": true, "reply": true, "goal": true, "compact": true, "model": true, "interrupt": true, "steer": true]
         let sessions: [[String: Any]] = [
-            ["id": "demo", "name": "Make the build reliable", "surface": "claude", "cwd": "/Users/demo/projects/fieldnotes", "status": "busy", "lastActive": "2026-09-12T04:03:00Z", "queueCount": 1, "open": true, "current": true, "capabilities": capabilities],
-            ["id": "codex-demo", "name": "Review the release pipeline", "surface": "codex", "cwd": "/Users/demo/projects/fieldnotes", "status": "idle", "lastActive": "2026-09-12T03:45:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities],
-            ["id": "saved-demo", "name": "Map the application architecture", "surface": "claude", "cwd": "/Users/demo/projects/agenthail", "status": "idle", "lastActive": "2026-09-11T13:00:00Z", "queueCount": 0, "open": false, "current": false, "capabilities": capabilities]
+            ["id": "demo", "project": ["id": "project-fieldnotes", "displayName": "fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "kind": "git"], "name": "Make the build reliable", "surface": "claude", "cwd": "/Users/demo/projects/fieldnotes", "status": "busy", "lastActive": "2026-09-12T04:03:00Z", "queueCount": 1, "open": true, "current": true, "capabilities": capabilities],
+            ["id": "codex-demo", "project": ["id": "project-fieldnotes", "displayName": "fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "kind": "git"], "name": "Review the release pipeline", "surface": "codex", "cwd": "/Users/demo/projects/fieldnotes", "status": "idle", "lastActive": "2026-09-12T03:45:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities],
+            ["id": "saved-demo", "project": ["id": "project-agenthail", "displayName": "agenthail", "rootPath": "/Users/demo/projects/agenthail", "kind": "git"], "name": "Map the application architecture", "surface": "claude", "cwd": "/Users/demo/projects/agenthail", "status": "idle", "lastActive": "2026-09-11T13:00:00Z", "queueCount": 0, "open": false, "current": false, "capabilities": capabilities],
+            ["id": "h0123456789ab::remote-demo", "project": ["id": "h0123456789ab::project-agenthail", "displayName": "agenthail", "rootPath": "/home/demo/work/agenthail", "kind": "git"], "host": ["id": "h0123456789ab", "name": "forge-agents.tail0000.ts.net", "state": "connected"], "name": "Prove the history is true", "surface": "codex", "cwd": "/home/demo/work/agenthail/.worktrees/history-truth", "status": "busy", "lastActive": "2026-09-12T04:01:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities],
+            ["id": "h0123456789ab::remote-demo-2", "project": ["id": "h0123456789ab::project-agenthail", "displayName": "agenthail", "rootPath": "/home/demo/work/agenthail", "kind": "git"], "host": ["id": "h0123456789ab", "name": "forge-agents.tail0000.ts.net", "state": "connected"], "name": "Tighten the release notes", "surface": "claude", "cwd": "/home/demo/work/agenthail/.worktrees/release-notes", "status": "idle", "lastActive": "2026-09-12T03:30:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities]
         ]
         let snapshot: [String: Any] = ["updatedAt": "2026-09-12T04:03:00Z", "daemon": ["running": true], "surfaces": [], "sessions": sessions, "totalSessions": sessions.count, "queue": [], "channels": [], "relays": [], "history": [], "attention": [], "codexRecentHours": 24]
         return String(data: try! JSONSerialization.data(withJSONObject: snapshot), encoding: .utf8)!
     }
 
-    nonisolated static let queueJSON = #"{"items":[{"id":1,"sessionId":"demo","target":"Make the build reliable","message":"Keep the regression check with the fix.","status":"pending","evidence":"queued","attempts":0,"queuedAt":"2026-09-12 04:00:00"},{"id":2,"sessionId":"codex-demo","target":"Review the release pipeline","message":"Verify the signing step before the next release.","status":"dead","evidence":"unknown","attempts":1,"lastError":"Delivery outcome is unknown. Check the session before retrying.","queuedAt":"2026-09-11 18:20:00"},{"id":3,"sessionId":"saved-demo","target":"Map the application architecture","message":"Old release reminder","status":"expired","evidence":"expired","attempts":0,"queuedAt":"2026-09-09 11:00:00"}]}"#
+    nonisolated static let queueJSON = #"{"items":[{"id":1,"sessionId":"demo","target":"Make the build reliable","message":"Keep the regression check with the fix.","status":"pending","evidence":"queued","attempts":0,"queuedAt":"2026-09-12 04:00:00"},{"id":2,"sessionId":"codex-demo","target":"Review the release pipeline","message":"Verify the signing step before the next release.","status":"dead","evidence":"unknown","attempts":1,"lastError":"Delivery outcome is unknown. Check the session before retrying.","queuedAt":"2026-09-11 18:20:00"},{"id":3,"sessionId":"saved-demo","target":"Map the application architecture","message":"Old release reminder","status":"canceled","evidence":"canceled","attempts":0,"queuedAt":"2026-09-09 11:00:00"}]}"#
 
     nonisolated static let previewMetadataJSON = #"{"sessionId":"demo","claudeRuns":[{"recordPath":"/Users/demo/.claude/runs/job-1.json","jobId":"job-1","sessionId":"demo","runType":"bg","providerState":"working","createdAt":"2026-09-07T12:00:00Z","updatedAt":"2026-09-07T12:04:00Z"}],"claudeSubagents":[{"parentSessionId":"demo","agentId":"agent-1","transcriptPath":"/Users/demo/.claude/agents/agent-1.jsonl"}]}"#
 
@@ -116,10 +118,13 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         var status = 200
         let body: String
         if let capture = SessionCapture.current {
-            let id = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "id" })?.value ?? ""
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let id = query.first(where: { $0.name == "id" })?.value ?? ""
             let captured: String?
             switch request.url?.path {
-            case "/api/v1/snapshot": captured = capture.snapshotJSON
+            case "/api/v1/snapshot":
+                if let parentID = query.first(where: { $0.name == "parentId" })?.value { captured = query.contains { $0.name == "cursor" } ? nil : capture.subagentPageJSON[parentID] }
+                else { captured = capture.snapshotJSON }
             case "/api/v1/queue": captured = capture.queueJSON
             case "/api/v1/session":
                 let before = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "timelineBefore" })?.value
@@ -130,7 +135,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             status = captured == nil ? 503 : 200
         } else {
         switch request.url?.path {
-        case "/api/v1/session-options": body = #"{"surfaces":[{"id":"claude","workspace":true},{"id":"codex","workspace":true},{"id":"notion","workspace":false}],"workspaces":["/Users/demo/projects/fieldnotes"]}"#
+        case "/api/v1/session-options": body = #"{"surfaces":[{"id":"claude","workspace":true},{"id":"codex","workspace":true},{"id":"notion","workspace":false}],"projects":[{"id":"p-fieldnotes","displayName":"fieldnotes","rootPath":"/Users/demo/projects/fieldnotes","kind":"git"}]}"#
         case "/api/v1/models":
             body = #"{"models":[{"id":"default","displayName":"Runtime default","default":true},{"id":"gpt-5.6-sol","displayName":"GPT-5.6-Sol","description":"Latest frontier agentic coding model.","supportedReasoningEfforts":["low","medium","high"],"defaultReasoningEffort":"low"},{"id":"chatgpt-web/pro","displayName":"ChatGPT Web — Pro","supportedReasoningEfforts":["ultra"],"defaultReasoningEffort":"ultra"},{"id":"gpt-5.5","displayName":"GPT-5.5","supportedReasoningEfforts":["medium","high"],"defaultReasoningEffort":"medium"},{"id":"gpt-5.3-codex-spark","displayName":"GPT-5.3 Codex Spark","supportedReasoningEfforts":["low","medium"],"defaultReasoningEffort":"low"},{"id":"provider/custom-runtime","displayName":"Provider custom runtime","description":"Provider supplied model ID","allowsCustom":true}]}"#
         case "/api/v1/snapshot": body = SessionPreview.snapshotJSON

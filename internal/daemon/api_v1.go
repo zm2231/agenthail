@@ -13,10 +13,40 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
 type apiDeviceTokenContextKey struct{}
+
+type apiHostPrincipalContextKey struct{}
+
+type apiHostPrincipal struct {
+	host     bool
+	hostID   string
+	hostName string
+}
+
+// catalogMirror reports whether the request comes from a paired host, which
+// mirrors every catalog row rather than the session list.
+func catalogMirror(ctx context.Context) bool {
+	principal, _ := ctx.Value(apiHostPrincipalContextKey{}).(apiHostPrincipal)
+	return principal.host
+}
+
+// requestingHost is the host a paired host's token was issued to, and whether
+// the request came from a paired host at all.
+func requestingHost(ctx context.Context) (string, bool) {
+	principal, _ := ctx.Value(apiHostPrincipalContextKey{}).(apiHostPrincipal)
+	return principal.hostID, principal.host
+}
+
+// requestingHostName is the device name a paired host registered with, its
+// host name at pairing time.
+func requestingHostName(ctx context.Context) string {
+	principal, _ := ctx.Value(apiHostPrincipalContextKey{}).(apiHostPrincipal)
+	return principal.hostName
+}
 
 const (
 	apiProtocolVersion   = 1
@@ -27,14 +57,16 @@ const (
 )
 
 type apiVersionResponse struct {
-	Protocol        int    `json:"protocol"`
-	MinimumProtocol int    `json:"minimumProtocol"`
-	MaximumProtocol int    `json:"maximumProtocol"`
-	Authentication  string `json:"authentication"`
-	EventTransport  string `json:"eventTransport"`
-	PushRelayURL    string `json:"pushRelayUrl"`
-	HostID          string `json:"hostId"`
-	HostName        string `json:"hostName"`
+	Protocol          int    `json:"protocol"`
+	MinimumProtocol   int    `json:"minimumProtocol"`
+	MaximumProtocol   int    `json:"maximumProtocol"`
+	MinimumFederation int    `json:"minimumFederation"`
+	MaximumFederation int    `json:"maximumFederation"`
+	Authentication    string `json:"authentication"`
+	EventTransport    string `json:"eventTransport"`
+	PushRelayURL      string `json:"pushRelayUrl"`
+	HostID            string `json:"hostId"`
+	HostName          string `json:"hostName"`
 }
 
 func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
@@ -49,12 +81,14 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/session-metadata", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.dashboardSessionMetadataHandler))))
 	mux.HandleFunc("/api/v1/session-stream", d.apiV1Guard(dashboard, "read", d.hostRouted("id", d.apiSessionStreamHandler)))
 	mux.HandleFunc("/api/v1/session-attachment", d.apiV1Guard(dashboard, "read", d.hostRouted("sessionId", d.apiSessionAttachmentHandler)))
+	mux.HandleFunc("/api/v1/uploads", d.apiV1Guard(dashboard, "control", d.hostRouted("sessionId", d.apiUploadHandler)))
 	mux.HandleFunc("/api/v1/session-stream-body", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.sessionStreamBodyHandler))))
 	mux.HandleFunc("/api/v1/search", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.dashboardSearchHandler)))
 	mux.HandleFunc("/api/v1/models", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.dashboardModelsHandler))))
 	mux.HandleFunc("/api/v1/session-options", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.sessionOptionsHandler))))
+	mux.HandleFunc("/api/v1/relays", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("", d.apiRelaysHandler))))
 	mux.HandleFunc("/api/v1/queue", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.mobileQueueHandler)))
-	mux.HandleFunc("/api/v1/history", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.dashboardHistoryHandler)))
+	mux.HandleFunc("/api/v1/history", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("sessionId", d.dashboardHistoryHandler))))
 	mux.HandleFunc("/api/v1/actions", d.apiV1Guard(dashboard, "control", d.idempotentActionHandler(apiV1JSONHandler(d.hostRoutedAction(d.dashboardActionHandler)))))
 	mux.HandleFunc("/api/v1/settings", d.apiV1Guard(dashboard, "settings", apiV1JSONHandler(d.dashboardSettingsHandler)))
 	mux.HandleFunc("/api/v1/pairings", d.apiV1Guard(dashboard, "settings", d.apiPairingsHandler))
@@ -75,6 +109,7 @@ func (d *Daemon) apiV1Guard(dashboard *dashboardServer, scope string, next http.
 				bearerAuthorized = true
 				ctx := context.WithValue(r.Context(), apiDeviceTokenContextKey{}, token)
 				ctx = context.WithValue(ctx, actionPrincipalContextKey{}, device.ID)
+				ctx = context.WithValue(ctx, apiHostPrincipalContextKey{}, apiHostPrincipal{host: device.IsHost(), hostID: device.HostID, hostName: device.Name})
 				r = r.WithContext(ctx)
 			}
 		}
@@ -96,7 +131,7 @@ func (d *Daemon) apiVersionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := d.hostIdentity()
-	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolVersion, MaximumProtocol: apiProtocolVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: PushRelayURL(), HostID: identity.ID, HostName: identity.Name})
+	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolVersion, MaximumProtocol: apiProtocolVersion, MinimumFederation: hosts.FederationVersion, MaximumFederation: hosts.FederationVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: PushRelayURL(), HostID: identity.ID, HostName: identity.Name})
 }
 
 func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {
@@ -207,12 +242,13 @@ func (d *Daemon) apiPairHandler(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Secret string `json:"secret"`
 		Name   string `json:"name"`
+		HostID string `json:"hostId"`
 	}
 	if err := decodeAPIV1JSON(w, r, &request, false); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "The pairing request is invalid.")
 		return
 	}
-	device, token, err := d.Registry.CompleteDevicePairing(request.Secret, request.Name)
+	device, token, err := d.Registry.CompleteDevicePairing(request.Secret, request.Name, request.HostID)
 	if errors.Is(err, registry.ErrPairingExpired) {
 		writeAPIError(w, http.StatusGone, "pairing_expired", err.Error())
 		return

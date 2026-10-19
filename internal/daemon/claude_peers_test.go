@@ -30,7 +30,7 @@ func TestRecentPeerRegistrationReadsFreshCatalogRowsOnly(t *testing.T) {
 		{ID: "native", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, LastActive: now},
 		{ID: "unconfigured", Surface: surface.SurfaceKind("other"), RuntimeKind: surface.RuntimeKind("other"), Status: surface.StatusBusy, LastActive: now},
 	} {
-		if _, _, err := reg.RecordCatalogSession(registry.CatalogSessionState{Session: session, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: now.UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:" + session.ID, Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
+		if _, _, err := reg.RecordCatalogSession(registry.CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: now.UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:" + session.ID, Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -40,7 +40,7 @@ func TestRecentPeerRegistrationReadsFreshCatalogRowsOnly(t *testing.T) {
 	if _, err := reg.AddHost(registry.PairedHost{ID: "h0123456789ab", Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := reg.ApplyHostCatalogRow("h0123456789ab", registry.HostCatalogRow{Session: surface.Session{ID: "mirrored", Surface: surface.KindCodex, Transport: "managed", Status: surface.StatusIdle, LastActive: now}, EntityID: "h0123456789ab::mirrored", Projection: []byte(`{"id":"h0123456789ab::mirrored"}`), ObservedAt: now.UTC()}); err != nil {
+	if _, _, err := reg.ApplyHostCatalogRow("h0123456789ab", registry.HostCatalogRow{Session: surface.Session{ID: "mirrored", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Transport: "managed", Status: surface.StatusIdle, LastActive: now}, EntityID: "h0123456789ab::mirrored", Projection: []byte(`{"id":"h0123456789ab::mirrored"}`), ObservedAt: now.UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	seen := map[string]int{}
@@ -125,7 +125,7 @@ func TestPeerRegistrationFollowsDiscoveryWithoutWaitingForTheTicker(t *testing.T
 	default:
 	}
 	session := surface.Session{ID: "discovered", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy, LastActive: time.Now()}
-	if _, _, err := d.catalog.publishSession(registry.CatalogSessionState{Session: session, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:discovered", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
+	if _, _, err := d.catalog.publishSession(registry.CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:discovered", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 	select {

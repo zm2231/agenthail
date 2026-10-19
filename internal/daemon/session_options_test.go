@@ -3,11 +3,14 @@ package daemon
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	registrypkg "github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -32,7 +35,14 @@ func TestMobileCreationOptionsAndAuthorizedCreation(t *testing.T) {
 				ID        string `json:"id"`
 				Workspace bool   `json:"workspace"`
 			} `json:"surfaces"`
-			Workspaces []string `json:"workspaces"`
+			Projects []launchProject `json:"projects"`
+		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(response.Body.Bytes(), &raw); err != nil {
+			t.Fatal(err)
+		}
+		if _, retired := raw["workspaces"]; retired || raw["projects"] == nil {
+			t.Fatalf("session options keys=%v", raw)
 		}
 		if err := json.Unmarshal(response.Body.Bytes(), &options); err != nil {
 			t.Fatal(err)
@@ -64,13 +74,16 @@ func TestMobileCreationOptionsAndAuthorizedCreation(t *testing.T) {
 	}
 }
 
-func TestMobileQueueIncludesExpiredAndRetriesThroughActionAPI(t *testing.T) {
+func TestMobileQueueIncludesFailedRowAndRetriesThroughActionAPI(t *testing.T) {
 	d, registry, _, _, _ := daemonFixture(t)
-	id, err := registry.QueueMessageWithKey("from", "Expired instruction", "expiry-probe")
+	id, err := registry.QueueMessageWithKey("from", "Failed instruction", "failure-probe")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registry.ClaimNextMessage("from", time.Now().Add(2*time.Hour)); err != nil {
+	if _, err := registry.ClaimNextMessage("from", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.DeadLetterMessage(id, errors.New("delivery rejected [invalid request]: bad")); err != nil {
 		t.Fatal(err)
 	}
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
@@ -86,9 +99,9 @@ func TestMobileQueueIncludesExpiredAndRetriesThroughActionAPI(t *testing.T) {
 	}
 	found := false
 	for _, item := range page.Items {
-		if item.ID == id && item.Status == "expired" {
-			if !item.Historical || item.Evidence != surface.EvidenceExpired {
-				t.Fatalf("expired row=%+v", item)
+		if item.ID == id && item.Status == "dead" {
+			if item.Historical || item.Evidence != surface.EvidenceFailed {
+				t.Fatalf("failed row=%+v", item)
 			}
 			found = true
 		}
@@ -104,8 +117,46 @@ func TestMobileQueueIncludesExpiredAndRetriesThroughActionAPI(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatal(response.Body.String())
 	}
-	item, err := registry.QueueItem(id)
+	item, err := registry.QueueItem(id, nil)
 	if err != nil || item.Status != "pending" {
 		t.Fatalf("%+v %v", item, err)
+	}
+}
+
+func TestLaunchProjectsListRecentProjectsThenRegisteredFolders(t *testing.T) {
+	d, reg, _, _, _ := daemonFixture(t)
+	now := time.Now().UTC()
+	record := func(id, project string, lastActive time.Time, subagent bool) {
+		t.Helper()
+		session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: id, Cwd: "/work/" + id, Status: surface.StatusIdle, LastActive: lastActive}
+		if subagent {
+			session.Subagent = &surface.Subagent{ParentID: "older", RootID: "older", Depth: 1}
+		}
+		if _, _, err := reg.RecordCatalogSession(registrypkg.CatalogSessionState{Session: session, Project: []byte(project), Checkout: []byte(`{}`), ObservedAt: now, ProjectionFingerprint: `{}`}, registrypkg.CatalogEvent{DedupeKey: "session.upserted:" + id, Type: "session.upserted", EntityID: id, Payload: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record("older", `{"id":"project-api","displayName":"api","rootPath":"/work/api","kind":"git"}`, now.Add(-2*time.Hour), false)
+	record("newer", `{"id":"project-web","displayName":"web","rootPath":"/work/web","kind":"git"}`, now.Add(-time.Hour), false)
+	record("worktree", `{"id":"project-api","displayName":"api","rootPath":"/work/api","kind":"git"}`, now.Add(-30*time.Minute), false)
+	record("helper", `{"id":"project-tools","displayName":"tools","rootPath":"/work/tools","kind":"git"}`, now, true)
+	record("hidden", `{"id":"project-old","displayName":"old","rootPath":"/work/old","kind":"git"}`, now, false)
+	record("loose", `null`, now, false)
+	if err := reg.ArchiveProject(registrypkg.ProjectRecord{ID: "project-old", Kind: "git", RootPath: "/work/old", DisplayName: "old"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.RegisterFolderProject("folder-notes", "/work/notes", "notes"); err != nil {
+		t.Fatal(err)
+	}
+	projects, err := d.launchProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := []string{}
+	for _, project := range projects {
+		got = append(got, project.DisplayName+"="+project.RootPath)
+	}
+	if strings.Join(got, ",") != "api=/work/api,web=/work/web,notes=/work/notes" {
+		t.Fatalf("projects=%v", got)
 	}
 }

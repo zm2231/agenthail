@@ -25,6 +25,31 @@ const (
 	StatusUnknown SessionStatus = "unknown"
 )
 
+// WaitingKind names what an open turn is waiting for from its user.
+type WaitingKind string
+
+const (
+	WaitingQuestion WaitingKind = "question"
+	WaitingApproval WaitingKind = "approval"
+	WaitingInput    WaitingKind = "input"
+)
+
+// Waiting marks a busy turn that cannot continue until its user answers. ID
+// is stable for one question, so a new ID means a new question.
+type Waiting struct {
+	Kind  WaitingKind `json:"kind"`
+	ID    string      `json:"id"`
+	Since time.Time   `json:"since,omitzero"`
+}
+
+// SameWaiting reports whether two waiting states describe the same question.
+func SameWaiting(left, right *Waiting) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Kind == right.Kind && left.ID == right.ID
+}
+
 // Session is one conversation. ID is the provider's native conversation id
 // (Claude session id, Codex thread id) and never changes. RuntimeKind is what
 // carries it now and picks its adapter. PID, Transport and Bridge (the Claude
@@ -38,6 +63,7 @@ type Session struct {
 	Cwd                   string            `json:"cwd"`
 	PID                   int               `json:"pid"`
 	Status                SessionStatus     `json:"status"`
+	WaitingOn             *Waiting          `json:"waitingOn,omitempty"`
 	Transcript            string            `json:"transcript"`
 	HasLocal              bool              `json:"hasLocal"`
 	Source                string            `json:"source,omitempty"`
@@ -64,13 +90,15 @@ type Session struct {
 
 // ClaudeClosingTurn is a Claude turn whose end_turn message has been read but
 // may still have content blocks to write. A stream that resumes at
-// TranscriptOffset finishes it at the first record outside MessageID, provided
-// the transcript bytes before that offset still match Anchor.
+// TranscriptOffset finishes it at the first record outside MessageID, or once
+// its process records idle no earlier than At, provided the transcript bytes
+// before that offset still match Anchor.
 type ClaudeClosingTurn struct {
 	TurnID    string
 	MessageID string
 	Key       string
 	Anchor    string
+	At        time.Time
 }
 
 // Subagent identifies a session spawned by another session. RootID is the
@@ -142,7 +170,6 @@ const (
 	EvidenceReplyObserved     DeliveryEvidence = "reply_observed"
 	EvidenceFailed            DeliveryEvidence = "failed"
 	EvidenceUnknown           DeliveryEvidence = "unknown"
-	EvidenceExpired           DeliveryEvidence = "expired"
 	EvidenceCanceled          DeliveryEvidence = "canceled"
 )
 
@@ -275,6 +302,17 @@ type SendOptions struct {
 	SourceSessionID string `json:"sourceSessionId,omitempty"`
 	BusyDelivery    string `json:"busyDelivery,omitempty"`
 	Author          Author `json:"-"`
+	// Uploads are the person's attached files. Route.Send turns them into
+	// Images for a route that takes image input and into stored paths in the
+	// message text for everything else.
+	Uploads Uploads `json:"-"`
+	Images  Uploads `json:"-"`
+}
+
+// HoldsForQueue reports whether the send carries parts a busy-session steer
+// cannot deliver, so it must wait in the queue for a turn of its own.
+func (o SendOptions) HoldsForQueue() bool {
+	return o.Model != "" || !o.TurnOptions.Empty() || len(o.Uploads) > 0
 }
 
 // Author records who wrote a message. A composer declares AuthorPerson when a
@@ -286,7 +324,14 @@ const AuthorPerson Author = "person"
 // HumanTurnSender delivers a person's message as that session's own user
 // turn, separate from the peer transport agents use to message each other.
 type HumanTurnSender interface {
-	SendHumanTurn(ctx context.Context, sess *Session, message string) (*SendResult, error)
+	SendHumanTurn(ctx context.Context, sess *Session, message string, images Uploads) (*SendResult, error)
+}
+
+// ImageRouter is implemented by an adapter whose runtime takes images as
+// model input on some routes. Every other route receives each upload as its
+// stored path in the message text.
+type ImageRouter interface {
+	NativeImages(session *Session, route Route) bool
 }
 
 type sourceSessionIDContextKey struct{}
@@ -404,6 +449,7 @@ type TurnObservation struct {
 	TerminalTurnID  string        `json:"terminalTurnId,omitempty"`
 	CompletedTurnID string        `json:"completedTurnId,omitempty"`
 	InputTurnID     string        `json:"inputTurnId,omitempty"`
+	WaitingOn       *Waiting      `json:"waitingOn,omitempty"`
 	Reply           *ReplyResult  `json:"reply,omitempty"`
 }
 
@@ -423,27 +469,28 @@ type Exchange struct {
 }
 
 type StreamEvent struct {
-	Role             string        `json:"role,omitempty"`
-	Origin           string        `json:"origin,omitempty"`
-	Sender           string        `json:"sender,omitempty"`
-	Title            string        `json:"title,omitempty"`
-	Status           string        `json:"status,omitempty"`
-	CallID           string        `json:"callId,omitempty"`
-	Attachment       *Attachment   `json:"attachment,omitempty"`
-	Truncated        bool          `json:"truncated,omitempty"`
-	TruncationReason string        `json:"truncationReason,omitempty"`
-	ID               string        `json:"id,omitempty"`
-	ProviderKey      string        `json:"providerKey,omitempty"`
-	Cursor           uint64        `json:"cursor,omitempty"`
-	Version          uint64        `json:"version,omitempty"`
-	Operation        string        `json:"operation,omitempty"`
-	Final            bool          `json:"final,omitempty"`
-	TurnID           string        `json:"turnId,omitempty"`
-	Timestamp        time.Time     `json:"timestamp,omitempty"`
-	Kind             string        `json:"kind"`
-	Text             string        `json:"text"`
-	Context          *ContextUsage `json:"context,omitempty"`
-	Goal             *GoalState    `json:"goal,omitempty"`
+	Role             string         `json:"role,omitempty"`
+	Origin           string         `json:"origin,omitempty"`
+	Sender           string         `json:"sender,omitempty"`
+	Title            string         `json:"title,omitempty"`
+	Status           string         `json:"status,omitempty"`
+	CallID           string         `json:"callId,omitempty"`
+	Attachment       *Attachment    `json:"attachment,omitempty"`
+	Files            []AttachedFile `json:"files,omitempty"`
+	Truncated        bool           `json:"truncated,omitempty"`
+	TruncationReason string         `json:"truncationReason,omitempty"`
+	ID               string         `json:"id,omitempty"`
+	ProviderKey      string         `json:"providerKey,omitempty"`
+	Cursor           uint64         `json:"cursor,omitempty"`
+	Version          uint64         `json:"version,omitempty"`
+	Operation        string         `json:"operation,omitempty"`
+	Final            bool           `json:"final,omitempty"`
+	TurnID           string         `json:"turnId,omitempty"`
+	Timestamp        time.Time      `json:"timestamp,omitempty"`
+	Kind             string         `json:"kind"`
+	Text             string         `json:"text"`
+	Context          *ContextUsage  `json:"context,omitempty"`
+	Goal             *GoalState     `json:"goal,omitempty"`
 }
 
 type StreamEventClass string
@@ -539,6 +586,7 @@ type Capabilities struct {
 	Model     bool `json:"model"`
 	Interrupt bool `json:"interrupt"`
 	Steer     bool `json:"steer"`
+	Attach    bool `json:"attach"`
 }
 
 type SessionCapabilities struct {
@@ -607,10 +655,11 @@ type LocalStatusSource interface {
 	LocalStatus(ctx context.Context, session Session) (Session, error)
 }
 
-// CatalogListCompleteness declares whether a successful List result is a
-// complete enumeration suitable for omission reconciliation.
-type CatalogListCompleteness interface {
-	CatalogListComplete() bool
+// CatalogLister lists sessions for the daemon catalog and reports whether the
+// result enumerates every session the runtime holds. Only a complete result
+// retires the sessions it omits. Adapters without it list completely.
+type CatalogLister interface {
+	CatalogList(ctx context.Context) ([]Session, bool, error)
 }
 
 func DeriveName(explicit, preview string, maxLen int) string {

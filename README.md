@@ -85,9 +85,9 @@ agenthail send claude:<session-id> "Here are the findings" --from @builder --jso
 agenthail history @builder 25
 ```
 
-A socket acknowledgement means transport acceptance, not model completion. Claude's inbound policy can still hold or deny the message. Agenthail does not invent a permission-mode attestation. Native sends do not support `--reply`, `--stream`, or slash commands; read the transcript with `last` or receive a native `SendMessage` reply. Compact, model, interrupt, and steer are typed controls. They require the target session to have a live Remote Control attachment and are never placed in the ordinary message queue.
+A socket acknowledgement means transport acceptance, not model completion. Claude's inbound policy can still hold or deny the message. Agenthail does not invent a permission-mode attestation. Native sends do not support `--reply`, `--stream`, or slash commands; read the transcript with `last` or receive a native `SendMessage` reply. Compact, model, interrupt, and steer are typed controls. They require the target session to have a live Remote Control attachment, except that a session the Claude host runs takes interrupt and steer through the host, and they are never placed in the ordinary message queue.
 
-A message you type in the web dashboard or the Mac or iPhone app goes to a Claude session's Remote Control attachment, so Claude records it as your own turn rather than a peer message. The apps mark it with `"author": "person"` on the `send` action. Sessions without Remote Control receive it over the native socket. A send that does not declare an author, including any script calling the API, and all agent, relay, channel, CLI and voice sends, use the native socket whenever the session has one. Sessions that expose only Remote Control receive every send through it, as before. A steer you send from the composer is also your own turn. A composer message to a busy session follows your busy-delivery setting, and a queued one is still delivered as your turn.
+A message you type in the web dashboard or the Mac or iPhone app, or speak to a session by voice, is your own turn, so Claude records it as yours rather than a peer message. The apps mark it with `"author": "person"` on the `send` action. A session the Claude host runs takes it through the host, and so does an exited session, which resumes in the host. A running session with Remote Control takes it through that attachment. A running session with only a native socket receives it over the socket. A send that does not declare an author, including any script calling the API, and all agent, relay, channel and CLI sends, use the native socket whenever the session has one. Sessions that expose only Remote Control receive every send through it, as before. A steer you send from the composer is also your own turn. A composer message to a busy session follows your busy-delivery setting, and a queued one is still delivered as your turn.
 
 ### Codex
 
@@ -143,7 +143,9 @@ When an agent is already working, Agenthail queues the next message by default. 
 the daemon/dashboard `busyDelivery` setting to `steer` to steer busy targets that
 advertise that capability; unsupported targets remain queued. Use `steer` when you
 want an explicit active-turn control.
-If Agenthail cannot reach a Codex session before starting a turn, it keeps that message pending and retries safely. A timeout after a turn has started is kept as an explicit unknown outcome instead, so Agenthail never guesses whether to send duplicate work. Messages that still cannot move after one hour expire instead of building up forever. They remain visible in the audit trail.
+If Agenthail cannot reach a Codex session before starting a turn, it keeps that message pending and retries safely. A timeout after a turn has started is kept as an explicit unknown outcome instead, so Agenthail never guesses whether to send duplicate work. A queued message never expires: it stays pending until it is delivered, you cancel it, or delivery fails in a way Agenthail can prove. `queue list` shows how long each message has waited and why it is held.
+
+An agent that has asked you something is **waiting on you**, not working. That covers a Claude question (`AskUserQuestion`), plan approval or permission prompt, and a Codex approval or input request. `list`, the dashboard and the apps show "Waiting on you". Your Mac and paired iPhone get one notification per question. Messages to the agent wait until you answer, even a steer, so nothing lands in the middle of the question. A steer then goes into the turn you answered; an ordinary message waits for the turn to finish.
 
 Agenthail keeps current work fast by using Codex's bounded local state. To find an older Codex conversation, use the dashboard search box or `agenthail search codex <query>`; selected results are saved locally for later use.
 
@@ -170,7 +172,7 @@ When the investigation finishes with something the builder needs, Agenthail pass
 
 `turn_finished` (the default) forwards each successful matching completion. `goal_completed` requires a source with goal support, waits for an explicit completed goal and its final turn, and forwards the latest pending completion once per goal. Active, paused, blocked, missing, or unreadable goals keep the route waiting. The regex filters the selected result; it does not determine whether a goal is complete.
 
-New routes begin after existing provider history. Completion events and provider cursors survive daemon restarts; each route advances only when its queue item and receipt commit together. A busy or offline destination keeps its handoff in the delivery queue, subject to the existing one-hour expiry. Active routes remain until explicitly removed; an inactive route whose Claude Code source stays closed for an hour is removed. `relay list --json`, the dashboard, and native handoff controls show the condition, pending event count, and capture/consumption error. Queued means persisted for delivery, not received by the destination. See [relay recovery](docs/maintainers/durable-relays.md).
+New routes begin after existing provider history. Completion events and provider cursors survive daemon restarts; each route advances only when its queue item and receipt commit together. A busy or offline destination keeps its handoff in the delivery queue until it can be delivered. Active routes remain until explicitly removed; an inactive route whose Claude Code source stays closed for an hour is removed. `relay list --json`, the dashboard, and native handoff controls show the condition, pending event count, and capture/consumption error. Queued means persisted for delivery, not received by the destination. See [relay recovery](docs/maintainers/durable-relays.md).
 
 For a group that needs the same update:
 
@@ -183,14 +185,14 @@ agenthail channel send launch "The release date moved to Friday"
 
 ## Start work without opening another window
 
-An agent or script can start a Codex thread or Claude background session directly:
+An agent or script can start a Codex thread or Claude session directly:
 
 ```bash
 agenthail thread create codex "Implement the verified fix" --alias builder --json
 agenthail thread create claude "Investigate the build failure" --alias investigator --json
 ```
 
-The session starts in your current folder unless you choose another project with `--cwd`. Claude background sessions support status, logs, stop and resume. Codex supports forks, its native input queue, reasoning effort, plan mode, service tier and structured output. These controls are available in the CLI and web dashboard; the Mac app offers one-click forks, the native queue, effort and plan mode; see [session operations](docs/maintainers/session-operations.md) for commands and retry behavior.
+The session starts in your current folder unless you choose another project with `--cwd`. Claude sessions run in the Claude host and support status, stop and resume; read their transcript with `agenthail last`, since a host session has no background log. Codex supports forks, its native input queue, reasoning effort, plan mode, service tier and structured output. These controls are available in the CLI and web dashboard; the Mac app offers one-click forks, the native queue, effort and plan mode; see [session operations](docs/maintainers/session-operations.md) for commands and retry behavior.
 
 Notion threads can start the same way:
 
@@ -204,7 +206,7 @@ The iPhone companion is distributed through TestFlight. [Request an iPhone invit
 
 After installing the iPhone app, install Tailscale on your Mac and iPhone, sign both into the same account, then open **Operations** in Agenthail on the Mac.
 
-Turn on **Private phone access** and choose **Pair an iPhone**. The iPhone app can then show current work, open conversations, send or steer messages, and notify you when an agent finishes. Your Mac is not opened to the public internet.
+Turn on **Private phone access** and choose **Pair an iPhone**. The iPhone app can then show current work, open conversations, send or steer messages, and notify you when an agent finishes or is waiting on you. Your Mac is not opened to the public internet.
 
 Matching voice-enabled builds also offer **Talk to orchestrator**: a real Codex
 Voice conversation that can inspect agents, delegate work, and read replies through
@@ -212,7 +214,7 @@ one persistent operator. [Voice setup, flow, and current limits](docs/maintainer
 
 ## See agents on your other machines
 
-Pair the Agenthail daemon on another machine in your tailnet and its sessions appear in the same list, app and phone. Run `agenthail hosts invite` there and `agenthail hosts add '<link>'` here, then address its sessions as `forge::@builder`. If a machine goes offline, its sessions stay listed as unavailable, and messages to them wait up to an hour for it to return; after that they expire and show in delivery history. [How paired hosts work](docs/maintainers/hosts.md).
+Pair the Agenthail daemon on another machine in your tailnet and its sessions appear in the same list, app and phone. Run `agenthail hosts invite` there and `agenthail hosts add '<link>'` here, then address its sessions as `forge::@builder`. If a machine goes offline, its sessions stay listed as unavailable, and messages to them wait until it returns; they never expire. [How paired hosts work](docs/maintainers/hosts.md).
 
 ## What Agenthail remembers
 

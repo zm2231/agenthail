@@ -124,6 +124,11 @@ if install_once "$FAILED_HOME" "$FAILED_BIN" "$FAILED_DATA" >"$TMP/fresh-rollbac
 	exit 1
 fi
 unset AGENTHAIL_INSTALL_TEST_FAIL_AFTER_ACTIVATION
+if ! grep -q "injected post-activation failure" "$TMP/fresh-rollback.log"; then
+	echo "error: the fresh install failed before activation" >&2
+	cat "$TMP/fresh-rollback.log" >&2
+	exit 1
+fi
 FAILED_PID="$(cat "$FAILED_HOME/.fake-agenthail-launchd-last-pid")"
 test ! -e "$FAILED_HOME/Library/LaunchAgents/com.agenthail.daemon.plist"
 test ! -e "$FAILED_HOME/.fake-agenthail-launchd-loaded"

@@ -17,11 +17,14 @@ import (
 const forgeHostID = "h0123456789ab"
 
 type fakeDaemonAPI struct {
-	mu       sync.Mutex
-	matches  map[string][]remoteTarget
-	actions  []map[string]any
-	keys     []string
-	response string
+	mu        sync.Mutex
+	matches   map[string][]remoteTarget
+	actions   []map[string]any
+	keys      []string
+	response  string
+	responses map[string]string
+	gets      []string
+	snapshot  string
 }
 
 func (f *fakeDaemonAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -45,7 +48,19 @@ func (f *fakeDaemonAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(body, &action)
 		f.actions = append(f.actions, action)
 		f.keys = append(f.keys, r.Header.Get("Idempotency-Key"))
+		if response, found := f.responses[action["action"].(string)]; found {
+			_, _ = io.WriteString(w, response)
+			return
+		}
 		_, _ = io.WriteString(w, f.response)
+	case "/api/v1/snapshot":
+		_, _ = io.WriteString(w, f.snapshot)
+	case "/api/v1/session-metadata":
+		f.gets = append(f.gets, r.URL.RequestURI())
+		_, _ = io.WriteString(w, `{"sessionId":"`+r.URL.Query().Get("id")+`","model":"gpt-remote","goal":{"objective":"ship the remote picker","status":"active"}}`)
+	case "/api/v1/history":
+		f.gets = append(f.gets, r.URL.RequestURI())
+		_, _ = io.WriteString(w, `{"items":[{"id":4,"createdAt":"2026-10-19T10:00:00Z","kind":"delivered","target":"@builder","message":"synthetic history line","evidence":"delivered"}],"hasMore":false}`)
 	case "/api/v1/hosts":
 		body, _ := io.ReadAll(r.Body)
 		var request map[string]any
@@ -74,7 +89,7 @@ func federatedCLIFixture(t *testing.T, daemonRunning bool) (*App, *registry.Regi
 		t.Fatal(err)
 	}
 	projection := `{"id":"` + forgeBuilder.ID + `","surface":"codex","name":"remote work","alias":"builder","host":{"id":"` + forgeHostID + `","name":"forge","state":"unreachable"}}`
-	if _, _, err := reg.ApplyHostCatalogRow(forgeHostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-1", Surface: surface.KindCodex, Name: "remote work", Cwd: "/home/remote/src"}, EntityID: forgeBuilder.ID, Projection: json.RawMessage(projection), UnavailableReason: "host forge is unreachable"}); err != nil {
+	if _, _, err := reg.ApplyHostCatalogRow(forgeHostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-1", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "remote work", Cwd: "/home/remote/src"}, EntityID: forgeBuilder.ID, Projection: json.RawMessage(projection), UnavailableReason: "host forge is unreachable"}); err != nil {
 		t.Fatal(err)
 	}
 	api := &fakeDaemonAPI{matches: map[string][]remoteTarget{"@builder": {forgeBuilder}, "builder": {forgeBuilder}}, response: `{"ok":true,"result":{"evidence":"delivered","status":"sent","sessionId":"` + forgeBuilder.ID + `","turnId":"turn-7"}}`}
@@ -165,14 +180,140 @@ func TestHeldRemoteSendReportsQueuedNotSent(t *testing.T) {
 	}
 }
 
-func TestLocalOnlyCommandRefusesRemoteSession(t *testing.T) {
+func TestChannelsAndRelaysReachARemoteSession(t *testing.T) {
 	app, _, _, api := federatedCLIFixture(t, true)
-	err := app.Run([]string{"compact", "forge::@builder"})
-	if err == nil || !strings.Contains(err.Error(), "forge::@builder is a session on host forge") {
-		t.Fatalf("err=%v", err)
+	if _, err := app.Registry.CreateChannel("ops"); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := captureStdout(t, func() error { return app.Run([]string{"channel", "add", "ops", "forge::@builder"}) }); err != nil || !strings.Contains(output, "forge::@builder") {
+		t.Fatalf("channel add output=%q err=%v", output, err)
+	}
+	members, err := app.Registry.ChannelMembers("ops")
+	if err != nil || len(members) != 1 || members[0] != "remote-1" {
+		t.Fatalf("members=%v err=%v", members, err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	if output, err := captureStdout(t, func() error { return app.Run([]string{"channel", "send", "ops", "status?"}) }); err != nil || !strings.Contains(output, "[QUEUE] forge::@builder (held for its host)") {
+		t.Fatalf("channel send output=%q err=%v", output, err)
+	}
+	if held, err := app.Registry.HostDeliveries(forgeHostID); err != nil || len(held) != 1 || held[0].SessionID != "remote-1" {
+		t.Fatalf("held=%+v err=%v", held, err)
+	}
+	if output, err := captureStdout(t, func() error { return app.Run([]string{"relay", "add", "forge::@builder", "forge::@builder", "done"}) }); err != nil || !strings.Contains(output, "relay on host forge") {
+		t.Fatalf("relay add output=%q err=%v", output, err)
+	}
+	actions, _ := api.recorded()
+	if len(actions) != 1 || actions[0]["action"] != "relay-add" || actions[0]["fromId"] != forgeBuilder.ID || actions[0]["pattern"] != "done" {
+		t.Fatalf("actions=%v", actions)
 	}
 	if err := app.Run([]string{"send", "nowhere::x", "hi"}); err == nil || !strings.Contains(err.Error(), `no paired host is named "nowhere"`) {
 		t.Fatalf("unknown host err=%v", err)
+	}
+}
+
+func TestRemoteSessionCommandsRouteThroughDaemon(t *testing.T) {
+	app, _, fake, api := federatedCLIFixture(t, true)
+	api.responses = map[string]string{
+		"compact":                  `{"ok":true,"result":{"evidence":"delivered","status":"sent"}}`,
+		"model":                    `{"ok":true,"result":"gpt-next"}`,
+		"session-fork":             `{"ok":true,"result":{"session":{"id":"` + hosts.Qualify(forgeHostID, "fork-1") + `","surface":"codex"}}}`,
+		"native-queue":             `{"ok":true,"result":{"items":[]}}`,
+		"session-lifecycle-status": `{"ok":true,"result":{"state":"running"}}`,
+		"alias":                    `{"ok":true,"alias":"builder2"}`,
+		"goal-set":                 `{"ok":true,"result":null}`,
+		"goal-budget":              `{"ok":true,"result":null}`,
+	}
+	run := func(args ...string) string {
+		t.Helper()
+		output, err := captureStdout(t, func() error { return app.Run(args) })
+		if err != nil {
+			t.Fatalf("%v: err=%v", args, err)
+		}
+		return output
+	}
+	if output := run("compact", "forge::@builder"); !strings.Contains(output, "compacted forge::@builder") {
+		t.Fatalf("compact output=%q", output)
+	}
+	if output := run("model", "forge::@builder"); strings.TrimSpace(output) != "gpt-remote" {
+		t.Fatalf("model read output=%q", output)
+	}
+	if output := run("model", "forge::@builder", "gpt-next"); strings.TrimSpace(output) != "gpt-next" {
+		t.Fatalf("model set output=%q", output)
+	}
+	if output := run("goal", "forge::@builder"); !strings.Contains(output, "ship the remote picker") {
+		t.Fatalf("goal read output=%q", output)
+	}
+	run("goal", "forge::@builder", "set", "finish", "it")
+	run("goal", "forge::@builder", "budget", "clear")
+	if output := run("identify", "forge::@builder", "builder2"); !strings.Contains(output, "forge::@builder2") {
+		t.Fatalf("identify output=%q", output)
+	}
+	run("thread", "fork", "forge::@builder", "--model", "gpt-next", "--alias", "branch")
+	run("thread", "queue", "forge::@builder", "list")
+	if output := run("thread", "status", "forge::@builder"); !strings.Contains(output, "running") {
+		t.Fatalf("status output=%q", output)
+	}
+	if output := run("queue", "forge::@builder", "when", "idle"); !strings.Contains(output, "sent to forge::@builder") {
+		t.Fatalf("queue output=%q", output)
+	}
+	if output := run("history", "forge::@builder", "150"); !strings.Contains(output, "forge::@builder synthetic history line") {
+		t.Fatalf("history output=%q", output)
+	}
+	run("thread", "stop", "forge::@builder")
+	run("thread", "resume", "forge::@builder")
+	run("thread", "logs", "forge::@builder")
+	actions, _ := api.recorded()
+	want := []string{"compact", "model", "goal-set", "goal-budget", "alias", "session-fork", "alias", "native-queue", "session-lifecycle-status", "send", "session-lifecycle-stop", "session-lifecycle-resume", "session-lifecycle-logs"}
+	if len(actions) != len(want) {
+		t.Fatalf("actions=%v", actions)
+	}
+	for index, name := range want {
+		if actions[index]["action"] != name {
+			t.Fatalf("action %d=%v want %s", index, actions[index], name)
+		}
+	}
+	for index, action := range actions {
+		wantID := forgeBuilder.ID
+		if index == 6 {
+			wantID = hosts.Qualify(forgeHostID, "fork-1")
+		}
+		if action["sessionId"] != wantID {
+			t.Fatalf("action %d sessionId=%v", index, action["sessionId"])
+		}
+	}
+	if actions[1]["model"] != "gpt-next" || actions[2]["message"] != "finish it" || actions[3]["message"] != "" || actions[4]["alias"] != "builder2" || actions[6]["alias"] != "branch" {
+		t.Fatalf("payloads=%v", actions)
+	}
+	if fork, _ := actions[5]["fork"].(map[string]any); fork["model"] != "gpt-next" {
+		t.Fatalf("fork payload=%v", actions[5])
+	}
+	if queue, _ := actions[7]["nativeQueue"].(map[string]any); queue["queueAction"] != "list" {
+		t.Fatalf("native queue payload=%v", actions[7])
+	}
+	if actions[9]["busyDelivery"] != "queue" || actions[9]["message"] != "when idle" {
+		t.Fatalf("queue payload=%v", actions[9])
+	}
+	if len(api.gets) != 3 || !strings.Contains(api.gets[2], "/api/v1/history?") || !strings.Contains(api.gets[2], "limit=150") {
+		t.Fatalf("gets=%v", api.gets)
+	}
+	if len(fake.sent) != 0 {
+		t.Fatalf("local surface received %v", fake.sent)
+	}
+}
+
+func TestHeldSendForRemoteSessionIsLocalQueueData(t *testing.T) {
+	app, reg, _, api := federatedCLIFixture(t, true)
+	id, err := reg.QueueHostDelivery("remote-1", "held for forge", "cli-synthetic", []byte(`{"action":"send"}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureStdout(t, func() error { return app.Run([]string{"queue", "list", "--target", "forge::@builder"}) })
+	if err != nil || !strings.Contains(output, "held for forge") {
+		t.Fatalf("list output=%q err=%v", output, err)
+	}
+	output, err = captureStdout(t, func() error { return app.Run([]string{"queue", "clear", "forge::@builder"}) })
+	if err != nil || !strings.Contains(output, "canceled 1 queued message(s)") {
+		t.Fatalf("clear output=%q err=%v id=%d", output, err, id)
 	}
 	if actions, _ := api.recorded(); len(actions) != 0 {
 		t.Fatalf("actions=%v", actions)
@@ -216,11 +357,11 @@ func TestThreadCreateOnHostKeepsRemoteCwd(t *testing.T) {
 
 func TestListShowsRemoteRowsWithHostAndUnavailableState(t *testing.T) {
 	app, _, _, _ := federatedCLIFixture(t, true)
-	output, err := captureStdout(t, func() error { return app.Run([]string{"list"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
 	if err != nil || !strings.Contains(output, "HOST") || !strings.Contains(output, "forge") || !strings.Contains(output, "down") || !strings.Contains(output, "@builder") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
-	output, err = captureStdout(t, func() error { return app.Run([]string{"list", "--json"}) })
+	output, err = captureStdout(t, func() error { return app.Run([]string{"list", "--all", "--json"}) })
 	if err != nil {
 		t.Fatal(err)
 	}

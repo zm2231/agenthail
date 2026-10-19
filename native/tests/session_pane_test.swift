@@ -1,3 +1,4 @@
+@testable import AgenthailHelpers
 import Foundation
 import Network
 
@@ -58,7 +59,7 @@ struct SessionPaneTest {
         check(!watched.draftIsEmpty, "edits from a pane sharing the draft are observed")
         watched.select("F")
         check(watched.draftIsEmpty, "a new session's empty draft is observed")
-        watched.composerDraft.attachments = [URL(fileURLWithPath: "/tmp/shot.png")]
+        watched.composerDraft.attachments = [ComposerAttachment(name: "shot.png", data: Data("synthetic".utf8), mediaType: "image/png")]
         check(!watched.draftIsEmpty && !watched.composerDraft.isEmpty, "an attachment alone makes the draft sendable")
         watched.composerDraft.attachments = []
         check(watched.draftIsEmpty, "removing the last attachment empties the draft")
@@ -117,15 +118,13 @@ struct SessionPaneTest {
         check(offlinePane.detailLoadError != nil && offlinePane.detail == nil, "a failed first load is shown on the pane while it retries")
         check(offline.operationError == "An action failed.", "a failed session load leaves another operation's error alone")
         offline.closePane(offlinePane)
-        let picture = URL(fileURLWithPath: "/Volumes/shared/a picture.png")
+        let picture = ComposerAttachment(name: "a picture.png", data: Data("synthetic picture".utf8), mediaType: "image/png")
         let sent = await withCheckedContinuation { done in
             offline.send(" look at this ", attachments: [picture], to: "X") { done.resume(returning: $0) }
         }
-        check(!sent && offline.draft(for: "X").text == "look at this" && offline.draft(for: "X").attachments == [picture], "a failed send returns the text and the attachments to the draft")
-        let onlyFile = await withCheckedContinuation { done in
-            offline.send("", attachments: [picture], to: "Y") { done.resume(returning: $0) }
-        }
-        check(!onlyFile && offline.draft(for: "Y").text.isEmpty && offline.draft(for: "Y").attachments == [picture], "a failed attachment-only send keeps the attachment")
+        let failed = offline.localSends["X"]?.first
+        check(!sent && failed?.failure != nil && failed?.text == "look at this" && failed?.attachments == [picture], "a failed send stays in the transcript with its attachments, ready to retry")
+        check(offline.draft(for: "X").text.isEmpty && offline.draft(for: "X").attachments.isEmpty, "a failed send is not also restored to the composer")
         let catalog = AgenthailModel(connecting: false)
         let codexSurface = try! JSONDecoder().decode(SurfaceState.self, from: Data(#"{"name":"codex","connected":true,"health":"healthy","capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}}"#.utf8))
         catalog.snapshot = DashboardSnapshot(updatedAt: "2026-10-04T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [codexSurface], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")

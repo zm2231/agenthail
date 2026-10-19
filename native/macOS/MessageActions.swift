@@ -1,0 +1,95 @@
+import AppKit
+import SwiftUI
+
+struct MessageActions: View {
+    let text: String
+    let emphasized: Bool
+    var onEdit: (() -> Void)? = nil
+    @State private var copied = false
+
+    var body: some View {
+        HStack(spacing: 2) {
+            button(copied ? "Copied" : "Copy", symbol: copied ? "checkmark" : "doc.on.doc", action: copy)
+            if let onEdit {
+                button("Edit", symbol: "pencil", action: onEdit)
+            }
+        }
+        .foregroundStyle(emphasized || copied ? DesktopPalette.text2 : DesktopPalette.muted)
+        .animation(.easeOut(duration: 0.12), value: emphasized)
+    }
+
+    private func button(_ label: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11.5))
+                .frame(width: 24, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
+    }
+
+    private func copy() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        copied = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            copied = false
+        }
+    }
+}
+
+struct MessageEditor: View {
+    @State private var text: String
+    let onCancel: () -> Void
+    let onSend: (String) -> Void
+    @FocusState private var focused: Bool
+
+    init(text: String, onCancel: @escaping () -> Void, onSend: @escaping (String) -> Void) {
+        _text = State(initialValue: text)
+        self.onCancel = onCancel
+        self.onSend = onSend
+    }
+
+    private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            TextField("Edit message", text: $text, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+                .lineSpacing(3)
+                .lineLimit(1...16)
+                .focused($focused)
+                .onSubmit(send)
+                .onKeyPress(.escape) {
+                    onCancel()
+                    return .handled
+                }
+                .padding(.horizontal, 13)
+                .padding(.vertical, 9)
+                .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(DesktopPalette.accent))
+            HStack(spacing: 8) {
+                Text("Sends as a new message")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DesktopPalette.text2)
+                Button("Cancel", action: onCancel)
+                    .controlSize(.small)
+                Button("Send", action: send)
+                    .controlSize(.small)
+                    .buttonStyle(.borderedProminent)
+                    .tint(DesktopPalette.accent)
+                    .disabled(trimmed.isEmpty)
+            }
+        }
+        .onAppear { focused = true }
+    }
+
+    private func send() {
+        guard !trimmed.isEmpty else { return }
+        onSend(trimmed)
+    }
+}

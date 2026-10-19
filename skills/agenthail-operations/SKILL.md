@@ -88,7 +88,8 @@ Claude's control capabilities depend on its transport. Native UDS messages
 cannot execute slash commands, steer a running turn, or correlate message IDs
 with transcript turns for `send --reply` / `--stream`. Use `last` to inspect
 the transcript or native `SendMessage` for an explicit reply. Compact, model,
-interrupt, and steer are typed controls that require a Remote Control attachment.
+interrupt, and steer are typed controls that require a Remote Control attachment;
+a session the Claude host runs takes interrupt and steer through the host.
 A receipt with `evidence: "transport_accepted"` only proves socket acceptance;
 receiver policy can still hold or deny the message. Do not claim model delivery
 from it. Report the immediate send status and target as returned: Sent, Queued,
@@ -127,14 +128,18 @@ target has no writable transport.
 
 ## Find And Resolve Targets
 
-For a user-facing current view, show open Claude sessions, busy or loaded Codex
-sessions active within the configured recent window (five hours by default),
-and busy or recently active Notion threads. Use `--all` only when the user asks
-for history or a target is older or missing from the current view.
+With the daemon running, `list` shows the daemon's current scope: open Claude
+sessions, busy or loaded Codex sessions active within the configured recent
+window (five hours by default), and busy or recently active Notion threads.
+`--all` lists every session that is not archived, and `--archived`
+lists the archived ones. Use `--all` only when the user asks for history or a
+target is older or missing from the current view. `--project <name|id>` keeps
+one project's sessions; `agenthail project list` names the projects.
 
 ```bash
 agenthail list --json
 agenthail list --all --json
+agenthail list --all --project agenthail --json
 ```
 
 `doctor` is a health probe. Its per-surface session counts are full discovery
@@ -197,7 +202,10 @@ terminal thread with `agenthail codex` in a human TTY. It uses the caller's
 current directory unless `--cd` is provided. `agenthail launch codex` starts
 Desktop with a writable bridge but does not itself create a thread.
 
-Create Claude background sessions with `agenthail thread create claude "task" --alias worker --json`.
+Create Claude sessions with `agenthail thread create claude "task" --alias worker --json`.
+The session runs in Agenthail's Claude host, which needs the daemon running. It
+has no Remote Control and the host denies tools its permission mode would prompt
+for, so pick a permission mode that allows the work.
 A Claude session ID is the conversation ID (the transcript name). The process,
 messaging socket and Remote Control session are attachments; Remote Control is
 never the identity. `/branch` and `/clear` create a new session without an alias
@@ -205,19 +213,20 @@ never the identity. `/branch` and `/clear` create a new session without an alias
 After `/branch`, `agenthail whoami` names the branch. Move an alias only with
 `agenthail identify <target> <name>`.
 
-Use `thread status`, `logs`, `stop` or `resume` with the alias. Preserve unknown
-launch outcomes; inspect `claude agents --json --all` before retrying.
+Use `thread status`, `stop` or `resume` with the alias; a host session has no
+`logs`, so read it with `agenthail last`. Preserve unknown launch outcomes;
+inspect `agenthail list` before retrying.
 Send to a Claude session whose process has ended (a stopped or finished
 background job, or a closed terminal session) like any other session: the send
-resumes it in the background by its session ID and delivers the message once.
+resumes it in the Claude host by its session ID and delivers the message once.
 This holds for every sender, voice delegation included. Do not run `thread resume` first. The alias and session ID keep working
 afterwards. If another process still holds the conversation but cannot take
 messages yet, the send is queued and goes out once it can, or once that process
 exits and the session is resumed. An `unknown` or `submitted` outcome means the
 resume or the delivery may have happened; inspect the session before sending
-again. `thread resume` remains for waking a background job without a message;
-it returns once the job can take messages, and a job that fails to start
-returns Claude's failure detail.
+again. `thread resume` remains for waking a session without a message; it
+returns once the session can take messages, and a session Claude refuses to
+start returns Claude's output.
 
 Codex supports `thread fork <target>` and `thread queue <target> <list|add|update|delete|reorder|start>`.
 Native queue adds require `--client-id <stable-id>`; reuse it only for retries
@@ -271,7 +280,7 @@ AgentHail has four distinct completion behaviors:
 
 1. `send --reply` waits for one completed turn.
 2. `stream` or `send --stream` watches one live Claude or Codex turn.
-3. A relay durably subscribes to successful completions. Choose `--when turn_finished` (default) for each matching turn, or `--when goal_completed` for the latest pending result after an explicit completed goal and finished final turn. Goal handoffs require source goal support. A handoff to a closed Claude Code target resumes it. Active routes remain until removed; queued messages retain the one-hour expiry.
+3. A relay durably subscribes to successful completions. Choose `--when turn_finished` (default) for each matching turn, or `--when goal_completed` for the latest pending result after an explicit completed goal and finished final turn. Goal handoffs require source goal support. A handoff to a closed Claude Code target resumes it. Active routes remain until removed; queued messages wait until the target can take them.
 4. Daemon notifications alert the human through the AgentHail Mac app and,
    when paired, the optional iPhone app.
 
@@ -293,7 +302,7 @@ require the daemon. `relay list` derives per-route firing evidence from that
 enqueue ledger, reporting each rule's fire count and last-fired timestamp in
 both text and `--json` output. `--once` deactivates the rule after its first
 matching completion while retaining that firing evidence. A relay that cannot be
-delivered or expires is reported as a delivery problem to the human; the source
+delivered is reported as a delivery problem to the human; the source
 agent is not sent a failure notice, because its reply to that notice would be
 relayed again.
 
@@ -339,12 +348,19 @@ The daemon delivers queued work when a target becomes idle. Queue delivery is
 ordered per session. Known pre-dispatch failures retry with bounded backoff.
 Repeated failures become dead letters. Uncertain external effects remain in
 audit history and are never automatically resent. Proven problems are reported
-by the daemon. Pending
-messages expire after one hour. Expired items leave the active queue, appear in
-history, and remain available through `queue list --all`. `--target` filters by
-destination, `--mine` includes messages sent by or addressed to the caller
-session, and `--cwd` includes target sessions in that normalized workspace and
-its descendants.
+by the daemon. Pending messages never expire; they leave the queue only when
+delivered, canceled, or failed. Each pending row reports `heldBy` (`waiting`,
+`busy`, `offline`, `unknown`, `retrying`, `notLoaded`, `hostUnreachable` (a send a paired host has not received), `behind` an earlier
+message) and its age in text output. Text output shows each row's status, with
+its delivery evidence beside it when they differ: `delivered (remote queued)`
+is a send a paired host accepted into its own queue. A target whose turn is waiting on its user
+(a Claude question, plan approval or permission prompt, a Codex approval or
+input request) carries `waitingOn` and lists as `wait`; messages to it,
+including steers, are queued until the user answers. Do not interrupt it to get
+a message through. Finished items appear in history and remain available through
+`queue list --all`. `--target` filters by destination, `--mine` includes
+messages sent by or addressed to the caller session, and `--cwd` includes target
+sessions in that normalized workspace and its descendants.
 
 ## Channels
 
@@ -380,9 +396,8 @@ An unqualified target that matches on two hosts is an error listing each
 `interrupt`, `reply`, `last`, `stream` and `thread create --host forge` reach
 paired hosts, and `--cwd` with `--host` is a path on that host. A session on an
 unreachable host stays listed as `down` with the host named. A send to it is
-held by the local daemon (`queued`) for up to an hour and delivered once if the
-host returns in that time; otherwise it expires and appears in delivery history
-as expired. `delivery submitted` means the outcome is unknown, so do not resend. Other
+held by the local daemon (`queued`, held by `hostUnreachable`) and delivered
+once when the host returns; it never expires. `delivery submitted` means the outcome is unknown, so do not resend. Other
 commands refuse remote sessions.
 
 ## Daemon
@@ -444,8 +459,8 @@ agenthail codex
 is reachable and on Codex's app-server daemon otherwise. `launch codex`
 opens Codex if needed and verifies its local connection. `agenthail codex` starts
 an interactive writable terminal session and requires a human TTY.
-Claude background sessions start with `thread create claude`; Claude authentication
-must already be configured. Notion requires a signed-in browser.
+Claude sessions start in the Claude host with `thread create claude`, which
+needs the daemon running; Claude authentication must already be configured. Notion requires a signed-in browser.
 
 ## Verification Boundary
 
@@ -474,6 +489,6 @@ the user's request calls for them, then verify the resulting status or receipt.
 
 Relay completion capture and per-route consumption use durable SQLite cursors.
 Check `pendingCount`, `eventCursor`, and `lastError` in `relay list --json` when a handoff waits.
-Capture/enqueue failures retain retry state. Delivery failure/expiry records a human-visible
+Capture/enqueue failures retain retry state. Delivery failure records a human-visible
 problem without sending a failure notice into the relay source. Do not equate a queued
 receipt with destination consumption. See `docs/maintainers/durable-relays.md` for recovery.

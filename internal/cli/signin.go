@@ -60,11 +60,15 @@ func (a *App) signinStatus(ctx context.Context) []signin.Status {
 	}
 	statuses := make([]signin.Status, 0, len(signin.Consumers))
 	for _, consumer := range signin.Consumers {
-		if a.Registry == nil {
-			statuses = append(statuses, signin.NewStatus(consumer, signin.Selection{}, errors.New("the registry is not open")))
+		r, err := a.openRegistry()
+		if err == nil && r == nil {
+			err = errors.New("the registry is not open")
+		}
+		if err != nil {
+			statuses = append(statuses, signin.NewStatus(consumer, signin.Selection{}, err))
 			continue
 		}
-		selection, _, err := a.Registry.SigninSelection(consumer.ID)
+		selection, _, err := r.SigninSelection(consumer.ID)
 		statuses = append(statuses, signin.NewStatus(consumer, selection, err))
 	}
 	return statuses

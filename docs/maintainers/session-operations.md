@@ -2,7 +2,7 @@
 
 Agenthail exposes these operations through the CLI and the authenticated dashboard API. The web dashboard has creation controls, Codex turn options, and a session operations form. The native iPhone companion supports Claude background creation with name, worktree, named-agent, model, effort and permission options, plus ordinary session and Agenthail queue controls. The Mac app has Claude background lifecycle, Codex forks, native Codex queue editing, and Codex effort and plan mode; see [native apps](../native-apps.md). On iPhone, use the web dashboard, Mac app or CLI for those.
 
-The immediate send status in CLI JSON and dashboard/mobile API results is `sent`, `queued`, or `submitted`, followed by the target. `sent` means the selected transport accepted the request, `queued` means Agenthail durably accepted delayed work, and `submitted` means Agenthail recorded the intent without asserting provider acceptance. Human/API sends without an agent sender use the durable operator identity. Channel sends count `submitted` members separately from `sent` and `queued`. Receipt copy does not ask the sender to investigate read or confirmation state. Success is silent; proven delivery problems appear as notices. Internal audit evidence retains `transport_accepted`, `held`, `delivered`, `reply_observed`, `failed`, `unknown`, `expired`, and `canceled`. Socket acceptance never proves model completion.
+The immediate send status in CLI JSON and dashboard/mobile API results is `sent`, `queued`, or `submitted`, followed by the target. `sent` means the selected transport accepted the request, `queued` means Agenthail durably accepted delayed work, and `submitted` means Agenthail recorded the intent without asserting provider acceptance. Human/API sends without an agent sender use the durable operator identity. Channel sends count `submitted` members separately from `sent` and `queued`. Receipt copy does not ask the sender to investigate read or confirmation state. Success is silent; proven delivery problems appear as notices. Internal audit evidence retains `transport_accepted`, `held`, `delivered`, `reply_observed`, `failed`, `unknown`, and `canceled`. Socket acceptance never proves model completion.
 
 `agenthail list --json` returns discovered sessions together with an `errors`
 object. A failed optional surface is a warning when at least one surface completed
@@ -11,11 +11,28 @@ rows take the local transcript's latest task lifecycle when it is known and the
 shared database state otherwise. Claude peer `idle` is trusted only from peers advertising idle
 notifications or from a readable transcript; otherwise the state is unknown.
 
+With the daemon running, `agenthail list` reads the daemon catalog and applies
+the daemon's scopes: current by default, or `--all` or `--archived`.
+The scopes count session families, so a subagent appears with its root. The
+table's PROJECT column and the JSON `project` field are the daemon's project for
+the session, and `--project <name|id>` keeps one project; a name shared by several projects
+is an error that lists their ids. See
+[projects](projects.md) for the identity and archive rules. Without the daemon,
+`list` discovers sessions directly and prints the working directory in place
+of the project. It shows the 15 most recently active session families and
+leaves out Notion threads idle for more than seven days; `--all` lists every
+saved session; `--project` and `--archived` need
+the daemon.
+
+`agenthail project list [--all]`, `project add <path>`, and
+`project <archive|unarchive> <name|id>` manage projects.
+`agenthail thread <archive|unarchive> <target>` archives one session. Both route
+to the host that owns the project or session.
+
 `agenthail list --cwd <path>` retains sessions whose normalized workspace is that
 directory or a descendant. Existing symlinks resolve before comparison, and path
-components, not string prefixes, define ancestry. `--wide` prints each full normalized
-workspace; ordinary table output also uses the full path when multiple sessions share
-a workspace basename. JSON always retains the complete `cwd` field. CWD narrows
+components, not string prefixes, define ancestry. `--wide` prints each full
+normalized workspace. JSON always retains the complete `cwd` field. CWD narrows
 discovery; it never selects a caller identity.
 
 `agenthail last <target> [count] --timeout 30s` and
@@ -52,17 +69,49 @@ the existing dashboard settings write path. Read-only targets fail before
 dispatch. An unknown delivery outcome must be inspected before an explicit retry;
 it is never resent automatically.
 
-## Claude background sessions
+A busy target can be waiting on its user. `surface.Waiting` on the session and
+on its turn observation carries the kind (`question`, `approval`, `input`), a
+stable id and when it was first seen. Claude reads it from the live process's
+record, `sessions/<pid>.json`: `"status":"waiting"` with `waitingFor` set to
+`input needed` for `AskUserQuestion` (kind `question`) or `permission prompt`
+for a plan approval or a tool permission (kind `approval`), and
+`statusUpdatedAt` as when it started. The id is
+`<conversation>:<kind>:<statusUpdatedAt>`. Claude 2.1.303 writes a pending tool
+call to the transcript only once it resolves, so the transcript cannot show an
+open question. Codex reads it from the thread status, `active` with
+`waitingOnApproval` or `waitingOnUserInput` in `activeFlags`, and names it
+`<thread>:<kind>` in both listings and observations. The registry keeps the
+current question in `session_runtime`. Each read of a turn and the write of what
+it waits on happen as one step per session, so a slower read never overwrites a
+newer one. A catalog row is published inside that same step, so an answer
+recorded while a row is being written waits for it and then asks for a fresh
+discovery pass. A catalog listing that disagrees with the record is confirmed by
+observing the turn before anything changes. Each new question is announced on
+the desktop and to paired devices (`session.waiting`) and marked announced once
+both were attempted; a question recorded but not yet announced when the daemon
+stops is announced after it restarts. Both notifications carry a key derived
+from the session and question: the desktop notification identifier and the APNs
+`apns-collapse-id`, so an announcement repeated after a stop replaces the one
+already shown rather than adding a second. While a target waits, nothing is
+steered into it: `send` under the `steer` policy and `steer` both queue a steer,
+with a receipt that names the wait. The daemon steers queued steers once the
+question is answered and delivers other messages when the turn ends. Queue rows
+report `heldBy`: `waiting`, `busy`, `offline`, `unknown`, `retrying`,
+`notLoaded` (an unloaded conversation that only Codex Desktop can load), `hostUnreachable` (a send a paired host has not received), or
+`behind` when an earlier message to the same session is still open. Empty means
+the next scan claims that message: a drain takes only a session's earliest open
+message, or its earliest steer while a turn runs and the target can steer.
+
+## Claude sessions
 
 ```sh
 agenthail thread create claude "Investigate the failing build" --cwd /path/to/repo --alias investigator --name investigator --effort high --permission-mode plan --json
 agenthail thread status @investigator --json
-agenthail thread logs @investigator --json
 agenthail thread stop @investigator --json
 agenthail thread resume @investigator --json
 ```
 
-Creation runs the installed Claude CLI with `--bg`. Optional flags are `--model`, `--name`, `--worktree <name>`, `--agent <name>`, `--permission-mode` and `--effort`. The working directory defaults to the caller's directory. Supported permission modes are `acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk` and `plan`; Claude effort values are `low`, `medium`, `high`, `xhigh` and `max`. Model availability and native permission behavior remain Claude's responsibility.
+Creation opens a new conversation in the [Claude host](claude-host.md) and sends the message as its first turn, a person's turn under the delivery intent's uuid. The host session has no Remote Control; the host answers its permission prompts. The daemon must be running, since it runs the host; without the host nothing is created. The `claude-bg` launcher still starts a `claude --bg` background job when a client selects it. Optional flags are `--model`, `--name`, `--worktree <name>`, `--agent <name>`, `--permission-mode` and `--effort`. The working directory defaults to the caller's directory. Supported permission modes are `acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk` and `plan`; Claude effort values are `low`, `medium`, `high`, `xhigh` and `max`. Model availability and native permission behavior remain Claude's responsibility.
 
 Model discovery and background lifecycle commands share executable selection and environment: explicit `AGENTHAIL_CLAUDE_BIN`, then `claude` on PATH, then the native installation at `~/.local/bin/claude`. An invalid explicit choice fails without choosing another installation. `agenthail daemon install` saves the explicit choice in its launchd configuration. Native installation discovery works when macOS launches Agenthail without the interactive shell's PATH. These commands run without the caller's `CMUX_` variables. Inside a cmux terminal, cmux's `claude` wrapper otherwise injects a temporary `--settings` file and an `--mcp-config` that Claude saves as the job's respawn flags; after a reboot the file is gone and every resume fails before init.
 
@@ -70,7 +119,7 @@ Use `@alias` or `claude:<session-id>` as a target. The `claude/name` transcript 
 
 For native messaging, Agenthail resolves the session first, then reads its PID registration and selects `messagingSocketPath`. It verifies session identity, a live PID, the expected `/tmp/cc-socks/<pid>.sock` path, socket ownership, and the process-start identity. Agenthail's verifier and peer registrations use `LC_ALL=C TZ=UTC`; native Claude records from 2.1.267 onward use UTC, while older records use local time. A stale process identity is rejected. Relays store canonical session IDs and use the shared queue and adapter delivery path; they do not retain a socket path across process changes.
 
-Socket messaging and Remote Control have different capabilities. Native socket-only sessions support messages and transcript inspection, but not compact, model switching, interrupt or steering. Sessions with a Remote Control attachment can use those typed controls even when ordinary messages use the native socket. Controls are never encoded as queued slash-text messages. Background status, logs, stop and resume use the Claude CLI lifecycle interface. Socket delivery is not evidence that a Remote Control operation works, and queue acceptance is not proof that Claude consumed the message. Composer messages from the web dashboard and native apps declare `"author": "person"` and use the Remote Control attachment when the session has one, so they arrive as the user's own turn with `delivered` rather than `transport_accepted` evidence.
+Socket messaging and Remote Control have different capabilities. Native socket-only sessions support messages and transcript inspection, but not compact, model switching, interrupt or steering. Sessions with a Remote Control attachment can use those typed controls even when ordinary messages use the native socket. Controls are never encoded as queued slash-text messages. Status, stop and resume of a host session go through the host; a `claude-bg` job uses the Claude CLI lifecycle interface, which also has logs. Socket delivery is not evidence that a Remote Control operation works, and queue acceptance is not proof that Claude consumed the message. Composer messages from the web dashboard and native apps declare `"author": "person"` and use the Remote Control attachment when the session has one, so they arrive as the user's own turn with `delivered` rather than `transport_accepted` evidence.
 
 Claude compact requests are stored as typed queue operations. The daemon waits
 for the target to become idle, invokes `/compact` through Remote Control, and
@@ -79,25 +128,25 @@ marks the queue row delivered only after the local transcript records a new
 command, the row becomes `unknown` for operator review instead of being retried
 as either a control or a message.
 
-Claude assigns the background ID. Agenthail parses that ID from the native launch response, then resolves the full session ID through `claude agents --json --all`. It never assumes that a supplied `--session-id` controls background identity. The registered session and optional alias become the targets for later messages. A successful launch confirms registration, not completion of the first model turn; there is no fabricated turn receipt.
+For a `claude-bg` job, Claude assigns the background ID. Agenthail parses that ID from the native launch response, then resolves the full session ID through `claude agents --json --all`. It never assumes that a supplied `--session-id` controls background identity. The registered session and optional alias become the targets for later messages. A successful launch confirms registration, not completion of the first model turn; there is no fabricated turn receipt.
 
 Claude Code lets one conversation stay open in several processes; resuming it elsewhere only warns. The conversation has one row whatever its processes: the process that opened it first is attached to the row, sends to the session reach it, and a later process is addressed by its PID. When a process moves to another conversation (`/branch`, `/clear`, `/resume`), registering it under the new conversation detaches it from the old row; nothing else moves. Commands run from either process still resolve to that session. Because a sender's process is unknown when several share its ID, replies to it are addressed to the session rather than to one process's socket.
 
-Status, logs, stop and resume operate only on native background records. Interactive sessions do not acquire background lifecycle controls merely by appearing in discovery. Destructive removal is not exposed.
+Status, stop and resume operate on sessions the host runs and on `claude-bg` jobs; logs exist only for `claude-bg` jobs, and a host session points to `agenthail last` instead. Interactive sessions do not acquire background lifecycle controls merely by appearing in discovery. Destructive removal is not exposed.
 
 ### Delivering to a closed Claude session
 
 A Claude conversation is identified by its session ID, the name of its transcript `projects/<project>/<session-id>.jsonl`. A background job ID is that ID's first eight characters, a PID lasts one process, and a Remote Control session ID lasts one registration. Registry rows are keyed by the session ID; the PID, messaging socket and Remote Control ID are attachments read from the live process record whose `sessionId` matches. So an alias follows the conversation through any number of resumes, and a `/branch` gets its own row (with `forked_from`) while the alias stays on the original. Rows created before this keying were moved to their conversation ID in one schema step; `session_rekeys` records each move, `/api/state` returns it as `rekeyed`, and the catalog announced each move as `session.removed` with `rekeyedTo` so the apps move open panes and drafts to the new ID.
 
-`Claude.reach` makes a session reachable before anything is posted into its conversation. `Claude.Send` and `Claude.SendHumanTurn` call it, so whichever route `delivery.RouteFor` picks, every message sender does: CLI `send`, dashboard and app sends including a person's composer turn, channel sends, voice delegation, and the daemon queue that carries relays and queued messages. `/compact` and `/model` call it too. A person's turn needs the web bridge, so when a resume leaves only the socket that delivery is unavailable and is routed again on retry. Steer and interrupt act only on a running turn, so they never resume. Voice selects its target from the registry by alias or exact session ID and refreshes it from the surface's live session for that exact ID. A surface whose sends wake a closed session, as Claude's do, takes the registered row when the session is not live, so a closed Claude session can be selected and a delegation wakes it, showing "Waking up" while it does. The reply stream outlives the request that started the delegation. Voice speaks the reply only when the send kept the session ID and transport its stream was opened for and the route carries turns; otherwise the request is delivered and voice says it cannot follow that session's reply. `reach` uses only Claude's own records:
+`Claude.reach` makes a session reachable before anything is posted into its conversation. `Claude.Send` and `Claude.SendHumanTurn` call it, so whichever route `delivery.RouteFor` picks, every message sender does: CLI `send`, dashboard and app sends including a person's composer turn, channel sends, voice delegation, and the daemon queue that carries relays and queued messages. A resumed conversation runs in the Claude host, which takes a person's turn under its delivery intent's uuid; agent messages take the resumed process's native socket. Steer and interrupt act only on a running turn, so they never resume. `/compact` and `/model` need Remote Control, which a host session never has, so they never call `reach`: they act only on an already running process with Remote Control and report unsupported otherwise. Voice selects its target from the registry by alias or exact session ID and refreshes it from the surface's live session for that exact ID. A surface whose sends wake a closed session, as Claude's do, takes the registered row when the session is not live, so a closed Claude session can be selected and a delegation wakes it, showing "Waking up" while it does. The reply stream outlives the request that started the delegation. A delegation is the person's turn. Voice speaks the reply only when the send kept the session ID its stream was opened for and the person's route to the session carries turns; a resume in the host changes the session's transport but not its ID, so voice follows the resumed session's reply. Otherwise the request is delivered and voice says it cannot follow that session's reply. `reach` uses only Claude's own records:
 
 - A live process whose session record has a validated messaging socket or a Remote Control ID: the message goes to it, and the session row is re-registered if its process changed.
 - A live process for the conversation without either, or a background job that is still starting and has no record yet: the delivery is held. A send queues it, and the queue retries it until the process can take messages, or until it exits and the conversation is resumed. No second process is started.
-- No process: `claude --bg --resume <session-id>` in the conversation's working directory (the job's, else the session's, else the transcript's), without a prompt, so only the user's message reaches the conversation. A terminal session resumes this way too and becomes a background job. The send then waits up to 10 seconds for the resumed process's session record to become reachable. A session that was reached through Remote Control waits for the resumed process to attach Remote Control again, so its transport stays the same, and uses the messaging socket only if Remote Control has not returned by then. When a resume leaves only the socket, `send --reply` and `--stream` deliver the message and say that its reply is read with `agenthail last`, since the turn cannot be followed from that send. Claude prints its `backgrounded` line before the session initializes, and the job state is not evidence either: a resumed idle job keeps reporting `done`.
+- No process: the Claude host opens the conversation with `resume` in its working directory (the job's, else the session's, else the transcript's), without a prompt, so only the sender's message reaches the conversation. A terminal or background session resumes this way too and becomes a host session without Remote Control. The send then waits up to 10 seconds for the host's process to be listed. An agent message to it takes the native socket, so `send --reply` and `--stream` deliver it and say that its reply is read with `agenthail last`. Without a running host the delivery is held.
 
-Resumes of one conversation are serialized across Agenthail processes by `~/.agenthail/claude-resume/<session-id>.lock`, held from the liveness check through the wait, so concurrent senders resume once and each message is delivered once. Claude runs without the caller's `CMUX_` variables, as for every background command; when Claude still reports a copy under another ID instead of the requested session, the copy is stopped and the outcome is unknown. A resume that does not become reachable in time, or whose command fails after it may have started, is also unknown: the delivery stays `submitted`, a queued item is dead-lettered as unknown, and nothing is retried. A job record that this resume marks failed or crashed while no process holds the conversation is a definite failure carrying Claude's `detail`; nothing was sent. A record state counts only when its `updatedAt` is no earlier than the resume.
+Resumes of one conversation are serialized across Agenthail processes by `~/.agenthail/claude-resume/<session-id>.lock`, held from the liveness check through the wait, so concurrent senders resume once and each message is delivered once. The host opens a conversation by its id, so it cannot start a copy. A process from an earlier host that still runs the conversation holds the delivery. A Claude that exits before it starts has refused the resume: the delivery fails with `Claude refused to resume <id>: <Claude's output>` and nothing was sent. A resume whose answer from the host is lost, or that the host opened but did not list in time, is unknown: the delivery stays `submitted`, a queued item is dead-lettered as unknown, and nothing is retried.
 
-Observation reads a session whose process exited as idle when no other process holds its conversation, so its queue drains into a resume, and as offline while another process, including a starting job, holds it. A target resolves to a registered session that discovery no longer lists only when it names that session exactly: an alias, a session ID, or `surface:<id>`. Name and folder fragments never resolve to historical sessions. `agenthail thread resume` uses the same path for a background job without sending a message.
+Observation reads a session whose process exited as idle when no other process holds its conversation, so its queue drains into a resume, and as offline while another process, including a starting job, holds it. A target resolves to a registered session that discovery no longer lists only when it names that session exactly: an alias, a session ID, or `surface:<id>`. Name and folder fragments never resolve to historical sessions. `agenthail thread resume` uses the same path without sending a message. For a host session, `thread status` reads the host's listing, `thread stop` closes the session in the host, and `thread logs` is refused: the host keeps no background log, so read the transcript with `agenthail last`.
 
 If creation returns a session, that session is registered before the initial-turn result is reported. An ambiguous initial-turn outcome records a durable `delivery_intents` row targeting that session and returns a neutral, non-retryable `submitted` result with its `deliveryId`; no automatic retry occurs. A definitive initial-turn failure records a failed delivery problem and returns a typed failure while preserving the created session. If the session identity is absent, the result is `{ok:false,status:"failed",retryable:false,unknown,error}`, where `unknown` is `true` when the initial-turn outcome is ambiguous and `false` for a definite failure; inspect the native catalog before any explicit retry of an unknown outcome. If the durable intent cannot be recorded, the result is an explicit bounded failure that carries the created session.
 

@@ -12,7 +12,7 @@ type routeFake struct {
 
 func (f routeFake) Name() SurfaceKind            { return KindClaude }
 func (f routeFake) Route(*Session, Author) Route { return f.route }
-func (f routeFake) SendHumanTurn(context.Context, *Session, string) (*SendResult, error) {
+func (f routeFake) SendHumanTurn(context.Context, *Session, string, Uploads) (*SendResult, error) {
 	return &SendResult{Accepted: true}, nil
 }
 

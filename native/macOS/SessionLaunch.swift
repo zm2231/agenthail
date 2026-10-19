@@ -61,7 +61,8 @@ enum SessionLaunchDecision: Equatable {
 
 struct SessionLaunchForm: Equatable {
     var agent = "claude"
-    var launcher: String?
+    var host: String?
+    var launcher: LauncherOption?
     var folder = ""
     var model = ""
     var effort = ""
@@ -69,14 +70,19 @@ struct SessionLaunchForm: Equatable {
 
     var usesFolder: Bool { agent != "notion" }
     var listsModels: Bool { agent != "notion" }
-    var setsEffort: Bool { listsModels && launcher == nil }
+    var setsEffort: Bool { listsModels && launcher?.isTerminal != true }
 
     var trimmedMessage: String { message.trimmingCharacters(in: .whitespacesAndNewlines) }
     var isComplete: Bool { !trimmedMessage.isEmpty && (!usesFolder || !folder.isEmpty) }
 
     mutating func switchAgent(to next: String) {
         guard next != agent else { return }
-        self = SessionLaunchForm(agent: next, folder: folder, message: message)
+        self = SessionLaunchForm(agent: next, host: host, folder: folder, message: message)
+    }
+
+    mutating func switchHost(to next: String?, folder nextFolder: String) {
+        guard next != host else { return }
+        self = SessionLaunchForm(agent: agent, host: next, folder: nextFolder, message: message)
     }
 
     mutating func selectModel(_ next: String) {
@@ -85,9 +91,9 @@ struct SessionLaunchForm: Equatable {
         effort = ""
     }
 
-    mutating func selectLauncher(_ next: String?) {
+    mutating func selectLauncher(_ next: LauncherOption?) {
         launcher = next
-        if next != nil { effort = "" }
+        if next?.isTerminal == true { effort = "" }
     }
 
     var cwd: String { usesFolder ? folder : "" }
@@ -97,7 +103,7 @@ struct SessionLaunchForm: Equatable {
         let effort = setsEffort ? effort : ""
         let turnSettings = agent == "codex" && !effort.isEmpty ? TurnSettings(effort: effort) : TurnSettings()
         let claude = agent == "claude" ? ClaudeCreationSettings(effort: effort) : ClaudeCreationSettings()
-        return try AgenthailAPI.creationBody(surface: agent, message: trimmedMessage, cwd: cwd, model: modelID, turnSettings: turnSettings, claude: claude, launcher: launcher)
+        return try AgenthailAPI.creationBody(surface: agent, message: trimmedMessage, cwd: cwd, model: modelID, turnSettings: turnSettings, claude: claude, launcher: launcher, host: host)
     }
 
     func efforts(models: [ModelOption]) -> [String] {

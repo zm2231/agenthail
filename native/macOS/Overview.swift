@@ -139,7 +139,6 @@ struct DeliveryOutcome: Identifiable, Equatable {
         case "reply_observed": return "Reply observed"
         case "failed": return "Failed"
         case "unknown": return "Delivery uncertain"
-        case "expired": return "Expired"
         case "canceled": return "Canceled"
         default: return kind.replacingOccurrences(of: "_", with: " ").capitalized
         }
@@ -148,7 +147,7 @@ struct DeliveryOutcome: Identifiable, Equatable {
     private static func tone(_ evidence: String) -> Tone {
         switch evidence {
         case "delivered", "reply_observed": return .done
-        case "failed", "unknown", "expired": return .problem
+        case "failed", "unknown": return .problem
         default: return .pending
         }
     }

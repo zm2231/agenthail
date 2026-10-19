@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -23,20 +24,6 @@ agents)
  ;;
 stop)
  printf 'stopped %s\n' "$2"
- ;;
---bg)
- [ "$2" = --resume ] || exit 2
- id=$(printf '%s' "$3" | cut -c1-8)
- if [ -f "$HOME/resume-copy" ]; then
-  printf 'backgrounded · %s (idle - send a prompt to start)\n' "$(cat "$HOME/resume-copy")"
-  exit 0
- fi
- if [ ! -f "$HOME/resume-never-ready" ]; then
-  record="{\"pid\":$AGENTHAIL_FIXTURE_PID,\"sessionId\":\"$3\",\"cwd\":\"$PWD\",\"bridgeSessionId\":\"$(cat "$HOME/resume-bridge")\",\"messagingSocketPath\":\"$(cat "$HOME/resume-socket" 2>/dev/null)\",\"status\":\"idle\",\"peerFeatures\":[\"notify_idle\"],\"startedAt\":$(date +%s)000}"
-  mkdir -p "$HOME/.claude/sessions"
-  (sleep "$(cat "$HOME/resume-delay" 2>/dev/null || printf 0)"; printf '%s' "$record" > "$HOME/.claude/sessions/$AGENTHAIL_FIXTURE_PID.json") >/dev/null 2>&1 &
- fi
- printf 'backgrounded · %s (idle - send a prompt to start)\n' "$id"
  ;;
 esac
 `
@@ -73,8 +60,6 @@ func New(t testing.TB) *Fixture {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
-	t.Setenv("AGENTHAIL_FIXTURE_PID", fmt.Sprint(f.PID))
-	f.write("resume-bridge", "")
 	return f
 }
 
@@ -118,7 +103,21 @@ func (f *Fixture) Job(id, conversation, cwd, state string, pid int) {
 // an empty bridge leaves it without Remote Control or a messaging socket.
 func (f *Fixture) Record(conversation, cwd, bridge string) {
 	f.t.Helper()
-	record := map[string]any{"pid": f.PID, "sessionId": conversation, "cwd": cwd, "status": "idle", "peerFeatures": []string{"notify_idle"}, "startedAt": time.Now().UnixMilli()}
+	f.RecordStatus(conversation, cwd, bridge, "idle", "", time.Time{})
+}
+
+// RecordStatus writes the record with the status Claude reports, such as
+// busy, or waiting with waitingFor "input needed" or "permission prompt"
+// since the given time.
+func (f *Fixture) RecordStatus(conversation, cwd, bridge, status, waitingFor string, since time.Time) {
+	f.t.Helper()
+	record := map[string]any{"pid": f.PID, "sessionId": conversation, "cwd": cwd, "status": status, "peerFeatures": []string{"notify_idle"}, "startedAt": time.Now().UnixMilli()}
+	if waitingFor != "" {
+		record["waitingFor"] = waitingFor
+	}
+	if !since.IsZero() {
+		record["statusUpdatedAt"] = since.UnixMilli()
+	}
 	if bridge != "" {
 		record["bridgeSessionId"] = bridge
 	}
@@ -147,32 +146,37 @@ func (f *Fixture) RemoveRecord() {
 // resumed records then name.
 func (f *Fixture) Listen() {
 	f.t.Helper()
-	if err := os.MkdirAll("/tmp/cc-socks", 0700); err != nil {
-		f.t.Fatal(err)
-	}
-	path := filepath.Join("/tmp/cc-socks", fmt.Sprint(f.PID)+".sock")
+	path := ClaimSocket(f.t, f.PID)
 	listener, err := net.Listen("unix", path)
 	if err != nil {
 		f.t.Fatal(err)
 	}
 	f.t.Cleanup(func() { _ = listener.Close() })
 	f.socket = path
-	f.write("resume-socket", path)
 }
 
-// ResumeBridge sets the Remote Control id the resumed process registers.
-func (f *Fixture) ResumeBridge(bridge string) { f.write("resume-bridge", bridge) }
-
-// ResumeDelay makes a resumed process write its record only after delay.
-func (f *Fixture) ResumeDelay(delay time.Duration) {
-	f.write("resume-delay", fmt.Sprintf("%.3f", delay.Seconds()))
+// ClaimSocket returns the messaging socket path Claude uses for pid, which
+// the test owns. Claude names the socket by its pid, so a file there that
+// nothing answers was left by an earlier process with the same pid and is
+// removed; one that answers is a live socket the test did not close.
+func ClaimSocket(t testing.TB, pid int) string {
+	t.Helper()
+	if err := os.MkdirAll("/tmp/cc-socks", 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join("/tmp/cc-socks", fmt.Sprint(pid)+".sock")
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		return path
+	}
+	if conn, err := net.DialTimeout("unix", path, time.Second); err == nil {
+		conn.Close()
+		t.Fatalf("a live socket already serves %s", path)
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	return path
 }
-
-// ResumeCopy makes claude report a copy under id instead of resuming.
-func (f *Fixture) ResumeCopy(id string) { f.write("resume-copy", id) }
-
-// ResumeNeverReady makes a resumed process never write its record.
-func (f *Fixture) ResumeNeverReady() { f.write("resume-never-ready", "") }
 
 // Invocations counts claude invocations whose arguments equal args.
 func (f *Fixture) Invocations(args ...string) int {
@@ -188,6 +192,75 @@ func (f *Fixture) Invocations(args ...string) int {
 	count := 0
 	for _, line := range strings.Split(string(data), "\n") {
 		if line == want {
+			count++
+		}
+	}
+	return count
+}
+
+// PeerManager answers the daemon's Claude peer manager socket under a home,
+// accepting every send and recording its message.
+type PeerManager struct {
+	mu       sync.Mutex
+	messages []string
+}
+
+func ListenPeerManager(t testing.TB, home string) *PeerManager {
+	t.Helper()
+	manager := &PeerManager{}
+	path := filepath.Join(home, ".agenthail", "claude-peers.sock")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			var request struct {
+				Message string `json:"message"`
+			}
+			if json.NewDecoder(conn).Decode(&request) == nil {
+				manager.mu.Lock()
+				manager.messages = append(manager.messages, request.Message)
+				id := fmt.Sprintf("peer-%d", len(manager.messages))
+				manager.mu.Unlock()
+				_ = json.NewEncoder(conn).Encode(map[string]any{"ok": true, "result": map[string]any{"uuid": id, "accepted": true}})
+			}
+			_ = conn.Close()
+		}
+	}()
+	return manager
+}
+
+// Count is how many sends carried exactly message.
+func (m *PeerManager) Count(message string) int {
+	return m.matching(func(sent string) bool { return sent == message })
+}
+
+// Containing is how many sends contained text.
+func (m *PeerManager) Containing(text string) int {
+	return m.matching(func(sent string) bool { return strings.Contains(sent, text) })
+}
+
+func (m *PeerManager) Messages() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.messages...)
+}
+
+func (m *PeerManager) matching(match func(string) bool) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, sent := range m.messages {
+		if match(sent) {
 			count++
 		}
 	}

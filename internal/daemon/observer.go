@@ -14,19 +14,12 @@ const (
 )
 
 func (d *Daemon) scanAndRelay(ctx context.Context) {
-	defer d.publishCatalogQueueCounts()
-	if expired, err := d.Registry.ExpireMessages(time.Now()); err != nil {
-		d.log.Printf("expire queued messages: %s", err)
-	} else {
-		if err := d.Registry.ReconcileAttentionItems(time.Now()); err != nil {
-			d.log.Printf("reconcile queue attention: %s", err)
-		}
-		if err := d.catalog.flushCommitted(); err != nil {
-			d.log.Printf("publish committed catalog events: %s", err)
-		}
-		if expired > 0 {
-			d.publishEvent("state.changed", "", map[string]any{"source": "queue-expired", "count": expired})
-		}
+	defer d.publishCatalogPresence()
+	if err := d.Registry.ReconcileAttentionItems(time.Now()); err != nil {
+		d.log.Printf("reconcile queue attention: %s", err)
+	}
+	if err := d.catalog.flushCommitted(); err != nil {
+		d.log.Printf("publish committed catalog events: %s", err)
 	}
 	watched, err := d.Registry.WatchedSessions()
 	if err != nil {
@@ -136,7 +129,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	d.syncRelays(ctx, adapter, session)
 	source, transport := session.Source, session.Transport
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
-	observation, err := adapter.Observe(operationCtx, session)
+	observation, err := d.observeTurn(operationCtx, adapter, session)
 	cancel()
 	if err != nil {
 		d.recordObservationFailure(session.ID)
@@ -155,6 +148,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.releaseSessionSource(session.ID, "active-turn")
 	}
 	session.Status = observation.Status
+	session.WaitingOn = observation.WaitingOn
 	if session.Source != source || session.Transport != transport {
 		if err := d.Registry.RegisterSession(*session); err != nil {
 			d.log.Printf("persist refreshed session %s: %s", d.resolveDisplay(session.ID), err)
@@ -219,12 +213,12 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	}
 	if desktopNotificationMessage != "" {
 		go func(desktopMessage, mobileMessage, sessionID, turnID string) {
-			if err := Notify("Agenthail", desktopMessage, sessionID); err != nil {
+			if err := Notify("Agenthail", desktopMessage, sessionID, ""); err != nil {
 				d.log.Printf("desktop notification: %s", err)
 			}
 			notificationCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			d.notifyPairedDevices(notificationCtx, "Agenthail", mobileMessage, sessionID, turnID, "turn.completed")
+			d.notifyPairedDevices(notificationCtx, mobileNotification{Title: "Agenthail", Message: mobileMessage, SessionID: sessionID, TurnID: turnID, EventType: "turn.completed"})
 		}(desktopNotificationMessage, mobileNotificationMessage, session.ID, observation.CompletedTurnID)
 	}
 	canLoadDesktopQueue := session.Surface == surface.KindCodex && session.Transport == "desktop" && observation.Status == surface.SessionStatus("notLoaded")
@@ -234,7 +228,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	}
 	canSteerQueued := steerQueued && surface.EffectiveCapabilities(adapter, session).Steer
 	canDrainQueue := (observation.Status == surface.StatusIdle && observation.ActiveTurnID == "") || canLoadDesktopQueue
-	canDrainSteer := canSteerQueued && observation.Status == surface.StatusBusy
+	canDrainSteer := canSteerQueued && observation.Status == surface.StatusBusy && observation.WaitingOn == nil
 	if canDrainQueue || canDrainSteer {
 		queued := d.Registry.QueueCount(session.ID)
 		if canDrainQueue {

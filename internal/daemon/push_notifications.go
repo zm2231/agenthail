@@ -20,6 +20,8 @@ var bundledPushRelayURL string
 
 var pushHTTPClient = &http.Client{Timeout: 12 * time.Second}
 
+var devicePushRetryDelay = 250 * time.Millisecond
+
 type pushRelayError struct {
 	status int
 	detail string
@@ -36,7 +38,14 @@ func PushRelayURL() string {
 	return strings.TrimRight(strings.TrimSpace(bundledPushRelayURL), "/")
 }
 
-func (d *Daemon) notifyPairedDevices(ctx context.Context, title, message, sessionID, turnID, eventType string) {
+// mobileNotification is one push to every paired device. CollapseID, when
+// set, makes a repeat of the same notification replace the earlier one on the
+// device instead of adding a second.
+type mobileNotification struct {
+	Title, Message, SessionID, TurnID, EventType, CollapseID string
+}
+
+func (d *Daemon) notifyPairedDevices(ctx context.Context, notification mobileNotification) {
 	targets, err := d.Registry.DevicePushTargets()
 	if err != nil {
 		d.log.Printf("load device push targets: %s", err)
@@ -55,7 +64,7 @@ func (d *Daemon) notifyPairedDevices(ctx context.Context, title, message, sessio
 			case <-ctx.Done():
 				return
 			}
-			if err := sendDevicePushWithRetry(ctx, target, title, message, sessionID, turnID, eventType); err != nil {
+			if err := sendDevicePushWithRetry(ctx, target, notification); err != nil {
 				d.log.Printf("mobile notification %s: %s", target.DeviceID, err)
 				if isTerminalPushRelayError(err) {
 					if removeErr := d.Registry.RemoveDevicePushTarget(target.DeviceID); removeErr != nil {
@@ -68,18 +77,18 @@ func (d *Daemon) notifyPairedDevices(ctx context.Context, title, message, sessio
 	wait.Wait()
 }
 
-func sendDevicePushWithRetry(ctx context.Context, target registry.DevicePushTarget, title, message, sessionID, turnID, eventType string) error {
+func sendDevicePushWithRetry(ctx context.Context, target registry.DevicePushTarget, notification mobileNotification) error {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			delay := time.Duration(attempt*attempt) * 250 * time.Millisecond
+			delay := time.Duration(attempt*attempt) * devicePushRetryDelay
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
 				return ctx.Err()
 			}
 		}
-		if err := sendDevicePush(ctx, target, title, message, sessionID, turnID, eventType); err != nil {
+		if err := sendDevicePush(ctx, target, notification); err != nil {
 			lastErr = err
 			var relayErr *pushRelayError
 			if errors.As(err, &relayErr) && isTerminalPushRelayError(err) {
@@ -97,7 +106,7 @@ func isTerminalPushRelayError(err error) bool {
 	return errors.As(err, &relayErr) && relayErr.status >= http.StatusBadRequest && relayErr.status < http.StatusInternalServerError && relayErr.status != http.StatusTooManyRequests
 }
 
-func sendDevicePush(ctx context.Context, target registry.DevicePushTarget, title, message, sessionID, turnID, eventType string) error {
+func sendDevicePush(ctx context.Context, target registry.DevicePushTarget, notification mobileNotification) error {
 	relayURL := PushRelayURL()
 	if relayURL == "" {
 		return errors.New("push relay is not configured")
@@ -105,11 +114,12 @@ func sendDevicePush(ctx context.Context, target registry.DevicePushTarget, title
 	payload, err := json.Marshal(map[string]string{
 		"installationId": target.InstallationID,
 		"credential":     target.Credential,
-		"title":          boundedNotificationText(title, 120),
-		"message":        boundedNotificationText(message, 1200),
-		"sessionId":      boundedNotificationText(sessionID, 240),
-		"turnId":         boundedNotificationText(turnID, 240),
-		"eventType":      boundedNotificationText(eventType, 80),
+		"title":          boundedNotificationText(notification.Title, 120),
+		"message":        boundedNotificationText(notification.Message, 1200),
+		"sessionId":      boundedNotificationText(notification.SessionID, 240),
+		"turnId":         boundedNotificationText(notification.TurnID, 240),
+		"eventType":      boundedNotificationText(notification.EventType, 80),
+		"collapseId":     boundedNotificationText(notification.CollapseID, 64),
 	})
 	if err != nil {
 		return err

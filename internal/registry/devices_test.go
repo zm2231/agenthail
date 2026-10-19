@@ -16,14 +16,14 @@ func TestDevicePairingIsScopedSingleUseAndRevocable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	device, token, err := r.CompleteDevicePairing(pairing.Secret, "")
+	device, token, err := r.CompleteDevicePairing(pairing.Secret, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if device.Name != "Test iPhone" || strings.Join(device.Scopes, ",") != "control,read" || !strings.HasPrefix(token, deviceTokenPrefix) {
 		t.Fatalf("device=%+v token=%q", device, token)
 	}
-	if _, _, err := r.CompleteDevicePairing(pairing.Secret, "Again"); !errors.Is(err, ErrPairingInvalid) {
+	if _, _, err := r.CompleteDevicePairing(pairing.Secret, "Again", ""); !errors.Is(err, ErrPairingInvalid) {
 		t.Fatalf("second pairing err=%v", err)
 	}
 	if _, err := r.AuthenticateDevice(token, "read"); err != nil {
@@ -51,14 +51,14 @@ func TestDevicePairingExpiresAndNeverStoresPlaintextSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(time.Millisecond)
-	if _, _, err := r.CompleteDevicePairing(expired.Secret, ""); !errors.Is(err, ErrPairingExpired) {
+	if _, _, err := r.CompleteDevicePairing(expired.Secret, "", ""); !errors.Is(err, ErrPairingExpired) {
 		t.Fatalf("expired pairing err=%v", err)
 	}
 	pairing, err := r.CreateDevicePairing("Tablet", []string{"read"}, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, token, err := r.CompleteDevicePairing(pairing.Secret, "")
+	_, token, err := r.CompleteDevicePairing(pairing.Secret, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestDevicePushTargetFollowsDeviceLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	device, _, err := r.CompleteDevicePairing(pairing.Secret, "")
+	device, _, err := r.CompleteDevicePairing(pairing.Secret, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestDeviceAuthenticationRecordsLastSeenAtMostOncePerMinute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, token, err := r.CompleteDevicePairing(pairing.Secret, "")
+	_, token, err := r.CompleteDevicePairing(pairing.Secret, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,5 +143,47 @@ func TestDeviceAuthenticationRecordsLastSeenAtMostOncePerMinute(t *testing.T) {
 	refreshed, err := r.AuthenticateDevice(token, "read")
 	if err != nil || refreshed.LastSeenAt == stale {
 		t.Fatalf("refreshed=%+v err=%v", refreshed, err)
+	}
+}
+
+func TestAHostTokenBelongsToTheHostThatPaired(t *testing.T) {
+	r := openTestRegistry(t)
+	hostPairing, err := r.CreateDevicePairing("forge", []string{"read", "control", HostScope}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.CompleteDevicePairing(hostPairing.Secret, "", "not-a-host"); err == nil {
+		t.Fatal("a malformed host id was accepted")
+	}
+	hostPairing, err = r.CreateDevicePairing("forge", []string{"read", "control", HostScope}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, hostToken, err := r.CompleteDevicePairing(hostPairing.Secret, "", "h0123456789ab")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if device, err := r.AuthenticateDevice(hostToken, "control"); err != nil || device.HostID != "h0123456789ab" {
+		t.Fatalf("host device=%+v err=%v", device, err)
+	}
+	phonePairing, err := r.CreateDevicePairing("phone", []string{"read", "control"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, phoneToken, err := r.CompleteDevicePairing(phonePairing.Secret, "", "h0123456789ab")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if device, err := r.AuthenticateDevice(phoneToken, "control"); err != nil || device.HostID != "" {
+		t.Fatalf("a device without the host scope took a host id: %+v err=%v", device, err)
+	}
+	devices, err := r.ListDevices(false)
+	if err != nil || len(devices) != 2 {
+		t.Fatalf("devices=%+v err=%v", devices, err)
+	}
+	for _, device := range devices {
+		if device.IsHost() != (device.HostID == "h0123456789ab") {
+			t.Fatalf("listed device %+v", device)
+		}
 	}
 }

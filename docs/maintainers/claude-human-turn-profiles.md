@@ -34,7 +34,9 @@ whatever the author.
 picks a message's transport. A person's message to an adapter that implements
 `surface.HumanTurnSender` and has a Remote Control attachment
 (`CanSendHumanTurn`) takes `RouteHumanTurn`. A Claude UDS session otherwise
-takes `RoutePeer`. Everything else takes `RouteSend`. `Dispatcher.deliver` and
+takes `RoutePeer`. A session the Claude host runs takes `RouteHumanTurn` for a
+person's message without Remote Control ([Claude session host](claude-host.md)).
+Everything else takes `RouteSend`. `Dispatcher.deliver` and
 [`drainClaimedMessage`](../../internal/daemon/outbox.go) both call it, and so do
 the CLI and voice checks that reject reply correlation on a peer route. The
 route is derived each time a message is sent and never stored, so a queued

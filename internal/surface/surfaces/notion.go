@@ -220,7 +220,10 @@ func (n *Notion) Capabilities() surface.Capabilities {
 	}
 }
 
-func (n *Notion) CatalogListComplete() bool { return false }
+func (n *Notion) CatalogList(ctx context.Context) ([]surface.Session, bool, error) {
+	sessions, err := n.List(ctx)
+	return sessions, false, err
+}
 
 func (a notionAccount) headers() map[string]string {
 	return map[string]string{
