@@ -739,6 +739,50 @@ func validManifest(root, socketDir, path string, manifest OwnershipManifest) boo
 	return manifest.RecordPath == filepath.Join(surface.ClaudeConfigDir(home), "sessions", strconv.Itoa(manifest.PID)+".json")
 }
 
+// On Linux Claude Code records procStart as the starttime field of
+// /proc/<pid>/stat, in clock ticks since boot.
+func IsClockTicks(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func ProcStartTicks(pid int) (string, error) {
+	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return "", err
+	}
+	return procStatStartTime(string(data))
+}
+
+func procStatStartTime(stat string) (string, error) {
+	end := strings.LastIndexByte(stat, ')')
+	if end < 0 {
+		return "", fmt.Errorf("malformed /proc stat")
+	}
+	fields := strings.Fields(stat[end+1:])
+	if len(fields) < 20 {
+		return "", fmt.Errorf("malformed /proc stat")
+	}
+	return fields[19], nil
+}
+
+// nativeProcessMatches reports whether pid is the process a native Claude
+// record names, by the start time Claude recorded for it.
+func nativeProcessMatches(pid int, recorded string) bool {
+	if IsClockTicks(recorded) {
+		actual, err := ProcStartTicks(pid)
+		return err == nil && actual == recorded
+	}
+	return processMatches(pid, recorded)
+}
+
 func processMatches(pid int, expected string) bool {
 	actual, err := ProcessStart(pid)
 	return err == nil && actual == expected
@@ -921,7 +965,7 @@ func validateNativeSender(home, socketDir, from string) error {
 	if json.Unmarshal(data, &record) != nil || record.MessagingSocketPath != socket || record.Agenthail != "" {
 		return errors.New("sender is not a current native Claude endpoint")
 	}
-	if record.PID != pid || record.ProcStart == "" || !processMatches(pid, record.ProcStart) {
+	if record.PID != pid || record.ProcStart == "" || !nativeProcessMatches(pid, record.ProcStart) {
 		return errors.New("sender native process identity is stale")
 	}
 	return nil

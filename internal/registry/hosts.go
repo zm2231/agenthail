@@ -622,14 +622,20 @@ type HostSend struct {
 	SessionID string
 	Message   string
 	Key       string
-	// SourceSessionID is one of this host's sessions, or empty to send as
-	// this host's operator. It goes qualified with this host's id, so the
-	// owner can reply across the pairing.
+	// SourceSessionID names the sender. One of this host's sessions goes
+	// qualified with this host's id, so the owner can reply across the
+	// pairing; only its own host names a session as a sender, so any other
+	// sender goes as this host's operator.
 	SourceSessionID string
 	BusyDelivery    string
 	// RelayHops counts relay legs so far, so a relay loop that crosses hosts
 	// still stops at the hop limit.
 	RelayHops int
+}
+
+func (r *Registry) localSession(id string) bool {
+	owner, err := r.SessionHost(id)
+	return err == nil && owner == ""
 }
 
 // QueueHostSend holds a send for its host.
@@ -643,7 +649,7 @@ func (r *Registry) QueueHostSend(send HostSend) (int64, error) {
 
 func (r *Registry) hostSendRequest(send HostSend) ([]byte, error) {
 	request := map[string]any{"action": "send", "sessionId": send.SessionID, "message": send.Message}
-	if send.SourceSessionID != "" {
+	if send.SourceSessionID != "" && r.localSession(send.SourceSessionID) {
 		identity, err := r.HostIdentity()
 		if err != nil {
 			return nil, err

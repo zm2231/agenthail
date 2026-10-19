@@ -140,6 +140,20 @@ func claudeProcStart(t *testing.T, pid int) string {
 	return strings.TrimSpace(string(out))
 }
 
+// nativeRecordStart is the procStart Claude Code itself records for pid:
+// /proc start ticks on Linux, "ps -o lstart" text in UTC elsewhere.
+func nativeRecordStart(t *testing.T, pid int) string {
+	t.Helper()
+	if runtime.GOOS == "linux" {
+		ticks, err := ProcStartTicks(pid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ticks
+	}
+	return claudeProcStart(t, pid)
+}
+
 type readyWriter struct {
 	r   *Ready
 	out chan<- Ready
@@ -920,10 +934,7 @@ func TestPeerMessageForAHostsSessionIsHeldForThatHostWithItsSender(t *testing.T)
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	procStart, err := ProcessStart(stand.Process.Pid)
-	if err != nil {
-		t.Fatal(err)
-	}
+	procStart := nativeRecordStart(t, stand.Process.Pid)
 	if err := os.MkdirAll(filepath.Join(surface.ClaudeConfigDir(home), "sessions"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -965,5 +976,15 @@ func TestPeerMessageForAHostsSessionIsHeldForThatHostWithItsSender(t *testing.T)
 	}
 	if reg.QueueCount("remote-a") != 2 {
 		t.Fatalf("queue count=%d", reg.QueueCount("remote-a"))
+	}
+}
+
+func TestProcStatStartTimeSkipsCommandNamesWithSpaces(t *testing.T) {
+	stat := "13446 (claude (bg) x) S 13433 13433 13433 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 11 0 1562374 1000 50\n"
+	if got, err := procStatStartTime(stat); err != nil || got != "1562374" {
+		t.Fatalf("start=%q err=%v", got, err)
+	}
+	if _, err := procStatStartTime("13446 claude S"); err == nil {
+		t.Fatal("malformed stat accepted")
 	}
 }

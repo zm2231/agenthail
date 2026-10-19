@@ -65,8 +65,8 @@ func TestFederationMessageCarriesItsSenderAndTheReplyComesBack(t *testing.T) {
 		t.Fatalf("mac received %v from %v", got, mac.fake.senders())
 	}
 	sibling := mac.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "send", "sessionId": hosts.Qualify(forgeRecord.ID, "forge-a"), "sourceSessionId": hosts.Qualify(forgeRecord.ID, "forge-b"), "message": "between forge sessions"})
-	if sibling.Code != http.StatusOK || lastSender(t, forge) != "forge-b" {
-		t.Fatalf("sibling status=%d body=%s senders=%v", sibling.Code, sibling.Body.String(), forge.fake.senders())
+	if sibling.Code != http.StatusBadRequest || !strings.Contains(sibling.Body.String(), "only that host can send as it") || len(forge.fake.delivered()) != 1 {
+		t.Fatalf("a forge session named as the sender from the mac: status=%d body=%s delivered=%v", sibling.Code, sibling.Body.String(), forge.fake.delivered())
 	}
 }
 
@@ -125,12 +125,13 @@ func TestFederationTrustsASenderOnlyFromItsOwnHost(t *testing.T) {
 		token, source, reason string
 	}{
 		{bound, "h0000000000ff::elsewhere", "host_mismatch"},
-		{bound, "forge-b", ""},
+		{bound, "forge-b", "host_mismatch"},
 		{tokenFor(""), hosts.Qualify(macRecord.ID, "mac-a"), "agenthail hosts invite"},
+		{bound, hosts.Qualify(macRecord.ID, "mac-a"), ""},
 	} {
 		response := post(test.token, map[string]any{"action": "send", "sessionId": "forge-a", "sourceSessionId": test.source, "message": "forged"})
 		if test.reason == "" {
-			if response.Code != http.StatusOK || lastSender(t, forge) != "forge-b" {
+			if response.Code != http.StatusOK || lastSender(t, forge) != "mac-a" {
 				t.Fatalf("own-session sender status=%d body=%s", response.Code, response.Body.String())
 			}
 			continue

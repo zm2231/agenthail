@@ -796,11 +796,11 @@ func (d *Daemon) sessionRelativeTo(owner *pairedHost, ref string) (string, error
 }
 
 // routeSource rewrites the sender an action names for the daemon that will
-// deliver it. Forwarding to a host qualifies a local sender with this host's
-// id, so the receiver can reply across the pairing. Receiving from a host, a
-// qualified sender is trusted only as a session of the host whose token sent
-// the request: a mirrored row when that host is paired back, otherwise a
-// sender with no reply address.
+// deliver it. Only a session's own host names it as a sender. Forwarding to a
+// host qualifies a local sender with this host's id, so the receiver can reply
+// across the pairing. Receiving from a host, the sender must be qualified with
+// the host whose token sent the request, and becomes its mirrored row when
+// that host is paired back, otherwise a sender with no reply address.
 func (d *Daemon) routeSource(ctx context.Context, request map[string]any, target *pairedHost) (bool, error) {
 	source, _ := request["sourceSessionId"].(string)
 	source = strings.TrimSpace(source)
@@ -814,29 +814,25 @@ func (d *Daemon) routeSource(ctx context.Context, request map[string]any, target
 		if err != nil {
 			return false, err
 		}
-		switch {
-		case routed == nil:
-			request["sourceSessionId"] = hosts.Qualify(d.hostIdentity().ID, rawID)
-			request["sourceName"] = d.senderName(rawID)
-		case routed == target:
-			request["sourceSessionId"] = rawID
-		default:
-			return false, fmt.Errorf("a session on host %s cannot send to a session on host %s", routed.record.Name, target.record.Name)
+		if routed != nil {
+			return false, fmt.Errorf("%s is a session on host %s; only that host can send as it", source, routed.record.Name)
 		}
+		request["sourceSessionId"] = hosts.Qualify(d.hostIdentity().ID, rawID)
+		request["sourceName"] = d.senderName(rawID)
 		return true, nil
 	}
 	principalHost, fromHost := requestingHost(ctx)
 	hostRef, rawID, qualified := hosts.Split(source)
-	if !fromHost || !qualified {
-		routed, rawID, err := d.routeSession(source)
+	if !fromHost {
+		_, rawID, err := d.routeSession(source)
 		if err != nil {
 			return false, err
 		}
-		if fromHost && routed != nil {
-			return false, fmt.Errorf("a paired host cannot name a session on host %s as the sender", routed.record.Name)
-		}
 		request["sourceSessionId"] = rawID
 		return rawID != source, nil
+	}
+	if !qualified {
+		return false, fmt.Errorf("host_mismatch: a host names its sender qualified with its own host id")
 	}
 	if principalHost == "" {
 		return false, errUnboundHostToken
