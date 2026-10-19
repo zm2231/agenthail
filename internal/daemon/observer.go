@@ -232,12 +232,18 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	canSteerQueued := steerQueued && surface.EffectiveCapabilities(adapter, session).Steer
 	canDrainQueue := (observation.Status == surface.StatusIdle && observation.ActiveTurnID == "") || canLoadDesktopQueue
 	canDrainSteer := canSteerQueued && observation.Status == surface.StatusBusy && observation.WaitingOn == nil
-	if canDrainQueue || canDrainSteer {
+	canDrainPeer := observation.Status == surface.StatusBusy && surface.RouteFor(adapter, session, "") == surface.RoutePeer
+	if canDrainQueue || canDrainPeer || canDrainSteer {
 		queued := d.Registry.QueueCount(session.ID)
 		if canDrainQueue {
 			d.drainMessageQueue(ctx, adapter, session)
 		} else {
-			d.drainSteerMessageQueue(ctx, adapter, session)
+			if canDrainPeer {
+				d.drainPeerMessageQueue(ctx, adapter, session)
+			}
+			if canDrainSteer {
+				d.drainSteerMessageQueue(ctx, adapter, session)
+			}
 		}
 		if queued > 0 {
 			d.publishEvent("state.changed", session.ID, map[string]string{"source": "queue"})

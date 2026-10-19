@@ -234,10 +234,19 @@ func (f *Fixture) count(path string, args []string) int {
 }
 
 // PeerManager answers the daemon's Claude peer manager socket under a home,
-// accepting every send and recording its message.
+// accepting every send and recording it.
 type PeerManager struct {
 	mu       sync.Mutex
 	messages []string
+	sends    []PeerSend
+}
+
+// PeerSend is one send the manager took: the sender it frames the message
+// from, the target socket and the message.
+type PeerSend struct {
+	Source  string `json:"sourceSessionId"`
+	Target  string `json:"targetSocket"`
+	Message string `json:"message"`
 }
 
 func ListenPeerManager(t testing.TB, home string) *PeerManager {
@@ -258,12 +267,11 @@ func ListenPeerManager(t testing.TB, home string) *PeerManager {
 			if err != nil {
 				return
 			}
-			var request struct {
-				Message string `json:"message"`
-			}
+			var request PeerSend
 			if json.NewDecoder(conn).Decode(&request) == nil {
 				manager.mu.Lock()
 				manager.messages = append(manager.messages, request.Message)
+				manager.sends = append(manager.sends, request)
 				id := fmt.Sprintf("peer-%d", len(manager.messages))
 				manager.mu.Unlock()
 				_ = json.NewEncoder(conn).Encode(map[string]any{"ok": true, "result": map[string]any{"uuid": id, "accepted": true}})
@@ -282,6 +290,13 @@ func (m *PeerManager) Count(message string) int {
 // Containing is how many sends contained text.
 func (m *PeerManager) Containing(text string) int {
 	return m.matching(func(sent string) bool { return strings.Contains(sent, text) })
+}
+
+// Sends are the sends the manager took, in order.
+func (m *PeerManager) Sends() []PeerSend {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]PeerSend(nil), m.sends...)
 }
 
 func (m *PeerManager) Messages() []string {

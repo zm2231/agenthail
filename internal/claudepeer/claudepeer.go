@@ -1073,21 +1073,12 @@ func queueFrame(reg *registry.Registry, c Config, f frame, ownSocket string) err
 		}
 		return surface.DeliveryTerminal(errors.New(reason), surface.DeliveryAccessDenied)
 	}
-	mode := c.BusyDelivery
-	if mode == "" {
-		var modeErr error
-		loadedMode, loadErr := deliverypolicy.LoadFromPath(filepath.Join(c.Home, ".agenthail", "dashboard.json"))
-		modeErr = loadErr
-		mode = string(loadedMode)
-		if modeErr != nil {
+	if c.BusyDelivery != "" {
+		if _, modeErr := deliverypolicy.Normalize(c.BusyDelivery); modeErr != nil {
 			return modeErr
 		}
 	}
-	normalizedMode, modeErr := deliverypolicy.Normalize(mode)
-	if modeErr != nil {
-		return modeErr
-	}
-	queueID, err := reg.QueueMessageWithOptions(target.ID, "[Claude peer message from "+f.From+"]\n"+body.Content, key, surface.SendOptions{BusyDelivery: string(normalizedMode)})
+	queueID, err := reg.QueueMessageWithOptions(target.ID, "[Claude peer message from "+f.From+"]\n"+body.Content, key, surface.SendOptions{BusyDelivery: c.BusyDelivery})
 	if err != nil {
 		return err
 	}

@@ -62,12 +62,20 @@ for paging, replay, gaps and source lifetime.
 Busy-target behavior is explicit: `send` delivers immediately when idle and follows
 the persisted `busyDelivery` setting (`queue` by default, or `steer` when the
 target advertises steering) when busy. A steer-policy target without steering
-capability is queued instead. `send --no-queue` refuses delayed delivery, while
+capability is queued instead. An agent's message to a Claude session with a
+native peer socket is the exception: the socket delivers it to a running or
+waiting turn with the sender's name and reply address, and Claude holds it in
+its own queue until the turn can read it, so it is sent at once whatever the
+policy. Only an explicit `queue`, or a message with per-message options, waits
+for that turn to end. `send --no-queue` refuses delayed delivery, while
 `queue` always creates the durable pending item and `steer` is an explicit active-
 turn control. The setting is exposed by the dashboard/API settings endpoint and
 the existing dashboard settings write path. Read-only targets fail before
 dispatch. An unknown delivery outcome must be inspected before an explicit retry;
-it is never resent automatically.
+it is never resent automatically. A queued message records only a per-message
+choice (`queue`, or `steer` for a steer held behind a question). One without a
+choice, such as a relay, follows the setting as it stands when the daemon drains
+it, so changing the setting applies to messages already waiting.
 
 A busy target can be waiting on its user. `surface.Waiting` on the session and
 on its turn observation carries the kind (`question`, `approval`, `input`), a
@@ -93,7 +101,9 @@ stops is announced after it restarts. Both notifications carry a key derived
 from the session and question: the desktop notification identifier and the APNs
 `apns-collapse-id`, so an announcement repeated after a stop replaces the one
 already shown rather than adding a second. While a target waits, nothing is
-steered into it: `send` under the `steer` policy and `steer` both queue a steer,
+steered into it, and a peer socket message is not held: Claude keeps it queued
+behind the question or prompt without answering or dismissing it. `send` under
+the `steer` policy to a target without a peer socket, and `steer`, queue a steer,
 with a receipt that names the wait. The daemon steers queued steers once the
 question is answered and delivers other messages when the turn ends. Queue rows
 report `heldBy`: `waiting`, `busy`, `offline`, `unknown`, `refused`,
