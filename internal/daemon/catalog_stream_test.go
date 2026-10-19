@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -461,18 +462,32 @@ func TestFailedDiscoveryKeepsCatalogRowsStaleThroughDashboardSnapshot(t *testing
 }
 
 func TestDiscoveryRemovesOnlyAfterTwoSuccessfulOmissions(t *testing.T) {
-	d, registry, fake, _, _ := daemonFixture(t)
+	d, store, fake, _, _ := daemonFixture(t)
 	d.discoverCatalog(context.Background())
 	fake.sessions = map[string]surface.Session{}
 	d.discoverCatalog(context.Background())
+	history, err := d.dashboardState(context.Background(), registry.CatalogPageRequest{Scope: "all", Limit: 50, Now: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history.Sessions) != 2 || history.Sessions[0].Status != surface.StatusOffline {
+		t.Fatalf("first omission kept %d sessions in history, want both offline", len(history.Sessions))
+	}
 	state, err := d.dashboardState(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(state.Sessions) != 2 {
-		t.Fatalf("first omission sessions=%d", len(state.Sessions))
+	if len(state.Sessions) != 0 {
+		t.Fatalf("first omission left %d offline sessions in the current snapshot", len(state.Sessions))
 	}
 	d.discoverCatalog(context.Background())
+	history, err = d.dashboardState(context.Background(), registry.CatalogPageRequest{Scope: "all", Limit: 50, Now: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history.Sessions) != 0 {
+		t.Fatalf("second omission history sessions=%d", len(history.Sessions))
+	}
 	state, err = d.dashboardState(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -480,7 +495,7 @@ func TestDiscoveryRemovesOnlyAfterTwoSuccessfulOmissions(t *testing.T) {
 	if len(state.Sessions) != 0 {
 		t.Fatalf("second omission sessions=%d", len(state.Sessions))
 	}
-	window, err := registry.CatalogEventsAfter(0, 20)
+	window, err := store.CatalogEventsAfter(0, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -772,6 +787,7 @@ func TestSnapshotListsTopLevelSessionsAndOnlyActiveSubagents(t *testing.T) {
 }
 
 func TestCatalogStreamShowsDevicesTheSessionListAndHostsEveryRow(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	d, store, fake, lead, _ := daemonFixture(t)
 	child := func(id, parent string, status surface.SessionStatus) surface.Session {
 		return surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: id, Status: status, Source: "subAgent", Transport: "desktop", Subagent: &surface.Subagent{ParentID: parent, RootID: lead.ID, Depth: 1}}
@@ -902,6 +918,28 @@ func TestCatalogStreamShowsDevicesTheSessionListAndHostsEveryRow(t *testing.T) {
 	}
 	if ids := snapshotIDs(hostToken); !ids[resting.ID] || !ids[buried.ID] || !ids[working.ID] {
 		t.Fatalf("host snapshot=%v, want every row", ids)
+	}
+	if err := os.MkdirAll(filepath.Dir(DashboardConfigPath()), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(DashboardConfigPath(), []byte(`{`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/snapshot?fresh=1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+hostToken)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode == http.StatusOK {
+		t.Fatal("host snapshot served the cached session list when the refresh failed; a host must see every row or an error")
+	}
+	if err := os.Remove(DashboardConfigPath()); err != nil {
+		t.Fatal(err)
 	}
 
 	resting.Status = surface.StatusBusy

@@ -287,8 +287,9 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 const catalogStreamBatch = 256
 
 // listedCatalogEvents is the catalog stream a device sees: the session list,
-// not every catalog row. An upsert of a session the list hides reaches it as a
-// removal under the same sequence. The presence pass republishes a row when it
+// not every catalog row. An upsert of a session outside the current list, a
+// hidden subagent or a retired row, reaches it as a removal under the same
+// sequence. The presence pass republishes a row when it
 // enters or leaves the list and an ancestor when its hidden count changes, so
 // each of those changes arrives as its own event. Without the listing the
 // stream ends rather than show a device rows it must not list.
@@ -300,7 +301,7 @@ func (d *Daemon) listedCatalogEvents(batch []registry.CatalogEvent) ([]registry.
 	}
 	listed := make([]registry.CatalogEvent, 0, len(batch))
 	for _, event := range batch {
-		if event.Type == "session.upserted" && listing.HidesEntity(event.EntityID) {
+		if event.Type == "session.upserted" && !listing.CurrentEntity(event.EntityID) {
 			payload, err := json.Marshal(map[string]string{"sessionId": event.EntityID, "reason": "unlisted"})
 			if err != nil {
 				continue
@@ -621,7 +622,7 @@ func (d *Daemon) publishCatalogPresence() {
 			current, reason := surface.PresenceFor(adapter, record.Session, surface.PresenceInput{QueueCount: count, Open: projection.Open, Now: now, CodexRecentHours: config.CodexRecentHours})
 			hidden := snapshot.Listing.HiddenSubagents(record.Session.ID)
 			subagents := addSubagentRollups(projection.ObservedSubagents, hidden)
-			listed := !snapshot.Listing.Hidden[record.Session.ID]
+			listed := snapshot.Listing.Current(record.Session.ID)
 			if projection.QueueCount == count && projection.Current == current && projection.CurrentReason == reason && sameSubagentRollup(projection.HiddenSubagents, hidden) && sameSubagentRollup(projection.Subagents, subagents) && projection.Listed == listed {
 				break
 			}

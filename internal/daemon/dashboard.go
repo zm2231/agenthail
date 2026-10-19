@@ -464,11 +464,11 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		writeAPIError(w, http.StatusBadRequest, code, pageErr.Error())
 		return
 	}
-	mirror := catalogMirror(r.Context())
+	cacheable := page == nil && !catalogMirror(r.Context())
 	hostEpoch, catalogSeq, catalogErr := d.Registry.CatalogState()
 	dashboard.stateMu.Lock()
 	version := dashboard.stateVersion.Load()
-	if page == nil && !mirror && catalogErr == nil && r.URL.Query().Get("fresh") != "1" && dashboard.cachedVersion == version && dashboard.state.HostEpoch == hostEpoch && dashboard.state.CatalogSeq == catalogSeq && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
+	if cacheable && catalogErr == nil && r.URL.Query().Get("fresh") != "1" && dashboard.cachedVersion == version && dashboard.state.HostEpoch == hostEpoch && dashboard.state.CatalogSeq == catalogSeq && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
 		state := dashboard.state
 		dashboard.stateMu.Unlock()
 		d.writeDashboardSnapshot(w, r, state)
@@ -486,11 +486,7 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		state, err = d.dashboardState(refreshCtx, *page)
 	}
 	if err != nil {
-		if page != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if hadPrevious {
+		if cacheable && hadPrevious {
 			stale := previous
 			stale.Daemon = cloneDashboardDaemon(stale.Daemon)
 			stale.Daemon["stale"] = true
@@ -501,7 +497,7 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if page == nil && !mirror {
+	if cacheable {
 		dashboard.stateMu.Lock()
 		dashboard.state = state
 		dashboard.stateAt = time.Now()
@@ -834,7 +830,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	sessions := make([]surface.Session, 0, len(catalogSnapshot.Sessions))
 	mirror := catalogMirror(ctx)
 	for _, record := range catalogSnapshot.Sessions {
-		if !mirror && catalogSnapshot.Listing.Hidden[record.Session.ID] {
+		if !mirror && (catalogSnapshot.Listing.Hidden[record.Session.ID] || page == nil && catalogSnapshot.Listing.Retired[record.Session.ID]) {
 			continue
 		}
 		catalogSessions[record.Session.ID] = record
@@ -883,7 +879,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		if record, found := catalogSessions[session.ID]; found && record.ProjectionFingerprint != "" {
 			var saved dashboardSession
 			if json.Unmarshal([]byte(record.ProjectionFingerprint), &saved) == nil {
-				entry.Open = saved.Open
+				entry.Open, entry.Listed = saved.Open, saved.Listed
 				entry.ObservedSubagents = saved.ObservedSubagents
 				entry.Current, entry.CurrentReason = saved.Current, saved.CurrentReason
 			}

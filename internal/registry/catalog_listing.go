@@ -12,11 +12,18 @@ import (
 // or is current and its parent is listed, so it always sits under a listed
 // row and never at the top level. Each hidden subagent counts toward its
 // nearest listed ancestor's rollup.
+//
+// Retired rows are listed but belong to history rather than the current
+// list: an offline session that nothing makes current, and every listed row
+// beneath one. Pages show them; the current snapshot and the device stream
+// do not.
 type CatalogListing struct {
-	Hidden         map[string]bool
-	Rollups        map[string]surface.SubagentRollup
-	descendants    map[string]surface.SubagentRollup
-	hiddenEntities map[string]bool
+	Hidden          map[string]bool
+	Retired         map[string]bool
+	Rollups         map[string]surface.SubagentRollup
+	descendants     map[string]surface.SubagentRollup
+	hiddenEntities  map[string]bool
+	retiredEntities map[string]bool
 }
 
 type catalogListingRow struct {
@@ -25,6 +32,7 @@ type catalogListingRow struct {
 	subagent bool
 	active   bool
 	busy     bool
+	retired  bool
 }
 
 func catalogListingTx(q catalogQuerier) (CatalogListing, error) {
@@ -42,7 +50,8 @@ func catalogListingTx(q catalogQuerier) (CatalogListing, error) {
 			return CatalogListing{}, err
 		}
 		busy := status == string(surface.StatusBusy)
-		byID[id] = catalogListingRow{entity: hosts.Qualify(hostID, id), parent: parent, subagent: parent != "" || source == "subAgent", active: busy || current, busy: busy}
+		retired := status == string(surface.StatusOffline) && !current
+		byID[id] = catalogListingRow{entity: hosts.Qualify(hostID, id), parent: parent, subagent: parent != "" || source == "subAgent", active: busy || current, busy: busy, retired: retired}
 	}
 	if err := rows.Close(); err != nil {
 		return CatalogListing{}, err
@@ -51,7 +60,7 @@ func catalogListingTx(q catalogQuerier) (CatalogListing, error) {
 }
 
 func catalogListing(byID map[string]catalogListingRow) CatalogListing {
-	listing := CatalogListing{Hidden: map[string]bool{}, Rollups: map[string]surface.SubagentRollup{}, descendants: map[string]surface.SubagentRollup{}, hiddenEntities: map[string]bool{}}
+	listing := CatalogListing{Hidden: map[string]bool{}, Retired: map[string]bool{}, Rollups: map[string]surface.SubagentRollup{}, descendants: map[string]surface.SubagentRollup{}, hiddenEntities: map[string]bool{}, retiredEntities: map[string]bool{}}
 	listed := map[string]bool{}
 	var decide func(id string, path map[string]bool) bool
 	decide = func(id string, path map[string]bool) bool {
@@ -73,6 +82,24 @@ func catalogListing(byID map[string]catalogListingRow) CatalogListing {
 		if !decide(id, map[string]bool{}) {
 			listing.Hidden[id] = true
 			listing.hiddenEntities[byID[id].entity] = true
+		}
+	}
+	for id, row := range byID {
+		if !listed[id] {
+			continue
+		}
+		seen := map[string]bool{}
+		for at := id; at != "" && !seen[at]; at = byID[at].parent {
+			above, found := byID[at]
+			if !found {
+				break
+			}
+			seen[at] = true
+			if above.retired {
+				listing.Retired[id] = true
+				listing.retiredEntities[row.entity] = true
+				break
+			}
 		}
 	}
 	for id, row := range byID {
@@ -120,8 +147,15 @@ func (l CatalogListing) HiddenSubagents(id string) *surface.SubagentRollup {
 	return &rollup
 }
 
-func (l CatalogListing) HidesEntity(entityID string) bool {
-	return l.hiddenEntities[entityID]
+// Current reports whether a row belongs to the current session list.
+func (l CatalogListing) Current(id string) bool {
+	return !l.Hidden[id] && !l.Retired[id]
+}
+
+// CurrentEntity reports whether a host-qualified row belongs to the current
+// session list.
+func (l CatalogListing) CurrentEntity(entityID string) bool {
+	return !l.hiddenEntities[entityID] && !l.retiredEntities[entityID]
 }
 
 func (r *Registry) CatalogListing() (CatalogListing, error) {
