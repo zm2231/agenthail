@@ -151,7 +151,7 @@ final class WorkflowParityTests: XCTestCase {
         let model = makeModel()
         let options = try await model.sessionOptions(host: nil)
         XCTAssertEqual(options.surfaces.first?.id, "codex")
-        XCTAssertEqual(options.workspaces, ["/project"])
+        XCTAssertEqual(options.projects.map(\.rootPath), ["/project"])
         let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen")
         XCTAssertTrue(created)
         XCTAssertEqual(model.requestedSessionID, "created")
@@ -265,7 +265,7 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         var status = 200
-        var text = #"{"surfaces":[{"id":"codex","workspace":true}],"workspaces":["/project"]}"#
+        var text = #"{"surfaces":[{"id":"codex","workspace":true}],"projects":[{"id":"p-project","displayName":"project","rootPath":"/project","kind":"git"}]}"#
         if request.url?.path == "/api/v1/actions" {
             var data = request.httpBody ?? Data()
             if let stream = request.httpBodyStream { stream.open(); defer { stream.close() }; var buffer = [UInt8](repeating:0,count:4096); while stream.hasBytesAvailable { let n = stream.read(&buffer,maxLength:buffer.count); if n <= 0 { break }; data.append(contentsOf:buffer.prefix(n)) } }

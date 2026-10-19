@@ -31,10 +31,10 @@ struct CreationHostPickerTest {
         expect(picker.hosts.first { $0.id == lab.id }?.stateLabel == "Unreachable", "a disabled host shows its state")
         expect(picker.isLoading && !picker.canStart, "nothing starts before the catalog loads")
 
-        let local = try decode(#"{"host":{"id":"h00000000000a","name":"mac","state":"local"},"surfaces":[{"id":"codex","workspace":true,"connected":true}],"workspaces":["/Users/me/app"]}"#)
+        let local = try decode(#"{"host":{"id":"h00000000000a","name":"mac","state":"local"},"surfaces":[{"id":"codex","workspace":true,"connected":true}],"projects":[{"id":"p-app","displayName":"app","rootPath":"/Users/me/app","kind":"git"}]}"#)
         picker.receive(options: local, for: picker.generation)
         picker.receive(models: [], agent: "codex", for: picker.generation)
-        expect(picker.canStart && picker.folders == ["/Users/me/app"] && picker.models["codex"] != nil, "this machine's catalog is applied")
+        expect(picker.canStart && picker.projects.map(\.rootPath) == ["/Users/me/app"] && picker.models["codex"] != nil, "this machine's catalog is applied")
 
         let stale = picker.generation
         expect(picker.select(forge.id) && picker.hostQuery == forge.id, "choosing a connected host selects it")
@@ -46,9 +46,13 @@ struct CreationHostPickerTest {
 
         picker.fail("forge is unreachable", for: picker.generation)
         expect(picker.loadError == "forge is unreachable" && !picker.isLoading && !picker.canStart, "a load failure blocks start and says why")
-        let remote = try decode(#"{"host":{"id":"h0123456789ab","name":"forge","state":"local"},"surfaces":[{"id":"claude","workspace":true,"connected":false}],"workspaces":["/srv/builder"]}"#)
+        let remote = try decode(#"{"host":{"id":"h0123456789ab","name":"forge","state":"local"},"surfaces":[{"id":"claude","workspace":true,"connected":false}],"projects":[{"id":"p-builder","displayName":"builder","rootPath":"/srv/builder","kind":"git"}]}"#)
         picker.receive(options: remote, for: picker.generation)
-        expect(picker.loadError == nil && picker.canStart && picker.folders == ["/srv/builder"], "the chosen host's catalog replaces the failure")
+        expect(picker.loadError == nil && picker.canStart && picker.projects.map(\.rootPath) == ["/srv/builder"], "the chosen host's catalog replaces the failure")
+        expect(picker.defaultFolder(selected: onMac) == "/srv/builder", "a remote host with no selected session there starts in its most recent project")
+        var inWorktree = onForge
+        inWorktree.cwd = "/srv/builder/.worktrees/fix"
+        expect(picker.defaultFolder(selected: inWorktree) == "/srv/builder/.worktrees/fix", "a selected session on the chosen host keeps its own folder")
 
         picker.update(daemon: DaemonState(running: true, pid: 1, stale: nil, refreshError: nil, host: daemon.host, hosts: [HostHealth(id: forge.id, name: "forge", state: "unreachable"), lab]))
         expect(!picker.canStart && picker.hostQuery == forge.id, "a chosen host that drops keeps the choice but cannot start")

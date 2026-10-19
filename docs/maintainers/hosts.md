@@ -147,7 +147,9 @@ delivers to local members directly.
 
 `GET /api/v1/session-options?host=<host>` is that host's launch catalog: the
 host it came from, the agents it can start and whether each is connected, its
-launchers, and the newest folders its own sessions ran in.
+launchers, and its projects (`projects`: id, display name, root path and kind;
+the most recently active first, registered folders without sessions after,
+archived projects left out).
 `GET /api/v1/models?surface=<agent>&host=<host>` lists that host's models
 with their reasoning efforts. `session-create` with `host` starts the
 session there. The web dashboard, the Mac app and the iPhone app show one
@@ -155,6 +157,8 @@ host button in the new session form once a host is paired. It opens a short
 list of this machine and each paired host (hosts that are not connected are
 listed with their state and cannot be chosen) and defaults to the selected
 session's host. Choosing a host reloads the form from that host's catalog.
+The form's project picker lists that host's projects by name and starts the
+session in the chosen project's root; a typed folder is still accepted.
 
 ## Unreachable hosts and delivery
 

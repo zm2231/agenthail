@@ -47,4 +47,28 @@ assert.match(html, /data-session="far".*<span class="host-badge" title="On forge
 assert.doesNotMatch(html.slice(0, html.indexOf("</section>")), /host-badge/, "local projects and sessions carry no host badge");
 assert.doesNotMatch(html, /data-session="hidden"|data-session="loose"/, "archived sessions and sessions without a project stay out");
 assert.match(html, /Archived \(1\)<\/summary>.*data-project-action="project-unarchive" data-project-id="project-notes".*data-session="kept"/s);
+const pickerStart = source.indexOf("function renderStartProjects(");
+const pickerEnd = source.indexOf("function syncStartForm()", pickerStart);
+assert(pickerStart >= 0 && pickerEnd > pickerStart);
+const folder = { value: "~" };
+const select = { innerHTML: "", value: "" };
+const picker = {
+  app: { startOptions: { projects: [{ id: "p-api", displayName: "api", rootPath: "/work/api", kind: "git" }, { id: "p-web", displayName: "web <x>", rootPath: "/work/web", kind: "git" }] } },
+  escape: context.escape,
+  $: (selector) => (selector === "#new-conversation-project" ? select : { querySelector: () => folder }),
+};
+vm.runInNewContext(source.slice(pickerStart, pickerEnd), picker);
+vm.runInContext("renderStartProjects()", picker);
+assert.equal(folder.value, "/work/api", "the most recent project fills an untouched folder");
+assert.equal(select.value, "/work/api");
+assert.match(select.innerHTML, /<option value="\/work\/web" title="\/work\/web">web &lt;x&gt;<\/option><option value="">Other folder<\/option>$/, "projects are listed by name, then Other folder");
+folder.value = "/elsewhere";
+vm.runInContext("renderStartProjects()", picker);
+assert.equal(select.value, "", "a typed folder keeps Other folder selected");
+assert.equal(folder.value, "/elsewhere");
+picker.app.startOptions = { projects: [] };
+folder.value = "~";
+vm.runInContext("renderStartProjects()", picker);
+assert.equal(select.value, "");
+assert.equal(folder.value, "~", "a host without projects keeps the home folder");
 console.log("dashboard projects view tests passed");

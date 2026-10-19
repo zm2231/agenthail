@@ -138,9 +138,12 @@
                 <input name="alias" maxlength="80" placeholder="research" />
               </label>
               <label data-code-start>
-                <span>Working directory</span>
-                <input name="cwd" value="~" placeholder="~/project" list="new-conversation-workspaces" />
-                <datalist id="new-conversation-workspaces"></datalist>
+                <span>Project</span>
+                <select id="new-conversation-project"><option value="">Other folder</option></select>
+              </label>
+              <label data-code-start data-start-folder>
+                <span>Folder</span>
+                <input name="cwd" value="~" placeholder="~/project" />
               </label>
               <label data-codex-start>
                 <span>Model</span>
@@ -537,6 +540,6 @@
       </form>
     </dialog>
     <div class="toast" id="toast" role="status" hidden></div>
-    <script src="/app.js?v=16"></script>
+    <script src="/app.js?v=17"></script>
   </body>
 </html>

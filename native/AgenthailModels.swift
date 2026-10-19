@@ -15,8 +15,17 @@ struct SessionCreationOptions: Decodable {
     struct Surface: Decodable, Identifiable { let id: String; let workspace: Bool; var connected: Bool? = nil }
     var host: SessionHost? = nil
     let surfaces: [Surface]
-    let workspaces: [String]
+    let projects: [LaunchProject]
     var launchers: [LauncherOption]? = nil
+}
+
+/// A project a new session can start in, most recently active first. The
+/// root path is where the session starts.
+struct LaunchProject: Decodable, Hashable, Identifiable {
+    let id: String
+    let displayName: String
+    let rootPath: String
+    let kind: String
 }
 
 struct CreationHost: Hashable, Identifiable {
@@ -51,7 +60,7 @@ struct CreationHostPicker {
     var hostQuery: String? { selected.isEmpty ? nil : selected }
     var isLoading: Bool { options == nil && loadError == nil }
     var canStart: Bool { options != nil && (selected.isEmpty || selectedHost?.isAvailable == true) }
-    var folders: [String] { options?.workspaces ?? [] }
+    var projects: [LaunchProject] { options?.projects ?? [] }
 
     mutating func update(daemon: DaemonState?) {
         let paired = daemon?.hosts ?? []
@@ -83,6 +92,12 @@ struct CreationHostPicker {
     func owns(_ session: SessionState?) -> Bool {
         guard let session else { return false }
         return (session.remoteHostName == nil ? "" : session.host?.id ?? "") == selected
+    }
+
+    /// Where a new session starts by default: the selected session's checkout
+    /// when it is on the chosen host, else that host's most recent project.
+    func defaultFolder(selected session: SessionState?) -> String {
+        (owns(session) ? session.flatMap { $0.checkout?.path ?? $0.cwd } : nil) ?? projects.first?.rootPath ?? ""
     }
 
     mutating func receive(options next: SessionCreationOptions, for loaded: Int) {

@@ -2023,9 +2023,23 @@ function renderStartSurfaceOptions() {
     .join("");
   if (surfaces.includes(current)) select.value = current;
   $("#new-conversation-toggle").hidden = app.state.surfaces.every((item) => !startable(item.name, item.connected));
-  $("#new-conversation-workspaces").innerHTML = (app.startOptions?.workspaces || []).map((path) => `<option value="${escape(path)}"></option>`).join("");
+  renderStartProjects();
   renderStartHost();
   syncStartForm();
+}
+// The project picker lists the host's projects, most recent first, and fills
+// the folder with the chosen project's root; "Other folder" shows the folder
+// field instead.
+function renderStartProjects() {
+  const select = $("#new-conversation-project");
+  const folder = $("#new-conversation-form").querySelector('input[name="cwd"]');
+  const projects = app.startOptions?.projects || [];
+  select.innerHTML = projects
+    .map((project) => `<option value="${escape(project.rootPath)}" title="${escape(project.rootPath)}">${escape(project.displayName)}</option>`)
+    .join("") + '<option value="">Other folder</option>';
+  const chosen = projects.find((project) => project.rootPath === folder.value) || (folder.value === "~" || folder.value === "" ? projects[0] : null);
+  select.value = chosen ? chosen.rootPath : "";
+  if (chosen) folder.value = chosen.rootPath;
 }
 function syncStartForm() {
   const selected = $("#new-conversation-surface").value;
@@ -2033,6 +2047,7 @@ function syncStartForm() {
   for (const [attribute, enabled] of [["data-code-start", selected !== "notion"], ["data-claude-start", selected === "claude"]]) {
     document.querySelectorAll(`[${attribute}]`).forEach(field => { field.hidden = !enabled; field.querySelectorAll("input,select,textarea").forEach(input => input.disabled = !enabled); });
   }
+  $("[data-start-folder]").hidden = selected === "notion" || $("#new-conversation-project").value !== "";
   document.querySelectorAll("[data-codex-start]").forEach((field) => {
     field.hidden = !isCodex;
     field.querySelectorAll("input,select,textarea").forEach((input) => {
@@ -2109,6 +2124,12 @@ $("#new-conversation-surface").addEventListener("change", () => {
   loadStartModels().catch((error) => toast(friendlyError(error)));
 });
 $("#new-conversation-launcher").addEventListener("change", syncStartForm);
+$("#new-conversation-project").addEventListener("change", (event) => {
+  const folder = $("#new-conversation-form").querySelector('input[name="cwd"]');
+  folder.value = event.target.value || "~";
+  syncStartForm();
+  if (!event.target.value) folder.focus();
+});
 function reloadStartCatalog() {
   app.startOptions = null;
   app.launchers = [];

@@ -60,12 +60,17 @@ struct NewSessionSheet: View {
                             }
                         }
                         if options.surfaces.first(where: { $0.id == selectedSurface })?.workspace == true {
-                            Section("Workspace on \(hostName)") {
-                                TextField("~/projects/my-project", text: $cwd).textInputAutocapitalization(.never).autocorrectionDisabled()
-                                if !options.workspaces.isEmpty {
-                                    Menu("Choose a recent workspace") { ForEach(options.workspaces, id: \.self) { path in Button(path) { cwd = path } } }
+                            Section("Project on \(hostName)") {
+                                if !options.projects.isEmpty {
+                                    Menu {
+                                        ForEach(options.projects) { project in Button(project.displayName) { cwd = project.rootPath } }
+                                    } label: {
+                                        LabeledContent("Project", value: options.projects.first(where: { $0.rootPath == cwd })?.displayName ?? "Choose")
+                                    }
+                                    .accessibilityIdentifier("creation-project-picker")
                                 }
-                                Text("Leave blank to use the home folder on \(hostName). The directory must already exist.").font(.footnote).foregroundStyle(.secondary)
+                                TextField("~/projects/my-project", text: $cwd).textInputAutocapitalization(.never).autocorrectionDisabled()
+                                Text("Pick a project or type a folder. Leave blank to use the home folder on \(hostName). The folder must already exist.").font(.footnote).foregroundStyle(.secondary)
                             }
                         }
                         Section("Model") {
@@ -196,7 +201,10 @@ struct NewSessionSheet: View {
             let loaded = try await model.sessionOptions(host: hosts.hostQuery)
             try Task.checkCancellation()
             hosts.receive(options: loaded, for: generation)
-            if generation == hosts.generation { selectedSurface = loaded.surfaces.first?.id ?? "" }
+            if generation == hosts.generation {
+                selectedSurface = loaded.surfaces.first?.id ?? ""
+                if cwd.isEmpty { cwd = loaded.projects.first?.rootPath ?? "" }
+            }
         } catch is CancellationError {
         } catch { hosts.fail(error.localizedDescription, for: generation) }
     }
