@@ -470,10 +470,26 @@ func hostNotice(t *testing.T, node *federationNode, hostID string) string {
 			notice = host.Notice
 		}
 	}
-	for _, host := range node.daemon.hostSummaries() {
-		if host.ID == hostID && host.Notice != notice {
-			t.Fatalf("snapshot notice=%q, hosts API notice=%q", host.Notice, notice)
+	snapshot := node.request(t, http.MethodGet, "/api/v1/snapshot?fresh=1", nil)
+	var state struct {
+		Daemon struct {
+			Hosts []dashboardHostHealth `json:"hosts"`
+		} `json:"daemon"`
+	}
+	if err := json.Unmarshal(snapshot.Body.Bytes(), &state); err != nil {
+		t.Fatalf("snapshot status=%d body=%s", snapshot.Code, snapshot.Body.String())
+	}
+	found := false
+	for _, host := range state.Daemon.Hosts {
+		if host.ID == hostID {
+			found = true
+			if host.Notice != notice {
+				t.Fatalf("snapshot notice=%q, hosts API notice=%q", host.Notice, notice)
+			}
 		}
+	}
+	if !found {
+		t.Fatalf("snapshot hosts=%+v missing %s", state.Daemon.Hosts, hostID)
 	}
 	return notice
 }
