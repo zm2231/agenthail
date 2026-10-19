@@ -885,3 +885,85 @@ func TestValidateTargetSocketAcceptsClaudeRuntimeDirNamespace(t *testing.T) {
 		t.Fatal("socket outside every Claude namespace accepted")
 	}
 }
+
+func TestPeerMessageForAHostsSessionIsHeldForThatHostWithItsSender(t *testing.T) {
+	regPath := filepath.Join(t.TempDir(), "registry.db")
+	reg, err := registry.Open(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	identity, err := reg.HostIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.AddHost(registry.PairedHost{ID: "h0123456789ab", Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
+		t.Fatal(err)
+	}
+	remote := surface.Session{ID: "remote-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "builder", Status: surface.StatusIdle}
+	if _, _, err := reg.ApplyHostCatalogRow("h0123456789ab", registry.HostCatalogRow{Session: remote, EntityID: "h0123456789ab::remote-a", Projection: []byte(`{"id":"h0123456789ab::remote-a"}`), ObservedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	native := surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "reviewer", Status: surface.StatusIdle}
+	if err := reg.RegisterSession(native); err != nil {
+		t.Fatal(err)
+	}
+	home, socketDir := shortTempDir(t, "cp-home-"), shortTempDir(t, "cp-socks-")
+	stand := exec.Command("sleep", "30")
+	if err := stand.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stand.Process.Kill(); _ = stand.Wait() })
+	nativeSocket := filepath.Join(socketDir, strconv.Itoa(stand.Process.Pid)+".sock")
+	listener, err := net.Listen("unix", nativeSocket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	procStart, err := ProcessStart(stand.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(surface.ClaudeConfigDir(home), "sessions"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	record, _ := json.Marshal(sessionRecord{PID: stand.Process.Pid, SessionID: native.ID, ProcStart: procStart, MessagingSocketPath: nativeSocket})
+	if err := os.WriteFile(filepath.Join(surface.ClaudeConfigDir(home), "sessions", strconv.Itoa(stand.Process.Pid)+".json"), record, 0600); err != nil {
+		t.Fatal(err)
+	}
+	worker, stop := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: remote, SocketDir: socketDir, HostName: "forge"})
+	defer stop()
+	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(home), "sessions", strconv.Itoa(worker.PID)+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var peer sessionRecord
+	if err := json.Unmarshal(data, &peer); err != nil || peer.Name != "agenthail/codex: forge/builder" {
+		t.Fatalf("peer name=%q err=%v", peer.Name, err)
+	}
+	sendFrames(t, worker.SocketPath,
+		frame{MsgV: 1, MsgID: uuid.NewString(), Type: "user", From: "uds:" + nativeSocket, Message: mustJSON(messageBody{Role: "user", Content: "from the reviewer"})},
+		frame{MsgV: 1, MsgID: uuid.NewString(), Type: "user", From: "uds:" + filepath.Join(socketDir, "999999.sock"), Message: mustJSON(messageBody{Role: "user", Content: "from nobody known"})},
+	)
+	held, err := reg.HostDeliveries("h0123456789ab")
+	if err != nil || len(held) != 2 {
+		history, _ := reg.ListHistory(10, "remote-a")
+		t.Fatalf("held=%+v err=%v history=%+v", held, err, history)
+	}
+	var known, unknown map[string]any
+	if err := json.Unmarshal(held[0].Request, &known); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(held[1].Request, &unknown); err != nil {
+		t.Fatal(err)
+	}
+	if known["sessionId"] != "remote-a" || known["message"] != "from the reviewer" || known["sourceSessionId"] != identity.ID+"::"+native.ID || known["sourceName"] != "reviewer" {
+		t.Fatalf("known sender request=%v", known)
+	}
+	if _, named := unknown["sourceSessionId"]; named || !strings.HasPrefix(unknown["message"].(string), "[Claude peer message from uds:") {
+		t.Fatalf("unknown sender request=%v", unknown)
+	}
+	if reg.QueueCount("remote-a") != 2 {
+		t.Fatalf("queue count=%d", reg.QueueCount("remote-a"))
+	}
+}

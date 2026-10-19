@@ -222,6 +222,13 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, message stri
 		return err
 	}
 	payload["action"], payload["sessionId"], payload["message"] = "send", remote.ID, message
+	source, err := a.sourceSessionID(ctx, flagVal(args, "--from"))
+	if err != nil {
+		return err
+	}
+	if source != "" {
+		payload["sourceSessionId"] = source
+	}
 	if model := flagVal(args, "--model"); model != "" {
 		payload["model"] = model
 	}

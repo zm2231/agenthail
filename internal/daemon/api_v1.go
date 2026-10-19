@@ -22,8 +22,9 @@ type apiDeviceTokenContextKey struct{}
 type apiHostPrincipalContextKey struct{}
 
 type apiHostPrincipal struct {
-	host   bool
-	hostID string
+	host     bool
+	hostID   string
+	hostName string
 }
 
 // catalogMirror reports whether the request comes from a paired host, which
@@ -38,6 +39,13 @@ func catalogMirror(ctx context.Context) bool {
 func requestingHost(ctx context.Context) (string, bool) {
 	principal, _ := ctx.Value(apiHostPrincipalContextKey{}).(apiHostPrincipal)
 	return principal.hostID, principal.host
+}
+
+// requestingHostName is the device name a paired host registered with, its
+// host name at pairing time.
+func requestingHostName(ctx context.Context) string {
+	principal, _ := ctx.Value(apiHostPrincipalContextKey{}).(apiHostPrincipal)
+	return principal.hostName
 }
 
 const (
@@ -99,7 +107,7 @@ func (d *Daemon) apiV1Guard(dashboard *dashboardServer, scope string, next http.
 				bearerAuthorized = true
 				ctx := context.WithValue(r.Context(), apiDeviceTokenContextKey{}, token)
 				ctx = context.WithValue(ctx, actionPrincipalContextKey{}, device.ID)
-				ctx = context.WithValue(ctx, apiHostPrincipalContextKey{}, apiHostPrincipal{host: device.IsHost(), hostID: device.HostID})
+				ctx = context.WithValue(ctx, apiHostPrincipalContextKey{}, apiHostPrincipal{host: device.IsHost(), hostID: device.HostID, hostName: device.Name})
 				r = r.WithContext(ctx)
 			}
 		}

@@ -616,7 +616,7 @@ func (d *Daemon) hostRoutedAction(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
-		host, rewritten, err := d.routeActionRequest(request)
+		host, rewritten, err := d.routeActionRequest(r.Context(), request)
 		if err != nil {
 			var owned registry.SessionOwnedError
 			if errors.As(err, &owned) {
@@ -642,9 +642,11 @@ func (d *Daemon) hostRoutedAction(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-var actionSessionFields = []string{"sessionId", "sourceSessionId", "targetId", "fromId", "toId"}
+var actionSessionFields = []string{"sessionId", "targetId", "fromId", "toId"}
 
-func (d *Daemon) routeActionRequest(request map[string]any) (*pairedHost, bool, error) {
+// routeActionRequest picks the host an action runs on from the sessions it
+// acts on. The sender it names is routed separately by routeSource.
+func (d *Daemon) routeActionRequest(ctx context.Context, request map[string]any) (*pairedHost, bool, error) {
 	var host *pairedHost
 	local := false
 	rewritten := false
@@ -703,11 +705,92 @@ func (d *Daemon) routeActionRequest(request map[string]any) (*pairedHost, bool, 
 		if strings.HasPrefix(action, "channel-") || strings.HasPrefix(action, "relay-") || strings.HasPrefix(action, "queue-") || action == "delivery-dismiss" {
 			return nil, false, fmt.Errorf("%s is not available for sessions on another host yet", action)
 		}
-		if source, _ := request["sourceSessionId"].(string); source != "" {
-			return nil, false, fmt.Errorf("a message from one session to another is not available for sessions on another host yet")
+	}
+	sourceRewritten, err := d.routeSource(ctx, request, host)
+	if err != nil {
+		return nil, false, err
+	}
+	return host, rewritten || sourceRewritten, nil
+}
+
+// routeSource rewrites the sender an action names for the daemon that will
+// deliver it. Forwarding to a host qualifies a local sender with this host's
+// id, so the receiver can reply across the pairing. Receiving from a host, a
+// qualified sender is trusted only as a session of the host whose token sent
+// the request: a mirrored row when that host is paired back, otherwise a
+// sender with no reply address.
+func (d *Daemon) routeSource(ctx context.Context, request map[string]any, target *pairedHost) (bool, error) {
+	source, _ := request["sourceSessionId"].(string)
+	source = strings.TrimSpace(source)
+	senderName, _ := request["sourceName"].(string)
+	delete(request, "sourceName")
+	if source == "" {
+		return senderName != "", nil
+	}
+	if target != nil {
+		routed, rawID, err := d.routeSession(source)
+		if err != nil {
+			return false, err
+		}
+		switch {
+		case routed == nil:
+			request["sourceSessionId"] = hosts.Qualify(d.hostIdentity().ID, rawID)
+			request["sourceName"] = d.senderName(rawID)
+		case routed == target:
+			request["sourceSessionId"] = rawID
+		default:
+			return false, fmt.Errorf("a session on host %s cannot send to a session on host %s", routed.record.Name, target.record.Name)
+		}
+		return true, nil
+	}
+	principalHost, fromHost := requestingHost(ctx)
+	hostRef, rawID, qualified := hosts.Split(source)
+	if !fromHost || !qualified {
+		routed, rawID, err := d.routeSession(source)
+		if err != nil {
+			return false, err
+		}
+		if fromHost && routed != nil {
+			return false, fmt.Errorf("a paired host cannot name a session on host %s as the sender", routed.record.Name)
+		}
+		request["sourceSessionId"] = rawID
+		return rawID != source, nil
+	}
+	if principalHost == "" {
+		return false, errUnboundHostToken
+	}
+	if hostRef != principalHost {
+		return false, fmt.Errorf("host_mismatch: a host may only name its own sessions as the sender")
+	}
+	if host, paired := d.pairedHost(hostRef); paired {
+		if owner, err := d.Registry.SessionHost(rawID); err == nil && owner == host.record.ID {
+			request["sourceSessionId"] = rawID
+			return true, nil
 		}
 	}
-	return host, rewritten, nil
+	if senderName = strings.TrimSpace(senderName); senderName == "" {
+		senderName = rawID
+	}
+	sender, err := d.Registry.EnsureUnrepliableSender(principalHost, rawID, requestingHostName(ctx)+"/"+senderName)
+	if err != nil {
+		return false, err
+	}
+	request["sourceSessionId"] = sender
+	return true, nil
+}
+
+var errUnboundHostToken = errors.New("this host was paired before hosts could name their sessions as senders; pair it again: run 'agenthail hosts invite' on this machine, then 'agenthail hosts add <pairing-link>' on the other host")
+
+// senderName is how a receiving host names one of this host's sessions when
+// it cannot mirror it: the alias, else the session's name.
+func (d *Daemon) senderName(sessionID string) string {
+	if alias, err := d.Registry.ReverseAlias(sessionID); err == nil && alias != "" {
+		return "@" + alias
+	}
+	if _, name, _, err := d.Registry.GetSession(sessionID); err == nil && name != "" {
+		return name
+	}
+	return sessionID
 }
 
 func (d *Daemon) forwardHostAction(w http.ResponseWriter, r *http.Request, host *pairedHost, request map[string]any, body []byte) {

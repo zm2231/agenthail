@@ -24,16 +24,16 @@ var (
 )
 
 type Device struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Scopes      []string `json:"scopes"`
+	ID     string   `json:"id"`
+	Name   string   `json:"name"`
+	Scopes []string `json:"scopes"`
 	// HostID is the paired host a host-scoped token belongs to. A forwarded
 	// sender is trusted only as a session of this host.
 	HostID      string `json:"hostId,omitempty"`
-	CreatedAt   string   `json:"createdAt"`
-	LastSeenAt  string   `json:"lastSeenAt,omitempty"`
-	RevokedAt   string   `json:"revokedAt,omitempty"`
-	PushEnabled bool     `json:"pushEnabled"`
+	CreatedAt   string `json:"createdAt"`
+	LastSeenAt  string `json:"lastSeenAt,omitempty"`
+	RevokedAt   string `json:"revokedAt,omitempty"`
+	PushEnabled bool   `json:"pushEnabled"`
 }
 
 type DevicePairing struct {
