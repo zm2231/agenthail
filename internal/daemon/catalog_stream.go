@@ -311,7 +311,6 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		d.log.Printf("catalog view state: %s", err)
 		return
 	}
-	openClaude := claudeOpenProcesses(ctx)
 	if projects, err := d.Registry.ListProjects(); err != nil {
 		d.log.Printf("catalog projects: %s", err)
 	} else {
@@ -357,14 +356,17 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		d.correlatePendingLaunches(locateCtx, sessions)
 		d.correlateObservedTerminalLaunches(locateCtx, sessions)
 		locateCancel()
+		openSessions := surface.OpenSessions(ctx, adapter, sessions)
 		source, _ := adapter.(surface.LocalStatusSource)
 		for _, session := range sessions {
 			if session.Runtime == nil {
 				session.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: false}
 			}
 			seen[session.ID] = struct{}{}
-			identity := d.catalogIdentities.identity(ctx, session, observedAt, func() *catalogProject { return d.storedCatalogProject(session.ID) })
-			open := session.Surface == surface.KindClaude && openClaude[session.PID]
+			identityCtx, identityCancel := context.WithTimeout(ctx, 3*time.Second)
+			identity := d.catalogIdentities.identity(identityCtx, session, observedAt, func() *catalogProject { return d.storedCatalogProject(session.ID) })
+			identityCancel()
+			open := openSessions[session.ID]
 			alias := aliasByID[session.ID]
 			if !d.publishCatalogSession(adapter, session, identity, alias, counts[session.ID], open, config, view, observedAt) {
 				delete(d.catalogLive, session.ID)
@@ -566,6 +568,7 @@ func (d *Daemon) publishCatalogViewState() {
 	type localRow struct {
 		record     registry.CatalogSessionState
 		projection dashboardSession
+		adapter    surface.Surface
 	}
 	rows := make([]localRow, 0, len(snapshot.Sessions))
 	projections := make([]dashboardSession, 0, len(snapshot.Sessions))
@@ -574,9 +577,13 @@ func (d *Daemon) publishCatalogViewState() {
 		if record.HostID != "" || json.Unmarshal([]byte(record.ProjectionFingerprint), &projection) != nil {
 			continue
 		}
+		adapter, err := d.adapters().For(&record.Session)
+		if err != nil {
+			continue
+		}
 		projection.QueueCount = counts[record.Session.ID]
-		projection.Current, projection.CurrentReason = dashboardSessionPresence(record.Session, projection.QueueCount, projection.Open, config.CodexRecentHours, now)
-		rows = append(rows, localRow{record: record, projection: projection})
+		projection.Current, projection.CurrentReason = surface.PresenceFor(adapter, record.Session, surface.PresenceInput{QueueCount: projection.QueueCount, Open: projection.Open, Now: now, CodexRecentHours: config.CodexRecentHours})
+		rows = append(rows, localRow{record: record, projection: projection, adapter: adapter})
 		projections = append(projections, projection)
 	}
 	d.settleArchiveActivity(projections, view)
@@ -597,7 +604,7 @@ func (d *Daemon) publishCatalogViewState() {
 					break
 				}
 				projection.QueueCount = conflict.QueueCount
-				projection.Current, projection.CurrentReason = dashboardSessionPresence(record.Session, projection.QueueCount, projection.Open, config.CodexRecentHours, now)
+				projection.Current, projection.CurrentReason = surface.PresenceFor(row.adapter, record.Session, surface.PresenceInput{QueueCount: projection.QueueCount, Open: projection.Open, Now: now, CodexRecentHours: config.CodexRecentHours})
 				if attempt == 2 {
 					d.log.Printf("catalog queue projection %s remained unstable", d.resolveDisplay(record.Session.ID))
 				}
@@ -722,8 +729,8 @@ func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surfa
 	if session.Runtime == nil {
 		session.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: false}
 	}
-	current, reason := dashboardSessionPresence(session, queueCount, open, config.CodexRecentHours, observedAt)
+	current, reason := surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: queueCount, Open: open, Now: observedAt, CodexRecentHours: config.CodexRecentHours})
 	host := d.localHost()
-	effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
+	effective := surface.EffectiveCapabilities(adapter, &session)
 	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, Project: identity.Project, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Subagents: session.Subagents, Host: &host}
 }

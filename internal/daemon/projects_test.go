@@ -23,7 +23,7 @@ func projectsFixture(t *testing.T) (*Daemon, *registry.Registry, *daemonSurface,
 	repo := catalogTestRepo(t)
 	worktree := filepath.Join(repo, ".worktrees", "task-c3")
 	gitRun(t, repo, "worktree", "add", "-b", "feature/c3", worktree)
-	idle := time.Now().Add(-10 * time.Hour).UTC().Truncate(time.Millisecond)
+	idle := time.Now().Add(-30 * time.Hour).UTC().Truncate(time.Millisecond)
 	from.Cwd, from.LastActive = repo, idle
 	to.Cwd, to.LastActive = worktree, idle
 	for _, session := range []surface.Session{from, to} {
@@ -84,8 +84,28 @@ func TestSnapshotGroupsWorktreeSessionsIntoOneProject(t *testing.T) {
 	if len(state.Projects) != 1 || state.Projects[0].DisplayName != "widget" || state.Projects[0].RootPath != canonicalRepo || state.Projects[0].SessionCount != 2 || state.Projects[0].Archived {
 		t.Fatalf("projects=%+v", state.Projects)
 	}
-	if !from.Recent || from.Current || state.Counts["recent"] != 2 || state.Counts["current"] != 0 || state.Counts["all"] != 2 || state.Counts["archived"] != 0 {
+	if from.Recent || from.Current || state.Counts["recent"] != 0 || state.Counts["current"] != 0 || state.Counts["all"] != 2 || state.Counts["archived"] != 0 {
 		t.Fatalf("from=%+v counts=%v", from, state.Counts)
+	}
+}
+
+func TestRecentCoversTheLastDayAndEveryCurrentSession(t *testing.T) {
+	now := time.Now()
+	view := catalogViewState{attention: map[string]bool{"flagged": true}}
+	for _, test := range []struct {
+		row    dashboardSession
+		recent bool
+	}{
+		{dashboardSession{ID: "earlier", LastActive: now.Add(-10 * time.Hour)}, true},
+		{dashboardSession{ID: "stale", LastActive: now.Add(-30 * time.Hour)}, false},
+		{dashboardSession{ID: "open", LastActive: now.Add(-30 * time.Hour), Current: true}, true},
+		{dashboardSession{ID: "flagged", LastActive: now.Add(-30 * time.Hour)}, true},
+	} {
+		row := test.row
+		applyCatalogView(&row, view, now)
+		if row.Recent != test.recent {
+			t.Fatalf("%s: recent=%v want %v", row.ID, row.Recent, test.recent)
+		}
 	}
 }
 
@@ -101,7 +121,7 @@ func TestArchivedSessionLeavesScopesUntilItIsActiveAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !stateRow(t, state, "from").Archived || state.Counts["all"] != 1 || state.Counts["recent"] != 1 || state.Counts["archived"] != 1 || state.Projects[0].SessionCount != 1 {
+	if !stateRow(t, state, "from").Archived || state.Counts["all"] != 1 || state.Counts["recent"] != 0 || state.Counts["archived"] != 1 || state.Projects[0].SessionCount != 1 {
 		t.Fatalf("counts=%v projects=%+v", state.Counts, state.Projects)
 	}
 
@@ -177,7 +197,7 @@ func TestAddingAFolderProjectClaimsItsSessions(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(folder, "week-2"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	scratch := surface.Session{ID: "scratch", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Cwd: filepath.Join(folder, "week-2"), LastActive: time.Now().UTC()}
+	scratch := surface.Session{ID: "scratch", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Cwd: filepath.Join(folder, "week-2"), LastActive: time.Now().UTC()}
 	fake.sessions[scratch.ID] = scratch
 	if err := r.RegisterSession(scratch); err != nil {
 		t.Fatal(err)

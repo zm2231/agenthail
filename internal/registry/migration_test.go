@@ -93,7 +93,7 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 func assertMigratedSessionsAndRoutes(t *testing.T, r *Registry) {
 	t.Helper()
 	target, err := r.Session("target")
-	if err != nil || target.Name != "Target" || target.Cwd != "/work/target" || target.Surface != surface.KindCodex {
+	if err != nil || target.Name != "Target" || target.Cwd != "/work/target" || target.Surface != surface.KindCodex || target.RuntimeKind == "" {
 		t.Fatalf("target=%+v err=%v", target, err)
 	}
 	if _, err := r.Session("sender"); err != nil {
@@ -297,5 +297,52 @@ func assertV11SeedCheckpointMigrated(t *testing.T, r *Registry) {
 	status, seq, identity, err := r.SessionJournalSeedCheckpoint("target")
 	if err != nil || status != SessionJournalSeeded || seq != 1 || identity != "" {
 		t.Fatalf("checkpoint status=%q seq=%d identity=%q err=%v", status, seq, identity, err)
+	}
+}
+
+func TestRuntimeKindStepDerivesEachRowsKindFromItsSurfaceAndTransport(t *testing.T) {
+	r := openTestRegistry(t)
+	if _, err := r.db.Exec(`ALTER TABLE sessions DROP COLUMN runtime_kind`); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]surface.RuntimeKind{
+		"claude":         surface.RuntimeClaudeCLI,
+		"codex-managed":  surface.RuntimeCodexAppServer,
+		"codex-desktop":  surface.RuntimeCodexDesktop,
+		"codex-readonly": surface.RuntimeCodexDesktop,
+		"codex-none":     surface.RuntimeCodexDesktop,
+		"notion":         surface.RuntimeNotionWeb,
+		"operator":       surface.RuntimeOperator,
+		"unknown":        "",
+	}
+	for _, row := range []struct{ id, surface, transport string }{
+		{"claude", "claude", "uds"},
+		{"codex-managed", "codex", "managed"},
+		{"codex-desktop", "codex", "desktop"},
+		{"codex-readonly", "codex", "readOnly"},
+		{"codex-none", "codex", ""},
+		{"notion", "notion", ""},
+		{"operator", "agenthail", ""},
+		{"unknown", "retired", ""},
+	} {
+		if _, err := r.db.Exec(`INSERT INTO sessions(id,surface,name,transport) VALUES(?,?,?,?)`, row.id, row.surface, row.id, row.transport); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.recordRuntimeKinds(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`INSERT INTO sessions(id,surface,name,transport,runtime_kind) VALUES('recorded','codex','recorded','managed','codex-desktop')`); err != nil {
+		t.Fatal(err)
+	}
+	want["recorded"] = surface.RuntimeCodexDesktop
+	if err := r.recordRuntimeKinds(); err != nil {
+		t.Fatal(err)
+	}
+	for id, kind := range want {
+		var got string
+		if err := r.db.QueryRow(`SELECT runtime_kind FROM sessions WHERE id=?`, id).Scan(&got); err != nil || surface.RuntimeKind(got) != kind {
+			t.Fatalf("%s runtime_kind=%q err=%v, want %q", id, got, err, kind)
+		}
 	}
 }

@@ -17,6 +17,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 const e2eToken = "e2e-token"
@@ -54,7 +55,7 @@ func newScriptedAgent(ids ...string) *scriptedAgent {
 }
 
 func (a *scriptedAgent) session(id string) surface.Session {
-	return surface.Session{ID: id, Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	return surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 }
 
 func (a *scriptedAgent) setStatus(id string, status surface.SessionStatus) {
@@ -110,6 +111,10 @@ func (a *scriptedAgent) deliveredTo(id string) []deliveredMessage {
 }
 
 func (a *scriptedAgent) Name() surface.SurfaceKind { return surface.KindCodex }
+
+func (a *scriptedAgent) RuntimeKinds() []surface.RuntimeKind {
+	return surfacetest.RuntimeKinds(a.Name())
+}
 
 func (a *scriptedAgent) List(context.Context) ([]surface.Session, error) {
 	a.mu.Lock()

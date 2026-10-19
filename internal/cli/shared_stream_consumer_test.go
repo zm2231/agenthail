@@ -43,7 +43,7 @@ func (r testSessionStreamReader) OpenSessionStream(context.Context, *surface.Ses
 }
 
 func TestSendStreamActiveDaemonUsesPreparedJournalAndFastReply(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	fake := &cliSurface{
 		kind:         surface.KindCodex,
 		sessions:     map[string]surface.Session{"s": session},
@@ -68,7 +68,7 @@ func TestSendStreamActiveDaemonUsesPreparedJournalAndFastReply(t *testing.T) {
 }
 
 func TestSendStreamActiveDaemonFailsOnCancelledTerminal(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	fake := &cliSurface{
 		kind:         surface.KindCodex,
 		sessions:     map[string]surface.Session{"s": session},
@@ -89,7 +89,7 @@ func TestSendStreamActiveDaemonFailsOnCancelledTerminal(t *testing.T) {
 }
 
 func TestSendStreamActiveDaemonFailsClosedOnSourceError(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Send: true, Stream: true}, sendResult: &surface.SendResult{UUID: "turn-a", Accepted: true}}
 	app, _ := cliFixture(t, fake)
 	app.catalogDaemonRunning = func() bool { return true }
@@ -103,7 +103,7 @@ func TestSendStreamActiveDaemonFailsClosedOnSourceError(t *testing.T) {
 }
 
 func TestStreamActiveDaemonTimeoutCancelsSubscription(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	cancelled := atomic.Int32{}
 	fake := &cliSurface{
 		kind:     surface.KindCodex,
@@ -130,7 +130,7 @@ func TestStreamActiveDaemonTimeoutCancelsSubscription(t *testing.T) {
 }
 
 func TestSendReplyToNewNotionThreadNeverStealsTakenAlias(t *testing.T) {
-	synthetic := surface.Session{ID: "new:launch-notes", Surface: surface.KindNotion, Name: "launch-notes", Status: surface.StatusIdle}
+	synthetic := surface.Session{ID: "new:launch-notes", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: "launch-notes", Status: surface.StatusIdle}
 	fake := &cliSurface{
 		kind:       surface.KindNotion,
 		sessions:   map[string]surface.Session{"new:launch-notes": synthetic},
@@ -138,7 +138,7 @@ func TestSendReplyToNewNotionThreadNeverStealsTakenAlias(t *testing.T) {
 		sendResult: &surface.SendResult{UUID: "notion-thread", Accepted: true},
 	}
 	app, registry := cliFixture(t, fake)
-	if err := registry.RegisterSession(surface.Session{ID: "existing", Surface: surface.KindNotion}); err != nil {
+	if err := registry.RegisterSession(surface.Session{ID: "existing", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb}); err != nil {
 		t.Fatal(err)
 	}
 	if err := registry.SetAlias("launch-notes", "existing"); err != nil {

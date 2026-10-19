@@ -20,15 +20,20 @@ type listProject struct {
 
 type listCatalogView struct {
 	Project   *listProject            `json:"project,omitempty"`
-	Subagents *surface.SubagentRollup `json:"subagents,omitempty"`
+	Subagents *surface.SubagentRollup `json:"-"`
 	Current   bool                    `json:"current"`
 	Recent    bool                    `json:"recent"`
 	Archived  bool                    `json:"archived,omitempty"`
 }
 
 func catalogListView(record registry.CatalogSessionState) listCatalogView {
-	var view listCatalogView
-	_ = json.Unmarshal([]byte(record.ProjectionFingerprint), &view)
+	var projection struct {
+		listCatalogView
+		Subagents *surface.SubagentRollup `json:"subagents"`
+	}
+	_ = json.Unmarshal([]byte(record.ProjectionFingerprint), &projection)
+	view := projection.listCatalogView
+	view.Subagents = projection.Subagents
 	return view
 }
 

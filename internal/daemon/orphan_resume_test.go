@@ -83,7 +83,7 @@ func newOrphanFixtureOn(t *testing.T, transport string) *orphanFixture {
 	}
 	t.Cleanup(func() { _ = r.Close() })
 	fixture.r = r
-	fixture.session = surface.Session{ID: orphanConversation, Bridge: "session_orphan", Surface: surface.KindClaude, Name: "orphan", PID: orphanPID, Status: surface.StatusBusy, Transport: transport, Cwd: fixture.claude.Home, Transcript: fixture.claude.Transcript(orphanConversation, fixture.claude.Home)}
+	fixture.session = surface.Session{ID: orphanConversation, Bridge: "session_orphan", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "orphan", PID: orphanPID, Status: surface.StatusBusy, Transport: transport, Cwd: fixture.claude.Home, Transcript: fixture.claude.Transcript(orphanConversation, fixture.claude.Home)}
 	if err := r.RegisterSession(fixture.session); err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestQueuedRelayToExitedSessionWithUncertainResumeIsNotRetried(t *testing.T)
 
 func TestRelayToExitedClaudeSessionResumesAndDeliversOnce(t *testing.T) {
 	f := newOrphanFixture(t)
-	from := surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	from := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 	if err := f.r.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}

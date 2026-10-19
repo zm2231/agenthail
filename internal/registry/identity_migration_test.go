@@ -126,15 +126,15 @@ func seedVersion13(t *testing.T, r *Registry) {
 	exec(`CREATE TABLE api_action_reservations (idempotency_key TEXT PRIMARY KEY, session_id TEXT NOT NULL, action TEXT NOT NULL, message TEXT NOT NULL DEFAULT '', source_session_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'reserved', receipt TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')))`)
 	exec(`CREATE TABLE daemon_event_items (dedupe_key TEXT PRIMARY KEY, event_id INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')))`)
 	for _, s := range []surface.Session{
-		{ID: rekeyedBridge, Surface: surface.KindClaude, Name: "worker", Cwd: "/work", PID: 41, Transcript: "/claude/projects/-work/conversation-worker.jsonl", HasLocal: true},
-		{ID: "conversation-native", Surface: surface.KindClaude, Name: "native", Cwd: "/work", Transcript: "/claude/projects/-work/conversation-native.jsonl", HasLocal: true},
-		{ID: collidedBridge, Surface: surface.KindClaude, Name: "native again", Cwd: "/work", PID: 42, Transcript: "/claude/projects/-work/conversation-native.jsonl", HasLocal: true},
-		{ID: orphanBridge, Surface: surface.KindClaude, Name: "no transcript", PID: 43},
-		{ID: keptOrphan, Surface: surface.KindClaude, Name: "no transcript, still addressed"},
-		{ID: historyOrphan, Surface: surface.KindClaude, Name: "no transcript, in history"},
-		{ID: "conversation-launch", Surface: surface.KindClaude, Name: "launched", PID: 44},
-		{ID: launchedBridge, Surface: surface.KindClaude, Name: "launched", Cwd: "/work", PID: 44, Transcript: "/claude/projects/-work/conversation-launch.jsonl", HasLocal: true},
-		{ID: "codex-peer", Surface: surface.KindCodex},
+		{ID: rekeyedBridge, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "worker", Cwd: "/work", PID: 41, Transcript: "/claude/projects/-work/conversation-worker.jsonl", HasLocal: true},
+		{ID: "conversation-native", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "native", Cwd: "/work", Transcript: "/claude/projects/-work/conversation-native.jsonl", HasLocal: true},
+		{ID: collidedBridge, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "native again", Cwd: "/work", PID: 42, Transcript: "/claude/projects/-work/conversation-native.jsonl", HasLocal: true},
+		{ID: orphanBridge, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "no transcript", PID: 43},
+		{ID: keptOrphan, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "no transcript, still addressed"},
+		{ID: historyOrphan, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "no transcript, in history"},
+		{ID: "conversation-launch", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "launched", PID: 44},
+		{ID: launchedBridge, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "launched", Cwd: "/work", PID: 44, Transcript: "/claude/projects/-work/conversation-launch.jsonl", HasLocal: true},
+		{ID: "codex-peer", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop},
 	} {
 		exec(`INSERT INTO sessions(id,surface,name,cwd,pid,transcript,has_local) VALUES(?,?,?,?,?,?,?)`, s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, s.Transcript, b2i(s.HasLocal))
 	}

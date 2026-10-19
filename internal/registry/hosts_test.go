@@ -85,11 +85,11 @@ func TestHostCatalogRowsStayOwnedAndOutsideLocalResolution(t *testing.T) {
 	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
-	local := surface.Session{ID: "local-thread", Surface: surface.KindCodex, Status: surface.StatusIdle}
+	local := surface.Session{ID: "local-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
 	if err := r.RegisterSession(local); err != nil {
 		t.Fatal(err)
 	}
-	remote := surface.Session{ID: "remote-thread", Surface: surface.KindCodex, Name: "remote work", Status: surface.StatusBusy, PID: 42, Transcript: "/home/remote/t.jsonl"}
+	remote := surface.Session{ID: "remote-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "remote work", Status: surface.StatusBusy, PID: 42, Transcript: "/home/remote/t.jsonl"}
 	row := HostCatalogRow{Session: remote, EntityID: hostID + "::remote-thread", Projection: json.RawMessage(`{"id":"h0123456789ab::remote-thread","surface":"codex","alias":"builder"}`)}
 	event, created, err := r.ApplyHostCatalogRow(hostID, row)
 	if err != nil || !created || event.Type != "session.upserted" || event.EntityID != row.EntityID {
@@ -225,7 +225,7 @@ func TestLocalRegistrationRefusesHostOwnedSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	takeover := surface.Session{ID: "remote-thread", Surface: surface.KindClaude, Name: "local takeover", PID: 7, Transcript: "/tmp/local.jsonl"}
+	takeover := surface.Session{ID: "remote-thread", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "local takeover", PID: 7, Transcript: "/tmp/local.jsonl"}
 	if err := r.RegisterSession(takeover); !errors.As(err, &SessionOwnedError{}) {
 		t.Fatalf("RegisterSession err=%v", err)
 	}

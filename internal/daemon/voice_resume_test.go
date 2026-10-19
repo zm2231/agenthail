@@ -28,7 +28,7 @@ type voiceCall struct {
 }
 
 func (c *voiceCall) Create(_ context.Context, cwd, _ string) (*surface.Session, error) {
-	return &surface.Session{ID: "operator", Surface: surface.KindCodex, Name: "Voice operator", Cwd: cwd, Transport: "desktop"}, nil
+	return &surface.Session{ID: "operator", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Voice operator", Cwd: cwd, Transport: "desktop"}, nil
 }
 
 func (c *voiceCall) Cursor(context.Context) (voice.Cursor, error) {
@@ -242,7 +242,7 @@ func TestVoiceDelegationWhoseResumeComesBackSocketOnlyDeliversAndCannotFollow(t 
 	f.claude.Listen()
 	f.claude.ResumeBridge("")
 	manager := listenPeerManager(t, f.claude.Home)
-	f.session = surface.Session{ID: orphanConversation, Surface: surface.KindClaude, Name: "orphan", PID: orphanPID, Status: surface.StatusIdle, Transport: "uds", Cwd: f.claude.Home, Transcript: f.session.Transcript}
+	f.session = surface.Session{ID: orphanConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "orphan", PID: orphanPID, Status: surface.StatusIdle, Transport: "uds", Cwd: f.claude.Home, Transcript: f.session.Transcript}
 	if err := f.r.RegisterSession(f.session); err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestVoiceDelegationToLiveSocketOnlySessionDeliversInsteadOfRejecting(t *tes
 	f.claude.Listen()
 	f.claude.Record(orphanConversation, f.claude.Home, "")
 	manager := listenPeerManager(t, f.claude.Home)
-	f.session = surface.Session{ID: orphanConversation, Surface: surface.KindClaude, Name: "orphan", PID: f.claude.PID, Status: surface.StatusIdle, Transport: "uds", Cwd: f.claude.Home, Transcript: f.session.Transcript}
+	f.session = surface.Session{ID: orphanConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "orphan", PID: f.claude.PID, Status: surface.StatusIdle, Transport: "uds", Cwd: f.claude.Home, Transcript: f.session.Transcript}
 	if err := f.r.RegisterSession(f.session); err != nil {
 		t.Fatal(err)
 	}

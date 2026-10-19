@@ -121,7 +121,7 @@ func countMethod(methods []string, method string) int {
 
 func TestCodexEnsureWritableRefreshesDesktopSourceTransport(t *testing.T) {
 	codex := NewCodex(startRendererDesktopBridge(t))
-	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "agenthail", Transport: codexTransportReadOnly}
+	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Source: "agenthail", Transport: codexTransportReadOnly}
 	if err := codex.EnsureWritable(context.Background(), session); err != nil {
 		t.Fatal(err)
 	}
@@ -142,12 +142,12 @@ func TestCodexDesktopSendNeverResumesLoadedThreadAndLoadsUnloadedThreadOnce(t *t
 		{
 			name:      "loaded thread behind stale managed transport",
 			firstRead: ready,
-			session:   surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "agenthail", Transport: codexTransportManaged},
+			session:   surface.Session{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Source: "agenthail", Transport: codexTransportManaged},
 		},
 		{
 			name:       "unloaded Desktop thread",
 			firstRead:  `{"result":{"thread":{"id":"thread","source":"vscode","status":{"type":"notLoaded"}}}}`,
-			session:    surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "vscode", Transport: codexTransportDesktop},
+			session:    surface.Session{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Source: "vscode", Transport: codexTransportDesktop},
 			wantResume: 1,
 		},
 	} {
@@ -208,7 +208,7 @@ func TestCodexDesktopSendNeverResumesLoadedThreadAndLoadsUnloadedThreadOnce(t *t
 func TestCodexObserveReadsThroughDesktopWhenTheDaemonIsStopped(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	codex := NewCodex(startRendererDesktopBridge(t))
-	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "agenthail", Transport: codexTransportManaged}
+	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Source: "agenthail", Transport: codexTransportManaged}
 	observation, err := codex.Observe(context.Background(), session)
 	if err != nil || observation == nil || observation.Status != surface.StatusIdle {
 		t.Fatalf("observation=%+v err=%v", observation, err)

@@ -18,7 +18,7 @@ func TestCodexOperationsUseNativeSocketAndReturnedIdentity(t *testing.T) {
 		return map[string]any{"data": []any{}, "nextCursor": "page-two"}
 	})
 	codex := isolatedManagedRuntime(t)
-	session := &surface.Session{ID: "source", Surface: surface.KindCodex, Transport: codexTransportManaged, Source: "agenthail", Cwd: "/source"}
+	session := &surface.Session{ID: "source", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: codexTransportManaged, Source: "agenthail", Cwd: "/source"}
 	fork, err := codex.ForkSession(context.Background(), session, surface.ForkOptions{LastTurnID: "cutoff"})
 	if err != nil || fork.ID != "fork-id" || fork.Cwd != "/fork" || fork.Source != "appServer" || fork.Transport != codexTransportManaged {
 		t.Fatalf("fork=%+v err=%v", fork, err)

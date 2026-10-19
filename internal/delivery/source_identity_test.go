@@ -34,12 +34,12 @@ func TestDispatcherAppliesSourceSessionIDToImmediateAndDeferredSend(t *testing.T
 		t.Fatal(err)
 	}
 	defer r.Close()
-	session := &surface.Session{ID: "target", Surface: surface.KindClaude}
+	session := &surface.Session{ID: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
 	if err := r.RegisterSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	for _, sourceID := range []string{"source-immediate", "source-deferred"} {
-		if err := r.RegisterSession(surface.Session{ID: sourceID, Surface: surface.SurfaceKind("agenthail")}); err != nil {
+		if err := r.RegisterSession(surface.Session{ID: sourceID, Surface: surface.SurfaceKind("agenthail"), RuntimeKind: surface.RuntimeOperator}); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -292,7 +292,7 @@ func TestUnchangedDiscoveryPassWritesNoSessionRows(t *testing.T) {
 	fake := &daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}
 	for index := 0; index < 20; index++ {
 		id := fmt.Sprintf("session-%02d", index)
-		fake.sessions[id] = surface.Session{ID: id, Surface: surface.KindCodex, Status: surface.StatusIdle, Cwd: t.TempDir(), Source: "vscode", Transport: "desktop", LastActive: time.UnixMilli(1_790_000_000_000)}
+		fake.sessions[id] = surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Cwd: t.TempDir(), Source: "vscode", Transport: "desktop", LastActive: time.UnixMilli(1_790_000_000_000)}
 	}
 	d := New(store, []surface.Surface{fake})
 	d.discoverCatalog(context.Background())

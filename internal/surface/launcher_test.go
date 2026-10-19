@@ -152,7 +152,7 @@ func TestCMUXLocateUsesAgenthailReceiptAndLiveInventory(t *testing.T) {
 	if err := WriteManagedCodexLaunchReceipt(path, ManagedCodexLaunchReceipt{LaunchID: "agenthail-launch", ThreadID: "codex-thread", Cwd: "/work/project", Runtime: LauncherCMUX, Workspace: "workspace-7", Surface: "surface-9"}); err != nil {
 		t.Fatal(err)
 	}
-	got := launcher.Locate(context.Background(), []Session{{ID: "codex-thread", Surface: KindCodex, Cwd: "/work/project"}})
+	got := launcher.Locate(context.Background(), []Session{{ID: "codex-thread", Surface: KindCodex, RuntimeKind: RuntimeCodexDesktop, Cwd: "/work/project"}})
 	want := map[string]Location{"codex-thread": {Workspace: "workspace-7", Surface: "surface-9"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("locations=%#v want=%#v", got, want)
@@ -184,7 +184,7 @@ func TestCMUXLocatePreservesReceiptOnUnverifiableInventory(t *testing.T) {
 			if err := WriteManagedCodexLaunchReceipt(path, ManagedCodexLaunchReceipt{LaunchID: "agenthail-degraded", ThreadID: "codex-thread", Cwd: "/work/project", Runtime: LauncherCMUX, Workspace: "workspace:7", Surface: "surface:9"}); err != nil {
 				t.Fatal(err)
 			}
-			if got := launcher.Locate(context.Background(), []Session{{ID: "codex-thread", Surface: KindCodex, Cwd: "/work/project"}}); len(got) != 0 {
+			if got := launcher.Locate(context.Background(), []Session{{ID: "codex-thread", Surface: KindCodex, RuntimeKind: RuntimeCodexDesktop, Cwd: "/work/project"}}); len(got) != 0 {
 				t.Fatalf("unverifiable inventory located the session: %#v", got)
 			}
 			if _, err := os.Stat(path); err != nil {
@@ -330,7 +330,7 @@ func TestTMUXLocateRequiresCwdAndVerifiedAncestry(t *testing.T) {
 		}
 		return []byte("1\n"), nil
 	}
-	got := launcher.Locate(context.Background(), []Session{{ID: "codex", Surface: KindCodex, Cwd: "/work/project", PID: 99}, {ID: "wrong", Surface: KindClaude, Cwd: "/work/project", PID: 100}})
+	got := launcher.Locate(context.Background(), []Session{{ID: "codex", Surface: KindCodex, RuntimeKind: RuntimeCodexDesktop, Cwd: "/work/project", PID: 99}, {ID: "wrong", Surface: KindClaude, RuntimeKind: RuntimeClaudeCLI, Cwd: "/work/project", PID: 100}})
 	want := map[string]Location{"codex": {Session: "build", Pane: "%1"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("locations = %#v, want %#v", got, want)
@@ -360,7 +360,7 @@ func TestTMUXLocateWaitsForCompleteReceiptAndRejectsTokenOrPaneMismatch(t *testi
 		return []byte("4242 agenthail-review %1 /work/project\n4343 agenthail-review %2 /work/project\n"), nil
 	}
 	launcher.pidAlive = func(pid int) bool { return pid == 4242 || pid == 4343 }
-	sessions := []Session{{ID: "codex-thread", Surface: KindCodex, Cwd: "/work/project", PID: 0}}
+	sessions := []Session{{ID: "codex-thread", Surface: KindCodex, RuntimeKind: RuntimeCodexDesktop, Cwd: "/work/project", PID: 0}}
 	if got := launcher.Locate(context.Background(), sessions); len(got) != 0 {
 		t.Fatalf("late receipt unexpectedly correlated: %#v", got)
 	}
