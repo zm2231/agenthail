@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -316,5 +317,47 @@ func TestFederationStopsReplayingHeldSendsOnceTheHostIsIncompatible(t *testing.T
 	}
 	if item, err := local.reg.QueueItem(ids[1]); err != nil || item.Status != "pending" {
 		t.Fatalf("second held send item=%+v err=%v", item, err)
+	}
+}
+
+func TestFederationMirrorKeepsEachSessionsRuntime(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	appServer := surface.Session{ID: "remote-c", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, ConfiguredModel: "gpt-remote", Name: "work remote-c", Status: surface.StatusIdle, Source: "agenthail", Transport: "managed", LastActive: time.Now()}
+	if err := remote.reg.RegisterSession(appServer); err != nil {
+		t.Fatal(err)
+	}
+	remote.fake.mu.Lock()
+	remote.fake.sessions["remote-c"] = appServer
+	remote.fake.mu.Unlock()
+	remote.daemon.discoverCatalog(context.Background())
+	awaitFederation(t, "app-server session mirrored", func() bool { return len(sessionsOf(local.snapshot(t), record.ID)) == 3 })
+
+	check := func(stage string) {
+		t.Helper()
+		for id, want := range map[string]surface.RuntimeKind{"remote-a": surface.RuntimeCodexDesktop, "remote-c": surface.RuntimeCodexAppServer} {
+			session, err := local.reg.Session(id)
+			if owner, _ := local.reg.SessionHost(id); err != nil || owner != record.ID || session.RuntimeKind != want {
+				t.Fatalf("%s: mirrored %s=%+v err=%v, want runtime %s", stage, id, session, err, want)
+			}
+			if _, err := local.daemon.adapters().For(session); err != nil {
+				t.Fatalf("%s: mirrored %s does not resolve its runtime: %v", stage, id, err)
+			}
+			if id == "remote-c" && (session.ConfiguredModel != "gpt-remote" || session.Transport != "managed" || session.LastActive.IsZero()) {
+				t.Fatalf("%s: mirrored row lost session fields: %+v", stage, session)
+			}
+		}
+		for _, row := range sessionsOf(local.snapshot(t), record.ID) {
+			if row.RuntimeKind == "" {
+				t.Fatalf("%s: snapshot row %s has no runtime kind", stage, row.ID)
+			}
+		}
+	}
+	check("connected")
+	host, _ := local.daemon.pairedHost(record.ID)
+	local.daemon.markHostDown(host, errors.New("synthetic outage"))
+	check("unavailable")
+	routed := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "compact", "sessionId": hosts.Qualify(record.ID, "remote-c")})
+	if routed.Code != http.StatusOK || strings.Join(remote.fake.delivered(), "|") != "compact" {
+		t.Fatalf("a mirrored row with a local runtime is not routed to its host: %d %s %v", routed.Code, routed.Body.String(), remote.fake.delivered())
 	}
 }

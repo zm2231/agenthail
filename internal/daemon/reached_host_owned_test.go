@@ -48,7 +48,7 @@ func pairForgeOwning(t *testing.T, r *registry.Registry, sessionID string) strin
 		t.Fatal(err)
 	}
 	entity := hostID + "::" + sessionID
-	if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: sessionID, Surface: surface.KindClaude, Name: "remote"}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
+	if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: sessionID, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "remote"}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	return hostID

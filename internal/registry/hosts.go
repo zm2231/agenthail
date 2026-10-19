@@ -295,6 +295,9 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 	if hostID == "" || row.Session.ID == "" || row.EntityID == "" {
 		return CatalogEvent{}, false, fmt.Errorf("host catalog row requires host, session and entity ids")
 	}
+	if row.Session.RuntimeKind == "" {
+		return CatalogEvent{}, false, fmt.Errorf("host catalog row %s: no runtime kind", row.Session.ID)
+	}
 	var projection map[string]any
 	if err := json.Unmarshal(row.Projection, &projection); err != nil {
 		return CatalogEvent{}, false, fmt.Errorf("host catalog projection must be a JSON object: %w", err)
@@ -337,12 +340,12 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 		lastActiveMS = session.LastActive.UnixMilli()
 	}
 	parentID, rootID, depth, nickname, role := subagentValues(session)
-	if _, err := tx.Exec(`INSERT INTO sessions(id,host_id,surface,name,cwd,status,source,transport,configured_model,last_active_ms,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+	if _, err := tx.Exec(`INSERT INTO sessions(id,host_id,surface,name,cwd,status,source,transport,runtime_kind,configured_model,last_active_ms,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
 		ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,status=excluded.status,source=excluded.source,
-		transport=excluded.transport,configured_model=excluded.configured_model,last_active_ms=excluded.last_active_ms,parent_session_id=excluded.parent_session_id,
+		transport=excluded.transport,runtime_kind=excluded.runtime_kind,configured_model=excluded.configured_model,last_active_ms=excluded.last_active_ms,parent_session_id=excluded.parent_session_id,
 		root_session_id=excluded.root_session_id,subagent_depth=excluded.subagent_depth,agent_nickname=excluded.agent_nickname,agent_role=excluded.agent_role,updated_at=datetime('now')`,
-		session.ID, hostID, string(session.Surface), session.Name, session.Cwd, string(session.Status), session.Source, session.Transport, session.ConfiguredModel, lastActiveMS, parentID, rootID, depth, nickname, role); err != nil {
+		session.ID, hostID, string(session.Surface), session.Name, session.Cwd, string(session.Status), session.Source, session.Transport, string(session.RuntimeKind), session.ConfiguredModel, lastActiveMS, parentID, rootID, depth, nickname, role); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	prior, err := readCatalogSessionPrior(tx, session.ID)
@@ -488,7 +491,7 @@ func (r *Registry) RemoveHostCatalogRow(hostID, sessionID, entityID, reason stri
 }
 
 func (r *Registry) HostCatalogRows(hostID string) ([]CatalogSessionState, error) {
-	rows, err := r.read.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.status,cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.host_queue_count
+	rows, err := r.read.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.status,s.source,s.transport,s.runtime_kind,s.configured_model,s.last_active_ms,`+sessionSubagentSelect+`,cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.host_queue_count
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id=? ORDER BY s.id`, hostID)
 	if err != nil {
 		return nil, err
@@ -498,11 +501,19 @@ func (r *Registry) HostCatalogRows(hostID string) ([]CatalogSessionState, error)
 	for rows.Next() {
 		var state CatalogSessionState
 		var kind, status, observedAt string
-		if err := rows.Scan(&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &status, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &state.HostQueueCount); err != nil {
+		var lastActiveMS int64
+		var subagent subagentColumns
+		targets := append([]any{&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &status, &state.Session.Source, &state.Session.Transport, &state.Session.RuntimeKind, &state.Session.ConfiguredModel, &lastActiveMS}, subagent.targets()...)
+		targets = append(targets, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &state.HostQueueCount)
+		if err := rows.Scan(targets...); err != nil {
 			return nil, err
 		}
 		state.Session.Surface = surface.SurfaceKind(kind)
 		state.Session.Status = surface.SessionStatus(status)
+		if lastActiveMS > 0 {
+			state.Session.LastActive = time.UnixMilli(lastActiveMS)
+		}
+		subagent.apply(&state.Session)
 		state.HostID = hostID
 		if parsed, err := time.Parse(time.RFC3339Nano, observedAt); err == nil {
 			state.ObservedAt = parsed

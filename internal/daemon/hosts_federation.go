@@ -559,7 +559,7 @@ func (d *Daemon) mirrorOrHide(host *pairedHost, row dashboardSession) error {
 }
 
 func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession) error {
-	session := surface.Session{ID: row.ID, Surface: row.Surface, Name: row.Name, Cwd: row.Cwd, Status: row.Status, LastActive: row.LastActive, Source: row.Source, Transport: row.Transport}
+	session := surface.Session{ID: row.ID, Surface: row.Surface, RuntimeKind: row.RuntimeKind, ConfiguredModel: row.ConfiguredModel, Name: row.Name, Cwd: row.Cwd, Status: row.Status, LastActive: row.LastActive, Source: row.Source, Transport: row.Transport}
 	if row.Subagent != nil {
 		subagent := *row.Subagent
 		session.Subagent = &subagent

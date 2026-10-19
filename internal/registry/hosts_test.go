@@ -162,7 +162,7 @@ func TestRemoveHostDeletesOwnedSessionsAndAnnouncesRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-thread"
-	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindClaude}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
+	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	events, err := r.RemoveHost(hostID)
@@ -184,7 +184,7 @@ func TestHeldHostDeliveryIsInvisibleToLocalClaimsAndMatchesByAlias(t *testing.T)
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-thread"
-	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex, Name: "remote work"}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `","alias":"builder"}`)}); err != nil {
+	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "remote work"}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `","alias":"builder"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.QueueHostDelivery("remote-thread", "held", "cli-key", []byte(`{"action":"send"}`), false); err != nil {
@@ -218,7 +218,7 @@ func TestLocalRegistrationRefusesHostOwnedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-thread"
-	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex, Name: "remote work"}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
+	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "remote work"}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	before, err := r.Session("remote-thread")
@@ -257,7 +257,7 @@ func TestHostCatalogRowRequiresPairedHost(t *testing.T) {
 	r := openTestRegistry(t)
 	hostID := "h0123456789ab"
 	entity := hostID + "::remote-thread"
-	row := HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}
+	row := HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}
 	if _, _, err := r.ApplyHostCatalogRow(hostID, row); err == nil {
 		t.Fatal("mirrored a row for a host that is not paired")
 	}
@@ -285,7 +285,7 @@ func TestHeldHostDeliveryPastItsDeadlineIsNeverClaimed(t *testing.T) {
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-thread"
-	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
+	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	stale, err := r.QueueHostDelivery("remote-thread", "too late", "key-stale", []byte(`{"action":"send"}`), false)
@@ -346,7 +346,7 @@ func TestHostDeliveryConfirmationWindowStartsAtFirstSend(t *testing.T) {
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-thread"
-	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
+	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now().Truncate(time.Millisecond)
@@ -383,7 +383,7 @@ func TestSurfaceAndExactResolutionNeverReachHostOwnedSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-thread"
-	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindClaude, Name: "remote work", Cwd: "/srv/remote"}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
+	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "remote work", Cwd: "/srv/remote"}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetAlias("builder", "remote-thread"); err != nil {

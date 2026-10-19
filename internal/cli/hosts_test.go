@@ -88,7 +88,7 @@ func federatedCLIFixture(t *testing.T, daemonRunning bool) (*App, *registry.Regi
 		t.Fatal(err)
 	}
 	projection := `{"id":"` + forgeBuilder.ID + `","surface":"codex","name":"remote work","alias":"builder","host":{"id":"` + forgeHostID + `","name":"forge","state":"unreachable"}}`
-	if _, _, err := reg.ApplyHostCatalogRow(forgeHostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-1", Surface: surface.KindCodex, Name: "remote work", Cwd: "/home/remote/src"}, EntityID: forgeBuilder.ID, Projection: json.RawMessage(projection), UnavailableReason: "host forge is unreachable"}); err != nil {
+	if _, _, err := reg.ApplyHostCatalogRow(forgeHostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-1", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "remote work", Cwd: "/home/remote/src"}, EntityID: forgeBuilder.ID, Projection: json.RawMessage(projection), UnavailableReason: "host forge is unreachable"}); err != nil {
 		t.Fatal(err)
 	}
 	api := &fakeDaemonAPI{matches: map[string][]remoteTarget{"@builder": {forgeBuilder}, "builder": {forgeBuilder}}, response: `{"ok":true,"result":{"evidence":"delivered","status":"sent","sessionId":"` + forgeBuilder.ID + `","turnId":"turn-7"}}`}
