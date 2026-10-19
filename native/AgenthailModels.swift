@@ -414,6 +414,7 @@ struct DeliveryProblem: Decodable, Identifiable, Equatable {
     let deliveryId: Int64
     let sessionId: String
     let sourceSessionId: String?
+    let attentionSessionId: String?
     let message: String
     let reason: String
     let status: String?
@@ -874,6 +875,7 @@ struct CatalogStreamData: Decodable {
     let deliveryId: Int64?
     let queueCount: Int?
     let sourceSessionId: String?
+    let attentionSessionId: String?
     let message: String?
     let reason: String?
     let status: String?

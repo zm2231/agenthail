@@ -759,6 +759,9 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	for index := range deliveryProblems {
 		deliveryProblems[index].SessionID = d.publicSessionID(deliveryProblems[index].SessionID)
 		deliveryProblems[index].SourceSessionID = d.publicSessionID(deliveryProblems[index].SourceSessionID)
+		if deliveryProblems[index].AttentionSessionID != "" {
+			deliveryProblems[index].AttentionSessionID = d.publicSessionID(deliveryProblems[index].AttentionSessionID)
+		}
 	}
 	rekeyed, err := d.Registry.SessionRekeys()
 	if err != nil {

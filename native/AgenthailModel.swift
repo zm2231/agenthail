@@ -86,7 +86,7 @@ final class AgenthailModel: ObservableObject {
         return listed + pinnedSessions.filter { !listedIDs.contains($0.id) }
     }
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
-    var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.map(\.sessionId)) }
+    var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.compactMap(\.attentionSessionId)) }
     var sessionTree: SessionTree {
         SessionTree.build(knownSessions, filter: sessionFilter, refinement: sessionRefinement, attentionSessionIDs: attentionSessionIDs, now: Date())
     }
@@ -827,7 +827,7 @@ final class AgenthailModel: ObservableObject {
             if let next = event.data.rekeyedTo { rekeys.record([id: next]) }
         case "delivery.problem":
             guard let deliveryID = event.data.deliveryId, let sessionID = event.data.sessionId else { return }
-            let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", status: event.data.status, at: event.data.at ?? "")
+            let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, attentionSessionId: event.data.attentionSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", status: event.data.status, at: event.data.at ?? "")
             var problems = current.deliveryProblems ?? []
             problems.removeAll { $0.deliveryId == deliveryID }
             problems.insert(problem, at: 0)
