@@ -29,7 +29,7 @@ struct NewSessionSheet: View {
         return ["claude", "codex", "notion"].filter(supported.contains)
     }
 
-    private var folders: [String] { hosts.folders }
+    private var projects: [LaunchProject] { hosts.projects }
     private var startsOnThisMac: Bool { hosts.hostQuery == nil }
 
     private var agentModels: [ModelOption] { hosts.models[form.agent] ?? [] }
@@ -74,21 +74,21 @@ struct NewSessionSheet: View {
                     if form.usesFolder && !startsOnThisMac {
                         HStack {
                             TextField("Folder on \(hosts.selectedHost?.name ?? "host")", text: $form.folder)
-                            if !folders.isEmpty {
-                                Menu("Recent") {
-                                    ForEach(folders, id: \.self) { path in Button(path) { form.folder = path } }
+                            if !projects.isEmpty {
+                                Menu("Projects") {
+                                    ForEach(projects) { project in Button(project.displayName) { form.folder = project.rootPath }.help(project.rootPath) }
                                 }
                                 .fixedSize()
                             }
                         }
                     } else if form.usesFolder {
                         HStack {
-                            Picker("Folder", selection: $form.folder) {
-                                if form.folder.isEmpty { Text("Choose a folder").tag("") }
-                                ForEach(folders, id: \.self) { path in
-                                    Text((path as NSString).abbreviatingWithTildeInPath).tag(path)
+                            Picker("Project", selection: $form.folder) {
+                                if form.folder.isEmpty { Text("Choose a project").tag("") }
+                                ForEach(projects) { project in
+                                    Text(project.displayName).tag(project.rootPath).help(project.rootPath)
                                 }
-                                if !form.folder.isEmpty && !folders.contains(form.folder) {
+                                if !form.folder.isEmpty && !projects.contains(where: { $0.rootPath == form.folder }) {
                                     Text((form.folder as NSString).abbreviatingWithTildeInPath).tag(form.folder)
                                 }
                             }
@@ -227,8 +227,7 @@ struct NewSessionSheet: View {
             hosts.receive(options: options, for: generation)
             if !agents.contains(form.agent), let first = agents.first { form.switchAgent(to: first) }
             if form.folder.isEmpty {
-                let selected = model.mainPane.selectedSession
-                form.folder = (hosts.owns(selected) ? selected.flatMap { $0.checkout?.path ?? $0.cwd } : nil) ?? (startsOnThisMac ? folders.first : nil) ?? ""
+                form.folder = hosts.defaultFolder(selected: model.mainPane.selectedSession)
             }
         } catch is CancellationError {
         } catch {

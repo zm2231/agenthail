@@ -117,7 +117,7 @@ func TestFederationLaunchCatalogComesFromTheNamedHost(t *testing.T) {
 	local, remote, record := pairedFederation(t)
 	remote.fake.modelOptions = []surface.ModelOption{{ID: "remote-model", SupportedReasoningEfforts: []string{"low", "high"}}}
 	project := surface.Session{ID: "remote-project", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "project work", Cwd: "/srv/remote-project", Status: surface.StatusIdle, LastActive: time.Now()}
-	if err := remote.reg.RegisterSession(project); err != nil {
+	if _, _, err := remote.reg.RecordCatalogSession(registry.CatalogSessionState{Session: project, Project: []byte(`{"id":"project-remote","displayName":"remote-project","rootPath":"/srv/remote-project","kind":"git"}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:" + project.ID, Type: "session.upserted", EntityID: project.ID, Payload: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 	var options struct {
@@ -126,13 +126,13 @@ func TestFederationLaunchCatalogComesFromTheNamedHost(t *testing.T) {
 			ID        string `json:"id"`
 			Connected bool   `json:"connected"`
 		} `json:"surfaces"`
-		Workspaces []string `json:"workspaces"`
+		Projects []launchProject `json:"projects"`
 	}
 	response := local.request(t, http.MethodGet, "/api/v1/session-options?host=forge", nil)
 	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &options) != nil {
 		t.Fatalf("options status=%d body=%s", response.Code, response.Body.String())
 	}
-	if options.Host.ID != record.ID || len(options.Surfaces) != 1 || options.Surfaces[0].ID != "codex" || !options.Surfaces[0].Connected || len(options.Workspaces) == 0 || options.Workspaces[0] != project.Cwd {
+	if options.Host.ID != record.ID || len(options.Surfaces) != 1 || options.Surfaces[0].ID != "codex" || !options.Surfaces[0].Connected || len(options.Projects) != 1 || options.Projects[0].RootPath != "/srv/remote-project" || options.Projects[0].DisplayName != "remote-project" {
 		t.Fatalf("remote options=%+v", options)
 	}
 	localIdentity, _ := local.reg.HostIdentity()
@@ -164,13 +164,6 @@ func TestFederationRefusesActionsThatOnlyMeanSomethingOnOneHost(t *testing.T) {
 	}
 	if _, err := local.daemon.resolveVoiceTarget(context.Background(), qualified); err == nil || !strings.Contains(err.Error(), "voice is not available for sessions on another host yet") {
 		t.Fatalf("voice err=%v", err)
-	}
-}
-
-func TestLaunchWorkspacesListNewestFoldersOnce(t *testing.T) {
-	sessions := []surface.Session{{Cwd: "/work/b"}, {Cwd: "/private/var/folders/x"}, {Cwd: "/work/a"}, {Cwd: "/work/b"}, {Cwd: ""}, {Cwd: "/home/u/.no-mistakes/run"}, {Cwd: "/tmp/scratch"}}
-	if got := launchWorkspaces(sessions); strings.Join(got, ",") != "/work/b,/work/a" {
-		t.Fatalf("workspaces=%v", got)
 	}
 }
 

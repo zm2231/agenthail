@@ -135,7 +135,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             status = captured == nil ? 503 : 200
         } else {
         switch request.url?.path {
-        case "/api/v1/session-options": body = #"{"surfaces":[{"id":"claude","workspace":true},{"id":"codex","workspace":true},{"id":"notion","workspace":false}],"workspaces":["/Users/demo/projects/fieldnotes"]}"#
+        case "/api/v1/session-options": body = #"{"surfaces":[{"id":"claude","workspace":true},{"id":"codex","workspace":true},{"id":"notion","workspace":false}],"projects":[{"id":"p-fieldnotes","displayName":"fieldnotes","rootPath":"/Users/demo/projects/fieldnotes","kind":"git"}]}"#
         case "/api/v1/models":
             body = #"{"models":[{"id":"default","displayName":"Runtime default","default":true},{"id":"gpt-5.6-sol","displayName":"GPT-5.6-Sol","description":"Latest frontier agentic coding model.","supportedReasoningEfforts":["low","medium","high"],"defaultReasoningEffort":"low"},{"id":"chatgpt-web/pro","displayName":"ChatGPT Web — Pro","supportedReasoningEfforts":["ultra"],"defaultReasoningEffort":"ultra"},{"id":"gpt-5.5","displayName":"GPT-5.5","supportedReasoningEfforts":["medium","high"],"defaultReasoningEffort":"medium"},{"id":"gpt-5.3-codex-spark","displayName":"GPT-5.3 Codex Spark","supportedReasoningEfforts":["low","medium"],"defaultReasoningEffort":"low"},{"id":"provider/custom-runtime","displayName":"Provider custom runtime","description":"Provider supplied model ID","allowsCustom":true}]}"#
         case "/api/v1/snapshot": body = SessionPreview.snapshotJSON
