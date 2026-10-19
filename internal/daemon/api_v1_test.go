@@ -347,10 +347,11 @@ func TestAPIV1SessionAttachmentServesReferencedBytesAndRejectsOversize(t *testin
 		t.Fatal(err)
 	}
 	from.Surface, from.Transcript = surface.KindClaude, transcript
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	if err := registry.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
-	claude := surfaces.NewClaude("", t.TempDir())
+	claude := surfaces.NewClaude(nil, t.TempDir())
 	d.Surfaces = []surface.Surface{claude}
 	read, err := claude.ReadSession(context.Background(), &from, surface.SessionReadRequest{Limit: 20})
 	if err != nil || len(read.Items) != 2 || read.Items[1].Attachment == nil || read.Items[0].Text != "caption" || read.Items[1].CallID != "call-1" {

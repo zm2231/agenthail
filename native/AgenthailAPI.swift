@@ -51,13 +51,17 @@ final class AgenthailAPI: @unchecked Sendable {
 
 #if os(macOS)
     convenience init(session: URLSession = .shared) throws {
+        let local = try Self.localDaemon()
+        self.init(baseURL: local.baseURL, token: local.token, session: session)
+    }
+
+    static func localDaemon() throws -> (baseURL: URL, token: String) {
         let environment = ProcessInfo.processInfo.environment
         if let rawURL = environment["AGENTHAIL_API_URL"],
            let baseURL = URL(string: rawURL),
            let token = environment["AGENTHAIL_API_TOKEN"],
            !token.isEmpty {
-            self.init(baseURL: baseURL, token: token, session: session)
-            return
+            return (baseURL, token)
         }
         let home = FileManager.default.homeDirectoryForCurrentUser
         let tokenURL = home.appendingPathComponent(".agenthail/dashboard.token")
@@ -75,7 +79,7 @@ final class AgenthailAPI: @unchecked Sendable {
         guard let baseURL = URL(string: "http://\(listen)") else {
             throw AgenthailAPIError.unavailable("The Agenthail dashboard address is invalid.")
         }
-        self.init(baseURL: baseURL, token: token, session: session)
+        return (baseURL, token)
     }
 #endif
 
@@ -246,6 +250,27 @@ final class AgenthailAPI: @unchecked Sendable {
             throw AgenthailAPIError.request(response.statusCode, message)
         }
         return try JSONDecoder().decode(PairedDeviceResponse.self, from: data)
+    }
+
+    func signin() async throws -> SigninState {
+        try await get("/api/v1/signin")
+    }
+
+    func addSigninProfile(browser: String, profile: String, label: String) async throws -> SigninProfileState? {
+        let response: SigninProfileResponse = try await post("/api/v1/signin/profiles", body: ["browser": browser, "profile": profile, "label": label])
+        return response.profile
+    }
+
+    func bindSignin(consumer: String, profileID: String?) async throws {
+        let _: SigninProfileResponse = try await request("/api/v1/signin/bindings", method: "PUT", body: ["consumer": consumer, "profileId": profileID.map { $0 as Any } ?? NSNull()])
+    }
+
+    func removeSigninProfile(id: String) async throws {
+        var components = URLComponents()
+        components.path = "/api/v1/signin/profiles"
+        components.queryItems = [URLQueryItem(name: "id", value: id)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        let _: SigninProfileResponse = try await request(path, method: "DELETE", body: nil)
     }
 
     func revokeDevice(id: String) async throws {

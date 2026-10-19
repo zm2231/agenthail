@@ -1127,6 +1127,12 @@ struct IOSSessionRow: View {
             let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
             layout {
                 Text(SessionStyle.agentName(session.surface)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                if let host = session.remoteHostName {
+                    Label(host, systemImage: session.isUnavailable ? "wifi.slash" : "server.rack")
+                        .font(.caption)
+                        .foregroundStyle(session.isUnavailable ? Color.orange : Color.secondary)
+                        .accessibilityLabel(session.isUnavailable ? "Unavailable on \(host)" : "On \(host)")
+                }
                 if session.isWaitingOnYou {
                     Label("Waiting on you", systemImage: "questionmark.bubble").font(.caption).foregroundStyle(SessionStyle.accent)
                 } else if session.isWorking {
@@ -1136,6 +1142,9 @@ struct IOSSessionRow: View {
                 if let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
                     Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
                 }
+            }
+            if session.isUnavailable, let reason = session.unavailableReason {
+                Text(reason).font(.caption).foregroundStyle(.secondary)
             }
             if session.queueCount > 0 || session.isReadOnly || (family?.subagentCount ?? 0) > 0 {
                 layout {
@@ -1173,6 +1182,21 @@ struct SettingsView: View {
                             }
                             ForEach(surface.runtime?.advice ?? [], id: \.self) { line in
                                 Text(line).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                            }
+                        }
+                    }
+                }
+            }
+            if let hosts = model.snapshot?.daemon.hosts, !hosts.isEmpty {
+                Section("Hosts") {
+                    ForEach(hosts) { host in
+                        VStack(alignment: .leading, spacing: 4) {
+                            LabeledContent(host.name, value: host.stateLabel)
+                            if let detail = host.detail, !detail.isEmpty {
+                                Text(detail).font(.footnote).foregroundStyle(.secondary)
+                            }
+                            if let notice = host.notice, !notice.isEmpty {
+                                Text(notice).font(.footnote).foregroundStyle(.orange)
                             }
                         }
                     }

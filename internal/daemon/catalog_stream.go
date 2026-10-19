@@ -306,7 +306,6 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 	for _, alias := range aliases {
 		aliasByID[alias.SessionID] = alias.Name
 	}
-	openClaude := claudeOpenProcesses(ctx)
 	for _, adapter := range d.Surfaces {
 		priorStamps := map[string]catalogLiveSession{}
 		for id, live := range d.catalogLive {
@@ -347,6 +346,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		d.correlatePendingLaunches(locateCtx, sessions)
 		d.correlateObservedTerminalLaunches(locateCtx, sessions)
 		locateCancel()
+		openSessions := surface.OpenSessions(ctx, adapter, sessions)
 		source, _ := adapter.(surface.LocalStatusSource)
 		for _, session := range sessions {
 			if session.Runtime == nil {
@@ -356,7 +356,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			identityCtx, identityCancel := context.WithTimeout(ctx, 3*time.Second)
 			identity := d.catalogIdentities.identity(identityCtx, session, observedAt)
 			identityCancel()
-			open := session.Surface == surface.KindClaude && openClaude[session.PID]
+			open := openSessions[session.ID]
 			alias := aliasByID[session.ID]
 			if !d.publishCatalogSession(ctx, adapter, session, identity, alias, counts[session.ID], open, config, observedAt) {
 				delete(d.catalogLive, session.ID)
@@ -516,6 +516,7 @@ func (d *Daemon) publishSurfaceHealth(health dashboardSurface, observedAt time.T
 }
 
 func (d *Daemon) publishCatalogQueueCounts() {
+	defer d.refreshHostQueueCounts()
 	counts, err := d.Registry.QueueCounts()
 	if err != nil {
 		d.log.Printf("catalog queue counts: %s", err)
@@ -533,7 +534,14 @@ func (d *Daemon) publishCatalogQueueCounts() {
 	}
 	now := time.Now()
 	for _, record := range snapshot.Sessions {
+		if record.HostID != "" {
+			continue
+		}
 		count := counts[record.Session.ID]
+		adapter, adapterErr := d.adapters().For(&record.Session)
+		if adapterErr != nil {
+			continue
+		}
 		for attempt := 0; attempt < 3; attempt++ {
 			var projection dashboardSession
 			if json.Unmarshal([]byte(record.ProjectionFingerprint), &projection) != nil {
@@ -543,7 +551,7 @@ func (d *Daemon) publishCatalogQueueCounts() {
 				break
 			}
 			projection.QueueCount = count
-			projection.Current, projection.CurrentReason = dashboardSessionPresence(record.Session, count, projection.Open, config.CodexRecentHours, now)
+			projection.Current, projection.CurrentReason = surface.PresenceFor(adapter, record.Session, surface.PresenceInput{QueueCount: count, Open: projection.Open, Now: now, CodexRecentHours: config.CodexRecentHours})
 			fingerprint, err := json.Marshal(projection)
 			if err != nil {
 				break
@@ -669,7 +677,8 @@ func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surfa
 	if session.Runtime == nil {
 		session.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: false}
 	}
-	current, reason := dashboardSessionPresence(session, queueCount, open, config.CodexRecentHours, observedAt)
-	effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
-	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Subagents: session.Subagents}
+	current, reason := surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: queueCount, Open: open, Now: observedAt, CodexRecentHours: config.CodexRecentHours})
+	host := d.localHost()
+	effective := surface.EffectiveCapabilities(adapter, &session)
+	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Subagents: session.Subagents, Host: &host}
 }

@@ -57,6 +57,9 @@ func (r *Registry) EnsureCatalogState() error {
 	if err := r.ensureColumn("catalog_sessions", "waiting_on", `BLOB NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
+	if err := r.ensureColumn("catalog_sessions", "host_queue_count", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	if _, err := r.db.Exec(`CREATE TABLE IF NOT EXISTS catalog_surfaces (
 		surface TEXT PRIMARY KEY,
 		health TEXT NOT NULL,

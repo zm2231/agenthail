@@ -28,7 +28,7 @@ fi
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
-	return home, NewClaude("", home)
+	return home, NewClaude(nil, home)
 }
 
 func TestClaudeBackgroundCommandsDropCmuxTerminalState(t *testing.T) {
@@ -62,7 +62,7 @@ func endedBackgroundJob(t *testing.T) (*claudetest.Fixture, *Claude) {
 	fixture.Transcript(fixtureConversation, fixture.Home)
 	fixture.Job("fe758937", fixtureConversation, fixture.Home, "done", 0)
 	fixture.ResumeBridge("session_fixture")
-	return fixture, NewClaude("", fixture.Home)
+	return fixture, NewClaude(nil, fixture.Home)
 }
 
 func shortResumeSettle(t *testing.T) {

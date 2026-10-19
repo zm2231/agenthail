@@ -102,7 +102,7 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 		if listErr == nil {
 			for _, record := range records {
 				if record.ID == shortID && record.Kind == "background" && record.SessionID != "" {
-					session := &surface.Session{ID: record.SessionID, Surface: surface.KindClaude, Name: record.Name, Cwd: record.Cwd, Status: surface.StatusUnknown, HasLocal: true, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
+					session := &surface.Session{ID: record.SessionID, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: record.Name, Cwd: record.Cwd, Status: surface.StatusUnknown, HasLocal: true, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
 					return session, nil, nil
 				}
 			}
@@ -132,7 +132,7 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "state": record.State}, nil
 		}
 		if action == "resume" {
-			target := surface.Session{ID: record.SessionID, Surface: surface.KindClaude, Cwd: record.Cwd}
+			target := surface.Session{ID: record.SessionID, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: record.Cwd}
 			resumed, err := c.reach(ctx, &target)
 			if err != nil {
 				return nil, err

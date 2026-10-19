@@ -64,6 +64,7 @@ cat >"$OUTPUT/Contents/Info.plist" <<'PLIST'
   </dict></array>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>LSUIElement</key><true/>
+  <key>NSMicrophoneUsageDescription</key><string>Talk to your Agenthail orchestrator or a session by voice. Audio is sent to Codex, not transcribed on this Mac.</string>
   <key>NSUserNotificationAlertStyle</key><string>alert</string>
 </dict></plist>
 PLIST
@@ -105,6 +106,7 @@ cp "$SWIFT_BIN/AgenthailMac" "$OUTPUT/Contents/MacOS/Agenthail"
 for bundle in "$SWIFT_BIN"/*.bundle; do
 	cp -R "$bundle" "$OUTPUT/Contents/Resources/"
 done
-"$ROOT/scripts/codesign-with-retry.sh" --force --deep --options runtime --sign "$IDENTITY" "$OUTPUT"
+"$ROOT/scripts/codesign-with-retry.sh" --force --deep --options runtime --entitlements "$ROOT/packaging/macos-app-entitlements.plist" --sign "$IDENTITY" "$OUTPUT"
 codesign --verify --deep --strict --verbose=2 "$OUTPUT"
+"$ROOT/scripts/test-macos-app-voice.sh" "$OUTPUT"
 echo "$OUTPUT"

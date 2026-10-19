@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"github.com/zm2231/agenthail/internal/signin"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,7 +24,7 @@ func liveClaudeApp(t *testing.T) (*App, *registry.Registry, *claudetest.Fixture,
 	fixture := claudetest.New(t)
 	posts := &claudePosts{}
 	app, r := cliFixture(t, &cliSurface{kind: surface.KindClaude})
-	app.Surfaces[0].Surface = surfaces.NewClaudeWithRequest("", fixture.Home, posts.request)
+	app.Surfaces[0].Surface = surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, posts.request)
 	return app, r, fixture, posts
 }
 
@@ -146,7 +147,7 @@ func TestResumeInAnotherProcessKeepsTheAlias(t *testing.T) {
 
 func TestALaunchedSessionAndItsDiscoveredProcessAreOneRow(t *testing.T) {
 	app, r, fixture, _ := liveClaudeApp(t)
-	launched := surface.Session{ID: originalConversation, Surface: surface.KindClaude, Name: "launched", PID: fixture.PID, Status: surface.StatusBusy, Cwd: fixture.Home}
+	launched := surface.Session{ID: originalConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "launched", PID: fixture.PID, Status: surface.StatusBusy, Cwd: fixture.Home}
 	if err := r.RegisterSession(launched); err != nil {
 		t.Fatal(err)
 	}

@@ -42,6 +42,21 @@ func NewCodex(remoteURL string) *Codex {
 
 func (c *Codex) Name() surface.SurfaceKind { return surface.KindCodex }
 
+func (c *Codex) RuntimeKinds() []surface.RuntimeKind {
+	return []surface.RuntimeKind{surface.RuntimeCodexDesktop, surface.RuntimeCodexAppServer}
+}
+
+// setCodexTransport routes a session and records the runtime that carries it:
+// the managed app-server for managed threads, Codex Desktop for the rest,
+// including read-only threads whose Desktop bridge is unavailable.
+func setCodexTransport(session *surface.Session, transport string) {
+	session.Transport = transport
+	session.RuntimeKind = surface.RuntimeCodexDesktop
+	if transport == codexTransportManaged {
+		session.RuntimeKind = surface.RuntimeCodexAppServer
+	}
+}
+
 func (c *Codex) RequiresLocalTranscript(session *surface.Session) bool {
 	return session != nil && !c.managed && session.Transport != codexTransportManaged
 }
@@ -54,6 +69,25 @@ func (c *Codex) Capabilities() surface.Capabilities {
 }
 
 func (c *Codex) CatalogListComplete() bool { return false }
+
+// Presence counts a Codex session current while it works, has queued messages,
+// or was active within the dashboard's Codex recency window, unless Codex has
+// not loaded it.
+func (c *Codex) Presence(sess surface.Session, input surface.PresenceInput) (bool, string) {
+	if sess.Status == surface.StatusBusy {
+		return true, "working"
+	}
+	if input.QueueCount > 0 {
+		return true, "queued"
+	}
+	if sess.Status == surface.SessionStatus("notLoaded") || sess.LastActive.IsZero() {
+		return false, ""
+	}
+	if input.Now.Sub(sess.LastActive) <= time.Duration(input.CodexRecentHours)*time.Hour {
+		return true, "recent"
+	}
+	return false, ""
+}
 
 func (c *Codex) Health(ctx context.Context) error {
 	if err := c.Ready(ctx); err != nil {
@@ -372,6 +406,7 @@ func codexSession(thread map[string]any) surface.Session {
 		WaitingOn: codexSessionWaiting(str(thread, "id"), thread["status"]),
 		Subagent:  codexSubagent(thread),
 	}
+	setCodexTransport(&session, "")
 	if timestamp, ok := thread["recencyAt"].(float64); ok && timestamp > 0 {
 		session.LastActive = time.Unix(int64(timestamp), 0)
 	}
@@ -654,7 +689,7 @@ func prepareManagedTerminalSession(ctx context.Context, client codexClient, cwd,
 	session := codexSession(thread)
 	session.ID = threadID
 	session.Surface = surface.KindCodex
-	session.Transport = codexTransportManaged
+	setCodexTransport(&session, codexTransportManaged)
 	session.Source = "agenthail"
 	if session.Cwd == "" {
 		session.Cwd = str(result, "cwd")
@@ -704,9 +739,9 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 		Status:     surface.StatusBusy,
 		HasLocal:   true,
 		Source:     "agenthail",
-		Transport:  transport,
 		LastActive: time.Now(),
 	}
+	setCodexTransport(session, transport)
 	if session.Cwd == "" {
 		session.Cwd = options.Cwd
 	}

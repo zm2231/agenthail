@@ -67,7 +67,7 @@ sleep 30
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
-	models, err := NewClaude("Default", home).Models(context.Background())
+	models, err := NewClaude(nil, home).Models(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

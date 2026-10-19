@@ -34,7 +34,7 @@ fi
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
 	t.Setenv("AGENTHAIL_FIXTURE_PID", strconv.Itoa(os.Getpid()))
-	c := NewClaude("Default", home)
+	c := NewClaude(nil, home)
 	session, turn, err := c.StartSession(context.Background(), surface.SessionStartOptions{Message: "--literal prompt", Cwd: home, Name: "builder", Worktree: "feature", TurnOptions: surface.TurnOptions{Effort: "high"}})
 	if err != nil || session == nil || session.ID != "real-session-id" || turn != nil {
 		t.Fatalf("session=%+v turn=%+v err=%v", session, turn, err)
@@ -58,7 +58,7 @@ func TestClaudeMalformedBackgroundOutputIsUnknown(t *testing.T) {
 	binary := filepath.Join(home, "claude")
 	os.WriteFile(binary, []byte("#!/bin/sh\nprintf 'unexpected output\\n'\n"), 0700)
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
-	session, _, err := NewClaude("", home).StartSession(context.Background(), surface.SessionStartOptions{Message: "hello", Cwd: home})
+	session, _, err := NewClaude(nil, home).StartSession(context.Background(), surface.SessionStartOptions{Message: "hello", Cwd: home})
 	if session != nil || !surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("session=%+v err=%v", session, err)
 	}

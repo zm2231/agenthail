@@ -28,7 +28,7 @@ func TestCodexLocalStatusFollowsTranscriptLifecycle(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rollout-synthetic.jsonl")
 	appendLine(t, path, `{"type":"event_msg","payload":{"type":"task_complete"}}`)
 	codex := &Codex{}
-	session := surface.Session{ID: "synthetic", Surface: surface.KindCodex, Status: surface.StatusIdle, Transcript: path}
+	session := surface.Session{ID: "synthetic", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Transcript: path}
 	if files := codex.LocalStatusFiles(session); len(files) != 1 || files[0] != path {
 		t.Fatalf("files=%v", files)
 	}
@@ -74,12 +74,12 @@ func writePeerRecord(t *testing.T, home string, pid int, record map[string]any) 
 
 func TestClaudeLocalStatusRereadsPeerRecord(t *testing.T) {
 	home := t.TempDir()
-	claude := NewClaude("", home)
+	claude := NewClaude(nil, home)
 	pid := os.Getpid()
 	updated := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
 	record := map[string]any{"pid": pid, "sessionId": "conversation-1", "bridgeSessionId": "session_synthetic", "status": "busy", "updatedAt": float64(updated.UnixMilli()), "peerFeatures": []any{"notify_idle"}}
 	writePeerRecord(t, home, pid, record)
-	session := surface.Session{ID: "conversation-1", Bridge: "session_synthetic", Surface: surface.KindClaude, PID: pid, Status: surface.StatusIdle}
+	session := surface.Session{ID: "conversation-1", Bridge: "session_synthetic", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: pid, Status: surface.StatusIdle}
 	if files := claude.LocalStatusFiles(session); len(files) != 1 || files[0] != filepath.Join(home, ".claude", "sessions", strconv.Itoa(pid)+".json") {
 		t.Fatalf("files=%v", files)
 	}
@@ -109,9 +109,9 @@ func TestCodexListAndLocalStatusShareTranscriptPrecedence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rollout-synthetic.jsonl")
 	appendLine(t, path, `{"type":"event_msg","payload":{"type":"task_started"}}`)
 	codex := &Codex{}
-	listed := surface.Session{ID: "synthetic", Surface: surface.KindCodex, Status: surface.StatusIdle, Transcript: path}
+	listed := surface.Session{ID: "synthetic", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Transcript: path}
 	codex.reconcileLocalStatus(&listed)
-	local, err := codex.LocalStatus(context.Background(), surface.Session{ID: "synthetic", Surface: surface.KindCodex, Status: surface.StatusIdle, Transcript: path})
+	local, err := codex.LocalStatus(context.Background(), surface.Session{ID: "synthetic", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Transcript: path})
 	if err != nil || listed.Status != surface.StatusBusy || local.Status != listed.Status {
 		t.Fatalf("listed=%s local=%s err=%v", listed.Status, local.Status, err)
 	}

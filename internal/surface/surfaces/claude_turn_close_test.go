@@ -45,7 +45,7 @@ func baselineCompletions(t *testing.T) (string, *surface.Session, string) {
 	path := filepath.Join(t.TempDir(), "transcript.jsonl")
 	appendRecords(t, path, closedTurnRecords)
 	session := &surface.Session{ID: "source", Transcript: path}
-	baseline, err := NewClaude("", t.TempDir()).ReadCompletions(context.Background(), session, "")
+	baseline, err := NewClaude(nil, t.TempDir()).ReadCompletions(context.Background(), session, "")
 	if err != nil || len(baseline.Events) != 0 {
 		t.Fatalf("baseline=%+v err=%v", baseline, err)
 	}
@@ -67,7 +67,7 @@ func TestClaudeCompletionClosesAfterLastContentBlock(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			path, session, cursor := baselineCompletions(t)
 			appendRecords(t, path, test.records...)
-			batch, err := NewClaude("", t.TempDir()).ReadCompletions(context.Background(), session, cursor)
+			batch, err := NewClaude(nil, t.TempDir()).ReadCompletions(context.Background(), session, cursor)
 			if err != nil || len(batch.Events) != 1 {
 				t.Fatalf("events=%+v err=%v", batch.Events, err)
 			}
@@ -75,7 +75,7 @@ func TestClaudeCompletionClosesAfterLastContentBlock(t *testing.T) {
 			if event.ID != "m1" || event.Text != "ONE" || event.InputID != "u1" || event.User != "say one" || !event.CompletedAt.Equal(test.at) {
 				t.Fatalf("event=%+v", event)
 			}
-			if replay, err := NewClaude("", t.TempDir()).ReadCompletions(context.Background(), session, batch.Cursor); err != nil || len(replay.Events) != 0 {
+			if replay, err := NewClaude(nil, t.TempDir()).ReadCompletions(context.Background(), session, batch.Cursor); err != nil || len(replay.Events) != 0 {
 				t.Fatalf("replay=%+v err=%v", replay, err)
 			}
 		})
@@ -85,21 +85,21 @@ func TestClaudeCompletionClosesAfterLastContentBlock(t *testing.T) {
 func TestClaudeCompletionSplitAcrossReadsEmitsFullTextOnceAfterRestart(t *testing.T) {
 	path, session, cursor := baselineCompletions(t)
 	appendRecords(t, path, promptRecord, thinkingRecord)
-	pending, err := NewClaude("", t.TempDir()).ReadCompletions(context.Background(), session, cursor)
+	pending, err := NewClaude(nil, t.TempDir()).ReadCompletions(context.Background(), session, cursor)
 	if err != nil || len(pending.Events) != 0 {
 		t.Fatalf("closing turn emitted early: %+v err=%v", pending.Events, err)
 	}
 	appendRecords(t, path, textRecord)
-	stillPending, err := NewClaude("", t.TempDir()).ReadCompletions(context.Background(), session, pending.Cursor)
+	stillPending, err := NewClaude(nil, t.TempDir()).ReadCompletions(context.Background(), session, pending.Cursor)
 	if err != nil || len(stillPending.Events) != 0 {
 		t.Fatalf("turn emitted before its close record: %+v err=%v", stillPending.Events, err)
 	}
 	appendRecords(t, path, durationRecord)
-	batch, err := NewClaude("", t.TempDir()).ReadCompletions(context.Background(), session, stillPending.Cursor)
+	batch, err := NewClaude(nil, t.TempDir()).ReadCompletions(context.Background(), session, stillPending.Cursor)
 	if err != nil || len(batch.Events) != 1 || batch.Events[0].ID != "m1" || batch.Events[0].Text != "ONE" || batch.Events[0].InputID != "u1" {
 		t.Fatalf("events=%+v err=%v", batch.Events, err)
 	}
-	if replay, err := NewClaude("", t.TempDir()).ReadCompletions(context.Background(), session, batch.Cursor); err != nil || len(replay.Events) != 0 {
+	if replay, err := NewClaude(nil, t.TempDir()).ReadCompletions(context.Background(), session, batch.Cursor); err != nil || len(replay.Events) != 0 {
 		t.Fatalf("replay=%+v err=%v", replay, err)
 	}
 }
@@ -107,7 +107,7 @@ func TestClaudeCompletionSplitAcrossReadsEmitsFullTextOnceAfterRestart(t *testin
 func TestClaudeObservationKeepsClosingTurnBusyUntilItCloses(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "transcript.jsonl")
 	appendRecords(t, path, promptRecord, thinkingRecord, textRecord)
-	claude := NewClaude("", t.TempDir())
+	claude := NewClaude(nil, t.TempDir())
 	session := &surface.Session{ID: "source", Surface: surface.KindClaude, Transcript: path, Status: surface.StatusIdle}
 	observation, err := claude.observe(context.Background(), session)
 	if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "u1" || observation.CompletedTurnID != "" {
@@ -143,7 +143,7 @@ func TestClaudeTargetedStreamWaitsForLastContentBlock(t *testing.T) {
 	}()
 	var mu sync.Mutex
 	var kinds []string
-	err := NewClaude("", t.TempDir()).Stream(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}, "u1", func(event surface.StreamEvent) {
+	err := NewClaude(nil, t.TempDir()).Stream(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}, "u1", func(event surface.StreamEvent) {
 		mu.Lock()
 		defer mu.Unlock()
 		if event.Kind == "done" || event.Text == "ONE" {
@@ -161,7 +161,7 @@ func TestClaudeSourceStreamCarriesClosingTurnAcrossWindows(t *testing.T) {
 	path := writeTranscript(t, closedTurnRecords)
 	session := seededClaudeStreamSession(t, path, "")
 	appendRecords(t, path, promptRecord, thinkingRecord, textRecord)
-	claude := NewClaude("", t.TempDir())
+	claude := NewClaude(nil, t.TempDir())
 	window := func() map[string]int {
 		done := map[string]int{}
 		err := claude.Stream(context.Background(), session, "", func(event surface.StreamEvent) {
@@ -186,17 +186,17 @@ func TestClaudeSourceStreamCarriesClosingTurnAcrossWindows(t *testing.T) {
 func TestClaudeInterruptAfterClosingBlockInterruptsTheTurn(t *testing.T) {
 	path, session, cursor := baselineCompletions(t)
 	appendRecords(t, path, promptRecord, thinkingRecord, textRecord, interruptRecord, durationRecord)
-	batch, err := NewClaude("", t.TempDir()).ReadCompletions(context.Background(), session, cursor)
+	batch, err := NewClaude(nil, t.TempDir()).ReadCompletions(context.Background(), session, cursor)
 	if err != nil || len(batch.Events) != 0 {
 		t.Fatalf("interrupted turn relayed: %+v err=%v", batch.Events, err)
 	}
 	observed := writeTranscript(t, promptRecord+thinkingRecord+textRecord+interruptRecord)
-	observation, err := NewClaude("", t.TempDir()).observe(context.Background(), &surface.Session{ID: "source", Surface: surface.KindClaude, Transcript: observed, Status: surface.StatusIdle})
+	observation, err := NewClaude(nil, t.TempDir()).observe(context.Background(), &surface.Session{ID: "source", Surface: surface.KindClaude, Transcript: observed, Status: surface.StatusIdle})
 	if err != nil || observation.CompletedTurnID != "" || observation.Status != surface.StatusIdle {
 		t.Fatalf("interrupted turn completed: %+v err=%v", observation, err)
 	}
 	targeted := writeTranscript(t, promptRecord+thinkingRecord+textRecord+interruptRecord)
-	err = NewClaude("", t.TempDir()).Stream(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: targeted}, "u1", func(surface.StreamEvent) {}, time.Second)
+	err = NewClaude(nil, t.TempDir()).Stream(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: targeted}, "u1", func(surface.StreamEvent) {}, time.Second)
 	if err == nil || errors.Is(err, surface.ErrStreamWindow) {
 		t.Fatalf("targeted stream err=%v", err)
 	}
@@ -204,7 +204,7 @@ func TestClaudeInterruptAfterClosingBlockInterruptsTheTurn(t *testing.T) {
 	sourceSession := seededClaudeStreamSession(t, source, "")
 	appendRecords(t, source, promptRecord, thinkingRecord, textRecord, interruptRecord)
 	var terminals []string
-	err = NewClaude("", t.TempDir()).Stream(context.Background(), sourceSession, "", func(event surface.StreamEvent) {
+	err = NewClaude(nil, t.TempDir()).Stream(context.Background(), sourceSession, "", func(event surface.StreamEvent) {
 		if event.Kind == "done" {
 			terminals = append(terminals, event.TurnID+":"+event.Status)
 		}
@@ -218,7 +218,7 @@ func TestClaudeSourceStreamDropsClosingTurnWhenTranscriptIsRewritten(t *testing.
 	path := writeTranscript(t, closedTurnRecords)
 	session := seededClaudeStreamSession(t, path, "")
 	appendRecords(t, path, promptRecord, thinkingRecord, textRecord)
-	claude := NewClaude("", t.TempDir())
+	claude := NewClaude(nil, t.TempDir())
 	if err := claude.Stream(context.Background(), session, "", func(surface.StreamEvent) {}, 150*time.Millisecond); !errors.Is(err, surface.ErrStreamWindow) || session.ClaudeClosingTurn.TurnID != "u1" {
 		t.Fatalf("stream err=%v closing=%+v", err, session.ClaudeClosingTurn)
 	}
@@ -271,7 +271,7 @@ func TestClaudeSourceStreamDropsClosingTurnWhenTranscriptIsRewrittenMidWindow(t 
 		written <- os.WriteFile(path, []byte(rewritten.String()), 0600)
 	}()
 	var once sync.Once
-	err = NewClaude("", t.TempDir()).Stream(context.Background(), session, "", func(event surface.StreamEvent) {
+	err = NewClaude(nil, t.TempDir()).Stream(context.Background(), session, "", func(event surface.StreamEvent) {
 		mu.Lock()
 		defer mu.Unlock()
 		if event.Text == "ONE" {

@@ -15,6 +15,8 @@ struct DesktopSettings: View {
                 .tabItem { Label("Keyboard", systemImage: "keyboard") }
             DevicesSettings(model: model)
                 .tabItem { Label("Devices", systemImage: "iphone") }
+            SigninSettings(model: model)
+                .tabItem { Label("Browser Sign-in", systemImage: "key") }
             NotificationSettings(model: model)
                 .tabItem { Label("Notifications", systemImage: "bell.badge") }
             DeliverySettings(model: model)
@@ -155,9 +157,53 @@ struct DevicesSettings: View {
                     }
                 }
             }
+            if let daemon = model.snapshot?.daemon {
+                HostsSection(daemon: daemon)
+            }
             SettingsError(model: model)
         }
         .formStyle(.grouped)
+    }
+}
+
+private struct HostsSection: View {
+    let daemon: DaemonState
+
+    var body: some View {
+        Section("Hosts") {
+            if let host = daemon.host {
+                LabeledContent("This Mac", value: host.name)
+            }
+            if (daemon.hosts ?? []).isEmpty {
+                Text("No other hosts are paired. Run agenthail hosts invite on the other host, then agenthail hosts add here.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DesktopPalette.text2)
+                    .textSelection(.enabled)
+            }
+            ForEach(daemon.hosts ?? []) { host in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(host.name)
+                        Spacer()
+                        Text(host.stateLabel)
+                            .foregroundStyle(host.isHealthy ? DesktopPalette.green : DesktopPalette.amber)
+                    }
+                    if let detail = host.detail, !detail.isEmpty {
+                        Text(detail)
+                            .font(.system(size: 12))
+                            .foregroundStyle(DesktopPalette.text2)
+                            .textSelection(.enabled)
+                    }
+                    if let notice = host.notice, !notice.isEmpty {
+                        Text(notice)
+                            .font(.system(size: 12))
+                            .foregroundStyle(DesktopPalette.amber)
+                            .textSelection(.enabled)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
     }
 }
 

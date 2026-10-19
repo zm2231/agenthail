@@ -26,7 +26,7 @@ func (d *Daemon) apiSessionAttachmentHandler(w http.ResponseWriter, r *http.Requ
 		writeAPIError(w, http.StatusNotFound, "session_not_found", "The requested session was not found.")
 		return
 	}
-	adapter := d.surfaceForKind(session.Surface)
+	adapter, _ := d.adapters().For(session)
 	reader, ok := adapter.(surface.AttachmentReader)
 	if !ok {
 		writeAPIError(w, http.StatusNotFound, "attachment_not_found", "The referenced attachment was not found.")

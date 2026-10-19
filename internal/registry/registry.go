@@ -28,7 +28,7 @@ type Registry struct {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 15
+	schemaVersion   = 17
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -89,6 +89,9 @@ func (r *Registry) migrate() error {
 	if _, err := r.db.Exec(schema); err != nil {
 		return err
 	}
+	if err := r.ensureHostIdentity(); err != nil {
+		return err
+	}
 	if err := r.ensureColumn("routes", "once_only", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
@@ -116,6 +119,7 @@ func (r *Registry) migrate() error {
 		{"operation", `TEXT NOT NULL DEFAULT 'message'`},
 		{"busy_delivery", `TEXT NOT NULL DEFAULT ''`},
 		{"author", `TEXT NOT NULL DEFAULT ''`},
+		{"host_request", `BLOB NOT NULL DEFAULT ''`},
 	} {
 		if err := r.ensureColumn("message_queue", column.name, column.decl); err != nil {
 			return err
@@ -136,6 +140,7 @@ func (r *Registry) migrate() error {
 		{"subagent_depth", `INTEGER NOT NULL DEFAULT 0`},
 		{"agent_nickname", `TEXT NOT NULL DEFAULT ''`},
 		{"agent_role", `TEXT NOT NULL DEFAULT ''`},
+		{"host_id", `TEXT NOT NULL DEFAULT ''`},
 	} {
 		if err := r.ensureColumn("sessions", column.name, column.decl); err != nil {
 			return err
@@ -217,7 +222,7 @@ func (r *Registry) migrate() error {
 	if err := r.ensureColumn("delivery_intents", "relayed", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
-	if version < 15 {
+	if version < 17 {
 		if err := r.dropQueueExpiry(); err != nil {
 			return err
 		}
@@ -243,6 +248,9 @@ func (r *Registry) migrate() error {
 		if err := r.rekeyClaudeConversations(version); err != nil {
 			return err
 		}
+	}
+	if err := r.recordRuntimeKinds(); err != nil {
+		return err
 	}
 	if version >= schemaVersion {
 		return nil
@@ -331,6 +339,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	status TEXT NOT NULL DEFAULT 'unknown', transcript TEXT NOT NULL DEFAULT '',
 	has_local INTEGER NOT NULL DEFAULT 0,
 	source TEXT NOT NULL DEFAULT '', transport TEXT NOT NULL DEFAULT '',
+	runtime_kind TEXT NOT NULL DEFAULT '',
 	configured_model TEXT NOT NULL DEFAULT '',
 	bridge TEXT NOT NULL DEFAULT '', forked_from TEXT NOT NULL DEFAULT '',
 	last_active_ms INTEGER NOT NULL DEFAULT 0,
@@ -557,16 +566,18 @@ CREATE TABLE IF NOT EXISTS catalog_events (
 	created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS catalog_events_created ON catalog_events(created_at DESC, seq DESC);
-CREATE TRIGGER IF NOT EXISTS message_queue_catalog_insert AFTER INSERT ON message_queue
-WHEN NEW.status IN ('pending','inflight')
+DROP TRIGGER IF EXISTS message_queue_catalog_insert;
+CREATE TRIGGER message_queue_catalog_insert AFTER INSERT ON message_queue
+WHEN NEW.status IN ('pending','inflight') AND NOT EXISTS(SELECT 1 FROM sessions WHERE id=NEW.session_id AND host_id<>'')
 BEGIN
 	INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at)
 	VALUES('session.queue:'||NEW.session_id||':'||lower(hex(randomblob(12))),'session.queue',NEW.session_id,
 		json_object('sessionId',NEW.session_id,'queueCount',(SELECT COUNT(*) FROM message_queue WHERE session_id=NEW.session_id AND status IN ('pending','inflight'))),
 		strftime('%Y-%m-%dT%H:%M:%fZ','now'));
 END;
-CREATE TRIGGER IF NOT EXISTS message_queue_catalog_update AFTER UPDATE OF status,session_id ON message_queue
-WHEN (OLD.status IN ('pending','inflight')) != (NEW.status IN ('pending','inflight')) OR (OLD.session_id != NEW.session_id AND NEW.status IN ('pending','inflight'))
+DROP TRIGGER IF EXISTS message_queue_catalog_update;
+CREATE TRIGGER message_queue_catalog_update AFTER UPDATE OF status,session_id ON message_queue
+WHEN ((OLD.status IN ('pending','inflight')) != (NEW.status IN ('pending','inflight')) OR (OLD.session_id != NEW.session_id AND NEW.status IN ('pending','inflight'))) AND NOT EXISTS(SELECT 1 FROM sessions WHERE id=NEW.session_id AND host_id<>'')
 BEGIN
 	INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at)
 	VALUES('session.queue:'||NEW.session_id||':'||lower(hex(randomblob(12))),'session.queue',NEW.session_id,
@@ -578,17 +589,48 @@ BEGIN
 		strftime('%Y-%m-%dT%H:%M:%fZ','now')
 	WHERE OLD.session_id != NEW.session_id AND OLD.status IN ('pending','inflight');
 END;
-CREATE TRIGGER IF NOT EXISTS message_queue_catalog_delete AFTER DELETE ON message_queue
-WHEN OLD.status IN ('pending','inflight')
+DROP TRIGGER IF EXISTS message_queue_catalog_delete;
+CREATE TRIGGER message_queue_catalog_delete AFTER DELETE ON message_queue
+WHEN OLD.status IN ('pending','inflight') AND NOT EXISTS(SELECT 1 FROM sessions WHERE id=OLD.session_id AND host_id<>'')
 BEGIN
 	INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at)
 	VALUES('session.queue:'||OLD.session_id||':'||lower(hex(randomblob(12))),'session.queue',OLD.session_id,
 		json_object('sessionId',OLD.session_id,'queueCount',(SELECT COUNT(*) FROM message_queue WHERE session_id=OLD.session_id AND status IN ('pending','inflight'))),
 		strftime('%Y-%m-%dT%H:%M:%fZ','now'));
 END;
+CREATE TABLE IF NOT EXISTS host_identity (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	host_id TEXT NOT NULL,
+	name TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS hosts (
+	host_id TEXT PRIMARY KEY,
+	name TEXT NOT NULL UNIQUE,
+	endpoint TEXT NOT NULL,
+	address TEXT NOT NULL,
+	token TEXT NOT NULL,
+	state TEXT NOT NULL DEFAULT 'connecting',
+	last_error TEXT NOT NULL DEFAULT '',
+	last_contact_at TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	catalog_epoch TEXT NOT NULL DEFAULT '',
+	catalog_seq INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	host_epoch TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS signin_profiles (
+	id TEXT PRIMARY KEY,
+	label TEXT NOT NULL UNIQUE,
+	browser TEXT NOT NULL,
+	profile TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	UNIQUE(browser, profile)
+);
+CREATE TABLE IF NOT EXISTS signin_bindings (
+	consumer TEXT PRIMARY KEY,
+	profile_id TEXT NOT NULL REFERENCES signin_profiles(id) ON DELETE CASCADE
 );
 `
 
@@ -636,14 +678,24 @@ func (r *Registry) RegisterSessionAndDeletePending(s surface.Session, pendingID 
 }
 
 func registerSessionTx(tx *sql.Tx, s surface.Session) error {
+	if s.RuntimeKind == "" {
+		return fmt.Errorf("register session %s: no runtime kind", s.ID)
+	}
+	var owner string
+	if err := tx.QueryRow(`SELECT host_id FROM sessions WHERE id=?`, s.ID).Scan(&owner); err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if owner != "" {
+		return SessionOwnedError{SessionID: s.ID, HostID: owner}
+	}
 	lastActiveMS := int64(0)
 	if !s.LastActive.IsZero() {
 		lastActiveMS = s.LastActive.UnixMilli()
 	}
 	parentID, rootID, depth, nickname, role := subagentValues(s)
 	_, err := tx.Exec(
-		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,configured_model,bridge,forked_from,last_active_ms,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,updated_at)
-			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,runtime_kind,configured_model,bridge,forked_from,last_active_ms,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,updated_at)
+			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
 		 ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,
 		   pid=excluded.pid,status=excluded.status,transcript=excluded.transcript,
 		   has_local=excluded.has_local,
@@ -659,6 +711,11 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		     WHEN excluded.transport<>'' THEN excluded.transport
 		     ELSE sessions.transport
 			   END,
+			   runtime_kind=CASE
+		     WHEN sessions.surface='codex' AND sessions.transport='managed' AND NOT (excluded.source='vscode' AND excluded.transport='desktop') THEN sessions.runtime_kind
+		     WHEN sessions.surface='codex' AND sessions.transport='desktop' AND excluded.source='agenthail' AND excluded.transport='managed' THEN sessions.runtime_kind
+		     ELSE excluded.runtime_kind
+			   END,
 			   configured_model=CASE WHEN excluded.configured_model<>'' THEN excluded.configured_model ELSE sessions.configured_model END,
 			   bridge=excluded.bridge,
 			   forked_from=CASE WHEN sessions.forked_from<>'' THEN sessions.forked_from ELSE excluded.forked_from END,
@@ -669,7 +726,7 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		   agent_nickname=CASE WHEN excluded.agent_nickname<>'' THEN excluded.agent_nickname ELSE sessions.agent_nickname END,
 		   agent_role=CASE WHEN excluded.agent_role<>'' THEN excluded.agent_role ELSE sessions.agent_role END,
 		   updated_at=datetime('now')`,
-		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, s.ConfiguredModel, s.Bridge, s.ForkedFrom, lastActiveMS, parentID, rootID, depth, nickname, role)
+		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, string(s.RuntimeKind), s.ConfiguredModel, s.Bridge, s.ForkedFrom, lastActiveMS, parentID, rootID, depth, nickname, role)
 	if err != nil {
 		return err
 	}
@@ -804,7 +861,7 @@ func (r *Registry) resolveTarget(target, kind string) (string, error) {
 		return "", err
 	}
 	prefix := escapeLike(target) + "%"
-	if ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\' AND (? = '' OR surface = ?) ORDER BY updated_at DESC, id LIMIT 2`, prefix, kind, kind); err != nil {
+	if ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE host_id='' AND id LIKE ? ESCAPE '\' AND (? = '' OR surface = ?) ORDER BY updated_at DESC, id LIMIT 2`, prefix, kind, kind); err != nil {
 		return "", err
 	} else if len(ids) == 1 {
 		return ids[0], nil
@@ -812,7 +869,7 @@ func (r *Registry) resolveTarget(target, kind string) (string, error) {
 		return "", fmt.Errorf("ambiguous session id prefix %q matches %s", target, strings.Join(ids, ", "))
 	}
 	contains := "%" + escapeLike(target) + "%"
-	ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE parent_session_id='' AND (name LIKE ? ESCAPE '\' OR cwd LIKE ? ESCAPE '\') AND (? = '' OR surface = ?) ORDER BY updated_at DESC, id LIMIT 2`, contains, contains, kind, kind)
+	ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE host_id='' AND parent_session_id='' AND (name LIKE ? ESCAPE '\' OR cwd LIKE ? ESCAPE '\') AND (? = '' OR surface = ?) ORDER BY updated_at DESC, id LIMIT 2`, contains, contains, kind, kind)
 	if err != nil {
 		return "", err
 	}
@@ -825,25 +882,27 @@ func (r *Registry) resolveTarget(target, kind string) (string, error) {
 	return ids[0], nil
 }
 
-func (r *Registry) sessionSurface(id string) string {
+func (r *Registry) localSessionSurface(id string) (string, bool) {
 	var kind string
-	_ = r.read.QueryRow(`SELECT surface FROM sessions WHERE id = ?`, id).Scan(&kind)
-	return kind
+	err := r.read.QueryRow(`SELECT surface FROM sessions WHERE id = ? AND host_id=''`, id).Scan(&kind)
+	return kind, err == nil
 }
 
 // ExactTarget resolves only targets that name one session of surface kind
 // exactly, any surface when kind is empty: an alias, a session ID, or the
 // conversation ID a Claude transcript is named after.
 func (r *Registry) ExactTarget(kind surface.SurfaceKind, target string) (string, error) {
-	if sid, err := r.LookupAlias(strings.TrimPrefix(target, "@")); err == nil && (kind == "" || r.sessionSurface(sid) == string(kind)) {
-		return sid, nil
+	if sid, err := r.LookupAlias(strings.TrimPrefix(target, "@")); err == nil {
+		if aliased, local := r.localSessionSurface(sid); local && (kind == "" || aliased == string(kind)) {
+			return sid, nil
+		}
 	}
 	var exact string
-	err := r.read.QueryRow(`SELECT id FROM sessions WHERE id = ? AND (? = '' OR surface = ?)`, target, string(kind), string(kind)).Scan(&exact)
+	err := r.read.QueryRow(`SELECT id FROM sessions WHERE id = ? AND host_id='' AND (? = '' OR surface = ?)`, target, string(kind), string(kind)).Scan(&exact)
 	if err == nil || !errors.Is(err, sql.ErrNoRows) || target == "" || (kind != "" && kind != surface.KindClaude) {
 		return exact, err
 	}
-	err = r.read.QueryRow(`SELECT id FROM sessions WHERE surface=? AND transcript LIKE ? ESCAPE '\' ORDER BY updated_at DESC, rowid DESC LIMIT 1`, string(surface.KindClaude), "%/"+escapeLike(target)+".jsonl").Scan(&exact)
+	err = r.read.QueryRow(`SELECT id FROM sessions WHERE surface=? AND host_id='' AND transcript LIKE ? ESCAPE '\' ORDER BY updated_at DESC, rowid DESC LIMIT 1`, string(surface.KindClaude), "%/"+escapeLike(target)+".jsonl").Scan(&exact)
 	return exact, err
 }
 
@@ -1402,11 +1461,10 @@ const (
 	QueueHeldRetrying QueueHold = "retrying"
 	QueueHeldBehind   QueueHold = "behind"
 	QueueHeldUnloaded QueueHold = "notLoaded"
+	// QueueHeldHostUnreachable is a send to a paired host's session that the
+	// host never received; it is replayed with its key when the host returns.
+	QueueHeldHostUnreachable QueueHold = "hostUnreachable"
 )
-
-// SteerSurfaces says which surfaces can steer a message into a running turn,
-// as their adapters declare it.
-type SteerSurfaces map[surface.SurfaceKind]bool
 
 // queueTargetStatus is the target's last observed status, as the daemon
 // drains by it.
@@ -1430,6 +1488,7 @@ func queueHoldCase(canSteer bool) string {
 		WHEN ` + queueTargetStatus + `='busy' AND ` + fmt.Sprintf(queueSteerRow, "q") + ` THEN CASE WHEN q.id!=` + fmt.Sprintf(earliest, " AND "+fmt.Sprintf(queueSteerRow, "m")) + ` THEN 'behind' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END`
 	}
 	return `CASE WHEN q.status!='pending' THEN ''
+		WHEN q.host_request!='' THEN 'hostUnreachable'
 		WHEN COALESCE(sr.waiting_id,'')!='' THEN 'waiting'` + steer + `
 		WHEN ` + queueTargetStatus + `='busy' THEN 'busy'
 		WHEN ` + queueTargetStatus + `='offline' THEN 'offline'
@@ -1445,21 +1504,24 @@ func queueHoldCase(canSteer bool) string {
 var queueRowSelect = `SELECT q.id,q.session_id,q.message,q.model,q.source_session_id,q.turn_options,q.status,q.attempts,q.last_error,q.queued_at,q.dead_at_ms,q.evidence,q.operation,q.busy_delivery,
 	` + queueHoldCase(true) + `,
 	` + queueHoldCase(false) + `,
-	COALESCE(s.surface,''),COALESCE(s.transport,''),COALESCE(s.bridge,'')
+	COALESCE(s.surface,''),COALESCE(s.transport,''),COALESCE(s.bridge,''),COALESCE(s.runtime_kind,'')
 	FROM message_queue q LEFT JOIN sessions s ON s.id=q.session_id LEFT JOIN session_runtime sr ON sr.session_id=q.session_id`
 
 type queueRowScanner interface{ Scan(...any) error }
 
-func scanQueueRow(scanner queueRowScanner, steer SteerSurfaces, now time.Time) (QueueRow, error) {
+// scanQueueRow picks the hold for a target that can steer when the adapter
+// that carries the target's runtime can steer into it; a target no adapter
+// carries cannot.
+func scanQueueRow(scanner queueRowScanner, adapters surface.Adapters, now time.Time) (QueueRow, error) {
 	var row QueueRow
-	var evidence, targetSurface, transport, bridge string
+	var evidence, targetSurface, transport, bridge, runtimeKind string
 	var steerHold, otherHold QueueHold
-	if err := scanner.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.DeadAt, &evidence, &row.Operation, &row.BusyDelivery, &steerHold, &otherHold, &targetSurface, &transport, &bridge); err != nil {
+	if err := scanner.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.DeadAt, &evidence, &row.Operation, &row.BusyDelivery, &steerHold, &otherHold, &targetSurface, &transport, &bridge, &runtimeKind); err != nil {
 		return QueueRow{}, err
 	}
-	target := &surface.Session{ID: row.SessionID, Surface: surface.SurfaceKind(targetSurface), Transport: transport, Bridge: bridge}
+	target := &surface.Session{ID: row.SessionID, Surface: surface.SurfaceKind(targetSurface), Transport: transport, Bridge: bridge, RuntimeKind: surface.RuntimeKind(runtimeKind)}
 	row.HeldBy = otherHold
-	if surface.EffectiveCapabilities(target, surface.Capabilities{Steer: steer[target.Surface]}).Steer {
+	if adapter, err := adapters.For(target); err == nil && surface.EffectiveCapabilities(adapter, target).Steer {
 		row.HeldBy = steerHold
 	}
 	row.Historical = queueRowIsHistorical(row, now)
@@ -1467,7 +1529,7 @@ func scanQueueRow(scanner queueRowScanner, steer SteerSurfaces, now time.Time) (
 	return row, nil
 }
 
-func (r *Registry) ListQueue(includeDelivered bool, steer SteerSurfaces) ([]QueueRow, error) {
+func (r *Registry) ListQueue(includeDelivered bool, adapters surface.Adapters) ([]QueueRow, error) {
 	now := r.now()
 	query := queueRowSelect
 	args := []any{now.UnixMilli()}
@@ -1483,7 +1545,7 @@ func (r *Registry) ListQueue(includeDelivered bool, steer SteerSurfaces) ([]Queu
 	defer rows.Close()
 	result := make([]QueueRow, 0)
 	for rows.Next() {
-		row, err := scanQueueRow(rows, steer, now)
+		row, err := scanQueueRow(rows, adapters, now)
 		if err != nil {
 			return nil, err
 		}
@@ -1492,9 +1554,9 @@ func (r *Registry) ListQueue(includeDelivered bool, steer SteerSurfaces) ([]Queu
 	return result, rows.Err()
 }
 
-func (r *Registry) QueueItem(id int64, steer SteerSurfaces) (*QueueRow, error) {
+func (r *Registry) QueueItem(id int64, adapters surface.Adapters) (*QueueRow, error) {
 	now := r.now()
-	row, err := scanQueueRow(r.read.QueryRow(queueRowSelect+` WHERE q.id=?`, now.UnixMilli(), id), steer, now)
+	row, err := scanQueueRow(r.read.QueryRow(queueRowSelect+` WHERE q.id=?`, now.UnixMilli(), id), adapters, now)
 	if err != nil {
 		return nil, err
 	}
@@ -1704,7 +1766,7 @@ func (r *Registry) ClaimNextSteerMessage(sessionID string, now time.Time) (*Queu
 // claimCandidateFilter selects the session's next queued message, the one a
 // claim acts on.
 func claimCandidateFilter(sessionID, busyDelivery string) (string, []any) {
-	filter := `session_id=? AND status IN ('pending','inflight')`
+	filter := `session_id=? AND host_request='' AND status IN ('pending','inflight')`
 	args := []any{sessionID}
 	if busyDelivery != "" {
 		filter += ` AND busy_delivery=?`
@@ -1969,10 +2031,10 @@ func (r *Registry) RecoverInflight(before time.Time) (int64, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`UPDATE delivery_intents SET status=?,evidence=?,updated_at=datetime('now') WHERE status=? AND queue_id IN (SELECT id FROM message_queue WHERE status='inflight' AND inflight_at_ms<?)`, DeliveryIntentUnknown, surface.EvidenceUnknown, DeliveryIntentQueued, before.UnixMilli()); err != nil {
+	if _, err := tx.Exec(`UPDATE delivery_intents SET status=?,evidence=?,updated_at=datetime('now') WHERE status=? AND queue_id IN (SELECT id FROM message_queue WHERE status='inflight' AND inflight_at_ms<? AND host_request='')`, DeliveryIntentUnknown, surface.EvidenceUnknown, DeliveryIntentQueued, before.UnixMilli()); err != nil {
 		return 0, err
 	}
-	res, err := tx.Exec(`UPDATE message_queue SET status='dead',dead_at_ms=?,last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE status='inflight' AND inflight_at_ms<?`, r.now().UnixMilli(), uncertainDeliveryError, before.UnixMilli())
+	res, err := tx.Exec(`UPDATE message_queue SET status='dead',dead_at_ms=?,last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE status='inflight' AND inflight_at_ms<? AND host_request=''`, r.now().UnixMilli(), uncertainDeliveryError, before.UnixMilli())
 	if err != nil {
 		return 0, err
 	}
@@ -2143,7 +2205,7 @@ func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
 	rows, err := r.read.Query(`
 		SELECT DISTINCT s.id,s.surface
 		FROM sessions s
-		WHERE s.id IN (
+		WHERE s.host_id='' AND s.id IN (
 			SELECT from_session FROM routes WHERE active=1
 			UNION SELECT to_session FROM routes WHERE active=1
 			UNION SELECT session_id FROM message_queue WHERE status IN ('pending','inflight')
@@ -2338,8 +2400,8 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	var location []byte
 	var focusable int
 	var subagent subagentColumns
-	err := r.read.QueryRow(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.id = ?`, id).Scan(append([]any{
-		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable,
+	err := r.read.QueryRow(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.id = ?`, id).Scan(append([]any{
+		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable,
 	}, subagent.targets()...)...)
 	if err != nil {
 		return nil, err
@@ -2368,9 +2430,9 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		limit = 20
 	}
 	pattern := "%" + escapeLike(query) + "%"
-	rows, err := r.read.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+`
+	rows, err := r.read.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+`
 		FROM sessions s LEFT JOIN aliases a ON a.session_id=s.id LEFT JOIN session_runtime sr ON sr.session_id=s.id
-		WHERE s.surface=? AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR a.name LIKE ? ESCAPE '\')
+		WHERE s.surface=? AND s.host_id='' AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR a.name LIKE ? ESCAPE '\')
 		ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id LIMIT ?`, string(kind), pattern, pattern, pattern, pattern, limit)
 	if err != nil {
 		return nil, err
@@ -2386,7 +2448,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		var location []byte
 		var focusable int
 		var subagent subagentColumns
-		if err := rows.Scan(append([]any{&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
+		if err := rows.Scan(append([]any{&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 			return nil, err
 		}
 		subagent.apply(&session)
@@ -2413,7 +2475,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 }
 
 func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
-	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + ` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
+	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + ` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.host_id='' ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
 	args := []any{}
 	if limit > 0 {
 		query += ` LIMIT ?`
@@ -2434,7 +2496,7 @@ func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
 		var location []byte
 		var focusable int
 		var subagent subagentColumns
-		if err := rows.Scan(append([]any{&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
+		if err := rows.Scan(append([]any{&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 			return nil, err
 		}
 		subagent.apply(&session)

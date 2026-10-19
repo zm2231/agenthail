@@ -19,6 +19,7 @@ enum QueueFacts {
         default: break
         }
         guard item.status == "pending" else { return statusLabel(item.status) }
+        if item.heldBy == "hostUnreachable" { return item.holdLabel }
         if let target, target.isReadOnly { return target.readOnlyReason ?? "Target is not writable" }
         if target?.surface == "codex" && target?.status == "notLoaded" {
             return target?.transport == "desktop" ? "Loading this Codex conversation before delivery" : "Codex conversation is not available to load"

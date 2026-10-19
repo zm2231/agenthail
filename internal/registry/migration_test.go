@@ -86,6 +86,9 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 				fixture.check(t, r)
 			}
 			assertMigratedRegistryAcceptsCurrentWrites(t, r)
+			if identity, err := r.HostIdentity(); err != nil || !ValidHostID(identity.ID) || !ValidHostName(identity.Name) {
+				t.Fatalf("host identity=%+v err=%v", identity, err)
+			}
 		})
 	}
 }
@@ -93,7 +96,7 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 func assertMigratedSessionsAndRoutes(t *testing.T, r *Registry) {
 	t.Helper()
 	target, err := r.Session("target")
-	if err != nil || target.Name != "Target" || target.Cwd != "/work/target" || target.Surface != surface.KindCodex {
+	if err != nil || target.Name != "Target" || target.Cwd != "/work/target" || target.Surface != surface.KindCodex || target.RuntimeKind == "" {
 		t.Fatalf("target=%+v err=%v", target, err)
 	}
 	if _, err := r.Session("sender"); err != nil {
@@ -349,5 +352,88 @@ func TestOpenRetiresQueueExpiry(t *testing.T) {
 		if entry.Kind == "expired" {
 			t.Fatalf("history kept expired entry %+v", entry)
 		}
+	}
+}
+
+func TestRuntimeKindStepDerivesEachRowsKindFromItsSurfaceAndTransport(t *testing.T) {
+	r := openTestRegistry(t)
+	if _, err := r.db.Exec(`ALTER TABLE sessions DROP COLUMN runtime_kind`); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]surface.RuntimeKind{
+		"claude":         surface.RuntimeClaudeCLI,
+		"codex-managed":  surface.RuntimeCodexAppServer,
+		"codex-desktop":  surface.RuntimeCodexDesktop,
+		"codex-readonly": surface.RuntimeCodexDesktop,
+		"codex-none":     surface.RuntimeCodexDesktop,
+		"notion":         surface.RuntimeNotionWeb,
+		"operator":       surface.RuntimeOperator,
+		"unknown":        "",
+	}
+	for _, row := range []struct{ id, surface, transport string }{
+		{"claude", "claude", "uds"},
+		{"codex-managed", "codex", "managed"},
+		{"codex-desktop", "codex", "desktop"},
+		{"codex-readonly", "codex", "readOnly"},
+		{"codex-none", "codex", ""},
+		{"notion", "notion", ""},
+		{"operator", "agenthail", ""},
+		{"unknown", "retired", ""},
+	} {
+		if _, err := r.db.Exec(`INSERT INTO sessions(id,surface,name,transport) VALUES(?,?,?,?)`, row.id, row.surface, row.id, row.transport); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.recordRuntimeKinds(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`INSERT INTO sessions(id,surface,name,transport,runtime_kind) VALUES('recorded','codex','recorded','managed','codex-desktop')`); err != nil {
+		t.Fatal(err)
+	}
+	want["recorded"] = surface.RuntimeCodexDesktop
+	if err := r.recordRuntimeKinds(); err != nil {
+		t.Fatal(err)
+	}
+	for id, kind := range want {
+		var got string
+		if err := r.db.QueryRow(`SELECT runtime_kind FROM sessions WHERE id=?`, id).Scan(&got); err != nil || surface.RuntimeKind(got) != kind {
+			t.Fatalf("%s runtime_kind=%q err=%v, want %q", id, got, err, kind)
+		}
+	}
+}
+
+func TestOpenRetiresQueueExpiryLeftOnARegistryAtTheVersionBefore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, r, "target")
+	for _, statement := range []string{
+		`ALTER TABLE message_queue ADD COLUMN expires_at_ms INTEGER NOT NULL DEFAULT 0`,
+		`INSERT INTO message_queue(id,session_id,message,queued_at,status,evidence,last_error,expires_at_ms,updated_at) VALUES(60,'target','old report','2026-10-18 08:08:00','expired','expired','message expired after 1 hour',1,'2026-10-18 09:08:00')`,
+		fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion-1),
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var version int
+	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("user_version=%d err=%v", version, err)
+	}
+	if exists, err := r.columnExists("message_queue", "expires_at_ms"); err != nil || exists {
+		t.Fatalf("expires_at_ms exists=%v err=%v", exists, err)
+	}
+	if row, err := r.QueueItem(60, nil); err != nil || row.Status != "canceled" || row.LastError != "expired before delivery" {
+		t.Fatalf("expired row=%+v err=%v", row, err)
 	}
 }

@@ -10,4 +10,5 @@ These notes cover Agenthail's implementation, packaging, release automation, and
 - [Mobile session fidelity audit](mobile-session-ux.md)
 - [Desktop parity: web dashboard vs Mac app](desktop-parity.md)
 - [Subagents: identity, families, targets, and cost](subagents.md)
+- [Paired hosts: pairing, ownership, routing, and unreachable delivery](hosts.md)
 - [Dashboard design reference](../../design.md)
