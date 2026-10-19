@@ -111,7 +111,7 @@ func newPushRecorder(t *testing.T, store *registry.Registry) *pushRecorder {
 	if err != nil {
 		t.Fatal(err)
 	}
-	device, _, err := store.CompleteDevicePairing(pairing.Secret, "")
+	device, _, err := store.CompleteDevicePairing(pairing.Secret, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

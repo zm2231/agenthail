@@ -48,40 +48,6 @@ func claudeSocketPaths(pid int) []string {
 	return paths
 }
 
-// On Linux Claude Code records procStart as the starttime field of
-// /proc/<pid>/stat, in clock ticks since boot.
-func isClockTicks(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, r := range value {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-func procStartTicks(pid int) (string, error) {
-	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
-	if err != nil {
-		return "", err
-	}
-	return procStatStartTime(string(data))
-}
-
-func procStatStartTime(stat string) (string, error) {
-	end := strings.LastIndexByte(stat, ')')
-	if end < 0 {
-		return "", fmt.Errorf("malformed /proc stat")
-	}
-	fields := strings.Fields(stat[end+1:])
-	if len(fields) < 20 {
-		return "", fmt.Errorf("malformed /proc stat")
-	}
-	return fields[19], nil
-}
-
 func sameClaudeProcessStart(version, recorded, actual string) bool {
 	return sameClaudeProcessStartInLocation(version, recorded, actual, time.Local)
 }

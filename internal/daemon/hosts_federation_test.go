@@ -31,6 +31,7 @@ type federatedSurface struct {
 	*daemonSurface
 	mu       sync.Mutex
 	messages []string
+	sources  []string
 }
 
 func (f *federatedSurface) record(message string) {
@@ -39,18 +40,30 @@ func (f *federatedSurface) record(message string) {
 	f.mu.Unlock()
 }
 
+func (f *federatedSurface) senders() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.sources...)
+}
+
 func (f *federatedSurface) delivered() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.messages...)
 }
 
-func (f *federatedSurface) Send(_ context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
+func (f *federatedSurface) Send(ctx context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
+	f.mu.Lock()
+	f.sources = append(f.sources, surface.SourceSessionID(ctx))
+	f.mu.Unlock()
 	f.record(message)
 	return &surface.SendResult{UUID: "remote-turn", Accepted: true}, nil
 }
 
-func (f *federatedSurface) SendWithOptions(_ context.Context, _ *surface.Session, message string, _ surface.SendOptions) (*surface.SendResult, error) {
+func (f *federatedSurface) SendWithOptions(ctx context.Context, _ *surface.Session, message string, _ surface.SendOptions) (*surface.SendResult, error) {
+	f.mu.Lock()
+	f.sources = append(f.sources, surface.SourceSessionID(ctx))
+	f.mu.Unlock()
 	f.record(message)
 	return &surface.SendResult{UUID: "remote-turn", Accepted: true}, nil
 }
@@ -416,8 +429,8 @@ func TestFederationMirrorsReadsAndDrivesRemoteSessions(t *testing.T) {
 	}
 
 	crossHost := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": qualified, "sourceSessionId": "local-a", "message": "relay"})
-	if crossHost.Code != http.StatusBadRequest || !strings.Contains(crossHost.Body.String(), "cannot span") {
-		t.Fatalf("cross-host status=%d body=%s", crossHost.Code, crossHost.Body.String())
+	if got := remote.fake.delivered(); crossHost.Code != http.StatusOK || got[len(got)-1] != "relay" || !strings.HasPrefix(lastSender(t, remote), "unrepliable:") {
+		t.Fatalf("cross-host status=%d body=%s delivered=%v from=%v", crossHost.Code, crossHost.Body.String(), got, remote.fake.senders())
 	}
 	unknown := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": "nowhere::x", "message": "lost"})
 	if unknown.Code != http.StatusBadRequest || !strings.Contains(unknown.Body.String(), "unknown host") {

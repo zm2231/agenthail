@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
@@ -257,16 +258,6 @@ func TestNativeClaudeRejectsControlsBeforeExternalIO(t *testing.T) {
 	}
 }
 
-func TestProcStatStartTimeSkipsCommandNamesWithSpaces(t *testing.T) {
-	stat := "13446 (claude (bg) x) S 13433 13433 13433 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 11 0 1562374 1000 50\n"
-	if got, err := procStatStartTime(stat); err != nil || got != "1562374" {
-		t.Fatalf("start=%q err=%v", got, err)
-	}
-	if _, err := procStatStartTime("13446 claude S"); err == nil {
-		t.Fatal("malformed stat accepted")
-	}
-}
-
 func TestClaudeDiscoversLinuxSocketUnderXDGRuntimeDir(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Claude Code binds peer sockets under XDG_RUNTIME_DIR only on Linux")
@@ -294,7 +285,7 @@ func TestClaudeDiscoversLinuxSocketUnderXDGRuntimeDir(t *testing.T) {
 	defer listener.Close()
 	record := map[string]any{"pid": os.Getpid(), "sessionId": "linux-id", "status": "idle", "version": "2.1.302", "messagingSocketPath": socket}
 	if runtime.GOOS == "linux" {
-		start, err := procStartTicks(os.Getpid())
+		start, err := claudepeer.ProcStartTicks(os.Getpid())
 		if err != nil {
 			t.Fatal(err)
 		}
