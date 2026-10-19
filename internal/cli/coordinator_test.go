@@ -399,3 +399,19 @@ func TestAFolderOutsideEveryProjectHasNoLead(t *testing.T) {
 		t.Fatalf("started=%d", c.started(t))
 	}
 }
+
+func TestALongProjectNameStillGetsAValidCoordinatorName(t *testing.T) {
+	c := newCoordinatorCLI(t)
+	dir := filepath.Join(t.TempDir(), "long")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	c.project(t, "project-long", dir, strings.Repeat("archive-", 12))
+	if _, err := c.run(t, "coordinator", "new", "claude", "--cwd", dir); err != nil {
+		t.Fatal(err)
+	}
+	spec, err := c.r.Coordinator("project-long")
+	if err != nil || len(spec.Name) > 80 || !strings.HasSuffix(spec.Name, "-lead") || strings.Contains(spec.Name, "--") {
+		t.Fatalf("spec=%+v err=%v", spec, err)
+	}
+}

@@ -111,6 +111,9 @@ func (r *Registry) SetCoordinator(spec CoordinatorSpec, sessionID string) error 
 		if err := setAliasTx(tx, spec.Name, sessionID); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(`DELETE FROM coordinator_replaced WHERE session_id=?`, sessionID); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(`INSERT INTO coordinators (`+coordinatorColumns+`) VALUES (?,?,?,?,?,?,?,?,datetime('now'))
 		ON CONFLICT(project_id) DO UPDATE SET project_root=excluded.project_root,name=excluded.name,surface=excluded.surface,cwd=excluded.cwd,model=excluded.model,permission_mode=excluded.permission_mode,instructions=excluded.instructions,updated_at=excluded.updated_at`,
@@ -133,26 +136,23 @@ func (r *Registry) ClearCoordinator(projectID string) error {
 
 // CoordinatorOfSession returns the spec of the project sessionID coordinates,
 // as its current conversation or one a restart replaced, which senders such as
-// a notification reply may still address.
+// a notification reply may still address. Being a coordinator now outranks
+// having been one.
 func (r *Registry) CoordinatorOfSession(sessionID string) (CoordinatorSpec, bool, error) {
 	if sessionID == "" {
 		return CoordinatorSpec{}, false, nil
 	}
-	spec, err := scanCoordinator(r.read.QueryRow(`SELECT `+prefixed("c", coordinatorColumns)+` FROM coordinators c
-		WHERE c.name IN (SELECT name FROM aliases WHERE session_id=?)
-		   OR c.project_id IN (SELECT project_id FROM coordinator_replaced WHERE session_id=?)`, sessionID, sessionID))
-	if errors.Is(err, ErrNoCoordinator) {
-		return spec, false, nil
+	for _, owner := range []string{
+		`SELECT ` + coordinatorColumns + ` FROM coordinators WHERE name IN (SELECT name FROM aliases WHERE session_id=?)`,
+		`SELECT ` + coordinatorColumns + ` FROM coordinators WHERE project_id IN (SELECT project_id FROM coordinator_replaced WHERE session_id=?)`,
+	} {
+		spec, err := scanCoordinator(r.read.QueryRow(owner, sessionID))
+		if errors.Is(err, ErrNoCoordinator) {
+			continue
+		}
+		return spec, err == nil, err
 	}
-	return spec, err == nil, err
-}
-
-func prefixed(table, columns string) string {
-	parts := strings.Split(columns, ",")
-	for index := range parts {
-		parts[index] = table + "." + parts[index]
-	}
-	return strings.Join(parts, ",")
+	return CoordinatorSpec{}, false, nil
 }
 
 func (r *Registry) CoordinatorSessionID(spec CoordinatorSpec) (string, error) {
@@ -186,18 +186,19 @@ func (r *Registry) HandOverCoordinator(spec CoordinatorSpec, previous, next stri
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE name=? OR session_id=?`, spec.Name, next); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`DELETE FROM coordinator_replaced WHERE session_id=?`, next); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`INSERT INTO aliases (name,session_id) VALUES (?,?)`, spec.Name, next); err != nil {
 		return err
 	}
 	if previous != "" {
-		for _, statement := range []string{
+		for _, statement := range append([]string{
 			`UPDATE delivery_intents SET target_session_id=?2,updated_at=datetime('now') WHERE queue_id IN (SELECT id FROM message_queue WHERE session_id=?1 AND status='pending')`,
 			`UPDATE message_queue SET session_id=?2,updated_at=datetime('now') WHERE session_id=?1 AND status='pending'`,
 			`INSERT OR IGNORE INTO channel_members (channel_id,session_id) SELECT channel_id,?2 FROM channel_members WHERE session_id=?1`,
 			`DELETE FROM channel_members WHERE session_id=?1`,
-			`UPDATE routes SET from_session=?2 WHERE from_session=?1`,
-			`UPDATE routes SET to_session=?2 WHERE to_session=?1`,
-		} {
+		}, routeMoves...) {
 			if _, err := tx.Exec(statement, previous, next); err != nil {
 				return err
 			}

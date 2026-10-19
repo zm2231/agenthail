@@ -302,11 +302,15 @@ var coordinatorNameCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 // defaultCoordinatorName is @<project>-lead, from the project's display name.
 func defaultCoordinatorName(displayName string) string {
+	const suffix = "-lead"
 	base := strings.Trim(coordinatorNameCharacters.ReplaceAllString(strings.ToLower(displayName), "-"), "-.")
+	if len(base) > 80-len(suffix) {
+		base = strings.TrimRight(base[:80-len(suffix)], "-.")
+	}
 	if base == "" {
 		base = "project"
 	}
-	return base + "-lead"
+	return base + suffix
 }
 
 func coordinatorNameError(err error) error {
