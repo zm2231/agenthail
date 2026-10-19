@@ -101,11 +101,11 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 	})
 	session := &surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: opened.PID, Name: options.Name, Cwd: options.Cwd, Status: surface.StatusIdle, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
 	if err != nil {
-		var unknown *claudehost.OutcomeUnknownError
-		if errors.As(err, &unknown) {
-			return session, nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude creation: %w", err))
+		failure := claudeHostDeliveryError(fmt.Errorf("Claude creation: %w", err))
+		if surface.IsDeliveryOutcomeUnknown(failure) {
+			return session, nil, failure
 		}
-		return nil, nil, fmt.Errorf("Claude creation: %w", err)
+		return nil, nil, failure
 	}
 	sent, err := c.sendHostTurn(ctx, session, options.Message, "", nil)
 	return session, sent, err

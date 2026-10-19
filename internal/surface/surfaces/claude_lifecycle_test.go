@@ -168,3 +168,11 @@ fi
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestClaudeCreationTheHostNeverReceivedIsAFailureNotUnknown(t *testing.T) {
+	host := claudehosttest.New(t, "")
+	session, sent, err := NewClaude(nil, host.Home).StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
+	if session != nil || sent != nil || !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("session=%+v sent=%+v err=%v", session, sent, err)
+	}
+}
