@@ -18,17 +18,31 @@ it paired with.
 Pairing reuses the device-token model the phone uses.
 
 1. On the remote: `agenthail hosts invite` creates a five-minute, single-use
-   pairing link with the `read` and `control` scopes. It needs remote access
-   (Tailscale Serve), which is what gives the link an HTTPS endpoint.
+   pairing link with the `read`, `control` and `host` scopes. It needs remote
+   access (Tailscale Serve), which is what gives the link an HTTPS endpoint.
+   The `host` scope gives the catalog stream every row, so the pairing mirrors
+   subagents the session list hides; a device token without it streams the
+   session list. A host paired without it must be paired again.
 2. On the Mac: `agenthail hosts add '<link>' [--address <tailnet-ip>]`. The
-   daemon redeems the secret, receives an `ahd_` device token, checks the
-   protocol version and host id, and stores the pairing in `hosts`.
+   daemon redeems the secret, sending its own host id, receives an `ahd_`
+   device token, checks the protocol version and host id, and stores the
+   pairing in `hosts`. The remote binds the token to the host id it was
+   redeemed with (`paired_devices.host_id`), so a request on that token speaks
+   for that host and no other.
 
 The daemon always dials the tailnet IP and verifies TLS against the endpoint's
 DNS name, so it works where MagicDNS does not resolve. The address must be in
 the Tailscale ranges (`100.64.0.0/10` or `fd7a:115c:a1e0::/48`); anything else
-is refused before dialing. If the remote's protocol range does not include this
-daemon's, pairing fails and the device it just issued is revoked. Without `--address` it
+is refused before dialing. `GET /api/v1/version` also reports the federation range
+(`minimumFederation`, `maximumFederation`): the version of what one daemon
+serves another beyond the client API, such as the launch catalog and history
+filtered by session. If the remote's protocol or federation range does not
+include this daemon's, pairing fails and the device it just issued is revoked.
+A paired host that later reports a range without this daemon's is
+`incompatible` (shown as needing an update), and nothing is forwarded to it
+until it is updated. Each connection starts with that version check, and no
+read, stream, action or held send goes to the host until the latest check has
+passed; a send made while it is pending is held. Without `--address` it
 asks `tailscale status --json` for the peer's IPv4 address. No new port is
 opened: the remote is reached through the Tailscale Serve route it already
 has. Device tokens stay in the registry and never appear in API responses,
@@ -78,15 +92,73 @@ mirror writes the row or the held queue changes.
 
 `routeSession` in `internal/daemon/hosts_federation.go` is the one owner that
 decides which host a session belongs to. Session reads, streams, metadata,
-model lists, attachments and actions are wrapped so that a host-qualified id,
+model lists, attachments, uploads and actions are wrapped so that a host-qualified id,
 a `host` query field, or a raw id owned by a paired host is forwarded to that
-host with its raw id; the answer comes back with every session reference
-re-qualified. An action cannot span two hosts, and actions that only make
-sense on one daemon (channels, relays, queue and delivery records, a message
-from a local source session) are refused for remote sessions. A qualifier
+host with its raw id, request body included; the answer comes back with every
+session reference re-qualified. An upload for a remote session is therefore
+stored on that host, and the upload id the client sends with the message is
+resolved there. An action names sessions on at most one other host. Queue and
+delivery records and voice are refused for remote sessions with a reason, and
+opening a session's terminal is refused because the terminal is on the other
+machine. The mirror stores remote rows with `runtime.focusable` cleared, and
+the web, Mac and iPhone hide voice and leave remote sessions out of relay and
+channel pickers; the CLI and the API reach them. A qualifier
 naming this daemon on a raw id a paired host owns is an ownership conflict,
 never a local action, and a `host` field that disagrees with the qualifier is
 `host_mismatch`.
+
+## Senders across hosts
+
+A message forwarded to another host carries its sender: the forwarding daemon
+qualifies a local source as `<this host id>::<id>` and adds its display name.
+The receiving daemon trusts that qualifier only from a token bound to the same
+host, refuses one from an unbound token (it names `agenthail hosts invite` and
+`agenthail hosts add` to pair again) and refuses one for any other host as
+`host_mismatch`. When the receiver is paired back and mirrors the sender, the
+source becomes that mirrored row, so a reply routes back. A one-way pairing
+has no route back: the source becomes an `unrepliable:<host>:<id>` operator
+row named `<host>/<name> (no reply address)`.
+
+Claude peers: while a paired host is connected, its sessions, Claude included,
+are advertised to local Claude sessions as peers named
+`agenthail/<surface>: <host>/<name>`. Local peers keep their name without a
+host. A peer message to a remote session is held for its host like any send,
+with the native Claude sender as its source when one is known, and otherwise
+with a `[Claude peer message from ...]` prefix.
+
+## Relays and channels across hosts
+
+A relay lives with its source, where its completions are observed. `relay-add`
+with a remote source is forwarded to that host, with the target named the way
+that host resolves it: a session of this host arrives qualified and resolves
+there as its mirrored row. A target on a host the source's host has not paired
+is refused with the pairing commands to run. When a relay fires toward a
+session another host owns, the leg is held for that host with its sender and a
+hop count one higher; the receiving daemon accepts a relay leg only from a
+host token and only below the hop limit, and runs it through its own relay
+queue. `GET /api/v1/relays?host=<host>` lists a host's relays with their ends
+qualified for this daemon.
+
+A channel lives where it was made. A remote member is stored by its raw id and
+mirrored row; `channel-send` holds the message for that member's host and
+delivers to local members directly.
+
+## Starting a session on a host
+
+`GET /api/v1/session-options?host=<host>` is that host's launch catalog: the
+host it came from, the agents it can start and whether each is connected, its
+launchers, and its projects (`projects`: id, display name, root path and kind;
+the most recently active first, registered folders without sessions after,
+archived projects left out).
+`GET /api/v1/models?surface=<agent>&host=<host>` lists that host's models
+with their reasoning efforts. `session-create` with `host` starts the
+session there. The web dashboard, the Mac app and the iPhone app show one
+host button in the new session form once a host is paired. It opens a short
+list of this machine and each paired host (hosts that are not connected are
+listed with their state and cannot be chosen) and defaults to the selected
+session's host. Choosing a host reloads the form from that host's catalog.
+The form's project picker lists that host's projects by name and starts the
+session in the chosen project's root; a typed folder is still accepted.
 
 ## Unreachable hosts and delivery
 
@@ -113,6 +185,10 @@ clients send one; the daemon generates one otherwise):
   of starting a second turn. A replay the remote still reports as in progress
   stays unknown, then becomes a dead letter marked unknown 15 minutes after
   it was first sent.
+- A replay the remote answers is delivered here with the remote's receipt as
+  its evidence. `queue list` shows `delivered (remote queued)` when the host
+  queued it for a busy session: the message now waits in that host's queue,
+  and this daemon's row is finished.
 
 `net/http` itself replays a request that carries an `Idempotency-Key` header
 once when a reused connection fails, which is safe for the same reason.
@@ -125,9 +201,17 @@ one is an error listing each `host::target`, never a pick. With the daemon
 stopped, the CLI still checks mirrored rows by exact id and alias so a local
 match cannot shadow a remote one silently.
 
-`send`, `steer`, `interrupt`, `reply`, `last`, `stream` and
-`thread create --host <host>` reach paired hosts. Other commands refuse a
-remote session by name. `list` adds a HOST column once a host is paired and
+Every session command reaches paired hosts through the local daemon:
+`send`, `steer`, `interrupt`, `reply`, `last`, `stream`, `compact`, `model`,
+`goal`, `identify`, `history`, `queue <target> "message"` (a send the host
+queues while busy), `thread fork`, `thread queue`, `thread status`, `stop`,
+`resume` and `logs`, and `thread create --host <host>`. A send this daemon
+holds for an unreachable host is local queue data: `queue list`, `queue
+clear`, `queue cancel` and `queue retry` act on it. `channel add`, `rm` and
+`send` accept a remote member, `relay add` accepts remote ends and creates the
+relay on its source's host, `relay rm <host>::<id>` removes one there, and
+`relay list` adds each paired host's relays under `<host>::#<id>`.
+`list` adds a HOST column once a host is paired and
 marks an unreachable host's rows `down`.
 
 ## Where an empty host_id means local
@@ -153,8 +237,8 @@ Every place that treats `host_id = ''` as "this daemon's session":
 - `Dispatcher.RegisterReached`: a send, queued send or compact whose provider
   reports the session under an id a paired host owns ends as an unknown
   outcome naming that host, recorded only under the addressed session.
-- `dashboardState` and `publishCatalogQueueCounts` render mirrored rows from
+- `dashboardState` and `publishCatalogPresence` render mirrored rows from
   their stored projection; `RefreshHostQueueCounts` keeps its queue count.
-- `registerRecentClaudePeers` never advertises a mirrored session as a local
-  Claude peer.
+- `registerRecentClaudePeers` advertises a mirrored session only while its
+  host is connected, under its host-prefixed peer name.
 - The CLI `list` renders rows with a host id from their projection.

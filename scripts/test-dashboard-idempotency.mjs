@@ -61,8 +61,8 @@ responses.push(networkLoss(), ok());
 await assert.rejects(() => context.runLogicalAction("session-create", "session-create", { surface: "codex", message: "create" }));
 context.app.selected = { id: "session-3" };
 await context.runLogicalAction("session-create", "session-create", { surface: "codex", message: "create" });
-assert.notEqual(calls[10].key, calls[11].key, "create fingerprint must include its serialized session context");
+assert.equal(calls[10].key, calls[11].key, "create retry must not depend on the selected session");
 
 assert.equal(calls[10].body.action, "session-create");
-assert.equal(calls[10].body.sessionId, "session-2");
-assert.equal(calls[11].body.sessionId, "session-3");
+assert.equal(calls[10].body.sessionId, "");
+assert.equal(calls[11].body.sessionId, "");

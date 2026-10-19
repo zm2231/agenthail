@@ -28,7 +28,7 @@ type Registry struct {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 17
+	schemaVersion   = 21
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -37,6 +37,18 @@ const (
 
 // SchemaVersion is the user_version a registry has once this build opens it.
 func SchemaVersion() int { return schemaVersion }
+
+// NewerSchemaError is returned by Open for a registry a newer agenthail has
+// migrated. This build does not know that schema, so it refuses to read or
+// write it rather than run against tables it would misuse.
+type NewerSchemaError struct {
+	Found     int
+	Supported int
+}
+
+func (e *NewerSchemaError) Error() string {
+	return fmt.Sprintf("registry is schema %d; this agenthail supports %d; install a newer agenthail", e.Found, e.Supported)
+}
 
 func Open(path string) (*Registry, error) {
 	private := path == ""
@@ -56,7 +68,7 @@ func Open(path string) (*Registry, error) {
 	if strings.Contains(path, "?") {
 		sep = "&"
 	}
-	db, err := sql.Open("sqlite", path+sep+"_pragma=foreign_keys(1)&_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate")
+	db, err := sql.Open("sqlite", path+sep+"_pragma=foreign_keys(1)&_pragma=busy_timeout(15000)&_pragma=synchronous(NORMAL)&_txlock=immediate")
 	if err != nil {
 		return nil, err
 	}
@@ -73,6 +85,12 @@ func Open(path string) (*Registry, error) {
 	if err := r.migrate(); err != nil {
 		r.Close()
 		return nil, err
+	}
+	// WAL mode is a property of the file, so it is set only once migrate has
+	// accepted the schema; a registry this build refuses keeps its journal mode.
+	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+		r.Close()
+		return nil, fmt.Errorf("enable registry WAL: %w", err)
 	}
 	return r, nil
 }
@@ -99,6 +117,9 @@ func migrateTx(tx *sql.Tx) error {
 	var version int
 	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
+	}
+	if version > schemaVersion {
+		return &NewerSchemaError{Found: version, Supported: schemaVersion}
 	}
 	if _, err := tx.Exec(schema); err != nil {
 		return err
@@ -134,6 +155,7 @@ func migrateTx(tx *sql.Tx) error {
 		{"busy_delivery", `TEXT NOT NULL DEFAULT ''`},
 		{"author", `TEXT NOT NULL DEFAULT ''`},
 		{"host_request", `BLOB NOT NULL DEFAULT ''`},
+		{"uploads", `TEXT NOT NULL DEFAULT '[]'`},
 	} {
 		if err := ensureColumn(tx, "message_queue", column.name, column.decl); err != nil {
 			return err
@@ -248,6 +270,9 @@ func migrateTx(tx *sql.Tx) error {
 	if _, err := catalogHostEpochTx(tx, true); err != nil {
 		return err
 	}
+	if err := ensureColumn(tx, "paired_devices", "host_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	if err := ensureColumn(tx, "delivery_intents", "relayed", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
@@ -255,6 +280,17 @@ func migrateTx(tx *sql.Tx) error {
 		if err := dropQueueExpiry(tx); err != nil {
 			return err
 		}
+	}
+	if err := ensureColumn(tx, "delivery_intents", "uuid", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if version < 18 {
+		if err := backfillIntentUUIDs(tx); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS delivery_intents_uuid ON delivery_intents(uuid)`); err != nil {
+		return err
 	}
 	if version < 13 {
 		if _, err := tx.Exec(`UPDATE delivery_intents SET relayed=1 WHERE queue_id IN (SELECT id FROM message_queue WHERE relay_hops>0) OR provider_key LIKE 'relay:%'`); err != nil {
@@ -281,7 +317,12 @@ func migrateTx(tx *sql.Tx) error {
 	if err := recordRuntimeKinds(tx); err != nil {
 		return err
 	}
-	if version >= schemaVersion {
+	if version < 19 {
+		if err := recordObservedSubagents(tx); err != nil {
+			return err
+		}
+	}
+	if version == schemaVersion {
 		return nil
 	}
 	if version >= 1 {
@@ -299,6 +340,13 @@ func migrateTx(tx *sql.Tx) error {
 		return err
 	}
 	_, err = tx.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
+	return err
+}
+
+// backfillIntentUUIDs gives each delivery intent recorded before intents
+// carried a uuid its own, so the unique index can be built over them.
+func backfillIntentUUIDs(tx *sql.Tx) error {
+	_, err := tx.Exec(`UPDATE delivery_intents SET uuid=` + sqlRandomUUID + ` WHERE uuid=''`)
 	return err
 }
 
@@ -428,7 +476,8 @@ CREATE TABLE IF NOT EXISTS message_queue (
 	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
 	busy_delivery TEXT NOT NULL DEFAULT '',
 	author TEXT NOT NULL DEFAULT '',
-	host_request BLOB NOT NULL DEFAULT ''
+	host_request BLOB NOT NULL DEFAULT '',
+	uploads TEXT NOT NULL DEFAULT '[]'
 );
 CREATE TABLE IF NOT EXISTS session_runtime (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
@@ -524,6 +573,7 @@ CREATE TABLE IF NOT EXISTS paired_devices (
 	name TEXT NOT NULL,
 	token_hash TEXT NOT NULL UNIQUE,
 	scopes TEXT NOT NULL,
+	host_id TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
 	last_seen_at TEXT NOT NULL DEFAULT '',
 	revoked_at TEXT NOT NULL DEFAULT ''
@@ -591,6 +641,7 @@ CREATE TABLE IF NOT EXISTS delivery_intents (
 	message TEXT NOT NULL DEFAULT '',
 	queue_id INTEGER NOT NULL DEFAULT 0,
 	relayed INTEGER NOT NULL DEFAULT 0,
+	uuid TEXT NOT NULL DEFAULT '',
 	status TEXT NOT NULL,
 	evidence TEXT NOT NULL,
 	failure TEXT NOT NULL DEFAULT '',
@@ -681,6 +732,18 @@ CREATE TABLE IF NOT EXISTS catalog_surfaces (
 	health TEXT NOT NULL,
 	detail TEXT NOT NULL DEFAULT '',
 	observed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS projects (
+	id TEXT PRIMARY KEY,
+	kind TEXT NOT NULL,
+	root_path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	registered INTEGER NOT NULL DEFAULT 0,
+	archived_at_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS session_archive (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	archived_at_ms INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),
@@ -1217,10 +1280,10 @@ func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, option
 }
 
 func enqueueMessageTx(tx *sql.Tx, now time.Time, sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation, recordIntent bool) (int64, int64, error) {
-	if options.BusyDelivery == "steer" && (options.Model != "" || !options.TurnOptions.Empty()) {
+	if options.BusyDelivery == "steer" && options.HoldsForQueue() {
 		options.BusyDelivery = "queue"
 	}
-	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, options.BusyDelivery, options.Author)
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,uploads,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, options.BusyDelivery, options.Author, options.Uploads)
 	if err != nil {
 		if deliveryKey != "" && strings.Contains(strings.ToLower(err.Error()), "unique") {
 			var id int64
@@ -1295,6 +1358,7 @@ type QueuedMessage struct {
 	Operation       QueueOperation
 	BusyDelivery    string
 	Author          surface.Author
+	Uploads         surface.Uploads
 }
 
 const (
@@ -1640,7 +1704,15 @@ func queueEvidence(row QueueRow, recorded surface.DeliveryEvidence) surface.Deli
 	if recorded != "" {
 		return recorded
 	}
-	switch row.Status {
+	if row.Status == "dead" && strings.HasPrefix(row.LastError, "delivery outcome is unknown") {
+		return surface.EvidenceUnknown
+	}
+	return QueueStatusEvidence(row.Status)
+}
+
+// QueueStatusEvidence is the evidence a queue status implies on its own.
+func QueueStatusEvidence(status string) surface.DeliveryEvidence {
+	switch status {
 	case "pending", "inflight":
 		return surface.EvidenceQueued
 	case "delivered":
@@ -1648,9 +1720,6 @@ func queueEvidence(row QueueRow, recorded surface.DeliveryEvidence) surface.Deli
 	case "canceled":
 		return surface.EvidenceCanceled
 	case "dead":
-		if strings.HasPrefix(row.LastError, "delivery outcome is unknown") {
-			return surface.EvidenceUnknown
-		}
 		return surface.EvidenceFailed
 	default:
 		return ""
@@ -1885,7 +1954,7 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 	var status string
 	var availableAt int64
 	var inflightAt int64
-	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation,busy_delivery,author FROM message_queue WHERE `+filter, args...).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery, &item.Author)
+	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation,busy_delivery,author,uploads FROM message_queue WHERE `+filter, args...).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery, &item.Author, &item.Uploads)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -2540,9 +2609,11 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 	return results, nil
 }
 
+// ListSessions reports a session the catalog no longer holds as offline: its
+// stored status is the last observation, not a running process.
 func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
-	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + ` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.host_id='' ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
-	args := []any{}
+	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,CASE WHEN EXISTS (SELECT 1 FROM catalog_sessions cs WHERE cs.session_id=s.id) THEN s.status ELSE ? END,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + ` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.host_id='' ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
+	args := []any{string(surface.StatusOffline)}
 	if limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, limit)

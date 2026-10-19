@@ -42,41 +42,35 @@ func main() {
 		return
 	}
 	home, _ := os.UserHomeDir()
-	reg, err := registry.Open("")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: open registry: %s\n", err)
-		os.Exit(1)
-	}
-	defer reg.Close()
-
-	helpers := sidecarAvailable(runtime.GOOS, os.Getenv("AGENTHAIL_SIDECAR"))
-	claude := surfaces.NewClaude(reg, home)
-	if !helpers {
-		claude.DisableRemoteControl()
-	}
-	codex := surfaces.NewCodex(codexconfig.RemoteDebuggingPort())
-	entries := []cli.SurfaceEntry{
-		{Name: "claude", Surface: claude},
-		{Name: "codex", Surface: codex},
-	}
-	if helpers {
-		entries = append(entries, cli.SurfaceEntry{Name: "notion", Surface: surfaces.NewNotion(
-			reg,
-			envOr("AGENTHAIL_NOTION_SPACE", ""),
-			envOr("AGENTHAIL_NOTION_USER", ""),
-		)})
-	}
-
-	app := cli.App{
-		Registry:       reg,
-		Surfaces:       entries,
+	app := &cli.App{
+		OpenRegistry:   func() (*registry.Registry, error) { return registry.Open("") },
 		DefaultTimeout: 2 * time.Minute,
 		Version:        version,
 		Revision:       revision,
 		BuiltAt:        builtAt,
 	}
 
-	if err := app.Run(os.Args[1:]); err != nil {
+	helpers := sidecarAvailable(runtime.GOOS, os.Getenv("AGENTHAIL_SIDECAR"))
+	claude := surfaces.NewClaude(app, home)
+	if !helpers {
+		claude.DisableRemoteControl()
+	}
+	codex := surfaces.NewCodex(codexconfig.RemoteDebuggingPort())
+	app.Surfaces = []cli.SurfaceEntry{
+		{Name: "claude", Surface: claude},
+		{Name: "codex", Surface: codex},
+	}
+	if helpers {
+		app.Surfaces = append(app.Surfaces, cli.SurfaceEntry{Name: "notion", Surface: surfaces.NewNotion(
+			app,
+			envOr("AGENTHAIL_NOTION_SPACE", ""),
+			envOr("AGENTHAIL_NOTION_USER", ""),
+		)})
+	}
+
+	err := app.Run(os.Args[1:])
+	app.Close()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
 	}

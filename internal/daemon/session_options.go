@@ -1,12 +1,17 @@
 package daemon
 
 import (
+	"encoding/json"
 	"net/http"
 	"sort"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+// sessionOptionsHandler is this host's launch catalog: the agents it can
+// start, whether each is connected, its launchers, and its projects. A
+// request naming a paired host is answered by that host.
 func (d *Daemon) sessionOptionsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Use GET for session options.", http.StatusMethodNotAllowed)
@@ -15,35 +20,112 @@ func (d *Daemon) sessionOptionsHandler(w http.ResponseWriter, r *http.Request) {
 	type option struct {
 		ID        string `json:"id"`
 		Workspace bool   `json:"workspace"`
+		Connected bool   `json:"connected"`
+	}
+	health := map[surface.SurfaceKind]string{}
+	if states, err := d.Registry.CatalogSurfaces(); err == nil {
+		for _, state := range states {
+			health[state.Surface] = state.Health
+		}
 	}
 	options := []option{}
 	for _, adapter := range d.Surfaces {
+		connected := health[adapter.Name()] == "healthy"
 		if _, ok := adapter.(surface.SessionStarter); ok {
-			options = append(options, option{string(adapter.Name()), true})
+			options = append(options, option{string(adapter.Name()), true, connected})
 		} else if adapter.Name() == surface.KindNotion {
-			options = append(options, option{string(adapter.Name()), false})
+			options = append(options, option{string(adapter.Name()), false, connected})
 		}
 	}
-	sessions, err := d.Registry.ListSessions(200)
+	projects, err := d.launchProjects()
 	if err != nil {
-		http.Error(w, "Saved workspaces are unavailable.", http.StatusInternalServerError)
+		http.Error(w, "Projects are unavailable.", http.StatusInternalServerError)
 		return
 	}
-	directories := []string{}
-	seen := map[string]bool{}
-	for _, session := range sessions {
-		if session.Cwd != "" && !seen[session.Cwd] {
-			seen[session.Cwd] = true
-			directories = append(directories, session.Cwd)
-		}
-	}
-	sort.Strings(directories)
 	sort.Slice(options, func(i, j int) bool { return options[i].ID < options[j].ID })
 	launchers := []map[string]any{}
 	if d.transportResolver != nil {
 		launchers = d.transportResolver.Options(r.Context())
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"surfaces": options, "workspaces": directories, "launchers": launchers})
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"host": d.localHost(), "surfaces": options, "projects": projects, "launchers": launchers})
+}
+
+const launchProjectLimit = 12
+
+// launchProject is a project a new session can start in: the root of its main
+// checkout, or the registered folder.
+type launchProject struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+	RootPath    string `json:"rootPath"`
+	Kind        string `json:"kind"`
+}
+
+// launchProjects lists this host's projects, the most recently active first,
+// followed by registered folders without sessions. Archived projects are left
+// out.
+func (d *Daemon) launchProjects() ([]launchProject, error) {
+	snapshot, err := d.Registry.CatalogSnapshot()
+	if err != nil {
+		return nil, err
+	}
+	archive, err := d.Registry.ArchiveState()
+	if err != nil {
+		return nil, err
+	}
+	records, err := d.Registry.ListProjects()
+	if err != nil {
+		return nil, err
+	}
+	type candidate struct {
+		project    launchProject
+		lastActive time.Time
+	}
+	byID := map[string]*candidate{}
+	for _, record := range snapshot.Sessions {
+		if record.HostID != "" || record.Session.Subagent != nil {
+			continue
+		}
+		var project catalogProject
+		if json.Unmarshal(record.Project, &project) != nil || project.ID == "" || project.RootPath == "" {
+			continue
+		}
+		if _, archived := archive.Projects[project.ID]; archived {
+			continue
+		}
+		entry, found := byID[project.ID]
+		if !found {
+			entry = &candidate{project: launchProject{ID: project.ID, DisplayName: project.DisplayName, RootPath: project.RootPath, Kind: project.Kind}}
+			byID[project.ID] = entry
+		}
+		if record.Session.LastActive.After(entry.lastActive) {
+			entry.lastActive = record.Session.LastActive
+		}
+	}
+	for _, record := range records {
+		if _, found := byID[record.ID]; found || !record.Registered || !record.ArchivedAt.IsZero() {
+			continue
+		}
+		byID[record.ID] = &candidate{project: launchProject{ID: record.ID, DisplayName: record.DisplayName, RootPath: record.RootPath, Kind: record.Kind}}
+	}
+	candidates := make([]*candidate, 0, len(byID))
+	for _, entry := range byID {
+		candidates = append(candidates, entry)
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if !candidates[i].lastActive.Equal(candidates[j].lastActive) {
+			return candidates[i].lastActive.After(candidates[j].lastActive)
+		}
+		return candidates[i].project.DisplayName < candidates[j].project.DisplayName
+	})
+	if len(candidates) > launchProjectLimit {
+		candidates = candidates[:launchProjectLimit]
+	}
+	projects := make([]launchProject, 0, len(candidates))
+	for _, entry := range candidates {
+		projects = append(projects, entry.project)
+	}
+	return projects, nil
 }
 
 func (d *Daemon) mobileQueueHandler(w http.ResponseWriter, r *http.Request) {

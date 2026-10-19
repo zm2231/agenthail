@@ -600,7 +600,7 @@ func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	device, _, err := r.CompleteDevicePairing(pairing.Secret, "Phone")
+	device, _, err := r.CompleteDevicePairing(pairing.Secret, "Phone", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -655,7 +655,7 @@ func TestCompletionNotificationDoesNotSendForBusyBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	device, _, err := r.CompleteDevicePairing(pairing.Secret, "Phone")
+	device, _, err := r.CompleteDevicePairing(pairing.Secret, "Phone", "")
 	if err != nil {
 		t.Fatal(err)
 	}

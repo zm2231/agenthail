@@ -36,9 +36,13 @@ final class AgenthailIOSModel: ObservableObject {
     private var searchQuery = ""
     private var sessionRequestID = UUID()
     private var drafts: [String: String] = [:]
+    @Published var composerAttachments: [ComposerAttachment] = []
+    @Published var attachmentProblem: String?
+    private var attachmentDrafts: [String: [ComposerAttachment]] = [:]
     private var rekeys = SessionRekeys()
     private struct PendingSendRequest {
         let message: String
+        let attachments: [ComposerAttachment]
         let turnSettings: TurnSettings
         let idempotencyKey: String
     }
@@ -50,6 +54,7 @@ final class AgenthailIOSModel: ObservableObject {
         let turnSettings: TurnSettings
         let claudeFields: [String: String]
         let launcher: String?
+        let host: String?
     }
     private var pendingSendRequests: [String: PendingSendRequest] = [:]
     private var creationRequestIdentity: CreationRequestIdentity?
@@ -65,6 +70,7 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var creationWarning: String?
     @Published var pendingControls: Set<String> = []
     @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
+    @Published private(set) var fetchedSubagents = SubagentPageCache()
 
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
 
@@ -106,6 +112,26 @@ final class AgenthailIOSModel: ObservableObject {
         turnSettingsDrafts.removeValue(forKey: sessionID)
     }
 
+    /// Fetches the direct subagents a session list only counts, so they can
+    /// be shown and opened.
+    func loadSubagents(of session: SessionState) async {
+        guard let api else { return }
+        guard (session.hiddenSubagents?.count ?? 0) > 0 else {
+            fetchedSubagents.drop(session.id)
+            return
+        }
+        do {
+            let loaded = try await api.subagents(of: session.id)
+            if !Task.isCancelled { fetchedSubagents.store(loaded, for: session.id) }
+        } catch {
+            if !Task.isCancelled { fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id) }
+        }
+    }
+
+    func subagents(of sessionID: String) -> [SessionState] {
+        SessionFamilies.children(of: sessionID, listed: snapshot?.sessions ?? [], fetched: fetchedSubagents.children(of: sessionID))
+    }
+
     func queuedInstructions() async throws -> [QueueState] {
         guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
         return try await api.queuedInstructions()
@@ -136,13 +162,13 @@ final class AgenthailIOSModel: ObservableObject {
         await refresh(fresh: true)
     }
 
-    func sessionOptions() async throws -> SessionCreationOptions {
+    func sessionOptions(host: String?) async throws -> SessionCreationOptions {
         guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
-        return try await api.sessionOptions()
+        return try await api.sessionOptions(host: host)
     }
-    func creationModels(surface: String) async throws -> [ModelOption] {
+    func creationModels(surface: String, host: String?) async throws -> [ModelOption] {
         guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
-        return try await api.creationModels(surface: surface)
+        return try await api.creationModels(surface: surface, host: host)
     }
     func prepareNewSessionForm() {
         creationError = nil
@@ -150,28 +176,28 @@ final class AgenthailIOSModel: ObservableObject {
         creationRequestIdentity = nil
         creationRequestKey = nil
     }
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) async -> Bool {
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, host: String? = nil) async -> Bool {
         guard !creatingSession, let api, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         creatingSession = true; creationError = nil; creationWarning = nil
         defer { creatingSession = false }
         let identity = CreationRequestIdentity(surface: surface, message: message, cwd: cwd, model: model,
                                                turnSettings: surface == "codex" ? turnSettings : .init(),
-                                               claudeFields: claude.fields, launcher: launcher)
+                                               claudeFields: claude.fields, launcher: launcher?.id, host: host)
         if creationRequestIdentity != identity || creationRequestKey == nil {
             creationRequestIdentity = identity
             creationRequestKey = UUID().uuidString
         }
         do {
-            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher, idempotencyKey: creationRequestKey)
+            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher, host: host, idempotencyKey: creationRequestKey)
             guard receipt.ok || receipt.unknown == true || receipt.accepted == true else { throw AgenthailAPIError.invalidResponse }
             if receipt.status == "submitted" && receipt.id == nil {
-                creationWarning = "Submitted to \(receipt.launcher ?? launcher ?? surface)."
+                creationWarning = "Submitted to \(receipt.launcher ?? launcher?.id ?? surface)."
                 return false
             }
             creationWarning = receipt.warning
             if let id = receipt.id, !id.isEmpty {
-                let target = receipt.launcher ?? launcher ?? surface
-                deliveryStatus[id] = receipt.status == "submitted" || receipt.unknown == true ? "Submitted to \(target)." : (surface == "claude" ? "Background session registered. Waiting for activity." : "Conversation started")
+                let target = receipt.launcher ?? launcher?.id ?? surface
+                deliveryStatus[id] = receipt.status == "submitted" || receipt.unknown == true ? "Submitted to \(target)." : (surface == "claude" ? "Session started. Waiting for activity." : "Conversation started")
                 requestedSessionID = id
             }
             if receipt.id != nil { creationRequestIdentity = nil; creationRequestKey = nil }
@@ -412,13 +438,18 @@ final class AgenthailIOSModel: ObservableObject {
 
     func loadSession(_ id: String) async {
         let id = rekeys.resolve(id)
-        if let previous = selectedSessionID, previous != id { drafts[previous] = composer }
+        if let previous = selectedSessionID, previous != id {
+            drafts[previous] = composer
+            attachmentDrafts[previous] = composerAttachments
+        }
         if selectedSessionID != id {
             sessionStreamTask?.cancel()
             sessionMetadataTask?.cancel()
             sessionStreamCursor = 0
             sessionStreamMetadataFields.removeAll()
             composer = drafts[id] ?? ""
+            composerAttachments = attachmentDrafts[id] ?? []
+            attachmentProblem = nil
             selectedDetail = nil
             olderActivity = []
             activityCursor = nil
@@ -574,6 +605,7 @@ final class AgenthailIOSModel: ObservableObject {
         rekeys.record(retired)
         guard !rekeys.isEmpty else { return }
         _ = rekeys.carry(&drafts)
+        _ = rekeys.carry(&attachmentDrafts)
         _ = rekeys.carry(&pendingSendRequests)
         var settings = turnSettingsDrafts
         if rekeys.carry(&settings) { turnSettingsDrafts = settings }
@@ -584,6 +616,17 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
+    func addAttachments(_ new: [ComposerAttachment], problem: ComposerAttachmentProblem? = nil) {
+        let added = ComposerAttachments.adding(new, to: composerAttachments)
+        composerAttachments = added.attachments
+        attachmentProblem = (problem ?? added.problem)?.message
+    }
+
+    func removeAttachment(_ id: UUID) {
+        composerAttachments.removeAll { $0.id == id }
+        attachmentProblem = nil
+    }
+
     func editAndResend(_ text: String) {
         let edited = text.trimmingCharacters(in: .whitespacesAndNewlines)
         composer = composer.isEmpty ? edited : edited + "\n\n" + composer
@@ -591,28 +634,33 @@ final class AgenthailIOSModel: ObservableObject {
 
     func send(to session: SessionState) {
         let message = composer.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty, let api,
+        let attachments = composerAttachments
+        guard !ComposerAttachments.isEmpty(text: message, attachments: attachments), let api,
               let detail = selectedDetail, detail.session.id == session.id,
               !detail.readOnly, !sendingSessionIDs.contains(session.id) else { return }
         let action = "send"
         guard detail.capabilities.send else { return }
         let turnSettings = action == "send" && session.surface == "codex" ? turnSettingsDrafts[session.id] ?? TurnSettings() : TurnSettings()
         let idempotencyKey: String
-        if let pending = pendingSendRequests[session.id], pending.message == message, pending.turnSettings == turnSettings {
+        if let pending = pendingSendRequests[session.id], pending.message == message, pending.attachments == attachments, pending.turnSettings == turnSettings {
             idempotencyKey = pending.idempotencyKey
         } else {
             idempotencyKey = UUID().uuidString
-            pendingSendRequests[session.id] = PendingSendRequest(message: message, turnSettings: turnSettings, idempotencyKey: idempotencyKey)
+            pendingSendRequests[session.id] = PendingSendRequest(message: message, attachments: attachments, turnSettings: turnSettings, idempotencyKey: idempotencyKey)
         }
         sendingSessionIDs.insert(session.id)
         deliveryQueueIDs.removeValue(forKey: session.id)
         deliveryStatus[session.id] = "Sending…"
         composer = ""
         drafts[session.id] = ""
+        composerAttachments = []
+        attachmentDrafts[session.id] = []
+        attachmentProblem = nil
         Task {
             defer { sendingSessionIDs.remove(session.id) }
             do {
-                let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings, author: "person", idempotencyKey: idempotencyKey)
+                let uploaded = try await api.upload(attachments, sessionID: session.id).map(\.id)
+                let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings, author: "person", attachments: uploaded, idempotencyKey: idempotencyKey)
                 if let deliveryID = response.result?.deliveryId { deliveryIDs[session.id] = deliveryID }
                 deliveryStatus[session.id] = deliveryLabel(response.result?.evidence, detail: response.result?.detail)
                 if response.result?.evidence == "queued", let queueID = response.result?.queueId {
@@ -626,12 +674,14 @@ final class AgenthailIOSModel: ObservableObject {
             } catch {
                 deliveryIDs.removeValue(forKey: session.id)
                 deliveryStatus[session.id] = "Couldn’t complete request. Draft kept."
-                operationError = "Couldn’t complete request."
+                operationError = attachments.isEmpty ? "Couldn’t complete request." : AgenthailAPIError.userMessage(error)
                 if selectedSessionID == session.id {
                     composer = composer.isEmpty ? message : message + "\n\n" + composer
+                    composerAttachments = ComposerAttachments.adding(composerAttachments, to: attachments).attachments
                 } else {
                     let newer = drafts[session.id] ?? ""
                     drafts[session.id] = newer.isEmpty ? message : message + "\n\n" + newer
+                    attachmentDrafts[session.id] = ComposerAttachments.adding(attachmentDrafts[session.id] ?? [], to: attachments).attachments
                 }
             }
         }
@@ -650,6 +700,28 @@ final class AgenthailIOSModel: ObservableObject {
                 operationError = error.localizedDescription
             }
         }
+    }
+
+    func setArchived(sessionID: String, _ archived: Bool) async {
+        guard let api else { return }
+        do {
+            try await api.action(archived ? "session-archive" : "session-unarchive", sessionID: sessionID)
+            operationError = nil
+        } catch {
+            operationError = error.localizedDescription
+        }
+        await refresh(fresh: true)
+    }
+
+    func setProjectArchived(_ projectID: String, _ archived: Bool) async {
+        guard let api else { return }
+        do {
+            _ = try await api.projectAction(archived ? "project-archive" : "project-unarchive", projectID: projectID)
+            operationError = nil
+        } catch {
+            operationError = error.localizedDescription
+        }
+        await refresh(fresh: true)
     }
 
     func unpair() {
@@ -697,6 +769,8 @@ final class AgenthailIOSModel: ObservableObject {
         selectedSessionID = nil
         composer = ""
         drafts = [:]
+        composerAttachments = []
+        attachmentDrafts = [:]
         pendingSendRequests = [:]
         creationRequestIdentity = nil
         creationRequestKey = nil
@@ -856,13 +930,14 @@ final class AgenthailIOSModel: ObservableObject {
         case "session.queue":
             guard let id = event.data.sessionId, let count = event.data.queueCount,
                   let index = current.sessions.firstIndex(where: { $0.id == id }) else { return }
-            current.sessions[index] = Self.applyingQueueCount(count, to: current.sessions[index], codexRecentHours: current.codexRecentHours, now: Date())
+            current.sessions[index].queueCount = count
             snapshot = current
         case "session.removed":
             guard let id = event.data.sessionId else { _ = await refresh(); return }
             current.sessions.removeAll { $0.id == id }
             current.totalSessions = current.sessions.count
             snapshot = current
+            fetchedSubagents.sessionRemoved(id, unlisted: event.data.reason == "unlisted")
             if let next = event.data.rekeyedTo { followRekeys([id: next]) }
         case "surface.health":
             guard let name = event.data.surface, let health = event.data.health,
@@ -880,7 +955,7 @@ final class AgenthailIOSModel: ObservableObject {
                   let reason = event.data.reason,
                   let at = event.data.at else { return }
             var problems = current.deliveryProblems ?? []
-            let problem = DeliveryProblem(deliveryId: deliveryId, sessionId: sessionId, sourceSessionId: event.data.sourceSessionId, message: message, reason: reason, status: event.data.status, at: at)
+            let problem = DeliveryProblem(deliveryId: deliveryId, sessionId: sessionId, sourceSessionId: event.data.sourceSessionId, attentionSessionId: event.data.attentionSessionId, message: message, reason: reason, status: event.data.status, at: at)
             problems.removeAll { $0.deliveryId == deliveryId }
             problems.insert(problem, at: 0)
             current.deliveryProblems = Array(problems.prefix(50))
@@ -892,32 +967,6 @@ final class AgenthailIOSModel: ObservableObject {
         default:
             return
         }
-    }
-
-    static func applyingQueueCount(_ count: Int, to session: SessionState, codexRecentHours: Int, now: Date) -> SessionState {
-        var updated = session
-        updated.queueCount = count
-        func activeWithin(hours: Int) -> Bool {
-            guard let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) else { return false }
-            return now.timeIntervalSince(date) <= TimeInterval(hours) * 3600
-        }
-        switch session.surface {
-        case "claude":
-            if count > 0 { (updated.current, updated.currentReason) = (true, "queued") }
-            else if !session.open { (updated.current, updated.currentReason) = (false, nil) }
-            else { (updated.current, updated.currentReason) = (true, session.isWorking ? "working" : "open") }
-        case "codex":
-            if session.isWorking { (updated.current, updated.currentReason) = (true, "working") }
-            else if count > 0 { (updated.current, updated.currentReason) = (true, "queued") }
-            else if session.status != "notLoaded" && activeWithin(hours: codexRecentHours) { (updated.current, updated.currentReason) = (true, "recent") }
-            else { (updated.current, updated.currentReason) = (false, nil) }
-        default:
-            if session.isWorking { (updated.current, updated.currentReason) = (true, "working") }
-            else if count > 0 { (updated.current, updated.currentReason) = (true, "queued") }
-            else if activeWithin(hours: 24) { (updated.current, updated.currentReason) = (true, "recent") }
-            else { (updated.current, updated.currentReason) = (false, nil) }
-        }
-        return updated
     }
 
     private func startSessionStream(_ id: String) {
@@ -962,7 +1011,7 @@ final class AgenthailIOSModel: ObservableObject {
         }
         guard var timeline = detail.timeline else { return }
         guard !event.data.itemId.isEmpty else { return }
-        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? (event.data.kind == "attachment" ? "Image" : event.data.kind), text: event.data.body ?? (event.data.kind == "attachment" ? "Image attachment" : ""), timestamp: event.data.ts, callId: event.data.callId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.truncationReason, bodyRef: event.data.bodyRef, attachment: event.data.attachment, sender: event.data.sender)
+        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? (event.data.kind == "attachment" ? "Image" : event.data.kind), text: event.data.body ?? (event.data.kind == "attachment" ? "Image attachment" : ""), timestamp: event.data.ts, callId: event.data.callId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.truncationReason, bodyRef: event.data.bodyRef, attachment: event.data.attachment, sender: event.data.sender, files: event.data.files)
         if event.data.op == "remove" {
             timeline.items.removeAll { $0.id == event.data.itemId }
         } else if let index = timeline.items.firstIndex(where: { $0.id == event.data.itemId }) {

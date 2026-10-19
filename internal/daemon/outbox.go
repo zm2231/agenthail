@@ -49,13 +49,18 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	operationCtx = surface.WithSourceSessionID(operationCtx, item.SourceSessionID)
+	if messageUUID, err := d.Registry.DeliveryIntentUUIDForQueue(item.ID); err != nil {
+		d.log.Printf("read delivery intent of queue item %d: %s", item.ID, err)
+	} else if messageUUID != "" {
+		operationCtx = surface.WithMessageUUID(operationCtx, messageUUID)
+	}
 	var result *surface.SendResult
 	var sendErr error
 	addressed := *session
 	steered := false
 	route := surface.RouteFor(adapter, session, item.Author)
-	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author}
-	if item.BusyDelivery == "steer" && item.Model == "" && item.TurnOptions.Empty() && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer {
+	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author, Uploads: item.Uploads}
+	if item.BusyDelivery == "steer" && !options.HoldsForQueue() && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer {
 		sendErr = adapter.Steer(operationCtx, session, item.Message)
 		if sendErr == nil {
 			result = &surface.SendResult{Accepted: true}

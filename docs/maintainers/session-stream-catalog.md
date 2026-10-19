@@ -14,11 +14,22 @@ change.
 and `q` filters plus a stable page cursor, and returns saved rows plus
 `hostEpoch` and `catalogSeq`, captured in the same registry read transaction.
 Each row retains the existing session summary fields and adds
-`hostProject` (`id`, `displayName`, and `commonDir` or `path`), `checkout`
+`project` (`id`, `displayName`, `rootPath`, `kind`), `checkout`
 (`id`, `path`, `branch` or `detachedHead`, `isMain`, and `dirty`), and
 `freshness` (`generation`, `observedAt`, and `stale`). A Claude branch adds
-`forkedFrom`, the session it was branched from. A failed
-Git query records typed unavailable identity and never hides the session. A
+`forkedFrom`, the session it was branched from.
+
+The owning host resolves `project` from the session's working directory. In
+a Git repository the project is the main checkout: a linked worktree and a
+subfolder both map to the repository whose common directory they share, and
+`id` is derived from that common directory. A directory that no longer exists
+resolves from its nearest existing ancestor, so a session keeps its project
+after its worktree is removed. Outside Git, a session belongs to the nearest
+folder registered as a project (`kind` `folder`) and otherwise has no
+`project`. A Git failure other than "not a repository" keeps the session's
+last known project and records `unavailableReason`; it never moves the
+session to another project. A mirrored row's project `id` is qualified with
+its host like the session id. A
 surface discoverer performs provider `List` calls in the background and emits
 full-row `session.upserted`, `session.removed`, `session.unavailable`, and
 `surface.health` catalog deltas. A status pass publishes a session's busy or
@@ -55,8 +66,8 @@ The launcher is one of `cmux`, `tmux`, `claude-bg`, `codex-app-server`,
 tmux locations use `session` and `pane`. A location is focusable only after
 the authoritative launcher `Locate` path correlates the discovered Agenthail
 session. Persisted locations are revalidated before focus, so stale panes or
-reused process IDs are never focused. `claude-sdk` remains unavailable until
-its real transport is registered; no peer fallback is allowed.
+reused process IDs are never focused. `claude-sdk` sessions run in the Claude
+host and have no focusable location.
 
 `GET /api/v1/session-options` also returns `launchers` with `{id,label,agents,
 available,detail}`. Explicit `session-create` launcher requests return the
@@ -121,7 +132,7 @@ envelopes are `{stream:"session",sessionId,seq,type,data}`. Their cursors are
 separate. The following shapes are canonical:
 
 ```json
-{"stream":"catalog","seq":41,"type":"session.upserted","data":{"session":{"id":"s1","surface":"codex","name":"Build","status":"busy","lastActive":"2026-10-03T12:00:00Z","hostProject":{"id":"host-project-1","displayName":"agenthail","commonDir":"/repo/.git"},"checkout":{"id":"checkout-1","path":"/repo/.worktrees/api","branch":"feat/api","isMain":false,"dirty":true},"freshness":{"generation":7,"observedAt":"2026-10-03T12:00:00Z","stale":false}}}}
+{"stream":"catalog","seq":41,"type":"session.upserted","data":{"session":{"id":"s1","surface":"codex","name":"Build","status":"busy","lastActive":"2026-10-03T12:00:00Z","project":{"id":"project-1","displayName":"agenthail","rootPath":"/repo","kind":"git"},"checkout":{"id":"checkout-1","path":"/repo/.worktrees/api","branch":"feat/api","isMain":false,"dirty":true},"freshness":{"generation":7,"observedAt":"2026-10-03T12:00:00Z","stale":false}}}}
 {"stream":"catalog","seq":42,"type":"delivery.problem","data":{"deliveryId":1,"sessionId":"s1","sourceSessionId":"s2","message":"Run the tests","reason":"delivery rejected [target missing]: session closed","at":"2026-10-03T12:00:01Z"}}
 {"stream":"session","sessionId":"s1","seq":9,"type":"item","data":{"itemId":"m1","providerKey":"m1","version":6,"op":"append","kind":"text","turnId":"u1","ts":"2026-10-03T12:00:02Z","body":"answer","truncated":false}}
 ```

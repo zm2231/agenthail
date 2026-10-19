@@ -4,6 +4,7 @@ enum SessionFilter: String, CaseIterable, Identifiable {
     case running = "Running"
     case recent = "Recent"
     case all = "All"
+    case archived = "Archived"
 
     var id: String { rawValue }
 }
@@ -60,13 +61,21 @@ struct SessionTree: Equatable {
     struct Project: Identifiable, Equatable {
         let id: String
         let name: String
+        /// The daemon's project, or nil for the group of sessions without one.
+        let identity: ProjectIdentity?
+        /// The short name of the host that owns the project, nil on this host.
+        let host: String?
         var checkouts: [Checkout]
+        /// Families that are working, queued or need attention. Collapsing a
+        /// project never hides them.
+        var pinned: Set<String> = []
 
         var sessionCount: Int { checkouts.reduce(0) { $0 + $1.families.count } }
+        var archived: Bool { identity?.archived == true }
 
         func limited(to limit: Int, keeping selectedID: String?) -> Project {
             let ordered = SessionTree.newestFirst(checkouts.flatMap(\.families), by: SessionTree.activity)
-            var visible = Set(ordered.prefix(limit).map(\.id))
+            var visible = Set(ordered.prefix(limit).map(\.id)).union(pinned)
             if let selected = ordered.first(where: { $0.contains(selectedID) }) { visible.insert(selected.id) }
             var copy = self
             copy.checkouts = checkouts.compactMap { checkout in
@@ -91,27 +100,30 @@ struct SessionTree: Equatable {
         var sessions: [SessionState] { families.map(\.root) }
     }
 
-    static let recentWindow: TimeInterval = 24 * 60 * 60
-
     let projects: [Project]
     let needsYou: [SessionState]
     let counts: [SessionFilter: Int]
 
-    static func build(_ sessions: [SessionState], filter: SessionFilter, refinement: SessionRefinement = SessionRefinement(), attentionSessionIDs: Set<String>, now: Date) -> SessionTree {
+    static let noProjectID = ""
+
+    static func build(_ sessions: [SessionState], filter: SessionFilter, refinement: SessionRefinement = SessionRefinement(), attentionSessionIDs: Set<String>) -> SessionTree {
         let families = SessionFamilies.build(sessions).filter(refinement.matches)
         var counts: [SessionFilter: Int] = [:]
         for candidate in SessionFilter.allCases {
-            counts[candidate] = families.filter { includes($0, in: candidate, now: now) }.count
+            counts[candidate] = families.filter { includes($0, in: candidate) }.count
         }
-        let visible = newestFirst(families.filter { includes($0, in: filter, now: now) }, by: activity)
+        let visible = newestFirst(families.filter { includes($0, in: filter) }, by: activity)
         var projects: [Project] = []
         for family in visible {
             let session = family.root
-            let projectID = session.hostProject?.id ?? session.cwd ?? "unknown"
+            let projectID = session.project?.id ?? noProjectID + (session.remoteHostName.map { "@" + $0 } ?? "")
             if !projects.contains(where: { $0.id == projectID }) {
-                projects.append(Project(id: projectID, name: projectName(session), checkouts: []))
+                projects.append(Project(id: projectID, name: session.project?.displayName ?? "No project", identity: session.project, host: session.shortRemoteHostName, checkouts: []))
             }
             let projectIndex = projects.firstIndex { $0.id == projectID }!
+            if family.isWorking || family.sessions.contains(where: { $0.queueCount > 0 || attentionSessionIDs.contains($0.id) }) {
+                projects[projectIndex].pinned.insert(family.id)
+            }
             let checkoutID = session.checkout?.id ?? session.checkout?.path ?? session.cwd ?? projectID
             if !projects[projectIndex].checkouts.contains(where: { $0.id == checkoutID }) {
                 projects[projectIndex].checkouts.append(Checkout(id: checkoutID, label: checkoutLabel(session), branchLabel: branchLabel(session), isMain: session.checkout?.isMain ?? true, dirty: session.checkout?.dirty ?? false, families: []))
@@ -119,6 +131,7 @@ struct SessionTree: Equatable {
             let checkoutIndex = projects[projectIndex].checkouts.firstIndex { $0.id == checkoutID }!
             projects[projectIndex].checkouts[checkoutIndex].families.append(family)
         }
+        projects = projects.filter { $0.identity != nil } + projects.filter { $0.identity == nil }
         return SessionTree(projects: projects, needsYou: needsYou(sessions, attentionSessionIDs: attentionSessionIDs), counts: counts)
     }
 
@@ -136,28 +149,20 @@ struct SessionTree: Equatable {
         items.map { (item: $0, activity: activity($0)) }.sorted { $0.activity > $1.activity }.map(\.item)
     }
 
-    static func includes(_ session: SessionState, in filter: SessionFilter, now: Date) -> Bool {
-        includes(session, in: filter, activity: activity(session), now: now)
-    }
-
-    private static func includes(_ session: SessionState, in filter: SessionFilter, activity: Date, now: Date) -> Bool {
+    /// Applies the daemon's scope rule to the flags it computed for the row,
+    /// so every client lists and counts the same sessions.
+    static func includes(_ session: SessionState, in filter: SessionFilter) -> Bool {
+        let archived = session.archived == true
         switch filter {
-        case .running:
-            return session.isWorking
-        case .recent:
-            return session.isWorking || session.current || now.timeIntervalSince(activity) <= recentWindow
-        case .all:
-            return true
+        case .running: return !archived && (session.isWorking || (session.subagents?.working ?? 0) > 0)
+        case .recent: return !archived && session.current
+        case .all: return !archived
+        case .archived: return archived
         }
     }
 
-    static func includes(_ family: SessionFamily, in filter: SessionFilter, now: Date) -> Bool {
-        switch filter {
-        case .running:
-            return family.isWorking
-        case .recent, .all:
-            return family.isWorking || family.sessions.contains { includes($0, in: filter, now: now) }
-        }
+    static func includes(_ family: SessionFamily, in filter: SessionFilter) -> Bool {
+        family.sessions.contains { includes($0, in: filter) }
     }
 
     static func activity(_ family: SessionFamily) -> Date {
@@ -185,12 +190,6 @@ struct SessionTree: Equatable {
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return formatter
     }()
-
-    private static func projectName(_ session: SessionState) -> String {
-        if let name = session.hostProject?.displayName, !name.isEmpty { return name }
-        if let cwd = session.cwd, !cwd.isEmpty { return URL(fileURLWithPath: cwd).lastPathComponent }
-        return "Other"
-    }
 
     private static func checkoutLabel(_ session: SessionState) -> String {
         branchLabel(session) ?? session.checkout?.path ?? session.cwd ?? "unknown checkout"

@@ -13,7 +13,7 @@ import (
 type CatalogSessionState struct {
 	Session               surface.Session
 	HostID                string
-	HostProject           json.RawMessage
+	Project               json.RawMessage
 	Checkout              json.RawMessage
 	UnavailableReason     string
 	ObservedAt            time.Time
@@ -35,6 +35,7 @@ type CatalogSnapshot struct {
 	CatalogSeq uint64
 	Sessions   []CatalogSessionState
 	Surfaces   []CatalogSurfaceState
+	Listing    CatalogListing
 }
 
 type CatalogSurfaceState struct {
@@ -172,7 +173,7 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	if state.ProjectionFingerprint == "" {
 		return CatalogEvent{}, false, fmt.Errorf("catalog session projection fingerprint is required")
 	}
-	if !json.Valid(state.HostProject) || !json.Valid(state.Checkout) {
+	if !json.Valid(state.Project) || !json.Valid(state.Checkout) {
 		return CatalogEvent{}, false, fmt.Errorf("catalog identity must be JSON")
 	}
 	if state.ObservedAt.IsZero() {
@@ -225,7 +226,7 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 		VALUES(?,?,?,?,?,?,?,0,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
 		checkout=excluded.checkout, unavailable_reason=excluded.unavailable_reason, observed_at=excluded.observed_at, misses=0,
 		projection_fingerprint=excluded.projection_fingerprint, projection_generation=excluded.projection_generation, discovery_failures=0, waiting_on=excluded.waiting_on`,
-		state.Session.ID, []byte(state.HostProject), []byte(state.Checkout), state.UnavailableReason, state.ObservedAt.Format(time.RFC3339Nano), state.ProjectionFingerprint, priorGeneration, waitingOn); err != nil {
+		state.Session.ID, []byte(state.Project), []byte(state.Checkout), state.UnavailableReason, state.ObservedAt.Format(time.RFC3339Nano), state.ProjectionFingerprint, priorGeneration, waitingOn); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	if len(event.Payload) > 0 {
@@ -273,13 +274,13 @@ func (r *Registry) catalogSessionUnchanged(state CatalogSessionState, event Cata
 type catalogSessionPrior struct {
 	found                        bool
 	fingerprint, unavailable     string
-	hostProject, checkout        []byte
+	project, checkout            []byte
 	generation, misses, failures int64
 }
 
 func readCatalogSessionPrior(q catalogQuerier, sessionID string) (catalogSessionPrior, error) {
 	var prior catalogSessionPrior
-	err := q.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures,host_project,checkout,unavailable_reason FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&prior.fingerprint, &prior.generation, &prior.misses, &prior.failures, &prior.hostProject, &prior.checkout, &prior.unavailable)
+	err := q.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures,host_project,checkout,unavailable_reason FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&prior.fingerprint, &prior.generation, &prior.misses, &prior.failures, &prior.project, &prior.checkout, &prior.unavailable)
 	if err == sql.ErrNoRows {
 		return catalogSessionPrior{}, nil
 	}
@@ -294,7 +295,7 @@ func (p catalogSessionPrior) changedBy(state CatalogSessionState) bool {
 }
 
 func (p catalogSessionPrior) unchangedBy(q catalogQuerier, state CatalogSessionState) (bool, error) {
-	if p.changedBy(state) || string(p.hostProject) != string(state.HostProject) || string(p.checkout) != string(state.Checkout) || p.unavailable != state.UnavailableReason {
+	if p.changedBy(state) || string(p.project) != string(state.Project) || string(p.checkout) != string(state.Checkout) || p.unavailable != state.UnavailableReason {
 		return false, nil
 	}
 	return sessionRowMatchesTx(q, state.Session)
@@ -541,6 +542,13 @@ func (r *Registry) RecordCatalogDiscovery(kind surface.SurfaceKind, seen map[str
 			if _, err := tx.Exec(`UPDATE catalog_sessions SET misses=? WHERE session_id=?`, misses, item.id); err != nil {
 				return nil, err
 			}
+			event, created, err := r.retireUnobservedSessionTx(tx, item.id, observedAt)
+			if err != nil {
+				return nil, err
+			}
+			if created {
+				events = append(events, event)
+			}
 			continue
 		}
 		payload, err := json.Marshal(map[string]string{"sessionId": item.id, "surface": string(kind), "reason": "omitted_from_successful_discovery"})
@@ -564,8 +572,79 @@ func (r *Registry) RecordCatalogDiscovery(kind surface.SurfaceKind, seen map[str
 	return events, nil
 }
 
+// retireUnobservedSessionTx records that a successful discovery pass did not
+// report the session: it is offline, no longer open, and current only while
+// messages are queued for it.
+func (r *Registry) retireUnobservedSessionTx(tx *sql.Tx, sessionID string, now time.Time) (CatalogEvent, bool, error) {
+	var fingerprint, observedAt string
+	var generation int64
+	if err := tx.QueryRow(`SELECT projection_fingerprint,projection_generation,observed_at FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&fingerprint, &generation, &observedAt); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	if _, err := tx.Exec(`UPDATE sessions SET status=? WHERE id=?`, string(surface.StatusOffline), sessionID); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	var session map[string]any
+	if json.Unmarshal([]byte(fingerprint), &session) != nil || session == nil {
+		return CatalogEvent{}, false, nil
+	}
+	queueCount, err := queueCountTx(tx, sessionID)
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	current, reason := surface.UnobservedPresence(queueCount)
+	session["status"] = surface.StatusOffline
+	session["open"] = false
+	session["queueCount"] = queueCount
+	session["current"] = current
+	delete(session, "currentReason")
+	delete(session, "waitingOn")
+	if reason != "" {
+		session["currentReason"] = reason
+	}
+	next, err := json.Marshal(session)
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	if string(next) == fingerprint {
+		return CatalogEvent{}, false, nil
+	}
+	lastObserved, err := time.Parse(time.RFC3339Nano, observedAt)
+	if err != nil {
+		return CatalogEvent{}, false, fmt.Errorf("parse catalog observation: %w", err)
+	}
+	generation++
+	if _, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=?,projection_generation=?,waiting_on=? WHERE session_id=?`, string(next), generation, []byte{}, sessionID); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	session["observedAt"] = lastObserved
+	session["freshness"] = CatalogFreshness{Generation: uint64(generation), ObservedAt: lastObserved, Stale: true}
+	envelope, err := json.Marshal(map[string]any{"session": session})
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	return r.AppendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("session.upserted:%s:%d", sessionID, generation), Type: "session.upserted", EntityID: sessionID, Payload: envelope})
+}
+
 // CatalogProjectionFingerprint returns the committed projection of one
 // catalog session, the same row CatalogSnapshot serves.
+// CatalogSessionProject returns the project last stored for a session, or
+// nil when the session has no catalog row.
+func (r *Registry) CatalogSessionProject(sessionID string) (json.RawMessage, error) {
+	var project []byte
+	err := r.read.QueryRow(`SELECT host_project FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&project)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return project, err
+}
+
+func (r *Registry) CatalogProjectByID(projectID string) (json.RawMessage, error) {
+	var project []byte
+	err := r.read.QueryRow(`SELECT host_project FROM catalog_sessions WHERE json_extract(host_project,'$.id')=? LIMIT 1`, projectID).Scan(&project)
+	return project, err
+}
+
 func (r *Registry) CatalogProjectionFingerprint(sessionID string) (string, bool, error) {
 	var fingerprint string
 	err := r.read.QueryRow(`SELECT cs.projection_fingerprint FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE cs.session_id=?`, sessionID).Scan(&fingerprint)
@@ -617,29 +696,46 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 	if err := rows.Err(); err != nil {
 		return CatalogSnapshot{}, err
 	}
-	surfaceRows, err := tx.Query(`SELECT surface,health,detail,observed_at FROM catalog_surfaces ORDER BY surface`)
+	surfaces, err := catalogSurfaces(tx)
 	if err != nil {
 		return CatalogSnapshot{}, err
 	}
-	defer surfaceRows.Close()
-	for surfaceRows.Next() {
-		var state CatalogSurfaceState
-		var observedAt string
-		if err := surfaceRows.Scan(&state.Surface, &state.Health, &state.Detail, &observedAt); err != nil {
-			return CatalogSnapshot{}, err
-		}
-		parsed, err := time.Parse(time.RFC3339Nano, observedAt)
-		if err != nil {
-			return CatalogSnapshot{}, fmt.Errorf("parse catalog surface observation: %w", err)
-		}
-		state.ObservedAt = parsed
-		snapshot.Surfaces = append(snapshot.Surfaces, state)
-	}
-	if err := surfaceRows.Err(); err != nil {
+	snapshot.Surfaces = surfaces
+	if snapshot.Listing, err = catalogListingTx(tx); err != nil {
 		return CatalogSnapshot{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return CatalogSnapshot{}, err
 	}
 	return snapshot, nil
+}
+
+// CatalogSurfaces returns the last health each surface's discovery recorded.
+func (r *Registry) CatalogSurfaces() ([]CatalogSurfaceState, error) {
+	return catalogSurfaces(r.read)
+}
+
+func catalogSurfaces(q interface {
+	Query(string, ...any) (*sql.Rows, error)
+}) ([]CatalogSurfaceState, error) {
+	rows, err := q.Query(`SELECT surface,health,detail,observed_at FROM catalog_surfaces ORDER BY surface`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	surfaces := []CatalogSurfaceState{}
+	for rows.Next() {
+		var state CatalogSurfaceState
+		var observedAt string
+		if err := rows.Scan(&state.Surface, &state.Health, &state.Detail, &observedAt); err != nil {
+			return nil, err
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, observedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse catalog surface observation: %w", err)
+		}
+		state.ObservedAt = parsed
+		surfaces = append(surfaces, state)
+	}
+	return surfaces, rows.Err()
 }

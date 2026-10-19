@@ -62,7 +62,7 @@ The second audit also traced existing Agenthail action producers against mobile 
 
 Claude Remote Control supports on-demand local session creation in server mode, including shared-directory and worktree spawn modes. The installed `claude remote-control --help` and [official Remote Control documentation](https://code.claude.com/docs/en/remote-control#start-a-remote-control-session) confirm this. Calling Claude creation a transport limitation was incorrect: the mobile branch lacked the adapter implementation, while the sibling Claude worktree already documented and implemented native background creation.
 
-That implementation is now integrated. Agenthail starts Claude through the installed CLI’s `--bg` interface, resolves its returned identity through the native agent catalog and exposes the creation options on phone. This is a native background integration rather than an implementation of the Remote Control cloud endpoint. [Current operations](../maintainers/session-operations.md) and [historical capability audit](../maintainers/agent-capability-audit.md) document that distinction.
+That implementation is now integrated. Agenthail starts Claude in its [Claude host](../maintainers/claude-host.md), which runs the installed CLI through the Agent SDK, and exposes the creation options on phone; the `claude-bg` launcher keeps the CLI’s `--bg` interface. Both are native integrations rather than an implementation of the Remote Control cloud endpoint. [Current operations](../maintainers/session-operations.md) and [historical capability audit](../maintainers/agent-capability-audit.md) document that distinction.
 
 ## September 12 correction: original remote-communication references
 

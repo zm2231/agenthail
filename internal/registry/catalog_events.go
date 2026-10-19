@@ -28,6 +28,15 @@ type CatalogEventWindow struct {
 	Gap         bool
 }
 
+// recordObservedSubagents gives each stored projection the observed subagent
+// count the hidden count is added to. A projection written before hidden
+// counts existed holds only the subagents its surface observed.
+func recordObservedSubagents(tx *sql.Tx) error {
+	_, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=json_set(projection_fingerprint,'$.observedSubagents',json_extract(projection_fingerprint,'$.subagents'))
+		WHERE json_valid(projection_fingerprint) AND json_type(projection_fingerprint,'$.subagents')='object' AND json_type(projection_fingerprint,'$.observedSubagents') IS NULL AND json_type(projection_fingerprint,'$.hiddenSubagents') IS NULL`)
+	return err
+}
+
 func (r *Registry) CatalogState() (string, uint64, error) {
 	tx, err := r.read.Begin()
 	if err != nil {

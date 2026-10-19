@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -281,7 +282,7 @@ type HostCatalogRow struct {
 	Session           surface.Session
 	EntityID          string
 	Projection        json.RawMessage
-	HostProject       json.RawMessage
+	Project           json.RawMessage
 	Checkout          json.RawMessage
 	UnavailableReason string
 	ObservedAt        time.Time
@@ -294,6 +295,9 @@ type HostCatalogRow struct {
 func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (CatalogEvent, bool, error) {
 	if hostID == "" || row.Session.ID == "" || row.EntityID == "" {
 		return CatalogEvent{}, false, fmt.Errorf("host catalog row requires host, session and entity ids")
+	}
+	if row.Session.RuntimeKind == "" {
+		return CatalogEvent{}, false, fmt.Errorf("host catalog row %s: no runtime kind", row.Session.ID)
 	}
 	var projection map[string]any
 	if err := json.Unmarshal(row.Projection, &projection); err != nil {
@@ -314,8 +318,8 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 		}
 		waitingOn = encoded
 	}
-	if len(row.HostProject) == 0 {
-		row.HostProject = json.RawMessage(`{}`)
+	if len(row.Project) == 0 {
+		row.Project = json.RawMessage(`null`)
 	}
 	if len(row.Checkout) == 0 {
 		row.Checkout = json.RawMessage(`{}`)
@@ -349,12 +353,12 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 		lastActiveMS = session.LastActive.UnixMilli()
 	}
 	parentID, rootID, depth, nickname, role := subagentValues(session)
-	if _, err := tx.Exec(`INSERT INTO sessions(id,host_id,surface,name,cwd,status,source,transport,configured_model,last_active_ms,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+	if _, err := tx.Exec(`INSERT INTO sessions(id,host_id,surface,name,cwd,status,source,transport,runtime_kind,configured_model,last_active_ms,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
 		ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,status=excluded.status,source=excluded.source,
-		transport=excluded.transport,configured_model=excluded.configured_model,last_active_ms=excluded.last_active_ms,parent_session_id=excluded.parent_session_id,
+		transport=excluded.transport,runtime_kind=excluded.runtime_kind,configured_model=excluded.configured_model,last_active_ms=excluded.last_active_ms,parent_session_id=excluded.parent_session_id,
 		root_session_id=excluded.root_session_id,subagent_depth=excluded.subagent_depth,agent_nickname=excluded.agent_nickname,agent_role=excluded.agent_role,updated_at=datetime('now')`,
-		session.ID, hostID, string(session.Surface), session.Name, session.Cwd, string(session.Status), session.Source, session.Transport, session.ConfiguredModel, lastActiveMS, parentID, rootID, depth, nickname, role); err != nil {
+		session.ID, hostID, string(session.Surface), session.Name, session.Cwd, string(session.Status), session.Source, session.Transport, string(session.RuntimeKind), session.ConfiguredModel, lastActiveMS, parentID, rootID, depth, nickname, role); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	prior, err := readCatalogSessionPrior(tx, session.ID)
@@ -391,7 +395,7 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 		VALUES(?,?,?,?,?,?,?,0,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,checkout=excluded.checkout,
 		unavailable_reason=excluded.unavailable_reason,observed_at=excluded.observed_at,misses=0,projection_fingerprint=excluded.projection_fingerprint,
 		projection_generation=excluded.projection_generation,discovery_failures=0,host_queue_count=excluded.host_queue_count,waiting_on=excluded.waiting_on`,
-		session.ID, []byte(row.HostProject), []byte(row.Checkout), row.UnavailableReason, observedAt.Format(time.RFC3339Nano), fingerprint, generation, row.QueueCount, waitingOn); err != nil {
+		session.ID, []byte(row.Project), []byte(row.Checkout), row.UnavailableReason, observedAt.Format(time.RFC3339Nano), fingerprint, generation, row.QueueCount, waitingOn); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	event, created, err := appendHostUpsertTx(tx, row.EntityID, projection, generation, observedAt, row.UnavailableReason)
@@ -499,7 +503,7 @@ func (r *Registry) RemoveHostCatalogRow(hostID, sessionID, entityID, reason stri
 }
 
 func (r *Registry) HostCatalogRows(hostID string) ([]CatalogSessionState, error) {
-	rows, err := r.read.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.status,cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.host_queue_count
+	rows, err := r.read.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.status,s.source,s.transport,s.runtime_kind,s.configured_model,s.last_active_ms,`+sessionSubagentSelect+`,cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.host_queue_count
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id=? ORDER BY s.id`, hostID)
 	if err != nil {
 		return nil, err
@@ -509,11 +513,19 @@ func (r *Registry) HostCatalogRows(hostID string) ([]CatalogSessionState, error)
 	for rows.Next() {
 		var state CatalogSessionState
 		var kind, status, observedAt string
-		if err := rows.Scan(&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &status, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &state.HostQueueCount); err != nil {
+		var lastActiveMS int64
+		var subagent subagentColumns
+		targets := append([]any{&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &status, &state.Session.Source, &state.Session.Transport, &state.Session.RuntimeKind, &state.Session.ConfiguredModel, &lastActiveMS}, subagent.targets()...)
+		targets = append(targets, &state.Project, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &state.HostQueueCount)
+		if err := rows.Scan(targets...); err != nil {
 			return nil, err
 		}
 		state.Session.Surface = surface.SurfaceKind(kind)
 		state.Session.Status = surface.SessionStatus(status)
+		if lastActiveMS > 0 {
+			state.Session.LastActive = time.UnixMilli(lastActiveMS)
+		}
+		subagent.apply(&state.Session)
 		state.HostID = hostID
 		if parsed, err := time.Parse(time.RFC3339Nano, observedAt); err == nil {
 			state.ObservedAt = parsed
@@ -568,14 +580,31 @@ type HostDelivery struct {
 }
 
 func (r *Registry) QueueHostDelivery(sessionID, message, key string, request []byte, sent bool) (int64, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	id, err := queueHostDeliveryTx(tx, r.now(), sessionID, message, key, request, sent)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: message})
+	return id, nil
+}
+
+func queueHostDeliveryTx(tx *sql.Tx, now time.Time, sessionID, message, key string, request []byte, sent bool) (int64, error) {
 	if key == "" || len(request) == 0 {
 		return 0, fmt.Errorf("a held host delivery needs its idempotency key and request")
 	}
 	status, inflightAt, evidence := "pending", int64(0), surface.EvidenceQueued
 	if sent {
-		status, inflightAt, evidence = "inflight", r.now().UnixMilli(), surface.EvidenceUnknown
+		status, inflightAt, evidence = "inflight", now.UnixMilli(), surface.EvidenceUnknown
 	}
-	result, err := r.db.Exec(`INSERT INTO message_queue(session_id,message,delivery_key,host_request,status,attempts,inflight_at_ms,evidence,updated_at)
+	result, err := tx.Exec(`INSERT INTO message_queue(session_id,message,delivery_key,host_request,status,attempts,inflight_at_ms,evidence,updated_at)
 		SELECT ?,?,?,?,?,1,?,?,datetime('now') WHERE EXISTS(SELECT 1 FROM sessions WHERE id=? AND host_id<>'')`,
 		sessionID, message, key, request, status, inflightAt, evidence, sessionID)
 	if err != nil {
@@ -584,12 +613,63 @@ func (r *Registry) QueueHostDelivery(sessionID, message, key string, request []b
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return 0, fmt.Errorf("session %s is not owned by a paired host", sessionID)
 	}
-	id, err := result.LastInsertId()
+	return result.LastInsertId()
+}
+
+// HostSend is a message this host holds for a session a paired host owns,
+// sent to that host as an ordinary send once it is reachable.
+type HostSend struct {
+	SessionID string
+	Message   string
+	Key       string
+	// SourceSessionID names the sender. One of this host's sessions goes
+	// qualified with this host's id, so the owner can reply across the
+	// pairing; only its own host names a session as a sender, so any other
+	// sender goes as this host's operator.
+	SourceSessionID string
+	BusyDelivery    string
+	// RelayHops counts relay legs so far, so a relay loop that crosses hosts
+	// still stops at the hop limit.
+	RelayHops int
+}
+
+func (r *Registry) localSession(id string) bool {
+	owner, err := r.SessionHost(id)
+	return err == nil && owner == ""
+}
+
+// QueueHostSend holds a send for its host.
+func (r *Registry) QueueHostSend(send HostSend) (int64, error) {
+	request, err := r.hostSendRequest(send)
 	if err != nil {
 		return 0, err
 	}
-	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: message})
-	return id, nil
+	return r.QueueHostDelivery(send.SessionID, send.Message, send.Key, request, false)
+}
+
+func (r *Registry) hostSendRequest(send HostSend) ([]byte, error) {
+	request := map[string]any{"action": "send", "sessionId": send.SessionID, "message": send.Message}
+	if send.SourceSessionID != "" && r.localSession(send.SourceSessionID) {
+		identity, err := r.HostIdentity()
+		if err != nil {
+			return nil, err
+		}
+		name := send.SourceSessionID
+		if alias, err := r.ReverseAlias(send.SourceSessionID); err == nil && alias != "" {
+			name = "@" + alias
+		} else if session, err := r.Session(send.SourceSessionID); err == nil && session.Name != "" {
+			name = session.Name
+		}
+		request["sourceSessionId"] = hosts.Qualify(identity.ID, send.SourceSessionID)
+		request["sourceName"] = name
+	}
+	if send.BusyDelivery != "" {
+		request["busyDelivery"] = send.BusyDelivery
+	}
+	if send.RelayHops > 0 {
+		request["relayHops"] = send.RelayHops
+	}
+	return json.Marshal(request)
 }
 
 func (r *Registry) HostDeliveries(hostID string) ([]HostDelivery, error) {

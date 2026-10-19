@@ -13,13 +13,15 @@ import (
 // CatalogPageRequest is the SQL-level projection of the dashboard catalog
 // filters. Offset is used by the existing opaque dashboard cursor.
 type CatalogPageRequest struct {
-	Scope            string
-	ProjectID        string
-	Query            string
-	Offset           int
-	Limit            int
-	Now              time.Time
-	CodexRecentHours int
+	Scope     string
+	ProjectID string
+	// ParentID lists every subagent of one session, including the ones a
+	// session list hides.
+	ParentID string
+	Query    string
+	Offset   int
+	Limit    int
+	Now      time.Time
 }
 
 type CatalogPage struct {
@@ -38,15 +40,12 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 		return CatalogPage{}, fmt.Errorf("catalog page offset must not be negative")
 	}
 	switch request.Scope {
-	case "", "all", "recent", "current", "running":
+	case "", "all", "recent", "current", "running", "archived":
 	default:
 		return CatalogPage{}, fmt.Errorf("invalid catalog page scope %q", request.Scope)
 	}
 	if request.Now.IsZero() {
 		request.Now = time.Now().UTC()
-	}
-	if request.CodexRecentHours <= 0 {
-		request.CodexRecentHours = 24
 	}
 
 	tx, err := r.read.Begin()
@@ -69,7 +68,14 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 		}
 		seq = uint64(latest.Int64)
 	}
-	from, where, args := catalogPageSQL(request)
+	listing, err := catalogListingTx(tx)
+	if err != nil {
+		return CatalogPage{}, err
+	}
+	from, where, args := catalogPageSQL(request, listing)
+	if request.ParentID != "" {
+		listing.Hidden, listing.Rollups = map[string]bool{}, listing.descendants
+	}
 	var total int
 	if err := tx.QueryRow(`SELECT COUNT(*) `+from+` WHERE `+where, args...).Scan(&total); err != nil {
 		return CatalogPage{}, err
@@ -108,16 +114,23 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 	if err := tx.Commit(); err != nil {
 		return CatalogPage{}, err
 	}
-	return CatalogPage{CatalogSnapshot: CatalogSnapshot{HostEpoch: epoch, CatalogSeq: seq, Sessions: sessions, Surfaces: surfaces}, TotalMatching: total, HasMore: hasMore, Offset: request.Offset, Limit: request.Limit}, nil
+	return CatalogPage{CatalogSnapshot: CatalogSnapshot{HostEpoch: epoch, CatalogSeq: seq, Sessions: sessions, Surfaces: surfaces, Listing: listing}, TotalMatching: total, HasMore: hasMore, Offset: request.Offset, Limit: request.Limit}, nil
 }
 
-func catalogPageSQL(request CatalogPageRequest) (string, string, []any) {
+func catalogPageSQL(request CatalogPageRequest, listing CatalogListing) (string, string, []any) {
 	from := `FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id
 		LEFT JOIN aliases a ON a.session_id=s.id
 		LEFT JOIN (SELECT session_id,COUNT(*) AS queue_count FROM message_queue WHERE status IN ('pending','inflight') GROUP BY session_id) qc ON qc.session_id=s.id
 		LEFT JOIN session_runtime sr ON sr.session_id=s.id`
 	args := []any{}
-	conditions := []string{"1=1"}
+	conditions := []string{}
+	if request.ParentID != "" {
+		conditions = append(conditions, "s.parent_session_id=?")
+		args = append(args, request.ParentID)
+	} else {
+		conditions = append(conditions, "s.id NOT IN (SELECT value FROM json_each(?))")
+		args = append(args, listing.hiddenJSON())
+	}
 	if request.ProjectID != "" {
 		conditions = append(conditions, "json_extract(cs.host_project,'$.id')=?")
 		args = append(args, request.ProjectID)
@@ -126,23 +139,19 @@ func catalogPageSQL(request CatalogPageRequest) (string, string, []any) {
 		conditions = append(conditions, "instr(lower(s.name||' '||s.cwd||' '||coalesce(a.name,json_extract(cs.projection_fingerprint,'$.alias'),'')),?)>0")
 		args = append(args, query)
 	}
-	if request.Scope == "running" {
-		conditions = append(conditions, "s.status=?")
+	archived := "COALESCE(json_extract(cs.projection_fingerprint,'$.archived'),0)=1"
+	switch request.Scope {
+	case "running":
+		conditions = append(conditions, "NOT "+archived, "(s.status=? OR COALESCE(json_extract(cs.projection_fingerprint,'$.subagents.working'),0)>0)")
 		args = append(args, string(surface.StatusBusy))
-	} else if request.Scope == "recent" || request.Scope == "current" {
-		conditions = append(conditions, catalogCurrentSQL(request.CodexRecentHours))
-		codexCutoff := request.Now.Add(-time.Duration(request.CodexRecentHours) * time.Hour).UnixMilli()
-		genericCutoff := request.Now.Add(-24 * time.Hour).UnixMilli()
-		args = append(args, codexCutoff, genericCutoff)
+	case "current", "recent":
+		conditions = append(conditions, "NOT "+archived, "(COALESCE(qc.queue_count,0)>0 OR (COALESCE(json_extract(cs.projection_fingerprint,'$.current'),0)=1 AND COALESCE(json_extract(cs.projection_fingerprint,'$.currentReason'),'')!='queued'))")
+	case "all":
+		conditions = append(conditions, "NOT "+archived)
+	case "archived":
+		conditions = append(conditions, archived)
 	}
 	return from, strings.Join(conditions, " AND "), args
-}
-
-func catalogCurrentSQL(codexRecentHours int) string {
-	_ = codexRecentHours
-	return `((s.surface='claude' AND (COALESCE(qc.queue_count,0)>0 OR COALESCE(json_extract(cs.projection_fingerprint,'$.open'),0)=1))
-		OR (s.surface='codex' AND (s.status='busy' OR COALESCE(qc.queue_count,0)>0 OR (s.status!='notLoaded' AND s.last_active_ms>0 AND s.last_active_ms>=?)))
-		OR (s.surface NOT IN ('claude','codex') AND (s.status='busy' OR COALESCE(qc.queue_count,0)>0 OR (s.last_active_ms>0 AND s.last_active_ms>=?))))`
 }
 
 func scanCatalogSession(scanner interface{ Scan(...any) error }) (CatalogSessionState, error) {
@@ -153,7 +162,7 @@ func scanCatalogSession(scanner interface{ Scan(...any) error }) (CatalogSession
 	var launcher string
 	var location, waitingOn []byte
 	var subagent subagentColumns
-	if err := scanner.Scan(append([]any{&state.Session.ID, &state.HostID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.RuntimeKind, &state.Session.ConfiguredModel, &state.Session.Bridge, &state.Session.ForkedFrom, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &waitingOn, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
+	if err := scanner.Scan(append([]any{&state.Session.ID, &state.HostID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.RuntimeKind, &state.Session.ConfiguredModel, &state.Session.Bridge, &state.Session.ForkedFrom, &lastActiveMS, &state.Project, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &waitingOn, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 		return CatalogSessionState{}, err
 	}
 	if len(waitingOn) > 0 {

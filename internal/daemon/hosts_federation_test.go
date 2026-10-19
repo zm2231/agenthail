@@ -31,6 +31,7 @@ type federatedSurface struct {
 	*daemonSurface
 	mu       sync.Mutex
 	messages []string
+	sources  []string
 }
 
 func (f *federatedSurface) record(message string) {
@@ -39,18 +40,30 @@ func (f *federatedSurface) record(message string) {
 	f.mu.Unlock()
 }
 
+func (f *federatedSurface) senders() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.sources...)
+}
+
 func (f *federatedSurface) delivered() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.messages...)
 }
 
-func (f *federatedSurface) Send(_ context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
+func (f *federatedSurface) Send(ctx context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
+	f.mu.Lock()
+	f.sources = append(f.sources, surface.SourceSessionID(ctx))
+	f.mu.Unlock()
 	f.record(message)
 	return &surface.SendResult{UUID: "remote-turn", Accepted: true}, nil
 }
 
-func (f *federatedSurface) SendWithOptions(_ context.Context, _ *surface.Session, message string, _ surface.SendOptions) (*surface.SendResult, error) {
+func (f *federatedSurface) SendWithOptions(ctx context.Context, _ *surface.Session, message string, _ surface.SendOptions) (*surface.SendResult, error) {
+	f.mu.Lock()
+	f.sources = append(f.sources, surface.SourceSessionID(ctx))
+	f.mu.Unlock()
 	f.record(message)
 	return &surface.SendResult{UUID: "remote-turn", Accepted: true}, nil
 }
@@ -103,10 +116,15 @@ type actionGate struct {
 	drops     atomic.Int32
 	truncate  atomic.Int32
 	proxyDown atomic.Bool
+	older     atomic.Bool
 	snapshots atomic.Pointer[snapshotHold]
+	versions  atomic.Pointer[snapshotHold]
+	actions   atomic.Pointer[snapshotHold]
+	// beyondVersion counts requests for anything other than /api/v1/version.
+	beyondVersion atomic.Int32
 }
 
-// snapshotHold parks snapshot requests until release is closed.
+// snapshotHold parks the requests it is installed for until release is closed.
 type snapshotHold struct {
 	waiting atomic.Int32
 	release chan struct{}
@@ -148,7 +166,7 @@ func newFederationNode(t *testing.T, sessionIDs ...string) *federationNode {
 			t.Fatal(err)
 		}
 	}
-	fake := &federatedSurface{daemonSurface: &daemonSurface{sessions: sessions, observations: map[string]*surface.TurnObservation{}, accepted: true, caps: surface.Capabilities{Send: true, Steer: true, Interrupt: true, Stream: true}}}
+	fake := &federatedSurface{daemonSurface: &daemonSurface{sessions: sessions, observations: map[string]*surface.TurnObservation{}, accepted: true, caps: surface.Capabilities{Send: true, Steer: true, Interrupt: true, Stream: true, Compact: true, Model: true, Goal: true}}}
 	d := New(reg, []surface.Surface{fake})
 	node := &federationNode{daemon: d, reg: reg, fake: fake, gate: &actionGate{}}
 	node.handler = d.dashboardHandler(&dashboardServer{token: dashboardTestToken})
@@ -161,6 +179,24 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 	gated := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if n.gate.proxyDown.Load() {
 			http.Error(w, "bad gateway", http.StatusBadGateway)
+			return
+		}
+		if r.URL.Path != "/api/v1/version" {
+			n.gate.beyondVersion.Add(1)
+		}
+		if hold := n.gate.versions.Load(); hold != nil && r.URL.Path == "/api/v1/version" {
+			hold.waiting.Add(1)
+			<-hold.release
+		}
+		if hold := n.gate.actions.Load(); hold != nil && r.URL.Path == "/api/v1/actions" {
+			hold.waiting.Add(1)
+			<-hold.release
+		}
+		if n.gate.older.Load() && r.URL.Path == "/api/v1/version" {
+			identity, _ := n.reg.HostIdentity()
+			w.Header().Set(hosts.ResponseHeader, identity.ID)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"protocol": 1, "minimumProtocol": 1, "maximumProtocol": 1, "hostId": identity.ID, "hostName": identity.Name})
 			return
 		}
 		if hold := n.gate.snapshots.Load(); hold != nil && r.URL.Path == "/api/v1/snapshot" {
@@ -242,7 +278,7 @@ func testRoots(server *httptest.Server) *x509.CertPool {
 
 func (n *federationNode) invite(t *testing.T) string {
 	t.Helper()
-	pairing, err := n.reg.CreateDevicePairing("peer", []string{"read", "control"}, time.Minute)
+	pairing, err := n.reg.CreateDevicePairing("peer", []string{"read", "control", registry.HostScope}, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,6 +296,7 @@ func (n *federationNode) request(t *testing.T, method, target string, body any) 
 	}
 	request := httptest.NewRequest(method, target, reader)
 	request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: dashboardTestToken})
 	response := httptest.NewRecorder()
 	n.handler.ServeHTTP(response, request)
 	return response
@@ -304,6 +341,22 @@ func awaitFederation(t *testing.T, what string, check func() bool) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+// awaitReplayed drains held sends until the remote applies one. A catalog
+// stream that opened while the proxy was down leaves the host unreachable
+// until the mirror loop reconnects, and a drain skips a host that is not
+// connected.
+func awaitReplayed(t *testing.T, local, remote *federationNode, host *pairedHost, message string) {
+	t.Helper()
+	awaitFederation(t, "held send replayed", func() bool {
+		local.daemon.drainHostDeliveries(context.Background(), host)
+		return len(remote.fake.delivered()) > 0
+	})
+	local.daemon.drainHostDeliveries(context.Background(), host)
+	if got := remote.fake.delivered(); len(got) != 1 || got[0] != message {
+		t.Fatalf("remote delivered=%v", got)
+	}
 }
 
 func sessionsOf(state dashboardState, hostID string) []dashboardSession {
@@ -376,8 +429,8 @@ func TestFederationMirrorsReadsAndDrivesRemoteSessions(t *testing.T) {
 	}
 
 	crossHost := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": qualified, "sourceSessionId": "local-a", "message": "relay"})
-	if crossHost.Code != http.StatusBadRequest || !strings.Contains(crossHost.Body.String(), "cannot span") {
-		t.Fatalf("cross-host status=%d body=%s", crossHost.Code, crossHost.Body.String())
+	if got := remote.fake.delivered(); crossHost.Code != http.StatusOK || got[len(got)-1] != "relay" || !strings.HasPrefix(lastSender(t, remote), "unrepliable:") {
+		t.Fatalf("cross-host status=%d body=%s delivered=%v from=%v", crossHost.Code, crossHost.Body.String(), got, remote.fake.senders())
 	}
 	unknown := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": "nowhere::x", "message": "lost"})
 	if unknown.Code != http.StatusBadRequest || !strings.Contains(unknown.Body.String(), "unknown host") {
@@ -598,7 +651,7 @@ func TestFederationQueueCountsCombineHostAndHeldWork(t *testing.T) {
 	if err := remote.reg.QueueMessage("remote-a", "queued on forge"); err != nil {
 		t.Fatal(err)
 	}
-	remote.daemon.publishCatalogQueueCounts()
+	remote.daemon.publishCatalogPresence()
 	awaitFederation(t, "remote queue mirrored", func() bool { return mirroredQueueCount(t, local, qualified) == 1 })
 	remote.stop()
 	awaitFederation(t, "rows marked unavailable", func() bool {
@@ -710,11 +763,7 @@ func TestFederationProxyAnswerWithDaemonDownHoldsSendAsUnknown(t *testing.T) {
 		t.Fatalf("held while down queue=%+v err=%v", queue, err)
 	}
 	remote.gate.proxyDown.Store(false)
-	local.daemon.drainHostDeliveries(context.Background(), host)
-	local.daemon.drainHostDeliveries(context.Background(), host)
-	if got := remote.fake.delivered(); len(got) != 1 || got[0] != "behind the proxy" {
-		t.Fatalf("remote delivered=%v", got)
-	}
+	awaitReplayed(t, local, remote, host, "behind the proxy")
 	queue, err = local.reg.ListQueue(true, nil)
 	if err != nil || len(queue) != 1 || queue[0].Status != "delivered" {
 		t.Fatalf("queue=%+v err=%v", queue, err)
@@ -746,11 +795,7 @@ func TestFederationUnconfirmedSendRetriesByReplayingItsKey(t *testing.T) {
 	}
 	remote.gate.proxyDown.Store(false)
 	host, _ := local.daemon.pairedHost(record.ID)
-	local.daemon.drainHostDeliveries(context.Background(), host)
-	local.daemon.drainHostDeliveries(context.Background(), host)
-	if got := remote.fake.delivered(); len(got) != 1 || got[0] != "retry me" {
-		t.Fatalf("remote delivered=%v", got)
-	}
+	awaitReplayed(t, local, remote, host, "retry me")
 	if item, err := local.reg.QueueItem(id, nil); err != nil || item.Status != "delivered" {
 		t.Fatalf("replayed item=%+v err=%v", item, err)
 	}

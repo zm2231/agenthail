@@ -33,6 +33,9 @@ func RouteFor(adapter Surface, session *Session, author Author) Route {
 func (r Route) TransportOnly() bool { return r == RoutePeer }
 
 func (r Route) Validate(adapter Surface, options SendOptions) error {
+	if len(options.Uploads) > 0 && !adapter.Capabilities().Attach {
+		return DeliveryTerminal(fmt.Errorf("%s sessions cannot take attached files", adapter.Name()), DeliveryInvalidRequest)
+	}
 	if options.Model == "" && options.TurnOptions.Empty() {
 		return nil
 	}
@@ -47,10 +50,12 @@ func (r Route) Validate(adapter Surface, options SendOptions) error {
 
 // Send must follow a successful Validate.
 func (r Route) Send(ctx context.Context, adapter Surface, session *Session, message string, options SendOptions) (*SendResult, error) {
+	router, native := adapter.(ImageRouter)
+	message, options.Images = options.Uploads.Compose(message, native && router.NativeImages(session, r))
 	if r == RouteHumanTurn {
-		return adapter.(HumanTurnSender).SendHumanTurn(ctx, session, message)
+		return adapter.(HumanTurnSender).SendHumanTurn(ctx, session, message, options.Images)
 	}
-	if options.Model != "" || !options.TurnOptions.Empty() {
+	if options.Model != "" || !options.TurnOptions.Empty() || len(options.Images) > 0 {
 		return adapter.(OptionSender).SendWithOptions(ctx, session, message, options)
 	}
 	return adapter.Send(ctx, session, message)

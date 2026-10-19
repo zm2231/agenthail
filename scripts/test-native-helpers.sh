@@ -9,10 +9,12 @@ SOURCES=(
   AgenthailAPI.swift
   AgenthailModel.swift
   AgenthailModels.swift
+  ComposerAttachment.swift
   DuplicateApplicationPolicy.swift
   EventRetryBackoff.swift
   OperationsRefreshPolicy.swift
   SessionSelection.swift
+  SessionTree.swift
   StatusRefreshPolicy.swift
   TurnSettings.swift
   VoiceAPI.swift
@@ -23,7 +25,6 @@ SOURCES=(
   macOS/AuditFacts.swift
   macOS/BoundedDock.swift
   macOS/CatalogPosition.swift
-  macOS/ComposerDrop.swift
   macOS/ContextBreakdown.swift
   macOS/LocalSend.swift
   macOS/MetadataOverlay.swift
@@ -36,7 +37,6 @@ SOURCES=(
   macOS/SessionOperationControllers.swift
   macOS/SessionOperations.swift
   macOS/SessionPane.swift
-  macOS/SessionTree.swift
   macOS/ShortcutStore.swift
   macOS/SlashCommand.swift
   macOS/SpotlightIndex.swift

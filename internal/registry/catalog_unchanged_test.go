@@ -19,7 +19,7 @@ func totalChanges(t *testing.T, r *Registry) int64 {
 func unchangedCatalogState(id string, observedAt time.Time) (CatalogSessionState, CatalogEvent) {
 	projection := `{"id":"` + id + `","surface":"codex","status":"idle"}`
 	session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Worker", Cwd: "/work", Status: surface.StatusIdle, Transcript: "/work/transcript.jsonl", HasLocal: true, Source: "vscode", Transport: "desktop", LastActive: time.UnixMilli(1_790_000_000_000), Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
-	return CatalogSessionState{Session: session, HostProject: []byte(`{"id":"project"}`), Checkout: []byte(`{"id":"checkout"}`), ObservedAt: observedAt, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "session.upserted:" + id, Type: "session.upserted", EntityID: id, Payload: []byte(`{"session":` + projection + `}`)}
+	return CatalogSessionState{Session: session, Project: []byte(`{"id":"project"}`), Checkout: []byte(`{"id":"checkout"}`), ObservedAt: observedAt, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "session.upserted:" + id, Type: "session.upserted", EntityID: id, Payload: []byte(`{"session":` + projection + `}`)}
 }
 
 func TestRecordCatalogSessionWritesNothingForUnchangedRow(t *testing.T) {

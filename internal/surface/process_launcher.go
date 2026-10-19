@@ -71,7 +71,7 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 	if l.id == LauncherCMUX {
 		launchID := ""
 		receiptPath := ""
-		if request.Agent == KindCodex {
+		if request.Surface == KindCodex {
 			launchID = "agenthail-" + uuid.NewString()
 			var err error
 			receiptPath, err = ManagedCodexLaunchReceiptPath(launchID)
@@ -79,16 +79,16 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 				return LaunchResult{}, err
 			}
 		}
-		command, intentPath, err := writeLauncherIntent(request.Cwd, argv)
+		command, intentPath, err := writeLauncherIntent(request.Options.Cwd, argv)
 		if err != nil {
 			return LaunchResult{}, err
 		}
 		if receiptPath != "" {
 			command = withLauncherEnvironment(command, "AGENTHAIL_CODEX_LAUNCH_ID="+launchID, "AGENTHAIL_CODEX_LAUNCH_RECEIPT="+receiptPath, "AGENTHAIL_CODEX_LAUNCH_RUNTIME="+LauncherCMUX)
 		}
-		args := []string{"new-workspace", "--json", "--cwd", request.Cwd, "--command", command}
-		if request.Name != "" {
-			args = append(args, "--name", request.Name)
+		args := []string{"new-workspace", "--json", "--cwd", request.Options.Cwd, "--command", command}
+		if request.Options.Name != "" {
+			args = append(args, "--name", request.Options.Name)
 		}
 		out, runErr := l.run(ctx, l.command, args...)
 		if runErr != nil {
@@ -108,7 +108,7 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 
 	sessionName := "agenthail-" + uuid.NewString()
 	receiptPath := ""
-	if request.Agent == KindCodex {
+	if request.Surface == KindCodex {
 		var receiptErr error
 		receiptPath, receiptErr = ManagedCodexLaunchReceiptPath(sessionName)
 		if receiptErr != nil {
@@ -116,9 +116,9 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 		}
 		argv = managedCodexLaunchArgv(argv, sessionName, receiptPath, LauncherTMUX)
 	}
-	args := []string{"new-session", "-d", "-s", sessionName, "-c", request.Cwd, "-P", "-F", "#{session_name} #{pane_id}"}
-	if request.Name != "" {
-		args = append(args, "-n", request.Name)
+	args := []string{"new-session", "-d", "-s", sessionName, "-c", request.Options.Cwd, "-P", "-F", "#{session_name} #{pane_id}"}
+	if request.Options.Name != "" {
+		args = append(args, "-n", request.Options.Name)
 	}
 	// tmux executes multiple shell-command arguments directly; do not collapse
 	// the target program and its user data into a shell command string.
@@ -142,7 +142,7 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 		if receiptErr != nil && !errors.Is(receiptErr, os.ErrNotExist) {
 			return result, LaunchAcceptedError{Launcher: l.id, Err: receiptErr}
 		}
-		if receiptErr == nil && (receipt.Runtime != LauncherTMUX || receipt.LaunchID != sessionName || receipt.TmuxSession != sessionName || filepath.Clean(receipt.Cwd) != filepath.Clean(request.Cwd) || receipt.TmuxPane != result.Location.Pane) {
+		if receiptErr == nil && (receipt.Runtime != LauncherTMUX || receipt.LaunchID != sessionName || receipt.TmuxSession != sessionName || filepath.Clean(receipt.Cwd) != filepath.Clean(request.Options.Cwd) || receipt.TmuxPane != result.Location.Pane) {
 			return result, LaunchAcceptedError{Launcher: l.id, Err: errors.New("tmux launch receipt does not match the launch result")}
 		}
 	}
@@ -165,23 +165,27 @@ func managedCodexLaunchArgv(argv []string, launchID, receiptPath, runtime string
 }
 
 func validateLaunchRequest(request LaunchRequest, agents []SurfaceKind) error {
-	if !contains(agents, request.Agent) {
-		return fmt.Errorf("unsupported agent %q", request.Agent)
+	if !contains(agents, request.Surface) {
+		return fmt.Errorf("unsupported agent %q", request.Surface)
 	}
-	if request.Cwd == "" || !filepath.IsAbs(request.Cwd) {
+	if request.Options.Cwd == "" || !filepath.IsAbs(request.Options.Cwd) {
 		return errors.New("absolute cwd is required")
 	}
-	if strings.TrimSpace(request.Message) == "" {
+	if strings.TrimSpace(request.Options.Message) == "" {
 		return errors.New("message is required")
 	}
-	if strings.IndexByte(request.Message, 0) >= 0 {
+	if strings.IndexByte(request.Options.Message, 0) >= 0 {
 		return errors.New("message contains NUL")
+	}
+	options := request.Options
+	if options.Worktree != "" || options.Agent != "" || options.PermissionMode != "" || options.ApprovalPolicy != "" || !options.TurnOptions.Empty() {
+		return fmt.Errorf("%w: a terminal launch takes only the cwd, message, model and name", ErrLaunchOptionUnsupported)
 	}
 	return nil
 }
 
 func agentArgv(request LaunchRequest) ([]string, error) {
-	if request.Agent == KindClaude {
+	if request.Surface == KindClaude {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return nil, fmt.Errorf("resolve home for Claude executable: %w", err)
@@ -191,23 +195,23 @@ func agentArgv(request LaunchRequest) ([]string, error) {
 			return nil, err
 		}
 		argv := []string{binary}
-		if request.Model != "" {
-			argv = append(argv, "--model", request.Model)
+		if request.Options.Model != "" {
+			argv = append(argv, "--model", request.Options.Model)
 		}
-		if request.Name != "" {
-			argv = append(argv, "--name", request.Name)
+		if request.Options.Name != "" {
+			argv = append(argv, "--name", request.Options.Name)
 		}
-		return append(argv, "--", request.Message), nil
+		return append(argv, "--", request.Options.Message), nil
 	}
 	executable, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("resolve agenthail executable: %w", err)
 	}
-	argv := []string{executable, "codex", "--cd", request.Cwd}
-	if request.Model != "" {
-		argv = append(argv, "--model", request.Model)
+	argv := []string{executable, "codex", "--cd", request.Options.Cwd}
+	if request.Options.Model != "" {
+		argv = append(argv, "--model", request.Options.Model)
 	}
-	return append(argv, "--", request.Message), nil
+	return append(argv, "--", request.Options.Message), nil
 }
 
 type launcherIntent struct {
@@ -296,6 +300,8 @@ func parseLaunchResult(id string, out []byte) (LaunchResult, error) {
 	}
 	return LaunchResult{Location: &Location{Workspace: workspace}}, nil
 }
+
+func (l *processLauncher) SessionOptions() bool { return false }
 
 func (l *processLauncher) Locate(ctx context.Context, sessions []Session) map[string]Location {
 	if l.id == LauncherCMUX {
