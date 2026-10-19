@@ -1,8 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
 
 permissions:
@@ -26,7 +24,6 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          if [ -z "$BASE" ]; then echo "ios=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           if git diff --name-only "$BASE" HEAD | grep -qE '^(native/|scripts/(ios-simulator|test-xcodegen-project)\.sh$|\.github/workflows/ci\.yml$)'; then
             echo "ios=true" >> "$GITHUB_OUTPUT"
           else
@@ -49,10 +46,14 @@ jobs:
           cache-dependency-path: |
             push-relay/package-lock.json
             claude-host/package-lock.json
+            sidecar/package-lock.json
       - name: Claude host tests
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
           npm test --prefix claude-host
+      - name: Cookie bridge dependencies
+        working-directory: sidecar
+        run: npm ci --ignore-scripts
       - name: Race tests
         run: go test ./... -race -count=1
       - name: Build
@@ -66,6 +67,7 @@ jobs:
           node scripts/test-dashboard-timeline.mjs
           node scripts/test-dashboard-relays.mjs
           node scripts/test-dashboard-rekeys.mjs
+          node scripts/test-dashboard-signin.mjs
       - name: Public copy check
         run: scripts/check-public-copy.sh
       - name: Push relay tests
@@ -149,6 +151,10 @@ jobs:
           "$RUNNER_TEMP/bounded-dock-test"
           swiftc -parse-as-library native/macOS/SessionHandle.swift native/tests/session_handle_test.swift -o "$RUNNER_TEMP/session-handle-test"
           "$RUNNER_TEMP/session-handle-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/AgenthailAPI.swift native/TurnSettings.swift native/VoiceAPI.swift native/tests/voice_api_test.swift -o "$RUNNER_TEMP/voice-api-test"
+          "$RUNNER_TEMP/voice-api-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/AgenthailAPI.swift native/TurnSettings.swift native/VoiceAPI.swift native/VoiceAudioBridge.swift native/VoiceOperatorModel.swift native/macOS/VoiceController.swift native/tests/voice_call_test.swift -o "$RUNNER_TEMP/voice-call-test"
+          "$RUNNER_TEMP/voice-call-test"
       - name: Mac app build
         run: swift build --package-path native -c release --product AgenthailMac
       - name: Installer lint

@@ -121,6 +121,8 @@ struct SessionState: Codable, Identifiable, Hashable {
     var runtime: SessionRuntime? = nil
     var subagent: SubagentIdentity? = nil
     var subagents: SubagentRollup? = nil
+    var host: SessionHost? = nil
+    var unavailableReason: String? = nil
     var transport: String? = nil
 
     var displayName: String {
@@ -130,6 +132,37 @@ struct SessionState: Codable, Identifiable, Hashable {
 
     var isWorking: Bool { status == "busy" }
     var isReadOnly: Bool { readOnly == true }
+    var remoteHostName: String? {
+        guard let host, host.state != "local" else { return nil }
+        return host.name
+    }
+    var isUnavailable: Bool { remoteHostName != nil && !(unavailableReason ?? "").isEmpty }
+}
+
+struct SessionHost: Codable, Hashable {
+    let id: String
+    let name: String
+    let state: String
+}
+
+struct HostHealth: Decodable, Hashable, Identifiable {
+    let id: String
+    let name: String
+    let state: String
+    var detail: String? = nil
+    var notice: String? = nil
+
+    var stateLabel: String {
+        switch state {
+        case "connected": return "Connected"
+        case "connecting": return "Connecting"
+        case "unreachable": return "Unreachable"
+        case "unauthorized": return "Pairing revoked"
+        case "incompatible": return "Needs update"
+        default: return state.capitalized
+        }
+    }
+    var isHealthy: Bool { state == "connected" }
 }
 
 struct SubagentIdentity: Codable, Hashable {
@@ -456,6 +489,8 @@ struct DaemonState: Decodable, Equatable {
     let pid: Int?
     let stale: Bool?
     let refreshError: String?
+    var host: SessionHost? = nil
+    var hosts: [HostHealth]? = nil
 }
 
 struct DashboardSnapshot: Decodable {
@@ -698,6 +733,58 @@ struct HistoryPageResponse: Decodable {
     let hasMore: Bool
     let nextBefore: Int64
     let kinds: [String]
+}
+
+struct SigninProfileState: Codable, Identifiable, Equatable {
+    let id: String
+    let label: String
+    let browser: String
+    let profile: String
+    let createdAt: String
+}
+
+struct SigninConsumerState: Codable, Identifiable, Equatable {
+    let id: String
+    let label: String
+    let purpose: String
+    let profileId: String?
+}
+
+struct SigninDetectedProfile: Codable, Identifiable, Equatable {
+    let profile: String
+    let name: String
+    let profileId: String?
+
+    var id: String { profile }
+    var choiceLabel: String { name == profile ? name : "\(name) (\(profile))" }
+}
+
+struct SigninBrowserState: Codable, Identifiable, Equatable {
+    let browser: String
+    let label: String
+    let available: Bool
+    let detail: String?
+    let profiles: [SigninDetectedProfile]
+
+    var id: String { browser }
+    var addableProfiles: [SigninDetectedProfile] { profiles.filter { $0.profileId == nil } }
+}
+
+struct SigninState: Codable, Equatable {
+    let profiles: [SigninProfileState]
+    let consumers: [SigninConsumerState]
+    let browsers: [SigninBrowserState]
+
+    func browserLabel(_ browser: String) -> String {
+        browsers.first { $0.browser == browser }?.label ?? browser
+    }
+
+    var addableBrowsers: [SigninBrowserState] { browsers.filter { $0.available && !$0.addableProfiles.isEmpty } }
+    var unavailableBrowsers: [SigninBrowserState] { browsers.filter { !$0.available } }
+}
+
+struct SigninProfileResponse: Decodable {
+    let profile: SigninProfileState?
 }
 
 struct PairingResponse: Decodable {

@@ -26,7 +26,7 @@ sleep 30
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
 	t.Setenv("CMUX_SURFACE_ID", "fixture-surface")
-	claude := NewClaude("Default", home)
+	claude := NewClaude(nil, home)
 	var group sync.WaitGroup
 	errs := make(chan error, 2)
 	for range 2 {
@@ -79,7 +79,7 @@ fi
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
-	claude := NewClaude("Default", home)
+	claude := NewClaude(nil, home)
 	if _, err := claude.Models(context.Background()); err == nil {
 		t.Fatal("empty catalog was accepted")
 	}

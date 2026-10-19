@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/signin"
+
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -27,7 +29,7 @@ type claudePosts struct {
 	bodies []string
 }
 
-func (p *claudePosts) request(_ context.Context, method, url string, _ map[string]string, body, _ string, _ string, _ time.Duration) (int, string, error) {
+func (p *claudePosts) request(_ context.Context, method, url string, _ map[string]string, body string, _ CookieSource, _ time.Duration) (int, string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if method == "POST" && strings.Contains(url, "/v1/code/sessions/") {
@@ -59,7 +61,7 @@ func hostResume(t *testing.T) (*claudetest.Fixture, *claudehosttest.Fixture, *Cl
 	fixture := claudetest.New(t)
 	host := claudehosttest.New(t, fixture.Home)
 	host.Start(t)
-	return fixture, host, NewClaude("", fixture.Home)
+	return fixture, host, NewClaude(nil, fixture.Home)
 }
 
 func TestClaudeConcurrentTurnsToAnExitedSessionResumeItOnceInTheHost(t *testing.T) {
@@ -124,7 +126,7 @@ func TestClaudeSendHoldsForLiveProcessWithoutMessaging(t *testing.T) {
 
 func TestClaudeObserveExitedSessionIsAtRestOnlyWithoutLiveProcess(t *testing.T) {
 	fixture := claudetest.New(t)
-	c := NewClaude("", fixture.Home)
+	c := NewClaude(nil, fixture.Home)
 	session := exitedSession(fixture)
 	observation, err := c.Observe(context.Background(), &session)
 	if err != nil || observation.Status != surface.StatusIdle || observation.ActiveTurnID != "" || observation.CompletedTurnID != "fixture-message" {
@@ -150,7 +152,7 @@ func TestClaudeResumeThatClaudeRefusesSaysWhy(t *testing.T) {
 func TestClaudeResumeWithoutTheHostIsHeld(t *testing.T) {
 	fixture := claudetest.New(t)
 	session := exitedSession(fixture)
-	_, err := NewClaude("", fixture.Home).Send(context.Background(), &session, "hello")
+	_, err := NewClaude(nil, fixture.Home).Send(context.Background(), &session, "hello")
 	if !surface.IsDeliveryHeld(err) {
 		t.Fatalf("err=%v, want held until the host runs", err)
 	}
@@ -183,7 +185,7 @@ func samePath(t *testing.T, a, b string) bool {
 
 func TestClaudeResumeLockExcludesAnotherProcess(t *testing.T) {
 	if home := os.Getenv("AGENTHAIL_HOLD_RESUME_LOCK"); home != "" {
-		unlock, err := NewClaude("", home).lockConversation(context.Background(), fixtureConversation)
+		unlock, err := NewClaude(nil, home).lockConversation(context.Background(), fixtureConversation)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -210,7 +212,7 @@ func TestClaudeResumeLockExcludesAnotherProcess(t *testing.T) {
 	if line, err := bufio.NewReader(output).ReadString('\n'); err != nil || line != "locked\n" {
 		t.Fatalf("holder line=%q err=%v", line, err)
 	}
-	c := NewClaude("", home)
+	c := NewClaude(nil, home)
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	if _, err := c.lockConversation(ctx, fixtureConversation); err == nil {
@@ -229,7 +231,7 @@ func TestClaudeResumeLockExcludesAnotherProcess(t *testing.T) {
 func TestClaudeCompactOfExitedSessionDoesNotResumeIt(t *testing.T) {
 	fixture, host, _ := hostResume(t)
 	session := exitedSession(fixture)
-	c := NewClaudeWithRequest("", fixture.Home, func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+	c := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
 		t.Fatal("compact was posted to a session without Remote Control")
 		return 0, "", nil
 	})

@@ -108,7 +108,20 @@ If a writer lock outlives the process that held it, Agenthail reports an ownersh
 
 ### Notion
 
-Notion is optional. It works as an external workspace for research, notes, and longer-running threads. If you are already signed into Notion in Chrome, Agenthail can find those threads and start new ones.
+Notion is optional. It works as an external workspace for research, notes, and longer-running threads. Sign into Notion in a desktop browser, then tell Agenthail which browser profile to use. After that, Agenthail can find those threads and start new ones.
+
+### Browser sign-in
+
+Notion and Claude sessions reached over Remote Control authenticate with the cookies of a browser profile you choose. Agenthail reads cookies only from that profile. Until you choose one, the consumer reports that it is not set up and no cookies are read.
+
+```bash
+agenthail signin list                      # browsers and profiles on this computer
+agenthail signin add chrome "Profile 2" --label Work
+agenthail signin use notion Work
+agenthail signin use claude Work           # only for Remote Control sessions
+```
+
+The same settings are under Settings > Browser Sign-in in the Mac app and the web dashboard. Supported browsers are Chrome, Brave, Arc, Chromium, Edge, Firefox and Safari.
 
 ## One place to check in
 
@@ -195,6 +208,10 @@ Turn on **Private phone access** and choose **Pair an iPhone**. The iPhone app c
 Matching voice-enabled builds also offer **Talk to orchestrator**: a real Codex
 Voice conversation that can inspect agents, delegate work, and read replies through
 one persistent operator. [Voice setup, flow, and current limits](docs/maintainers/codex-voice.md).
+
+## See agents on your other machines
+
+Pair the Agenthail daemon on another machine in your tailnet and its sessions appear in the same list, app and phone. Run `agenthail hosts invite` there and `agenthail hosts add '<link>'` here, then address its sessions as `forge::@builder`. If a machine goes offline, its sessions stay listed as unavailable, and messages to them wait up to an hour for it to return; after that they expire and show in delivery history. [How paired hosts work](docs/maintainers/hosts.md).
 
 ## What Agenthail remembers
 

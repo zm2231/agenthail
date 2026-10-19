@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/signin"
+
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -28,7 +30,7 @@ type orphanPosts struct {
 	onPost func(body string)
 }
 
-func (p *orphanPosts) request(_ context.Context, method, url string, _ map[string]string, body, _ string, _ string, _ time.Duration) (int, string, error) {
+func (p *orphanPosts) request(_ context.Context, method, url string, _ map[string]string, body string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if method == "POST" && strings.Contains(url, "/v1/code/sessions/") {
@@ -96,7 +98,7 @@ func newOrphanFixtureOn(t *testing.T, transport string) *orphanFixture {
 		t.Fatal(err)
 	}
 	fixture.claude.Job("fe758937", orphanConversation, fixture.claude.Home, "done", 0)
-	fixture.daemon = New(r, []surface.Surface{surfaces.NewClaudeWithRequest("", fixture.claude.Home, fixture.posts.request)})
+	fixture.daemon = New(r, []surface.Surface{surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.claude.Home, fixture.posts.request)})
 	fixture.handler = dashboardRouter(fixture.daemon)
 	fixture.token = pairedControlToken(t, r)
 	return fixture

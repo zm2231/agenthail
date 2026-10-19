@@ -49,6 +49,27 @@ struct SettingsRequestsTest {
         let unmarked = await waitFor { $0.path == "/api/v1/actions" && $0.body["message"] as? String == "unmarked" }
         check(unmarked != nil && unmarked?.body["author"] == nil, "an unmarked API send declares no author: \(String(describing: unmarked?.body))")
 
+        RecordingProtocol.reset()
+        await model.loadSignin()
+        check(model.signin?.consumers.map(\.id) == ["notion", "claude"] && model.signin?.addableBrowsers.first?.addableProfiles.map(\.profile) == ["Default"], "sign-in settings decode: \(String(describing: model.signin))")
+        RecordingProtocol.reset()
+        model.addSigninProfile(browser: "chrome", profile: "Default", label: "")
+        let added = await waitFor { $0.path == "/api/v1/signin/profiles" && $0.method == "POST" }
+        check(added?.body["browser"] as? String == "chrome" && added?.body["profile"] as? String == "Default", "adding sends the chosen browser profile: \(String(describing: added?.body))")
+        RecordingProtocol.reset()
+        model.bindSignin(consumer: "notion", profileID: "sp_0123456789ab")
+        let bound = await waitFor { $0.path == "/api/v1/signin/bindings" }
+        check(bound?.method == "PUT" && bound?.body["consumer"] as? String == "notion" && bound?.body["profileId"] as? String == "sp_0123456789ab", "binding names the consumer and profile: \(String(describing: bound?.body))")
+        RecordingProtocol.reset()
+        model.bindSignin(consumer: "claude", profileID: nil)
+        let cleared = await waitFor { $0.path == "/api/v1/signin/bindings" }
+        check(cleared?.body["profileId"] is NSNull, "choosing Not set up sends a null profile: \(String(describing: cleared?.body))")
+        RecordingProtocol.reset()
+        model.removeSigninProfile("sp_0123456789ab")
+        let removed = await waitFor { $0.path == "/api/v1/signin/profiles" && $0.method == "DELETE" }
+        check(removed?.query == "id=sp_0123456789ab", "removing names the profile: \(String(describing: removed?.query))")
+        check(await waitFor { $0.path == "/api/v1/signin" } != nil, "a sign-in change reloads the settings")
+
         let catalog = AgenthailModel(connecting: false)
         catalog.snapshot = model.snapshot.map { snapshot in
             var copy = snapshot
@@ -87,6 +108,7 @@ final class RecordingProtocol: URLProtocol {
     struct Request {
         let method: String
         let path: String
+        let query: String?
         let body: [String: Any]
         let idempotencyKey: String?
     }
@@ -122,7 +144,7 @@ final class RecordingProtocol: URLProtocol {
         }
         let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         let failing = Self.lock.withLock {
-            Self.recorded.append(Request(method: request.httpMethod ?? "GET", path: path, body: body, idempotencyKey: request.value(forHTTPHeaderField: "Idempotency-Key")))
+            Self.recorded.append(Request(method: request.httpMethod ?? "GET", path: path, query: request.url?.query, body: body, idempotencyKey: request.value(forHTTPHeaderField: "Idempotency-Key")))
             return Self.failingPath == path
         }
         let (status, reply): (Int, String) = failing ? (502, "codex launch failed") : (200, Self.reply(for: path))
@@ -138,6 +160,8 @@ final class RecordingProtocol: URLProtocol {
         switch path {
         case "/api/v1/snapshot":
             return #"{"updatedAt":"2026-10-05T12:00:01Z","daemon":{"running":true,"pid":1},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5,"busyDelivery":"steer"}"#
+        case "/api/v1/signin":
+            return #"{"profiles":[{"id":"sp_0123456789ab","label":"Work Chrome","browser":"chrome","profile":"Profile 2","createdAt":"2026-10-18T00:00:00Z"}],"consumers":[{"id":"notion","label":"Notion","purpose":"p","profileId":null},{"id":"claude","label":"Claude Remote Control","purpose":"p","profileId":"sp_0123456789ab"}],"browsers":[{"browser":"chrome","label":"Google Chrome","available":true,"profiles":[{"profile":"Default","name":"Personal"},{"profile":"Profile 2","name":"Work","profileId":"sp_0123456789ab"}]},{"browser":"edge","label":"Microsoft Edge","available":false,"detail":"reading this browser's profiles did not finish in time","profiles":[]}]}"#
         case "/api/v1/settings":
             return #"{"dashboard":{"listen":"127.0.0.1:7412","codexRecentHours":12,"busyDelivery":"steer"},"remoteAccess":{"enabled":false,"desired":false,"provider":"tailscale","port":7412},"notifications":{"enabled":false,"available":true,"authorization":"unknown","authorized":false,"alerts":false,"sounds":false}}"#
         default:

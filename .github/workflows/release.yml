@@ -119,6 +119,14 @@ jobs:
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
           npm test --prefix claude-host
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sidecar/package-lock.json
+      - name: Cookie bridge dependencies
+        working-directory: sidecar
+        run: npm ci --ignore-scripts
       - name: Test source
         run: |
           go test ./... -race -count=1

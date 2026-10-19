@@ -74,7 +74,7 @@ func writePeerRecord(t *testing.T, home string, pid int, record map[string]any) 
 
 func TestClaudeLocalStatusRereadsPeerRecord(t *testing.T) {
 	home := t.TempDir()
-	claude := NewClaude("", home)
+	claude := NewClaude(nil, home)
 	pid := os.Getpid()
 	updated := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
 	record := map[string]any{"pid": pid, "sessionId": "conversation-1", "bridgeSessionId": "session_synthetic", "status": "busy", "updatedAt": float64(updated.UnixMilli()), "peerFeatures": []any{"notify_idle"}}

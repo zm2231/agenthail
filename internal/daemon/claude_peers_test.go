@@ -37,6 +37,12 @@ func TestRecentPeerRegistrationReadsFreshCatalogRowsOnly(t *testing.T) {
 	if _, err := reg.MarkCatalogDiscoveryFailure(surface.KindNotion, "catalog discovery failed", now); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := reg.AddHost(registry.PairedHost{ID: "h0123456789ab", Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := reg.ApplyHostCatalogRow("h0123456789ab", registry.HostCatalogRow{Session: surface.Session{ID: "mirrored", Surface: surface.KindCodex, Transport: "managed", Status: surface.StatusIdle, LastActive: now}, EntityID: "h0123456789ab::mirrored", Projection: []byte(`{"id":"h0123456789ab::mirrored"}`), ObservedAt: now.UTC()}); err != nil {
+		t.Fatal(err)
+	}
 	seen := map[string]int{}
 	d.registerRecentClaudePeers(context.Background(), func(_ context.Context, sessions []surface.Session) map[string]error {
 		for _, session := range sessions {
@@ -74,14 +80,14 @@ func TestClaudePeerEligibilityKeepsBusyAndRecentOnly(t *testing.T) {
 }
 
 func TestNativeClaudeCapabilitiesMatchSocketContract(t *testing.T) {
-	caps := surface.EffectiveCapabilities(surfaces.NewClaude("", t.TempDir()), &surface.Session{ID: "local-uuid", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"})
+	caps := surface.EffectiveCapabilities(surfaces.NewClaude(nil, t.TempDir()), &surface.Session{ID: "local-uuid", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"})
 	if caps.ReadOnly || !caps.Send || !caps.Reply || caps.Stream || caps.Compact || caps.Model || caps.Interrupt || caps.Steer {
 		t.Fatalf("caps=%+v readOnly=%v", caps, caps.ReadOnly)
 	}
 }
 
 func TestBridgedClaudeCapabilitiesUseRemoteControlContract(t *testing.T) {
-	caps := surface.EffectiveCapabilities(surfaces.NewClaude("", t.TempDir()), &surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"})
+	caps := surface.EffectiveCapabilities(surfaces.NewClaude(nil, t.TempDir()), &surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"})
 	if caps.ReadOnly || !caps.Send || !caps.Reply || caps.Stream || !caps.Compact || !caps.Model || !caps.Interrupt || !caps.Steer {
 		t.Fatalf("caps=%+v readOnly=%v", caps, caps.ReadOnly)
 	}

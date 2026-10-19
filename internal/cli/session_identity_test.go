@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"github.com/zm2231/agenthail/internal/signin"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,7 +25,7 @@ func liveClaudeApp(t *testing.T) (*App, *registry.Registry, *claudetest.Fixture,
 	fixture := claudetest.New(t)
 	posts := &claudePosts{}
 	app, r := cliFixture(t, &cliSurface{kind: surface.KindClaude})
-	app.Surfaces[0].Surface = surfaces.NewClaudeWithRequest("", fixture.Home, posts.request)
+	app.Surfaces[0].Surface = surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, posts.request)
 	return app, r, fixture, posts
 }
 

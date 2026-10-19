@@ -30,7 +30,7 @@ fi
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
-	return home, NewClaude("", home)
+	return home, NewClaude(nil, home)
 }
 
 func TestClaudeBackgroundCommandsDropCmuxTerminalState(t *testing.T) {
@@ -61,7 +61,7 @@ const fixtureConversation = "fe758937-0caa-4912-823f-927677775b2b"
 func TestClaudeStartsASessionInTheHostWithItsFirstTurn(t *testing.T) {
 	host := claudehosttest.New(t, "")
 	host.Start(t)
-	c := NewClaude("", host.Home)
+	c := NewClaude(nil, host.Home)
 	turn := uuid.NewString()
 	session, sent, err := c.StartSession(surface.WithMessageUUID(context.Background(), turn), surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, Name: "builder", PermissionMode: "acceptEdits", TurnOptions: surface.TurnOptions{Effort: "high"}})
 	if err != nil {
@@ -86,7 +86,7 @@ func TestClaudeStartsASessionInTheHostWithItsFirstTurn(t *testing.T) {
 
 func TestClaudeStartWithoutTheHostCreatesNothing(t *testing.T) {
 	home := t.TempDir()
-	session, sent, err := NewClaude("", home).StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: home})
+	session, sent, err := NewClaude(nil, home).StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: home})
 	if err == nil || session != nil || sent != nil || surface.IsDeliveryOutcomeUnknown(err) || !strings.Contains(err.Error(), "Claude host is not running") {
 		t.Fatalf("session=%+v sent=%+v err=%v", session, sent, err)
 	}
@@ -123,7 +123,7 @@ func TestClaudeResumeLeavesReachableProcessAlone(t *testing.T) {
 func TestClaudeHostSessionLifecycle(t *testing.T) {
 	host := claudehosttest.New(t, "")
 	host.Start(t)
-	c := NewClaude("", host.Home)
+	c := NewClaude(nil, host.Home)
 	session, _, err := c.StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
 	if err != nil {
 		t.Fatal(err)

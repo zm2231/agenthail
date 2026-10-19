@@ -45,7 +45,9 @@ agenthail doctor --json
 ```
 
 AgentHail targets macOS and runs headless on Linux. Native Claude messages use local sockets and require
-the daemon. Claude Remote Control and Notion use a signed-in Chrome profile. Codex
+the daemon. Claude Remote Control and Notion read cookies only from the browser sign-in profile
+bound with `agenthail signin use <notion|claude> <profile>` (list with
+`agenthail signin list`); unbound consumers report "not set up" and read nothing. Codex
 Desktop uses AgentHail's loopback Desktop bridge (`agenthail launch codex`).
 Without Desktop, AgentHail uses Codex's app-server daemon and starts it when a
 conversation needs it. Codex 0.151 and older can only start that daemon from the
@@ -53,7 +55,7 @@ standalone runtime; `doctor --json` reports a typed runtime `problem` plus
 non-failing `notes` with the exact install step
 (`curl -fsSL https://chatgpt.com/codex/install.sh | sh`). Never run that
 installer on the user's behalf. Relevant overrides are
-`AGENTHAIL_CHROME_PROFILE`, `AGENTHAIL_PYTHON`, `AGENTHAIL_CLAUDE_BIN`,
+`AGENTHAIL_PYTHON`, `AGENTHAIL_CLAUDE_BIN`,
 `AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT`, `AGENTHAIL_NOTION_SPACE`, and
 `AGENTHAIL_NOTION_USER`. Never print browser cookies, dashboard tokens, or
 credentials.
@@ -143,8 +145,8 @@ that surface is unavailable for this call; report it and continue with sessions
 from healthy surfaces. Do not describe an unavailable Notion surface as active
 or configured.
 
-Targets accept `@alias`, PID, session-ID prefix, cwd/name fragment, or a
-qualified `surface:target` value. A cwd/name fragment resolves to a family's
+Targets accept `@alias`, PID, session-ID prefix, cwd/name fragment, a
+qualified `surface:target` value, or `host::target` for a paired host. A cwd/name fragment resolves to a family's
 root session, never to one of its subagents. Address a Codex subagent by its
 ID or as `@<parent>/<nickname>` (for example `@lead/Ada/Euclid` for a nested
 one). Claude subagents are read-only and cannot be targeted. If AgentHail
@@ -362,6 +364,30 @@ agenthail channel rm launch --all
 
 Channels broadcast to every member. Busy members queue. Partial failure exits
 nonzero so the caller can report which deliveries failed.
+
+## Paired Hosts
+
+Another Agenthail daemon on the tailnet can be paired so its sessions appear
+here. Pairing needs remote access on the other host and both daemons running.
+
+```bash
+agenthail hosts                     # this host, paired hosts, state, session counts
+agenthail hosts invite              # on the other host: prints a pairing link
+agenthail hosts add '<link>' --address <tailnet-ip>
+agenthail hosts remove forge
+agenthail hosts name mac
+```
+
+Address a paired host's session as `forge::@builder` or `forge::<id>`.
+An unqualified target that matches on two hosts is an error listing each
+`host::target`; show the candidates and ask which one. `send`, `steer`,
+`interrupt`, `reply`, `last`, `stream` and `thread create --host forge` reach
+paired hosts, and `--cwd` with `--host` is a path on that host. A session on an
+unreachable host stays listed as `down` with the host named. A send to it is
+held by the local daemon (`queued`) for up to an hour and delivered once if the
+host returns in that time; otherwise it expires and appears in delivery history
+as expired. `delivery submitted` means the outcome is unknown, so do not resend. Other
+commands refuse remote sessions.
 
 ## Daemon
 

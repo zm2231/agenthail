@@ -8,7 +8,7 @@ Agenthail's primary installer is a signed and notarized Apple silicon `.pkg`. Th
 
 ## Runtime decision
 
-The Claude and Notion adapters require Chrome-compatible TLS behavior from `curl_cffi` and a local cookie reader. Replacing either with a different networking stack would change observable authentication and transport behavior. The package therefore bundles pinned runtimes instead of rewriting those adapters during the packaging change:
+The Claude and Notion adapters require Chrome-compatible TLS behavior from `curl_cffi` and a local cookie reader. The cookie reader (`cookie.mjs`, built on sweet-cookie) reads only the browser and profile directory the daemon passes for the request's sign-in profile. Replacing either with a different networking stack would change observable authentication and transport behavior. The package therefore bundles pinned runtimes instead of rewriting those adapters during the packaging change:
 
 - CPython 3.13 from `python-build-standalone`
 - Node.js 22 LTS from the official Node distribution

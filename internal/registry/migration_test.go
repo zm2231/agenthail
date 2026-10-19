@@ -83,6 +83,9 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 				fixture.check(t, r)
 			}
 			assertMigratedRegistryAcceptsCurrentWrites(t, r)
+			if identity, err := r.HostIdentity(); err != nil || !ValidHostID(identity.ID) || !ValidHostName(identity.Name) {
+				t.Fatalf("host identity=%+v err=%v", identity, err)
+			}
 		})
 	}
 }

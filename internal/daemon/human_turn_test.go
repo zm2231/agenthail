@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/zm2231/agenthail/internal/signin"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -57,7 +58,7 @@ func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
 	process := claudetest.New(t)
 	process.Listen()
 	process.Record("conversation-bridge", process.Home, "session_bridge")
-	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaudeWithRequest("Default", process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ string, _ string, _ time.Duration) (int, string, error) {
+	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
 		if method != http.MethodPost {
 			t.Fatalf("method=%s", method)
 		}

@@ -12,9 +12,10 @@ The Mac app keeps your connected conversations in one window.
 - The **inspector** (⌥⌘I) shows a session's details, context usage with a token breakdown, and delivery work, switches its model or compacts its context when the agent supports it, and lets you set, edit, pause, budget, or clear its goal when the agent supports goals. Codex sessions fork in one click from the inspector or **Session > Fork**; the fork opens in the same folder, and the inspector lists Codex's own queue for the session, where you can add, edit, reorder, delete, or start queued input. Claude Code sessions started with `claude --bg` show their background status and logs there, with Stop and Resume; sessions the Claude host runs show their status, with Stop and Resume. When Agenthail can't confirm whether a fork, queue change, Stop or Resume went through, trying the same action again checks on that request instead of repeating it. Once you reload the queue or check Status, the next try is new work. A fork that may still be in progress says so under the message box, with **Fork again** to start another. Its **Subagents** section links to the parent of a subagent, lists Codex subagents you can open, and lists Claude Code subagents with their type, task and working state.
 - **New session** (⌘N) picks the agent (Claude, Codex, or Notion), where it runs, the folder, the model, and the first message. The model menu lists the agent's models and the effort each one supports; a session started in a terminal uses the model but the agent's own effort. If the models can't load, the sheet says why and the session uses the runtime default. When Agenthail can't confirm a session started, starting the same session again checks on that request instead of repeating it; **Start again** starts a new one.
 - **⌘K** opens a command palette for jumping to any session, starting a new one (⌘N), and session actions.
-- The **Session** menu holds Go to Session (⌘K), Rename, Open in New Window, Fork, and Stop (⌘.); the **View** menu switches between Running, Recent, and All and shows or hides the inspector. They act on whichever Agenthail window is in front.
+- The **Session** menu holds Go to Session (⌘K), Rename, Open in New Window, Fork, Talk to Orchestrator, Call This Session, and Stop (⌘.); the **View** menu switches between Running, Recent, and All and shows or hides the inspector. They act on whichever Agenthail window is in front.
 - Any session can open in its own window from its context menu or the palette, and can be renamed there or from the inspector. A name another session already uses is refused. Windows showing the same session share its draft.
 - A session that disappears from the host stays readable with a notice until you close it.
+- **Voice**: the waveform button in the sidebar footer, the menu bar item, or **Session > Talk to Orchestrator** opens the Voice window. The waveform button in a conversation's header, or **Session > Call This Session**, opens it routed to that session. See [Codex Voice orchestrator](#codex-voice-orchestrator).
 - When an agent finishes, its notification opens that session. **Reply** on the notification sends your answer to the session; if it can't be sent, the app opens the session with your reply in its draft.
 - **Send to Agenthail** in any app's Services menu adds the selected text to the open session's draft, or opens the new session form with it filled in. Nothing is sent or started until you do it.
 - Every keyboard shortcut can be changed or cleared in Settings > Keyboard, which also sets a shortcut that opens the session palette from any app. The shortcuts listed here are the defaults.
@@ -65,17 +66,26 @@ Agenthail only offers message controls when it knows a conversation is writable.
 
 ## Codex Voice orchestrator
 
-With matching voice-enabled host and iOS builds, **Talk to orchestrator** opens
+With a voice-enabled host, **Talk to orchestrator** on the Mac or iPhone opens
 a conversational Codex Voice call. Ask about your agents, discuss a plan, or ask
 the orchestrator to create an agent and send it work. It uses one persistent Codex
 Desktop thread with the packaged Agenthail Operations skill, not on-device
-dictation. Your Codex account must support native Voice and your paired phone must
+dictation. Your Codex account must support native Voice, and a paired phone must
 have control permission.
 
-Live conversation and expandable agent activity remain visible. **Open full
-timeline** opens the same ordinary session. **Hang up** ends audio, not agent work;
-leaving the app also ends the call. Call again to resume the same orchestrator.
-Native approvals may still need attention on your Mac.
+Live conversation and agent activity remain visible. **Open full timeline**
+opens the same ordinary session. Enter a session ID or alias to route the call to
+that exact session; during a call, **Transfer to session** moves it there,
+**Return to orchestrator** moves it back, and **Stop selected session** stops
+that session's running turn without hanging up. **Hang up** ends audio, not agent
+work; closing the Voice window on the Mac, or leaving the iPhone app, also ends
+the call. Call again to resume the same orchestrator. Native approvals may still
+need attention on your Mac.
+
+The Mac asks for microphone access on the first call. If access is off, the Voice
+window says so and **Open System Settings** goes to Privacy & Security >
+Microphone. Only one device holds a call at a time; another device's call shows
+as in use until it hangs up there.
 
 See [Voice setup, capabilities, and verification](maintainers/codex-voice.md).
 

@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"fmt"
+	"github.com/zm2231/agenthail/internal/signin"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,7 +27,7 @@ func TestClaudeListReadsSessionsFromClaudeConfigDir(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", config)
 	writeClaudeSessionRecord(t, filepath.Join(config, "sessions"), "configured")
 	writeClaudeSessionRecord(t, filepath.Join(home, ".claude", "sessions"), "home")
-	sessions, err := NewClaude("", home).List(context.Background())
+	sessions, err := NewClaude(nil, home).List(context.Background())
 	if err != nil || len(sessions) != 1 || sessions[0].ID != "configured" {
 		t.Fatalf("sessions=%+v err=%v", sessions, err)
 	}
@@ -36,7 +37,7 @@ func TestClaudeListReadsHomeClaudeWhenConfigDirIsUnset(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	writeClaudeSessionRecord(t, filepath.Join(home, ".claude", "sessions"), "home")
-	sessions, err := NewClaude("", home).List(context.Background())
+	sessions, err := NewClaude(nil, home).List(context.Background())
 	if err != nil || len(sessions) != 1 || sessions[0].ID != "home" {
 		t.Fatalf("sessions=%+v err=%v", sessions, err)
 	}
@@ -45,7 +46,10 @@ func TestClaudeListReadsHomeClaudeWhenConfigDirIsUnset(t *testing.T) {
 func TestClaudeHealthWithoutRemoteControlNeedsNoSidecar(t *testing.T) {
 	t.Setenv("AGENTHAIL_SIDECAR", "")
 	t.Setenv("PATH", t.TempDir())
-	claude := NewClaude("Default", t.TempDir())
+	if err := NewClaude(nil, t.TempDir()).Health(context.Background()); err != nil {
+		t.Fatalf("health with no sign-in profile and no Remote Control session err=%v", err)
+	}
+	claude := NewClaude(signin.Fixed{Browser: signin.Chrome}, t.TempDir())
 	if err := claude.Health(context.Background()); err == nil || !strings.Contains(err.Error(), "sidecar not found") {
 		t.Fatalf("remote control health err=%v, want sidecar not found", err)
 	}

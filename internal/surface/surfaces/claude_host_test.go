@@ -17,7 +17,7 @@ import (
 func hostedClaude(t *testing.T) (*Claude, *claudehosttest.Fixture) {
 	t.Helper()
 	fixture := claudehosttest.New(t, "")
-	return NewClaude("Default", fixture.Home), fixture
+	return NewClaude(nil, fixture.Home), fixture
 }
 
 func listedSession(t *testing.T, c *Claude, id string) *surface.Session {

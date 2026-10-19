@@ -442,7 +442,16 @@ struct SessionRowView: View {
             StatusIndicator(session: session, needsYou: needsYou, finishedUnseen: finishedUnseen)
             Text(title ?? session.title)
                 .lineLimit(1)
-                .foregroundStyle(session.open || session.isWorking ? DesktopPalette.text : DesktopPalette.text2)
+                .foregroundStyle(!session.isUnavailable && (session.open || session.isWorking) ? DesktopPalette.text : DesktopPalette.text2)
+            if let host = session.remoteHostName {
+                HStack(spacing: 3) {
+                    Image(systemName: session.isUnavailable ? "wifi.slash" : "server.rack")
+                    Text(host)
+                }
+                .font(.system(size: 10.5))
+                .foregroundStyle(session.isUnavailable ? DesktopPalette.amber : DesktopPalette.text2)
+                .help(session.unavailableReason ?? "On \(host)")
+            }
             Spacer(minLength: 4)
             if let family, family.subagentCount > 0 {
                 HStack(spacing: 3) {
@@ -497,6 +506,8 @@ struct StatusIndicator: View {
 struct ConnectionFooter: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject private var shortcuts = ShortcutStore.shared
+    @EnvironmentObject private var voice: VoiceController
+    @Environment(\.openWindow) private var openWindow
 
     private var offlineLabel: String {
         if model.daemonSlow { return "Agenthail is slow to respond" }
@@ -526,6 +537,15 @@ struct ConnectionFooter: View {
                     .help("Start the Agenthail daemon")
             }
             if model.isConnected {
+                Button {
+                    voice.route(to: "")
+                    openWindow(id: "voice")
+                } label: {
+                    Image(systemName: "waveform")
+                }
+                .buttonStyle(.plain)
+                .help("Talk to orchestrator")
+                .accessibilityLabel("Talk to orchestrator")
                 Button { model.refreshNow() } label: {
                     Image(systemName: "arrow.triangle.2.circlepath")
                 }
@@ -553,11 +573,17 @@ struct ConversationPane: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     var headerInset: CGFloat = 22
+    @EnvironmentObject private var voice: VoiceController
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         if let session = pane.displayedSession {
             VStack(spacing: 0) {
-                ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) })
+                ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id ? nil : {
+                    voice.route(to: session.id)
+                    NSApplication.shared.activate()
+                    openWindow(id: "voice")
+                })
                 TranscriptView(model: model, pane: pane, session: session)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         if pane.removedSession?.id == session.id {
@@ -633,6 +659,7 @@ struct ConversationHeader: View {
     var leadingInset: CGFloat = 22
     @ObservedObject private var shortcuts = ShortcutStore.shared
     var onFocusTerminal: () -> Void = {}
+    var onCall: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -666,6 +693,16 @@ struct ConversationHeader: View {
                     .font(.system(size: 12))
                     .foregroundStyle(DesktopPalette.accentText)
                     .help("Bring this session's terminal to the front")
+            }
+            if let onCall {
+                Button(action: onCall) {
+                    Image(systemName: "waveform")
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(DesktopPalette.text2)
+                .help("Call this session by voice")
+                .accessibilityLabel("Call this session")
             }
             Button {
                 inspectorVisible.toggle()

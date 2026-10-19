@@ -63,7 +63,7 @@ func TestAPersonsMessageToAHostSessionIsDeliveredUnderItsIntentUUID(t *testing.T
 	client := fixture.Start(t)
 	id := uuid.NewString()
 	fixture.Open(t, client, id)
-	claude := surfaces.NewClaude("Default", fixture.Home)
+	claude := surfaces.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
 	if err := r.RegisterSession(session); err != nil {
