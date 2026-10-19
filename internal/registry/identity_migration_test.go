@@ -114,9 +114,6 @@ func TestSchema14RekeysClaudeRowsToTheirConversation(t *testing.T) {
 
 func seedVersion13(t *testing.T, r *Registry) {
 	t.Helper()
-	if err := r.EnsureCatalogState(); err != nil {
-		t.Fatal(err)
-	}
 	exec := func(query string, args ...any) {
 		t.Helper()
 		if _, err := r.db.Exec(query, args...); err != nil {

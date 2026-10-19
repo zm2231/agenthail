@@ -24,9 +24,9 @@ type fakeSurface struct {
 	observeErr   error
 	sent         []string
 	steered      []string
+	beforeSteer  func()
 	steerErr     error
 	beforeSend   func()
-	beforeSteer  func()
 	capabilities surface.Capabilities
 	compactCalls int
 }
@@ -505,40 +505,6 @@ func TestDispatcherPersistsBeforeSendAndRetainsIDAcrossCrashBoundary(t *testing.
 	}
 }
 
-func TestDispatcherPersistsBeforeSteerAndTransitionsSameID(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	session := &surface.Session{ID: "steer-callback", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
-	if err := r.RegisterSession(*session); err != nil {
-		t.Fatal(err)
-	}
-	var seenID int64
-	var callbackErr error
-	adapter := &fakeSurface{capabilities: surface.Capabilities{Steer: true}}
-	adapter.beforeSteer = func() {
-		intent, err := r.DeliveryIntent(1)
-		if err != nil {
-			callbackErr = err
-			return
-		}
-		seenID = intent.ID
-		if intent.Status != registry.DeliveryIntentSubmitted || intent.Message != "steer callback" {
-			callbackErr = fmt.Errorf("provider callback saw intent %+v", intent)
-		}
-	}
-	receipt, err := (Dispatcher{Registry: r}).Steer(context.Background(), adapter, session, "steer callback")
-	if callbackErr != nil || err != nil || receipt == nil || receipt.DeliveryID != seenID {
-		t.Fatalf("callbackErr=%v err=%v receipt=%+v seenID=%d", callbackErr, err, receipt, seenID)
-	}
-	intent, err := r.DeliveryIntent(receipt.DeliveryID)
-	if err != nil || intent.Status != registry.DeliveryIntentSent {
-		t.Fatalf("same-id transition intent=%+v err=%v", intent, err)
-	}
-}
-
 func TestDispatcherQueueStorageFailureDiscardsSubmittedIntent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	r, err := registry.Open(path)
@@ -695,5 +661,39 @@ func TestDispatcherCompactReportsTypedControlFailure(t *testing.T) {
 	receipt, err := (Dispatcher{}).Compact(context.Background(), adapter, session)
 	if err == nil || !strings.Contains(err.Error(), "control unavailable") || receipt != nil || len(adapter.sent) != 0 || adapter.compactCalls != 1 {
 		t.Fatalf("receipt=%+v sent=%v err=%v", receipt, adapter.sent, err)
+	}
+}
+
+func TestDispatcherPersistsBeforeSteerAndTransitionsSameID(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "steer-callback", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	var seenID int64
+	var callbackErr error
+	adapter := &fakeSurface{capabilities: surface.Capabilities{Steer: true}}
+	adapter.beforeSteer = func() {
+		intent, err := r.DeliveryIntent(1)
+		if err != nil {
+			callbackErr = err
+			return
+		}
+		seenID = intent.ID
+		if intent.Status != registry.DeliveryIntentSubmitted || intent.Message != "steer callback" {
+			callbackErr = fmt.Errorf("provider callback saw intent %+v", intent)
+		}
+	}
+	receipt, err := (Dispatcher{Registry: r}).Steer(context.Background(), adapter, session, "steer callback")
+	if callbackErr != nil || err != nil || receipt == nil || receipt.DeliveryID != seenID {
+		t.Fatalf("callbackErr=%v err=%v receipt=%+v seenID=%d", callbackErr, err, receipt, seenID)
+	}
+	intent, err := r.DeliveryIntent(receipt.DeliveryID)
+	if err != nil || intent.Status != registry.DeliveryIntentSent {
+		t.Fatalf("same-id transition intent=%+v err=%v", intent, err)
 	}
 }

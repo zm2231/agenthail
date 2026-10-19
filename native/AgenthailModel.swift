@@ -70,13 +70,6 @@ final class AgenthailModel: ObservableObject {
         cache.countLimit = 100
         return cache
     }()
-    private struct PendingSendRequest {
-        let busyDelivery: String?
-        let turnSettings: TurnSettings
-        let message: String
-        let idempotencyKey: String
-    }
-    private var pendingSendRequests: [String: PendingSendRequest] = [:]
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
@@ -630,30 +623,34 @@ final class AgenthailModel: ObservableObject {
             completion?(false)
             return
         }
-        let idempotencyKey: String
-        if let retry = pendingSendRequests[sessionID], retry.busyDelivery == busyDelivery, retry.turnSettings == turnSettings, retry.message == text {
-            idempotencyKey = retry.idempotencyKey
-        } else {
-            idempotencyKey = UUID().uuidString
-            pendingSendRequests[sessionID] = PendingSendRequest(busyDelivery: busyDelivery, turnSettings: turnSettings, message: text, idempotencyKey: idempotencyKey)
-        }
-        let pending = LocalSend(text: text, sentAt: Date(), status: nil)
+        let pending = LocalSend(text: text, sentAt: Date(), status: nil, busyDelivery: busyDelivery, turnSettings: turnSettings)
         localSends[sessionID, default: []].append(pending)
+        deliver(pending, to: sessionID, api: api, completion: completion)
+    }
+
+    func retrySend(_ send: LocalSend, in sessionID: String) {
+        guard let api, let index = localSends[sessionID]?.firstIndex(where: { $0.id == send.id }) else { return }
+        localSends[sessionID]?[index].failure = nil
+        deliver(send, to: sessionID, api: api)
+    }
+
+    private func deliver(_ send: LocalSend, to sessionID: String, api: AgenthailAPI, completion: ((Bool) -> Void)? = nil) {
         Task {
             do {
-                let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: text, turnSettings: turnSettings, busyDelivery: busyDelivery, author: "person", idempotencyKey: idempotencyKey)
-                if pendingSendRequests[sessionID]?.idempotencyKey == idempotencyKey { pendingSendRequests.removeValue(forKey: sessionID) }
-                if !turnSettings.isEmpty, turnSettingsDrafts[sessionID] == turnSettings { turnSettingsDrafts.removeValue(forKey: sessionID) }
-                updateLocalSend(pending.id, in: sessionID, status: LocalSend.label(for: receipt.result?.status, waitingOnYou: receipt.result?.waitingOn != nil))
+                let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: send.text, turnSettings: send.turnSettings, busyDelivery: send.busyDelivery, author: "person", idempotencyKey: send.idempotencyKey)
+                if !send.turnSettings.isEmpty, turnSettingsDrafts[sessionID] == send.turnSettings { turnSettingsDrafts.removeValue(forKey: sessionID) }
+                updateLocalSend(send.id, in: sessionID) { $0.status = LocalSend.label(for: receipt.result?.status, waitingOnYou: receipt.result?.waitingOn != nil) }
                 operationError = nil
                 completion?(true)
             } catch {
-                localSends[sessionID]?.removeAll { $0.id == pending.id }
-                restoreToComposer(message.trimmingCharacters(in: .whitespacesAndNewlines), attachments: attachments, sessionID: sessionID)
-                operationError = AgenthailAPIError.userMessage(error)
+                updateLocalSend(send.id, in: sessionID) { $0.failure = AgenthailAPIError.userMessage(error) }
                 completion?(false)
             }
         }
+    }
+
+    func discardSend(_ send: LocalSend, in sessionID: String) {
+        localSends[sessionID]?.removeAll { $0.id == send.id }
     }
 
     @Published private(set) var modelCatalog: [String: [ModelOption]] = [:]
@@ -783,9 +780,10 @@ final class AgenthailModel: ObservableObject {
         draft(for: sessionID).restore(text, attachments: attachments)
     }
 
-    private func updateLocalSend(_ id: UUID, in sessionID: String, status: String) {
+    private func updateLocalSend(_ id: UUID, in sessionID: String, _ change: (inout LocalSend) -> Void) {
+        let sessionID = rekeys.resolve(sessionID)
         guard let index = localSends[sessionID]?.firstIndex(where: { $0.id == id }) else { return }
-        localSends[sessionID]?[index].status = status
+        change(&localSends[sessionID]![index])
     }
 
     private func startCatalogStream() {
@@ -933,7 +931,6 @@ final class AgenthailModel: ObservableObject {
     private func reconcilePanes() {
         if !rekeys.isEmpty {
             _ = rekeys.carry(&drafts)
-            _ = rekeys.carry(&pendingSendRequests)
             var sends = localSends
             if rekeys.carry(&sends) { localSends = sends }
             var settings = turnSettingsDrafts

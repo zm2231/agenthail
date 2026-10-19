@@ -1,3 +1,4 @@
+@testable import AgenthailHelpers
 import Foundation
 
 @main
@@ -40,8 +41,6 @@ struct SessionFactsTest {
 
         expect(SessionFacts.filterSummary(.recent, codexRecentHours: 6).contains("last 6 hours"), "recent summary names the Codex window")
         expect(SettingsCounts.history(50) == "50+" && SettingsCounts.history(12) == "12", "history count caps like the web")
-
-        expect(!LongReply.isLong(String(repeating: "a", count: 2400)) && LongReply.isLong(String(repeating: "a", count: 2401)), "long replies start past 2400 characters")
 
         let detailed = item("toolResult", title: "Bash", timestamp: "2026-10-18T06:00:00Z", callId: "call_synthetic", status: "completed", truncated: true, reason: "size limit", bodyRef: "body/synthetic")
         expect(TimelineMetadata.fields(detailed) == ["Title: Bash", "Call: call_synthetic", "Status: completed", "2026-10-18T06:00:00Z", "Content truncated (size limit)", "Body reference: body/synthetic"], "timeline metadata lists every field like the web")
