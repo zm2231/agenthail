@@ -28,7 +28,18 @@ func timelineFixture(t *testing.T, data string) string {
 func TestMain(m *testing.M) {
 	os.Unsetenv("CLAUDE_CONFIG_DIR")
 	transcriptPollInterval = 20 * time.Millisecond
-	os.Exit(m.Run())
+	// Adapters write state such as the Codex write lock under HOME, so the
+	// package runs against a scratch HOME rather than the developer's own.
+	home, err := os.MkdirTemp("", "surfaces-home-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv("HOME", home)
+	os.Setenv("CFFIXED_USER_HOME", home)
+	code := m.Run()
+	os.RemoveAll(home)
+	os.Exit(code)
 }
 
 // readTimeline reads a transcript page through the adapter's public ReadSession.
