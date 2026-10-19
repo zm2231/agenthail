@@ -19,17 +19,17 @@ import (
 const claudeHostListTTL = time.Second
 
 type claudeHost struct {
-	client claudehost.Client
-	mu     sync.Mutex
-	listed time.Time
-	pids   map[int]string
+	client   claudehost.Client
+	mu       sync.Mutex
+	listed   time.Time
+	sessions map[string]int
 }
 
-// claudeNativeSocket reports whether a Claude transport delivers agent
-// messages over the session's native messaging socket. A host session has
-// that socket too; only a person's turn goes through the host.
-func claudeNativeSocket(transport string) bool {
-	return transport == "uds" || transport == "host"
+// claudeHosted reports whether the host runs the session's conversation. Its
+// process also serves Claude's native messaging socket, which agent messages
+// take; only a person's turn goes through the host.
+func claudeHosted(sess *surface.Session) bool {
+	return sess != nil && sess.RuntimeKind == surface.RuntimeClaudeHost
 }
 
 func newClaudeHost(home string) *claudeHost {
@@ -38,10 +38,15 @@ func newClaudeHost(home string) *claudeHost {
 
 // runs reports whether the host runs this Claude process for this
 // conversation. A host that does not answer runs nothing, so its sessions
-// keep their native socket.
+// fall back to the CLI runtime and keep their native socket.
 func (h *claudeHost) runs(ctx context.Context, pid int, conversation string) bool {
-	if h == nil || pid <= 0 {
-		return false
+	return pid > 0 && conversation != "" && h.listing(ctx)[conversation] == pid
+}
+
+// listing is the host's sessions by conversation, with their process ids.
+func (h *claudeHost) listing(ctx context.Context) map[string]int {
+	if h == nil {
+		return nil
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -49,15 +54,15 @@ func (h *claudeHost) runs(ctx context.Context, pid int, conversation string) boo
 		listCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 		listing, err := h.client.List(listCtx)
 		cancel()
-		h.pids = map[int]string{}
+		h.sessions = map[string]int{}
 		if err == nil {
 			for _, session := range listing.Sessions {
-				h.pids[session.PID] = session.SessionID
+				h.sessions[session.SessionID] = session.PID
 			}
 		}
 		h.listed = time.Now()
 	}
-	return h.pids[pid] == conversation
+	return h.sessions
 }
 
 // The intent uuid becomes the transcript record's uuid: the turn is followed

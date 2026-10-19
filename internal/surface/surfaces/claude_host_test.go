@@ -25,14 +25,14 @@ func listedSession(t *testing.T, c *Claude, id string) *surface.Session {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	var found *surface.Session
-	claudehosttest.WaitFor(t, "the session to be listed on the host transport", func() bool {
+	claudehosttest.WaitFor(t, "the session to be listed on the host runtime", func() bool {
 		c.host.listed = time.Time{}
 		sessions, err := c.List(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
 		for i := range sessions {
-			if sessions[i].ID == id && sessions[i].Transport == "host" {
+			if sessions[i].ID == id && sessions[i].RuntimeKind == surface.RuntimeClaudeHost {
 				found = &sessions[i]
 				return true
 			}
@@ -51,14 +51,14 @@ func origin(t *testing.T, turn claudehosttest.Turn) map[string]any {
 	return out
 }
 
-func TestAHostSessionIsListedOnTheHostTransport(t *testing.T) {
+func TestAHostSessionIsListedOnTheHostRuntimeWithItsNativeSocket(t *testing.T) {
 	c, fixture := hostedClaude(t)
 	client := fixture.Start(t)
 	id := uuid.NewString()
 	opened := fixture.Open(t, client, id)
 	sess := listedSession(t, c, id)
-	if sess.PID != opened.PID || sess.Bridge != "" {
-		t.Fatalf("listed %+v, want pid %d and no bridge", sess, opened.PID)
+	if sess.PID != opened.PID || sess.Bridge != "" || sess.Transport != "uds" {
+		t.Fatalf("listed %+v, want pid %d, the native socket and no bridge", sess, opened.PID)
 	}
 	if got := c.Route(sess, surface.AuthorPerson); got != surface.RouteHumanTurn {
 		t.Fatalf("person route = %v, want a human turn", got)
@@ -188,4 +188,24 @@ func TestHostErrorsMapToDeliveryOutcomes(t *testing.T) {
 			t.Errorf("%s: %v", tc.name, got)
 		}
 	}
+}
+
+func TestAHostSessionIsOpenWhileTheHostListsIt(t *testing.T) {
+	c, fixture := hostedClaude(t)
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	sess := listedSession(t, c, id)
+	cli := surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: sess.PID}
+	open := c.OpenSessions(context.Background(), []surface.Session{*sess, cli})
+	if !open[id] || open[cli.ID] {
+		t.Fatalf("open = %v, want the host session and not a CLI row on its pid", open)
+	}
+	if err := client.Close(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	claudehosttest.WaitFor(t, "the host to stop listing the session", func() bool {
+		c.host.listed = time.Time{}
+		return !c.OpenSessions(context.Background(), []surface.Session{*sess})[id]
+	})
 }

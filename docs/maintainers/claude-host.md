@@ -59,8 +59,12 @@ would prompt for, with a reason, and emits a `permission_denied` event.
 ## Delivery
 
 A Claude process that the host runs for the conversation it lists is
-discovered with transport `host`. It also has Claude's native messaging socket,
-so it is reachable like a `uds` session (`claudeNativeSocket`).
+discovered with runtime kind `claude-host`; the Claude adapter serves both
+`claude-cli` and `claude-host` and decides per session from that kind. The
+process also serves Claude's native messaging socket, so its transport is
+`uds`. It is open while the host lists it; a CLI session is open while its pid
+is a running `claude` process. When the host stops listing a process that still
+runs, discovery records it as `claude-cli` again.
 
 - A person's message ([`RouteHumanTurn`](../../internal/delivery/route.go))
   goes through the host's `send` with origin `human`. Its uuid is the delivery

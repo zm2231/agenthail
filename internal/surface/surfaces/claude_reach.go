@@ -64,7 +64,7 @@ func (c *Claude) reach(ctx context.Context, sess *surface.Session) (bool, error)
 	if cwd == "" {
 		return false, surface.DeliveryTerminal(fmt.Errorf("Claude conversation %s has no known working directory to resume in", conversation), surface.DeliveryTargetMissing)
 	}
-	resumed, err := c.resume(ctx, conversation, cwd, state.job, !claudeNativeSocket(sess.Transport) && !c.localOnly)
+	resumed, err := c.resume(ctx, conversation, cwd, state.job, sess.Transport != "uds" && !c.localOnly)
 	if err != nil {
 		return false, err
 	}
@@ -93,10 +93,10 @@ func (c *Claude) reachableAsIs(ctx context.Context, sess *surface.Session) bool 
 	if !c.localOnly {
 		sess.Bridge = str(record, "bridgeSessionId")
 	}
-	if claudeNativeSocket(sess.Transport) {
+	if sess.Transport == "uds" {
 		return c.peerSocket(ctx, record) != ""
 	}
-	return sess.Bridge != ""
+	return claudeHosted(sess) || sess.Bridge != ""
 }
 
 // conversation reads which processes hold a conversation. Session records
@@ -234,6 +234,7 @@ func adoptClaudeProcess(sess, process *surface.Session) {
 	if sess.Transport != "" || process.Bridge == "" {
 		sess.Transport = process.Transport
 	}
+	sess.RuntimeKind = process.RuntimeKind
 	sess.Bridge = process.Bridge
 	sess.PID = process.PID
 	sess.Status = process.Status

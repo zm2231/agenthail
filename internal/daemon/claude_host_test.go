@@ -37,7 +37,7 @@ func hostedSession(t *testing.T, claude *surfaces.Claude, id string) surface.Ses
 			t.Fatal(err)
 		}
 		for _, session := range sessions {
-			if session.ID == id && session.Transport == "host" {
+			if session.ID == id && session.RuntimeKind == surface.RuntimeClaudeHost {
 				found = session
 				return true
 			}

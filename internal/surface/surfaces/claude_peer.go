@@ -151,7 +151,7 @@ func (c *Claude) nativeCaller(ctx context.Context, id string) (*surface.Session,
 	var sender *surface.Session
 	var record map[string]any
 	for _, process := range processes {
-		if process.session.ID != id || !claudeNativeSocket(process.session.Transport) {
+		if process.session.ID != id || process.session.Transport != "uds" {
 			continue
 		}
 		candidate, present := c.peerRecord(process.session.PID)

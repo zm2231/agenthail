@@ -65,7 +65,7 @@ func NewClaudeWithRequest(profile, home string, request ClaudeRequest) *Claude {
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
 
 func (c *Claude) RuntimeKinds() []surface.RuntimeKind {
-	return []surface.RuntimeKind{surface.RuntimeClaudeCLI}
+	return []surface.RuntimeKind{surface.RuntimeClaudeCLI, surface.RuntimeClaudeHost}
 }
 
 func (c *Claude) ObserveClaudeRuns(ctx context.Context) ([]surface.ClaudeRunObservation, error) {
@@ -87,12 +87,13 @@ func (c *Claude) Capabilities() surface.Capabilities {
 	}
 }
 
-// SessionCapabilities narrows Capabilities for a session reached over its native
-// peer socket: it streams only from a local transcript, and steer, compact,
-// model and interrupt need its Remote Control bridge.
+// SessionCapabilities narrows Capabilities for a session the host runs, which
+// takes steer and interrupt but no slash commands, and for a CLI session reached
+// over its native peer socket, where steer, compact, model and interrupt need
+// its Remote Control bridge. Both stream only from a local transcript.
 func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities {
 	capabilities := c.Capabilities()
-	if sess != nil && sess.Transport == "host" {
+	if claudeHosted(sess) {
 		capabilities.Stream = sess.HasLocal && sess.Transcript != ""
 		capabilities.Compact = false
 		capabilities.Model = false
@@ -121,7 +122,7 @@ func (c *Claude) Health(ctx context.Context) error {
 	sessions, err := c.List(ctx)
 	if err == nil {
 		for _, session := range sessions {
-			if claudeNativeSocket(session.Transport) {
+			if session.Transport == "uds" {
 				return nil
 			}
 		}
@@ -444,7 +445,9 @@ func (c *Claude) process(ctx context.Context, m map[string]any, transcript func(
 		bridge = str(m, "bridgeSessionId")
 	}
 	socket := c.peerSocket(ctx, m)
-	if conversation == "" || (bridge == "" && socket == "") {
+	pid, _ := m["pid"].(float64)
+	hosted := c.host.runs(ctx, int(pid), conversation)
+	if conversation == "" || (bridge == "" && socket == "" && !hosted) {
 		return claudeProcess{}, false
 	}
 	sess := surface.Session{
@@ -455,14 +458,12 @@ func (c *Claude) process(ctx context.Context, m map[string]any, transcript func(
 		Cwd:         str(m, "cwd"),
 		Status:      surface.SessionStatus(str(m, "status")),
 	}
-	if pid, ok := m["pid"].(float64); ok {
-		sess.PID = int(pid)
-	}
+	sess.PID = int(pid)
 	if socket != "" {
 		sess.Transport = "uds"
 	}
-	if c.host.runs(ctx, sess.PID, conversation) {
-		sess.Transport = "host"
+	if hosted {
+		sess.RuntimeKind = surface.RuntimeClaudeHost
 	}
 	if n, ok := m["name"].(string); ok {
 		sess.Name = n
@@ -692,7 +693,7 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 	if _, err := c.reach(ctx, sess); err != nil {
 		return nil, err
 	}
-	if claudeNativeSocket(sess.Transport) {
+	if sess.Transport == "uds" {
 		if err := peerSlashCommand(sess, message); err != nil {
 			return nil, err
 		}
@@ -705,7 +706,7 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 // run one. It is checked before reaching the session and again on the
 // transport the session was reached through.
 func peerSlashCommand(sess *surface.Session, message string) error {
-	if claudeNativeSocket(sess.Transport) && strings.HasPrefix(strings.TrimSpace(message), "/") {
+	if sess.Transport == "uds" && strings.HasPrefix(strings.TrimSpace(message), "/") {
 		return surface.DeliveryTerminal(fmt.Errorf("Claude peer messages cannot execute slash commands; use the Claude session directly"), surface.DeliveryInvalidRequest)
 	}
 	return nil
@@ -729,14 +730,14 @@ func (c *Claude) Route(sess *surface.Session, author surface.Author) surface.Rou
 	if author == surface.AuthorPerson && c.canSendHumanTurn(sess) {
 		return surface.RouteHumanTurn
 	}
-	if sess != nil && claudeNativeSocket(sess.Transport) {
+	if sess != nil && sess.Transport == "uds" {
 		return surface.RoutePeer
 	}
 	return surface.RouteSend
 }
 
 func (c *Claude) canSendHumanTurn(sess *surface.Session) bool {
-	return sess != nil && sess.Surface == surface.KindClaude && (sess.Transport == "host" || !c.localOnly && !nativeClaudeOnly(sess))
+	return sess != nil && sess.Surface == surface.KindClaude && (claudeHosted(sess) || !c.localOnly && !nativeClaudeOnly(sess))
 }
 
 // SendHumanTurn submits a message through Claude's authenticated web bridge as
@@ -751,7 +752,7 @@ func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, messa
 	if _, err := c.reach(ctx, sess); err != nil {
 		return nil, err
 	}
-	if sess.Transport == "host" {
+	if claudeHosted(sess) {
 		return c.sendHostTurn(ctx, sess, message, "")
 	}
 	if !c.canSendHumanTurn(sess) {
@@ -1203,7 +1204,7 @@ func (c *Claude) confirmedCommand(ctx context.Context, sess *surface.Session, co
 }
 
 func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
-	if sess.Transport == "host" {
+	if claudeHosted(sess) {
 		return c.interruptHost(ctx, sess)
 	}
 	if c.localOnly || nativeClaudeOnly(sess) {
@@ -1248,7 +1249,7 @@ func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
 }
 
 func (c *Claude) Steer(ctx context.Context, sess *surface.Session, message string) error {
-	if sess.Transport == "host" {
+	if claudeHosted(sess) {
 		return c.steerHost(ctx, sess, message)
 	}
 	if nativeClaudeOnly(sess) {
