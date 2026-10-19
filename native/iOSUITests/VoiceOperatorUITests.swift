@@ -13,7 +13,7 @@ final class VoiceOperatorUITests: XCTestCase {
 
         let newConversation = app.buttons["new-voice-conversation"]
         XCTAssertTrue(newConversation.isHittable)
-        newConversation.tap()
+        newConversation.tapWhenReady()
         XCTAssertTrue(app.staticTexts["This creates a separate Codex thread. The current conversation remains available in Sessions."].waitForExistence(timeout: 5))
     }
 }
