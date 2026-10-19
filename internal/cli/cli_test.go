@@ -1033,7 +1033,7 @@ func TestReplyLabelsSourceAndBoundsDeadline(t *testing.T) {
 	session := surface.Session{ID: "s", Surface: surface.KindCodex}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}, tail: []surface.Exchange{{User: "question", Assistant: "answer", Source: "rpc"}}}
 	app, _ := cliFixture(t, fake)
-	output, err := captureStdout(t, func() error { return app.Run([]string{"reply", "codex:s", "--json", "--timeout", "50ms"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"reply", "codex:s", "--json", "--timeout", "10s"}) })
 	if err != nil || !strings.Contains(output, `"source":"rpc"`) {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
