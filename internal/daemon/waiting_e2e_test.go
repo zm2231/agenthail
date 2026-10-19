@@ -410,7 +410,7 @@ func TestQuestionRecordedButNotAnnouncedIsAnnouncedAfterRestart(t *testing.T) {
 	if record, err := q.store.RecordWaiting(q.session.ID, &surface.Waiting{Kind: surface.WaitingQuestion, ID: questionID, Since: questionAsked}, questionAsked); err != nil || !record.Announce {
 		t.Fatalf("record=%+v err=%v", record, err)
 	}
-	if _, err := q.store.QueueMessageWithOptions(q.session.ID, "after you answer", "", surface.SendOptions{}); err != nil {
+	if _, err := q.store.QueueMessageWithOptions(q.session.ID, "after you answer", "", surface.SendOptions{BusyDelivery: "queue"}); err != nil {
 		t.Fatal(err)
 	}
 	runDaemon(t, q.store, q.claude)
@@ -571,6 +571,46 @@ func TestQueuedSteerToAClaudeSessionWithoutABridgeWaitsForTheTurn(t *testing.T) 
 		}
 		if item, err := store.QueueItem(queueID, adapters); err != nil || item.HeldBy != test.want {
 			t.Fatalf("bridge %q: item=%+v err=%v, want held by %q", test.bridge, item, err, test.want)
+		}
+	}
+}
+
+func TestQueuedPeerMessageReachesARunningOrWaitingClaudeTurnOverItsSocket(t *testing.T) {
+	for _, waiting := range []bool{true, false} {
+		q := newClaudeQuestion(t)
+		if !waiting {
+			q.answer(t)
+		}
+		manager := claudetest.ListenPeerManager(t, q.process.Home)
+		sender := surface.Session{ID: "sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+		if err := q.store.RegisterSession(sender); err != nil {
+			t.Fatal(err)
+		}
+		peerID, _, err := q.store.QueueDeliveryWithIntent(q.session.ID, "handoff", "", surface.SendOptions{SourceSessionID: sender.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		queuedID, _, err := q.store.QueueDeliveryWithIntent(q.session.ID, "after the turn", "", surface.SendOptions{SourceSessionID: sender.ID, BusyDelivery: "queue"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if item, err := q.store.QueueItem(peerID, nil); err != nil || item.HeldBy != "" {
+			t.Fatalf("waiting=%v: item=%+v err=%v, want the peer message ready to send", waiting, item, err)
+		}
+		runDaemon(t, q.store, surfaces.NewClaude(nil, q.process.Home))
+		eventually(t, "the peer message over the socket", func() bool { return manager.Count("handoff") == 1 })
+		eventually(t, "the peer message acknowledged", func() bool {
+			item, err := q.store.QueueItem(peerID, nil)
+			return err == nil && item.Status == "delivered"
+		})
+		if item, err := q.store.QueueItem(queuedID, nil); err != nil || item.Status != "pending" || manager.Count("after the turn") != 0 {
+			t.Fatalf("waiting=%v: an explicit queue left during the turn: item=%+v err=%v", waiting, item, err)
+		}
+		if !waiting {
+			appendClaudeRecords(t, q.transcript, `{"type":"assistant","uuid":"done","timestamp":"2026-10-18T20:18:30Z","message":{"id":"msg-done","stop_reason":"end_turn","content":[{"type":"text","text":"Released from main."}]}}`,
+				`{"type":"system","subtype":"turn_duration","timestamp":"2026-10-18T20:18:31Z"}`)
+			q.process.RecordStatus("conversation-question", q.process.Home, "session_question", "idle", "", questionAsked.Add(2*time.Hour))
+			eventually(t, "the explicit queue once the turn ends", func() bool { return manager.Count("after the turn") == 1 })
 		}
 	}
 }

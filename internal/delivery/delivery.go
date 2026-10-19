@@ -180,7 +180,10 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	}
 	var intent *registry.DeliveryIntent
 	retry := true
-	if route == surface.RoutePeer {
+	// A Claude peer socket delivers to a running or waiting turn with the
+	// sender's address, so only an explicit queue or a message that needs
+	// per-message options waits for the turn to end.
+	if route == surface.RoutePeer && (options.BusyDelivery != "" && busyMode == deliverypolicy.Queue || options.HoldsForQueue()) {
 		observation, observeErr := adapter.Observe(ctx, session)
 		if observeErr != nil {
 			return nil, observeErr
@@ -242,6 +245,7 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 		return nil, ownedErr
 	}
 	if surface.IsDeliveryHeld(err) {
+		options.BusyDelivery = string(deliverypolicy.Queue)
 		return d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, deliverypolicy.Queue, "", intent, nil)
 	}
 	if err != nil {
@@ -288,8 +292,9 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 		d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result.UUID})
 		return receipt, nil
 	}
-	if !retry {
+	if !retry || route == surface.RoutePeer {
 		busyMode = deliverypolicy.Queue
+		options.BusyDelivery = string(deliverypolicy.Queue)
 	}
 	receipt, err := d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, busyMode, result.UUID, intent, nil)
 	if errors.Is(err, errTurnEnded) {
@@ -362,9 +367,8 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 		return nil, err
 	}
 	if needsOptionSender {
-		busyMode = deliverypolicy.Queue
+		options.BusyDelivery = string(deliverypolicy.Queue)
 	}
-	options.BusyDelivery = string(busyMode)
 	var queueID, deliveryID int64
 	var err error
 	if intent != nil {
