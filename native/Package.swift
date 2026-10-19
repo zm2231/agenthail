@@ -33,6 +33,9 @@ let package = Package(
                 "ToolPresentation.swift",
                 "OperationsRefreshPolicy.swift",
                 "AgenthailModel.swift",
+                "VoiceAPI.swift",
+                "VoiceAudioBridge.swift",
+                "VoiceOperatorModel.swift",
                 "macOS"
             ],
         )

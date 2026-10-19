@@ -149,6 +149,10 @@ jobs:
           "$RUNNER_TEMP/bounded-dock-test"
           swiftc -parse-as-library native/macOS/SessionHandle.swift native/tests/session_handle_test.swift -o "$RUNNER_TEMP/session-handle-test"
           "$RUNNER_TEMP/session-handle-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/AgenthailAPI.swift native/TurnSettings.swift native/VoiceAPI.swift native/tests/voice_api_test.swift -o "$RUNNER_TEMP/voice-api-test"
+          "$RUNNER_TEMP/voice-api-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/AgenthailAPI.swift native/TurnSettings.swift native/VoiceAPI.swift native/VoiceAudioBridge.swift native/VoiceOperatorModel.swift native/macOS/VoiceController.swift native/tests/voice_call_test.swift -o "$RUNNER_TEMP/voice-call-test"
+          "$RUNNER_TEMP/voice-call-test"
       - name: Mac app build
         run: swift build --package-path native -c release --product AgenthailMac
       - name: Installer lint

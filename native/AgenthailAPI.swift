@@ -51,13 +51,17 @@ final class AgenthailAPI: @unchecked Sendable {
 
 #if os(macOS)
     convenience init(session: URLSession = .shared) throws {
+        let local = try Self.localDaemon()
+        self.init(baseURL: local.baseURL, token: local.token, session: session)
+    }
+
+    static func localDaemon() throws -> (baseURL: URL, token: String) {
         let environment = ProcessInfo.processInfo.environment
         if let rawURL = environment["AGENTHAIL_API_URL"],
            let baseURL = URL(string: rawURL),
            let token = environment["AGENTHAIL_API_TOKEN"],
            !token.isEmpty {
-            self.init(baseURL: baseURL, token: token, session: session)
-            return
+            return (baseURL, token)
         }
         let home = FileManager.default.homeDirectoryForCurrentUser
         let tokenURL = home.appendingPathComponent(".agenthail/dashboard.token")
@@ -75,7 +79,7 @@ final class AgenthailAPI: @unchecked Sendable {
         guard let baseURL = URL(string: "http://\(listen)") else {
             throw AgenthailAPIError.unavailable("The Agenthail dashboard address is invalid.")
         }
-        self.init(baseURL: baseURL, token: token, session: session)
+        return (baseURL, token)
     }
 #endif
 

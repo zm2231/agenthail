@@ -25,6 +25,9 @@ targets:
       - path: SessionSelection.swift
       - path: EventRetryBackoff.swift
       - path: ToolPresentation.swift
+      - path: VoiceAPI.swift
+      - path: VoiceAudioBridge.swift
+      - path: VoiceOperatorModel.swift
       - path: iOS
     settings:
       base:
