@@ -44,7 +44,7 @@ func TestThreadCreateCodexRegistersAndPrintsJSON(t *testing.T) {
 	base := &cliSurface{kind: surface.KindCodex}
 	starter := &starterCLISurface{
 		cliSurface: base,
-		session:    &surface.Session{ID: "thread-123", Surface: surface.KindCodex, Name: "Build this", Cwd: cwd, Status: surface.StatusBusy, Source: "agenthail", Transport: "managed"},
+		session:    &surface.Session{ID: "thread-123", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Name: "Build this", Cwd: cwd, Status: surface.StatusBusy, Source: "agenthail", Transport: "managed"},
 		delivery:   &surface.SendResult{UUID: "turn-456", Accepted: true},
 	}
 	app := threadFixture(t, starter)
@@ -86,7 +86,7 @@ func TestThreadCreateCodexAcceptsMessageFlagAndDefaultsToCallerCwd(t *testing.T)
 	base := &cliSurface{kind: surface.KindCodex}
 	starter := &starterCLISurface{
 		cliSurface: base,
-		session:    &surface.Session{ID: "thread-flag", Surface: surface.KindCodex, Cwd: "/tmp", Transport: "managed"},
+		session:    &surface.Session{ID: "thread-flag", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: "/tmp", Transport: "managed"},
 		delivery:   &surface.SendResult{UUID: "turn-flag", Accepted: true},
 	}
 	app := threadFixture(t, starter)
@@ -126,7 +126,7 @@ func TestThreadCreateCodexReadsLongMessageFromStdin(t *testing.T) {
 	base := &cliSurface{kind: surface.KindCodex}
 	starter := &starterCLISurface{
 		cliSurface: base,
-		session:    &surface.Session{ID: "thread", Surface: surface.KindCodex, Cwd: t.TempDir(), Transport: "managed"},
+		session:    &surface.Session{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: t.TempDir(), Transport: "managed"},
 		delivery:   &surface.SendResult{UUID: "turn", Accepted: true},
 	}
 	app := threadFixture(t, starter)
@@ -145,7 +145,7 @@ func TestThreadCreateCodexPreservesCreatedThreadOnUnknownTurn(t *testing.T) {
 	base := &cliSurface{kind: surface.KindCodex}
 	starter := &starterCLISurface{
 		cliSurface: base,
-		session:    &surface.Session{ID: "created", Surface: surface.KindCodex, Cwd: cwd, Transport: "managed"},
+		session:    &surface.Session{ID: "created", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: cwd, Transport: "managed"},
 		err:        surface.DeliveryOutcomeUnknown(errors.New("connection closed")),
 	}
 	app := threadFixture(t, starter)
@@ -180,7 +180,7 @@ func TestThreadCreateCodexReportsDefinitiveInitialFailure(t *testing.T) {
 	base := &cliSurface{kind: surface.KindCodex}
 	starter := &starterCLISurface{
 		cliSurface: base,
-		session:    &surface.Session{ID: "created", Surface: surface.KindCodex, Cwd: cwd, Transport: "managed"},
+		session:    &surface.Session{ID: "created", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: cwd, Transport: "managed"},
 		err:        errors.New("initial message rejected"),
 	}
 	app := threadFixture(t, starter)

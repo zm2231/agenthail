@@ -278,7 +278,7 @@ func (s *sessionSource) run() {
 		seedErr = s.seedJournal()
 		s.setSeedErr(seedErr)
 	}
-	if !surface.EffectiveCapabilities(&s.session, s.adapter.Capabilities()).Stream {
+	if !surface.EffectiveCapabilities(s.adapter, &s.session).Stream {
 		for s.wait(sessionSnapshotRefreshInterval) {
 			s.setSeedErr(s.seedJournal())
 		}
@@ -297,6 +297,7 @@ func (s *sessionSource) run() {
 		current.CodexPendingEventUser = s.session.CodexPendingEventUser
 		current.CodexPendingEventTurn = s.session.CodexPendingEventTurn
 		current.CodexCurrentTurnID = s.session.CodexCurrentTurnID
+		current.ClaudeClosingTurn = s.session.ClaudeClosingTurn
 		streamErr := s.adapter.Stream(s.ctx, &current, "", s.append, 30*time.Minute)
 		if current.Transcript == s.session.Transcript && current.TranscriptIdentity != "" && (current.TranscriptIdentity == s.session.TranscriptIdentity || !s.session.TranscriptOffsetSet) && current.TranscriptOffsetSet && current.TranscriptOffset >= s.session.TranscriptOffset {
 			s.session.TranscriptOffset = current.TranscriptOffset
@@ -305,6 +306,7 @@ func (s *sessionSource) run() {
 			s.session.CodexPendingEventUser = current.CodexPendingEventUser
 			s.session.CodexPendingEventTurn = current.CodexPendingEventTurn
 			s.session.CodexCurrentTurnID = current.CodexCurrentTurnID
+			s.session.ClaudeClosingTurn = current.ClaudeClosingTurn
 		}
 		if errors.Is(streamErr, surface.ErrUnsupported) {
 			<-s.ctx.Done()
@@ -443,7 +445,7 @@ func (s *sessionSource) loadSeed() error {
 	if provider, ok := s.adapter.(surface.LocalTranscriptProvider); ok {
 		localTranscript = provider.RequiresLocalTranscript(&s.session)
 	}
-	streamable := surface.EffectiveCapabilities(&s.session, s.adapter.Capabilities()).Stream
+	streamable := surface.EffectiveCapabilities(s.adapter, &s.session).Stream
 	if statusErr == nil && seedStatus == registry.SessionJournalSeeded && !localTranscript && streamable {
 		return s.resumeClaudeTranscript(trustedIdentity)
 	}

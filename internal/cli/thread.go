@@ -60,7 +60,7 @@ func (a *App) cmdThread(args []string) error {
 	if a.Registry == nil {
 		return fmt.Errorf("registry not available")
 	}
-	adapter := a.surfaceByKind(request.surface)
+	adapter := a.adapters().ForSurface(request.surface)
 	if adapter == nil {
 		return fmt.Errorf("surface %s is not configured", request.surface)
 	}

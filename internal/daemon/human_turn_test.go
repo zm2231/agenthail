@@ -20,6 +20,7 @@ import (
 const (
 	idleClaudeTranscript = `{"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"previous"}}
 {"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
+{"type":"system","subtype":"turn_duration","timestamp":"2026-07-19T01:00:01Z"}
 `
 	busyClaudeTranscript = `{"type":"user","uuid":"u2","timestamp":"2026-07-19T01:00:02Z","message":{"content":"running"}}
 `
@@ -67,9 +68,9 @@ func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
 		return http.StatusOK, `{}`, nil
 	})}
 	dir := t.TempDir()
-	f.bridged = surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, PID: process.PID, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "bridged.jsonl")}
-	f.native = surface.Session{ID: "native-only", Surface: surface.KindClaude, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "native.jsonl")}
-	agent := surface.Session{ID: "agent", Surface: surface.KindCodex, Transport: "managed", Status: surface.StatusIdle}
+	f.bridged = surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: process.PID, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "bridged.jsonl")}
+	f.native = surface.Session{ID: "native-only", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "native.jsonl")}
+	agent := surface.Session{ID: "agent", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "managed", Status: surface.StatusIdle}
 	for _, session := range []surface.Session{f.bridged, f.native, agent} {
 		if err := r.RegisterSession(session); err != nil {
 			t.Fatal(err)

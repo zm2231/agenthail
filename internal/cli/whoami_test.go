@@ -13,8 +13,8 @@ func TestWhoamiUsesBoundSessionInsteadOfSharedCWD(t *testing.T) {
 	app, store := cliFixture(t, fake)
 	sharedCwd := "/work/agenthail"
 	for _, session := range []surface.Session{
-		{ID: "codex-one", Surface: surface.KindCodex, Cwd: sharedCwd},
-		{ID: "codex-two", Surface: surface.KindCodex, Cwd: sharedCwd},
+		{ID: "codex-one", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: sharedCwd},
+		{ID: "codex-two", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: sharedCwd},
 	} {
 		if err := store.RegisterSession(session); err != nil {
 			t.Fatal(err)
@@ -41,7 +41,7 @@ func TestWhoamiUsesBoundSessionInsteadOfSharedCWD(t *testing.T) {
 func TestWhoamiReportsUnboundShellWithoutGuessingFromCWD(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex}
 	app, store := cliFixture(t, fake)
-	if err := store.RegisterSession(surface.Session{ID: "other", Surface: surface.KindCodex, Cwd: "/work/agenthail"}); err != nil {
+	if err := store.RegisterSession(surface.Session{ID: "other", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: "/work/agenthail"}); err != nil {
 		t.Fatal(err)
 	}
 

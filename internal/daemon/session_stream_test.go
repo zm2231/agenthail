@@ -79,6 +79,7 @@ func TestAPISessionStreamReplaysJournalWithoutNewProviderRead(t *testing.T) {
 func TestAPISessionStreamRejectsClaudeWithoutLiveStream(t *testing.T) {
 	d, reg, fake, from, _ := daemonFixture(t)
 	from.Surface = surface.KindClaude
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	from.Transport = "uds"
 	fake.kind = surface.KindClaude
 	if err := reg.RegisterSession(from); err != nil {

@@ -15,7 +15,7 @@ func TestDeliveryIntentsCarryAUUIDFromBeforeTheyHadOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"sender", "target"} {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex}); err != nil {
+		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 			t.Fatal(err)
 		}
 	}

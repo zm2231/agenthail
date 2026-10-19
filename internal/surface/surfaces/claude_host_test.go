@@ -60,10 +60,13 @@ func TestAHostSessionIsListedOnTheHostTransport(t *testing.T) {
 	if sess.PID != opened.PID || sess.Bridge != "" {
 		t.Fatalf("listed %+v, want pid %d and no bridge", sess, opened.PID)
 	}
-	if !c.CanSendHumanTurn(sess) {
-		t.Fatal("a host session takes a person's turn")
+	if got := c.Route(sess, surface.AuthorPerson); got != surface.RouteHumanTurn {
+		t.Fatalf("person route = %v, want a human turn", got)
 	}
-	caps := surface.EffectiveCapabilities(sess, c.Capabilities())
+	if got := c.Route(sess, ""); got != surface.RoutePeer {
+		t.Fatalf("agent route = %v, want the native socket", got)
+	}
+	caps := surface.EffectiveCapabilities(c, sess)
 	if !caps.Steer || !caps.Interrupt || caps.Compact || caps.Model {
 		t.Fatalf("capabilities = %+v, want steer and interrupt only among controls", caps.Capabilities)
 	}

@@ -22,7 +22,7 @@ func (a *App) cmdGoal(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surf.Capabilities().Goal {
+	if !surface.CapabilitiesFor(surf, sess).Goal {
 		return fmt.Errorf("%s does not support goal management", surf.Name())
 	}
 	if len(positional) == 1 {

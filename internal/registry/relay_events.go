@@ -60,7 +60,7 @@ func (r *Registry) PrepareRelaySource(ctx context.Context, adapter surface.Surfa
 	if handoff != "" && handoff != HandoffTurnFinished && handoff != HandoffGoalCompleted {
 		return fmt.Errorf("handoff must be turn_finished or goal_completed")
 	}
-	if handoff == HandoffGoalCompleted && !surface.EffectiveCapabilities(session, adapter.Capabilities()).Goal {
+	if handoff == HandoffGoalCompleted && !surface.EffectiveCapabilities(adapter, session).Goal {
 		return fmt.Errorf("source does not support goal-completed handoffs")
 	}
 	reader, ok := adapter.(surface.CompletionReader)

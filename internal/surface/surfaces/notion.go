@@ -167,6 +167,10 @@ func (n *Notion) autoDetect(ctx context.Context) error {
 
 func (n *Notion) Name() surface.SurfaceKind { return surface.KindNotion }
 
+func (n *Notion) RuntimeKinds() []surface.RuntimeKind {
+	return []surface.RuntimeKind{surface.RuntimeNotionWeb}
+}
+
 func (n *Notion) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
 		Send: true, Stream: false, Reply: true,
@@ -224,10 +228,11 @@ func (n *Notion) List(ctx context.Context) ([]surface.Session, error) {
 	sessions := make([]surface.Session, 0, len(resp.Transcripts))
 	for _, t := range resp.Transcripts {
 		sess := surface.Session{
-			ID:      t.ID,
-			Surface: surface.KindNotion,
-			Name:    t.Title,
-			Status:  surface.StatusIdle,
+			ID:          t.ID,
+			Surface:     surface.KindNotion,
+			RuntimeKind: surface.RuntimeNotionWeb,
+			Name:        t.Title,
+			Status:      surface.StatusIdle,
 		}
 		if t.UpdatedAt > 0 {
 			sess.LastActive = time.UnixMilli(t.UpdatedAt)
@@ -240,7 +245,7 @@ func (n *Notion) List(ctx context.Context) ([]surface.Session, error) {
 func (n *Notion) Resolve(ctx context.Context, target string) (*surface.Session, error) {
 	if target == "new" || strings.HasPrefix(target, "new:") {
 		name := strings.TrimPrefix(target, "new:")
-		return &surface.Session{ID: target, Surface: surface.KindNotion, Name: name, Status: surface.StatusIdle}, nil
+		return &surface.Session{ID: target, Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: name, Status: surface.StatusIdle}, nil
 	}
 	if looksLikeUUID(target) {
 		exists, err := n.threadExists(ctx, target)
@@ -250,7 +255,7 @@ func (n *Notion) Resolve(ctx context.Context, target string) (*surface.Session, 
 		if !exists {
 			return nil, fmt.Errorf("Notion thread %s not found", target)
 		}
-		return &surface.Session{ID: target, Surface: surface.KindNotion, Status: surface.StatusIdle}, nil
+		return &surface.Session{ID: target, Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Status: surface.StatusIdle}, nil
 	}
 	threads, err := n.List(ctx)
 	if err != nil {
@@ -392,7 +397,7 @@ func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, mes
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		completionID, reply, observeErr := n.latestAgentReply(ctx, &surface.Session{ID: resultThreadID, Surface: surface.KindNotion})
+		completionID, reply, observeErr := n.latestAgentReply(ctx, &surface.Session{ID: resultThreadID, Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb})
 		if observeErr != nil {
 			return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("confirm Notion persistence: %w", observeErr))
 		}

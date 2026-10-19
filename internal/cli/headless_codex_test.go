@@ -85,7 +85,7 @@ func TestHeadlessCodexCLICreatesListsReadsAndDrivesAThread(t *testing.T) {
 	}
 
 	sibling := id[:len(id)-2] + "ff"
-	if err := r.RegisterSession(surface.Session{ID: sibling, Surface: surface.KindCodex, Transport: "managed"}); err != nil {
+	if err := r.RegisterSession(surface.Session{ID: sibling, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "managed"}); err != nil {
 		t.Fatal(err)
 	}
 	lifecycle.Crash()
