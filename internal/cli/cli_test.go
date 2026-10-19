@@ -864,9 +864,6 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "provider-call-would-be-a-bug", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}}}
 	app, store := cliFixture(t, fake)
 	app.catalogDaemonRunning = func() bool { return true }
-	if err := store.EnsureCatalogState(); err != nil {
-		t.Fatal(err)
-	}
 	observedAt := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
 	for _, item := range []surface.Session{
 		{ID: "catalog-root", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "root", Cwd: root, LastActive: observedAt},
@@ -1173,9 +1170,6 @@ func TestListAllReportsSessionsOutsideTheCatalogAsOffline(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindClaude}
 	app, store := cliFixture(t, fake)
 	app.catalogDaemonRunning = func() bool { return true }
-	if err := store.EnsureCatalogState(); err != nil {
-		t.Fatal(err)
-	}
 	observedAt := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
 	live := surface.Session{ID: "catalog-live", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "live", Status: surface.StatusBusy, LastActive: observedAt}
 	if _, _, err := store.RecordCatalogSession(registry.CatalogSessionState{Session: live, HostProject: json.RawMessage(`{}`), Checkout: json.RawMessage(`{}`), ObservedAt: observedAt, ProjectionFingerprint: live.ID}, registry.CatalogEvent{DedupeKey: "session:" + live.ID, Type: "session.upserted", EntityID: live.ID, Payload: json.RawMessage(`{}`)}); err != nil {

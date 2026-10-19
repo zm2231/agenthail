@@ -28,7 +28,13 @@ type CatalogEventWindow struct {
 	Gap         bool
 }
 
+// EnsureCatalogState gives this host its catalog epoch.
 func (r *Registry) EnsureCatalogState() error {
+	_, err := r.catalogHostEpoch(true)
+	return err
+}
+
+func (r *Registry) migrateCatalog() error {
 	if _, err := r.db.Exec(`CREATE TABLE IF NOT EXISTS catalog_sessions (
 		session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 		host_project BLOB NOT NULL,
@@ -68,8 +74,7 @@ func (r *Registry) EnsureCatalogState() error {
 	)`); err != nil {
 		return err
 	}
-	_, err := r.catalogHostEpoch(true)
-	return err
+	return nil
 }
 
 func (r *Registry) CatalogState() (string, uint64, error) {
