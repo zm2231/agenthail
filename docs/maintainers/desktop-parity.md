@@ -20,7 +20,7 @@ The web calls the unversioned routes and the Mac calls `/api/v1/*`. Each pair sh
 | GET, POST /api/settings | GET, POST /api/v1/settings |
 | GET /api/settings/remote-qr | none (the Mac draws the QR locally) |
 | GET, POST /api/voice | GET, POST /api/v1/voice (same voice service) |
-| GET /voice-peer.js (browser WebRTC script, `voicePeerScriptHandler`, internal/daemon/voice.go:152-161) | no twin. iOS loads GET /api/v1/voice/peer instead, an authenticated HTML page with its own handler (`voicePeerHandler`, internal/daemon/voice.go:163-177; native/iOS/VoiceOperator.swift:81-84) |
+| GET /voice-peer.js (browser WebRTC script, `voicePeerScriptHandler`, internal/daemon/voice.go:152-161) | no twin. The Mac and iOS load GET /api/v1/voice/peer instead, an authenticated HTML page with its own handler (`voicePeerHandler`, internal/daemon/voice.go:163-177), in the shared WebKit bridge (native/VoiceAudioBridge.swift). The Mac reaches it over loopback HTTP with the dashboard token |
 | GET /api/v1/session-options | same route |
 
 Status: **present** means the Mac covers the behavior; **partial** means part of it is missing; **missing** means the Mac has none of it; **decided** means the Mac omits it on purpose; **n/a** means the behavior belongs to another client.
@@ -29,9 +29,9 @@ Status: **present** means the Mac covers the behavior; **partial** means part of
 
 | Status | Count |
 | --- | --- |
-| Present | 37 |
+| Present | 39 |
 | Partial | 11 |
-| Missing | 5 |
+| Missing | 3 |
 | Decided | 1 |
 | n/a | 1 |
 
@@ -49,7 +49,7 @@ Open gaps are tracked as td stories under td-5f222f (listed at the end). Each on
 | Needs attention: reason, requested action, Retry and Cancel | index.html:62-70; app.js:517-524, 1602-1639 | GET /api/state `attention`; POST /api/action `queue-retry`, `queue-cancel` | partial | Only `sessionId` is read, to mark the session "Needs you": native/AgenthailModel.swift:87. Reason and requested action are never shown. Retry and Cancel exist only in Settings > Delivery: macOS/DesktopSettings.swift:277-280 |
 | Delivery problems with Dismiss | index.html:71-74; app.js:527-535, 1603-1616 | GET /api/state `deliveryProblems`; POST /api/action `delivery-dismiss` | present | macOS/DesktopWindow.swift:1414-1445 (banner, Edit and resend, Dismiss), 145-152 (Needs you) |
 | Manual refresh button and "Synced" time | index.html:38-46; app.js:875-876, 1980-1982 | GET /api/state?fresh=1 | missing | `refresh(fresh:)` (native/AgenthailModel.swift:163) runs on connect, on the status timer, on stream events and after actions (native/AgenthailModel.swift:144, 813, 831), but no menu item, button or shortcut triggers it (no match for "Refresh" in macOS/CommandPalette.swift, macOS/SessionCommands.swift, native/AgenthailApp.swift) |
-| Talk to orchestrator by voice: call, transfer, stop the routed session's turn, hang up | index.html:33-35, 498-521; app.js:1326-1442, 1983-1992 | GET, POST /api/voice `select`, `prepare`, `start`, `connected`, `transfer`, `target-interrupt`, `stop`; /voice-peer.js | missing | No voice code in native/macOS (no match for "voice"); the iOS app has it in native/iOS/VoiceOperator.swift and native/iOS/VoiceAPI.swift |
+| Talk to orchestrator by voice: call, transfer, stop the routed session's turn, hang up | index.html:33-35, 498-521; app.js:1326-1442, 1983-1992 | GET, POST /api/voice `select`, `prepare`, `start`, `connected`, `transfer`, `target-interrupt`, `stop`; /voice-peer.js | present | The Voice window (macOS/VoiceWindow.swift, `VoiceCallView`) opens from the sidebar footer, the menu bar item and Session > Talk to Orchestrator (macOS/DesktopWindow.swift `ConnectionFooter`, native/AgenthailApp.swift, macOS/SessionCommands.swift). The call flow is shared with iOS in native/VoiceOperatorModel.swift over native/VoiceAPI.swift. The web dashboard and the Mac app are separate callers, so each sees the other's call as occupied (internal/daemon/voice_test.go `TestVoiceDashboardAndMacAppAreSeparateCallers`) |
 | Empty states: no surfaces, no current conversations, nothing selected, empty queue, outcomes, audit | index.html:241-248; app.js:497, 516, 618, 670, 692, 817 | GET /api/state, GET /api/history | present | macOS/OverviewSettings.swift:16-17, 113; macOS/DesktopWindow.swift:179-184, 558-584; macOS/DesktopSettings.swift:261-263, 402-404 |
 | Empty states: no saved exchanges, no channels, no handoffs | app.js:699, 707, 1167 | GET /api/session, GET /api/state | missing | The transcript has no empty branch (macOS/DesktopWindow.swift:684-705); channel and handoff lists render nothing when empty (macOS/DesktopSettings.swift:285-301, 323-336) |
 | Error toasts, with network failures rewritten as restart and refresh guidance | app.js:321-334 | none | partial | Errors show verbatim from `error.localizedDescription` (native/AgenthailModel.swift:384, 395; macOS/DesktopSettings.swift:30-41; macOS/DesktopWindow.swift:1306-1310). The footer and empty pane offer Start when disconnected (macOS/DesktopWindow.swift:515-519, 578-580), but a failed action never says to reconnect |
@@ -85,7 +85,7 @@ Open gaps are tracked as td stories under td-5f222f (listed at the end). Each on
 | Goal: set, edit, pause, resume, clear, budget, metrics, needs-you status | app.js:1118-1127, 1190-1204, 1678-1689 | GET /api/session-metadata and stream `goal`; POST /api/action `goal-set`, `goal-edit`, `goal-pause`, `goal-resume`, `goal-clear`, `goal-budget` | present | macOS/GoalSection.swift:14-66, 120-145 |
 | Conversation name | app.js:1117, 1678-1681 | GET /api/state `alias`; POST /api/action `alias` | present | macOS/RenameSessionSheet.swift; macOS/DesktopWindow.swift:356, 1681 |
 | Observed Claude runs and subagents | app.js:1068-1075 | GET /api/session-metadata | present | macOS/ClaudeObservations.swift:3; macOS/SubagentsSection.swift |
-| Call this session by voice | app.js:1130, 1580-1581 | GET, POST /api/voice `select` then the call flow above; GET /voice-peer.js | missing | Covered by the voice story; no voice code in native/macOS |
+| Call this session by voice | app.js:1130, 1580-1581 | GET, POST /api/voice `select` then the call flow above; GET /voice-peer.js | present | The waveform button in the conversation header and Session > Call This Session open the Voice window routed to that session (macOS/DesktopWindow.swift `ConversationHeader`, macOS/SessionCommands.swift, macOS/VoiceController.swift) |
 | Codex turn effort and mode | index.html:251-256; app.js:2013-2018 | POST /api/action `send` | present | macOS/TurnSettingsMenu.swift:18-31 |
 | Codex per-turn service tier and output schema | index.html:254-255; app.js:2016 | POST /api/action `send` | decided | Dropped from the Mac composer in d68aada8; native/tests/session_operations_test.swift:158 asserts sends carry effort and mode only |
 | Fork, Codex native queue, Claude background lifecycle | index.html:257-267; app.js:2019-2056 | POST /api/action `session-fork`, `native-queue`, `session-lifecycle-status`, `-logs`, `-stop`, `-resume` | present | macOS/SessionOperationsSection.swift:4-290; macOS/SessionOperations.swift |
@@ -108,7 +108,7 @@ Open gaps are tracked as td stories under td-5f222f (listed at the end). Each on
 
 ## iOS where web and Mac differ
 
-- Voice: iOS has it (native/iOS/VoiceOperator.swift, native/iOS/VoiceAPI.swift over /api/v1/voice), so the Mac can follow the same v1 contract.
+- Voice: iOS adds typed messages, a new orchestrator conversation and an inline activity timeline to the shared call (native/iOS/VoiceOperator.swift). The Mac matches the web dialog and links to the full timeline.
 - Manual refresh: iOS uses pull to refresh with `refresh(fresh: true)` (native/iOS/AgenthailIOSViews.swift:310, native/iOS/SessionControls.swift:125).
 - Queue last error: iOS shows `lastError` on queued items (native/iOS/SessionControls.swift:156).
 
@@ -117,7 +117,6 @@ Open gaps are tracked as td stories under td-5f222f (listed at the end). Each on
 | Story | Covers |
 | --- | --- |
 | td-0ec020 (existing, PR #39) | New-session form |
-| td-d38302 | Talk to orchestrator; call this session by voice |
 | td-ea7bbf | Needs attention reason and requested action; delivery queue reason, last error, status-correct Retry and Cancel; inspector status labels |
 | td-006fa3 | Audit route and full content |
 | td-98d5f4 | Manual refresh; surface card click-to-filter; session row queued count, surface and presence label; header queued count and last active; long assistant reply collapse; exchange count and filter summary; Operations tab counts; timeline item details; empty states for transcript, channels and handoffs; reconnect guidance on network errors |

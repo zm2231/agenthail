@@ -562,14 +562,22 @@ func (c *Claude) Resolve(ctx context.Context, target string) (*surface.Session, 
 	}
 	lower := strings.ToLower(target)
 	var matches []surface.Session
+	var exactMatches []surface.Session
 	for _, s := range sessions {
 		if strconv.Itoa(s.PID) == target ||
-			strings.HasPrefix(s.ID, target) ||
-			strings.TrimSuffix(filepath.Base(s.Transcript), ".jsonl") == target ||
+			s.ID == target ||
+			strings.TrimSuffix(filepath.Base(s.Transcript), ".jsonl") == target {
+			exactMatches = append(exactMatches, s)
+			continue
+		}
+		if strings.HasPrefix(s.ID, target) ||
 			strings.Contains(strings.ToLower(s.Cwd), lower) ||
 			strings.Contains(strings.ToLower(s.Name), lower) {
 			matches = append(matches, s)
 		}
+	}
+	if len(exactMatches) > 0 {
+		matches = exactMatches
 	}
 	if len(matches) == 0 {
 		if process, found, err := c.processByPID(ctx, target); err != nil || found {

@@ -422,3 +422,57 @@ func TestClaudeSocketSessionStreamsOnlyFromALocalTranscript(t *testing.T) {
 		t.Fatal("Claude UDS session without a local transcript should not claim stream support")
 	}
 }
+
+func TestClaudeResolveExactIDBeatsCwdContainingIt(t *testing.T) {
+	home := t.TempDir()
+	sessionsDir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(sessionsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll("/tmp/cc-socks", 0700); err != nil {
+		t.Fatal(err)
+	}
+	worker := exec.Command("/bin/sh", "-c", "sleep 10")
+	if err := worker.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = worker.Process.Kill()
+		_ = worker.Wait()
+	}()
+	write := func(pid int, id, cwd string) {
+		command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+		command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+		start, err := command.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		socket := filepath.Join("/tmp/cc-socks", strconv.Itoa(pid)+".sock")
+		if _, err := os.Lstat(socket); !os.IsNotExist(err) {
+			t.Fatalf("test socket already exists %s: %v", socket, err)
+		}
+		listener, err := net.Listen("unix", socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { listener.Close() })
+		record := map[string]any{"pid": pid, "sessionId": id, "name": id, "cwd": cwd, "status": "idle", "version": "2.1.270", "procStart": string(start), "messagingSocketPath": socket}
+		data, _ := json.Marshal(record)
+		if err := os.WriteFile(filepath.Join(sessionsDir, strconv.Itoa(pid)+".json"), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const coordinator = "4c1d2f8e-0000-4000-8000-00000000c011"
+	write(os.Getpid(), coordinator, "/fixture")
+	write(worker.Process.Pid, "worker-id", "/scratch/"+coordinator+"/check")
+
+	adapter := NewClaude("", home)
+	resolved, err := adapter.Resolve(context.Background(), coordinator)
+	if err != nil || resolved.ID != coordinator {
+		t.Fatalf("exact id target=%+v err=%v", resolved, err)
+	}
+	resolved, err = adapter.Resolve(context.Background(), "scratch")
+	if err != nil || resolved.ID != "worker-id" {
+		t.Fatalf("cwd text target=%+v err=%v", resolved, err)
+	}
+}

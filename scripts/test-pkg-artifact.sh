@@ -46,6 +46,7 @@ fi
 
 bash -n "$payload/usr/local/bin/agenthail" "$payload/usr/local/bin/agenthail-uninstall" "$component/Scripts/preinstall" "$component/Scripts/postinstall"
 codesign --verify --deep --strict --verbose=2 "$app"
+"$(dirname "$0")/test-macos-app-voice.sh" "$app"
 codesign --verify --strict --verbose=2 "$root/agenthail"
 
 mkdir -p "$work/home/.claude/skills" "$work/home/.codex"

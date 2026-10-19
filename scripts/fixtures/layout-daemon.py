@@ -53,7 +53,8 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-print(server.server_address[1], flush=True)
-sys.stdout.close()
-server.serve_forever()
+if __name__ == "__main__":
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    print(server.server_address[1], flush=True)
+    sys.stdout.close()
+    server.serve_forever()
