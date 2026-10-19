@@ -13,10 +13,9 @@ final class ActivityReadingTests: XCTestCase {
         for _ in 0..<4 where !activity.isHittable { timeline.swipeDown() }
         XCTAssertTrue(activity.isHittable)
         capture("Chat with compact tools", app)
-        activity.tap()
+        activity.tapWhenReady()
         let command = app.buttons.containing(.staticText, identifier: "Run command").firstMatch
-        XCTAssertTrue(command.waitForExistence(timeout: 5))
-        command.tap()
+        command.tapWhenReady()
         let output = app.staticTexts["Test Suite ReconnectTests passed.\nExecuted 8 tests, with 0 failures."]
         XCTAssertTrue(output.exists)
         let collapseTool = app.buttons["collapse-tool-3"]
@@ -24,15 +23,14 @@ final class ActivityReadingTests: XCTestCase {
         XCTAssertTrue(collapseTool.isHittable)
         if collapseTool.frame.maxY > timeline.frame.maxY - 140 { timeline.swipeUp() }
         XCTAssertTrue(collapseTool.isHittable)
-        collapseTool.tap()
+        collapseTool.tapWhenReady()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: output)], timeout: 5), .completed)
         XCTAssertTrue(activity.isHittable)
-        activity.tap()
+        activity.tapWhenReady()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: command)], timeout: 5), .completed)
         capture("Recorded tool input and output", app)
-        app.buttons["Session menu"].tap()
-        XCTAssertTrue(app.buttons["All events"].waitForExistence(timeout: 5))
-        app.buttons["All events"].tap()
+        app.buttons["Session menu"].tapWhenReady()
+        app.buttons["All events"].tapWhenReady()
         XCTAssertFalse(app.buttons["activity-3"].exists)
     }
 

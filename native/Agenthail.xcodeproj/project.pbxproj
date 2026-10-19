@@ -36,6 +36,7 @@
 		7DC117AD0726F803381476B0 /* AgenthailIOSTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7039428BDACFBDD5CA67BBBB /* AgenthailIOSTests.swift */; };
 		7EED627B413EDDEB73D5EC42 /* EventRetryBackoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C5287EF2BD6F1B5CC9EE0E8 /* EventRetryBackoff.swift */; };
 		7F351AE442DA4780791BA41D /* ComposerAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33AFDDC2552D1DC17F94ABC1 /* ComposerAttachment.swift */; };
+		84AFE005DFA7159DC412701B /* TapWhenReady.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B076C97F3E9777192BE7445 /* TapWhenReady.swift */; };
 		8B6804836C0F77C19FF386D0 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 69AC673BBC26A79668444D61 /* WebRTC */; };
 		8D013EE6AE4E56CDE6D3685F /* VoiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A91AA65329AF94FEF3F821E2 /* VoiceTests.swift */; };
 		8E72D14478259402D504EDCB /* AgenthailIOSModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E782347BC048EE03E6B10D1 /* AgenthailIOSModel.swift */; };
@@ -86,6 +87,7 @@
 /* Begin PBXFileReference section */
 		023B7A26F85ABD5C04B517BE /* VoiceOperatorUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOperatorUITests.swift; sourceTree = "<group>"; };
 		0864D478BAA6B9611ABCBF30 /* AgenthailIOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AgenthailIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0B076C97F3E9777192BE7445 /* TapWhenReady.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TapWhenReady.swift; sourceTree = "<group>"; };
 		0B89C776F58E3976CA85343C /* SessionExperienceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionExperienceTests.swift; sourceTree = "<group>"; };
 		0E782347BC048EE03E6B10D1 /* AgenthailIOSModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgenthailIOSModel.swift; sourceTree = "<group>"; };
 		0EBFE61CC399105A1DE63886 /* SessionTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTree.swift; sourceTree = "<group>"; };
@@ -200,6 +202,7 @@
 			children = (
 				3244752A0EB724F241568485 /* ActivityReadingTests.swift */,
 				2615CE29223F7FB746D9F8B2 /* SessionNavigationTests.swift */,
+				0B076C97F3E9777192BE7445 /* TapWhenReady.swift */,
 				A6ED9926A8FF2A500F79D3FA /* TranscriptReadingUITests.swift */,
 				023B7A26F85ABD5C04B517BE /* VoiceOperatorUITests.swift */,
 			);
@@ -419,6 +422,7 @@
 			files = (
 				CBCA932E315251D8765B458D /* ActivityReadingTests.swift in Sources */,
 				070A9882E55DDEE16B0D1592 /* SessionNavigationTests.swift in Sources */,
+				84AFE005DFA7159DC412701B /* TapWhenReady.swift in Sources */,
 				4745ED34D458BE5684C88ABF /* TranscriptReadingUITests.swift in Sources */,
 				3F469EFA3A39C2186C2C4C1D /* VoiceOperatorUITests.swift in Sources */,
 			);
