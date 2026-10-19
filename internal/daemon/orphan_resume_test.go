@@ -88,7 +88,7 @@ func newOrphanFixtureOn(t *testing.T, transport string) *orphanFixture {
 	}
 	t.Cleanup(func() { _ = r.Close() })
 	fixture.r = r
-	fixture.session = surface.Session{ID: orphanConversation, Bridge: "session_orphan", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "orphan", PID: orphanPID, Status: surface.StatusBusy, Transport: transport, Cwd: fixture.claude.Home, Transcript: fixture.claude.Transcript(orphanConversation, fixture.claude.Home)}
+	fixture.session = surface.Session{ID: orphanConversation, Bridge: "session_orphan", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "orphan", PID: orphanPID, Status: surface.StatusBusy, Transport: transport, Cwd: fixture.claude.Home, HasLocal: true, Transcript: fixture.claude.Transcript(orphanConversation, fixture.claude.Home)}
 	if err := r.RegisterSession(fixture.session); err != nil {
 		t.Fatal(err)
 	}

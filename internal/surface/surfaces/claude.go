@@ -724,8 +724,10 @@ func (c *Claude) postWhenIdle(ctx context.Context, sess *surface.Session, messag
 }
 
 // Route sends a person's message as their own turn through the session host or the
-// session's web bridge identity, the routes that record it as the user's turn. Other
-// messages to a session with a native peer socket take that socket.
+// session's web bridge identity, the routes that record it as the user's turn. A
+// session with no live process resumes in the host, so a person's message to it
+// is a turn too. Other messages to a session with a native peer socket take that
+// socket.
 func (c *Claude) Route(sess *surface.Session, author surface.Author) surface.Route {
 	if author == surface.AuthorPerson && c.canSendHumanTurn(sess) {
 		return surface.RouteHumanTurn
@@ -737,7 +739,7 @@ func (c *Claude) Route(sess *surface.Session, author surface.Author) surface.Rou
 }
 
 func (c *Claude) canSendHumanTurn(sess *surface.Session) bool {
-	return sess != nil && sess.Surface == surface.KindClaude && (claudeHosted(sess) || !c.localOnly && !nativeClaudeOnly(sess))
+	return sess != nil && sess.Surface == surface.KindClaude && (claudeHosted(sess) || !claudeProcessAlive(sess.PID) || !c.localOnly && !nativeClaudeOnly(sess))
 }
 
 // SendHumanTurn submits a message through Claude's authenticated web bridge as

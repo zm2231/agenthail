@@ -12,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 	"github.com/zm2231/agenthail/internal/voice"
 )
@@ -107,25 +109,53 @@ func delegate(t *testing.T, service *voice.Service, text string) voice.State {
 	return state
 }
 
-// delegateToResumed delegates to the exited session, which resumes in the
-// Claude host. A delegation is the operator's message, so it takes the native
-// socket and its reply cannot be followed.
-func (f *orphanFixture) delegateToResumed(t *testing.T) {
+// delegateAndHear delegates to the exited session, which resumes in the Claude
+// host. A delegation is the person speaking, so it is their turn there and voice
+// speaks the reply it follows.
+func (f *orphanFixture) delegateAndHear(t *testing.T) {
 	t.Helper()
 	manager := claudetest.ListenPeerManager(t, f.claude.Home)
 	service, call := connectVoice(t, f, "orphan")
-	state := delegate(t, service, "hello")
-	if !strings.Contains(state.Message, "cannot follow this session's reply") || f.resumes(t) != 1 || manager.Count("hello") != 1 || f.posts.count("hello") != 0 || call.said("hello") {
-		t.Fatalf("message=%q resumes=%d peer=%d posts=%d", state.Message, f.resumes(t), manager.Count("hello"), f.posts.count("hello"))
+	delegate(t, service, "hello")
+	deadline := time.Now().Add(10 * time.Second)
+	for !call.said("echo:hello") {
+		if time.Now().After(deadline) {
+			t.Fatalf("reply was not spoken: spoken=%q message=%q events=%+v", call.spoken, service.View("phone").Message, service.View("phone").Events)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	turns := f.host.Turns(t, orphanConversation)
+	if f.resumes(t) != 1 || len(turns) != 1 || turnOrigin(t, turns[0]) != "human" || manager.Count("hello") != 0 || !strings.Contains(service.View("phone").Message, "Woke orphan") || failed(service.View("phone")) {
+		t.Fatalf("resumes=%d turns=%+v peer=%d message=%q", f.resumes(t), turns, manager.Count("hello"), service.View("phone").Message)
 	}
 }
 
-func TestVoiceDelegationToEndedBackgroundJobResumesItInTheHostAndCannotFollow(t *testing.T) {
-	newOrphanFixtureOn(t, "").delegateToResumed(t)
+func TestVoiceDelegationToEndedBackgroundJobResumesItInTheHostAndSpeaksTheReply(t *testing.T) {
+	newOrphanFixtureOn(t, "").delegateAndHear(t)
 }
 
-func TestVoiceDelegationToEndedSocketSessionResumesItInTheHostAndCannotFollow(t *testing.T) {
-	newOrphanFixture(t).delegateToResumed(t)
+func TestVoiceDelegationToEndedSocketSessionResumesItInTheHostAndSpeaksTheReply(t *testing.T) {
+	newOrphanFixture(t).delegateAndHear(t)
+}
+
+func TestVoiceDelegationToAHostSessionIsAPersonsTurnAndSpeaksTheReply(t *testing.T) {
+	f := newOrphanFixture(t)
+	client := f.host.Start(t)
+	f.host.Open(t, client, orphanConversation)
+	claude := f.daemon.adapters()[0].(*surfaces.Claude)
+	hosted := hostedSession(t, claude, orphanConversation)
+	hosted.Name = "orphan"
+	if err := f.r.RegisterSession(hosted); err != nil {
+		t.Fatal(err)
+	}
+	f.session = hosted
+	service, call := connectVoice(t, f, "orphan")
+	delegate(t, service, "hello")
+	claudehosttest.WaitFor(t, "the spoken reply", func() bool { return call.said("echo:hello") })
+	turns := f.host.Turns(t, orphanConversation)
+	if f.resumes(t) != 1 || len(turns) != 1 || turnOrigin(t, turns[0]) != "human" || failed(service.View("phone")) {
+		t.Fatalf("resumes=%d turns=%+v message=%q", f.resumes(t), turns, service.View("phone").Message)
+	}
 }
 
 func TestVoiceDelegationToLiveSocketOnlySessionDeliversInsteadOfRejecting(t *testing.T) {

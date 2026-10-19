@@ -158,7 +158,7 @@ func TestClaudeSendHumanTurnRejectsNativeOnlySession(t *testing.T) {
 		t.Fatal("human turn attempted a web request without a bridge identity")
 		return 0, "", nil
 	})
-	_, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "native-session", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", Status: surface.StatusIdle}, "hello")
+	_, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "native-session", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", PID: os.Getpid(), Status: surface.StatusIdle}, "hello")
 	if !surface.IsDeliveryUnavailable(err) {
 		t.Fatalf("err=%v", err)
 	}

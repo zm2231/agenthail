@@ -370,9 +370,11 @@ func TestClaudeWithoutRemoteControlIgnoresBridgeIDs(t *testing.T) {
 
 func TestClaudeRouteDecidesByAuthorBridgeAndSocket(t *testing.T) {
 	adapter := NewClaude("", t.TempDir())
-	bridged := &surface.Session{ID: "local-id", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"}
-	socketOnly := &surface.Session{ID: "local-id", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"}
-	bridgeOnly := &surface.Session{ID: "local-id", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
+	live := os.Getpid()
+	bridged := &surface.Session{ID: "local-id", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", PID: live}
+	socketOnly := &surface.Session{ID: "local-id", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", PID: live}
+	exited := &surface.Session{ID: "local-id", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"}
+	bridgeOnly := &surface.Session{ID: "local-id", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: live}
 	for _, tc := range []struct {
 		name    string
 		session *surface.Session
@@ -382,6 +384,8 @@ func TestClaudeRouteDecidesByAuthorBridgeAndSocket(t *testing.T) {
 		{"person with bridge", bridged, surface.AuthorPerson, surface.RouteHumanTurn},
 		{"unattributed with bridge and socket", bridged, "", surface.RoutePeer},
 		{"person with socket only", socketOnly, surface.AuthorPerson, surface.RoutePeer},
+		{"person to an exited session", exited, surface.AuthorPerson, surface.RouteHumanTurn},
+		{"unattributed to an exited session", exited, "", surface.RoutePeer},
 		{"unattributed with bridge only", bridgeOnly, "", surface.RouteSend},
 	} {
 		if got := adapter.Route(tc.session, tc.author); got != tc.want {
@@ -391,6 +395,9 @@ func TestClaudeRouteDecidesByAuthorBridgeAndSocket(t *testing.T) {
 	adapter.DisableRemoteControl()
 	if got := adapter.Route(bridged, surface.AuthorPerson); got != surface.RoutePeer {
 		t.Fatalf("local-only install routed a person's message to Remote Control: %v", got)
+	}
+	if got := adapter.Route(exited, surface.AuthorPerson); got != surface.RouteHumanTurn {
+		t.Fatalf("local-only install did not resume an exited session for a person's message: %v", got)
 	}
 }
 
