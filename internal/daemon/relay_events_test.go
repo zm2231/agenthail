@@ -322,6 +322,7 @@ func TestRelayPreparationLosingToAShorterCaptureStillBaselinesWhatItRead(t *test
 	d, r, _, source, to := daemonFixture(t)
 	source.Surface = surface.KindClaude
 	source.RuntimeKind = surface.RuntimeClaudeCLI
+	source.RuntimeKind = surface.RuntimeClaudeCLI
 	source.Transcript = path
 	if err := r.RegisterSession(source); err != nil {
 		t.Fatal(err)

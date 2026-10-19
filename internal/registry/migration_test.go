@@ -299,6 +299,9 @@ func assertV11SeedCheckpointMigrated(t *testing.T, r *Registry) {
 
 func TestRuntimeKindStepDerivesEachRowsKindFromItsSurfaceAndTransport(t *testing.T) {
 	r := openTestRegistry(t)
+	if _, err := r.db.Exec(`ALTER TABLE sessions DROP COLUMN runtime_kind`); err != nil {
+		t.Fatal(err)
+	}
 	want := map[string]surface.RuntimeKind{
 		"claude":         surface.RuntimeClaudeCLI,
 		"codex-managed":  surface.RuntimeCodexAppServer,
@@ -319,18 +322,19 @@ func TestRuntimeKindStepDerivesEachRowsKindFromItsSurfaceAndTransport(t *testing
 		{"operator", "agenthail", ""},
 		{"unknown", "retired", ""},
 	} {
-		if _, err := r.db.Exec(`INSERT INTO sessions(id,surface,name,transport,runtime_kind) VALUES(?,?,?,?,'')`, row.id, row.surface, row.id, row.transport); err != nil {
+		if _, err := r.db.Exec(`INSERT INTO sessions(id,surface,name,transport) VALUES(?,?,?,?)`, row.id, row.surface, row.id, row.transport); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := r.db.Exec(`UPDATE sessions SET runtime_kind='codex-desktop' WHERE id='codex-managed'`); err != nil {
+	if err := r.recordRuntimeKinds(); err != nil {
 		t.Fatal(err)
 	}
-	want["codex-managed"] = surface.RuntimeCodexDesktop
-	for range 2 {
-		if err := r.recordRuntimeKinds(); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := r.db.Exec(`INSERT INTO sessions(id,surface,name,transport,runtime_kind) VALUES('recorded','codex','recorded','managed','codex-desktop')`); err != nil {
+		t.Fatal(err)
+	}
+	want["recorded"] = surface.RuntimeCodexDesktop
+	if err := r.recordRuntimeKinds(); err != nil {
+		t.Fatal(err)
 	}
 	for id, kind := range want {
 		var got string
