@@ -100,7 +100,7 @@ func migrateTx(tx *sql.Tx) error {
 	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(schema + coordinatorSchema); err != nil {
+	if _, err := tx.Exec(schema); err != nil {
 		return err
 	}
 	if err := ensureHostIdentity(tx); err != nil {
@@ -378,6 +378,19 @@ CREATE TABLE IF NOT EXISTS sessions (
 	subagent_depth INTEGER NOT NULL DEFAULT 0,
 	agent_nickname TEXT NOT NULL DEFAULT '', agent_role TEXT NOT NULL DEFAULT '',
 	host_id TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS coordinator (
+	singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+	name TEXT NOT NULL,
+	surface TEXT NOT NULL,
+	cwd TEXT NOT NULL,
+	model TEXT NOT NULL DEFAULT '',
+	permission_mode TEXT NOT NULL DEFAULT '',
+	instructions TEXT NOT NULL DEFAULT '',
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS coordinator_replaced (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS session_rekeys (
 	old_id TEXT PRIMARY KEY, new_id TEXT NOT NULL,

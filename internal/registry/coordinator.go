@@ -23,21 +23,6 @@ type CoordinatorSpec struct {
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
-const coordinatorSchema = `
-CREATE TABLE IF NOT EXISTS coordinator (
-	singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-	name TEXT NOT NULL,
-	surface TEXT NOT NULL,
-	cwd TEXT NOT NULL,
-	model TEXT NOT NULL DEFAULT '',
-	permission_mode TEXT NOT NULL DEFAULT '',
-	instructions TEXT NOT NULL DEFAULT '',
-	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS coordinator_replaced (
-	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE
-);`
-
 // A restart holds this lock so concurrent senders in any Agenthail process
 // start at most one conversation.
 func (r *Registry) CoordinatorLockPath() string {
