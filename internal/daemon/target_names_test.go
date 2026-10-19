@@ -11,14 +11,14 @@ import (
 
 func TestResolveNamedTargetMatchesOnlyThatName(t *testing.T) {
 	d, r, _, _, _ := daemonFixture(t)
-	if err := r.SetAlias("lead", "to"); err != nil {
+	if err := r.SetAlias("chief", "to"); err != nil {
 		t.Fatal(err)
 	}
 	handler, token := dashboardRouter(d), pairedControlToken(t, r)
 	if err := r.RegisterSession(surface.Session{ID: "session_named", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "claudeprobe-a3", Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
-	for target, want := range map[string]int{"@probe-a": 0, "@lead": 1} {
+	for target, want := range map[string]int{"@probe-a": 0, "@chief": 1} {
 		request := httptest.NewRequest(http.MethodGet, "/api/v1/resolve?target="+target, nil)
 		request.Header.Set("Authorization", "Bearer "+token)
 		response := httptest.NewRecorder()

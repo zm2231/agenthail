@@ -174,18 +174,21 @@ When the investigation finishes with something the builder needs, Agenthail pass
 
 New routes begin after existing provider history. Completion events and provider cursors survive daemon restarts; each route advances only when its queue item and receipt commit together. A busy or offline destination keeps its handoff in the delivery queue until it can be delivered. Active routes remain until explicitly removed; an inactive route whose Claude Code source stays closed for an hour is removed. `relay list --json`, the dashboard, and native handoff controls show the condition, pending event count, and capture/consumption error. Queued means persisted for delivery, not received by the destination. See [relay recovery](docs/maintainers/durable-relays.md).
 
-## Send all your work to one coordinator
+## Give each project a coordinator
 
-Pick one agent as your coordinator, and send it work from anywhere:
+Each project can have one coordinator, the agent you send the project's work to and its other sessions report to:
 
 ```bash
-agenthail coordinator set @lead --instructions ~/briefs/coordinator.md
-agenthail send @lead "Ship the export fix and report back"
+cd ~/work/export-service
+agenthail coordinator new claude --instructions ~/briefs/coordinator.md
+agenthail send @export-service-lead "Ship the export fix and report back"
 ```
+
+From any session in the project, `agenthail send @lead "..."` reaches that project's coordinator. A folder outside every Git repository and registered folder project has no coordinator; `agenthail project add <folder>` makes it a project.
 
 A message to the coordinator always lands. When it is working, the message steers its current turn if the session can be steered, and otherwise waits in the queue. When its session has ended, Agenthail resumes the same conversation. When the conversation is gone, Agenthail starts a new one in the same folder, with the same agent, model and permission mode. Its first message is your saved instructions, a note saying why it started again, and your message. The reply tells you it started again. Messages still waiting for the old conversation move to the new one.
 
-`agenthail coordinator new claude --cwd ~/work --instructions brief.md` defines a coordinator that starts on its first message. `agenthail coordinator` shows the current one, and `agenthail coordinator clear` removes the role and leaves the session alone. Sends from the dashboard, the Mac and iPhone apps and notification replies reach the coordinator the same way, because they address its session. See [coordinator](docs/maintainers/coordinator.md).
+`coordinator new` defines a coordinator that starts on its first message; `agenthail coordinator set <session>` gives the role to a running session instead. `agenthail coordinator` shows the current folder's coordinator, `agenthail coordinator list` shows all of them, and `agenthail coordinator clear` removes the role and leaves the session alone. Sends from the dashboard, the Mac and iPhone apps and notification replies reach the coordinator the same way, because they address its session. See [coordinator](docs/maintainers/coordinator.md).
 
 For a group that needs the same update:
 

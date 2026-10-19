@@ -186,7 +186,7 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 	statements := []statement{
 		{"aliases", `UPDATE aliases SET session_id=?2 WHERE session_id=?1`, hasAlias},
 		{"channel_members", `INSERT OR IGNORE INTO channel_members(channel_id,session_id) SELECT channel_id,?2 FROM channel_members WHERE session_id=?1`, false},
-		{"coordinator_replaced", `INSERT OR IGNORE INTO coordinator_replaced(session_id) SELECT ?2 FROM coordinator_replaced WHERE session_id=?1`, false},
+		{"coordinator_replaced", `INSERT OR IGNORE INTO coordinator_replaced(session_id,project_id) SELECT ?2,project_id FROM coordinator_replaced WHERE session_id=?1`, false},
 		{"routes", `UPDATE routes SET from_session=?2 WHERE from_session=?1`, false},
 		{"routes", `UPDATE routes SET to_session=?2 WHERE to_session=?1`, false},
 		{"routes", `DELETE FROM routes WHERE from_session=to_session AND from_session=?2`, false},

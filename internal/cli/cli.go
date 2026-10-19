@@ -248,15 +248,17 @@ Identity:
   identify rm <name>             Remove an alias
   identify list                 Show all names
 
-Coordinator (the agent you send work to; a message to it always lands):
-  coordinator [--json]          Show the coordinator and its current session
+Coordinator (one per project; a message to it always lands):
+  coordinator [--cwd <path>] [--json]  Show the coordinator of this folder's project
+  coordinator list [--json]     Show every project's coordinator
   coordinator set <target> [--name <name>] [--instructions <file>] [--permission-mode <mode>]
-                                 Make an existing session the coordinator
-  coordinator new <claude|codex> --cwd <path> [--name <name>] [--model <model>] [--instructions <file>] [--permission-mode <mode>]
-                                 Define a coordinator; the first message starts it
-  coordinator clear             Stop treating any session as the coordinator
-  A send to the coordinator steers it when busy, resumes it when ended, and
-  starts a new conversation from its saved instructions when its conversation is gone.
+                                 Make an existing session its project's coordinator
+  coordinator new <claude|codex> [--cwd <path>] [--name <name>] [--model <model>] [--instructions <file>] [--permission-mode <mode>]
+                                 Define this folder's project coordinator (default @<project>-lead); the first message starts it
+  coordinator clear [--cwd <path>]  Stop treating any session as this project's coordinator
+  @lead addresses the coordinator of the sender's project. A send to a coordinator
+  steers it when busy, resumes it when ended, and starts a new conversation from
+  its saved instructions when its conversation is gone.
 
 Channels:
   channel create <name>         Create a channel
@@ -1293,6 +1295,10 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 		}
 		return session, adapter, nil
 	}
+	target, err := a.expandLead(target)
+	if err != nil {
+		return nil, nil, err
+	}
 	subagentPath := strings.HasPrefix(target, "@") && strings.Contains(target, "/")
 	named := strings.HasPrefix(target, "@") && !subagentPath && a.registry() != nil
 	if !subagentPath {
@@ -1630,9 +1636,13 @@ func (a *App) cmdSend(args []string) error {
 		message = fmt.Sprintf("[from %s] %s", fromLabel, message)
 	}
 
+	if target, err = a.expandLead(target); err != nil {
+		return err
+	}
 	coord := a.coordinator()
-	if coord.Names(target) && !coord.Named() {
-		return a.startCoordinator(ctx, coord, message, args)
+	_, byName := coord.Named(target)
+	if spec, named := coord.Named(target); named && !coord.Started(spec) {
+		return a.startCoordinator(ctx, coord, spec, message, args)
 	}
 	sess, surf, remote, err := a.resolveAnyTarget(ctx, target)
 	if err != nil {
@@ -1641,7 +1651,7 @@ func (a *App) cmdSend(args []string) error {
 	if remote != nil {
 		return a.sendRemote(ctx, remote, message, args, timeout)
 	}
-	coordinated := coord.Is(sess.ID)
+	spec, coordinated := coord.Of(sess.ID)
 	if current, replaced := coord.ReplacedBy(sess.ID); replaced {
 		if sess, surf, _, err = a.resolveAnyTarget(ctx, current); err != nil {
 			return err
@@ -1703,9 +1713,9 @@ func (a *App) cmdSend(args []string) error {
 			deliver = coord.DeliverWithoutQueue
 		}
 		var outcome *coordinator.Outcome
-		if outcome, err = deliver(ctx, message, options); err == nil {
+		if outcome, err = deliver(ctx, spec, message, options); err == nil {
 			if outcome.Started {
-				if !coord.Names(target) {
+				if !byName {
 					return printCoordinatorStart(outcome, outcome.Session.ID, jsonOut)
 				}
 				return printCoordinatorStart(outcome, target, jsonOut)
@@ -1742,7 +1752,7 @@ func (a *App) cmdSend(args []string) error {
 				fmt.Printf("queued #%d for %s, which is waiting on you; it delivers after you answer\n", receipt.QueueID, a.resolveDisplay(sess.ID))
 			} else {
 				steerTarget := target
-				if coordinated && !coord.Names(target) {
+				if coordinated && !byName {
 					steerTarget = sess.ID
 				}
 				fmt.Printf("target is active; queued #%d for %s and will deliver when the current turn finishes (use 'agenthail steer %s \"message\"' to affect the current turn)\n", receipt.QueueID, a.resolveDisplay(sess.ID), steerTarget)

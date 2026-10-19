@@ -34,35 +34,32 @@ type Outcome struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
-// Is reports whether a send to sessionID belongs to the coordinator: its
-// current session or a conversation a restart replaced.
-func (s Service) Is(sessionID string) bool {
+// Of returns the spec of the project sessionID coordinates, as its current
+// conversation or one a restart replaced.
+func (s Service) Of(sessionID string) (registry.CoordinatorSpec, bool) {
 	if s.Registry == nil {
-		return false
+		return registry.CoordinatorSpec{}, false
 	}
-	is, err := s.Registry.IsCoordinatorSession(sessionID)
-	return err == nil && is
+	spec, found, err := s.Registry.CoordinatorOfSession(sessionID)
+	return spec, err == nil && found
 }
 
-// Names reports whether target is @<name> of the coordinator. A bare name
-// stays a fragment like any other target.
-func (s Service) Names(target string) bool {
+// Named returns the coordinator target is @<name> of. A bare name stays a
+// fragment like any other target.
+func (s Service) Named(target string) (registry.CoordinatorSpec, bool) {
 	name, ok := strings.CutPrefix(target, "@")
 	if s.Registry == nil || !ok {
-		return false
+		return registry.CoordinatorSpec{}, false
 	}
-	spec, err := s.Registry.Coordinator()
-	return err == nil && name == spec.Name
+	spec, err := s.Registry.CoordinatorNamed(name)
+	return spec, err == nil
 }
 
 // ReplacedBy returns the coordinator's current session when sessionID is a
 // conversation a restart replaced.
 func (s Service) ReplacedBy(sessionID string) (string, bool) {
-	if !s.Is(sessionID) {
-		return "", false
-	}
-	spec, err := s.Registry.Coordinator()
-	if err != nil {
+	spec, ok := s.Of(sessionID)
+	if !ok {
 		return "", false
 	}
 	current, err := s.Registry.CoordinatorSessionID(spec)
@@ -72,31 +69,23 @@ func (s Service) ReplacedBy(sessionID string) (string, bool) {
 	return current, true
 }
 
-// Named reports whether the coordinator's name points at a session.
-func (s Service) Named() bool {
-	spec, err := s.Registry.Coordinator()
-	if err != nil {
-		return false
-	}
+// Started reports whether the coordinator's name points at a session.
+func (s Service) Started(spec registry.CoordinatorSpec) bool {
 	id, err := s.Registry.CoordinatorSessionID(spec)
 	return err == nil && id != ""
 }
 
-func (s Service) Deliver(ctx context.Context, message string, options surface.SendOptions) (*Outcome, error) {
-	return s.deliver(ctx, message, options, true)
+func (s Service) Deliver(ctx context.Context, spec registry.CoordinatorSpec, message string, options surface.SendOptions) (*Outcome, error) {
+	return s.deliver(ctx, spec, message, options, true)
 }
 
 // DeliverWithoutQueue refuses to wait for a busy or unavailable coordinator,
 // but still starts one whose conversation is gone.
-func (s Service) DeliverWithoutQueue(ctx context.Context, message string, options surface.SendOptions) (*Outcome, error) {
-	return s.deliver(ctx, message, options, false)
+func (s Service) DeliverWithoutQueue(ctx context.Context, spec registry.CoordinatorSpec, message string, options surface.SendOptions) (*Outcome, error) {
+	return s.deliver(ctx, spec, message, options, false)
 }
 
-func (s Service) deliver(ctx context.Context, message string, options surface.SendOptions, allowQueue bool) (*Outcome, error) {
-	spec, err := s.Registry.Coordinator()
-	if err != nil {
-		return nil, err
-	}
+func (s Service) deliver(ctx context.Context, spec registry.CoordinatorSpec, message string, options surface.SendOptions, allowQueue bool) (*Outcome, error) {
 	session, adapter, reason, err := s.current(ctx, spec)
 	if err != nil {
 		return s.queueUnavailable(session, message, options, allowQueue, err)
@@ -104,11 +93,14 @@ func (s Service) deliver(ctx context.Context, message string, options surface.Se
 	if reason == "" {
 		return s.deliverTo(ctx, adapter, session, message, options, allowQueue)
 	}
-	unlock, err := lock(ctx, s.Registry.CoordinatorLockPath())
+	unlock, err := lock(ctx, s.Registry.CoordinatorLockPath(spec.ProjectID))
 	if err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}
 	defer unlock()
+	if spec, err = s.Registry.Coordinator(spec.ProjectID); err != nil {
+		return nil, err
+	}
 	session, adapter, reason, err = s.current(ctx, spec)
 	if err != nil {
 		return s.queueUnavailable(session, message, options, allowQueue, err)
@@ -128,24 +120,26 @@ func (s Service) deliver(ctx context.Context, message string, options surface.Se
 
 // Restart starts a new conversation for a message the outbox holds for
 // session when that conversation is gone. It reports false when session is
-// not the coordinator or can still take the message; a failed check is
+// not a coordinator or can still take the message; a failed check is
 // handled, so the message is retried rather than sent to a blank resume.
 func (s Service) Restart(ctx context.Context, session *surface.Session, message string) (*Outcome, bool, error) {
-	if !s.Is(session.ID) {
-		return nil, false, nil
-	}
-	spec, err := s.Registry.Coordinator()
-	if err != nil {
+	spec, ok := s.Of(session.ID)
+	if !ok {
 		return nil, false, nil
 	}
 	if _, _, reason, err := s.current(ctx, spec); err != nil || reason == "" {
 		return nil, err != nil, err
 	}
-	unlock, err := lock(ctx, s.Registry.CoordinatorLockPath())
+	unlock, err := lock(ctx, s.Registry.CoordinatorLockPath(spec.ProjectID))
 	if err != nil {
 		return nil, true, surface.DeliveryUnavailable(err)
 	}
 	defer unlock()
+	if spec, err = s.Registry.Coordinator(spec.ProjectID); errors.Is(err, registry.ErrNoCoordinator) {
+		return nil, false, nil
+	} else if err != nil {
+		return nil, true, err
+	}
 	current, _, reason, err := s.current(ctx, spec)
 	if err != nil {
 		return nil, true, err
@@ -250,7 +244,7 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	if err := s.Registry.RegisterSession(*session); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but could not be registered: %w", session.ID, err))
 	}
-	if err := s.Registry.HandOverCoordinator(spec.Name, previous, session.ID); err != nil {
+	if err := s.Registry.HandOverCoordinator(spec, previous, session.ID); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but @%s could not point at it: %w", session.ID, spec.Name, err))
 	}
 	outcome := &Outcome{Session: session, Started: true, Previous: previous, Reason: reason}

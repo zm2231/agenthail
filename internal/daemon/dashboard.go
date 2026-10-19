@@ -1716,9 +1716,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, Uploads: attached}
 		var receipt *delivery.Receipt
 		var actionErr error
-		if coord := d.coordinator(); coord.Is(session.ID) {
+		coord := d.coordinator()
+		if spec, coordinated := coord.Of(session.ID); coordinated {
 			var outcome *coordinator.Outcome
-			if outcome, actionErr = coord.Deliver(ctx, request.Message, options); actionErr == nil {
+			if outcome, actionErr = coord.Deliver(ctx, spec, request.Message, options); actionErr == nil {
 				receipt = outcome.Receipt
 			}
 		} else {

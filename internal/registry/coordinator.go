@@ -5,15 +5,24 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
-var ErrNoCoordinator = errors.New("no coordinator is set; use 'agenthail coordinator set'")
+var ErrNoCoordinator = errors.New("this project has no coordinator; use 'agenthail coordinator new' or 'agenthail coordinator set'")
 
-// CoordinatorSpec is how the coordinator starts again when its conversation
-// cannot be resumed. The coordinator is whichever session its alias names, so
-// the address follows rekeys and restarts.
+// LeadAlias is not a session's name: "@lead" addresses the coordinator of the
+// sender's project.
+const LeadAlias = "lead"
+
+var ErrReservedAlias = fmt.Errorf("@%s is reserved for the coordinator of the sender's project", LeadAlias)
+
+// CoordinatorSpec is how a project's coordinator starts again when its
+// conversation cannot be resumed. The coordinator is whichever session its
+// alias names, so the address follows rekeys and restarts.
 type CoordinatorSpec struct {
+	ProjectID      string    `json:"projectId"`
+	ProjectRoot    string    `json:"projectRoot"`
 	Name           string    `json:"name"`
 	Surface        string    `json:"surface"`
 	Cwd            string    `json:"cwd"`
@@ -23,85 +32,127 @@ type CoordinatorSpec struct {
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
-// A restart holds this lock so concurrent senders in any Agenthail process
-// start at most one conversation.
-func (r *Registry) CoordinatorLockPath() string {
-	return filepath.Join(filepath.Dir(r.path), "coordinator.lock")
+type CoordinatorNameTakenError struct {
+	Name        string
+	ProjectRoot string
 }
 
-func (r *Registry) Coordinator() (CoordinatorSpec, error) {
+func (e CoordinatorNameTakenError) Error() string {
+	return fmt.Sprintf("@%s already coordinates %s", e.Name, e.ProjectRoot)
+}
+
+// A restart holds this lock so concurrent senders in any Agenthail process
+// start at most one conversation for the project.
+func (r *Registry) CoordinatorLockPath(projectID string) string {
+	return filepath.Join(filepath.Dir(r.path), "coordinator-"+projectID+".lock")
+}
+
+const coordinatorColumns = `project_id,project_root,name,surface,cwd,model,permission_mode,instructions,updated_at`
+
+func scanCoordinator(row interface{ Scan(...any) error }) (CoordinatorSpec, error) {
 	var spec CoordinatorSpec
 	var updated string
-	err := r.read.QueryRow(`SELECT name,surface,cwd,model,permission_mode,instructions,updated_at FROM coordinator WHERE singleton=1`).Scan(&spec.Name, &spec.Surface, &spec.Cwd, &spec.Model, &spec.PermissionMode, &spec.Instructions, &updated)
-	if errors.Is(err, sql.ErrNoRows) {
-		return spec, ErrNoCoordinator
-	}
-	if err != nil {
+	if err := row.Scan(&spec.ProjectID, &spec.ProjectRoot, &spec.Name, &spec.Surface, &spec.Cwd, &spec.Model, &spec.PermissionMode, &spec.Instructions, &updated); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return spec, ErrNoCoordinator
+		}
 		return spec, err
 	}
 	spec.UpdatedAt, _ = time.Parse(time.DateTime, updated)
 	return spec, nil
 }
 
+func (r *Registry) Coordinator(projectID string) (CoordinatorSpec, error) {
+	return scanCoordinator(r.read.QueryRow(`SELECT `+coordinatorColumns+` FROM coordinators WHERE project_id=?`, projectID))
+}
+
+func (r *Registry) CoordinatorNamed(name string) (CoordinatorSpec, error) {
+	return scanCoordinator(r.read.QueryRow(`SELECT `+coordinatorColumns+` FROM coordinators WHERE name=?`, name))
+}
+
+func (r *Registry) Coordinators() ([]CoordinatorSpec, error) {
+	rows, err := r.read.Query(`SELECT ` + coordinatorColumns + ` FROM coordinators ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var specs []CoordinatorSpec
+	for rows.Next() {
+		spec, err := scanCoordinator(rows)
+		if err != nil {
+			return nil, err
+		}
+		specs = append(specs, spec)
+	}
+	return specs, rows.Err()
+}
+
 func (r *Registry) SetCoordinator(spec CoordinatorSpec, sessionID string) error {
-	if spec.Name == "" || spec.Surface == "" || spec.Cwd == "" {
-		return fmt.Errorf("a coordinator needs a name, an agent and a working directory")
+	if spec.ProjectID == "" || spec.ProjectRoot == "" || spec.Name == "" || spec.Surface == "" || spec.Cwd == "" {
+		return fmt.Errorf("a coordinator needs a project, a name, an agent and a working directory")
+	}
+	if strings.EqualFold(spec.Name, LeadAlias) {
+		return ErrReservedAlias
 	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	var owner, root string
+	err = tx.QueryRow(`SELECT project_id,project_root FROM coordinators WHERE name=?`, spec.Name).Scan(&owner, &root)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil && owner != spec.ProjectID {
+		return CoordinatorNameTakenError{Name: spec.Name, ProjectRoot: root}
+	}
 	if sessionID != "" {
 		if err := setAliasTx(tx, spec.Name, sessionID); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO coordinator (singleton,name,surface,cwd,model,permission_mode,instructions,updated_at) VALUES (1,?,?,?,?,?,?,datetime('now'))
-		ON CONFLICT(singleton) DO UPDATE SET name=excluded.name,surface=excluded.surface,cwd=excluded.cwd,model=excluded.model,permission_mode=excluded.permission_mode,instructions=excluded.instructions,updated_at=excluded.updated_at`,
-		spec.Name, spec.Surface, spec.Cwd, spec.Model, spec.PermissionMode, spec.Instructions); err != nil {
+	if _, err := tx.Exec(`INSERT INTO coordinators (`+coordinatorColumns+`) VALUES (?,?,?,?,?,?,?,?,datetime('now'))
+		ON CONFLICT(project_id) DO UPDATE SET project_root=excluded.project_root,name=excluded.name,surface=excluded.surface,cwd=excluded.cwd,model=excluded.model,permission_mode=excluded.permission_mode,instructions=excluded.instructions,updated_at=excluded.updated_at`,
+		spec.ProjectID, spec.ProjectRoot, spec.Name, spec.Surface, spec.Cwd, spec.Model, spec.PermissionMode, spec.Instructions); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (r *Registry) ClearCoordinator() error {
-	tx, err := r.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	res, err := tx.Exec(`DELETE FROM coordinator WHERE singleton=1`)
+func (r *Registry) ClearCoordinator(projectID string) error {
+	res, err := r.db.Exec(`DELETE FROM coordinators WHERE project_id=?`, projectID)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNoCoordinator
 	}
-	if _, err := tx.Exec(`DELETE FROM coordinator_replaced`); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return nil
 }
 
-// IsCoordinatorSession reports whether sessionID is the coordinator or a
-// conversation a restart replaced, which senders such as a notification reply
-// may still address.
-func (r *Registry) IsCoordinatorSession(sessionID string) (bool, error) {
-	spec, err := r.Coordinator()
-	if errors.Is(err, ErrNoCoordinator) || sessionID == "" {
-		return false, nil
+// CoordinatorOfSession returns the spec of the project sessionID coordinates,
+// as its current conversation or one a restart replaced, which senders such as
+// a notification reply may still address.
+func (r *Registry) CoordinatorOfSession(sessionID string) (CoordinatorSpec, bool, error) {
+	if sessionID == "" {
+		return CoordinatorSpec{}, false, nil
 	}
-	if err != nil {
-		return false, err
+	spec, err := scanCoordinator(r.read.QueryRow(`SELECT `+prefixed("c", coordinatorColumns)+` FROM coordinators c
+		WHERE c.name IN (SELECT name FROM aliases WHERE session_id=?)
+		   OR c.project_id IN (SELECT project_id FROM coordinator_replaced WHERE session_id=?)`, sessionID, sessionID))
+	if errors.Is(err, ErrNoCoordinator) {
+		return spec, false, nil
 	}
-	current, err := r.CoordinatorSessionID(spec)
-	if err != nil || current == sessionID {
-		return err == nil, err
+	return spec, err == nil, err
+}
+
+func prefixed(table, columns string) string {
+	parts := strings.Split(columns, ",")
+	for index := range parts {
+		parts[index] = table + "." + parts[index]
 	}
-	var replaced bool
-	err = r.read.QueryRow(`SELECT EXISTS(SELECT 1 FROM coordinator_replaced WHERE session_id=?)`, sessionID).Scan(&replaced)
-	return replaced, err
+	return strings.Join(parts, ",")
 }
 
 func (r *Registry) CoordinatorSessionID(spec CoordinatorSpec) (string, error) {
@@ -114,36 +165,44 @@ func (r *Registry) CoordinatorSessionID(spec CoordinatorSpec) (string, error) {
 
 var ErrCoordinatorMoved = errors.New("the coordinator was moved to another conversation")
 
-// HandOverCoordinator also moves messages still pending for the previous
-// conversation, which can no longer take them, and remembers it was replaced.
-func (r *Registry) HandOverCoordinator(name, previous, next string) error {
+// HandOverCoordinator points the coordinator's name at next. It also moves
+// what the previous conversation can no longer use: messages still pending
+// for it, its channel memberships and its relay routes, and remembers it was
+// replaced.
+func (r *Registry) HandOverCoordinator(spec CoordinatorSpec, previous, next string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	var owner string
-	err = tx.QueryRow(`SELECT session_id FROM aliases WHERE name=?`, name).Scan(&owner)
+	err = tx.QueryRow(`SELECT session_id FROM aliases WHERE name=?`, spec.Name).Scan(&owner)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if owner != previous {
 		return ErrCoordinatorMoved
 	}
-	if _, err := tx.Exec(`DELETE FROM aliases WHERE name=? OR session_id=?`, name, next); err != nil {
+	if _, err := tx.Exec(`DELETE FROM aliases WHERE name=? OR session_id=?`, spec.Name, next); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO aliases (name,session_id) VALUES (?,?)`, name, next); err != nil {
+	if _, err := tx.Exec(`INSERT INTO aliases (name,session_id) VALUES (?,?)`, spec.Name, next); err != nil {
 		return err
 	}
 	if previous != "" {
-		if _, err := tx.Exec(`UPDATE delivery_intents SET target_session_id=?,updated_at=datetime('now') WHERE queue_id IN (SELECT id FROM message_queue WHERE session_id=? AND status='pending')`, next, previous); err != nil {
-			return err
+		for _, statement := range []string{
+			`UPDATE delivery_intents SET target_session_id=?2,updated_at=datetime('now') WHERE queue_id IN (SELECT id FROM message_queue WHERE session_id=?1 AND status='pending')`,
+			`UPDATE message_queue SET session_id=?2,updated_at=datetime('now') WHERE session_id=?1 AND status='pending'`,
+			`INSERT OR IGNORE INTO channel_members (channel_id,session_id) SELECT channel_id,?2 FROM channel_members WHERE session_id=?1`,
+			`DELETE FROM channel_members WHERE session_id=?1`,
+			`UPDATE routes SET from_session=?2 WHERE from_session=?1`,
+			`UPDATE routes SET to_session=?2 WHERE to_session=?1`,
+		} {
+			if _, err := tx.Exec(statement, previous, next); err != nil {
+				return err
+			}
 		}
-		if _, err := tx.Exec(`UPDATE message_queue SET session_id=?,updated_at=datetime('now') WHERE session_id=? AND status='pending'`, next, previous); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`INSERT OR IGNORE INTO coordinator_replaced (session_id) VALUES (?)`, previous); err != nil {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO coordinator_replaced (session_id,project_id) VALUES (?,?)`, previous, spec.ProjectID); err != nil {
 			return err
 		}
 	}

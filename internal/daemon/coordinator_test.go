@@ -47,7 +47,7 @@ func newCoordinatorFixture(t *testing.T) *coordinatorFixture {
 	if err := r.RegisterSession(gone); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.SetCoordinator(registry.CoordinatorSpec{Name: "lead", Surface: string(surface.KindClaude), Cwd: f.host.Cwd, Instructions: "You coordinate fixture workers."}, goneCoordinator); err != nil {
+	if err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: "project-fixture", ProjectRoot: f.host.Cwd, Name: "fixture-lead", Surface: string(surface.KindClaude), Cwd: f.host.Cwd, Instructions: "You coordinate fixture workers."}, goneCoordinator); err != nil {
 		t.Fatal(err)
 	}
 	posts := &orphanPosts{}
@@ -68,10 +68,10 @@ func (f *coordinatorFixture) send(t *testing.T, key, sessionID, message string) 
 	return response.Code, decoded
 }
 
-// current is the conversation @lead names.
+// current is the conversation @fixture-lead names.
 func (f *coordinatorFixture) current(t *testing.T) string {
 	t.Helper()
-	sid, err := f.r.LookupAlias("lead")
+	sid, err := f.r.LookupAlias("fixture-lead")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestAPISendsToAGoneCoordinatorStartOneConversation(t *testing.T) {
 	wg.Wait()
 	started := 0
 	for _, detail := range details {
-		if strings.Contains(detail, "Started a new conversation for coordinator @lead") {
+		if strings.Contains(detail, "Started a new conversation for coordinator @fixture-lead") {
 			started++
 		}
 	}

@@ -28,7 +28,7 @@ type Registry struct {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 22
+	schemaVersion   = 23
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -427,9 +427,10 @@ CREATE TABLE IF NOT EXISTS sessions (
 	agent_nickname TEXT NOT NULL DEFAULT '', agent_role TEXT NOT NULL DEFAULT '',
 	host_id TEXT NOT NULL DEFAULT ''
 );
-CREATE TABLE IF NOT EXISTS coordinator (
-	singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-	name TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS coordinators (
+	project_id TEXT PRIMARY KEY,
+	project_root TEXT NOT NULL,
+	name TEXT NOT NULL UNIQUE,
 	surface TEXT NOT NULL,
 	cwd TEXT NOT NULL,
 	model TEXT NOT NULL DEFAULT '',
@@ -438,7 +439,8 @@ CREATE TABLE IF NOT EXISTS coordinator (
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS coordinator_replaced (
-	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	project_id TEXT NOT NULL REFERENCES coordinators(project_id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS session_rekeys (
 	old_id TEXT PRIMARY KEY, new_id TEXT NOT NULL,
@@ -902,6 +904,9 @@ func (r *Registry) EnsureAliasAvailable(name string) error {
 	if name == "" {
 		return nil
 	}
+	if strings.EqualFold(name, LeadAlias) {
+		return ErrReservedAlias
+	}
 	var owner string
 	err := r.read.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&owner)
 	if err == sql.ErrNoRows {
@@ -935,6 +940,9 @@ func (e AliasTakenError) Error() string {
 }
 
 func setAliasTx(tx *sql.Tx, name, sessionID string) error {
+	if strings.EqualFold(name, LeadAlias) {
+		return ErrReservedAlias
+	}
 	var owner string
 	err := tx.QueryRow(`SELECT session_id FROM aliases WHERE name=?`, name).Scan(&owner)
 	if err != nil && err != sql.ErrNoRows {
@@ -971,6 +979,9 @@ func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error)
 		candidate := base
 		if n > 0 {
 			candidate = fmt.Sprintf("%s-%d", base, n+1)
+		}
+		if candidate == LeadAlias {
+			continue
 		}
 		if _, err := tx.Exec(`INSERT INTO aliases(name,session_id) VALUES(?,?)`, candidate, sessionID); err == nil {
 			return candidate, tx.Commit()
