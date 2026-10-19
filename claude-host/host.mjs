@@ -506,3 +506,5 @@ process.on('exit', () => {
 });
 process.on('SIGTERM', () => shutdown(0));
 process.on('SIGINT', () => shutdown(0));
+// stderr is host.log. A log that cannot be written loses lines, not sessions.
+process.stderr.on('error', () => {});
