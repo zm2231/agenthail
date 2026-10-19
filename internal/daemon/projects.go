@@ -514,6 +514,34 @@ func (d *Daemon) addProject(ctx context.Context, path, title string) (catalogPro
 	return *addedCatalogProject(record, inRepository), nil
 }
 
+// ResolvePathProject names the project a session working in path belongs
+// to, resolved the way the catalog resolves sessions. It is "" when no
+// project holds the folder.
+func ResolvePathProject(ctx context.Context, reg *registry.Registry, path string) (string, error) {
+	path, err := catalogSessionPath(path)
+	if err != nil || path == "" {
+		return "", fmt.Errorf("a folder path is required")
+	}
+	records, err := reg.ListProjects()
+	if err != nil {
+		return "", err
+	}
+	added := records[:0]
+	for _, record := range records {
+		if record.Added {
+			added = append(added, record)
+		}
+	}
+	identity, _, transient := resolveCatalogIdentity(ctx, path, added, nil)
+	if transient {
+		return "", fmt.Errorf("resolve the project of %s: %s", path, identity.UnavailableReason)
+	}
+	if identity.Project == nil {
+		return "", nil
+	}
+	return identity.Project.ID, nil
+}
+
 // refreshProjectRepositories keeps each added project's key current with its
 // repository's remote.
 func (d *Daemon) refreshProjectRepositories(ctx context.Context, records []registry.ProjectRecord, now time.Time) {

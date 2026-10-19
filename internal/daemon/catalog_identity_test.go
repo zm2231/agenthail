@@ -207,3 +207,35 @@ func TestImplicitProjectsShareARepositoryOnlyThroughItsRemote(t *testing.T) {
 		t.Fatalf("a repository without a remote: %+v", local)
 	}
 }
+
+func TestImplicitProjectsCoverBareRepositoriesAndDottedRemoteNames(t *testing.T) {
+	bare := filepath.Join(t.TempDir(), "mirror.git")
+	if err := os.MkdirAll(bare, 0700); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, bare, "init", "--bare")
+	gitRun(t, bare, "remote", "add", "team.backup", "/srv/git/mirror.git")
+	gitRun(t, bare, "remote", "add", "team.main", "https://github.com/example/mirror.git")
+	gitRun(t, bare, "config", "--add", "remote.team.main.url", "https://github.com/example/mirror-second.git")
+	canonicalBare, err := workspace.NormalizeCWD(bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := newCatalogIdentityCache()
+	found := catalogProjectAt(t, cache, filepath.Join(bare, "refs"))
+	if found.ID != "repo:github.com/example/mirror" || found.RootPath != canonicalBare || found.DisplayName != "mirror" || found.Repository == nil || found.Repository.RemoteName != "team.main" {
+		t.Fatalf("bare repository: %+v repository=%+v", found, found.Repository)
+	}
+}
+
+func TestChangingOriginMovesTheProject(t *testing.T) {
+	repo := catalogTestRepo(t)
+	gitRun(t, repo, "remote", "add", "origin", "https://github.com/example/gadget.git")
+	cache := newCatalogIdentityCache()
+	before := catalogProjectAt(t, cache, repo)
+	gitRun(t, repo, "remote", "set-url", "origin", "https://github.com/someone-else/gadget.git")
+	later := cache.identity(context.Background(), surface.Session{Cwd: repo}, time.Now().Add(catalogIdentityTTL), noStoredProject)
+	if before.ID != "repo:github.com/example/gadget" || later.Project == nil || later.Project.ID != "repo:github.com/someone-else/gadget" {
+		t.Fatalf("before=%+v later=%+v", before, later.Project)
+	}
+}

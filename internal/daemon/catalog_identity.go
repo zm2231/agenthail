@@ -220,7 +220,7 @@ func resolveCatalogIdentity(ctx context.Context, path string, projects []registr
 	} else if inRepository {
 		identity.Project = repository.implicitProject()
 	}
-	if !inRepository || existing != path {
+	if !inRepository || existing != path || repository.bare {
 		return identity, "", false
 	}
 	identity.Checkout.Path = repository.toplevel
@@ -234,6 +234,7 @@ func resolveCatalogIdentity(ctx context.Context, path string, projects []registr
 }
 
 type catalogRepository struct {
+	bare       bool
 	toplevel   string
 	commonDir  string
 	gitDir     string
@@ -393,6 +394,10 @@ func resolveCatalogRepository(ctx context.Context, path string, repositories cat
 	gitCtx, cancel := context.WithTimeout(ctx, catalogIdentityGitTimeout)
 	defer cancel()
 	toplevel, err := catalogGit(gitCtx, path, "rev-parse", "--show-toplevel")
+	if err != nil && isCatalogBare(gitCtx, path, err) {
+		repository.bare = true
+		toplevel, err = catalogGit(gitCtx, path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	}
 	if err != nil {
 		return catalogRepository{}, isCatalogNonGit(err), err
 	}
@@ -533,6 +538,18 @@ func isCatalogNoMatch(err error) bool {
 	var gitErr *catalogGitError
 	var exitErr *exec.ExitError
 	return errors.As(err, &gitErr) && strings.TrimSpace(gitErr.stderr) == "" && errors.As(err, &exitErr) && exitErr.ExitCode() == 1
+}
+
+// isCatalogBare reports that git refused --show-toplevel because path is in
+// a bare repository, which has no work tree; its common directory stands in
+// for the checkout root.
+func isCatalogBare(ctx context.Context, path string, err error) bool {
+	var gitErr *catalogGitError
+	if !errors.As(err, &gitErr) || !strings.Contains(gitErr.stderr, "must be run in a work tree") {
+		return false
+	}
+	bare, bareErr := catalogGit(ctx, path, "rev-parse", "--is-bare-repository")
+	return bareErr == nil && bare == "true"
 }
 
 // isCatalogNonGit reports git's answer that the folder is outside any

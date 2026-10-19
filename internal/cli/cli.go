@@ -219,9 +219,9 @@ Session commands:
   thread <status|stop|resume|logs> <target>  Manage a Claude session (logs: claude-bg jobs)
   thread <archive|unarchive> <target>  Hide a session until it is active again
   thread queue <target> <list|add|update|delete|reorder|start>  Manage Codex native input
-  list [--all|--archived] [--project <name|id>] [--cwd <path>] [--wide]
+  list [--all|--archived] [--project <name|id>|--cwd <path>] [--wide]
                                  List current sessions (with the daemon: --all or --archived);
-                                 --cwd includes that workspace and descendants
+                                 --cwd lists the project that holds that folder
   project list|add <path>|remove <name>|archive <name>|unarchive <name>
                                  List, add or remove project folders, or hide a project
   runs [--json]                  Read verified Claude job and subagent records
@@ -243,8 +243,8 @@ Session commands:
   control <target> <context|usage|status|effort|rename> [value] [--json] [--timeout 30s]
                                  Run a Claude Remote Control command and show its output
   queue <target> "msg"|-        Hold until target is ready; start daemon to deliver queued work
-  queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]
-                                 Inspect queued work scoped to a session or workspace
+  queue list [--json] [--all] [--target <target>] [--mine] [--project <name|id>|--cwd <path>]
+                                 Inspect queued work scoped to a session or project
   queue retry <id>              Retry a failed message
   queue rm <id>                 Cancel a pending queued message
   queue clear <target>          Cancel all pending messages for a target
@@ -608,7 +608,7 @@ func validateCommandFlags(command string, args []string) error {
 		return nil
 	}
 	if command == "queue" && len(args) > 0 && args[0] == "list" {
-		spec.values = map[string]bool{"--target": true, "--cwd": true}
+		spec.values = map[string]bool{"--target": true, "--cwd": true, "--project": true}
 		spec.bools = map[string]bool{"--all": true, "--mine": true, "--json": true, "--help": true}
 	}
 	if command == "relay" && len(args) > 0 && args[0] == "add" {
@@ -685,7 +685,7 @@ func (a *App) cmdClaudeRuns(args []string) error {
 
 func (a *App) cmdList(args []string) error {
 	if len(stripFlags(args)) != 0 {
-		return fmt.Errorf("usage: agenthail list [--all|--archived] [--project <name|id>] [--cwd <path>] [--wide] [--json]")
+		return fmt.Errorf("usage: agenthail list [--all|--archived] [--project <name|id>|--cwd <path>] [--wide] [--json]")
 	}
 	scope, err := listScopeFromArgs(args)
 	if err != nil {
@@ -694,12 +694,8 @@ func (a *App) cmdList(args []string) error {
 	projectSelector := strings.TrimSpace(flagVal(args, "--project"))
 	jsonOut := hasFlag(args, "--json")
 	rootCwd := flagVal(args, "--cwd")
-	if rootCwd != "" {
-		var err error
-		rootCwd, err = workspace.NormalizeCWD(rootCwd)
-		if err != nil {
-			return fmt.Errorf("normalize --cwd: %w", err)
-		}
+	if rootCwd != "" && projectSelector != "" {
+		return fmt.Errorf("choose either --cwd or --project")
 	}
 	ctx := context.Background()
 
@@ -717,16 +713,13 @@ func (a *App) cmdList(args []string) error {
 	successfulSurfaces := 0
 	remoteRows := map[string]listHostRow{}
 	views := map[string]listCatalogView{}
-	if !catalogBacked && (projectSelector != "" || hasFlag(args, "--archived")) {
-		return fmt.Errorf("--project and --archived need the daemon; start it with: agenthail daemon start")
+	if !catalogBacked && (projectSelector != "" || rootCwd != "" || hasFlag(args, "--archived")) {
+		return fmt.Errorf("--project, --cwd and --archived need the daemon; start it with: agenthail daemon start")
 	}
 	if catalogBacked {
 		successfulSurfaces = 1
 		for _, record := range catalog.Sessions {
 			if record.HostID != "" {
-				if rootCwd != "" {
-					continue
-				}
 				session, row := listRemoteSession(record)
 				session.Subagents = catalogSubagentRollup(record)
 				remoteRows[session.ID] = row
@@ -837,19 +830,6 @@ func (a *App) cmdList(args []string) error {
 		}
 		allSessions = filtered
 	}
-	if rootCwd != "" {
-		filtered := allSessions[:0]
-		for _, s := range allSessions {
-			within, err := workspace.IsWithin(rootCwd, s.Cwd)
-			if err != nil {
-				return fmt.Errorf("compare session workspace: %w", err)
-			}
-			if within {
-				filtered = append(filtered, s)
-			}
-		}
-		allSessions = filtered
-	}
 
 	sort.SliceStable(allSessions, func(i, j int) bool {
 		if allSessions[i].LastActive.IsZero() {
@@ -865,11 +845,9 @@ func (a *App) cmdList(args []string) error {
 		families = -1
 	}
 	if catalogBacked {
-		projectID := ""
-		if projectSelector != "" {
-			if projectID, err = resolveListProject(views, projectSelector); err != nil {
-				return err
-			}
+		projectID, err := a.selectedProject(ctx, views, projectSelector, rootCwd)
+		if err != nil {
+			return err
 		}
 		allSessions = filterListScope(allSessions, views, scope, projectID)
 	}
@@ -2385,21 +2363,22 @@ func (a *App) cmdQueue(args []string) error {
 	}
 	if len(args) > 0 && args[0] == "list" {
 		if hasFlag(args, "--help") {
-			fmt.Println("usage: agenthail queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]")
-			fmt.Println("  --target  show messages for one destination")
-			fmt.Println("  --mine    show messages sent by or addressed to the caller session")
-			fmt.Println("  --cwd     show messages for targets in a workspace and its descendants")
+			fmt.Println("usage: agenthail queue list [--json] [--all] [--target <target>] [--mine] [--project <name|id>] [--cwd <path>]")
+			fmt.Println("  --target   show messages for one destination")
+			fmt.Println("  --mine     show messages sent by or addressed to the caller session")
+			fmt.Println("  --project  show messages for targets in one project")
+			fmt.Println("  --cwd      show messages for targets in the project that holds this folder")
 			fmt.Println("  --all     include terminal queue history")
 			return nil
 		}
 		if len(stripFlags(args)) != 1 {
-			return fmt.Errorf("usage: agenthail queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]")
+			return fmt.Errorf("usage: agenthail queue list [--json] [--all] [--target <target>] [--mine] [--project <name|id>] [--cwd <path>]")
 		}
 		rows, err := a.registry().ListQueue(hasFlag(args, "--all"), a.adapters())
 		if err != nil {
 			return err
 		}
-		rows, err = a.filterQueueRows(context.Background(), rows, flagVal(args, "--target"), hasFlag(args, "--mine"), flagVal(args, "--cwd"))
+		rows, err = a.filterQueueRows(context.Background(), rows, flagVal(args, "--target"), hasFlag(args, "--mine"), strings.TrimSpace(flagVal(args, "--project")), flagVal(args, "--cwd"))
 		if err != nil {
 			return err
 		}
@@ -2536,7 +2515,7 @@ func (a *App) cmdQueue(args []string) error {
 	return nil
 }
 
-func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, targetSelector string, mine bool, cwd string) ([]registry.QueueRow, error) {
+func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, targetSelector string, mine bool, projectSelector, cwd string) ([]registry.QueueRow, error) {
 	targetID := ""
 	if targetSelector != "" {
 		sessionID, err := a.queueSessionID(ctx, targetSelector)
@@ -2556,16 +2535,25 @@ func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, tar
 			return nil, fmt.Errorf("--mine requires a caller session binding; set AGENTHAIL_SESSION_ID, CODEX_THREAD_ID, or CLAUDE_CODE_SESSION_ID")
 		}
 	}
-	root := ""
-	if cwd != "" {
-		var err error
-		root, err = workspace.NormalizeCWD(cwd)
+	if projectSelector != "" && cwd != "" {
+		return nil, fmt.Errorf("choose either --cwd or --project")
+	}
+	var views map[string]listCatalogView
+	projectID := ""
+	if projectSelector != "" || cwd != "" {
+		snapshot, err := a.registry().CatalogSnapshot()
 		if err != nil {
-			return nil, fmt.Errorf("normalize --cwd: %w", err)
+			return nil, fmt.Errorf("read daemon catalog: %w", err)
+		}
+		views = make(map[string]listCatalogView, len(snapshot.Sessions))
+		for _, record := range snapshot.Sessions {
+			views[record.Session.ID] = catalogListView(record)
+		}
+		if projectID, err = a.selectedProject(ctx, views, projectSelector, cwd); err != nil {
+			return nil, err
 		}
 	}
 	filtered := make([]registry.QueueRow, 0, len(rows))
-	sessions := make(map[string]*surface.Session)
 	for _, row := range rows {
 		if targetID != "" && row.SessionID != targetID {
 			continue
@@ -2573,21 +2561,8 @@ func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, tar
 		if mineID != "" && row.SessionID != mineID && row.SourceSessionID != mineID {
 			continue
 		}
-		if root != "" {
-			session := sessions[row.SessionID]
-			if session == nil {
-				var err error
-				session, err = a.registry().Session(row.SessionID)
-				if err != nil {
-					return nil, fmt.Errorf("read queue target %s: %w", row.SessionID, err)
-				}
-				sessions[row.SessionID] = session
-			}
-			within, err := workspace.IsWithin(root, session.Cwd)
-			if err != nil {
-				return nil, fmt.Errorf("compare queue target workspace: %w", err)
-			}
-			if !within {
+		if projectID != "" {
+			if project := views[row.SessionID].Project; project == nil || project.ID != projectID {
 				continue
 			}
 		}

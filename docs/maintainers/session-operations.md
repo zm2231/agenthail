@@ -29,11 +29,15 @@ the daemon.
 `agenthail thread <archive|unarchive> <target>` archives one session. Both route
 to the host that owns the project or session.
 
-`agenthail list --cwd <path>` retains sessions whose normalized workspace is that
-directory or a descendant. Existing symlinks resolve before comparison, and path
-components, not string prefixes, define ancestry. `--wide` prints each full
-normalized workspace. JSON always retains the complete `cwd` field. CWD narrows
-discovery; it never selects a caller identity.
+`agenthail list --project <name|id>` lists one project's sessions on every
+host. `agenthail list --cwd <path>` lists the project a session working in that
+folder would belong to, resolved the way the daemon resolves sessions (see
+`projects.md`): a session in a linked worktree counts for its project wherever
+the worktree lives, and a folder no project holds is an error. Both need the
+daemon and cannot be combined. `queue list` takes the same two filters for its
+targets. `--wide` prints each full normalized workspace. JSON always retains
+the complete `cwd` field. `--cwd` narrows the list; it never selects a caller
+identity.
 
 `agenthail last <target> [count] --timeout 30s` and
 `agenthail reply <target> --timeout 30s` use one bounded session reader. The

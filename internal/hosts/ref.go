@@ -10,12 +10,12 @@ import (
 // through registry host_id.
 const Separator = "::"
 
-// PortablePrefix starts a project id that names the same project on every
+// RepositoryPrefix starts a project id that names the same project on every
 // host, so it is never host-qualified even though it may contain Separator.
-const PortablePrefix = "repo:"
+const RepositoryPrefix = "repo:"
 
 func Qualify(hostID, sessionID string) string {
-	if hostID == "" || sessionID == "" || strings.Contains(sessionID, Separator) || strings.HasPrefix(sessionID, PortablePrefix) {
+	if hostID == "" || sessionID == "" || strings.Contains(sessionID, Separator) || strings.HasPrefix(sessionID, RepositoryPrefix) {
 		return sessionID
 	}
 	return hostID + Separator + sessionID
@@ -23,7 +23,7 @@ func Qualify(hostID, sessionID string) string {
 
 func Split(ref string) (host, target string, ok bool) {
 	host, target, ok = strings.Cut(ref, Separator)
-	if !ok || host == "" || strings.HasPrefix(ref, PortablePrefix) {
+	if !ok || host == "" || strings.HasPrefix(ref, RepositoryPrefix) {
 		return "", ref, false
 	}
 	return host, target, true
