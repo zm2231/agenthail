@@ -31,7 +31,7 @@ type CatalogEventWindow struct {
 func (r *Registry) EnsureCatalogState() error {
 	if _, err := r.db.Exec(`CREATE TABLE IF NOT EXISTS catalog_sessions (
 		session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-		host_project BLOB NOT NULL,
+		project BLOB NOT NULL,
 		checkout BLOB NOT NULL,
 		unavailable_reason TEXT NOT NULL DEFAULT '',
 		observed_at TEXT NOT NULL,
@@ -41,6 +41,13 @@ func (r *Registry) EnsureCatalogState() error {
 		discovery_failures INTEGER NOT NULL DEFAULT 0
 	)`); err != nil {
 		return err
+	}
+	if found, err := r.columnExists("catalog_sessions", "host_project"); err != nil {
+		return err
+	} else if found {
+		if _, err := r.db.Exec(`ALTER TABLE catalog_sessions RENAME COLUMN host_project TO project`); err != nil {
+			return err
+		}
 	}
 	if err := r.ensureColumn("catalog_sessions", "misses", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err

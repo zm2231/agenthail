@@ -359,7 +359,7 @@ func (d *Daemon) markHostDown(host *pairedHost, cause error) {
 		projection.Host = &ref
 		projection.UnavailableReason = reason
 		projection.QueueCount = row.HostQueueCount
-		if err := d.applyMirroredProjection(host.record.ID, row.Session, projection, row.HostProject, row.Checkout); err != nil {
+		if err := d.applyMirroredProjection(host.record.ID, row.Session, projection, row.Project, row.Checkout); err != nil {
 			d.log.Printf("host %s mark unavailable: %s", host.record.Name, err)
 		}
 	}
@@ -543,7 +543,7 @@ func (d *Daemon) updateMirroredQueueCount(host *pairedHost, sessionID string, co
 			return err
 		}
 		projection.QueueCount = count
-		return d.applyMirroredProjection(host.record.ID, row.Session, projection, row.HostProject, row.Checkout)
+		return d.applyMirroredProjection(host.record.ID, row.Session, projection, row.Project, row.Checkout)
 	}
 	return nil
 }
@@ -574,7 +574,12 @@ func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession) error {
 		qualified.RootID = hosts.Qualify(host.record.ID, subagent.RootID)
 		row.Subagent = &qualified
 	}
-	hostProject, _ := json.Marshal(row.HostProject)
+	if row.Project != nil {
+		qualified := *row.Project
+		qualified.ID = hosts.Qualify(host.record.ID, qualified.ID)
+		row.Project = &qualified
+	}
+	project, _ := json.Marshal(row.Project)
 	checkout, _ := json.Marshal(row.Checkout)
 	row.ID = hosts.Qualify(host.record.ID, row.ID)
 	if row.ForkedFrom != "" {
@@ -588,17 +593,17 @@ func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession) error {
 	}
 	ref := host.ref()
 	row.Host = &ref
-	return d.applyMirroredProjection(host.record.ID, session, row, hostProject, checkout)
+	return d.applyMirroredProjection(host.record.ID, session, row, project, checkout)
 }
 
-func (d *Daemon) applyMirroredProjection(hostID string, session surface.Session, projection dashboardSession, hostProject, checkout json.RawMessage) error {
+func (d *Daemon) applyMirroredProjection(hostID string, session surface.Session, projection dashboardSession, project, checkout json.RawMessage) error {
 	projection.ObservedAt = time.Time{}
 	projection.Freshness = nil
 	encoded, err := json.Marshal(projection)
 	if err != nil {
 		return err
 	}
-	return d.publishHostRow(hostID, registry.HostCatalogRow{Session: session, EntityID: projection.ID, Projection: encoded, HostProject: hostProject, Checkout: checkout, UnavailableReason: projection.UnavailableReason, ObservedAt: time.Now().UTC(), QueueCount: projection.QueueCount})
+	return d.publishHostRow(hostID, registry.HostCatalogRow{Session: session, EntityID: projection.ID, Projection: encoded, Project: project, Checkout: checkout, UnavailableReason: projection.UnavailableReason, ObservedAt: time.Now().UTC(), QueueCount: projection.QueueCount})
 }
 
 func (d *Daemon) refreshHostQueueCounts() {

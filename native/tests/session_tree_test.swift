@@ -7,7 +7,7 @@ struct SessionTreeTest {
         expect(SessionTree.parseTimestamp("2026-10-04 12:00:00") == now, "SQLite UTC timestamps parse as UTC")
         let caps = Capabilities(send: true, stream: true, reply: true, goal: false, compact: false, model: true, interrupt: true, steer: true)
         func session(_ id: String, status: String, lastActive: String, project: String, checkout: String, branch: String?, detached: String? = nil, name: String? = nil) -> SessionState {
-            SessionState(id: id, surface: "codex", name: name ?? id, alias: nil, status: status, lastActive: lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: "/repo/\(checkout)", hostProject: HostProjectIdentity(id: project, displayName: project, commonDir: "/repo/.git", path: nil), checkout: CheckoutIdentity(id: checkout, path: "/repo/\(checkout)", branch: branch, detachedHead: detached, isMain: checkout == "main", dirty: false))
+            SessionState(id: id, surface: "codex", name: name ?? id, alias: nil, status: status, lastActive: lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: "/repo/\(checkout)", project: ProjectIdentity(id: project, displayName: project, rootPath: "/repo", kind: "git"), checkout: CheckoutIdentity(id: checkout, path: "/repo/\(checkout)", branch: branch, detachedHead: detached, isMain: checkout == "main", dirty: false))
         }
         let sessions = [
             session("old", status: "idle", lastActive: "2026-10-01T12:00:00Z", project: "agenthail", checkout: "main", branch: "main"),
@@ -71,7 +71,7 @@ struct SessionTreeTest {
         expect(capFamily.checkouts.flatMap(\.families).map(\.id) == ["lead"], "selecting a subagent keeps its family visible past the cap")
 
         var offline = session("gone", status: "offline", lastActive: "2026-10-04T11:30:00Z", project: "agenthail", checkout: "main", branch: "main")
-        offline = SessionState(id: offline.id, surface: "claude", name: "gone", alias: nil, status: "offline", lastActive: offline.lastActive, queueCount: 0, open: false, current: false, currentReason: nil, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: offline.cwd, hostProject: offline.hostProject, checkout: offline.checkout)
+        offline = SessionState(id: offline.id, surface: "claude", name: "gone", alias: nil, status: "offline", lastActive: offline.lastActive, queueCount: 0, open: false, current: false, currentReason: nil, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: offline.cwd, project: offline.project, checkout: offline.checkout)
         let notLoaded = session("cold", status: "notLoaded", lastActive: "2026-10-04T11:40:00Z", project: "agenthail", checkout: "main", branch: "main")
         let unknown = session("lost", status: "unknown", lastActive: "2026-10-04T11:41:00Z", project: "agenthail", checkout: "main", branch: "main")
         let refined = sessions + [offline, notLoaded, unknown]

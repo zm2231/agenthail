@@ -101,7 +101,7 @@ func TestDashboardEmptyCatalogPageDoesNotFallBackToSavedSessions(t *testing.T) {
 	d, store, fake, from, _ := daemonFixture(t)
 	if _, _, err := store.RecordCatalogSession(registry.CatalogSessionState{
 		Session:               from,
-		HostProject:           []byte(`{"id":"project"}`),
+		Project:           []byte(`{"id":"project"}`),
 		Checkout:              []byte(`{}`),
 		ProjectionFingerprint: `{"id":"from","surface":"codex","name":"from","cwd":"/work","status":"idle"}`,
 	}, registry.CatalogEvent{DedupeKey: "session:from:catalog", Type: "session.upserted", EntityID: from.ID, Payload: []byte(`{"session":{"id":"from"}}`)}); err != nil {

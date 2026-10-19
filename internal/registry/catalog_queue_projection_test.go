@@ -17,7 +17,7 @@ func catalogQueueTestState(id, name string, queueCount int) (CatalogSessionState
 	encoded, _ := json.Marshal(fingerprint)
 	return CatalogSessionState{
 			Session:     surface.Session{ID: id, Surface: surface.KindClaude, Name: name, Status: surface.StatusIdle},
-			HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(),
+			Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(),
 			ProjectionFingerprint: string(encoded),
 		}, CatalogEvent{
 			DedupeKey: "session.upserted:" + id, Type: "session.upserted", EntityID: id,

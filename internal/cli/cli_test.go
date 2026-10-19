@@ -844,7 +844,7 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 	} {
 		if _, _, err := store.RecordCatalogSession(registry.CatalogSessionState{
 			Session:               item,
-			HostProject:           json.RawMessage(`{}`),
+			Project:           json.RawMessage(`{}`),
 			Checkout:              json.RawMessage(`{}`),
 			ObservedAt:            observedAt,
 			ProjectionFingerprint: item.ID,

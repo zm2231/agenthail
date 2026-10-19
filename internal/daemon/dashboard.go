@@ -100,7 +100,7 @@ type dashboardSession struct {
 	Source            string                     `json:"source,omitempty"`
 	Transport         string                     `json:"transport,omitempty"`
 	ForkedFrom        string                     `json:"forkedFrom,omitempty"`
-	HostProject       *catalogHostProject        `json:"hostProject,omitempty"`
+	Project       *catalogProject        `json:"project,omitempty"`
 	Checkout          *catalogCheckout           `json:"checkout,omitempty"`
 	ObservedAt        time.Time                  `json:"observedAt,omitempty"`
 	UnavailableReason string                     `json:"unavailableReason,omitempty"`
@@ -531,7 +531,7 @@ func (d *Daemon) writeDashboardSnapshot(w http.ResponseWriter, r *http.Request, 
 		if scope == "running" && row.Status != surface.StatusBusy {
 			continue
 		}
-		if projectID != "" && (row.HostProject == nil || row.HostProject.ID != projectID) {
+		if projectID != "" && (row.Project == nil || row.Project.ID != projectID) {
 			continue
 		}
 		if query != "" && !strings.Contains(strings.ToLower(row.Name+" "+row.Cwd+" "+row.Alias), query) {
@@ -849,7 +849,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		identity := catalogIdentity{}
 		observedAt := time.Time{}
 		if record, found := catalogSessions[session.ID]; found {
-			_ = json.Unmarshal(record.HostProject, &identity.HostProject)
+			_ = json.Unmarshal(record.Project, &identity.Project)
 			_ = json.Unmarshal(record.Checkout, &identity.Checkout)
 			identity.UnavailableReason = record.UnavailableReason
 			observedAt = record.ObservedAt

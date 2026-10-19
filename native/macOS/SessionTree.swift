@@ -107,7 +107,7 @@ struct SessionTree: Equatable {
         var projects: [Project] = []
         for family in visible {
             let session = family.root
-            let projectID = session.hostProject?.id ?? session.cwd ?? "unknown"
+            let projectID = session.project?.id ?? session.cwd ?? "unknown"
             if !projects.contains(where: { $0.id == projectID }) {
                 projects.append(Project(id: projectID, name: projectName(session), checkouts: []))
             }
@@ -187,7 +187,7 @@ struct SessionTree: Equatable {
     }()
 
     private static func projectName(_ session: SessionState) -> String {
-        if let name = session.hostProject?.displayName, !name.isEmpty { return name }
+        if let name = session.project?.displayName, !name.isEmpty { return name }
         if let cwd = session.cwd, !cwd.isEmpty { return URL(fileURLWithPath: cwd).lastPathComponent }
         return "Other"
     }

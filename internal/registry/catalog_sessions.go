@@ -13,7 +13,7 @@ import (
 type CatalogSessionState struct {
 	Session               surface.Session
 	HostID                string
-	HostProject           json.RawMessage
+	Project           json.RawMessage
 	Checkout              json.RawMessage
 	UnavailableReason     string
 	ObservedAt            time.Time
@@ -181,7 +181,7 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	if state.ProjectionFingerprint == "" {
 		return CatalogEvent{}, false, fmt.Errorf("catalog session projection fingerprint is required")
 	}
-	if !json.Valid(state.HostProject) || !json.Valid(state.Checkout) {
+	if !json.Valid(state.Project) || !json.Valid(state.Checkout) {
 		return CatalogEvent{}, false, fmt.Errorf("catalog identity must be JSON")
 	}
 	if state.ObservedAt.IsZero() {
@@ -224,11 +224,11 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	if err := registerSessionTx(tx, state.Session); err != nil {
 		return CatalogEvent{}, false, err
 	}
-	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures)
-		VALUES(?,?,?,?,?,?,?,0) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
+	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures)
+		VALUES(?,?,?,?,?,?,?,0) ON CONFLICT(session_id) DO UPDATE SET project=excluded.project,
 		checkout=excluded.checkout, unavailable_reason=excluded.unavailable_reason, observed_at=excluded.observed_at, misses=0,
 		projection_fingerprint=excluded.projection_fingerprint, projection_generation=excluded.projection_generation, discovery_failures=0`,
-		state.Session.ID, []byte(state.HostProject), []byte(state.Checkout), state.UnavailableReason, state.ObservedAt.Format(time.RFC3339Nano), state.ProjectionFingerprint, priorGeneration); err != nil {
+		state.Session.ID, []byte(state.Project), []byte(state.Checkout), state.UnavailableReason, state.ObservedAt.Format(time.RFC3339Nano), state.ProjectionFingerprint, priorGeneration); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	if len(event.Payload) > 0 {
@@ -276,13 +276,13 @@ func (r *Registry) catalogSessionUnchanged(state CatalogSessionState, event Cata
 type catalogSessionPrior struct {
 	found                        bool
 	fingerprint, unavailable     string
-	hostProject, checkout        []byte
+	project, checkout        []byte
 	generation, misses, failures int64
 }
 
 func readCatalogSessionPrior(q catalogQuerier, sessionID string) (catalogSessionPrior, error) {
 	var prior catalogSessionPrior
-	err := q.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures,host_project,checkout,unavailable_reason FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&prior.fingerprint, &prior.generation, &prior.misses, &prior.failures, &prior.hostProject, &prior.checkout, &prior.unavailable)
+	err := q.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures,project,checkout,unavailable_reason FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&prior.fingerprint, &prior.generation, &prior.misses, &prior.failures, &prior.project, &prior.checkout, &prior.unavailable)
 	if err == sql.ErrNoRows {
 		return catalogSessionPrior{}, nil
 	}
@@ -297,7 +297,7 @@ func (p catalogSessionPrior) changedBy(state CatalogSessionState) bool {
 }
 
 func (p catalogSessionPrior) unchangedBy(q catalogQuerier, state CatalogSessionState) (bool, error) {
-	if p.changedBy(state) || string(p.hostProject) != string(state.HostProject) || string(p.checkout) != string(state.Checkout) || p.unavailable != state.UnavailableReason {
+	if p.changedBy(state) || string(p.project) != string(state.Project) || string(p.checkout) != string(state.Checkout) || p.unavailable != state.UnavailableReason {
 		return false, nil
 	}
 	return sessionRowMatchesTx(q, state.Session)
@@ -575,6 +575,17 @@ func (r *Registry) RecordCatalogDiscovery(kind surface.SurfaceKind, seen map[str
 
 // CatalogProjectionFingerprint returns the committed projection of one
 // catalog session, the same row CatalogSnapshot serves.
+// CatalogSessionProject returns the project last stored for a session, or
+// nil when the session has no catalog row.
+func (r *Registry) CatalogSessionProject(sessionID string) (json.RawMessage, error) {
+	var project []byte
+	err := r.read.QueryRow(`SELECT project FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&project)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return project, err
+}
+
 func (r *Registry) CatalogProjectionFingerprint(sessionID string) (string, bool, error) {
 	var fingerprint string
 	err := r.read.QueryRow(`SELECT cs.projection_fingerprint FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE cs.session_id=?`, sessionID).Scan(&fingerprint)
@@ -602,7 +613,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		return CatalogSnapshot{}, err
 	}
 	rows, err := tx.Query(`SELECT s.id,s.host_id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
-		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `
+		cs.project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id LEFT JOIN session_runtime sr ON sr.session_id=s.id
 		ORDER BY s.last_active_ms DESC,s.updated_at DESC,s.id`)
 	if err != nil {
@@ -626,7 +637,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		var location []byte
 		var focusable int
 		var subagent subagentColumns
-		if err := rows.Scan(append([]any{&state.Session.ID, &state.HostID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.ConfiguredModel, &state.Session.Bridge, &state.Session.ForkedFrom, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
+		if err := rows.Scan(append([]any{&state.Session.ID, &state.HostID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.ConfiguredModel, &state.Session.Bridge, &state.Session.ForkedFrom, &lastActiveMS, &state.Project, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 			return CatalogSnapshot{}, err
 		}
 		subagent.apply(&state.Session)

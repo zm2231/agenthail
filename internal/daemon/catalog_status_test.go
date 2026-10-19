@@ -345,8 +345,8 @@ func TestCatalogIdentityResolvesPathWithNewline(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitRun(t, repo, "init", "-b", "main")
-	identity := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, time.Now())
-	if identity.UnavailableReason != "" || identity.HostProject.CommonDir == "" || filepath.Base(identity.Checkout.Path) != "line\nbreak" {
+	identity := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, time.Now(), noStoredProject)
+	if identity.UnavailableReason != "" || identity.Project == nil || identity.Project.RootPath != identity.Checkout.Path || filepath.Base(identity.Checkout.Path) != "line\nbreak" {
 		t.Fatalf("identity=%+v", identity)
 	}
 }
@@ -366,28 +366,28 @@ func TestCatalogIdentityCacheReusesResolvedCheckout(t *testing.T) {
 	now := time.Now()
 	session := surface.Session{Cwd: repo}
 
-	first := cache.identity(context.Background(), session, now)
+	first := cache.identity(context.Background(), session, now, noStoredProject)
 	resolved := calls()
 	if resolved == 0 || first.Checkout.Branch != "main" || first.Checkout.Dirty {
 		t.Fatalf("calls=%d identity=%+v", resolved, first.Checkout)
 	}
-	if again := cache.identity(context.Background(), session, now.Add(time.Minute)); again != first || calls() != resolved {
+	if again := cache.identity(context.Background(), session, now.Add(time.Minute), noStoredProject); again != first || calls() != resolved {
 		t.Fatalf("cached lookup ran %d git commands", calls()-resolved)
 	}
 
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("edited\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if edited := cache.identity(context.Background(), session, now.Add(time.Minute)); edited.Checkout.Dirty || calls() != resolved {
+	if edited := cache.identity(context.Background(), session, now.Add(time.Minute), noStoredProject); edited.Checkout.Dirty || calls() != resolved {
 		t.Fatalf("working tree edit re-resolved before expiry: dirty=%v calls=%d", edited.Checkout.Dirty, calls()-resolved)
 	}
-	if expired := cache.identity(context.Background(), session, now.Add(catalogIdentityTTL)); !expired.Checkout.Dirty || calls() == resolved {
+	if expired := cache.identity(context.Background(), session, now.Add(catalogIdentityTTL), noStoredProject); !expired.Checkout.Dirty || calls() == resolved {
 		t.Fatalf("expired entry was reused: %+v", expired.Checkout)
 	}
 
 	gitRun(t, repo, "checkout", "-q", "-b", "feature/cache")
 	switched := calls()
-	if branch := cache.identity(context.Background(), session, now.Add(catalogIdentityTTL)); branch.Checkout.Branch != "feature/cache" || calls() == switched {
+	if branch := cache.identity(context.Background(), session, now.Add(catalogIdentityTTL), noStoredProject); branch.Checkout.Branch != "feature/cache" || calls() == switched {
 		t.Fatalf("branch switch did not invalidate: %+v", branch.Checkout)
 	}
 }

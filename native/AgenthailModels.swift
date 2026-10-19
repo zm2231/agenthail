@@ -116,7 +116,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     let readOnly: Bool?
     let readOnlyReason: String?
     var cwd: String? = nil
-    var hostProject: HostProjectIdentity? = nil
+    var project: ProjectIdentity? = nil
     var checkout: CheckoutIdentity? = nil
     var runtime: SessionRuntime? = nil
     var subagent: SubagentIdentity? = nil
@@ -331,11 +331,12 @@ struct LauncherOption: Decodable, Identifiable, Hashable {
     }
 }
 
-struct HostProjectIdentity: Codable, Hashable {
-    let id: String?
-    let displayName: String?
-    let commonDir: String?
-    let path: String?
+struct ProjectIdentity: Codable, Hashable {
+    let id: String
+    let displayName: String
+    let rootPath: String
+    let kind: String
+    var archived: Bool? = nil
 }
 
 struct CheckoutIdentity: Codable, Hashable {

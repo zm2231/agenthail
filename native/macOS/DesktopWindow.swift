@@ -271,7 +271,7 @@ extension SessionSidebar {
     private var searchMatches: (local: [SessionState], remote: [SessionSearchItem]) {
         let query = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let local = SessionTree.newestFirst(model.knownSessions.filter { session in
-            [session.title, session.name, session.hostProject?.displayName, session.checkout?.branch]
+            [session.title, session.name, session.project?.displayName, session.checkout?.branch]
                 .compactMap { $0 }
                 .contains { $0.localizedCaseInsensitiveContains(query) }
         })
@@ -1830,7 +1830,7 @@ struct DetailsTab: View {
                 } else if let modelName {
                     detailRow("Model", modelName)
                 }
-                if let project = session.hostProject?.displayName { detailRow("Project", project) }
+                if let project = session.project?.displayName { detailRow("Project", project) }
                 if let branch = session.checkout?.branch ?? session.checkout?.detachedHead { detailRow("Branch", branch, monospaced: true) }
                 if let path = session.checkout?.path ?? session.cwd { detailRow("Checkout", (path as NSString).abbreviatingWithTildeInPath, monospaced: true) }
             }
