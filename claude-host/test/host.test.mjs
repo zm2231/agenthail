@@ -169,6 +169,21 @@ test('bypassPermissions opens with explicit consent to skip permissions', async 
   c.close();
 });
 
+test('a session opened in a Claude config root runs its Claude there', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  const root = path.join(f.cwd, 'claude-work');
+  const resumed = randomUUID();
+  await c.call('open', { resume: resumed, cwd: f.cwd, configDir: root });
+  await c.call('open', { sessionId: randomUUID(), cwd: f.cwd });
+  const [inRoot, primary] = fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(inRoot.sessionId, resumed);
+  assert.equal(inRoot.configDir, root);
+  assert.equal(primary.configDir, process.env.CLAUDE_CONFIG_DIR ?? null);
+  c.close();
+});
+
 test('a peer message keeps its text and carries the sender as origin', async () => {
   const f = fixture();
   await startHost(f);
@@ -391,6 +406,7 @@ test('open rejects a bad request', async () => {
   await assert.rejects(c.call('open', { cwd: f.cwd, permissionMode: 'yolo' }), { code: 'invalid' });
   await assert.rejects(c.call('open', { cwd: f.cwd, effort: 'extreme' }), { code: 'invalid' });
   await assert.rejects(c.call('open', { cwd: f.cwd, resume: randomUUID(), name: 'renamed' }), { code: 'invalid' });
+  await assert.rejects(c.call('open', { cwd: f.cwd, configDir: 'relative/claude' }), { code: 'invalid' });
   await assert.rejects(c.call('nope'), { code: 'invalid' });
   c.close();
 });

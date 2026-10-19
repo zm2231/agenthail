@@ -2765,19 +2765,34 @@ func (a *App) cmdDoctor(args []string) error {
 	}
 	signins := a.signinStatus(ctx)
 	home, _ := os.UserHomeDir()
-	claudeConfigDir := surface.ClaudeConfigDir(home)
+	claudeRoots, claudeRootsErr := surface.ClaudeConfigRoots(home)
+	if claudeRootsErr != nil {
+		failures++
+	}
 	service := a.service()
 	serviceProblems := service.Problems()
 	if serviceProblems == nil {
 		serviceProblems = []serviceProblem{}
 	}
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDir": claudeConfigDir, "signin": signins}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "signin": signins}
+		if claudeRootsErr != nil {
+			report["claudeConfigError"] = claudeRootsErr.Error()
+		}
 		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
 			return err
 		}
 	} else {
-		fmt.Printf("claude config: %s\n", claudeConfigDir)
+		if claudeRootsErr != nil {
+			fmt.Printf("claude config: %s\n", claudeRootsErr)
+		}
+		for i, root := range claudeRoots {
+			label := "claude config"
+			if i > 0 {
+				label = "claude config (claudeConfigDirs)"
+			}
+			fmt.Printf("%s: %s\n", label, root)
+		}
 		if len(serviceProblems) > 0 {
 			fmt.Printf("[daemon] supervisor: %s\n", service.Name())
 			for _, problem := range serviceProblems {

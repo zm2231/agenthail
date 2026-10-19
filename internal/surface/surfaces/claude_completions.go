@@ -19,9 +19,9 @@ type claudeCompletionCursor struct {
 }
 
 func (c *Claude) ReadCompletions(ctx context.Context, sess *surface.Session, cursor string) (surface.CompletionBatch, error) {
-	path := sess.Transcript
-	if path == "" {
-		path = c.transcriptPath(sess)
+	path, err := c.sessionTranscript(sess)
+	if err != nil {
+		return surface.CompletionBatch{}, err
 	}
 	var checkpoint claudeCompletionCursor
 	if cursor != "" {

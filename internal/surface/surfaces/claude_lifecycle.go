@@ -29,7 +29,8 @@ type claudeBackground struct {
 	PID       int    `json:"pid"`
 }
 
-func (c *Claude) backgroundCommand(ctx context.Context, cwd string, args ...string) ([]byte, error) {
+// backgroundCommand runs claude against one config root; "" is the primary.
+func (c *Claude) backgroundCommand(ctx context.Context, root, cwd string, args ...string) ([]byte, error) {
 	binary, err := surface.ClaudeBinary(c.home)
 	if err != nil {
 		return nil, surface.DeliveryUnavailable(err)
@@ -38,6 +39,9 @@ func (c *Claude) backgroundCommand(ctx context.Context, cwd string, args ...stri
 	cmd.WaitDelay = time.Second
 	cmd.Dir = cwd
 	cmd.Env = claudeCommandEnv(c.home)
+	if root != "" {
+		cmd.Env = append(cmd.Env, "CLAUDE_CONFIG_DIR="+root)
+	}
 	return cmd.CombinedOutput()
 }
 
@@ -53,8 +57,8 @@ func claudeCommandEnv(home string) []string {
 	}
 	return append(env, "HOME="+home)
 }
-func (c *Claude) backgroundSessions(ctx context.Context) ([]claudeBackground, error) {
-	data, err := c.backgroundCommand(ctx, "", "agents", "--json", "--all")
+func (c *Claude) backgroundSessions(ctx context.Context, root string) ([]claudeBackground, error) {
+	data, err := c.backgroundCommand(ctx, root, "", "agents", "--json", "--all")
 	if err != nil {
 		return nil, fmt.Errorf("Claude agents: %w: %s", err, string(data))
 	}
@@ -129,7 +133,7 @@ func (s claudeBackgroundStarter) StartSession(ctx context.Context, options surfa
 		}
 	}
 	args = append(args, "--", options.Message)
-	data, err := c.backgroundCommand(ctx, options.Cwd, args...)
+	data, err := c.backgroundCommand(ctx, "", options.Cwd, args...)
 	if err != nil {
 		return nil, nil, claudeBackgroundRunError("Claude creation", err, data)
 	}
@@ -142,7 +146,7 @@ func (s claudeBackgroundStarter) StartSession(ctx context.Context, options surfa
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		records, listErr := c.backgroundSessions(ctx)
+		records, listErr := c.backgroundSessions(ctx, "")
 		if listErr == nil {
 			for _, record := range records {
 				if record.ID == shortID && record.Kind == "background" && record.SessionID != "" {
@@ -164,10 +168,14 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 	if action != "stop" && action != "resume" && action != "logs" && action != "status" {
 		return nil, fmt.Errorf("Claude lifecycle action must be status, stop, resume, or logs")
 	}
+	root, err := c.conversationRoot(session.ID)
+	if err != nil {
+		return nil, err
+	}
 	if claudeHosted(session) {
 		return c.hostSessionAction(ctx, session, action)
 	}
-	records, err := c.backgroundSessions(ctx)
+	records, err := c.backgroundSessions(ctx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +194,7 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 			}
 			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "unchanged": !resumed, "state": string(target.Status)}, nil
 		}
-		output, err := c.backgroundCommand(ctx, record.Cwd, action, record.ID)
+		output, err := c.backgroundCommand(ctx, root, record.Cwd, action, record.ID)
 		if err != nil {
 			var path *fs.PathError
 			if surface.IsDeliveryUnavailable(err) || errors.As(err, &path) {

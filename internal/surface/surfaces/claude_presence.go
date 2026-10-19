@@ -2,8 +2,6 @@ package surfaces
 
 import (
 	"context"
-	"encoding/json"
-	"os"
 
 	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -43,26 +41,14 @@ func (c *Claude) OpenSessions(ctx context.Context, sessions []surface.Session) m
 	return open
 }
 
-func (c *Claude) readPeerRecord(pid int) (map[string]any, error) {
-	raw, err := os.ReadFile(c.peerRecordPath(pid))
-	if err != nil {
-		return nil, err
-	}
-	var record map[string]any
-	if err := json.Unmarshal(raw, &record); err != nil {
-		return nil, err
-	}
-	return record, nil
-}
-
 // liveRecord reads the session record of sess's process while that process
 // is still the one that wrote it for sess.
 func (c *Claude) liveRecord(sess surface.Session) (map[string]any, bool) {
 	if sess.PID <= 0 {
 		return nil, false
 	}
-	record, err := c.readPeerRecord(sess.PID)
-	if err != nil || str(record, "sessionId") != sess.ID || !claudeRecordLive(record) {
+	_, record, found := c.pidRecord(sess.PID)
+	if !found || str(record, "sessionId") != sess.ID || !claudeRecordLive(record) {
 		return nil, false
 	}
 	return record, true

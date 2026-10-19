@@ -47,7 +47,7 @@ func readTimeline(ctx context.Context, path, source string, before int64, limit 
 	session := &surface.Session{Transcript: path}
 	request := surface.SessionReadRequest{Before: before, Limit: limit}
 	if source == "claude" {
-		return (&Claude{}).ReadSession(ctx, session, request)
+		return timelineClaude().ReadSession(ctx, session, request)
 	}
 	return (&Codex{}).ReadSession(ctx, session, request)
 }
@@ -379,7 +379,7 @@ func TestClaudeReadGroupsTurnsFiltersNonHumanRecordsAndKeepsFullReply(t *testing
 		assistant("m1", long, true),
 		`{"type":"system","subtype":"stop_hook_summary"}`,
 	}, "\n")+"\n")
-	read, err := (&Claude{}).ReadSession(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 5})
+	read, err := timelineClaude().ReadSession(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -590,7 +590,7 @@ func TestClaudeReplyDoneFollowsTranscriptTurnStateNotRegistryStatus(t *testing.T
 {"type":"assistant","timestamp":"2026-09-07T10:01:00Z","message":{"id":"m1","content":[{"type":"text","text":"Looking at the file"}]}}
 `)
 	staleIdle := &surface.Session{Transcript: path, Status: surface.StatusIdle}
-	read, err := (&Claude{}).ReadSession(context.Background(), staleIdle, surface.SessionReadRequest{Limit: 1})
+	read, err := timelineClaude().ReadSession(context.Background(), staleIdle, surface.SessionReadRequest{Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -601,7 +601,7 @@ func TestClaudeReplyDoneFollowsTranscriptTurnStateNotRegistryStatus(t *testing.T
 	fmt.Fprintln(f, `{"type":"assistant","timestamp":"2026-09-07T10:02:00Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"Done, patched"}]}}`)
 	fmt.Fprintln(f, `{"type":"system","subtype":"stop_hook_summary"}`)
 	f.Close()
-	read, err = (&Claude{}).ReadSession(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusBusy}, surface.SessionReadRequest{Limit: 1})
+	read, err = timelineClaude().ReadSession(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusBusy}, surface.SessionReadRequest{Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -613,7 +613,7 @@ func TestClaudeReplyDoneFollowsTranscriptTurnStateNotRegistryStatus(t *testing.T
 	fmt.Fprintln(f, `{"type":"assistant","timestamp":"2026-09-07T10:04:00Z","message":{"id":"m2","content":[{"type":"text","text":"Starting"}]}}`)
 	fmt.Fprintln(f, `{"type":"user","timestamp":"2026-09-07T10:05:00Z","message":{"content":"[Request interrupted by user]"}}`)
 	f.Close()
-	read, err = (&Claude{}).ReadSession(context.Background(), staleIdle, surface.SessionReadRequest{Limit: 1})
+	read, err = timelineClaude().ReadSession(context.Background(), staleIdle, surface.SessionReadRequest{Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,7 +633,7 @@ func TestClaudeReadSessionOlderCursorWalksEveryExchange(t *testing.T) {
 	seenItems := map[string]bool{}
 	cursor := int64(0)
 	for page := 0; page < 20; page++ {
-		read, err := (&Claude{}).ReadSession(context.Background(), session, surface.SessionReadRequest{Limit: 50, Before: cursor})
+		read, err := timelineClaude().ReadSession(context.Background(), session, surface.SessionReadRequest{Limit: 50, Before: cursor})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -667,4 +667,10 @@ func TestClaudeReadSessionOlderCursorWalksEveryExchange(t *testing.T) {
 			t.Fatalf("exchange %d: got %q want %q", i, user, want)
 		}
 	}
+}
+
+// timelineClaude reads transcripts named by the session, with no Claude
+// config root holding anything.
+func timelineClaude() *Claude {
+	return NewClaude(nil, "/nonexistent/agenthail-timeline-home")
 }

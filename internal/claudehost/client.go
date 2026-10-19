@@ -60,6 +60,7 @@ type OpenRequest struct {
 	Agent          string `json:"agent,omitempty"`
 	Name           string `json:"name,omitempty"`
 	Worktree       string `json:"worktree,omitempty"`
+	ConfigDir      string `json:"configDir,omitempty"`
 }
 
 type Session struct {
