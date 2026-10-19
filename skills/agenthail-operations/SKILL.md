@@ -67,7 +67,9 @@ process and stores shared session, alias, queue, relay, and delivery state in
 variables that exist only in an interactive shell. `daemon install` records the
 installing shell's `PATH`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `AGENTHAIL_*`
 overrides in the service; rerun it after changing them. Claude Code state is
-read from `CLAUDE_CONFIG_DIR` when it is set, otherwise `~/.claude`.
+read from `CLAUDE_CONFIG_DIR` when it is set, otherwise `~/.claude`, plus every
+root listed as `claudeConfigDirs` in `~/.agenthail/config.json`. `doctor` shows
+each root. A conversation present in two roots is refused rather than guessed.
 
 One unhealthy surface does not block the others. Preserve the `errors` object
 from JSON discovery output when reporting partial availability.

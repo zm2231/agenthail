@@ -42,12 +42,9 @@ type claudeContextRecord struct {
 }
 
 func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surface.ContextUsage, error) {
-	path := sess.Transcript
-	if path == "" {
-		path = c.transcriptPath(sess)
-	}
-	if path == "" {
-		return nil, nil
+	path, err := c.sessionTranscript(sess)
+	if err != nil || path == "" {
+		return nil, err
 	}
 	info, err := os.Stat(path)
 	if err != nil {

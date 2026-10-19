@@ -34,7 +34,7 @@ Before writing anything, install refuses a `CODEX_HOME` or `~/.agenthail` that c
 
 ## Doctor
 
-`doctor --json` adds `daemon: {supervisor, problems}` and `claudeConfigDir`. Under systemd each problem carries `problem`, `detail` and `fix`:
+`doctor --json` adds `daemon: {supervisor, problems}` and `claudeConfigDirs`, every Claude config root Agenthail reads with the primary one first (`claudeConfigError` when `~/.agenthail/config.json` cannot be read). Under systemd each problem carries `problem`, `detail` and `fix`:
 
 | problem | fix |
 |---|---|
@@ -52,7 +52,7 @@ The Claude, exec and SQLite checks read the environment recorded in the unit, no
 
 ## Claude Code on Linux
 
-Agenthail resolves Claude Code state through `surface.ClaudeConfigDir`: `CLAUDE_CONFIG_DIR` when set, otherwise `~/.claude`. Claude Code 2.1.302 keeps `sessions/`, peer key files, `jobs/` and `projects/` there. On Linux it puts peer sockets under `$XDG_RUNTIME_DIR/cc-socks` rather than `/tmp/cc-socks`, and records `procStart` as the starttime field of `/proc/<pid>/stat` in clock ticks rather than as a date. Peer discovery accepts both socket directories and verifies the start time from `/proc`, so a reused PID is not trusted.
+Agenthail resolves Claude Code state through `surface.ClaudeConfigRoots`: the primary root (`CLAUDE_CONFIG_DIR` when set, otherwise `~/.claude`) plus any `claudeConfigDirs` in `~/.agenthail/config.json` (see [Claude peer messaging](claude-peers.md#claude-config-roots)). Claude Code 2.1.302 keeps `sessions/`, peer key files, `jobs/` and `projects/` there. On Linux it puts peer sockets under `$XDG_RUNTIME_DIR/cc-socks` rather than `/tmp/cc-socks`, and records `procStart` as the starttime field of `/proc/<pid>/stat` in clock ticks rather than as a date. Peer discovery accepts both socket directories and verifies the start time from `/proc`, so a reused PID is not trusted.
 
 Claude Remote Control and Notion depend on the Python sidecar and a signed-in desktop browser. The Linux archive does not ship the sidecar, so off macOS `cmd/agenthail` registers the Notion surface only when `AGENTHAIL_SIDECAR` is set and limits the Claude surface to local sessions, whose health does not probe claude.ai. `list` and `doctor` stay clean on a plain Linux install, including when no Claude session is running.
 

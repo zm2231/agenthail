@@ -952,17 +952,18 @@ func validateNativeSender(home, socketDir, from string) error {
 	if err := validateTargetSocket(socketDir, socket); err != nil {
 		return err
 	}
-	pidText := strings.TrimSuffix(filepath.Base(socket), ".sock")
-	pid, err := strconv.Atoi(pidText)
+	pid, err := strconv.Atoi(strings.TrimSuffix(filepath.Base(socket), ".sock"))
 	if err != nil {
 		return errors.New("sender socket has no valid owner pid")
 	}
-	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(home), "sessions", pidText+".json"))
+	_, record, found, err := nativeRecord(home, socket)
 	if err != nil {
+		return err
+	}
+	if !found {
 		return errors.New("sender has no current native Claude record")
 	}
-	var record sessionRecord
-	if json.Unmarshal(data, &record) != nil || record.MessagingSocketPath != socket || record.Agenthail != "" {
+	if record.Agenthail != "" {
 		return errors.New("sender is not a current native Claude endpoint")
 	}
 	if record.PID != pid || record.ProcStart == "" || !nativeProcessMatches(pid, record.ProcStart) {
@@ -1120,13 +1121,8 @@ func nativeSenderSession(reg *registry.Registry, c Config, from string) (string,
 	if validateNativeSender(c.Home, c.SocketDir, from) != nil {
 		return "", false
 	}
-	pid := strings.TrimSuffix(filepath.Base(strings.TrimPrefix(from, "uds:")), ".sock")
-	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.Home), "sessions", pid+".json"))
-	if err != nil {
-		return "", false
-	}
-	var record sessionRecord
-	if json.Unmarshal(data, &record) != nil || record.SessionID == "" {
+	_, record, found, err := nativeRecord(c.Home, strings.TrimPrefix(from, "uds:"))
+	if err != nil || !found || record.SessionID == "" {
 		return "", false
 	}
 	session, err := reg.Session(record.SessionID)
@@ -1312,10 +1308,39 @@ func sendFrame(target string, payload []byte) error {
 	return nil
 }
 
+// nativeRecord reads the session record of the Claude process serving
+// socket, and the config root that holds it.
+func nativeRecord(home, socket string) (string, sessionRecord, bool, error) {
+	roots, err := surface.ClaudeConfigRoots(home)
+	if err != nil {
+		return "", sessionRecord{}, false, err
+	}
+	for _, path := range surface.ClaudeSessionRecordPaths(roots, strings.TrimSuffix(filepath.Base(socket), ".sock")) {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var record sessionRecord
+		if json.Unmarshal(data, &record) == nil && record.MessagingSocketPath == socket {
+			return filepath.Dir(filepath.Dir(path)), record, true, nil
+		}
+	}
+	return "", sessionRecord{}, false, nil
+}
+
+// sendAuthenticatedFrame reads the peer key Claude wrote beside the target
+// process's session record, in whichever config root holds that record.
 func sendAuthenticatedFrame(home, target string, payload []byte) error {
 	hash := sha256.Sum256([]byte(target))
 	pid := strings.TrimSuffix(filepath.Base(target), ".sock")
-	keyPath := filepath.Join(surface.ClaudeConfigDir(home), "sessions", pid+"."+hex.EncodeToString(hash[:])+".key")
+	root, _, found, err := nativeRecord(home, target)
+	if err != nil {
+		return surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
+	}
+	if !found {
+		root = surface.ClaudeConfigDir(home)
+	}
+	keyPath := filepath.Join(root, "sessions", pid+"."+hex.EncodeToString(hash[:])+".key")
 	if info, err := os.Lstat(keyPath); err == nil {
 		if !info.Mode().IsRegular() {
 			return surface.DeliveryTerminal(errors.New("invalid Claude peer key file"), surface.DeliveryAuthenticationNeeded)

@@ -153,6 +153,9 @@ async function open(params) {
     if (params[name] !== undefined && typeof params[name] !== 'string') throw new HostError('invalid', `${name} must be a string`);
   }
   if (params.resume && (params.name || params.worktree)) throw new HostError('invalid', 'a resumed session keeps its name and worktree');
+  if (params.configDir !== undefined && (typeof params.configDir !== 'string' || !path.isAbsolute(params.configDir))) {
+    throw new HostError('invalid', `configDir must be an absolute path: ${params.configDir}`);
+  }
   const extraArgs = {
     ...(params.name ? { name: params.name } : {}),
     ...(params.worktree ? { worktree: params.worktree } : {}),
@@ -170,7 +173,7 @@ async function open(params) {
       prompt: s.input(),
       options: {
         cwd,
-        env: process.env,
+        env: params.configDir ? { ...process.env, CLAUDE_CONFIG_DIR: params.configDir } : process.env,
         pathToClaudeCodeExecutable: args.claude,
         ...(params.resume ? { resume: id } : { sessionId: id }),
         ...(params.permissionMode ? { permissionMode: params.permissionMode } : {}),

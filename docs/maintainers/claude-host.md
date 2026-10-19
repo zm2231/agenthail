@@ -93,7 +93,9 @@ still names the session, so creation reports it as unknown rather than failed.
 Without a running host nothing is created.
 
 `Claude.reach` resumes a conversation no process holds with `open({resume})`
-and waits until the host lists the process. The host's `held` answer holds the
+and waits until the host lists the process. When the conversation lives in a
+Claude config root other than the primary one, the open carries
+`configDir`, and the host runs that Claude with it as `CLAUDE_CONFIG_DIR`. The host's `held` answer holds the
 delivery; `open_failed` means Claude refused the conversation and fails it with
 Claude's output.
 
