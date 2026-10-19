@@ -3,13 +3,16 @@
 package claudehosttest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -47,7 +50,7 @@ func New(t testing.TB, home string) *Fixture {
 		t.Cleanup(func() { os.RemoveAll(dir) })
 	}
 	f := &Fixture{Home: home, Cwd: filepath.Join(home, "work"), ClaudeDir: filepath.Join(home, "fake-claude")}
-	for _, dir := range []string{f.Cwd, f.ClaudeDir} {
+	for _, dir := range []string{f.Cwd, f.ClaudeDir, f.reportDir()} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -73,7 +76,8 @@ func (f *Fixture) Manager(t testing.TB, version string) *claudehost.Manager {
 	if _, err := os.Stat(filepath.Join(hostDir, "node_modules", "@anthropic-ai", "claude-agent-sdk")); err != nil {
 		t.Fatalf("install the host's dependencies first (npm ci --prefix claude-host): %v", err)
 	}
-	env := append(os.Environ(), "FAKE_CLAUDE_DIR="+f.ClaudeDir, "FAKE_CLAUDE_RECORD=1", "HOME="+f.Home)
+	env := append(os.Environ(), "FAKE_CLAUDE_DIR="+f.ClaudeDir, "FAKE_CLAUDE_RECORD=1", "HOME="+f.Home,
+		"NODE_OPTIONS=--report-on-signal --report-signal=SIGUSR2 --report-directory="+f.reportDir())
 	return &claudehost.Manager{Home: f.Home, Launch: func() (claudehost.Launch, error) {
 		return claudehost.Launch{
 			Node:    node,
@@ -275,6 +279,110 @@ func processes() map[int]string {
 		}
 	}
 	return out
+}
+
+// Diagnose describes the host serving this home, for a test that timed out
+// waiting on it: the last error the test saw, the host process and its open
+// files, the socket, the host log, and what the host is doing (Node's
+// diagnostic report, plus a stack sample on macOS or the kernel wait channel
+// on Linux). pid is the host the test expects; the hosts found serving this
+// home are described too.
+func (f *Fixture) Diagnose(pid int, lastErr error) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "last error: %v\n", lastErr)
+	pids := f.HostPIDs()
+	fmt.Fprintf(&b, "expected host pid %d alive=%v; hosts serving this home: %v\n", pid, Alive(pid), pids)
+	if pid > 0 && !slices.Contains(pids, pid) {
+		pids = append([]int{pid}, pids...)
+	}
+	socket := claudehost.SocketPath(f.Home)
+	if info, err := os.Stat(socket); err != nil {
+		fmt.Fprintf(&b, "socket %s: %v\n", socket, err)
+	} else {
+		fmt.Fprintf(&b, "socket %s: mode %s\n", socket, info.Mode())
+	}
+	for _, pid := range pids {
+		id := strconv.Itoa(pid)
+		section(&b, "ps "+id, "ps", "-p", id, "-o", "pid=,ppid=,stat=,etime=,wchan=,command=")
+		section(&b, "lsof "+id, "lsof", "-nP", "-p", id)
+		if !f.owns(pid) {
+			continue
+		}
+		fmt.Fprintf(&b, "--- node report %s\n%s\n", id, f.nodeReport(pid))
+		if runtime.GOOS == "darwin" {
+			path := filepath.Join(f.Home, "host-"+id+".sample.txt")
+			_, err := command("sample", id, "1", "-file", path)
+			sample, _ := os.ReadFile(path)
+			sample, _, _ = bytes.Cut(sample, []byte("Binary Images:"))
+			fmt.Fprintf(&b, "--- sample %s (err=%v)\n%s\n", id, err, head(sample, 32<<10))
+		} else {
+			for _, name := range []string{"status", "wchan", "stack"} {
+				data, err := os.ReadFile(filepath.Join("/proc", id, name))
+				fmt.Fprintf(&b, "--- /proc/%s/%s (err=%v)\n%s\n", id, name, err, tail(data, 4<<10))
+			}
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(claudehost.StateDir(f.Home), "host.log"))
+	fmt.Fprintf(&b, "--- host.log (err=%v)\n%s\n", err, tail(data, 16<<10))
+	return b.String()
+}
+
+func (f *Fixture) reportDir() string { return filepath.Join(f.Home, "node-reports") }
+
+// nodeReport asks a host for Node's diagnostic report, which holds its
+// JavaScript stack and open libuv handles, and returns those parts. Only a
+// host this fixture started handles the signal; it would end any other Node
+// process. A stopped host cannot write one.
+func (f *Fixture) nodeReport(pid int) string {
+	if err := syscall.Kill(pid, syscall.SIGUSR2); err != nil {
+		return fmt.Sprintf("signal: %v", err)
+	}
+	pattern := filepath.Join(f.reportDir(), fmt.Sprintf("report.*.%d.*.json", pid))
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		paths, _ := filepath.Glob(pattern)
+		if len(paths) == 0 {
+			continue
+		}
+		data, err := os.ReadFile(paths[len(paths)-1])
+		if err != nil {
+			return err.Error()
+		}
+		var report struct {
+			JavaScriptStack json.RawMessage `json:"javascriptStack"`
+			Libuv           json.RawMessage `json:"libuv"`
+		}
+		if err := json.Unmarshal(data, &report); err != nil {
+			continue
+		}
+		out, _ := json.MarshalIndent(report, "", "  ")
+		return string(head(out, 32<<10))
+	}
+	return "no report within 5s"
+}
+
+func section(b *strings.Builder, title, name string, args ...string) {
+	output, err := command(name, args...)
+	fmt.Fprintf(b, "--- %s (err=%v)\n%s\n", title, err, head(output, 16<<10))
+}
+
+func command(name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+}
+
+func head(data []byte, limit int) []byte {
+	if len(data) > limit {
+		return data[:limit]
+	}
+	return data
+}
+
+func tail(data []byte, limit int) []byte {
+	if len(data) > limit {
+		return data[len(data)-limit:]
+	}
+	return data
 }
 
 func WaitFor(t testing.TB, what string, done func() bool) {
