@@ -118,11 +118,11 @@ func TestDesktopStreamIdentityPreservesJournalAndPageBoundaries(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	appendPayload(sessionJournalPayload{ItemID: "user-2", Kind: "message", Role: "user", Body: "next question", Op: "upsert", Version: 1})
-	appendPayload(sessionJournalPayload{ItemID: "codex-turn-1-assistant-assistant-1", Kind: "text", Role: "assistant", Body: "hel", Op: "upsert", Version: 1})
-	appendPayload(sessionJournalPayload{ItemID: "codex-turn-1-toolCall-tool-1", Kind: "toolCall", Role: "assistant", CallID: "tool-1", Body: "lookup", Op: "upsert", Version: 1})
-	appendPayload(sessionJournalPayload{ItemID: "codex-turn-1-assistant-assistant-1", Kind: "text", Role: "assistant", Body: "authoritative answer", Op: "upsert", Version: 2})
-	appendPayload(sessionJournalPayload{ItemID: "codex-turn-2-assistant-assistant-2", Kind: "text", Role: "assistant", Body: "second answer", Op: "upsert", Version: 1})
+	appendPayload(sessionJournalPayload{ItemID: "user-2", Kind: "message", Role: "user", Body: "next question", TurnID: "turn-1", Op: "upsert", Version: 1})
+	appendPayload(sessionJournalPayload{ItemID: "codex-turn-1-assistant-assistant-1", Kind: "text", Role: "assistant", Body: "hel", TurnID: "turn-1", Op: "upsert", Version: 1})
+	appendPayload(sessionJournalPayload{ItemID: "codex-turn-1-toolCall-tool-1", Kind: "toolCall", Role: "assistant", CallID: "tool-1", Body: "lookup", TurnID: "turn-1", Op: "upsert", Version: 1})
+	appendPayload(sessionJournalPayload{ItemID: "codex-turn-1-assistant-assistant-1", Kind: "text", Role: "assistant", Body: "authoritative answer", TurnID: "turn-1", Op: "upsert", Version: 2})
+	appendPayload(sessionJournalPayload{ItemID: "codex-turn-2-assistant-assistant-2", Kind: "text", Role: "assistant", Body: "second answer", TurnID: "turn-2", Op: "upsert", Version: 1})
 
 	page, err := d.readJournalPage(from.ID, 0, 20)
 	if err != nil {

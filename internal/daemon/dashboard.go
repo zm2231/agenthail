@@ -1944,9 +1944,9 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		http.Error(w, "surface is not configured", http.StatusConflict)
 		return
 	}
-	limit := 20
+	limit := 10
 	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
-		if parsed, parseErr := strconv.Atoi(rawLimit); parseErr == nil && parsed >= 4 && parsed <= 40 {
+		if parsed, parseErr := strconv.Atoi(rawLimit); parseErr == nil && parsed >= 1 && parsed <= 40 {
 			limit = parsed
 		}
 	}
@@ -1967,18 +1967,14 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		historyCtx, cancel := context.WithTimeout(r.Context(), operationTimeout)
 		sessionRead, sessionReadErr = d.readProviderHistoryPage(historyCtx, session, adapter, historyBefore, limit)
 		cancel()
-	} else {
+	} else if timelineBefore > 0 {
 		sessionRead, sessionReadErr = d.readJournalPage(session.ID, uint64(timelineBefore), limit)
-	}
-	if sessionReadErr == nil && sessionRead.JournalSeq > 0 && !effective.Stream && timelineBefore == 0 {
-		d.sources.refresh(session, adapter)
-	}
-	if sessionReadErr == nil && sessionRead.JournalSeq == 0 && timelineBefore == 0 {
+	} else {
 		seedCtx, cancel := context.WithTimeout(r.Context(), min(operationTimeout, 2*time.Second))
 		seedErr := d.sources.seed(seedCtx, session, adapter)
 		cancel()
 		sessionRead, sessionReadErr = d.readJournalPage(session.ID, 0, limit)
-		if sessionReadErr == nil && seedErr != nil {
+		if sessionReadErr == nil && seedErr != nil && sessionRead.JournalSeq == 0 {
 			sessionReadErr = seedErr
 		}
 	}
