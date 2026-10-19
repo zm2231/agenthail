@@ -248,6 +248,7 @@ test('a host restart keeps the running turn and resumes the session afterwards',
   assert.deepEqual(listed.sessions, []);
   assert.deepEqual(listed.orphans.map((o) => [o.sessionId, o.pid]), [[id, pid]]);
   await assert.rejects(d.call('open', { resume: id, cwd: f.cwd }), { code: 'held' });
+  await assert.rejects(d.call('send', { sessionId: id, uuid: randomUUID(), text: 'early' }), { code: 'held' });
 
   for (let i = 0; i < 100 && alive(pid); i++) await sleep(50);
   assert.ok(!alive(pid), 'the orphan exits after its turn');

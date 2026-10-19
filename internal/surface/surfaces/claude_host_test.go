@@ -145,7 +145,7 @@ func TestSteerAndInterruptAHostSession(t *testing.T) {
 	}
 }
 
-func TestAPersonsTurnIsHeldWhileTheHostIsDownAndItsSessionRuns(t *testing.T) {
+func TestAPersonsTurnWaitsForAnOrphanedSessionAndThenResumesItOnce(t *testing.T) {
 	c, fixture := hostedClaude(t)
 	client := fixture.Start(t)
 	id := uuid.NewString()
@@ -158,12 +158,31 @@ func TestAPersonsTurnIsHeldWhileTheHostIsDownAndItsSessionRuns(t *testing.T) {
 	if !claudehosttest.Alive(opened.PID) {
 		t.Fatal("the session's CLI outlives the host while its turn runs")
 	}
-	_, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), uuid.NewString()), sess, "while the host is down")
-	if !surface.IsDeliveryHeld(err) {
-		t.Fatalf("send while the host is down = %v, want held", err)
+	held := func(when string) {
+		t.Helper()
+		orphaned := listedSession(t, c, id)
+		if orphaned.PID != opened.PID || c.Route(orphaned, surface.AuthorPerson) != surface.RouteHumanTurn {
+			t.Fatalf("%s: session = %+v route = %v, want the orphaned process to keep the host route", when, orphaned, c.Route(orphaned, surface.AuthorPerson))
+		}
+		if _, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), uuid.NewString()), orphaned, "early"); !surface.IsDeliveryHeld(err) {
+			t.Fatalf("%s: send = %v, want held", when, err)
+		}
 	}
-	if turns := fixture.Turns(t, id); len(turns) > 1 {
-		t.Fatalf("turns = %+v, want nothing delivered while held", turns)
+	held("while the host is down")
+	fixture.Start(t)
+	held("while a new host runs and the orphan still holds the session")
+	claudehosttest.WaitFor(t, "the orphaned CLI to finish its turn and exit", func() bool { return !claudehosttest.Alive(opened.PID) })
+	c.host.forget()
+	if _, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), uuid.NewString()), sess, "after"); err != nil {
+		t.Fatal(err)
+	}
+	claudehosttest.WaitFor(t, "the resumed turn", func() bool { return len(fixture.Turns(t, id)) >= 2 })
+	var texts []string
+	for _, turn := range fixture.Turns(t, id) {
+		texts = append(texts, turn.Text)
+	}
+	if strings.Join(texts, ",") != "SLOW 3000,after" || len(fixture.Spawns(t, id)) != 2 {
+		t.Fatalf("turns = %q spawns = %d, want the held messages undelivered and one resume", texts, len(fixture.Spawns(t, id)))
 	}
 }
 

@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -20,6 +21,7 @@ const claudeHostListTTL = time.Second
 
 type claudeHost struct {
 	client   claudehost.Client
+	state    string
 	mu       sync.Mutex
 	listed   time.Time
 	sessions map[string]int
@@ -33,12 +35,13 @@ func claudeHosted(sess *surface.Session) bool {
 }
 
 func newClaudeHost(home string) *claudeHost {
-	return &claudeHost{client: claudehost.NewClient(home)}
+	return &claudeHost{client: claudehost.NewClient(home), state: filepath.Join(claudehost.StateDir(home), "state.json")}
 }
 
-// runs reports whether the host runs this Claude process for this
-// conversation. A host that does not answer runs nothing, so its sessions
-// fall back to the CLI runtime and keep their native socket.
+// runs reports whether a host started this Claude process for this
+// conversation. That includes a process an earlier host started, which holds
+// its session until it exits, so a person's turn to it waits rather than
+// taking the native socket.
 func (h *claudeHost) runs(ctx context.Context, pid int, conversation string) bool {
 	return pid > 0 && conversation != "" && h.listing(ctx)[conversation] == pid
 }
@@ -50,7 +53,9 @@ func (h *claudeHost) forget() {
 	h.mu.Unlock()
 }
 
-// listing is the host's sessions by conversation, with their process ids.
+// listing is the host's sessions and orphans by conversation, with their
+// process ids. A host that does not answer is read from its state file, which
+// names the processes it started.
 func (h *claudeHost) listing(ctx context.Context) map[string]int {
 	if h == nil {
 		return nil
@@ -66,10 +71,33 @@ func (h *claudeHost) listing(ctx context.Context) map[string]int {
 			for _, session := range listing.Sessions {
 				h.sessions[session.SessionID] = session.PID
 			}
+			for _, orphan := range listing.Orphans {
+				h.sessions[orphan.SessionID] = orphan.PID
+			}
+		} else {
+			h.readState()
 		}
 		h.listed = time.Now()
 	}
 	return h.sessions
+}
+
+func (h *claudeHost) readState() {
+	data, err := os.ReadFile(h.state)
+	if err != nil {
+		return
+	}
+	var state struct {
+		Sessions map[string]struct {
+			PID int `json:"pid"`
+		} `json:"sessions"`
+	}
+	if json.Unmarshal(data, &state) != nil {
+		return
+	}
+	for id, entry := range state.Sessions {
+		h.sessions[id] = entry.PID
+	}
 }
 
 // The intent uuid becomes the transcript record's uuid: the turn is followed

@@ -156,8 +156,7 @@ async function open(params) {
   };
   const existing = sessions.get(id);
   if (existing) return existing.describe();
-  const orphan = liveOrphans().find((o) => o.sessionId === id);
-  if (orphan) throw new HostError('held', `Claude process ${orphan.pid} from an earlier host still runs this session`);
+  refuseOrphaned(id);
 
   const s = new Session(id, cwd);
   sessions.set(id, s);
@@ -294,7 +293,10 @@ async function run(s, exit) {
 
 function session(id) {
   const s = sessions.get(id);
-  if (!s || s.ended) throw new HostError('not_open', `Claude session ${id} is not open in the host`);
+  if (!s || s.ended) {
+    refuseOrphaned(id);
+    throw new HostError('not_open', `Claude session ${id} is not open in the host`);
+  }
   return s;
 }
 
@@ -372,6 +374,11 @@ function loadOrphans(statePath) {
     if (runs(entry)) out.set(sessionId, { sessionId, pid: entry.pid, started: entry.started, cwd: entry.cwd, openedAt: entry.openedAt });
   }
   return out;
+}
+
+function refuseOrphaned(id) {
+  const orphan = liveOrphans().find((o) => o.sessionId === id);
+  if (orphan) throw new HostError('held', `Claude process ${orphan.pid} from an earlier host still runs this session`);
 }
 
 function liveOrphans() {

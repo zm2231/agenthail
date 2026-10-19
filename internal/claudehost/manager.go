@@ -40,7 +40,11 @@ type Manager struct {
 
 func (m *Manager) Client() Client { return NewClient(m.Home) }
 
-func (m *Manager) stateDir() string { return filepath.Join(m.Home, ".agenthail", "claude-host") }
+func (m *Manager) stateDir() string { return StateDir(m.Home) }
+
+// StateDir holds the host's lock, log and state.json, the record of the Claude
+// processes it started, which outlives the host.
+func StateDir(home string) string { return filepath.Join(home, ".agenthail", "claude-host") }
 
 // Ensure returns a client for a running host of this build, starting one
 // only when none answers. The host lock decides who starts it: the daemon

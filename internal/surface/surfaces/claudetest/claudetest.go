@@ -25,20 +25,6 @@ agents)
 stop)
  printf 'stopped %s\n' "$2"
  ;;
---bg)
- [ "$2" = --resume ] || exit 2
- id=$(printf '%s' "$3" | cut -c1-8)
- if [ -f "$HOME/resume-copy" ]; then
-  printf 'backgrounded · %s (idle - send a prompt to start)\n' "$(cat "$HOME/resume-copy")"
-  exit 0
- fi
- if [ ! -f "$HOME/resume-never-ready" ]; then
-  record="{\"pid\":$AGENTHAIL_FIXTURE_PID,\"sessionId\":\"$3\",\"cwd\":\"$PWD\",\"bridgeSessionId\":\"$(cat "$HOME/resume-bridge")\",\"messagingSocketPath\":\"$(cat "$HOME/resume-socket" 2>/dev/null)\",\"status\":\"idle\",\"peerFeatures\":[\"notify_idle\"],\"startedAt\":$(date +%s)000}"
-  mkdir -p "$HOME/.claude/sessions"
-  (sleep "$(cat "$HOME/resume-delay" 2>/dev/null || printf 0)"; printf '%s' "$record" > "$HOME/.claude/sessions/$AGENTHAIL_FIXTURE_PID.json") >/dev/null 2>&1 &
- fi
- printf 'backgrounded · %s (idle - send a prompt to start)\n' "$id"
- ;;
 esac
 `
 
@@ -74,8 +60,6 @@ func New(t testing.TB) *Fixture {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
-	t.Setenv("AGENTHAIL_FIXTURE_PID", fmt.Sprint(f.PID))
-	f.write("resume-bridge", "")
 	return f
 }
 
@@ -155,7 +139,6 @@ func (f *Fixture) Listen() {
 	}
 	f.t.Cleanup(func() { _ = listener.Close() })
 	f.socket = path
-	f.write("resume-socket", path)
 }
 
 // ClaimSocket returns the messaging socket path Claude uses for pid, which
@@ -180,20 +163,6 @@ func ClaimSocket(t testing.TB, pid int) string {
 	}
 	return path
 }
-
-// ResumeBridge sets the Remote Control id the resumed process registers.
-func (f *Fixture) ResumeBridge(bridge string) { f.write("resume-bridge", bridge) }
-
-// ResumeDelay makes a resumed process write its record only after delay.
-func (f *Fixture) ResumeDelay(delay time.Duration) {
-	f.write("resume-delay", fmt.Sprintf("%.3f", delay.Seconds()))
-}
-
-// ResumeCopy makes claude report a copy under id instead of resuming.
-func (f *Fixture) ResumeCopy(id string) { f.write("resume-copy", id) }
-
-// ResumeNeverReady makes a resumed process never write its record.
-func (f *Fixture) ResumeNeverReady() { f.write("resume-never-ready", "") }
 
 // Invocations counts claude invocations whose arguments equal args.
 func (f *Fixture) Invocations(args ...string) int {

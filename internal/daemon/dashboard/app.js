@@ -1798,6 +1798,9 @@ function renderStartLaunchers() {
   select.value = options.some(item => item.id === current && item.available) ? current : "";
   const launcher = options.find(item => item.id === select.value);
   $("#new-conversation-launcher-detail").textContent = launcher?.detail || "";
+  if (launcher && !launcher.sessionOptions) {
+    document.querySelectorAll("[data-launch-option]").forEach(field => { field.hidden = true; field.querySelectorAll("input,select,textarea").forEach(input => input.disabled = true); });
+  }
 }
 async function loadStartLaunchers() {
   const response = await fetch("/api/v1/session-options");
@@ -1844,7 +1847,7 @@ $("#new-conversation-surface").addEventListener("change", () => {
   syncStartForm();
   loadStartModels().catch((error) => toast(friendlyError(error)));
 });
-$("#new-conversation-launcher").addEventListener("change", renderStartLaunchers);
+$("#new-conversation-launcher").addEventListener("change", syncStartForm);
 $("#new-conversation-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;

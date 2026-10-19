@@ -422,8 +422,8 @@ agenthail codex
 is reachable and on Codex's app-server daemon otherwise. `launch codex`
 opens Codex if needed and verifies its local connection. `agenthail codex` starts
 an interactive writable terminal session and requires a human TTY.
-Claude background sessions start with `thread create claude`; Claude authentication
-must already be configured. Notion requires a signed-in browser.
+Claude sessions start in the Claude host with `thread create claude`, which
+needs the daemon running; Claude authentication must already be configured. Notion requires a signed-in browser.
 
 ## Verification Boundary
 

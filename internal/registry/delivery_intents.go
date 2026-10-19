@@ -39,6 +39,9 @@ const (
 )
 
 type DeliveryIntentInput struct {
+	// UUID is the message's provider identity when the caller already sent
+	// under one; otherwise the intent gets a new one.
+	UUID            string
 	SenderSessionID string
 	TargetSessionID string
 	ProviderKey     string
@@ -170,26 +173,33 @@ func (r *Registry) RecordDeliveryIntent(input DeliveryIntentInput) (*DeliveryInt
 			return intent, tx.Commit()
 		}
 	}
-	res, err := tx.Exec(`INSERT INTO delivery_intents(uuid,sender_session_id,target_session_id,provider_key,message,status,evidence) VALUES(?,?,?,?,?,?,?)`, uuid.NewString(), input.SenderSessionID, input.TargetSessionID, input.ProviderKey, boundedIntentMessage(input.Message), input.Status, input.Evidence)
+	id := input.UUID
+	if id == "" {
+		id = uuid.NewString()
+	}
+	res, err := tx.Exec(`INSERT INTO delivery_intents(uuid,sender_session_id,target_session_id,provider_key,message,status,evidence) VALUES(?,?,?,?,?,?,?)`, id, input.SenderSessionID, input.TargetSessionID, input.ProviderKey, boundedIntentMessage(input.Message), input.Status, input.Evidence)
 	if err != nil {
 		return nil, err
 	}
-	id, err := res.LastInsertId()
+	row, err := res.LastInsertId()
 	if err != nil {
 		return nil, err
 	}
-	intent, err := deliveryIntentByID(tx, id)
+	intent, err := deliveryIntentByID(tx, row)
 	if err != nil {
 		return nil, err
 	}
 	return intent, tx.Commit()
 }
 
-func (r *Registry) RecordSessionCreationIntent(sessionID, message string) (*DeliveryIntent, error) {
+// RecordSessionCreationIntent records a new session's first message under the
+// uuid it was sent with, so the intent names the turn it may have started.
+func (r *Registry) RecordSessionCreationIntent(sessionID, messageUUID, message string) (*DeliveryIntent, error) {
 	if err := r.EnsureOperatorSession(); err != nil {
 		return nil, err
 	}
 	return r.RecordDeliveryIntent(DeliveryIntentInput{
+		UUID:            messageUUID,
 		SenderSessionID: OperatorSessionID,
 		TargetSessionID: sessionID,
 		Message:         message,
@@ -201,6 +211,11 @@ func (r *Registry) RecordSessionCreationIntent(sessionID, message string) (*Deli
 func (input DeliveryIntentInput) validate() error {
 	if strings.TrimSpace(input.SenderSessionID) == "" || strings.TrimSpace(input.TargetSessionID) == "" {
 		return fmt.Errorf("delivery intent requires sender and target sessions")
+	}
+	if input.UUID != "" {
+		if _, err := uuid.Parse(input.UUID); err != nil {
+			return fmt.Errorf("delivery intent uuid: %w", err)
+		}
 	}
 	if input.Status != DeliveryIntentSubmitted && input.Status != DeliveryIntentSent && input.Status != DeliveryIntentQueued && input.Status != DeliveryIntentUnknown {
 		return fmt.Errorf("delivery intent cannot start as %q", input.Status)

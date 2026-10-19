@@ -97,7 +97,7 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 		SessionID: id, Cwd: options.Cwd, Model: options.Model, PermissionMode: options.PermissionMode,
 		Effort: options.Effort, Agent: options.Agent, Name: options.Name, Worktree: options.Worktree,
 	})
-	session := &surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: opened.PID, Name: options.Name, Cwd: options.Cwd, Status: surface.StatusIdle, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
+	session := &surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: opened.PID, Name: options.Name, Cwd: options.Cwd, Status: surface.StatusIdle, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
 	if err != nil {
 		var unknown *claudehost.OutcomeUnknownError
 		if errors.As(err, &unknown) {

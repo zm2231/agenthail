@@ -35,12 +35,15 @@ struct SessionLaunchFormTest {
         check(form.model == "other-model" && form.effort.isEmpty, "changing the model clears effort")
 
         form.effort = "high"
-        form.selectLauncher("tmux")
-        check(form.launcher == "tmux" && form.effort.isEmpty && !form.setsEffort, "a terminal launcher clears effort and sets none")
+        form.selectLauncher(LauncherOption(id: "tmux"))
+        check(form.launcher?.id == "tmux" && form.effort.isEmpty && !form.setsEffort, "a terminal launcher clears effort and sets none")
         check(form.model == "other-model", "a terminal launcher keeps the model")
         form.selectLauncher(nil)
         check(form.setsEffort, "the default launcher sets effort")
-        form.selectLauncher("tmux")
+        form.effort = "high"
+        form.selectLauncher(LauncherOption(id: "claude-sdk", sessionOptions: true))
+        check(form.effort == "high" && form.setsEffort, "a launcher that takes every setting keeps effort")
+        form.selectLauncher(LauncherOption(id: "tmux"))
         form.switchAgent(to: "claude")
         check(form.launcher == nil, "switching agents returns to the default launcher")
     }
@@ -81,7 +84,7 @@ struct SessionLaunchFormTest {
         check(Set(plain.keys) == ["action", "surface", "message", "cwd", "model"], "no effort is sent when none is chosen")
 
         var terminal = SessionLaunchForm(agent: "claude", folder: "/work/sample", model: "sample-model", effort: "high", message: "Review")
-        terminal.selectLauncher("tmux")
+        terminal.selectLauncher(LauncherOption(id: "tmux"))
         let terminalBody = try await send(terminal, api)
         check(terminalBody["launcher"] as? String == "tmux" && terminalBody["model"] as? String == "sample-model", "a terminal launch sends its launcher and model")
         check(Set(terminalBody.keys) == ["action", "surface", "message", "cwd", "model", "launcher"], "a terminal launch sends no effort")
