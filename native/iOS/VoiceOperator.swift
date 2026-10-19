@@ -1,4 +1,3 @@
-import AVFAudio
 import SwiftUI
 
 extension VoiceOperatorModel {
@@ -7,37 +6,27 @@ extension VoiceOperatorModel {
               let token = KeychainStore.get("token") else {
             return VoiceOperatorModel(targetID: targetID, unavailable: "Pair this phone with Agenthail on your Mac first.")
         }
-        return VoiceOperatorModel(endpoint: endpoint, token: token, targetID: targetID)
-    }
-
-    func audioInterrupted(_ notification: Notification) {
-        guard let rawValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-              AVAudioSession.InterruptionType(rawValue: rawValue) == .began,
-              dialing || audioConnected else { return }
-        let reason = (notification.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt)
-            .map { " (iOS reason code \($0))" } ?? ""
-        error = "iOS interrupted the microphone\(reason). The call was ended; call again after the interruption clears."
-        hangup()
+        return VoiceOperatorModel(endpoint: endpoint, token: token, targetID: targetID, diagnostics: VoiceCallDiagnostics())
     }
 }
 
 struct AgenthailVoiceOperatorSheet: View {
-    @StateObject private var model: VoiceOperatorModel
+    @ObservedObject private var model: VoiceOperatorModel
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var confirmInterrupt = false
     @State private var confirmTargetInterrupt = false
     @State private var confirmNewConversation = false
     @State private var showKeyboard = false
     @State private var showDetails = false
+    @State private var showActivity = false
     @State private var followingLatest = true
     @State private var atLatest = true
     @State private var userScrolling = false
     let openSession: (String) -> Void
 
-    init(targetID: String = "", model: VoiceOperatorModel? = nil, openSession: @escaping (String) -> Void) {
-        _model = StateObject(wrappedValue: model ?? VoiceOperatorModel.paired(targetID: targetID))
+    init(model: VoiceOperatorModel, openSession: @escaping (String) -> Void) {
+        self.model = model
         self.openSession = openSession
     }
 
@@ -52,9 +41,8 @@ struct AgenthailVoiceOperatorSheet: View {
                         HStack {
                             Text("Simulated microphone · Real Codex").font(.caption).foregroundStyle(.secondary)
                             Spacer()
-                            Button("Speak next request") {
-                                (model.audio as? VoiceAudioBridge)?.webView.evaluateJavaScript("void window.agenthailEvaluationSpeak()", completionHandler: nil)
-                            }.font(.caption).disabled(!model.audioConnected)
+                            Button("Speak next request") { VoiceEvaluation.device.speakNext() }
+                                .font(.caption).disabled(!model.audioConnected)
                         }
                     }
 #endif
@@ -64,7 +52,7 @@ struct AgenthailVoiceOperatorSheet: View {
                             .frame(width: 44, height: 44).background(.quaternary, in: Circle())
                         VStack(alignment: .leading, spacing: 4) {
                             Text(model.connectionTitle).font(.headline)
-                            Text("Codex Voice").font(.subheadline).foregroundStyle(.secondary)
+                            Text(model.committedRoute).font(.subheadline).foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 0)
                         if model.working || model.dialing { ProgressView() }
@@ -93,7 +81,7 @@ struct AgenthailVoiceOperatorSheet: View {
                     if model.state?.truncated == true { Text("Showing recent voice activity. Recorded agent work remains in the full timeline.").font(.caption).foregroundStyle(.secondary) }
                     if let activityError = model.activityError { Text(activityError).font(.caption).foregroundStyle(.orange) }
                     if let detail = model.detail {
-                        DisclosureGroup {
+                        DisclosureGroup(isExpanded: $showActivity) {
                             VStack(alignment: .leading, spacing: 12) {
                                 if detail.readOnly { Text(detail.readOnlyReason).foregroundStyle(.orange) }
                                 if let timeline = detail.timeline {
@@ -107,6 +95,7 @@ struct AgenthailVoiceOperatorSheet: View {
                             Label(detail.session.status == "busy" ? "Orchestrator is working" : "Agent activity", systemImage: "terminal")
                                 .font(.subheadline.weight(.medium)).frame(minHeight: 44)
                         }
+                        .accessibilityIdentifier("voice-activity")
                     }
                     Color.clear.frame(height: 1).id("voice-bottom")
                 }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: .infinity)
@@ -128,7 +117,10 @@ struct AgenthailVoiceOperatorSheet: View {
                     atLatest = value
                 }
                 .onChange(of: latestContentMarker) { _, _ in
-                    if followingLatest { proxy.scrollTo("voice-bottom", anchor: .bottom) }
+                    if followingLatest, !showActivity { proxy.scrollTo("voice-bottom", anchor: .bottom) }
+                }
+                .onChange(of: showActivity) { _, expanded in
+                    if expanded { followingLatest = false }
                 }
                 .onChange(of: model.state?.session?.id) { _, _ in
                     followingLatest = true
@@ -154,9 +146,6 @@ struct AgenthailVoiceOperatorSheet: View {
                     }
                 }
             }
-            .background(alignment: .bottom) {
-                if let bridge = model.audio as? VoiceAudioBridge { VoiceAudioSurface(bridge: bridge).frame(width: 1, height: 1).accessibilityHidden(true) }
-            }
             .navigationTitle(model.state?.target == nil ? "Talk to orchestrator" : "Session voice")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -169,10 +158,8 @@ struct AgenthailVoiceOperatorSheet: View {
                 }
             }
             .sheet(isPresented: $showDetails) { connectionDetails }
-            .task { model.open() }
-            .onDisappear { model.close() }
-            .onChange(of: scenePhase) { _, phase in if phase == .background { model.hangup() } }
-            .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { model.audioInterrupted($0) }
+            .onAppear { model.screenAppeared() }
+            .onDisappear { model.screenDisappeared() }
             .confirmationDialog("Interrupt the orchestrator's current turn? This does not stop delegated agents.", isPresented: $confirmInterrupt) {
                 Button("Interrupt orchestrator", role: .destructive) { Task { await model.interrupt() } }
             }
@@ -211,8 +198,7 @@ struct AgenthailVoiceOperatorSheet: View {
                 }
             }
             if model.hostHangupPending {
-                Label("Audio ended locally. Confirming host hangup…", systemImage: "hourglass")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                callEntry
             } else if model.hostHangupUnconfirmed {
                 callControl("Try hangup again", icon: "phone.down.fill", destructive: true, disabled: model.state?.occupied == true, action: model.hangup)
                 if !dynamicTypeSize.isAccessibilitySize { Text("Audio is off locally. The host did not confirm hangup.").font(.caption).foregroundStyle(.secondary) }
@@ -252,12 +238,28 @@ struct AgenthailVoiceOperatorSheet: View {
                     Text(model.targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Voice starts with the normal Agenthail orchestrator workflow." : "Voice uses Codex realtime for audio and sends work only to this exact existing session.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Button { Task { await model.call() } } label: {
-                    Label(dynamicTypeSize.isAccessibilitySize ? "Call" : (model.targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Talk to orchestrator" : "Call session"), systemImage: "phone.fill").font(.headline).frame(maxWidth: .infinity, minHeight: 48)
-                }.buttonStyle(.borderedProminent).accessibilityLabel("Start voice call").disabled(!model.canCall)
-                if !dynamicTypeSize.isAccessibilitySize { Text(model.targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "The orchestrator can inspect, plan, and coordinate across Agenthail." : "Your conversation and agent work stay in the selected session.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center) }
+                callEntry
             }
         }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.vertical, 16).frame(maxWidth: .infinity).background(.bar)
+    }
+
+    // One call button stays in place while hangup is confirmed, so the
+    // controls do not jump between the confirming and ready states.
+    private var callEntry: some View {
+        VStack(spacing: 16) {
+            Button { Task { await model.call() } } label: {
+                Label(dynamicTypeSize.isAccessibilitySize ? "Call" : (model.targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Talk to orchestrator" : "Call session"), systemImage: "phone.fill")
+                    .font(.headline).frame(maxWidth: .infinity, minHeight: 48)
+            }
+            .buttonStyle(VoiceCallButtonStyle())
+            .accessibilityLabel("Start voice call")
+            .disabled(!model.canCall)
+            if !dynamicTypeSize.isAccessibilitySize {
+                Text(model.hostHangupPending ? "Audio ended locally. Confirming host hangup…" : (model.targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "The orchestrator can inspect, plan, and coordinate across Agenthail." : "Your conversation and agent work stay in the selected session."))
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    .frame(minHeight: 32)
+            }
+        }
     }
 
     private func callControl(_ title: String, icon: String, destructive: Bool = false, disabled: Bool, action: @escaping () -> Void) -> some View {
@@ -283,7 +285,7 @@ struct AgenthailVoiceOperatorSheet: View {
                     if let provider = model.state?.audioProvider { LabeledContent("Audio provider", value: provider) }
                     LabeledContent("Audio", value: model.connectionTitle)
                     Text("The microphone sends audio to Codex. No on-device speech recognition is used.")
-                    Text("Leaving the app ends audio. Return and call again to continue with the same orchestrator.")
+                    Text("The call stays active when you close this screen, switch apps or lock your phone. Use Hang up or the system call controls to end audio. Force-quitting the app ends the call.")
                     if let state = model.state, let id = state.attemptId {
                         LabeledContent("Call ID") { Text(id).font(.caption.monospaced()).textSelection(.enabled) }
                     }
@@ -291,6 +293,18 @@ struct AgenthailVoiceOperatorSheet: View {
                         LabeledContent("Host close") {
                             Text("\(closed.params.reason ?? "unspecified") · event #\(closed.sequence)")
                                 .font(.caption.monospaced()).textSelection(.enabled)
+                        }
+                    }
+                }
+                if let attempt = model.diagnostics?.attempts.last {
+                    Section("Call lifecycle") {
+                        LabeledContent("Attempt") { Text(attempt.id).font(.caption.monospaced()).textSelection(.enabled) }
+                        if let cause = attempt.terminalCause { LabeledContent("Ended because", value: cause) }
+                        ForEach(attempt.milestones.sorted { $0.value < $1.value }, id: \.key) { name, seconds in
+                            LabeledContent(name, value: String(format: "%.2fs", seconds)).font(.caption.monospaced())
+                        }
+                        if let failure = model.diagnostics?.persistenceError {
+                            Text("Call diagnostics could not be saved: \(failure)").foregroundStyle(.red)
                         }
                     }
                 }
@@ -316,13 +330,28 @@ struct AgenthailVoiceOperatorSheet: View {
     }
 }
 
+private struct VoiceCallButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(.white)
+            .background(isEnabled ? SessionStyle.accent : Color.secondary, in: Capsule())
+            .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.45)
+    }
+}
+
 struct VoiceOperatorEntry: View {
     @ObservedObject var model: AgenthailIOSModel
+    @EnvironmentObject private var voiceCalls: VoiceCallCoordinator
     @State private var presented = false
     @State private var operatorID: String?
 
     var body: some View {
-        Button("Talk to orchestrator", systemImage: "waveform") { presented = true }
+        Button(voiceCalls.model?.hasLocalCall == true ? "Return to call" : "Talk to orchestrator", systemImage: "waveform") {
+            voiceCalls.open()
+            presented = true
+        }
             .font(.subheadline.weight(.semibold))
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -330,15 +359,17 @@ struct VoiceOperatorEntry: View {
             .frame(minHeight: 56)
             .accessibilityIdentifier("voice-entry")
             .sheet(isPresented: $presented) {
-                AgenthailVoiceOperatorSheet { id in operatorID = id }
-                    .sheet(isPresented: Binding(get: { operatorID != nil }, set: { if !$0 { operatorID = nil } })) {
-                        if let id = operatorID {
-                            NavigationStack {
-                                SessionRouteView(model: model, sessionID: id)
-                                    .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Back to Voice") { operatorID = nil } } }
+                if let call = voiceCalls.model {
+                    AgenthailVoiceOperatorSheet(model: call) { id in operatorID = id }
+                        .sheet(isPresented: Binding(get: { operatorID != nil }, set: { if !$0 { operatorID = nil } })) {
+                            if let id = operatorID {
+                                NavigationStack {
+                                    SessionRouteView(model: model, sessionID: id)
+                                        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Back to Voice") { operatorID = nil } } }
+                                }
                             }
                         }
-                    }
+                }
             }
             .onChange(of: model.isPaired) { _, paired in if !paired { presented = false } }
     }

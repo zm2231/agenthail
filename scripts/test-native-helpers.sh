@@ -19,6 +19,7 @@ SOURCES=(
   TurnSettings.swift
   VoiceAPI.swift
   VoiceAudioBridge.swift
+  VoiceCallDiagnostics.swift
   VoiceOperatorModel.swift
   macOS/AgenthailLink.swift
   macOS/AgenthailProcess.swift

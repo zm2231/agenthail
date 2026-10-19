@@ -79,9 +79,14 @@ opens the same ordinary session. Enter a session ID or alias to route the call t
 that exact session; during a call, **Transfer to session** moves it there,
 **Return to orchestrator** moves it back, and **Stop selected session** stops
 that session's running turn without hanging up. **Hang up** ends audio, not agent
-work; closing the Voice window on the Mac, or leaving the iPhone app, also ends
-the call. Call again to resume the same orchestrator. Native approvals may still
-need attention on your Mac.
+work; closing the Voice window on the Mac also ends the call. Call again to
+resume the same orchestrator. Native approvals may still need attention on your
+Mac.
+
+On iPhone the call is a system call: it shows in the status bar and the
+Lock Screen call controls, and it keeps going when you close the Voice screen,
+switch apps or lock the phone. **Return to call** reopens it. Hang up in the app
+or with the system call controls; force-quitting the app ends the call.
 
 The Mac asks for microphone access on the first call. If access is off, the Voice
 window says so and **Open System Settings** goes to Privacy & Security >
