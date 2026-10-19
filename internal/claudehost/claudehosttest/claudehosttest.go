@@ -255,16 +255,20 @@ func (f *Fixture) cliPIDs() []int {
 // owns reports whether pid is still a live host or fake CLI, so a reused pid
 // is never mistaken for one.
 func (f *Fixture) owns(pid int) bool {
-	output, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").Output()
-	if err != nil {
-		return false
-	}
-	command := strings.TrimSpace(string(output))
+	command := commandLine(pid)
 	return f.isHost(command) || strings.Contains(command, "fake-claude.mjs")
 }
 
+func commandLine(pid int) string {
+	output, err := stdout("ps", "-p", strconv.Itoa(pid), "-o", "command=")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
 func processes() map[int]string {
-	output, err := exec.Command("ps", "-axo", "pid=,command=").Output()
+	output, err := stdout("ps", "-axo", "pid=,command=")
 	if err != nil {
 		return nil
 	}
@@ -305,7 +309,7 @@ func (f *Fixture) Diagnose(pid int, lastErr error) string {
 		id := strconv.Itoa(pid)
 		section(&b, "ps "+id, "ps", "-p", id, "-o", "pid=,ppid=,stat=,etime=,wchan=,command=")
 		section(&b, "lsof "+id, "lsof", "-nP", "-p", id)
-		if !f.owns(pid) {
+		if !f.isHost(commandLine(pid)) {
 			continue
 		}
 		fmt.Fprintf(&b, "--- node report %s\n%s\n", id, f.nodeReport(pid))
@@ -331,8 +335,9 @@ func (f *Fixture) reportDir() string { return filepath.Join(f.Home, "node-report
 
 // nodeReport asks a host for Node's diagnostic report, which holds its
 // JavaScript stack and open libuv handles, and returns those parts. Only a
-// host this fixture started handles the signal; it would end any other Node
-// process. A stopped host cannot write one.
+// host started for this home handles the signal; it would end any other
+// process, so the caller checks the pid is still that host. A stopped host
+// cannot write one.
 func (f *Fixture) nodeReport(pid int) string {
 	if err := syscall.Kill(pid, syscall.SIGUSR2); err != nil {
 		return fmt.Sprintf("signal: %v", err)
@@ -369,6 +374,12 @@ func command(name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+}
+
+func stdout(name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, name, args...).Output()
 }
 
 func head(data []byte, limit int) []byte {

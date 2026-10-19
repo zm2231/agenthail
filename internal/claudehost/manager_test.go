@@ -3,7 +3,9 @@ package claudehost_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -289,5 +291,45 @@ func TestSubscribeStreamsEventsBoundToTheMessage(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatalf("events: denied=%v result=%v", denied, result)
 		}
+	}
+}
+
+func TestDiagnoseSignalsOnlyTheHost(t *testing.T) {
+	fixture := claudehosttest.New(t, "")
+	client := fixture.Start(t)
+	hello, err := client.Hello(testContext(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := exec.Command(node, "-e", "setInterval(() => {}, 1000)", "fake-claude.mjs")
+	if err := foreign.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan struct{})
+	var waitErr error
+	go func() {
+		waitErr = foreign.Wait()
+		close(exited)
+	}()
+	t.Cleanup(func() {
+		_ = foreign.Process.Kill()
+		<-exited
+	})
+
+	report := fixture.Diagnose(foreign.Process.Pid, nil)
+	select {
+	case <-exited:
+		t.Fatalf("Diagnose ended a process that is not the host: %v", waitErr)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if strings.Contains(report, fmt.Sprintf("node report %d", foreign.Process.Pid)) {
+		t.Fatalf("Diagnose reported on a process that is not the host:\n%s", report)
+	}
+	if !strings.Contains(report, fmt.Sprintf("node report %d\n{", hello.PID)) || !claudehosttest.Alive(hello.PID) {
+		t.Fatalf("Diagnose did not report on the host %d:\n%s", hello.PID, report)
 	}
 }
