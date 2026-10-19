@@ -1,0 +1,73 @@
+name: iOS
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ios: ${{ steps.diff.outputs.ios }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          inputs=(native/project.yml native/Agenthail.xcodeproj scripts/ios-simulator.sh scripts/test-xcodegen-project.sh .github/workflows/ios.yml)
+          while read -r source; do inputs+=("native/$source"); done < <(yq '.targets[].sources[].path' native/project.yml)
+          ios=false
+          while read -r file; do
+            for input in "${inputs[@]}"; do
+              if [ "$file" = "$input" ] || [[ "$file" == "$input"/* ]]; then ios=true; fi
+            done
+          done < <(git diff --name-only --no-renames "$BASE" HEAD)
+          echo "ios=$ios" >> "$GITHUB_OUTPUT"
+
+  ios:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      DERIVED: ${{ github.workspace }}/../ios-derived
+    steps:
+      - uses: actions/checkout@v5
+      - name: Start simulator
+        run: |
+          udid="$(scripts/ios-simulator.sh iphone)"
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+          xcrun simctl boot "$udid"
+      - name: Build for simulator tests
+        run: xcodebuild build-for-testing -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED"
+      - name: iOS simulator tests
+        run: |
+          xcrun simctl bootstatus "$SIMULATOR_UDID" -b
+          xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" -parallel-testing-enabled NO
+          plist="$DERIVED/Build/Products/Debug-iphonesimulator/Agenthail.app/Info.plist"
+          test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your Mac."
+          test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"
+
+  ios-release:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify generated iOS project
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          scripts/test-xcodegen-project.sh
+      - name: iOS release device build
+        run: xcodebuild build -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Release -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO

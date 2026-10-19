@@ -26,10 +26,9 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertFalse(app.buttons["voice-entry"].exists)
     }
 
-
-    func testSessionOpensAndReturnsToBrowser() {
+    func testSessionAndInboxNavigationReturnToTheirOrigin() {
         let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-app"]
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-delivery"]
         app.launch()
         let session = app.buttons["session-demo"]
         XCTAssertTrue(session.waitForExistence(timeout: 10))
@@ -50,12 +49,9 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertTrue(session.waitForExistence(timeout: 5))
         app.buttons["new-session"].tap()
         XCTAssertTrue(app.navigationBars["New session"].waitForExistence(timeout: 5))
-    }
+        app.navigationBars["New session"].buttons["Cancel"].tap()
+        XCTAssertTrue(session.waitForExistence(timeout: 5))
 
-    func testInboxNavigationReturnsToSessionsAndFromInspectorAndComposer() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-app", "--preview-delivery"]
-        app.launch()
         app.tabBars.buttons["Inbox"].tap()
         let inboxSession = app.buttons["inbox-session-2"]
         XCTAssertTrue(inboxSession.waitForExistence(timeout: 10))
@@ -94,8 +90,6 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Session inbox"].exists)
     }
-
-
 
     private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let predicate = NSPredicate(format: "hittable == true")
