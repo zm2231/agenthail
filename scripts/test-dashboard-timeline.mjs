@@ -46,6 +46,7 @@ const context = {
   syncComposerAction: () => {},
   renderSlashMenu: () => {},
   conversationMeta: () => "Claude Code",
+  remoteHostName: () => "",
   renderContextUsage: () => {},
   startLiveStream: () => {},
   renderGoalAttention: () => "",
