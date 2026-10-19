@@ -296,3 +296,64 @@ func TestQueuedMessageToAResumeClaudeRefusesIsHeldWithItsReasonAndAnnouncedOnce(
 		t.Fatalf("sender notices=%d rows=%+v", notices, rows)
 	}
 }
+
+// retire records the session in the catalog and runs the discovery passes
+// that omit it, as the Claude adapter does once its process exits: the first
+// pass retires it offline and the second drops its catalog row.
+func (f *orphanFixture) retire(t *testing.T) {
+	t.Helper()
+	if _, _, err := f.r.RecordCatalogSession(registry.CatalogSessionState{Session: f.session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:" + f.session.ID, Type: "session.upserted", EntityID: f.session.ID, Payload: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := f.r.RecordCatalogDiscovery(surface.KindClaude, map[string]struct{}{}, time.Now().UTC(), true, 2); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if stored, err := f.r.Session(f.session.ID); err != nil || stored.Status != surface.StatusOffline {
+		t.Fatalf("stored=%+v err=%v, want the retired session offline", stored, err)
+	}
+}
+
+func TestQueuedMessageToARetiredExitedClaudeSessionResumesAndDeliversOnce(t *testing.T) {
+	f := newOrphanFixture(t)
+	manager := claudetest.ListenPeerManager(t, f.claude.Home)
+	f.retire(t)
+	sender := surface.Session{ID: "sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	if err := f.r.RegisterSession(sender); err != nil {
+		t.Fatal(err)
+	}
+	id, _, err := f.r.QueueDeliveryWithIntent(f.session.ID, "hello", "retired-1", surface.SendOptions{SourceSessionID: sender.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item, err := f.r.QueueItem(id, f.daemon.adapters()); err != nil || item.HeldBy != "" {
+		t.Fatalf("item=%+v err=%v, want a resumable session's message ready to send", item, err)
+	}
+	for range 2 {
+		f.daemon.scanAndRelay(context.Background())
+	}
+	if f.resumes(t) != 1 || manager.Count("hello") != 1 {
+		t.Fatalf("resumes=%d peer=%q", f.resumes(t), manager.Messages())
+	}
+}
+
+func TestRelayToARetiredExitedClaudeSessionResumesAndDeliversOnce(t *testing.T) {
+	f := newOrphanFixture(t)
+	manager := claudetest.ListenPeerManager(t, f.claude.Home)
+	f.retire(t)
+	from := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	if err := f.r.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.r.AddRoute(from.ID, f.session.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	f.daemon.fireRelays(&from, "done", 0, "finished")
+	for range 2 {
+		f.daemon.scanAndRelay(context.Background())
+	}
+	if f.resumes(t) != 1 || manager.Containing("] finished") != 1 {
+		t.Fatalf("resumes=%d peer=%q", f.resumes(t), manager.Messages())
+	}
+}

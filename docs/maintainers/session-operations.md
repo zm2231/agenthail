@@ -99,7 +99,9 @@ question is answered and delivers other messages when the turn ends. Queue rows
 report `heldBy`: `waiting`, `busy`, `offline`, `unknown`, `refused`,
 `retrying`, `notLoaded` (an unloaded conversation that only Codex Desktop can
 load), `hostUnreachable` (a send a paired host has not received), or `behind`
-when an earlier message to the same session is still open. `refused` means the
+when an earlier message to the same session is still open. `offline` covers a
+target discovery no longer reports; a closed Claude session is the exception,
+since the daemon resumes it to deliver its queue. `refused` means the
 target refused to start, such as Claude failing to resume the conversation in
 the Claude host. The row's last error carries Claude's message, the row raises
 an attention item, and the refusal is announced once on the desktop and paired
