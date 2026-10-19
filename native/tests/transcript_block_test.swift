@@ -1,3 +1,4 @@
+@testable import AgenthailHelpers
 import Foundation
 
 @main
@@ -23,8 +24,19 @@ struct TranscriptBlockTest {
         ], "injected prompts are not shown as the agent's own reply: \(kinds)")
     }
 
+    static func attachedFiles() {
+        let notes = AttachedFile(name: "notes.txt", path: "/store/abc/notes.txt", bytes: 16)
+        var withText = item("message", "user", text: "Read this", role: "user")
+        withText.files = [notes]
+        var fileOnly = item("message", "user", role: "user")
+        fileOnly.files = [notes]
+        let kinds = TranscriptBlock.build([withText, fileOnly, item("message", "user", role: "user")]).map(\.kind)
+        check(kinds == [.user("Read this", files: [notes]), .user("", files: [notes])], "sent files stay with their message, even without text: \(kinds)")
+    }
+
     static func main() {
         injected()
+        attachedFiles()
         let blocks = TranscriptBlock.build([
             item("message", "user", text: "Start", role: "user"),
             item("reasoning", "Reasoning summary", text: "Plan the work"),
@@ -39,7 +51,7 @@ struct TranscriptBlockTest {
         ])
         let kinds = blocks.map(\.kind)
         check(kinds.count == 7, "\(kinds)")
-        check(kinds[0] == .user("Start"), "user message")
+        check(kinds[0] == .user("Start", files: []), "user message")
         if case .tools(let items) = kinds[1] {
             check(items.map(\.kind) == ["reasoning", "toolCall"], "reasoning stays with its tool run")
         } else {

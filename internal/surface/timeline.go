@@ -9,21 +9,31 @@ var ErrTranscriptUnavailable = errors.New("session transcript unavailable")
 
 // TimelineItem preserves the ordered, user-visible contents of an agent transcript.
 type TimelineItem struct {
-	ID               string      `json:"id"`
-	Kind             string      `json:"kind"`
-	Role             string      `json:"role,omitempty"`
-	Origin           string      `json:"origin,omitempty"`
-	Sender           string      `json:"sender,omitempty"`
-	Title            string      `json:"title"`
-	Text             string      `json:"text"`
-	Timestamp        string      `json:"timestamp,omitempty"`
-	CallID           string      `json:"callId,omitempty"`
-	TurnID           string      `json:"turnId,omitempty"`
-	Status           string      `json:"status,omitempty"`
-	Truncated        bool        `json:"truncated"`
-	TruncationReason string      `json:"truncationReason,omitempty"`
-	BodyRef          string      `json:"bodyRef,omitempty"`
-	Attachment       *Attachment `json:"attachment,omitempty"`
+	ID               string         `json:"id"`
+	Kind             string         `json:"kind"`
+	Role             string         `json:"role,omitempty"`
+	Origin           string         `json:"origin,omitempty"`
+	Sender           string         `json:"sender,omitempty"`
+	Title            string         `json:"title"`
+	Text             string         `json:"text"`
+	Timestamp        string         `json:"timestamp,omitempty"`
+	CallID           string         `json:"callId,omitempty"`
+	TurnID           string         `json:"turnId,omitempty"`
+	Status           string         `json:"status,omitempty"`
+	Truncated        bool           `json:"truncated"`
+	TruncationReason string         `json:"truncationReason,omitempty"`
+	BodyRef          string         `json:"bodyRef,omitempty"`
+	Attachment       *Attachment    `json:"attachment,omitempty"`
+	Files            []AttachedFile `json:"files,omitempty"`
+}
+
+// AttachedFile is a file a person sent with a message that the agent received
+// as a stored path rather than as image input. Path is on the host that owns
+// the session.
+type AttachedFile struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	Bytes int64  `json:"bytes,omitempty"`
 }
 
 type Attachment struct {
@@ -74,9 +84,6 @@ type AttachmentReader interface {
 }
 
 func ReadSession(ctx context.Context, adapter Surface, session *Session, request SessionReadRequest) (*SessionReadResult, error) {
-	if err := ValidateRuntimeTransport(session); err != nil {
-		return nil, err
-	}
 	if request.Limit < 1 {
 		request.Limit = 1
 	}

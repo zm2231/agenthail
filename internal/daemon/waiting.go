@@ -16,9 +16,15 @@ import (
 // that shows it. Observation and catalog discovery run concurrently, so
 // without it an older read could bring back a question the user answered.
 func (d *Daemon) lockWaiting(sessionID string) func() {
-	lock, _ := d.waitingLocks.LoadOrStore(sessionID, &sync.Mutex{})
-	lock.(*sync.Mutex).Lock()
-	return lock.(*sync.Mutex).Unlock
+	value, _ := d.waitingLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	if !lock.TryLock() {
+		if d.waitingContended != nil {
+			d.waitingContended(sessionID)
+		}
+		lock.Lock()
+	}
+	return lock.Unlock
 }
 
 // observeTurn reads the session's turn and records what it is waiting on as
@@ -29,10 +35,7 @@ func (d *Daemon) observeTurn(ctx context.Context, adapter surface.Surface, sessi
 	defer d.lockWaiting(session.ID)()
 	observation, changed, err := d.observeTurnLocked(ctx, adapter, session)
 	if changed {
-		select {
-		case d.catalogNudge <- struct{}{}:
-		default:
-		}
+		d.requestCatalogDiscovery()
 	}
 	return observation, err
 }

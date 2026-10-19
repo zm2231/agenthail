@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -21,7 +20,7 @@ import (
 func (c *Claude) peerSocket(ctx context.Context, record map[string]any) string {
 	path := str(record, "messagingSocketPath")
 	pid, _ := record["pid"].(float64)
-	if pid <= 0 || !slices.Contains(claudeSocketPaths(int(pid)), path) || !claudeProcessAlive(int(pid)) {
+	if pid <= 0 || !slices.Contains(claudeSocketPaths(int(pid)), path) {
 		return ""
 	}
 	info, err := os.Lstat(path)
@@ -32,20 +31,8 @@ func (c *Claude) peerSocket(ctx context.Context, record map[string]any) string {
 	if !ok || stat.Uid != uint32(os.Getuid()) {
 		return ""
 	}
-	if started := str(record, "procStart"); isClockTicks(started) {
-		actual, err := procStartTicks(int(pid))
-		if err != nil || actual != started {
-			return ""
-		}
-	} else if started != "" {
-		processCtx, cancel := context.WithTimeout(ctx, 500000000)
-		defer cancel()
-		command := exec.CommandContext(processCtx, "ps", "-o", "lstart=", "-p", strconv.Itoa(int(pid)))
-		command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
-		actual, err := command.Output()
-		if err != nil || !sameClaudeProcessStart(str(record, "version"), started, string(actual)) {
-			return ""
-		}
+	if !claudeRecordLive(record) {
+		return ""
 	}
 	return path
 }
@@ -59,40 +46,6 @@ func claudeSocketPaths(pid int) []string {
 		paths = append(paths, filepath.Join(dir, name))
 	}
 	return paths
-}
-
-// On Linux Claude Code records procStart as the starttime field of
-// /proc/<pid>/stat, in clock ticks since boot.
-func isClockTicks(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, r := range value {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-func procStartTicks(pid int) (string, error) {
-	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
-	if err != nil {
-		return "", err
-	}
-	return procStatStartTime(string(data))
-}
-
-func procStatStartTime(stat string) (string, error) {
-	end := strings.LastIndexByte(stat, ')')
-	if end < 0 {
-		return "", fmt.Errorf("malformed /proc stat")
-	}
-	fields := strings.Fields(stat[end+1:])
-	if len(fields) < 20 {
-		return "", fmt.Errorf("malformed /proc stat")
-	}
-	return fields[19], nil
 }
 
 func sameClaudeProcessStart(version, recorded, actual string) bool {
@@ -155,7 +108,7 @@ func (c *Claude) nativeCaller(ctx context.Context, id string) (*surface.Session,
 			continue
 		}
 		candidate, present := c.peerRecord(process.session.PID)
-		if !present || str(candidate, "agenthail") == "peer-worker" {
+		if !present || str(candidate, "agenthail") != "" {
 			continue
 		}
 		if sender != nil {
@@ -184,6 +137,40 @@ func (c *Claude) peerRecord(pid int) (map[string]any, bool) {
 		return nil, false
 	}
 	return record, true
+}
+
+// idleSince reports when the session's Claude process last recorded going
+// idle. Claude writes turn_duration only in its interactive CLI, so a final
+// end_turn block of a session run through the SDK stays closing until another
+// record follows; the process records idle once it has written every block of
+// that message.
+func (c *Claude) idleSince(sess *surface.Session) (time.Time, bool) {
+	if sess == nil || sess.ID == "" {
+		return time.Time{}, false
+	}
+	var record map[string]any
+	if candidate, found := c.peerRecord(sess.PID); sess.PID > 0 && found && str(candidate, "sessionId") == sess.ID {
+		record = candidate
+	} else if records, err := c.records(); err == nil {
+		for _, candidate := range records {
+			if str(candidate, "sessionId") == sess.ID {
+				record = candidate
+				break
+			}
+		}
+	}
+	updated, _ := record["statusUpdatedAt"].(float64)
+	if str(record, "status") != "idle" || updated <= 0 {
+		return time.Time{}, false
+	}
+	return time.UnixMilli(int64(updated)), true
+}
+
+// settledAfter reports whether the session's process went idle no earlier
+// than at, the time a closing turn wrote its end_turn block.
+func (c *Claude) settledAfter(sess *surface.Session, at time.Time) bool {
+	idle, found := c.idleSince(sess)
+	return found && !at.IsZero() && !idle.Before(at)
 }
 
 func nativeClaudeOnly(session *surface.Session) bool {

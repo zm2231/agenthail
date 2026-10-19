@@ -91,7 +91,7 @@ func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, fro
 		if err == nil && route.Handoff == registry.HandoffGoalCompleted && len(events) > 0 {
 			if captureErr != nil {
 				err = captureErr
-			} else if !surface.EffectiveCapabilities(from, adapter.Capabilities()).Goal {
+			} else if !surface.EffectiveCapabilities(adapter, from).Goal {
 				err = fmt.Errorf("source does not support goal-completed handoffs")
 			} else {
 				goalCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
@@ -134,7 +134,7 @@ func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, fro
 						err = targetErr
 						break
 					}
-					if surface.IsReadOnlySession(target) {
+					if !d.hostOwned(target.ID) && surface.IsReadOnlySession(target) {
 						err = fmt.Errorf("destination is read-only: %s", surface.ReadOnlySessionReason(target))
 						break
 					}

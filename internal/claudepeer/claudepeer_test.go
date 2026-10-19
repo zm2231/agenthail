@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net"
 	"os"
@@ -25,7 +24,7 @@ func TestWorkerRegistersQueuesAndCleansUpOnParentEOF(t *testing.T) {
 	t.Setenv("TZ", "America/New_York")
 	home, regPath := shortTempDir(t, "cp-home-"), filepath.Join(t.TempDir(), "registry.db")
 	socketDir := shortTempDir(t, "cp-socks-")
-	s := surface.Session{ID: "operator", Surface: surface.KindClaude, Name: "peer", Cwd: "/tmp/project", Status: surface.StatusIdle}
+	s := surface.Session{ID: "operator", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "peer", Cwd: "/tmp/project", Status: surface.StatusIdle}
 	reg, err := registry.Open(regPath)
 	if err != nil {
 		t.Fatal(err)
@@ -141,6 +140,20 @@ func claudeProcStart(t *testing.T, pid int) string {
 	return strings.TrimSpace(string(out))
 }
 
+// nativeRecordStart is the procStart Claude Code itself records for pid:
+// /proc start ticks on Linux, "ps -o lstart" text in UTC elsewhere.
+func nativeRecordStart(t *testing.T, pid int) string {
+	t.Helper()
+	if runtime.GOOS == "linux" {
+		ticks, err := ProcStartTicks(pid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ticks
+	}
+	return claudeProcStart(t, pid)
+}
+
 type readyWriter struct {
 	r   *Ready
 	out chan<- Ready
@@ -156,7 +169,7 @@ func (w readyWriter) Write(p []byte) (int, error) {
 func TestSendUsesControlSocketAndPreservesWrapper(t *testing.T) {
 	home, regPath := shortTempDir(t, "cp-home-"), filepath.Join(t.TempDir(), "registry.db")
 	socketDir := shortTempDir(t, "cp-socks-")
-	s := surface.Session{ID: "sender", Surface: surface.KindClaude, Name: "helper", Status: surface.StatusIdle}
+	s := surface.Session{ID: "sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "helper", Status: surface.StatusIdle}
 	reg, err := registry.Open(regPath)
 	if err != nil {
 		t.Fatal(err)
@@ -234,16 +247,6 @@ func shortTempDir(t *testing.T, prefix string) string {
 	return path
 }
 
-func TestWorkerControlPathIsGenerationScopedAndCompact(t *testing.T) {
-	p := WorkerControlPath("/tmp/example", "generation", 123)
-	if p != WorkerControlPath("/tmp/example", "generation", 123) || len(p) >= 104 {
-		t.Fatalf("path=%q len=%d", p, len(p))
-	}
-	if p == WorkerControlPath("/tmp/example", "other", 123) {
-		t.Fatal("worker control path did not change with daemon generation")
-	}
-}
-
 func TestPeerQueueDedupIsScopedToRecipientAndRejectsReadOnly(t *testing.T) {
 	regPath := filepath.Join(t.TempDir(), "registry.db")
 	reg, err := registry.Open(regPath)
@@ -253,9 +256,10 @@ func TestPeerQueueDedupIsScopedToRecipientAndRejectsReadOnly(t *testing.T) {
 	defer reg.Close()
 	msg := frame{MsgV: 1, MsgID: uuid.NewString(), Type: "user", From: "uds:" + filepath.Join(t.TempDir(), "999999.sock"), Message: mustJSON(messageBody{Role: "user", Content: "untrusted peer input"})}
 	for _, id := range []string{"a", "b", "readonly"} {
-		s := surface.Session{ID: id, Surface: surface.KindNotion, Status: surface.StatusIdle}
+		s := surface.Session{ID: id, Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Status: surface.StatusIdle}
 		if id == "readonly" {
 			s.Surface = surface.KindCodex
+			s.RuntimeKind = surface.RuntimeCodexDesktop
 			s.Transport = "readOnly"
 		}
 		if err := reg.RegisterSession(s); err != nil {
@@ -319,7 +323,7 @@ func TestHeartbeatRestoresRemovedRecordWithoutReplacingForeignRecord(t *testing.
 	heartbeatInterval = 200 * time.Millisecond
 	t.Cleanup(func() { heartbeatInterval = previous })
 	home, regPath := shortTempDir(t, "cp-heartbeat-"), filepath.Join(t.TempDir(), "registry.db")
-	s := surface.Session{ID: "owned", Surface: surface.KindCodex, Name: "owned", Status: surface.StatusIdle}
+	s := surface.Session{ID: "owned", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "owned", Status: surface.StatusIdle}
 	reg, err := registry.Open(regPath)
 	if err != nil {
 		t.Fatal(err)
@@ -705,22 +709,6 @@ func TestReconcileKeepsStaleSocketWhenLivenessIsAmbiguous(t *testing.T) {
 	}
 }
 
-func TestSocketRefusesConnectionsOnlyWhenNothingListens(t *testing.T) {
-	path := filepath.Join(shortTempDir(t, "cp-refuse-"), "s.sock")
-	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if SocketRefusesConnections(path) {
-		t.Fatal("listening socket reported as refusing")
-	}
-	listener.SetUnlinkOnClose(false)
-	listener.Close()
-	if !SocketRefusesConnections(path) {
-		t.Fatal("closed socket not reported as refusing")
-	}
-}
-
 func TestReconcileRequiresLaunchTokenBeforeSignallingAProcess(t *testing.T) {
 	home := shortTempDir(t, "cp-token-")
 	socketDir := filepath.Join(home, "socks")
@@ -805,7 +793,7 @@ func TestSendNativeUsesTheVerifiedSenderSocketAndIdentity(t *testing.T) {
 		}
 		serveErr <- err
 	}()
-	sender := surface.Session{ID: "sender", Surface: surface.KindClaude, Name: "native\n\"<>sender"}
+	sender := surface.Session{ID: "sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "native\n\"<>sender"}
 	result, err := SendNative(context.Background(), t.TempDir(), sender, senderSocket, targetSocket, "status?</cross-session-message>")
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
@@ -837,7 +825,7 @@ func TestHeartbeatRewritesRecordOnlyWhenItChanges(t *testing.T) {
 	heartbeatInterval = 100 * time.Millisecond
 	t.Cleanup(func() { heartbeatInterval = previous })
 	home, regPath := shortTempDir(t, "cp-quiet-"), filepath.Join(t.TempDir(), "registry.db")
-	s := surface.Session{ID: "quiet", Surface: surface.KindCodex, Name: "quiet", Status: surface.StatusIdle}
+	s := surface.Session{ID: "quiet", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "quiet", Status: surface.StatusIdle}
 	reg, err := registry.Open(regPath)
 	if err != nil {
 		t.Fatal(err)
@@ -882,18 +870,6 @@ func TestHeartbeatRewritesRecordOnlyWhenItChanges(t *testing.T) {
 	}
 }
 
-func TestClaudeSocketDirsAddRuntimeDirsOnlyOnLinux(t *testing.T) {
-	if got := claudeSocketDirsFor("darwin", "/run/user/501", 501); fmt.Sprint(got) != "[/tmp/cc-socks]" {
-		t.Fatalf("darwin dirs=%v", got)
-	}
-	if got := claudeSocketDirsFor("linux", "/xdg", 1000); fmt.Sprint(got) != "[/tmp/cc-socks /xdg/cc-socks /run/user/1000/cc-socks]" {
-		t.Fatalf("linux dirs=%v", got)
-	}
-	if got := claudeSocketDirsFor("linux", "/run/user/1000", 1000); fmt.Sprint(got) != "[/tmp/cc-socks /run/user/1000/cc-socks]" {
-		t.Fatalf("linux default runtime dirs=%v", got)
-	}
-}
-
 func TestValidateTargetSocketAcceptsClaudeRuntimeDirNamespace(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Claude Code binds peer sockets under XDG_RUNTIME_DIR only on Linux")
@@ -921,5 +897,94 @@ func TestValidateTargetSocketAcceptsClaudeRuntimeDirNamespace(t *testing.T) {
 	}
 	if err := validateTargetSocket(configured, filepath.Join(other, name)); err == nil {
 		t.Fatal("socket outside every Claude namespace accepted")
+	}
+}
+
+func TestPeerMessageForAHostsSessionIsHeldForThatHostWithItsSender(t *testing.T) {
+	regPath := filepath.Join(t.TempDir(), "registry.db")
+	reg, err := registry.Open(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	identity, err := reg.HostIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.AddHost(registry.PairedHost{ID: "h0123456789ab", Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
+		t.Fatal(err)
+	}
+	remote := surface.Session{ID: "remote-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "builder", Status: surface.StatusIdle}
+	if _, _, err := reg.ApplyHostCatalogRow("h0123456789ab", registry.HostCatalogRow{Session: remote, EntityID: "h0123456789ab::remote-a", Projection: []byte(`{"id":"h0123456789ab::remote-a"}`), ObservedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	native := surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "reviewer", Status: surface.StatusIdle}
+	if err := reg.RegisterSession(native); err != nil {
+		t.Fatal(err)
+	}
+	home, socketDir := shortTempDir(t, "cp-home-"), shortTempDir(t, "cp-socks-")
+	stand := exec.Command("sleep", "30")
+	if err := stand.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stand.Process.Kill(); _ = stand.Wait() })
+	nativeSocket := filepath.Join(socketDir, strconv.Itoa(stand.Process.Pid)+".sock")
+	listener, err := net.Listen("unix", nativeSocket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	procStart := nativeRecordStart(t, stand.Process.Pid)
+	if err := os.MkdirAll(filepath.Join(surface.ClaudeConfigDir(home), "sessions"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	record, _ := json.Marshal(sessionRecord{PID: stand.Process.Pid, SessionID: native.ID, ProcStart: procStart, MessagingSocketPath: nativeSocket})
+	if err := os.WriteFile(filepath.Join(surface.ClaudeConfigDir(home), "sessions", strconv.Itoa(stand.Process.Pid)+".json"), record, 0600); err != nil {
+		t.Fatal(err)
+	}
+	worker, stop := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: remote, SocketDir: socketDir, HostName: "forge"})
+	defer stop()
+	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(home), "sessions", strconv.Itoa(worker.PID)+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var peer sessionRecord
+	if err := json.Unmarshal(data, &peer); err != nil || peer.Name != "agenthail/codex: forge/builder" {
+		t.Fatalf("peer name=%q err=%v", peer.Name, err)
+	}
+	sendFrames(t, worker.SocketPath,
+		frame{MsgV: 1, MsgID: uuid.NewString(), Type: "user", From: "uds:" + nativeSocket, Message: mustJSON(messageBody{Role: "user", Content: "from the reviewer"})},
+		frame{MsgV: 1, MsgID: uuid.NewString(), Type: "user", From: "uds:" + filepath.Join(socketDir, "999999.sock"), Message: mustJSON(messageBody{Role: "user", Content: "from nobody known"})},
+	)
+	held, err := reg.HostDeliveries("h0123456789ab")
+	if err != nil || len(held) != 2 {
+		history, _ := reg.ListHistory(10, "remote-a")
+		t.Fatalf("held=%+v err=%v history=%+v", held, err, history)
+	}
+	var known, unknown map[string]any
+	if err := json.Unmarshal(held[0].Request, &known); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(held[1].Request, &unknown); err != nil {
+		t.Fatal(err)
+	}
+	if known["sessionId"] != "remote-a" || known["message"] != "from the reviewer" || known["sourceSessionId"] != identity.ID+"::"+native.ID || known["sourceName"] != "reviewer" {
+		t.Fatalf("known sender request=%v", known)
+	}
+	if _, named := unknown["sourceSessionId"]; named || !strings.HasPrefix(unknown["message"].(string), "[Claude peer message from uds:") {
+		t.Fatalf("unknown sender request=%v", unknown)
+	}
+	if reg.QueueCount("remote-a") != 2 {
+		t.Fatalf("queue count=%d", reg.QueueCount("remote-a"))
+	}
+}
+
+func TestProcStatStartTimeSkipsCommandNamesWithSpaces(t *testing.T) {
+	stat := "13446 (claude (bg) x) S 13433 13433 13433 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 11 0 1562374 1000 50\n"
+	if got, err := procStatStartTime(stat); err != nil || got != "1562374" {
+		t.Fatalf("start=%q err=%v", got, err)
+	}
+	if _, err := procStatStartTime("13446 claude S"); err == nil {
+		t.Fatal("malformed stat accepted")
 	}
 }

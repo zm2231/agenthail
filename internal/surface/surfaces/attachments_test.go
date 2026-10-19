@@ -43,14 +43,14 @@ func TestAttachmentResolvesOldReferencedRecordByStableOffset(t *testing.T) {
 	if item.Attachment == nil {
 		t.Fatalf("item=%+v", item)
 	}
-	got, bytes, err := NewClaude("", t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, item.Attachment.ID)
+	got, bytes, err := NewClaude(nil, t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, item.Attachment.ID)
 	if err != nil || got.ID != item.Attachment.ID || string(bytes) != string(data) {
 		t.Fatalf("attachment=%+v bytes=%d err=%v", got, len(bytes), err)
 	}
 	if err := os.WriteFile(filePath, append(data, 1), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := NewClaude("", t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, item.Attachment.ID); err == nil {
+	if _, _, err := NewClaude(nil, t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, item.Attachment.ID); err == nil {
 		t.Fatal("changed referenced bytes were served under immutable id")
 	}
 }
@@ -63,7 +63,7 @@ func TestAttachmentOversizedRecordPreservesTypedTooLarge(t *testing.T) {
 	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := NewClaude("", t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, "attachment:0:0:"+strings.Repeat("0", 64))
+	_, _, err := NewClaude(nil, t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, "attachment:0:0:"+strings.Repeat("0", 64))
 	if !errors.Is(err, ErrAttachmentTooLarge) {
 		t.Fatalf("err=%v, want ErrAttachmentTooLarge", err)
 	}
@@ -81,13 +81,13 @@ func TestAttachmentRejectsMidRecordOffsetAndHonorsCancellation(t *testing.T) {
 		t.Fatalf("attachment id does not reference the record offset: %q", id)
 	}
 	forged := parts[0] + ":1:" + parts[2]
-	_, _, err := NewClaude("", t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, forged)
+	_, _, err := NewClaude(nil, t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, forged)
 	if !errors.Is(err, ErrAttachmentNotFound) {
 		t.Fatalf("mid-record err=%v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _, err = NewClaude("", t.TempDir()).ReadAttachment(ctx, &surface.Session{Transcript: path}, id)
+	_, _, err = NewClaude(nil, t.TempDir()).ReadAttachment(ctx, &surface.Session{Transcript: path}, id)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled err=%v", err)
 	}
@@ -246,7 +246,7 @@ func TestClaudeUnsupportedImageSourceKeepsLaterAttachmentAligned(t *testing.T) {
 	if len(attachments) != 2 || attachments[0].Attachment != nil || attachments[1].Attachment == nil {
 		t.Fatalf("attachments=%+v", attachments)
 	}
-	_, data, err := NewClaude("", t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, attachments[1].Attachment.ID)
+	_, data, err := NewClaude(nil, t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, attachments[1].Attachment.ID)
 	if err != nil || !bytes.Equal(data, mustAttachmentData(t)) {
 		t.Fatalf("aligned attachment bytes=%d err=%v", len(data), err)
 	}

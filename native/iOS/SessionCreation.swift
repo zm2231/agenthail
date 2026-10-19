@@ -3,7 +3,7 @@ import SwiftUI
 struct NewSessionSheet: View {
     @ObservedObject var model: AgenthailIOSModel
     @Environment(\.dismiss) private var dismiss
-    @State private var options: SessionCreationOptions?
+    @State private var hosts: CreationHostPicker
     @State private var selectedSurface = ""
     @State private var cwd = ""
     @State private var selectedModel = ""
@@ -13,33 +13,42 @@ struct NewSessionSheet: View {
     @State private var modelError: String?
     @State private var loading = false
     @State private var claude = ClaudeCreationSettings()
-    @State private var selectedLauncher: String?
+    @State private var selectedLauncher: LauncherOption?
     @State private var showingModels = false
     @State private var turnSettings = TurnSettings()
+
+    init(model: AgenthailIOSModel) {
+        self.model = model
+        let selected = model.snapshot?.sessions.first { $0.id == model.selectedSessionID }
+        _hosts = State(initialValue: CreationHostPicker(daemon: model.snapshot?.daemon, selectedSession: selected))
+    }
+
+    private var options: SessionCreationOptions? { hosts.options }
+    private var hostName: String { hosts.selectedHost?.name ?? "your Mac" }
 
     var body: some View {
         NavigationStack {
             Form {
                 if loading { ProgressView("Loading session options") }
-                if let error { Section { Text(error).foregroundStyle(.red); Button("Reload options") { Task { await load() } } } }
+                if let error = hosts.loadError ?? error { Section { Text(error).foregroundStyle(.red); Button("Reload options") { Task { await load() } } } }
                 if let options {
                     if options.surfaces.isEmpty {
-                        ContentUnavailableView("No agent can start sessions", systemImage: "bubble.left", description: Text("Configure a supported runtime on your Mac, then reload."))
+                        ContentUnavailableView("No agent can start sessions", systemImage: "bubble.left", description: Text("Configure a supported runtime on \(hostName), then reload."))
                     } else {
                         Section("Agent") {
                             Picker("Run with", selection: $selectedSurface) {
                                 ForEach(options.surfaces) { Text($0.id.capitalized).tag($0.id) }
                             }
-                            Text(selectedSurface == "claude" ? "Starts a native background Claude session on your Mac." : "Uses the runtime configured on your Mac.").font(.footnote).foregroundStyle(.secondary)
+                            Text(selectedSurface != "claude" ? "Uses the runtime configured on \(hostName)." : selectedLauncher?.id == "claude-bg" ? "Starts a Claude Code background job on \(hostName)." : "Starts a Claude session on \(hostName), run by Agenthail.").font(.footnote).foregroundStyle(.secondary)
                         }
                         let launchers = launchers(for: selectedSurface, options: options)
                         if !launchers.isEmpty {
                             Section("Where it runs") {
                                 Picker("Launcher", selection: $selectedLauncher) {
-                                    Text("Use Mac default").tag(String?.none)
+                                    Text("Use \(hostName) default").tag(LauncherOption?.none)
                                     ForEach(launchers) { launcher in
                                         Text(launcher.available ? launcher.label : "\(launcher.label) (unavailable)")
-                                            .tag(Optional(launcher.id))
+                                            .tag(Optional(launcher))
                                             .disabled(!launcher.available)
                                     }
                                 }
@@ -51,12 +60,17 @@ struct NewSessionSheet: View {
                             }
                         }
                         if options.surfaces.first(where: { $0.id == selectedSurface })?.workspace == true {
-                            Section("Workspace on your Mac") {
-                                TextField("~/projects/my-project", text: $cwd).textInputAutocapitalization(.never).autocorrectionDisabled()
-                                if !options.workspaces.isEmpty {
-                                    Menu("Choose a recent workspace") { ForEach(options.workspaces, id: \.self) { path in Button(path) { cwd = path } } }
+                            Section("Project on \(hostName)") {
+                                if !options.projects.isEmpty {
+                                    Menu {
+                                        ForEach(options.projects) { project in Button(project.displayName) { cwd = project.rootPath } }
+                                    } label: {
+                                        LabeledContent("Project", value: options.projects.first(where: { $0.rootPath == cwd })?.displayName ?? "Choose")
+                                    }
+                                    .accessibilityIdentifier("creation-project-picker")
                                 }
-                                Text("Leave blank to use your Mac’s home folder. The directory must already exist.").font(.footnote).foregroundStyle(.secondary)
+                                TextField("~/projects/my-project", text: $cwd).textInputAutocapitalization(.never).autocorrectionDisabled()
+                                Text("Pick a project or type a folder. Leave blank to use the home folder on \(hostName). The folder must already exist.").font(.footnote).foregroundStyle(.secondary)
                             }
                         }
                         Section("Model") {
@@ -66,10 +80,10 @@ struct NewSessionSheet: View {
                             }
                             .accessibilityIdentifier("creation-model-picker")
                             if let modelError { Text(modelError).font(.footnote).foregroundStyle(.secondary) }
-                            Text("Uses the runtime’s existing permission settings. Requests requiring approval may need attention on your Mac.").font(.footnote).foregroundStyle(.secondary)
+                            Text("Uses the runtime’s existing permission settings. Requests requiring approval may need attention on \(hostName).").font(.footnote).foregroundStyle(.secondary)
                         }
                         if selectedSurface == "codex" {
-                            TurnSettingsView(settings: $turnSettings, modelOption: selectedModelOption, enabled: selectedLauncher == nil)
+                            TurnSettingsView(settings: $turnSettings, modelOption: selectedModelOption, enabled: selectedLauncher?.isTerminal != true)
                         }
                         Section("First instruction") {
                             TextField("What would you like the agent to do?", text: $message, axis: .vertical).lineLimit(4...12)
@@ -90,11 +104,12 @@ struct NewSessionSheet: View {
                                         Text("Accept edits").tag("acceptEdits")
                                         Text("Automatic review").tag("auto")
                                         Text("Deny approval prompts").tag("dontAsk")
+                                        Text("Bypass permissions").tag("bypassPermissions")
                                         Text("Plan only").tag("plan")
                                     }
                                     Text("Worktrees require a Git repository or configured worktree hooks. Named agents must exist in Claude’s configuration.").font(.footnote).foregroundStyle(.secondary)
                                 }
-                            }.disabled(selectedLauncher != nil)
+                            }.disabled(selectedLauncher?.isTerminal == true)
                         }
                     }
                 }
@@ -106,12 +121,15 @@ struct NewSessionSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(model.creatingSession) }
+                if hosts.isVisible {
+                    ToolbarItem(placement: .principal) { hostButton }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { Task {
-                        if await model.createSession(surface: selectedSurface, message: message, cwd: cwd, model: selectedModel, turnSettings: turnSettings, claude: claude, launcher: selectedLauncher) { dismiss() }
+                        if await model.createSession(surface: selectedSurface, message: message, cwd: cwd, model: selectedModel, turnSettings: turnSettings, claude: claude, launcher: selectedLauncher, host: hosts.hostQuery) { dismiss() }
                     } } label: {
                         if model.creatingSession { ProgressView() } else { Text("Start") }
-                    }.disabled(model.creatingSession || model.creationWarning != nil || selectedSurface.isEmpty || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }.disabled(model.creatingSession || model.creationWarning != nil || !hosts.canStart || selectedSurface.isEmpty || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .interactiveDismissDisabled(model.creatingSession)
@@ -121,22 +139,29 @@ struct NewSessionSheet: View {
                     selectedModel = value ?? ""
                     turnSettings.effort = nil
                 }, reload: {
-                    let values = try await model.creationModels(surface: selectedSurface)
+                    let generation = hosts.generation
+                    let values = try await model.creationModels(surface: selectedSurface, host: hosts.hostQuery)
+                    guard generation == hosts.generation else { throw CancellationError() }
                     models = values
                     modelError = nil
                     return values
                 })
             }
-            .task { await load() }
-            .task(id: selectedSurface) {
+            .task(id: hosts.generation) { await load() }
+            .onChange(of: model.snapshot?.daemon) { _, daemon in
+                let before = hosts.generation
+                hosts.update(daemon: daemon)
+                if hosts.generation != before { cwd = ""; selectedSurface = ""; showingModels = false }
+            }
+            .task(id: "\(hosts.generation)/\(selectedSurface)") {
                 selectedLauncher = nil
                 models = []; selectedModel = ""; modelError = nil; turnSettings = .init(); claude = .init()
                 guard !selectedSurface.isEmpty else { return }
-                do { let values = try await model.creationModels(surface: selectedSurface); try Task.checkCancellation(); models = values }
+                do { let values = try await model.creationModels(surface: selectedSurface, host: hosts.hostQuery); try Task.checkCancellation(); models = values }
                 catch is CancellationError {} catch { modelError = "Models unavailable. You can still use the runtime default." }
             }
             .onChange(of: selectedLauncher) { _, launcher in
-                guard launcher != nil else { return }
+                guard launcher?.isTerminal == true else { return }
                 turnSettings = .init()
                 claude = .init()
             }
@@ -148,10 +173,39 @@ struct NewSessionSheet: View {
     private func launchers(for surface: String, options: SessionCreationOptions) -> [LauncherOption] {
         options.launchers?.filter { $0.agents.contains(surface) } ?? []
     }
+    private var hostButton: some View {
+        Menu {
+            ForEach(hosts.hosts) { host in
+                Button {
+                    if hosts.select(host.id) { cwd = ""; selectedSurface = "" }
+                } label: {
+                    if host.id == hosts.selectedHost?.id {
+                        Label(host.name, systemImage: "checkmark")
+                    } else {
+                        Text(host.isAvailable ? host.name : "\(host.name) (\(host.stateLabel))")
+                    }
+                }
+                .disabled(!host.isAvailable)
+            }
+        } label: {
+            Label(hostName, systemImage: "desktopcomputer").labelStyle(.titleAndIcon).font(.subheadline)
+        }
+        .accessibilityIdentifier("creation-host-picker")
+        .accessibilityLabel("Starts on \(hostName)")
+    }
     private func load() async {
         loading = true; error = nil
         defer { loading = false }
-        do { options = try await model.sessionOptions(); selectedSurface = options?.surfaces.first?.id ?? "" }
-        catch { self.error = error.localizedDescription }
+        let generation = hosts.generation
+        do {
+            let loaded = try await model.sessionOptions(host: hosts.hostQuery)
+            try Task.checkCancellation()
+            hosts.receive(options: loaded, for: generation)
+            if generation == hosts.generation {
+                selectedSurface = loaded.surfaces.first?.id ?? ""
+                if cwd.isEmpty { cwd = loaded.projects.first?.rootPath ?? "" }
+            }
+        } catch is CancellationError {
+        } catch { hosts.fail(error.localizedDescription, for: generation) }
     }
 }

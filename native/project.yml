@@ -22,9 +22,14 @@ targets:
       - path: AgenthailModels.swift
       - path: TurnSettings.swift
       - path: AgenthailAPI.swift
+      - path: ComposerAttachment.swift
       - path: SessionSelection.swift
+      - path: SessionTree.swift
       - path: EventRetryBackoff.swift
       - path: ToolPresentation.swift
+      - path: VoiceAPI.swift
+      - path: VoiceAudioBridge.swift
+      - path: VoiceOperatorModel.swift
       - path: iOS
     settings:
       base:
@@ -48,7 +53,7 @@ targets:
       properties:
         ITSAppUsesNonExemptEncryption: false
         AgenthailAPNSEnvironment: $(AGENTHAIL_APNS_ENVIRONMENT)
-        NSCameraUsageDescription: Scan the pairing code shown by Agenthail on your Mac.
+        NSCameraUsageDescription: Scan the pairing code shown by Agenthail on your Mac, or take a photo to send to an agent.
         NSMicrophoneUsageDescription: Talk directly to your Codex Voice orchestrator. Audio is sent to Codex, not transcribed on this device.
         UIBackgroundModes:
           - remote-notification

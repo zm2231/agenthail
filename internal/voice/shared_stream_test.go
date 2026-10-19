@@ -24,7 +24,7 @@ func (f *journalStreamFixture) PrepareSessionStream(context.Context, *surface.Se
 }
 
 func TestVoiceUsesPreparedJournalAndFiltersTurnWithBodyDelta(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Claude", Transport: "browser"}, turnID: "turn-a"}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Claude", Transport: "browser"}, turnID: "turn-a"}
 	stream := &journalStreamFixture{events: make(chan sessionstream.Event, 8), prepared: make(chan struct{}), cancelled: make(chan struct{})}
 	f := newFixture(t, fixtureOptions{target: target, stream: stream})
 	apply(t, f, Action{Action: "prepare"})

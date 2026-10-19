@@ -30,6 +30,8 @@ test -x "$root/runtime/python/bin/python3"
 test -x "$root/runtime/node/bin/node"
 test -f "$root/pydeps/curl_cffi/__init__.py"
 test -f "$root/node_modules/@steipete/sweet-cookie/package.json"
+test -f "$root/claude-host/host.mjs"
+test ! -e "$root/claude-host/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64"
 test -f "$root/skills/agenthail-operations/SKILL.md"
 test -x "$payload/usr/local/bin/agenthail"
 test -x "$payload/usr/local/bin/agenthail-uninstall"
@@ -46,6 +48,7 @@ fi
 
 bash -n "$payload/usr/local/bin/agenthail" "$payload/usr/local/bin/agenthail-uninstall" "$component/Scripts/preinstall" "$component/Scripts/postinstall"
 codesign --verify --deep --strict --verbose=2 "$app"
+"$(dirname "$0")/test-macos-app-voice.sh" "$app"
 codesign --verify --strict --verbose=2 "$root/agenthail"
 
 mkdir -p "$work/home/.claude/skills" "$work/home/.codex"
@@ -61,6 +64,8 @@ test "$(readlink "$work/home/.claude/skills/agenthail-operations")" = "$work/che
 test "$(readlink "$work/home/.hermes/skills/agenthail-operations")" = "$root/skills/agenthail-operations"
 PYTHONPATH="$root/pydeps" PYTHONDONTWRITEBYTECODE=1 "$root/runtime/python/bin/python3" -c 'from curl_cffi import requests; assert requests'
 (cd "$root" && PATH="$root/runtime/node/bin:/usr/bin:/bin" "$root/runtime/node/bin/node" -e "import('@steipete/sweet-cookie').then(module => { if (!module.getCookies) process.exit(1) })")
+"$root/runtime/node/bin/node" --check "$root/claude-host/host.mjs"
+(cd "$root/claude-host" && "$root/runtime/node/bin/node" -e "import('@anthropic-ai/claude-agent-sdk').then(module => { if (!module.query) process.exit(1) })")
 
 linkage="$work/linkage.txt"
 while IFS= read -r path; do

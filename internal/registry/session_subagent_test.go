@@ -11,11 +11,11 @@ import (
 func registerFamily(t *testing.T, r *Registry) {
 	t.Helper()
 	sessions := []surface.Session{
-		{ID: "root-thread", Surface: surface.KindCodex, Name: "Build the parser", Cwd: "/repo/app"},
-		{ID: "child-ada", Surface: surface.KindCodex, Name: "Build the parser tests", Cwd: "/repo/app", Subagent: &surface.Subagent{ParentID: "root-thread", RootID: "root-thread", Depth: 1, Nickname: "Ada"}},
-		{ID: "child-bo", Surface: surface.KindCodex, Name: "Review", Cwd: "/repo/app", Subagent: &surface.Subagent{ParentID: "root-thread", RootID: "root-thread", Depth: 1, Nickname: "Bo", Role: "reviewer"}},
-		{ID: "child-bo-2", Surface: surface.KindCodex, Name: "Review again", Cwd: "/repo/app", Subagent: &surface.Subagent{ParentID: "root-thread", RootID: "root-thread", Depth: 1, Nickname: "bo"}},
-		{ID: "grandchild-cy", Surface: surface.KindCodex, Name: "Leaf", Cwd: "/repo/app", Subagent: &surface.Subagent{ParentID: "child-ada", RootID: "root-thread", Depth: 2, Nickname: "Cy"}},
+		{ID: "root-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Build the parser", Cwd: "/repo/app"},
+		{ID: "child-ada", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Build the parser tests", Cwd: "/repo/app", Subagent: &surface.Subagent{ParentID: "root-thread", RootID: "root-thread", Depth: 1, Nickname: "Ada"}},
+		{ID: "child-bo", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Review", Cwd: "/repo/app", Subagent: &surface.Subagent{ParentID: "root-thread", RootID: "root-thread", Depth: 1, Nickname: "Bo", Role: "reviewer"}},
+		{ID: "child-bo-2", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Review again", Cwd: "/repo/app", Subagent: &surface.Subagent{ParentID: "root-thread", RootID: "root-thread", Depth: 1, Nickname: "bo"}},
+		{ID: "grandchild-cy", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Leaf", Cwd: "/repo/app", Subagent: &surface.Subagent{ParentID: "child-ada", RootID: "root-thread", Depth: 2, Nickname: "Cy"}},
 	}
 	for _, session := range sessions {
 		if err := r.RegisterSession(session); err != nil {
@@ -38,7 +38,7 @@ func TestRegistryPersistsSubagentIdentity(t *testing.T) {
 	if !reflect.DeepEqual(got.Subagent, want) {
 		t.Fatalf("subagent = %+v, want %+v", got.Subagent, want)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "grandchild-cy", Surface: surface.KindCodex, Name: "Leaf"}); err != nil {
+	if err := r.RegisterSession(surface.Session{ID: "grandchild-cy", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Leaf"}); err != nil {
 		t.Fatal(err)
 	}
 	got, err = r.Session("grandchild-cy")

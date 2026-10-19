@@ -55,7 +55,7 @@ func TestClaudeObserveReadsWaitingFromTheProcessRecord(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			home := t.TempDir()
 			writeClaudeRecord(t, home, test.fields)
-			claude := NewClaude("", home)
+			claude := NewClaude(nil, home)
 			session := &surface.Session{ID: "conversation", Bridge: "bridge", Surface: surface.KindClaude, PID: os.Getpid(), Status: surface.StatusBusy, Transcript: transcript}
 			observation, err := claude.Observe(context.Background(), session)
 			if err != nil {
@@ -78,7 +78,7 @@ func TestClaudeObserveIgnoresARecordOfAnotherSession(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	home := t.TempDir()
 	writeClaudeRecord(t, home, map[string]any{"sessionId": "other", "bridgeSessionId": "bridge", "status": "waiting", "waitingFor": "input needed", "statusUpdatedAt": 1})
-	claude := NewClaude("", home)
+	claude := NewClaude(nil, home)
 	session := &surface.Session{ID: "conversation", Bridge: "bridge", Surface: surface.KindClaude, PID: os.Getpid(), Status: surface.StatusBusy, Transcript: writeTranscript(t, `{"type":"user","uuid":"prompt","message":{"content":"Plan it"}}`)}
 	observation, err := claude.Observe(context.Background(), session)
 	if err != nil || observation.WaitingOn != nil {

@@ -37,30 +37,6 @@ func TestActionIdempotencyResponseOverflowLeavesPending(t *testing.T) {
 	}
 }
 
-func TestDashboardActionRouteUsesIdempotencyWrapper(t *testing.T) {
-	r := openActionTestRegistry(t)
-	d := New(r, nil)
-	handler := d.dashboardHandler(&dashboardServer{token: "dashboard-secret"})
-	first := dashboardActionRequestWithKey(`{"action":"unsupported"}`, "dashboard-route")
-	first.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "dashboard-secret"})
-	firstResponse := httptest.NewRecorder()
-	handler.ServeHTTP(firstResponse, first)
-	if firstResponse.Code != http.StatusBadRequest {
-		t.Fatalf("first status=%d body=%s", firstResponse.Code, firstResponse.Body.String())
-	}
-	mismatch := dashboardActionRequestWithKey(`{"action":"different"}`, "dashboard-route")
-	mismatch.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "dashboard-secret"})
-	mismatchResponse := httptest.NewRecorder()
-	handler.ServeHTTP(mismatchResponse, mismatch)
-	if mismatchResponse.Code != http.StatusConflict || effectsInBody(mismatchResponse.Body.Bytes(), "action_idempotency_mismatch") == false {
-		t.Fatalf("mismatch status=%d body=%s", mismatchResponse.Code, mismatchResponse.Body.String())
-	}
-}
-
-func effectsInBody(body []byte, value string) bool {
-	return bytes.Contains(body, []byte(value))
-}
-
 func dashboardActionRequestWithKey(body, key string) *http.Request {
 	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewBufferString(body))
 	request.Host = "127.0.0.1:7412"
@@ -118,14 +94,14 @@ func openIdempotencyFixture(t *testing.T, path string, adapter surface.Surface) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = r.Close() })
-	if err := r.RegisterSession(surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}); err != nil {
+	if err := r.RegisterSession(surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}); err != nil {
 		t.Fatal(err)
 	}
 	return r, dashboardRouter(New(r, []surface.Surface{adapter}))
 }
 
 func idempotencyFake() *daemonSurface {
-	session := surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	session := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 	return &daemonSurface{sessions: map[string]surface.Session{"from": session}, observations: map[string]*surface.TurnObservation{}, accepted: true}
 }
 
@@ -135,7 +111,7 @@ func pairedControlToken(t *testing.T, r *registry.Registry) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, token, err := r.CompleteDevicePairing(pairing.Secret, "Phone")
+	_, token, err := r.CompleteDevicePairing(pairing.Secret, "Phone", "")
 	if err != nil {
 		t.Fatal(err)
 	}

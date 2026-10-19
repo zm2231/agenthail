@@ -68,6 +68,8 @@ their location contains only the workspace and surface handles.
 `Focuser` is implemented by cmux and tmux. Focus is an explicit caller action,
 not a side effect of `Launch`.
 
-The `claude-sdk` implementation is deliberately a seam only: it reports
-unavailable and performs no SDK/runtime work. `external` is the generic
+`claude-sdk` is the default Claude launcher: it opens the session in the
+[Claude host](claude-host.md) through `Claude.StartSession`. `claude-bg` starts
+a `claude --bg` background job, and only when a client selects it; it is never
+a fallback for `claude-sdk`. `external` is the generic
 unavailable seam until a daemon-owned external command policy is supplied.

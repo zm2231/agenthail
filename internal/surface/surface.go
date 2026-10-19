@@ -51,38 +51,54 @@ func SameWaiting(left, right *Waiting) bool {
 }
 
 // Session is one conversation. ID is the provider's native conversation id
-// (Claude session id, Codex thread id) and never changes. PID, Transport and
-// Bridge (the Claude Remote Control id) describe the process currently
-// attached to the conversation and can come and go. ForkedFrom is the
-// conversation this one was branched from.
+// (Claude session id, Codex thread id) and never changes. RuntimeKind is what
+// carries it now and picks its adapter. PID, Transport and Bridge (the Claude
+// Remote Control id) describe the process currently attached to the
+// conversation and can come and go. ForkedFrom is the conversation this one was
+// branched from.
 type Session struct {
-	ID                    string          `json:"id"`
-	Surface               SurfaceKind     `json:"surface"`
-	Name                  string          `json:"name"`
-	Cwd                   string          `json:"cwd"`
-	PID                   int             `json:"pid"`
-	Status                SessionStatus   `json:"status"`
-	WaitingOn             *Waiting        `json:"waitingOn,omitempty"`
-	Transcript            string          `json:"transcript"`
-	HasLocal              bool            `json:"hasLocal"`
-	Source                string          `json:"source,omitempty"`
-	Transport             string          `json:"transport,omitempty"`
-	ConfiguredModel       string          `json:"configuredModel,omitempty"`
-	Bridge                string          `json:"bridge,omitempty"`
-	ForkedFrom            string          `json:"forkedFrom,omitempty"`
-	LastActive            time.Time       `json:"lastActive"`
-	StartedAt             time.Time       `json:"startedAt,omitzero"`
-	Runtime               *Runtime        `json:"runtime,omitempty"`
-	Subagent              *Subagent       `json:"subagent,omitempty"`
-	Subagents             *SubagentRollup `json:"subagents,omitempty"`
-	StreamCursor          uint64          `json:"-"`
-	StreamCursorSet       bool            `json:"-"`
-	TranscriptOffset      int64           `json:"-"`
-	TranscriptOffsetSet   bool            `json:"-"`
-	TranscriptIdentity    string          `json:"-"`
-	CodexPendingEventUser bool            `json:"-"`
-	CodexPendingEventTurn string          `json:"-"`
-	CodexCurrentTurnID    string          `json:"-"`
+	ID                    string            `json:"id"`
+	Surface               SurfaceKind       `json:"surface"`
+	Name                  string            `json:"name"`
+	Cwd                   string            `json:"cwd"`
+	PID                   int               `json:"pid"`
+	Status                SessionStatus     `json:"status"`
+	WaitingOn             *Waiting          `json:"waitingOn,omitempty"`
+	Transcript            string            `json:"transcript"`
+	HasLocal              bool              `json:"hasLocal"`
+	Source                string            `json:"source,omitempty"`
+	Transport             string            `json:"transport,omitempty"`
+	RuntimeKind           RuntimeKind       `json:"runtimeKind,omitempty"`
+	ConfiguredModel       string            `json:"configuredModel,omitempty"`
+	Bridge                string            `json:"bridge,omitempty"`
+	ForkedFrom            string            `json:"forkedFrom,omitempty"`
+	LastActive            time.Time         `json:"lastActive"`
+	StartedAt             time.Time         `json:"startedAt,omitzero"`
+	Runtime               *Runtime          `json:"runtime,omitempty"`
+	Subagent              *Subagent         `json:"subagent,omitempty"`
+	Subagents             *SubagentRollup   `json:"subagents,omitempty"`
+	StreamCursor          uint64            `json:"-"`
+	StreamCursorSet       bool              `json:"-"`
+	TranscriptOffset      int64             `json:"-"`
+	TranscriptOffsetSet   bool              `json:"-"`
+	TranscriptIdentity    string            `json:"-"`
+	CodexPendingEventUser bool              `json:"-"`
+	CodexPendingEventTurn string            `json:"-"`
+	CodexCurrentTurnID    string            `json:"-"`
+	ClaudeClosingTurn     ClaudeClosingTurn `json:"-"`
+}
+
+// ClaudeClosingTurn is a Claude turn whose end_turn message has been read but
+// may still have content blocks to write. A stream that resumes at
+// TranscriptOffset finishes it at the first record outside MessageID, or once
+// its process records idle no earlier than At, provided the transcript bytes
+// before that offset still match Anchor.
+type ClaudeClosingTurn struct {
+	TurnID    string
+	MessageID string
+	Key       string
+	Anchor    string
+	At        time.Time
 }
 
 // Subagent identifies a session spawned by another session. RootID is the
@@ -237,6 +253,7 @@ const (
 	DeliveryAccessDenied         DeliveryTerminalKind = "access_denied"
 	DeliveryInvalidRequest       DeliveryTerminalKind = "invalid_request"
 	DeliveryOwnershipConflict    DeliveryTerminalKind = "ownership_conflict"
+	DeliverySigninNotConfigured  DeliveryTerminalKind = "signin_not_configured"
 )
 
 type DeliveryTerminalError struct {
@@ -263,6 +280,8 @@ func deliveryTerminalLabel(kind DeliveryTerminalKind) string {
 		return "invalid request"
 	case DeliveryOwnershipConflict:
 		return "session ownership conflict"
+	case DeliverySigninNotConfigured:
+		return "browser sign-in not set up"
 	default:
 		return "delivery rejected"
 	}
@@ -300,6 +319,17 @@ type SendOptions struct {
 	SourceSessionID string `json:"sourceSessionId,omitempty"`
 	BusyDelivery    string `json:"busyDelivery,omitempty"`
 	Author          Author `json:"-"`
+	// Uploads are the person's attached files. Route.Send turns them into
+	// Images for a route that takes image input and into stored paths in the
+	// message text for everything else.
+	Uploads Uploads `json:"-"`
+	Images  Uploads `json:"-"`
+}
+
+// HoldsForQueue reports whether the send carries parts a busy-session steer
+// cannot deliver, so it must wait in the queue for a turn of its own.
+func (o SendOptions) HoldsForQueue() bool {
+	return o.Model != "" || !o.TurnOptions.Empty() || len(o.Uploads) > 0
 }
 
 // Author records who wrote a message. A composer declares AuthorPerson when a
@@ -311,8 +341,14 @@ const AuthorPerson Author = "person"
 // HumanTurnSender delivers a person's message as that session's own user
 // turn, separate from the peer transport agents use to message each other.
 type HumanTurnSender interface {
-	CanSendHumanTurn(sess *Session) bool
-	SendHumanTurn(ctx context.Context, sess *Session, message string) (*SendResult, error)
+	SendHumanTurn(ctx context.Context, sess *Session, message string, images Uploads) (*SendResult, error)
+}
+
+// ImageRouter is implemented by an adapter whose runtime takes images as
+// model input on some routes. Every other route receives each upload as its
+// stored path in the message text.
+type ImageRouter interface {
+	NativeImages(session *Session, route Route) bool
 }
 
 type sourceSessionIDContextKey struct{}
@@ -360,9 +396,6 @@ type SessionAccessChecker interface {
 }
 
 func EnsureWritableSession(ctx context.Context, adapter Surface, sess *Session) error {
-	if err := ValidateRuntimeTransport(sess); err != nil {
-		return err
-	}
 	if checker, ok := adapter.(SessionAccessChecker); ok {
 		if err := checker.EnsureWritable(ctx, sess); err != nil {
 			return err
@@ -453,27 +486,28 @@ type Exchange struct {
 }
 
 type StreamEvent struct {
-	Role             string        `json:"role,omitempty"`
-	Origin           string        `json:"origin,omitempty"`
-	Sender           string        `json:"sender,omitempty"`
-	Title            string        `json:"title,omitempty"`
-	Status           string        `json:"status,omitempty"`
-	CallID           string        `json:"callId,omitempty"`
-	Attachment       *Attachment   `json:"attachment,omitempty"`
-	Truncated        bool          `json:"truncated,omitempty"`
-	TruncationReason string        `json:"truncationReason,omitempty"`
-	ID               string        `json:"id,omitempty"`
-	ProviderKey      string        `json:"providerKey,omitempty"`
-	Cursor           uint64        `json:"cursor,omitempty"`
-	Version          uint64        `json:"version,omitempty"`
-	Operation        string        `json:"operation,omitempty"`
-	Final            bool          `json:"final,omitempty"`
-	TurnID           string        `json:"turnId,omitempty"`
-	Timestamp        time.Time     `json:"timestamp,omitempty"`
-	Kind             string        `json:"kind"`
-	Text             string        `json:"text"`
-	Context          *ContextUsage `json:"context,omitempty"`
-	Goal             *GoalState    `json:"goal,omitempty"`
+	Role             string         `json:"role,omitempty"`
+	Origin           string         `json:"origin,omitempty"`
+	Sender           string         `json:"sender,omitempty"`
+	Title            string         `json:"title,omitempty"`
+	Status           string         `json:"status,omitempty"`
+	CallID           string         `json:"callId,omitempty"`
+	Attachment       *Attachment    `json:"attachment,omitempty"`
+	Files            []AttachedFile `json:"files,omitempty"`
+	Truncated        bool           `json:"truncated,omitempty"`
+	TruncationReason string         `json:"truncationReason,omitempty"`
+	ID               string         `json:"id,omitempty"`
+	ProviderKey      string         `json:"providerKey,omitempty"`
+	Cursor           uint64         `json:"cursor,omitempty"`
+	Version          uint64         `json:"version,omitempty"`
+	Operation        string         `json:"operation,omitempty"`
+	Final            bool           `json:"final,omitempty"`
+	TurnID           string         `json:"turnId,omitempty"`
+	Timestamp        time.Time      `json:"timestamp,omitempty"`
+	Kind             string         `json:"kind"`
+	Text             string         `json:"text"`
+	Context          *ContextUsage  `json:"context,omitempty"`
+	Goal             *GoalState     `json:"goal,omitempty"`
 }
 
 type StreamEventClass string
@@ -569,6 +603,7 @@ type Capabilities struct {
 	Model     bool `json:"model"`
 	Interrupt bool `json:"interrupt"`
 	Steer     bool `json:"steer"`
+	Attach    bool `json:"attach"`
 }
 
 type SessionCapabilities struct {
@@ -577,24 +612,33 @@ type SessionCapabilities struct {
 	ReadOnlyReason string `json:"readOnlyReason,omitempty"`
 }
 
-func EffectiveCapabilities(session *Session, capabilities Capabilities) SessionCapabilities {
-	if session != nil && session.Surface == KindClaude && session.Transport == "uds" {
-		capabilities.Stream = capabilities.Stream && session.HasLocal && session.Transcript != ""
-		if session.Bridge == "" {
-			capabilities.Steer = false
-			capabilities.Compact = false
-			capabilities.Model = false
-			capabilities.Interrupt = false
-		}
+// SessionCapabilitySource is implemented by an adapter whose capabilities
+// differ by session. Every other adapter's sessions have its Capabilities.
+type SessionCapabilitySource interface {
+	SessionCapabilities(session *Session) Capabilities
+}
+
+// CapabilitiesFor is what the adapter can do for the session.
+func CapabilitiesFor(adapter Surface, session *Session) Capabilities {
+	if source, ok := adapter.(SessionCapabilitySource); ok {
+		return source.SessionCapabilities(session)
 	}
+	return adapter.Capabilities()
+}
+
+// EffectiveCapabilities is what may be done to the session: nothing when it is
+// read-only, otherwise what its adapter can do for it.
+func EffectiveCapabilities(adapter Surface, session *Session) SessionCapabilities {
 	if IsReadOnlySession(session) {
 		return SessionCapabilities{ReadOnly: true, ReadOnlyReason: ReadOnlySessionReason(session)}
 	}
-	return SessionCapabilities{Capabilities: capabilities}
+	return SessionCapabilities{Capabilities: CapabilitiesFor(adapter, session)}
 }
 
 type Surface interface {
 	Name() SurfaceKind
+	// RuntimeKinds are the runtimes whose sessions this adapter serves.
+	RuntimeKinds() []RuntimeKind
 	List(ctx context.Context) ([]Session, error)
 	Resolve(ctx context.Context, target string) (*Session, error)
 	Observe(ctx context.Context, sess *Session) (*TurnObservation, error)
@@ -628,10 +672,11 @@ type LocalStatusSource interface {
 	LocalStatus(ctx context.Context, session Session) (Session, error)
 }
 
-// CatalogListCompleteness declares whether a successful List result is a
-// complete enumeration suitable for omission reconciliation.
-type CatalogListCompleteness interface {
-	CatalogListComplete() bool
+// CatalogLister lists sessions for the daemon catalog and reports whether the
+// result enumerates every session the runtime holds. Only a complete result
+// retires the sessions it omits. Adapters without it list completely.
+type CatalogLister interface {
+	CatalogList(ctx context.Context) ([]Session, bool, error)
 }
 
 func DeriveName(explicit, preview string, maxLen int) string {

@@ -21,7 +21,7 @@ func (d *Daemon) dispatcher() delivery.Dispatcher {
 }
 
 func (d *Daemon) createNotionThread(ctx context.Context, message, alias, model string) (*delivery.Receipt, error) {
-	adapter := d.surfaceForKind(surface.KindNotion)
+	adapter := d.adapters().ForSurface(surface.KindNotion)
 	if adapter == nil {
 		return nil, fmt.Errorf("Notion is not configured")
 	}
@@ -30,7 +30,7 @@ func (d *Daemon) createNotionThread(ctx context.Context, message, alias, model s
 	if message == "" {
 		return nil, fmt.Errorf("first message is required")
 	}
-	session := &surface.Session{ID: "new", Surface: surface.KindNotion, Name: alias, Status: surface.StatusIdle}
+	session := &surface.Session{ID: "new", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: alias, Status: surface.StatusIdle}
 	var result *surface.SendResult
 	var err error
 	if model = strings.TrimSpace(model); model != "" {

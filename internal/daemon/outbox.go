@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -27,10 +26,6 @@ func (d *Daemon) drainSteerMessageQueue(ctx context.Context, adapter surface.Sur
 }
 
 func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surface, session *surface.Session, claim func(time.Time) (*registry.QueuedMessage, error)) {
-	if err := surface.ValidateRuntimeTransport(session); err != nil {
-		d.log.Printf("transport for %s unavailable: %s", d.resolveDisplay(session.ID), err)
-		return
-	}
 	now := time.Now()
 	item, err := claim(now)
 	if err != nil {
@@ -41,22 +36,31 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		return
 	}
 	if item.Operation == registry.QueueOperationCompact {
+		// The compact may resume the session and move it to another process;
+		// it works on its own copy so the observer's session is never written
+		// from this goroutine.
+		compacting := *session
 		d.queueWorkers.Add(1)
 		go func() {
 			defer d.queueWorkers.Done()
-			d.runQueuedCompact(ctx, adapter, session, item)
+			d.runQueuedCompact(ctx, adapter, &compacting, item)
 		}()
 		return
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	operationCtx = surface.WithSourceSessionID(operationCtx, item.SourceSessionID)
+	if messageUUID, err := d.Registry.DeliveryIntentUUIDForQueue(item.ID); err != nil {
+		d.log.Printf("read delivery intent of queue item %d: %s", item.ID, err)
+	} else if messageUUID != "" {
+		operationCtx = surface.WithMessageUUID(operationCtx, messageUUID)
+	}
 	var result *surface.SendResult
 	var sendErr error
 	addressed := *session
 	steered := false
-	route := delivery.RouteFor(adapter, session, item.Author)
-	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author}
-	if item.BusyDelivery == "steer" && item.Model == "" && item.TurnOptions.Empty() && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer {
+	route := surface.RouteFor(adapter, session, item.Author)
+	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author, Uploads: item.Uploads}
+	if item.BusyDelivery == "steer" && !options.HoldsForQueue() && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer {
 		sendErr = adapter.Steer(operationCtx, session, item.Message)
 		if sendErr == nil {
 			result = &surface.SendResult{Accepted: true}
@@ -66,8 +70,12 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		result, sendErr = route.Send(operationCtx, adapter, session, item.Message, options)
 	}
 	cancel()
-	d.dispatcher().RegisterReached(&addressed, session)
-	peerTransport := delivery.RouteFor(adapter, session, item.Author).TransportOnly()
+	if ownedErr := d.dispatcher().RegisterReached(&addressed, session); ownedErr != nil {
+		*session = addressed
+		d.finishReachedHostOwned(item, session, item.Message, ownedErr)
+		return
+	}
+	peerTransport := surface.RouteFor(adapter, session, item.Author).TransportOnly()
 	if sendErr != nil {
 		d.finishQueueFailure(item, session, sendErr, now)
 		return
@@ -114,7 +122,10 @@ func (d *Daemon) runQueuedCompact(ctx context.Context, adapter surface.Surface, 
 	defer cancel()
 	addressed := *session
 	err := adapter.Compact(operationCtx, session)
-	d.dispatcher().RegisterReached(&addressed, session)
+	if ownedErr := d.dispatcher().RegisterReached(&addressed, session); ownedErr != nil {
+		d.finishReachedHostOwned(item, &addressed, "compact", ownedErr)
+		return
+	}
 	if err != nil {
 		d.finishQueueFailure(item, session, err, time.Now())
 		return
@@ -126,6 +137,16 @@ func (d *Daemon) runQueuedCompact(ctx context.Context, adapter surface.Surface, 
 	}
 	d.log.Printf("completed compact queue item %d for %s", item.ID, d.resolveDisplay(session.ID))
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, QueueID: item.ID, Message: "compact", Evidence: surface.EvidenceDelivered})
+}
+
+// finishReachedHostOwned settles a queue item whose send resumed into a
+// session a paired host owns. The provider took it, so it is never retried,
+// and it is recorded only under the session it was addressed to.
+func (d *Daemon) finishReachedHostOwned(item *registry.QueuedMessage, addressed *surface.Session, message string, ownedErr error) {
+	if err := d.Registry.DeadLetterUnknown(item.ID, ownedErr); err != nil {
+		d.log.Printf("dead-letter queue item %d: %s", item.ID, err)
+	}
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: addressed.ID, QueueID: item.ID, Message: message, Error: ownedErr.Error(), Evidence: surface.EvidenceUnknown})
 }
 
 func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surface.Session, sendErr error, now time.Time) {

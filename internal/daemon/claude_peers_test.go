@@ -8,6 +8,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 func TestRecentPeerRegistrationReadsFreshCatalogRowsOnly(t *testing.T) {
@@ -22,18 +23,24 @@ func TestRecentPeerRegistrationReadsFreshCatalogRowsOnly(t *testing.T) {
 	d := New(reg, []surface.Surface{codex, notion, claude})
 	now := time.Now()
 	for _, session := range []surface.Session{
-		{ID: "recent", Surface: surface.KindCodex, Transport: "managed", Status: surface.StatusIdle, LastActive: now},
-		{ID: "last-page", Surface: surface.KindCodex, Transport: "readOnly", Status: surface.StatusIdle, LastActive: now.Add(-48 * time.Hour)},
-		{ID: "offline", Surface: surface.KindCodex, Status: surface.StatusOffline, LastActive: now},
-		{ID: "notes", Surface: surface.KindNotion, Status: surface.StatusIdle, LastActive: now},
-		{ID: "native", Surface: surface.KindClaude, Status: surface.StatusIdle, LastActive: now},
-		{ID: "unconfigured", Surface: surface.SurfaceKind("other"), Status: surface.StatusBusy, LastActive: now},
+		{ID: "recent", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "managed", Status: surface.StatusIdle, LastActive: now},
+		{ID: "last-page", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Transport: "readOnly", Status: surface.StatusIdle, LastActive: now.Add(-48 * time.Hour)},
+		{ID: "offline", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusOffline, LastActive: now},
+		{ID: "notes", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Status: surface.StatusIdle, LastActive: now},
+		{ID: "native", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, LastActive: now},
+		{ID: "unconfigured", Surface: surface.SurfaceKind("other"), RuntimeKind: surface.RuntimeKind("other"), Status: surface.StatusBusy, LastActive: now},
 	} {
-		if _, _, err := reg.RecordCatalogSession(registry.CatalogSessionState{Session: session, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: now.UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:" + session.ID, Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
+		if _, _, err := reg.RecordCatalogSession(registry.CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: now.UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:" + session.ID, Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if _, err := reg.MarkCatalogDiscoveryFailure(surface.KindNotion, "catalog discovery failed", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.AddHost(registry.PairedHost{ID: "h0123456789ab", Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := reg.ApplyHostCatalogRow("h0123456789ab", registry.HostCatalogRow{Session: surface.Session{ID: "mirrored", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Transport: "managed", Status: surface.StatusIdle, LastActive: now}, EntityID: "h0123456789ab::mirrored", Projection: []byte(`{"id":"h0123456789ab::mirrored"}`), ObservedAt: now.UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	seen := map[string]int{}
@@ -73,14 +80,14 @@ func TestClaudePeerEligibilityKeepsBusyAndRecentOnly(t *testing.T) {
 }
 
 func TestNativeClaudeCapabilitiesMatchSocketContract(t *testing.T) {
-	caps := surface.EffectiveCapabilities(&surface.Session{ID: "local-uuid", Surface: surface.KindClaude, Transport: "uds"}, surface.Capabilities{Send: true, Stream: true, Reply: true, Compact: true, Model: true, Interrupt: true, Steer: true})
+	caps := surface.EffectiveCapabilities(surfaces.NewClaude(nil, t.TempDir()), &surface.Session{ID: "local-uuid", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"})
 	if caps.ReadOnly || !caps.Send || !caps.Reply || caps.Stream || caps.Compact || caps.Model || caps.Interrupt || caps.Steer {
 		t.Fatalf("caps=%+v readOnly=%v", caps, caps.ReadOnly)
 	}
 }
 
 func TestBridgedClaudeCapabilitiesUseRemoteControlContract(t *testing.T) {
-	caps := surface.EffectiveCapabilities(&surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, Transport: "uds"}, surface.Capabilities{Send: true, Stream: true, Reply: true, Compact: true, Model: true, Interrupt: true, Steer: true})
+	caps := surface.EffectiveCapabilities(surfaces.NewClaude(nil, t.TempDir()), &surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"})
 	if caps.ReadOnly || !caps.Send || !caps.Reply || caps.Stream || !caps.Compact || !caps.Model || !caps.Interrupt || !caps.Steer {
 		t.Fatalf("caps=%+v readOnly=%v", caps, caps.ReadOnly)
 	}
@@ -117,8 +124,8 @@ func TestPeerRegistrationFollowsDiscoveryWithoutWaitingForTheTicker(t *testing.T
 		t.Fatalf("empty catalog registered %q", id)
 	default:
 	}
-	session := surface.Session{ID: "discovered", Surface: surface.KindCodex, Status: surface.StatusBusy, LastActive: time.Now()}
-	if _, _, err := d.catalog.publishSession(registry.CatalogSessionState{Session: session, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:discovered", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
+	session := surface.Session{ID: "discovered", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy, LastActive: time.Now()}
+	if _, _, err := d.catalog.publishSession(registry.CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:discovered", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 	select {

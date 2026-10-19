@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -59,24 +62,63 @@ func (c *Claude) backgroundSessions(ctx context.Context) ([]claudeBackground, er
 	}
 	return records, nil
 }
-func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
+func validateClaudeStart(options surface.SessionStartOptions) error {
 	if strings.TrimSpace(options.Message) == "" {
-		return nil, nil, fmt.Errorf("message is required")
+		return fmt.Errorf("message is required")
 	}
 	if options.ApprovalPolicy != "" {
-		return nil, nil, fmt.Errorf("Claude uses permissionMode, not Codex approvalPolicy")
+		return fmt.Errorf("Claude uses permissionMode, not Codex approvalPolicy")
 	}
 	if options.Mode != "" || options.ServiceTier != "" || len(options.OutputSchema) > 0 {
-		return nil, nil, fmt.Errorf("Claude background creation does not support Codex turn options")
+		return fmt.Errorf("Claude creation does not support Codex turn options")
 	}
 	if options.Effort != "" && !slices.Contains([]string{"low", "medium", "high", "xhigh", "max"}, options.Effort) {
-		return nil, nil, fmt.Errorf("invalid Claude effort")
+		return fmt.Errorf("invalid Claude effort")
 	}
-	if options.PermissionMode != "" && !slices.Contains([]string{"acceptEdits", "auto", "manual", "dontAsk", "plan"}, options.PermissionMode) {
-		return nil, nil, fmt.Errorf("invalid Claude permission mode")
+	if options.PermissionMode != "" && !slices.Contains([]string{"acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"}, options.PermissionMode) {
+		return fmt.Errorf("invalid Claude permission mode")
 	}
 	if options.Cwd == "" || !filepath.IsAbs(options.Cwd) {
-		return nil, nil, fmt.Errorf("absolute cwd is required")
+		return fmt.Errorf("absolute cwd is required")
+	}
+	return nil
+}
+
+// StartSession opens a new conversation in the Claude host and sends the
+// message as its first turn. The host answers the session's permission
+// prompts, and the session has no Remote Control. The conversation id is
+// chosen here, so an open whose outcome is unknown still names the session.
+func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
+	if err := validateClaudeStart(options); err != nil {
+		return nil, nil, err
+	}
+	id := uuid.NewString()
+	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{
+		SessionID: id, Cwd: options.Cwd, Model: options.Model, PermissionMode: options.PermissionMode,
+		Effort: options.Effort, Agent: options.Agent, Name: options.Name, Worktree: options.Worktree,
+	})
+	session := &surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: opened.PID, Name: options.Name, Cwd: options.Cwd, Status: surface.StatusIdle, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
+	if err != nil {
+		var unknown *claudehost.OutcomeUnknownError
+		if errors.As(err, &unknown) {
+			return session, nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude creation: %w", err))
+		}
+		return nil, nil, fmt.Errorf("Claude creation: %w", err)
+	}
+	sent, err := c.sendHostTurn(ctx, session, options.Message, "", nil)
+	return session, sent, err
+}
+
+// claudeBackgroundStarter starts a conversation as a Claude Code background
+// job, which registers Remote Control. It serves the claude-bg launcher only.
+type claudeBackgroundStarter struct{ c *Claude }
+
+func (c *Claude) BackgroundStarter() surface.SessionStarter { return claudeBackgroundStarter{c} }
+
+func (s claudeBackgroundStarter) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
+	c := s.c
+	if err := validateClaudeStart(options); err != nil {
+		return nil, nil, err
 	}
 	args := []string{"--bg"}
 	for _, pair := range [][2]string{{"--model", options.Model}, {"--name", options.Name}, {"--worktree", options.Worktree}, {"--agent", options.Agent}, {"--permission-mode", options.PermissionMode}, {"--effort", options.Effort}} {
@@ -102,7 +144,7 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 		if listErr == nil {
 			for _, record := range records {
 				if record.ID == shortID && record.Kind == "background" && record.SessionID != "" {
-					session := &surface.Session{ID: record.SessionID, Surface: surface.KindClaude, Name: record.Name, Cwd: record.Cwd, Status: surface.StatusUnknown, HasLocal: true, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
+					session := &surface.Session{ID: record.SessionID, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: record.Name, Cwd: record.Cwd, Status: surface.StatusUnknown, HasLocal: true, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
 					return session, nil, nil
 				}
 			}
@@ -120,6 +162,9 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 	if action != "stop" && action != "resume" && action != "logs" && action != "status" {
 		return nil, fmt.Errorf("Claude lifecycle action must be status, stop, resume, or logs")
 	}
+	if claudeHosted(session) {
+		return c.hostSessionAction(ctx, session, action)
+	}
 	records, err := c.backgroundSessions(ctx)
 	if err != nil {
 		return nil, err
@@ -132,7 +177,7 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "state": record.State}, nil
 		}
 		if action == "resume" {
-			target := surface.Session{ID: record.SessionID, Surface: surface.KindClaude, Cwd: record.Cwd}
+			target := surface.Session{ID: record.SessionID, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: record.Cwd}
 			resumed, err := c.reach(ctx, &target)
 			if err != nil {
 				return nil, err
@@ -151,21 +196,41 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 	return nil, fmt.Errorf("session is not a Claude background agent")
 }
 
-type claudeJob struct {
-	State     string    `json:"state"`
-	Detail    string    `json:"detail"`
-	UpdatedAt time.Time `json:"updatedAt"`
-}
-
-// claude agents --json omits the failure detail and update time that the job
-// record holds.
-func (c *Claude) backgroundJob(id string) (claudeJob, bool) {
-	var job claudeJob
-	raw, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.home), "jobs", id, "state.json"))
-	if err != nil || json.Unmarshal(raw, &job) != nil {
-		return job, false
+// hostSessionAction runs a lifecycle action on a session the Claude host
+// runs. Stop closes it in the host; the conversation resumes on the next
+// message or resume. The host keeps no background log.
+func (c *Claude) hostSessionAction(ctx context.Context, session *surface.Session, action string) (map[string]any, error) {
+	switch action {
+	case "status":
+		listing, err := c.host.client.List(ctx)
+		if err != nil {
+			return nil, surface.DeliveryUnavailable(err)
+		}
+		for _, hosted := range listing.Sessions {
+			if hosted.SessionID == session.ID {
+				return map[string]any{"sessionId": session.ID, "state": hosted.State, "pid": hosted.PID}, nil
+			}
+		}
+		return map[string]any{"sessionId": session.ID, "state": "closed"}, nil
+	case "stop":
+		err := c.host.client.Close(ctx, session.ID)
+		if claudehost.IsCode(err, "not_open") {
+			return map[string]any{"sessionId": session.ID, "action": action, "unchanged": true}, nil
+		}
+		if err != nil {
+			return nil, claudeHostDeliveryError(err)
+		}
+		return map[string]any{"sessionId": session.ID, "action": action}, nil
+	case "resume":
+		target := *session
+		resumed, err := c.reach(ctx, &target)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"sessionId": session.ID, "action": action, "unchanged": !resumed, "state": string(target.Status)}, nil
+	default:
+		return nil, fmt.Errorf("a Claude host session has no background log; read its transcript with agenthail last")
 	}
-	return job, true
 }
 
 var claudeANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)

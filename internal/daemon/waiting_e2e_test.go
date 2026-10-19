@@ -111,7 +111,7 @@ func newPushRecorder(t *testing.T, store *registry.Registry) *pushRecorder {
 	if err != nil {
 		t.Fatal(err)
 	}
-	device, _, err := store.CompleteDevicePairing(pairing.Secret, "")
+	device, _, err := store.CompleteDevicePairing(pairing.Secret, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,12 +247,12 @@ func newClaudeQuestion(t *testing.T) claudeQuestion {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	session := surface.Session{ID: "conversation-question", Bridge: "session_question", Surface: surface.KindClaude, PID: process.PID, Transport: "uds", Status: surface.StatusBusy, HasLocal: true, Transcript: transcript}
+	session := surface.Session{ID: "conversation-question", Bridge: "session_question", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: process.PID, Transport: "uds", Status: surface.StatusBusy, HasLocal: true, Transcript: transcript}
 	if err := store.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
 	pushes := newPushRecorder(t, store)
-	claude := &recordingClaude{Claude: surfaces.NewClaude("Default", process.Home)}
+	claude := &recordingClaude{Claude: surfaces.NewClaude(nil, process.Home)}
 
 	return claudeQuestion{store: store, claude: claude, pushes: pushes, session: session, transcript: transcript, process: process}
 }
@@ -308,7 +308,8 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 		t.Fatalf("queued message left before the turn ended: %+v", item)
 	}
 
-	appendClaudeRecords(t, transcript, `{"type":"assistant","uuid":"done","timestamp":"2026-10-18T20:18:30Z","message":{"id":"msg-done","stop_reason":"end_turn","content":[{"type":"text","text":"Released from main."}]}}`)
+	appendClaudeRecords(t, transcript, `{"type":"assistant","uuid":"done","timestamp":"2026-10-18T20:18:30Z","message":{"id":"msg-done","stop_reason":"end_turn","content":[{"type":"text","text":"Released from main."}]}}`,
+		`{"type":"system","subtype":"turn_duration","timestamp":"2026-10-18T20:18:31Z"}`)
 	q.process.RecordStatus("conversation-question", q.process.Home, "session_question", "idle", "", questionAsked.Add(2*time.Hour))
 	eventually(t, "the queued message after the turn ends", func() bool {
 		sent, _ := claude.delivered()
@@ -446,8 +447,16 @@ func TestQuestionAnnouncedAgainAfterAStopMidDeliveryCollapsesIntoOne(t *testing.
 func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) {
 	q := newClaudeQuestion(t)
 	var armed atomic.Bool
-	selected, release := make(chan *surface.Waiting, 1), make(chan struct{})
+	selected, release, contended := make(chan *surface.Waiting, 1), make(chan struct{}), make(chan struct{}, 1)
 	h, _ := runDaemonWith(t, q.store, func(d *Daemon) {
+		d.waitingContended = func(id string) {
+			if id == q.session.ID {
+				select {
+				case contended <- struct{}{}:
+				default:
+				}
+			}
+		}
 		d.catalogSelected = func(id string) {
 			if id == q.session.ID && armed.CompareAndSwap(true, false) {
 				waiting, _, _ := q.store.WaitingState(id)
@@ -472,7 +481,6 @@ func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) 
 	case <-time.After(5 * time.Second):
 		t.Fatal("no catalog publication reached the session")
 	}
-	q.answer(t)
 	answered := q.session
 	observed := make(chan error, 1)
 	go func() {
@@ -482,15 +490,15 @@ func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) 
 		}
 		observed <- err
 	}()
-	// The answer must not be recorded while a row carrying the question is
-	// still to be written. The bound only limits how long a broken lock takes
-	// to show; a correct one blocks the observation until release.
+	// The observation must wait for the paused row to commit, not read the
+	// turn while a row carrying the question is still to be written.
 	select {
+	case <-contended:
 	case <-observed:
 		close(release)
-		t.Fatal("the answer was recorded while a catalog row with the question was still to be written")
-	case <-time.After(200 * time.Millisecond):
+		t.Fatal("the turn was observed while a catalog row with the question was still to be written")
 	}
+	q.answer(t)
 	close(release)
 	if err := <-observed; err != nil {
 		t.Fatal(err)
@@ -525,5 +533,33 @@ func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) 
 	eventually(t, "the later publication to keep the session clear", cleared)
 	if got := q.pushes.count("session.waiting"); got != 1 {
 		t.Fatalf("one question notified %d times", got)
+	}
+}
+
+func TestQueuedSteerToAClaudeSessionWithoutABridgeWaitsForTheTurn(t *testing.T) {
+	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	adapters := surface.Adapters{surfaces.NewClaude(nil, t.TempDir())}
+	for _, test := range []struct {
+		bridge string
+		want   registry.QueueHold
+	}{{"", registry.QueueHeldBusy}, {"session_steerable", ""}} {
+		id := "conversation-bridge-" + test.bridge
+		if err := store.RegisterSession(surface.Session{ID: id, Bridge: test.bridge, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", Status: surface.StatusBusy}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SaveRuntimeState(id, surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}); err != nil {
+			t.Fatal(err)
+		}
+		queueID, err := store.QueueMessageWithOptions(id, "into the turn", "", surface.SendOptions{BusyDelivery: "steer"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if item, err := store.QueueItem(queueID, adapters); err != nil || item.HeldBy != test.want {
+			t.Fatalf("bridge %q: item=%+v err=%v, want held by %q", test.bridge, item, err, test.want)
+		}
 	}
 }

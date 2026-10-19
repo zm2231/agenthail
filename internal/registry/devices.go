@@ -24,13 +24,16 @@ var (
 )
 
 type Device struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Scopes      []string `json:"scopes"`
-	CreatedAt   string   `json:"createdAt"`
-	LastSeenAt  string   `json:"lastSeenAt,omitempty"`
-	RevokedAt   string   `json:"revokedAt,omitempty"`
-	PushEnabled bool     `json:"pushEnabled"`
+	ID     string   `json:"id"`
+	Name   string   `json:"name"`
+	Scopes []string `json:"scopes"`
+	// HostID is the paired host a host-scoped token belongs to. A forwarded
+	// sender is trusted only as a session of this host.
+	HostID      string `json:"hostId,omitempty"`
+	CreatedAt   string `json:"createdAt"`
+	LastSeenAt  string `json:"lastSeenAt,omitempty"`
+	RevokedAt   string `json:"revokedAt,omitempty"`
+	PushEnabled bool   `json:"pushEnabled"`
 }
 
 type DevicePairing struct {
@@ -83,7 +86,7 @@ func (r *Registry) pruneDevicePairings(now time.Time) error {
 	return err
 }
 
-func (r *Registry) CompleteDevicePairing(secret, name string) (Device, string, error) {
+func (r *Registry) CompleteDevicePairing(secret, name, hostID string) (Device, string, error) {
 	secret = strings.TrimSpace(secret)
 	if secret == "" {
 		return Device{}, "", ErrPairingInvalid
@@ -116,6 +119,11 @@ func (r *Registry) CompleteDevicePairing(secret, name string) (Device, string, e
 		return Device{}, "", fmt.Errorf("device name must be at most 120 characters")
 	}
 	scopes := splitDeviceScopes(storedScopes)
+	if !deviceScopesInclude(scopes, HostScope) {
+		hostID = ""
+	} else if hostID = strings.TrimSpace(hostID); hostID != "" && !ValidHostID(hostID) {
+		return Device{}, "", fmt.Errorf("pairing host id %q is not a host id", hostID)
+	}
 	tokenSecret, err := randomDeviceSecret(32)
 	if err != nil {
 		return Device{}, "", err
@@ -129,8 +137,8 @@ func (r *Registry) CompleteDevicePairing(secret, name string) (Device, string, e
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return Device{}, "", ErrPairingInvalid
 	}
-	device := Device{ID: uuid.NewString(), Name: name, Scopes: scopes, CreatedAt: now}
-	if _, err := tx.Exec(`INSERT INTO paired_devices (id,name,token_hash,scopes,created_at) VALUES (?,?,?,?,?)`, device.ID, device.Name, hashDeviceSecret(token), strings.Join(scopes, ","), now); err != nil {
+	device := Device{ID: uuid.NewString(), Name: name, Scopes: scopes, HostID: hostID, CreatedAt: now}
+	if _, err := tx.Exec(`INSERT INTO paired_devices (id,name,token_hash,scopes,host_id,created_at) VALUES (?,?,?,?,?,?)`, device.ID, device.Name, hashDeviceSecret(token), strings.Join(scopes, ","), device.HostID, now); err != nil {
 		return Device{}, "", err
 	}
 	if err := tx.Commit(); err != nil {
@@ -147,7 +155,7 @@ func (r *Registry) AuthenticateDevice(token, requiredScope string) (Device, erro
 	}
 	var device Device
 	var scopes string
-	err := r.read.QueryRow(`SELECT id,name,scopes,created_at,last_seen_at,revoked_at FROM paired_devices WHERE token_hash=?`, hashDeviceSecret(token)).Scan(&device.ID, &device.Name, &scopes, &device.CreatedAt, &device.LastSeenAt, &device.RevokedAt)
+	err := r.read.QueryRow(`SELECT id,name,scopes,host_id,created_at,last_seen_at,revoked_at FROM paired_devices WHERE token_hash=?`, hashDeviceSecret(token)).Scan(&device.ID, &device.Name, &scopes, &device.HostID, &device.CreatedAt, &device.LastSeenAt, &device.RevokedAt)
 	if errors.Is(err, sql.ErrNoRows) || device.RevokedAt != "" {
 		return Device{}, ErrDeviceDenied
 	}
@@ -173,7 +181,7 @@ func (r *Registry) AuthenticateDevice(token, requiredScope string) (Device, erro
 }
 
 func (r *Registry) ListDevices(includeRevoked bool) ([]Device, error) {
-	query := `SELECT d.id,d.name,d.scopes,d.created_at,d.last_seen_at,d.revoked_at,
+	query := `SELECT d.id,d.name,d.scopes,d.host_id,d.created_at,d.last_seen_at,d.revoked_at,
 		EXISTS(SELECT 1 FROM device_push_targets p WHERE p.device_id=d.id AND p.enabled=1)
 		FROM paired_devices d`
 	if !includeRevoked {
@@ -190,7 +198,7 @@ func (r *Registry) ListDevices(includeRevoked bool) ([]Device, error) {
 		var device Device
 		var scopes string
 		var pushEnabled int
-		if err := rows.Scan(&device.ID, &device.Name, &scopes, &device.CreatedAt, &device.LastSeenAt, &device.RevokedAt, &pushEnabled); err != nil {
+		if err := rows.Scan(&device.ID, &device.Name, &scopes, &device.HostID, &device.CreatedAt, &device.LastSeenAt, &device.RevokedAt, &pushEnabled); err != nil {
 			return nil, err
 		}
 		device.Scopes = splitDeviceScopes(scopes)
@@ -279,7 +287,7 @@ func normalizeDeviceScopes(scopes []string) ([]string, error) {
 	set := map[string]bool{}
 	for _, scope := range scopes {
 		scope = strings.TrimSpace(scope)
-		if scope != "read" && scope != "control" && scope != "settings" {
+		if scope != "read" && scope != "control" && scope != "settings" && scope != HostScope {
 			return nil, fmt.Errorf("unsupported device scope %q", scope)
 		}
 		set[scope] = true
@@ -297,6 +305,24 @@ func splitDeviceScopes(value string) []string {
 		return []string{}
 	}
 	return strings.Split(value, ",")
+}
+
+// HostScope marks a token a paired Agenthail host uses to mirror this host's
+// catalog. It grants nothing by itself; it only gives the catalog stream every
+// row instead of the session list.
+const HostScope = "host"
+
+func (d Device) IsHost() bool {
+	return deviceScopesInclude(d.Scopes, HostScope)
+}
+
+func deviceScopesInclude(scopes []string, scope string) bool {
+	for _, item := range scopes {
+		if item == scope {
+			return true
+		}
+	}
+	return false
 }
 
 func deviceHasScope(scopes []string, required string) bool {

@@ -17,7 +17,7 @@ SESSION = {
     "current": True,
     "capabilities": CAPABILITIES,
     "transport": "uds",
-    "hostProject": {"id": "fixture-project", "displayName": "fixture-project", "commonDir": "/tmp/fixture-project/.git"},
+    "project": {"id": "fixture-project", "displayName": "fixture-project", "rootPath": "/tmp/fixture-project", "kind": "git"},
     "checkout": {"id": "fixture-checkout", "path": "/tmp/fixture-project", "branch": "main", "dirty": False, "isMain": True},
     "observedAt": NOW,
     "runtime": {"focusable": False, "launcher": "terminal"},
@@ -53,7 +53,8 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-print(server.server_address[1], flush=True)
-sys.stdout.close()
-server.serve_forever()
+if __name__ == "__main__":
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    print(server.server_address[1], flush=True)
+    sys.stdout.close()
+    server.serve_forever()

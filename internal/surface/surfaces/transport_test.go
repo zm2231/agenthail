@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/signin"
+
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
@@ -21,9 +23,10 @@ func sendToReadyClaude(t *testing.T, respond ClaudeRequest) error {
 	t.Helper()
 	path := writeTranscript(t, `
 {"type":"user","uuid":"u1","message":{"content":"one"}}
-{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
+{"type":"system","subtype":"stop_hook_summary"}`)
 	home, pid := liveBridgeProcess(t)
-	claude := NewClaudeWithRequest("Default", home, respond)
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, respond)
 	_, err := claude.Send(context.Background(), &surface.Session{ID: "conversation-test", Bridge: "session_test", PID: pid, Status: surface.StatusIdle, Transcript: path}, "message")
 	return err
 }
@@ -55,7 +58,7 @@ func TestClaudeSendClassifiesDeliveryOutcome(t *testing.T) {
 		{name: "not found", status: http.StatusNotFound, body: "rejected", terminal: surface.DeliveryTargetMissing},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			err := sendToReadyClaude(t, func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+			err := sendToReadyClaude(t, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
 				return test.status, test.body, test.err
 			})
 			if test.terminal == "" {
@@ -71,58 +74,66 @@ func TestClaudeSendClassifiesDeliveryOutcome(t *testing.T) {
 	}
 }
 
-func TestClaudeSendUsesTranscriptReadiness(t *testing.T) {
+func TestClaudeSendWaitsForRecordedIdle(t *testing.T) {
 	calls := 0
-	home, pid := liveBridgeProcess(t)
-	claude := NewClaudeWithRequest("Default", home, func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+	fixture := claudetest.New(t)
+	fixture.RecordStatus("conversation-test", fixture.Home, "session_test", "busy", "", time.Time{})
+	home, pid := fixture.Home, fixture.PID
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
 		calls++
 		return 200, `{}`, nil
 	})
 	recent := writeTranscript(t, `
 {"type":"user","uuid":"u0","timestamp":"2026-07-19T01:00:00Z","message":{"content":"previous"}}
-{"type":"assistant","uuid":"a0","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m0","stop_reason":"end_turn","content":[{"type":"text","text":"previous answer"}]}}`)
+{"type":"assistant","uuid":"a0","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m0","stop_reason":"end_turn","content":[{"type":"text","text":"previous answer"}]}}
+{"type":"system","subtype":"stop_hook_summary"}`)
 	newActivity := time.Date(2026, 7, 19, 1, 5, 0, 0, time.UTC)
 	result, err := claude.Send(context.Background(), &surface.Session{ID: "conversation-test", Bridge: "session_test", PID: pid, Status: surface.StatusBusy, Transcript: recent, LastActive: newActivity}, "racing")
 	if err != nil || result.Accepted || calls != 0 {
 		t.Fatalf("recent result=%+v calls=%d err=%v", result, calls, err)
 	}
 
+	fixture.RecordStatus("conversation-test", fixture.Home, "session_test", "idle", "", time.Time{})
 	completed := writeTranscript(t, `
 {"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"one"}}
-{"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
+{"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
+{"type":"system","subtype":"stop_hook_summary"}`)
 	writeJitter := time.Date(2026, 7, 19, 1, 0, 1, 9_000_000, time.UTC)
 	result, err = claude.Send(context.Background(), &surface.Session{ID: "conversation-test", Bridge: "session_test", PID: pid, Status: surface.StatusBusy, Transcript: completed, LastActive: writeJitter}, "next")
 	if err != nil || !result.Accepted || calls != 1 {
 		t.Fatalf("completed result=%+v calls=%d err=%v", result, calls, err)
 	}
 
+	fixture.RecordStatus("conversation-test", fixture.Home, "session_test", "busy", "", time.Time{})
 	active := writeTranscript(t, `{"type":"user","uuid":"u2","message":{"content":"running"}}`)
 	result, err = claude.Send(context.Background(), &surface.Session{ID: "conversation-test", Bridge: "session_test", PID: pid, Status: surface.StatusIdle, Transcript: active}, "too soon")
 	if err != nil || result.Accepted || calls != 1 {
 		t.Fatalf("active result=%+v calls=%d err=%v", result, calls, err)
 	}
 
-	result, err = claude.Send(context.Background(), &surface.Session{ID: "conversation-test", Bridge: "session_test", PID: pid, Status: surface.StatusIdle}, "unproven")
-	if err != nil || result.Accepted || calls != 1 {
-		t.Fatalf("missing transcript result=%+v calls=%d err=%v", result, calls, err)
+	fixture.RecordStatus("conversation-test", fixture.Home, "session_test", "idle", "", time.Time{})
+	result, err = claude.Send(context.Background(), &surface.Session{ID: "conversation-test", Bridge: "session_test", PID: pid, Status: surface.StatusBusy}, "recorded idle")
+	if err != nil || !result.Accepted || calls != 2 {
+		t.Fatalf("recorded idle without transcript result=%+v calls=%d err=%v", result, calls, err)
 	}
 }
 
 func TestClaudeSendHumanTurnUsesAuthenticatedBridgeForUDSSession(t *testing.T) {
 	transcript := writeTranscript(t, `
 {"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"previous"}}
-{"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
+{"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
+{"type":"system","subtype":"stop_hook_summary"}`)
 	var requestBody, requestURL string
 	home, pid := liveHumanTurnProcess(t)
-	claude := NewClaudeWithRequest("Default", home, func(_ context.Context, method, url string, _ map[string]string, body string, _ string, _ string, _ time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(_ context.Context, method, url string, _ map[string]string, body string, _ CookieSource, _ time.Duration) (int, string, error) {
 		if method != http.MethodPost {
 			t.Fatalf("method=%s", method)
 		}
 		requestURL, requestBody = url, body
 		return http.StatusOK, `{}`, nil
 	})
-	session := &surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, PID: pid, Transport: "uds", Status: surface.StatusIdle, Transcript: transcript}
-	result, err := claude.SendHumanTurn(context.Background(), session, "Please inspect the failure.")
+	session := &surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: pid, Transport: "uds", Status: surface.StatusIdle, Transcript: transcript}
+	result, err := claude.SendHumanTurn(context.Background(), session, "Please inspect the failure.", nil)
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -150,11 +161,11 @@ func TestClaudeSendHumanTurnUsesAuthenticatedBridgeForUDSSession(t *testing.T) {
 }
 
 func TestClaudeSendHumanTurnRejectsNativeOnlySession(t *testing.T) {
-	claude := NewClaudeWithRequest("Default", t.TempDir(), func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, t.TempDir(), func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
 		t.Fatal("human turn attempted a web request without a bridge identity")
 		return 0, "", nil
 	})
-	_, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "native-session", Surface: surface.KindClaude, Transport: "uds", Status: surface.StatusIdle}, "hello")
+	_, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "native-session", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", PID: os.Getpid(), Status: surface.StatusIdle}, "hello", nil)
 	if !surface.IsDeliveryUnavailable(err) {
 		t.Fatalf("err=%v", err)
 	}
@@ -163,14 +174,15 @@ func TestClaudeSendHumanTurnRejectsNativeOnlySession(t *testing.T) {
 func TestClaudeSendHumanTurnUsesBridgeOnlySessionID(t *testing.T) {
 	transcript := writeTranscript(t, `
 {"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"previous"}}
-{"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
+{"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
+{"type":"system","subtype":"stop_hook_summary"}`)
 	var requestURL string
 	home, pid := liveHumanTurnProcess(t)
-	claude := NewClaudeWithRequest("Default", home, func(_ context.Context, _ string, url string, _ map[string]string, _ string, _ string, _ string, _ time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(_ context.Context, _ string, url string, _ map[string]string, _ string, _ CookieSource, _ time.Duration) (int, string, error) {
 		requestURL = url
 		return http.StatusOK, `{}`, nil
 	})
-	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, PID: pid, Transport: "remote-control", Status: surface.StatusIdle, Transcript: transcript}, "continue")
+	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: pid, Transport: "remote-control", Status: surface.StatusIdle, Transcript: transcript}, "continue", nil)
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -180,13 +192,16 @@ func TestClaudeSendHumanTurnUsesBridgeOnlySessionID(t *testing.T) {
 }
 
 func TestClaudeSendHumanTurnRetainsIdleGate(t *testing.T) {
-	home, pid := liveHumanTurnProcess(t)
-	claude := NewClaudeWithRequest("Default", home, func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+	fixture := claudetest.New(t)
+	fixture.Listen()
+	fixture.RecordStatus("conversation-bridge", fixture.Home, "session_bridge", "busy", "", time.Time{})
+	home, pid := fixture.Home, fixture.PID
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
 		t.Fatal("human turn bypassed the active-turn gate")
 		return 0, "", nil
 	})
 	active := writeTranscript(t, `{"type":"user","uuid":"u2","message":{"content":"running"}}`)
-	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, PID: pid, Transport: "uds", Status: surface.StatusIdle, Transcript: active}, "wait")
+	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: pid, Transport: "uds", Status: surface.StatusIdle, Transcript: active}, "wait", nil)
 	if err != nil || result == nil || result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -206,7 +221,7 @@ func TestClaudeCompactPostsRemoteSlashCommandAndConfirmsBoundary(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
 	var body string
 	home, pid := liveBridgeProcess(t)
-	claude := NewClaudeWithRequest("", home, func(_ context.Context, method, url string, _ map[string]string, requestBody, _ string, _ string, _ time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(_ context.Context, method, url string, _ map[string]string, requestBody string, _ CookieSource, _ time.Duration) (int, string, error) {
 		if method != "POST" || !strings.Contains(url, "/v1/code/sessions/") {
 			t.Fatalf("method=%s url=%s", method, url)
 		}
@@ -245,7 +260,10 @@ func TestClaudeCompactPostsRemoteSlashCommandAndConfirmsBoundary(t *testing.T) {
 func TestClaudeCompactDoesNotAcceptBoundaryBeforeRequestRecord(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
 	home, pid := liveBridgeProcess(t)
-	claude := NewClaudeWithRequest("", home, func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+		defer cancel()
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 		if err != nil {
 			t.Fatal(err)
@@ -259,8 +277,6 @@ func TestClaudeCompactDoesNotAcceptBoundaryBeforeRequestRecord(t *testing.T) {
 		}
 		return 200, `{}`, nil
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
 	err := claude.Compact(ctx, &surface.Session{ID: "conversation-test", Bridge: "session_test", PID: pid, Transcript: path})
 	if !surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("err=%v", err)
@@ -270,11 +286,12 @@ func TestClaudeCompactDoesNotAcceptBoundaryBeforeRequestRecord(t *testing.T) {
 func TestClaudeCompactReportsUnknownAfterAcceptedCommandLosesConfirmation(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
 	home, pid := liveBridgeProcess(t)
-	claude := NewClaudeWithRequest("", home, func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+		cancel()
 		return 200, `{}`, nil
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
 	err := claude.Compact(ctx, &surface.Session{ID: "conversation-test", Bridge: "session_test", PID: pid, Transcript: path})
 	if !surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("err=%v", err)

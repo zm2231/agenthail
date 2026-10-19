@@ -8,12 +8,13 @@ Agenthail's primary installer is a signed and notarized Apple silicon `.pkg`. Th
 
 ## Runtime decision
 
-The Claude and Notion adapters require Chrome-compatible TLS behavior from `curl_cffi` and a local cookie reader. Replacing either with a different networking stack would change observable authentication and transport behavior. The package therefore bundles pinned runtimes instead of rewriting those adapters during the packaging change:
+The Claude and Notion adapters require Chrome-compatible TLS behavior from `curl_cffi` and a local cookie reader. The cookie reader (`cookie.mjs`, built on sweet-cookie) reads only the browser and profile directory the daemon passes for the request's sign-in profile. Replacing either with a different networking stack would change observable authentication and transport behavior. The package therefore bundles pinned runtimes instead of rewriting those adapters during the packaging change:
 
 - CPython 3.13 from `python-build-standalone`
 - Node.js 22 LTS from the official Node distribution
 - hash-locked Python wheels from `packaging/runtime-requirements.txt`
 - npm dependencies locked by `sidecar/package-lock.json`
+- the Claude session host and its dependencies, locked by `claude-host/package-lock.json` (see [the Claude host notes](maintainers/claude-host.md))
 
 The build verifies the runtime archive hashes before extraction. `THIRD_PARTY_NOTICES.md` records sources and licenses, and the licenses shipped by each dependency remain in the installed payload.
 
@@ -67,7 +68,7 @@ Export the Developer ID Application and Developer ID Installer identities as sep
 
 The `.pkg` verifier expands the real artifact, checks signatures and expected files, runs the embedded CLI and both runtimes with a restricted `PATH`, rejects Homebrew-linked Mach-O files, and rejects AppleDouble metadata.
 
-The `linux-archive` job builds `agenthail-<tag>-linux-amd64.tar.gz` and `agenthail-<tag>-linux-arm64.tar.gz` with `GOOS=linux scripts/package-release.sh`, verifies each checksum, layout and ELF binary, runs the amd64 binary's `version --json`, and runs the Go suite on Linux. A Linux archive holds the binary, `skills/`, `README.md`, `LICENSE` and `COMMERCIAL.md`; it has no Mac app, installer script or sidecar. The publication job attaches both archives and their checksums. See [the Linux daemon notes](maintainers/linux-daemon.md).
+The `linux-archive` job builds `agenthail-<tag>-linux-amd64.tar.gz` and `agenthail-<tag>-linux-arm64.tar.gz` with `GOOS=linux scripts/package-release.sh`, verifies each checksum, layout and ELF binary, runs the amd64 binary's `version --json`, and runs the Go suite on Linux. A Linux archive holds the binary, `claude-host/`, `skills/`, `README.md`, `LICENSE` and `COMMERCIAL.md`; it has no Mac app, installer script or sidecar. The publication job attaches both archives and their checksums. See [the Linux daemon notes](maintainers/linux-daemon.md).
 
 The release runner then installs the real package, verifies the supervised daemon, dashboard, skills, and doctor output, installs the same package again to exercise upgrade and daemon replacement, and runs the packaged uninstaller. It also validates the iPhone archive and push relay. Only the final publication job uploads the validated iPhone build to TestFlight, deploys the relay, and makes the draft GitHub release public. The IPA is deliberately not attached to GitHub Releases because ordinary iPhones cannot install an App Store distribution IPA directly.
 

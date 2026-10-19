@@ -20,7 +20,7 @@ func TestQueuePreservesSourceSessionIDAcrossReopenClaimAndExports(t *testing.T) 
 	if r.Path() != path {
 		t.Fatalf("registry path=%q, want %q", r.Path(), path)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindClaude}); err != nil {
+	if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
 	queueID, err := r.QueueMessageWithOptions("target", "hello", "", surface.SendOptions{Model: "sonnet", SourceSessionID: "source"})

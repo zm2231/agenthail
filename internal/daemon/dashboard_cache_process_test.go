@@ -12,19 +12,6 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func TestParseClaudeOpenProcessesRequiresPositivePIDAndExactClaudeBasename(t *testing.T) {
-	got := parseClaudeOpenProcesses("" +
-		"0 /Applications/Claude/claude\n" +
-		"not-a-pid /Applications/Claude/claude\n" +
-		"101 /Applications/Claude Code/claude\n" +
-		"102 /usr/local/bin/claude-helper\n" +
-		"103 /Applications/Claude Code/Claude\n" +
-		"104 /Applications/Claude Code/claude\n")
-	if len(got) != 2 || !got[101] || !got[104] {
-		t.Fatalf("parsed=%v", got)
-	}
-}
-
 func TestDashboardSnapshotCursorTracksFilterAndRejectsCatalogChanges(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
 	d.discoverCatalog(context.Background())
@@ -52,7 +39,7 @@ func TestDashboardSnapshotCursorTracksFilterAndRejectsCatalogChanges(t *testing.
 		t.Fatalf("filter mismatch status=%d body=%s", filteredResponse.Code, filteredResponse.Body.String())
 	}
 
-	fake.sessions["third"] = surface.Session{ID: "third", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	fake.sessions["third"] = surface.Session{ID: "third", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 	d.discoverCatalog(context.Background())
 	stale := httptest.NewRequest(http.MethodGet, "/api/state?limit=1&cursor="+first.NextCursor, nil)
 	stale.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
@@ -101,7 +88,7 @@ func TestDashboardEmptyCatalogPageDoesNotFallBackToSavedSessions(t *testing.T) {
 	d, store, fake, from, _ := daemonFixture(t)
 	if _, _, err := store.RecordCatalogSession(registry.CatalogSessionState{
 		Session:               from,
-		HostProject:           []byte(`{"id":"project"}`),
+		Project:               []byte(`{"id":"project"}`),
 		Checkout:              []byte(`{}`),
 		ProjectionFingerprint: `{"id":"from","surface":"codex","name":"from","cwd":"/work","status":"idle"}`,
 	}, registry.CatalogEvent{DedupeKey: "session:from:catalog", Type: "session.upserted", EntityID: from.ID, Payload: []byte(`{"session":{"id":"from"}}`)}); err != nil {

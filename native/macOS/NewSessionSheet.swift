@@ -4,55 +4,65 @@ import SwiftUI
 struct NewSessionSheet: View {
     @ObservedObject var model: AgenthailModel
     @Environment(\.dismiss) private var dismiss
-    @State private var form = SessionLaunchForm()
-    @State private var models: [String: [ModelOption]] = [:]
+    @State private var form: SessionLaunchForm
+    @State private var hosts: CreationHostPicker
     @State private var modelError: String?
     @State private var starting = false
     @State private var error: String?
     @State private var submitted: String?
     @State private var canStartAgain = false
 
+    init(model: AgenthailModel) {
+        self.model = model
+        let hosts = CreationHostPicker(daemon: model.snapshot?.daemon, selectedSession: model.mainPane.selectedSession)
+        _hosts = State(initialValue: hosts)
+        _form = State(initialValue: SessionLaunchForm(host: hosts.hostQuery))
+    }
+
     private var launchers: [LauncherOption] {
-        (model.creationOptions?.launchers ?? []).filter { $0.agents.contains(form.agent) }
+        (hosts.options?.launchers ?? []).filter { $0.agents.contains(form.agent) }
     }
 
     private var agents: [String] {
-        let supported = (model.creationOptions?.surfaces ?? []).map(\.id)
+        let supported = (hosts.options?.surfaces ?? []).map(\.id)
         if supported.isEmpty { return ["claude", "codex"] }
         return ["claude", "codex", "notion"].filter(supported.contains)
     }
 
-    private var folders: [String] {
-        var seen = Set<String>()
-        return SessionTree.newestFirst(model.knownSessions.filter { $0.hostProject != nil })
-            .compactMap { $0.checkout?.path ?? $0.cwd }
-            .filter { !$0.hasPrefix("/private/") && !$0.hasPrefix("/var/") && !$0.contains("/.no-mistakes/") && seen.insert($0).inserted }
-            .prefix(12)
-            .map { $0 }
-    }
+    private var projects: [LaunchProject] { hosts.projects }
+    private var startsOnThisMac: Bool { hosts.hostQuery == nil }
 
-    private var agentModels: [ModelOption] { models[form.agent] ?? [] }
+    private var agentModels: [ModelOption] { hosts.models[form.agent] ?? [] }
     private var listedDefault: ModelOption? { agentModels.first { $0.default == true } }
     private var efforts: [String] { form.setsEffort ? form.efforts(models: agentModels) : [] }
 
     private var canStart: Bool {
-        !starting && submitted == nil && form.isComplete
-            && (form.launcher == nil || launchers.contains { $0.id == form.launcher && $0.available })
+        !starting && submitted == nil && form.isComplete && hosts.canStart
+            && (form.launcher == nil || launchers.contains { $0.id == form.launcher?.id && $0.available })
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("New session")
-                .font(.system(size: 15, weight: .semibold))
+            HStack {
+                Text("New session")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+                if hosts.isVisible { hostButton }
+            }
+            if let failure = hosts.loadError {
+                Text(failure)
+                    .font(.system(size: 12))
+                    .foregroundStyle(DesktopPalette.red)
+            }
             Form {
                 Section {
                     Picker("Agent", selection: Binding(get: { form.agent }, set: { form.switchAgent(to: $0) })) {
                         ForEach(agents, id: \.self) { Text($0.capitalized).tag($0) }
                     }
                     if !launchers.isEmpty {
-                        Picker("Runs in", selection: Binding(get: { form.launcher }, set: { form.selectLauncher($0) })) {
+                        Picker("Runs in", selection: Binding(get: { form.launcher?.id }, set: { id in form.selectLauncher(launchers.first { $0.id == id }) })) {
                             Text("Default").tag(nil as String?)
-                                .help("Starts the agent in the background on this Mac.")
+                                .help("Starts the agent on \(startsOnThisMac ? "this Mac" : hosts.selectedHost?.name ?? "the host") without a terminal.")
                             ForEach(launchers) { option in
                                 Text(option.available ? option.label : "\(option.label) (unavailable)")
                                     .tag(Optional(option.id))
@@ -61,14 +71,24 @@ struct NewSessionSheet: View {
                             }
                         }
                     }
-                    if form.usesFolder {
+                    if form.usesFolder && !startsOnThisMac {
                         HStack {
-                            Picker("Folder", selection: $form.folder) {
-                                if form.folder.isEmpty { Text("Choose a folder").tag("") }
-                                ForEach(folders, id: \.self) { path in
-                                    Text((path as NSString).abbreviatingWithTildeInPath).tag(path)
+                            TextField("Folder on \(hosts.selectedHost?.name ?? "host")", text: $form.folder)
+                            if !projects.isEmpty {
+                                Menu("Projects") {
+                                    ForEach(projects) { project in Button(project.displayName) { form.folder = project.rootPath }.help(project.rootPath) }
                                 }
-                                if !form.folder.isEmpty && !folders.contains(form.folder) {
+                                .fixedSize()
+                            }
+                        }
+                    } else if form.usesFolder {
+                        HStack {
+                            Picker("Project", selection: $form.folder) {
+                                if form.folder.isEmpty { Text("Choose a project").tag("") }
+                                ForEach(projects) { project in
+                                    Text(project.displayName).tag(project.rootPath).help(project.rootPath)
+                                }
+                                if !form.folder.isEmpty && !projects.contains(where: { $0.rootPath == form.folder }) {
                                     Text((form.folder as NSString).abbreviatingWithTildeInPath).tag(form.folder)
                                 }
                             }
@@ -120,11 +140,13 @@ struct NewSessionSheet: View {
         .disabled(starting)
         .task {
             takeSharedMessage()
-            await model.loadCreationOptions()
-            if !agents.contains(form.agent), let first = agents.first { form.switchAgent(to: first) }
-            if form.folder.isEmpty { form.folder = model.mainPane.selectedSession.flatMap { $0.checkout?.path ?? $0.cwd } ?? folders.first ?? "" }
         }
-        .task(id: form.agent) { await loadModels() }
+        .task(id: hosts.generation) { await loadOptions() }
+        .task(id: "\(hosts.generation)/\(form.agent)/\(hosts.options != nil)") { await loadModels() }
+        .onChange(of: model.snapshot?.daemon) {
+            hosts.update(daemon: model.snapshot?.daemon)
+            if form.host != hosts.hostQuery { form.switchHost(to: hosts.hostQuery, folder: "") }
+        }
         .onChange(of: form.agent) { error = nil }
         .onChange(of: model.newSessionMessage) { takeSharedMessage() }
         .onChange(of: starting) { takeSharedMessage() }
@@ -166,14 +188,62 @@ struct NewSessionSheet: View {
         return form.effort.isEmpty ? name : "\(name) · \(form.effort.capitalized)"
     }
 
+    @ViewBuilder private var hostButton: some View {
+        Menu {
+            ForEach(hosts.hosts) { host in
+                Button {
+                    selectHost(host.id)
+                } label: {
+                    if host.id == hosts.selectedHost?.id {
+                        Label(host.name, systemImage: "checkmark")
+                    } else {
+                        Text(host.isAvailable ? host.name : "\(host.name) (\(host.stateLabel))")
+                    }
+                }
+                .disabled(!host.isAvailable)
+            }
+        } label: {
+            Label(hosts.selectedHost?.name ?? "This Mac", systemImage: "desktopcomputer")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Choose the machine this session starts on")
+        .accessibilityLabel("Starts on \(hosts.selectedHost?.name ?? "this Mac")")
+    }
+
+    private func selectHost(_ id: String) {
+        guard hosts.select(id) else { return }
+        let selected = model.mainPane.selectedSession
+        form.switchHost(to: hosts.hostQuery, folder: hosts.owns(selected) ? selected.flatMap { $0.checkout?.path ?? $0.cwd } ?? "" : "")
+        modelError = nil
+        error = nil
+    }
+
+    private func loadOptions() async {
+        let generation = hosts.generation
+        do {
+            let options = try await model.creationOptions(host: hosts.hostQuery)
+            try Task.checkCancellation()
+            hosts.receive(options: options, for: generation)
+            if !agents.contains(form.agent), let first = agents.first { form.switchAgent(to: first) }
+            if form.folder.isEmpty {
+                form.folder = hosts.defaultFolder(selected: model.mainPane.selectedSession)
+            }
+        } catch is CancellationError {
+        } catch {
+            if !error.isCancellation { hosts.fail("Couldn't load what \(hosts.selectedHost?.name ?? "this Mac") can start: \(AgenthailAPIError.userMessage(error))", for: generation) }
+        }
+    }
+
     private func loadModels() async {
         modelError = nil
         let agent = form.agent
-        guard form.listsModels, models[agent] == nil else { return }
+        let generation = hosts.generation
+        guard form.listsModels, hosts.options != nil, hosts.models[agent] == nil else { return }
         do {
-            let options = try await model.creationModels(for: agent)
+            let options = try await model.creationModels(for: agent, host: hosts.hostQuery)
             try Task.checkCancellation()
-            models[agent] = options
+            hosts.receive(models: options, agent: agent, for: generation)
         } catch is CancellationError {
         } catch {
             if !error.isCancellation { modelError = "Models unavailable: \(error.localizedDescription)\nThe session uses the runtime default." }

@@ -1,3 +1,4 @@
+@testable import AgenthailHelpers
 import Foundation
 
 @main
@@ -20,6 +21,14 @@ struct SessionFactsTest {
         expect(SessionFacts.rowDetail(waiting) == "Claude · Waiting on you", "row detail names the wait")
         expect(SessionFacts.rowDetail(session(reason: "open")) == "Claude · Open", "row detail names surface and presence")
         expect(SessionFacts.rowDetail(session(surface: "codex", status: "busy", queued: 2, reason: "working")) == "Codex · Working · 2 queued", "row detail adds the queued count")
+        var remote = session(reason: "open")
+        remote.host = SessionHost(id: "h0123456789ab", name: "forge", state: "connected")
+        expect(SessionFacts.rowDetail(remote) == "Claude · Open on forge", "row detail names a paired host")
+        remote.unavailableReason = "host forge is unreachable"
+        expect(SessionFacts.rowDetail(remote) == "Claude · Unavailable on forge", "row detail marks an unreachable host's session")
+        var local = session(reason: "open")
+        local.host = SessionHost(id: "h00000000000a", name: "mac", state: "local")
+        expect(SessionFacts.rowDetail(local) == "Claude · Open", "a local session names no host")
 
         expect(SessionFacts.headerFacts(session(queued: 3), age: "5m") == ["3 queued", "last active 5m ago"], "idle header shows queue and last active")
         expect(SessionFacts.headerFacts(session(status: "busy"), age: "5m") == ["0 queued"], "busy header omits last active")
@@ -32,8 +41,6 @@ struct SessionFactsTest {
 
         expect(SessionFacts.filterSummary(.recent, codexRecentHours: 6).contains("last 6 hours"), "recent summary names the Codex window")
         expect(SettingsCounts.history(50) == "50+" && SettingsCounts.history(12) == "12", "history count caps like the web")
-
-        expect(!LongReply.isLong(String(repeating: "a", count: 2400)) && LongReply.isLong(String(repeating: "a", count: 2401)), "long replies start past 2400 characters")
 
         let detailed = item("toolResult", title: "Bash", timestamp: "2026-10-18T06:00:00Z", callId: "call_synthetic", status: "completed", truncated: true, reason: "size limit", bodyRef: "body/synthetic")
         expect(TimelineMetadata.fields(detailed) == ["Title: Bash", "Call: call_synthetic", "Status: completed", "2026-10-18T06:00:00Z", "Content truncated (size limit)", "Body reference: body/synthetic"], "timeline metadata lists every field like the web")

@@ -38,6 +38,15 @@ func (c *Claude) ReadCompletions(ctx context.Context, sess *surface.Session, cur
 	}
 	state := &claudeObservationState{current: checkpoint.Current, hasCurrent: checkpoint.Current.UserID != "" || checkpoint.Current.MessageID != ""}
 	batch := surface.CompletionBatch{}
+	collect := func() {
+		if state.hasCompleted && state.completed.MessageID != checkpoint.CompletedID {
+			turn := state.completed
+			checkpoint.CompletedID = turn.MessageID
+			if cursor != "" && !turn.Interrupted {
+				batch.Events = append(batch.Events, surface.Completion{ID: turn.MessageID, InputID: turn.UserID, Text: turn.Assistant, User: turn.User, CompletedAt: turn.TerminalAt})
+			}
+		}
+	}
 	apply := func(line []byte) error {
 		var record claudeRecord
 		if err := json.Unmarshal(line, &record); err != nil {
@@ -46,13 +55,7 @@ func (c *Claude) ReadCompletions(ctx context.Context, sess *surface.Session, cur
 		if err := state.apply(line); err != nil {
 			return err
 		}
-		if state.hasCompleted && state.completed.MessageID != checkpoint.CompletedID {
-			turn := state.completed
-			checkpoint.CompletedID = turn.MessageID
-			if cursor != "" && !turn.Interrupted {
-				batch.Events = append(batch.Events, surface.Completion{ID: turn.MessageID, InputID: turn.UserID, Text: turn.Assistant, User: turn.User, CompletedAt: turn.TerminalAt})
-			}
-		}
+		collect()
 		return nil
 	}
 	// Baseline once from the bounded tail; subsequent reads resume the durable
@@ -75,6 +78,10 @@ func (c *Claude) ReadCompletions(ctx context.Context, sess *surface.Session, cur
 		}
 		checkpoint.Offset = offset
 	}
+	if state.hasCurrent && state.current.Closing && c.settledAfter(sess, state.current.TerminalAt) {
+		state.settle()
+		collect()
+	}
 	checkpoint.Current = state.current
 	anchor, err := completionAnchor(path, checkpoint.Offset)
 	if err != nil {
@@ -86,23 +93,38 @@ func (c *Claude) ReadCompletions(ctx context.Context, sess *surface.Session, cur
 	return batch, err
 }
 
+const transcriptAnchorBytes = 256
+
 func completionAnchor(path string, offset int64) (string, error) {
-	f, err := os.Open(path)
+	tail, err := transcriptTail(path, offset)
 	if err != nil {
 		return "", err
+	}
+	return anchorOf(tail), nil
+}
+
+func anchorOf(tail []byte) string {
+	return fmt.Sprintf("%x", sha256.Sum256(tail))
+}
+
+// transcriptTail returns the bytes an anchor at offset covers.
+func transcriptTail(path string, offset int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if offset < 0 || offset > info.Size() {
-		return "", fmt.Errorf("relay transcript was truncated before its saved cursor")
+		return nil, fmt.Errorf("relay transcript was truncated before its saved cursor")
 	}
-	start := max(int64(0), offset-256)
+	start := max(int64(0), offset-transcriptAnchorBytes)
 	data := make([]byte, offset-start)
 	if _, err := io.ReadFull(io.NewSectionReader(f, start, offset-start), data); err != nil {
-		return "", err
+		return nil, err
 	}
-	return fmt.Sprintf("%x", sha256.Sum256(data)), nil
+	return data, nil
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SessionCommands: Commands {
     @ObservedObject var model: AgenthailModel
+    let voice: VoiceController
     @ObservedObject private var shortcuts = ShortcutStore.shared
     @FocusedObject private var pane: SessionPane?
     @Environment(\.openWindow) private var openWindow
@@ -35,6 +36,10 @@ struct SessionCommands: Commands {
             Button("Fork") { if let session { pane?.fork(session) } }
                 .disabled(session.map(SessionOperationAvailability.fork) != true || pane?.removedSession != nil || pane?.forking == true)
             Divider()
+            Button("Talk to Orchestrator…") { openVoice("") }
+            Button("Call This Session…") { if let id = session?.id { openVoice(id) } }
+                .disabled(session?.canCallByVoice != true || pane?.removedSession != nil)
+            Divider()
             Button("Stop") {
                 if let pane, pane.canStop { pane.interrupt() }
             }
@@ -60,6 +65,12 @@ struct SessionCommands: Commands {
         }
     }
 
+    private func openVoice(_ targetID: String) {
+        voice.route(to: targetID)
+        NSApplication.shared.activate()
+        openWindow(id: "voice")
+    }
+
     private func showMainWindow() {
         NSApplication.shared.activate()
         openWindow(id: "main")
@@ -72,6 +83,7 @@ extension SessionFilter {
         case .running: return .showRunning
         case .recent: return .showRecent
         case .all: return .showAll
+        case .archived: return .showArchived
         }
     }
 }

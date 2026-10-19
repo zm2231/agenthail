@@ -54,6 +54,7 @@ test -x /usr/local/bin/agenthail
 test -x /usr/local/bin/agenthail-uninstall
 test -x "/Library/Application Support/Agenthail/runtime/python/bin/python3"
 test -x "/Library/Application Support/Agenthail/runtime/node/bin/node"
+test -f "/Library/Application Support/Agenthail/claude-host/host.mjs"
 test -x /Applications/Agenthail.app/Contents/MacOS/Agenthail
 for _ in {1..5}; do
 	menu_count="$({ pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$' || true; } | wc -l | tr -d ' ')"

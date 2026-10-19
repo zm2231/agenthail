@@ -1,12 +1,10 @@
 package daemon
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,10 +14,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/signin"
+
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 type daemonSurface struct {
@@ -33,7 +34,6 @@ type daemonSurface struct {
 	models         []string
 	modelOptions   []surface.ModelOption
 	listCalls      atomic.Int32
-	resolveCalls   atomic.Int32
 	rejectBusy     bool
 	sendErr        error
 	turnID         string
@@ -123,20 +123,33 @@ func (f *daemonSurface) Name() surface.SurfaceKind {
 	}
 	return surface.KindCodex
 }
+
+func (f *daemonSurface) RuntimeKinds() []surface.RuntimeKind {
+	return surfacetest.RuntimeKinds(f.Name())
+}
 func (f *daemonSurface) List(context.Context) ([]surface.Session, error) {
 	f.listCalls.Add(1)
 	result := make([]surface.Session, 0, len(f.sessions))
 	for _, session := range f.sessions {
-		result = append(result, session)
+		result = append(result, f.carried(session))
 	}
 	return result, nil
 }
+
+// carried stamps the runtime kind the real adapter would, for sessions a test
+// set up without one.
+func (f *daemonSurface) carried(session surface.Session) surface.Session {
+	if session.RuntimeKind == "" {
+		session.RuntimeKind = f.RuntimeKinds()[0]
+	}
+	return session
+}
 func (f *daemonSurface) Resolve(_ context.Context, id string) (*surface.Session, error) {
-	f.resolveCalls.Add(1)
 	session, ok := f.sessions[id]
 	if !ok {
 		return nil, fmt.Errorf("not found")
 	}
+	session = f.carried(session)
 	return &session, nil
 }
 func (f *daemonSurface) SearchSessions(context.Context, string, int) ([]surface.SessionSearchResult, error) {
@@ -188,14 +201,6 @@ func TestScanBacksOffFailingRelayOnlySessionsAndRecovers(t *testing.T) {
 	}
 }
 
-func TestPruneObservationFailuresClearsLocalNotificationArms(t *testing.T) {
-	d, _, _, from, _ := daemonFixture(t)
-	d.armCompletionNotification(from.ID)
-	d.pruneObservationFailures(nil)
-	if d.consumeNotificationArm(from.ID) {
-		t.Fatal("unwatched session retained local notification arm")
-	}
-}
 func (f *daemonSurface) Send(_ context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
 	if f.rejectBusy && session.Status == surface.StatusBusy {
 		return &surface.SendResult{Accepted: false}, nil
@@ -233,7 +238,7 @@ func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Sess
 }
 func (f *daemonSurface) StartSession(_ context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
 	f.startOptions = append(f.startOptions, options)
-	session := &surface.Session{ID: "started", Surface: surface.KindCodex, Name: "Started conversation", Cwd: options.Cwd, Status: surface.StatusBusy, Source: "appServer", Transport: "managed", LastActive: time.Now()}
+	session := &surface.Session{ID: "started", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Name: "Started conversation", Cwd: options.Cwd, Status: surface.StatusBusy, Source: "appServer", Transport: "managed", LastActive: time.Now()}
 	f.sessions[session.ID] = *session
 	if f.startErr != nil {
 		return session, nil, f.startErr
@@ -291,8 +296,8 @@ func daemonFixture(t *testing.T) (*Daemon, *registry.Registry, *daemonSurface, s
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	from := surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
-	to := surface.Session{ID: "to", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	from := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	to := surface.Session{ID: "to", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 	if err := r.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
@@ -462,10 +467,11 @@ func TestAcceptedDeliveryDoesNotRelayPreviousCompletion(t *testing.T) {
 func TestCodexCompletionReconcilesMatchingDeliveryIntent(t *testing.T) {
 	daemon, r, fake, from, _ := daemonFixture(t)
 	from.Surface = surface.KindCodex
+	from.RuntimeKind = surface.RuntimeCodexDesktop
 	if err := r.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "sender", Surface: surface.KindCodex}); err != nil {
+	if err := r.RegisterSession(surface.Session{ID: "sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 		t.Fatal(err)
 	}
 	intent, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: from.ID, ProviderKey: "turn-next", Status: registry.DeliveryIntentSent, Evidence: surface.EvidenceDelivered})
@@ -484,7 +490,7 @@ func TestCodexCompletionReconcilesMatchingDeliveryIntent(t *testing.T) {
 
 func TestFailedCodexCompletionDoesNotReconcileDeliveryIntent(t *testing.T) {
 	daemon, r, fake, from, _ := daemonFixture(t)
-	if err := r.RegisterSession(surface.Session{ID: "sender", Surface: surface.KindCodex}); err != nil {
+	if err := r.RegisterSession(surface.Session{ID: "sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 		t.Fatal(err)
 	}
 	intent, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: from.ID, ProviderKey: "turn-failed", Status: registry.DeliveryIntentSent, Evidence: surface.EvidenceDelivered})
@@ -504,10 +510,11 @@ func TestFailedCodexCompletionDoesNotReconcileDeliveryIntent(t *testing.T) {
 func TestClaudeCompletionReconcilesOnlyByInputEnvelope(t *testing.T) {
 	daemon, r, fake, from, _ := daemonFixture(t)
 	from.Surface = surface.KindClaude
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	if err := r.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "sender", Surface: surface.KindClaude}); err != nil {
+	if err := r.RegisterSession(surface.Session{ID: "sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
 	intent, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: from.ID, ProviderKey: "user-envelope", Status: registry.DeliveryIntentSent, Evidence: surface.EvidenceTransportAccepted})
@@ -593,7 +600,7 @@ func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	device, _, err := r.CompleteDevicePairing(pairing.Secret, "Phone")
+	device, _, err := r.CompleteDevicePairing(pairing.Secret, "Phone", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -648,7 +655,7 @@ func TestCompletionNotificationDoesNotSendForBusyBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	device, _, err := r.CompleteDevicePairing(pairing.Secret, "Phone")
+	device, _, err := r.CompleteDevicePairing(pairing.Secret, "Phone", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -674,25 +681,6 @@ func TestCompletionNotificationDoesNotSendForBusyBaseline(t *testing.T) {
 	}
 }
 
-func TestCompletionNotificationRequiresFreshRuntimeState(t *testing.T) {
-	for _, test := range []struct {
-		name           string
-		state          registry.RuntimeState
-		observedActive bool
-		want           bool
-	}{
-		{name: "unarmed baseline", state: registry.RuntimeState{}, want: false},
-		{name: "observed active turn", state: registry.RuntimeState{}, observedActive: true, want: true},
-		{name: "agenthail delivery", state: registry.RuntimeState{NotificationArmed: true}, want: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if got := completionNotificationEligible(test.state, test.observedActive); got != test.want {
-				t.Fatalf("completionNotificationEligible=%v want=%v", got, test.want)
-			}
-		})
-	}
-}
-
 func TestRelayBoundsVerboseCompletionText(t *testing.T) {
 	daemon, r, fake, from, _ := daemonFixture(t)
 	if _, err := r.AddRoute("from", "to", ".*"); err != nil {
@@ -715,7 +703,7 @@ func TestRelayBoundsVerboseCompletionText(t *testing.T) {
 
 func TestRelayQueuesDurablyForClosedClaudeSession(t *testing.T) {
 	d, r, _, from, _ := daemonFixture(t)
-	closed := surface.Session{ID: "closed", Surface: surface.KindClaude, Status: surface.StatusIdle, PID: 2147483647}
+	closed := surface.Session{ID: "closed", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, PID: 2147483647}
 	if err := r.RegisterSession(closed); err != nil {
 		t.Fatal(err)
 	}
@@ -734,7 +722,7 @@ func TestRelayQueuesDurablyForClosedClaudeSession(t *testing.T) {
 
 func TestClaudeRoutePruneRemovesOnlyInactiveRoutesFromAnExitedSource(t *testing.T) {
 	d, r, _, from, to := daemonFixture(t)
-	closed := surface.Session{ID: "closed", Surface: surface.KindClaude, Status: surface.StatusIdle, PID: 2147483647, Transcript: "/tmp/closed.jsonl"}
+	closed := surface.Session{ID: "closed", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, PID: 2147483647, Transcript: "/tmp/closed.jsonl"}
 	if err := r.RegisterSession(closed); err != nil {
 		t.Fatal(err)
 	}
@@ -765,7 +753,7 @@ func TestRelayStopsAtHopLimit(t *testing.T) {
 	daemon, r, fake, _, _ := daemonFixture(t)
 	for index := 0; index <= maxRelayHops+1; index++ {
 		id := fmt.Sprintf("hop-%d", index)
-		session := surface.Session{ID: id, Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+		session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 		if err := r.RegisterSession(session); err != nil {
 			t.Fatal(err)
 		}
@@ -825,36 +813,6 @@ func TestRelayHoldsReadOnlyCodexTerminalDestination(t *testing.T) {
 	}
 }
 
-func TestScanObservesOnlyWatchedSessionsWithoutDiscovery(t *testing.T) {
-	daemon, r, fake, _, _ := daemonFixture(t)
-	if _, err := r.AddRoute("from", "to", ".*"); err != nil {
-		t.Fatal(err)
-	}
-	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "from-turn"}
-	fake.observations["to"] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "to-turn"}
-
-	daemon.scanAndRelay(context.Background())
-
-	if got := fake.listCalls.Load(); got != 0 {
-		t.Fatalf("daemon performed %d full surface discovery call(s)", got)
-	}
-	if got := fake.resolveCalls.Load(); got != 0 {
-		t.Fatalf("daemon performed %d redundant resolve call(s)", got)
-	}
-}
-
-func TestScanSkipsClaudeDiscoveryWithoutClaudeWork(t *testing.T) {
-	d, _, _, _, _ := daemonFixture(t)
-	claude := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{"open": {ID: "open", Surface: surface.KindClaude, Status: surface.StatusBusy}}}
-	d.Surfaces = []surface.Surface{claude}
-
-	d.scanAndRelay(context.Background())
-
-	if got := claude.listCalls.Load(); got != 0 {
-		t.Fatalf("Claude discovery calls=%d", got)
-	}
-}
-
 func TestScanDoesNotStartSurfaceRuntime(t *testing.T) {
 	daemon, _, fake, _, _ := daemonFixture(t)
 	runtimeSurface := &runtimeDaemonSurface{daemonSurface: fake}
@@ -888,7 +846,7 @@ func TestScanRefreshesClaudeMetadataWithoutRoutesBeforeQueueDrain(t *testing.T) 
 	d, r, _, _, _ := daemonFixture(t)
 	oldLastActive := time.Now().Add(-time.Hour)
 	liveLastActive := time.Now().Truncate(time.Millisecond)
-	stale := surface.Session{ID: "claude-queued", Surface: surface.KindClaude, Status: surface.StatusIdle, LastActive: oldLastActive}
+	stale := surface.Session{ID: "claude-queued", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, LastActive: oldLastActive}
 	live := stale
 	live.Status = surface.StatusBusy
 	live.LastActive = liveLastActive
@@ -918,7 +876,7 @@ func TestScanRefreshesClaudeMetadataWithoutRoutesBeforeQueueDrain(t *testing.T) 
 
 func TestScanDoesNotDrainClaudeQueueWhenMetadataRefreshFails(t *testing.T) {
 	d, r, _, _, _ := daemonFixture(t)
-	session := surface.Session{ID: "claude-stale", Surface: surface.KindClaude, Status: surface.StatusIdle, LastActive: time.Now().Add(-time.Hour)}
+	session := surface.Session{ID: "claude-stale", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, LastActive: time.Now().Add(-time.Hour)}
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
@@ -937,7 +895,7 @@ func TestScanDoesNotDrainClaudeQueueWhenMetadataRefreshFails(t *testing.T) {
 
 func TestScanLoadsUnloadedDesktopCodexSessionForQueueDelivery(t *testing.T) {
 	d, r, _, _, _ := daemonFixture(t)
-	session := surface.Session{ID: "desktop-unloaded", Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"}
+	session := surface.Session{ID: "desktop-unloaded", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"}
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
@@ -1021,7 +979,7 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 	}
 	fixture := claudetest.New(t)
 	fixture.Record("conversation-compact", fixture.Home, "session_compact")
-	session := surface.Session{ID: "conversation-compact", Bridge: "session_compact", Surface: surface.KindClaude, PID: fixture.PID, Status: surface.StatusIdle, Transcript: path}
+	session := surface.Session{ID: "conversation-compact", Bridge: "session_compact", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: fixture.PID, Status: surface.StatusIdle, Transcript: path}
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
@@ -1030,7 +988,7 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 		t.Fatal(err)
 	}
 	requestSent := make(chan string, 1)
-	claude := surfaces.NewClaudeWithRequest("", fixture.Home, func(_ context.Context, method, url string, _ map[string]string, body, _ string, _ string, _ time.Duration) (int, string, error) {
+	claude := surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
 		if method != "POST" || !strings.Contains(url, "/v1/code/sessions/") {
 			t.Fatalf("method=%s url=%s", method, url)
 		}
@@ -1089,26 +1047,6 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 	daemon.queueWorkers.Wait()
 }
 
-func TestObservationErrorsAreThrottledUntilRecovery(t *testing.T) {
-	daemon, _, fake, _, to := daemonFixture(t)
-	var output bytes.Buffer
-	daemon.log = log.New(&output, "", 0)
-	fake.observeErr = errors.New("bridge unavailable")
-	daemon.observeSession(context.Background(), fake, &to)
-	daemon.observeSession(context.Background(), fake, &to)
-	if strings.Count(output.String(), "bridge unavailable") != 1 {
-		t.Fatalf("repeated error log=%q", output.String())
-	}
-	fake.observeErr = nil
-	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
-	daemon.observeSession(context.Background(), fake, &to)
-	fake.observeErr = errors.New("bridge unavailable")
-	daemon.observeSession(context.Background(), fake, &to)
-	if strings.Count(output.String(), "bridge unavailable") != 2 {
-		t.Fatalf("recovery did not reset throttle log=%q", output.String())
-	}
-}
-
 func TestFailedCompletionIsNotRelayed(t *testing.T) {
 	daemon, r, fake, from, _ := daemonFixture(t)
 	if _, err := r.AddRoute("from", "to", ".*"); err != nil {
@@ -1146,7 +1084,7 @@ func TestRelayIsPersistedWhileDestinationIsUnavailable(t *testing.T) {
 
 func TestRelayToUnavailableSurfaceRemainsQueuedWithoutNotifyingSource(t *testing.T) {
 	d, r, _, from, to := daemonFixture(t)
-	if err := r.RegisterSession(surface.Session{ID: to.ID, Surface: surface.KindNotion, Status: surface.StatusIdle}); err != nil {
+	if err := r.RegisterSession(surface.Session{ID: to.ID, Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {

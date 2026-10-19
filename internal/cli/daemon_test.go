@@ -101,6 +101,7 @@ func TestDaemonServicePlistRunsAtStandardProcessType(t *testing.T) {
 	}
 	for key, want := range map[string]string{
 		"ProcessType":               "Standard",
+		"AbandonProcessGroup":       "true",
 		"ProgramArguments.0":        "/opt/agenthail & tools/agenthail",
 		"EnvironmentVariables.PATH": "/usr/bin",
 	} {

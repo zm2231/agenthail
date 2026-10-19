@@ -1,8 +1,8 @@
 # Claude human turns and authenticated profiles
 
-Status: the first layer, desktop composer delivery through one authenticated
-profile, has shipped. Multiple profiles, account ownership, persisted provenance
-snapshots and voice delivery are later layers. Their plans follow below.
+Status: desktop composer delivery and browser sign-in profiles have shipped.
+Per-session profile bindings, account ownership, persisted provenance snapshots
+and voice delivery are later layers. Their plans follow below.
 
 ## Shipped: desktop composer human turns
 
@@ -34,7 +34,9 @@ whatever the author.
 picks a message's transport. A person's message to an adapter that implements
 `surface.HumanTurnSender` and has a Remote Control attachment
 (`CanSendHumanTurn`) takes `RouteHumanTurn`. A Claude UDS session otherwise
-takes `RoutePeer`. Everything else takes `RouteSend`. `Dispatcher.deliver` and
+takes `RoutePeer`. A session the Claude host runs takes `RouteHumanTurn` for a
+person's message without Remote Control ([Claude session host](claude-host.md)).
+Everything else takes `RouteSend`. `Dispatcher.deliver` and
 [`drainClaimedMessage`](../../internal/daemon/outbox.go) both call it, and so do
 the CLI and voice checks that reject reply correlation on a peer route. The
 route is derived each time a message is sent and never stored, so a queued
@@ -72,30 +74,51 @@ retried. The native helper tests check that the Mac composer and notification
 Reply declare the author and that an unmarked API send does not. A live
 authenticated POST through the composer path has not been run for this layer.
 
+## Shipped: browser sign-in profiles
+
+A sign-in profile is `{id, label, browser, profile selector}` in the registry
+([`signin_profiles`](../../internal/registry/registry.go)), the one owner shared
+by the CLI and the daemon under launchd. Each consumer (`notion`, and `claude`
+for Remote Control) has at most one binding in `signin_bindings`. Bindings and
+selectors are stored; cookies are not. Removing a profile clears the bindings
+that used it, so that consumer becomes unset. Nothing moves to another profile.
+There is no process-wide profile and no environment override.
+
+Each request resolves one `signin.Source` through `signin.Resolver` with a
+`signin.Target{Consumer, SessionID}` before anything is sent
+([`signin.go`](../../internal/signin/signin.go),
+[`registry/signin.go`](../../internal/registry/signin.go)). The cookie cache,
+the per-key read lock and invalidation are keyed on that source
+([`transport.go`](../../internal/surface/surfaces/transport.go)), and
+[`cookie.mjs`](../../sidecar/cookie.mjs) reads only the browser and profile
+directory it is given. An unset consumer returns `signin.NotConfiguredError`,
+which names `agenthail signin use <consumer> <profile>` and Settings > Browser
+Sign-in. Sends fail as terminal `signin_not_configured`, and doctor and health
+show "not set up" rather than a failure. Notion keeps the user and space it
+detected for one profile in an immutable account value, so a binding change
+never mixes two accounts within one operation.
+
+`GET /api/v1/signin` lists profiles, bindings and the browsers found on this
+computer. Each browser probe reads only profile metadata, is bounded by a
+timeout, and refuses special files. Profiles are added through
+`POST /api/v1/signin/profiles`, removed through `DELETE ?id=`, and bound
+through `PUT /api/v1/signin/bindings`. All of these require the settings
+scope. The CLI (`agenthail signin`), the web dashboard and the Mac app use
+these endpoints.
+
+`SessionID` is carried but not yet used. Per-session Claude profile bindings
+attach behind the same resolver without changing callers.
+
 ## Planned account model
 
 The working assumption is multiple separately signed-in Claude accounts selected
-through named Chrome profiles. A profile is an authentication source, not proof
+through named browser sign-in profiles. A profile is an authentication source, not proof
 of a subscription tier. Organization selection within one account requires a
 separate authenticated contract; it is not inferred from a profile name.
 
-Use a stable internal profile ID with a user-facing label and a validated Chrome
-profile selector. Persist selectors and bindings, never browser cookies. Read
-cookies through the existing bridge when needed. Configuration must have one
-canonical owner shared by CLI and daemon startup, including launchd; replace the
-process-global profile selection rather than changing it around each request.
-
-The current startup selects one `AGENTHAIL_CHROME_PROFILE`
-([main](../../cmd/agenthail/main.go), [launchd](../../internal/cli/daemon.go)).
-[`transport.go`](../../internal/surface/surfaces/transport.go) uses a global
-`chromeProfile` for cookie reads, invalidation and sidecar request metadata.
-Although `Claude` stores a constructor profile, the request path does not read
-that value. Cache keys already include a profile selector.
-
-Each authenticated request must resolve one immutable profile identity before
-loading cookies. Cache and invalidation must use that same identity throughout
-the request. Removing or editing a profile must not redirect existing work to a
-different account. A Chrome profile can be signed into another account later:
+Sign-in profiles, their canonical registry owner and per-request resolution
+have shipped (above). What remains is binding a Claude session to a profile
+through `Target.SessionID`. A browser profile can be signed into another account later:
 pin an authenticated account identity and reject identity drift before posting.
 The account identity response and a read-only session ownership check still need
 to be verified against the existing authenticated bridge.
@@ -150,9 +173,11 @@ See [shared stream consumers](shared-stream-consumers.md).
    package/config examples, then perform authorized live acceptance with two
    accounts and two sessions.
 
-The shipped layer covers the trusted desktop entry point and queue replay for one
-authenticated profile, without per-intent profile or account bindings. Steps 1, 2
-and 4, the voice part of step 5 and the two-account live acceptance remain.
+The shipped layers cover the trusted desktop entry point and queue replay, step 1,
+and the profile configuration and settings surfaces from steps 2 and 4. Still to
+do: account identity checks, per-session bindings and durable intent fields from
+step 2, account health and session binding in step 4, the voice part of step 5,
+and the two-account live acceptance.
 
 ## Acceptance gates
 

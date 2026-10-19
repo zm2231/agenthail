@@ -54,7 +54,7 @@ func (d *Daemon) fireRelays(from *surface.Session, id string, hops int, text str
 	if err != nil {
 		panic(err)
 	}
-	d.consumeRelays(context.Background(), d.surfaceForKind(from.Surface), from, routes, nil)
+	d.consumeRelays(context.Background(), d.adapters().ForSurface(from.Surface), from, routes, nil)
 }
 
 func TestDurableRelayClaudeBurstFailureRestartAndOutbox(t *testing.T) {
@@ -68,10 +68,12 @@ func TestDurableRelayClaudeBurstFailureRestartAndOutbox(t *testing.T) {
 		defer f.Close()
 		fmt.Fprintf(f, "{\"type\":\"user\",\"uuid\":\"input-%s\",\"message\":{\"content\":\"request\"}}\n", id)
 		fmt.Fprintf(f, "{\"type\":\"assistant\",\"message\":{\"id\":\"%s\",\"stop_reason\":\"end_turn\",\"content\":[{\"type\":\"text\",\"text\":\"answer %s\"}]}}\n", id, id)
+		fmt.Fprintln(f, `{"type":"system","subtype":"turn_duration"}`)
 	}
 	appendTurn("baseline")
 	d, r, target, source, to := daemonFixture(t)
 	source.Surface = surface.KindClaude
+	source.RuntimeKind = surface.RuntimeClaudeCLI
 	source.Transcript = path
 	if err := r.RegisterSession(source); err != nil {
 		t.Fatal(err)
@@ -82,7 +84,7 @@ func TestDurableRelayClaudeBurstFailureRestartAndOutbox(t *testing.T) {
 	if err := r.RegisterSession(other); err != nil {
 		t.Fatal(err)
 	}
-	reader := surfaces.NewClaude("", t.TempDir())
+	reader := surfaces.NewClaude(nil, t.TempDir())
 	if err := r.PrepareRelaySource(context.Background(), reader, &source, registry.HandoffTurnFinished); err != nil {
 		t.Fatal(err)
 	}
@@ -119,8 +121,8 @@ func TestDurableRelayClaudeBurstFailureRestartAndOutbox(t *testing.T) {
 	}
 	defer reopened.Close()
 	restarted := New(reopened, []surface.Surface{target})
-	restarted.syncRelays(context.Background(), surfaces.NewClaude("", t.TempDir()), &source)
-	restarted.syncRelays(context.Background(), surfaces.NewClaude("", t.TempDir()), &source)
+	restarted.syncRelays(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source)
+	restarted.syncRelays(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source)
 	routes, _ = reopened.ListRoutes()
 	if routes[0].FireCount != 3 || routes[0].PendingCount != 0 || routes[1].FireCount != 3 || reopened.QueueCount(to.ID) != 3 {
 		t.Fatalf("restart/replay: %+v", routes)
@@ -314,15 +316,17 @@ func TestRelayPreparationLosingToAShorterCaptureStillBaselinesWhatItRead(t *test
 		defer f.Close()
 		fmt.Fprintf(f, "{\"type\":\"user\",\"uuid\":\"input-%s\",\"message\":{\"content\":\"request\"}}\n", id)
 		fmt.Fprintf(f, "{\"type\":\"assistant\",\"message\":{\"id\":\"%s\",\"stop_reason\":\"end_turn\",\"content\":[{\"type\":\"text\",\"text\":\"answer %s\"}]}}\n", id, id)
+		fmt.Fprintln(f, `{"type":"system","subtype":"turn_duration"}`)
 	}
 	appendTurn("baseline")
 	d, r, _, source, to := daemonFixture(t)
 	source.Surface = surface.KindClaude
+	source.RuntimeKind = surface.RuntimeClaudeCLI
 	source.Transcript = path
 	if err := r.RegisterSession(source); err != nil {
 		t.Fatal(err)
 	}
-	reader := &racingClaudeReader{Claude: surfaces.NewClaude("", t.TempDir())}
+	reader := &racingClaudeReader{Claude: surfaces.NewClaude(nil, t.TempDir())}
 	if err := r.PrepareRelaySource(context.Background(), reader, &source, registry.HandoffTurnFinished); err != nil {
 		t.Fatal(err)
 	}
@@ -355,6 +359,73 @@ func TestRelayPreparationLosingToAShorterCaptureStillBaselinesWhatItRead(t *test
 	}
 	items, err := r.ListQueue(false, nil)
 	if err != nil || len(items) != 1 || !strings.Contains(items[0].Message, "answer C") {
+		t.Fatalf("queue=%+v err=%v", items, err)
+	}
+}
+
+func TestDurableRelayClaudeRelaysReplyTextOnceAfterItsLastContentBlock(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	write := func(records ...string) {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		for _, record := range records {
+			fmt.Fprintln(f, record)
+		}
+	}
+	prompt := func(id string) string {
+		return fmt.Sprintf(`{"type":"user","uuid":"input-%s","message":{"content":"request %s"}}`, id, id)
+	}
+	thinking := func(id string) string {
+		return fmt.Sprintf(`{"type":"assistant","message":{"id":"%s","stop_reason":"end_turn","content":[{"type":"thinking","thinking":"","signature":"sig"}]}}`, id)
+	}
+	text := func(id string) string {
+		return fmt.Sprintf(`{"type":"assistant","message":{"id":"%s","stop_reason":"end_turn","content":[{"type":"text","text":"answer %s"}]}}`, id, id)
+	}
+	const hook = `{"type":"system","subtype":"stop_hook_summary"}`
+	const duration = `{"type":"system","subtype":"turn_duration"}`
+	write(prompt("baseline"), text("baseline"), duration)
+	d, r, _, source, to := daemonFixture(t)
+	source.Surface = surface.KindClaude
+	source.RuntimeKind = surface.RuntimeClaudeCLI
+	source.Transcript = path
+	if err := r.RegisterSession(source); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.PrepareRelaySource(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source, registry.HandoffTurnFinished); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.AddRoute(source.ID, to.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	fires := func() int64 {
+		routes, err := r.ListRoutes()
+		if err != nil || len(routes) != 1 || routes[0].LastError != "" {
+			t.Fatalf("routes=%+v err=%v", routes, err)
+		}
+		return routes[0].FireCount
+	}
+	write(prompt("one"), thinking("one"), text("one"), hook, duration)
+	d.syncRelays(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source)
+	if fires() != 1 || r.QueueCount(to.ID) != 1 {
+		t.Fatalf("thinking and text in one read: fires=%d queued=%d", fires(), r.QueueCount(to.ID))
+	}
+	write(prompt("two"), thinking("two"))
+	d.syncRelays(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source)
+	if fires() != 1 || r.QueueCount(to.ID) != 1 {
+		t.Fatalf("closing turn relayed before its text: fires=%d queued=%d", fires(), r.QueueCount(to.ID))
+	}
+	write(text("two"), duration)
+	d.syncRelays(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source)
+	d.syncRelays(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source)
+	if fires() != 2 || r.QueueCount(to.ID) != 2 {
+		t.Fatalf("split turn: fires=%d queued=%d", fires(), r.QueueCount(to.ID))
+	}
+	items, err := r.ListQueue(false, nil)
+	if err != nil || len(items) != 2 || !strings.Contains(items[0].Message, "answer one") || !strings.Contains(items[1].Message, "answer two") {
 		t.Fatalf("queue=%+v err=%v", items, err)
 	}
 }

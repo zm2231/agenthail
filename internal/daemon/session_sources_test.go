@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -41,7 +42,7 @@ func TestCodexCatchupRejectsReplacementBeforeFirstPageAfterRegistryReopen(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	from := surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: transcript, HasLocal: true}
+	from := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: transcript, HasLocal: true}
 	if err := reg.RegisterSession(from); err != nil {
 		reg.Close()
 		t.Fatal(err)
@@ -131,7 +132,7 @@ func TestLegacySeedCheckpointNeverAcceptsReplacementAcrossRetries(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer reg.Close()
-	from := surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: transcript, HasLocal: true}
+	from := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: transcript, HasLocal: true}
 	if err := reg.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
@@ -539,6 +540,7 @@ liveObserved:
 func TestSessionSourceSeedsWithoutUnsupportedLiveStream(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	from.Surface = surface.KindClaude
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	from.Transport = "uds"
 	adapter := &sourceCountingSurface{
 		daemonSurface: fake,
@@ -569,6 +571,7 @@ func TestSessionSourceSeedsWithoutUnsupportedLiveStream(t *testing.T) {
 func TestSessionSourceKeepsUnsupportedTailOpenWithoutRetryNoise(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	from.Surface = surface.KindClaude
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	from.Transport = "uds"
 	from.Transcript = "/local/transcript.jsonl"
 	from.HasLocal = true
@@ -620,13 +623,14 @@ func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	from.Surface = surface.KindClaude
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	from.Transport = "uds"
 	from.Transcript = transcript
 	from.HasLocal = true
 	if err := reg.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
-	adapter := providers.NewClaude("Default", t.TempDir())
+	adapter := providers.NewClaude(nil, t.TempDir())
 	manager := newSessionSourceManager(reg)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
@@ -680,9 +684,11 @@ func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
 	for _, turn := range []struct{ message, turnID, answer, records string }{
 		{"m2", "u2", "second answer", `{"type":"user","uuid":"u2","message":{"content":"second"}}
 {"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"second answer"}]}}
+{"type":"system","subtype":"turn_duration"}
 `},
 		{"m3", "u3", "third answer", `{"type":"user","uuid":"u3","message":{"content":"third"}}
 {"type":"assistant","uuid":"a3","message":{"id":"m3","stop_reason":"end_turn","content":[{"type":"text","text":"third answer"}]}}
+{"type":"system","subtype":"turn_duration"}
 `},
 	} {
 		appendTranscript(turn.records)
@@ -719,6 +725,7 @@ func TestClaudeSessionSourceJournalsFullTimelineAcrossTransports(t *testing.T) {
 			_, reg, _, from, _ := daemonFixture(t)
 			from.ID = "claude-" + map[string]string{"": "native", "uds": "uds"}[transport]
 			from.Surface = surface.KindClaude
+			from.RuntimeKind = surface.RuntimeClaudeCLI
 			from.Transport = transport
 			from.HasLocal = true
 			transcript := filepath.Join(t.TempDir(), "session.jsonl")
@@ -732,7 +739,7 @@ func TestClaudeSessionSourceJournalsFullTimelineAcrossTransports(t *testing.T) {
 			if err := reg.RegisterSession(from); err != nil {
 				t.Fatal(err)
 			}
-			adapter := providers.NewClaude("Default", t.TempDir())
+			adapter := providers.NewClaude(nil, t.TempDir())
 			manager := newSessionSourceManager(reg)
 			subscription, err := manager.subscribe(&from, adapter)
 			if err != nil {
@@ -748,6 +755,7 @@ func TestClaudeSessionSourceJournalsFullTimelineAcrossTransports(t *testing.T) {
 {"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":null,"content":[{"type":"tool_use","id":"call-2","name":"Read","input":{"path":"x"}},{"type":"thinking","thinking":"checking"}]}}
 {"type":"user","uuid":"u2-result","message":{"content":[{"type":"tool_result","tool_use_id":"call-2","content":"contents"}]}}
 {"type":"assistant","uuid":"a3","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"final answer"}]}}
+{"type":"system","subtype":"turn_duration"}
 `)
 			if closeErr := file.Close(); err != nil {
 				t.Fatal(err)
@@ -800,6 +808,7 @@ func TestClaudeSessionSourceJournalsInterruptedTerminalBeforeNextTurn(t *testing
 			_, reg, _, from, _ := daemonFixture(t)
 			from.ID = "claude-interrupted-" + map[string]string{"": "native", "uds": "uds"}[transport]
 			from.Surface = surface.KindClaude
+			from.RuntimeKind = surface.RuntimeClaudeCLI
 			from.Transport = transport
 			from.HasLocal = true
 			transcript := filepath.Join(t.TempDir(), "session.jsonl")
@@ -813,7 +822,7 @@ func TestClaudeSessionSourceJournalsInterruptedTerminalBeforeNextTurn(t *testing
 			if err := reg.RegisterSession(from); err != nil {
 				t.Fatal(err)
 			}
-			adapter := providers.NewClaude("Default", t.TempDir())
+			adapter := providers.NewClaude(nil, t.TempDir())
 			subscription, err := newSessionSourceManager(reg).subscribe(&from, adapter)
 			if err != nil {
 				t.Fatal(err)
@@ -830,6 +839,7 @@ func TestClaudeSessionSourceJournalsInterruptedTerminalBeforeNextTurn(t *testing
 {"type":"system","subtype":"turn_duration","content":"done"}
 {"type":"user","uuid":"u2","message":{"content":"continue"}}
 {"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"continued"}]}}
+{"type":"system","subtype":"turn_duration"}
 `)
 			if closeErr := file.Close(); err != nil {
 				t.Fatal(err)
@@ -1212,13 +1222,14 @@ func TestClaudeSessionSourceResumesTurnsWrittenWhileUnheld(t *testing.T) {
 		t.Fatal(err)
 	}
 	from.Surface = surface.KindClaude
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	from.Transcript = transcript
 	from.HasLocal = true
 	if err := reg.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
 	firstManager := newSessionSourceManager(reg)
-	first, err := firstManager.subscribe(&from, providers.NewClaude("Default", t.TempDir()))
+	first, err := firstManager.subscribe(&from, providers.NewClaude(nil, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1236,7 +1247,7 @@ func TestClaudeSessionSourceResumesTurnsWrittenWhileUnheld(t *testing.T) {
 	}
 	file.Close()
 	manager := newSessionSourceManager(reg)
-	second, err := manager.subscribe(&from, providers.NewClaude("Default", t.TempDir()))
+	second, err := manager.subscribe(&from, providers.NewClaude(nil, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1271,6 +1282,7 @@ func TestClaudeSessionSourceJournalsInjectedPromptOrigins(t *testing.T) {
 	_, reg, _, from, _ := daemonFixture(t)
 	from.ID = "claude-injections"
 	from.Surface = surface.KindClaude
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	from.HasLocal = true
 	transcript := filepath.Join(t.TempDir(), "session.jsonl")
 	notification := `<task-notification>\n<task-id>task-9</task-id>\n<tool-use-id>toolu_synthetic</tool-use-id>\n<status>completed</status>\n<summary>Synthetic job done</summary>\n</task-notification>`
@@ -1286,7 +1298,7 @@ func TestClaudeSessionSourceJournalsInjectedPromptOrigins(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager := newSessionSourceManager(reg)
-	subscription, err := manager.subscribe(&from, providers.NewClaude("Default", t.TempDir()))
+	subscription, err := manager.subscribe(&from, providers.NewClaude(nil, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1350,5 +1362,19 @@ func TestClaudeSessionSourceJournalsInjectedPromptOrigins(t *testing.T) {
 			t.Fatalf("notifications=%v peer=%v window=%+v", notifications, peer, window)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestSessionJournalKeepsAttachedFilesForTheChatPage(t *testing.T) {
+	d, reg, fake, from, _ := daemonFixture(t)
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	files := []surface.AttachedFile{{Name: "notes.txt", Path: "/uploads/abc/notes.txt", Bytes: 16}}
+	source.append(surface.StreamEvent{ID: "user-1", ProviderKey: "user-1", Kind: "message", Role: "user", Title: "user", Text: "read this", Files: files})
+	page, err := d.readJournalPage(from.ID, 0, 10)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	if got := page.Items[0]; got.Text != "read this" || !reflect.DeepEqual(got.Files, files) {
+		t.Fatalf("item=%+v", got)
 	}
 }

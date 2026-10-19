@@ -26,7 +26,7 @@ func writeClaudeProjectTranscript(t *testing.T, home, dir, id string) string {
 
 func TestClaudeTranscriptIsFoundByConversationIDInAnyProject(t *testing.T) {
 	home := t.TempDir()
-	adapter := NewClaude("", home)
+	adapter := NewClaude(nil, home)
 	worktree := writeClaudeProjectTranscript(t, home, "-Volumes-work-repo--worktrees-fix-a", "11111111-aaaa")
 	hashed := writeClaudeProjectTranscript(t, home, "-Users-dev-very-long-name-abc123", "22222222-bbbb")
 	if got := adapter.transcriptPath(&surface.Session{ID: "11111111-aaaa", Cwd: "/Volumes/work/repo/.worktrees/fix-a"}); got != worktree {
@@ -39,7 +39,7 @@ func TestClaudeTranscriptIsFoundByConversationIDInAnyProject(t *testing.T) {
 
 func TestClaudeTranscriptAppearsAfterTheSessionStarts(t *testing.T) {
 	home := t.TempDir()
-	adapter := NewClaude("", home)
+	adapter := NewClaude(nil, home)
 	writeClaudeProjectTranscript(t, home, "-Users-dev-app", "existing")
 	if got := adapter.resolveTranscript("new-1"); got != "" {
 		t.Fatalf("a conversation with no transcript resolved to %q", got)
@@ -57,7 +57,7 @@ func TestClaudeTranscriptAppearsAfterTheSessionStarts(t *testing.T) {
 
 func TestClaudeTranscriptDoesNotGuessBetweenProjects(t *testing.T) {
 	home := t.TempDir()
-	adapter := NewClaude("", home)
+	adapter := NewClaude(nil, home)
 	writeClaudeProjectTranscript(t, home, "-Users-dev-one", "dup-1")
 	writeClaudeProjectTranscript(t, home, "-Users-dev-two", "dup-1")
 	if got := adapter.resolveTranscript("dup-1"); got != "" {
@@ -115,7 +115,7 @@ func TestClaudeTranscriptPassListsProjectsOnce(t *testing.T) {
 
 func TestClaudeTranscriptBecomesAmbiguousAndThenUniqueAgain(t *testing.T) {
 	home := t.TempDir()
-	adapter := NewClaude("", home)
+	adapter := NewClaude(nil, home)
 	first := writeClaudeProjectTranscript(t, home, "-Users-dev-one", "conv-1")
 	if got := adapter.resolveTranscript("conv-1"); got != first {
 		t.Fatalf("unique transcript resolved to %q, want %q", got, first)
@@ -147,7 +147,7 @@ func TestClaudeBridgeSessionFindsItsTranscriptCreatedAfterDiscovery(t *testing.T
 	if err := os.WriteFile(filepath.Join(sessionsDir, strconv.Itoa(os.Getpid())+".json"), record, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	adapter := NewClaude("", home)
+	adapter := NewClaude(nil, home)
 	sessions, err := adapter.List(context.Background())
 	if err != nil || len(sessions) != 1 || sessions[0].ID != "local" || sessions[0].Bridge != "bridge" || sessions[0].Transcript != "" {
 		t.Fatalf("sessions=%+v err=%v", sessions, err)

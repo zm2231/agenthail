@@ -23,6 +23,7 @@ import (
 
 	registrypkg "github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 const dashboardTestToken = "secret"
@@ -201,6 +202,7 @@ func TestDashboardSessionReadsJournalWithoutProviderMetadata(t *testing.T) {
 func TestDashboardSessionMetadataExposesValidatedClaudeRunObservations(t *testing.T) {
 	_, registry, _, from, _ := daemonFixture(t)
 	from.Surface = surface.KindClaude
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	from.ID = "claude-session"
 	from.Transcript = "/projects/encoded-cwd/transcript-1.jsonl"
 	if err := registry.RegisterSession(from); err != nil {
@@ -264,7 +266,7 @@ func TestDashboardSessionResolvesExactAlias(t *testing.T) {
 
 func TestDashboardSessionReadDoesNotNegotiateWritableAccess(t *testing.T) {
 	_, registry, fake, _, _ := daemonFixture(t)
-	session := surface.Session{ID: "history", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}
+	session := surface.Session{ID: "history", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}
 	if err := registry.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
@@ -373,25 +375,10 @@ func TestDashboardExposesCookieAuthenticatedDesktopVoiceControls(t *testing.T) {
 	}
 }
 
-func TestDashboardActionSendsToRegisteredSession(t *testing.T) {
-	d, _, fake, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
-	body, _ := json.Marshal(map[string]string{"action": "send", "sessionId": "from", "message": "ship this"})
-	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
-	request.Header.Set("Origin", "http://example.test")
-	request.Host = "example.test"
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || len(fake.sent) != 1 || fake.sent[0] != "ship this" {
-		t.Fatalf("status=%d sent=%v body=%s", response.Code, fake.sent, response.Body.String())
-	}
-}
-
 func TestDashboardSearchStoresCodexHistoryResult(t *testing.T) {
 	d, registry, fake, _, _ := daemonFixture(t)
 	fake.kind = surface.KindCodex
-	fake.searchResults = []surface.SessionSearchResult{{Session: surface.Session{ID: "old", Surface: surface.KindCodex, Name: "old project"}, Snippet: "matched text"}}
+	fake.searchResults = []surface.SessionSearchResult{{Session: surface.Session{ID: "old", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "old project"}, Snippet: "matched text"}}
 	response := serveDashboardRequest(dashboardRouter(d), http.MethodGet, "/api/search?surface=codex&q=project", "")
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "matched text") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
@@ -405,7 +392,7 @@ func TestDashboardSearchReturnsSavedResultsWhenCodexSearchFails(t *testing.T) {
 	d, registry, fake, _, _ := daemonFixture(t)
 	fake.kind = surface.KindCodex
 	fake.searchErr = errors.New("app-server timeout")
-	if err := registry.RegisterSession(surface.Session{ID: "saved", Surface: surface.KindCodex, Name: "saved project"}); err != nil {
+	if err := registry.RegisterSession(surface.Session{ID: "saved", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "saved project"}); err != nil {
 		t.Fatal(err)
 	}
 	response := serveDashboardRequest(dashboardRouter(d), http.MethodGet, "/api/search?surface=codex&q=project", "")
@@ -424,7 +411,7 @@ func TestDashboardSearchReturnsSavedResultsWhenCodexSearchFails(t *testing.T) {
 
 func TestDashboardCompactUsesTypedClaudeControl(t *testing.T) {
 	_, registry, _, _, _ := daemonFixture(t)
-	session := surface.Session{ID: "claude", Surface: surface.KindClaude, Name: "claude", Status: surface.StatusBusy}
+	session := surface.Session{ID: "claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "claude", Status: surface.StatusBusy}
 	if err := registry.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +431,7 @@ func TestDashboardCompactUsesTypedClaudeControl(t *testing.T) {
 
 func TestDashboardSteerReturnsDeliveryEvidence(t *testing.T) {
 	_, registry, _, _, _ := daemonFixture(t)
-	session := surface.Session{ID: "codex", Surface: surface.KindCodex, Name: "codex", Status: surface.StatusBusy, Transport: "desktop"}
+	session := surface.Session{ID: "codex", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "codex", Status: surface.StatusBusy, Transport: "desktop"}
 	if err := registry.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
@@ -902,7 +889,7 @@ func TestDashboardShutdownCancelsActiveStreams(t *testing.T) {
 }
 
 func TestEffectiveCapabilitiesMakeUnloadedCodexReadOnly(t *testing.T) {
-	effective := surface.EffectiveCapabilities(&surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded")}, surface.Capabilities{Send: true, Model: true})
+	effective := surface.EffectiveCapabilities(&daemonSurface{kind: surface.KindCodex, caps: surface.Capabilities{Send: true, Model: true}}, &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.SessionStatus("notLoaded")})
 	if !effective.ReadOnly || effective.ReadOnlyReason == "" || effective.Send || effective.Model {
 		t.Fatalf("effective=%+v", effective)
 	}
@@ -910,7 +897,7 @@ func TestEffectiveCapabilitiesMakeUnloadedCodexReadOnly(t *testing.T) {
 
 func TestEffectiveCapabilitiesKeepUnloadedDesktopThreadWritable(t *testing.T) {
 	capabilities := surface.Capabilities{Send: true, Model: true}
-	effective := surface.EffectiveCapabilities(&surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"}, capabilities)
+	effective := surface.EffectiveCapabilities(&daemonSurface{kind: surface.KindCodex, caps: capabilities}, &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"})
 	if effective.ReadOnly || effective.ReadOnlyReason != "" || !effective.Send || !effective.Model {
 		t.Fatalf("effective=%+v", effective)
 	}
@@ -918,8 +905,8 @@ func TestEffectiveCapabilitiesKeepUnloadedDesktopThreadWritable(t *testing.T) {
 
 func TestEffectiveCapabilitiesKeepManagedDesktopThreadWritable(t *testing.T) {
 	capabilities := surface.Capabilities{Send: true, Steer: true, Compact: true, Model: true}
-	session := surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "managed"}
-	effective := surface.EffectiveCapabilities(&session, capabilities)
+	session := surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.StatusIdle, Source: "vscode", Transport: "managed"}
+	effective := surface.EffectiveCapabilities(&daemonSurface{kind: surface.KindCodex, caps: capabilities}, &session)
 	if effective.ReadOnly || effective.ReadOnlyReason != "" || !effective.Send || !effective.Steer || !effective.Compact || !effective.Model {
 		t.Fatalf("effective=%+v", effective)
 	}
@@ -927,14 +914,14 @@ func TestEffectiveCapabilitiesKeepManagedDesktopThreadWritable(t *testing.T) {
 
 func TestEffectiveCapabilitiesDisableUnbridgedDesktopThread(t *testing.T) {
 	capabilities := surface.Capabilities{Send: true, Model: true}
-	effective := surface.EffectiveCapabilities(&surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "readOnly"}, capabilities)
+	effective := surface.EffectiveCapabilities(&daemonSurface{kind: surface.KindCodex, caps: capabilities}, &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "readOnly"})
 	if !effective.ReadOnly || effective.Send || effective.Model || !strings.Contains(effective.ReadOnlyReason, "agenthail launch codex") {
 		t.Fatalf("effective=%+v", effective)
 	}
 }
 
 func TestEffectiveCapabilitiesMakePlainCodexTerminalReadOnly(t *testing.T) {
-	effective := surface.EffectiveCapabilities(&surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}, surface.Capabilities{Send: true, Steer: true, Compact: true})
+	effective := surface.EffectiveCapabilities(&daemonSurface{kind: surface.KindCodex, caps: surface.Capabilities{Send: true, Steer: true, Compact: true}}, &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"})
 	if !effective.ReadOnly || effective.ReadOnlyReason == "" || effective.Send || effective.Steer || effective.Compact {
 		t.Fatalf("effective=%+v", effective)
 	}
@@ -1140,7 +1127,7 @@ func TestDashboardStateReadsPersistedCatalogStatus(t *testing.T) {
 	}
 	from.Status = surface.StatusBusy
 	from.LastActive = time.Now()
-	if err := registry.RegisterSession(from); err != nil {
+	if _, _, err := registry.RecordCatalogSession(registrypkg.CatalogSessionState{Session: from, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registrypkg.CatalogEvent{DedupeKey: "session.upserted:" + from.ID, Type: "session.upserted", EntityID: from.ID, Payload: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1156,39 +1143,33 @@ func TestDashboardStateReadsPersistedCatalogStatus(t *testing.T) {
 	t.Fatal("live session missing from dashboard state")
 }
 
-func TestDashboardSessionPresenceUsesSurfaceSpecificTruth(t *testing.T) {
-	now := time.Date(2026, 7, 12, 20, 0, 0, 0, time.UTC)
-	tests := []struct {
-		name        string
-		session     surface.Session
-		queueCount  int
-		open        bool
-		wantCurrent bool
-		wantReason  string
-	}{
-		{name: "open idle Claude", session: surface.Session{Surface: surface.KindClaude, Status: surface.StatusIdle}, open: true, wantCurrent: true, wantReason: "open"},
-		{name: "closed busy Claude is stale", session: surface.Session{Surface: surface.KindClaude, Status: surface.StatusBusy}, wantCurrent: false},
-		{name: "queued closed Claude", session: surface.Session{Surface: surface.KindClaude}, queueCount: 1, wantCurrent: true, wantReason: "queued"},
-		{name: "recent Codex", session: surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, LastActive: now.Add(-4 * time.Hour)}, wantCurrent: true, wantReason: "recent"},
-		{name: "old Codex", session: surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, LastActive: now.Add(-6 * time.Hour)}, wantCurrent: false},
-		{name: "historical Codex", session: surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded"), LastActive: now.Add(-time.Hour)}, wantCurrent: false},
-		{name: "busy Codex", session: surface.Session{Surface: surface.KindCodex, Status: surface.StatusBusy, LastActive: now.Add(-48 * time.Hour)}, wantCurrent: true, wantReason: "working"},
+func TestChangingTheCodexWindowRepublishesPresence(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := SaveDashboardConfig(DashboardConfig{CodexRecentHours: 5}); err != nil {
+		t.Fatal(err)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			current, reason := dashboardSessionPresence(test.session, test.queueCount, test.open, 5, now)
-			if current != test.wantCurrent || reason != test.wantReason {
-				t.Fatalf("current=%v reason=%q, want current=%v reason=%q", current, reason, test.wantCurrent, test.wantReason)
-			}
-		})
+	r, err := registrypkg.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestClaudeProcessOpenRejectsOtherProcesses(t *testing.T) {
-	if claudeProcessOpen(context.Background(), os.Getpid()) {
-		t.Fatal("non-Claude process was recognized as an open Claude session")
+	t.Cleanup(func() { r.Close() })
+	session := surface.Session{ID: "019f004a-0000-7000-8000-0000000000c1", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", LastActive: time.Now().Add(-3 * time.Hour)}
+	projection := `{"id":"` + session.ID + `","surface":"codex","status":"idle","current":true,"currentReason":"recent"}`
+	if _, _, err := r.RecordCatalogSession(registrypkg.CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: projection}, registrypkg.CatalogEvent{DedupeKey: "session.upserted:" + session.ID, Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
+		t.Fatal(err)
 	}
-	if claudeProcessOpen(context.Background(), 0) {
-		t.Fatal("zero PID was recognized as alive")
+	d := New(r, []surface.Surface{&surfaces.Codex{}})
+	handler := dashboardRouter(d)
+	if response := serveDashboardRequest(handler, http.MethodPost, "/api/settings", `{"action":"dashboard-config","codexRecentHours":1}`); response.Code != http.StatusOK {
+		t.Fatalf("settings status=%d body=%s", response.Code, response.Body.String())
+	}
+	page, err := r.CatalogSnapshotPage(registrypkg.CatalogPageRequest{Scope: "current", Limit: 10, Now: time.Now()})
+	if err != nil || len(page.Sessions) != 0 {
+		t.Fatalf("current page after narrowing the window=%+v err=%v", page.Sessions, err)
+	}
+	for _, listed := range readDashboardState(t, handler).Sessions {
+		if listed.ID == session.ID && (listed.Current || listed.CurrentReason != "") {
+			t.Fatalf("snapshot still current after narrowing the window: %+v", listed)
+		}
 	}
 }

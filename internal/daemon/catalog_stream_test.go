@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -39,14 +40,12 @@ func (s *blockingObserveSurface) Observe(ctx context.Context, session *surface.S
 	return s.daemonSurface.Observe(ctx, session)
 }
 
-func (boundedCatalogSurface) CatalogListComplete() bool { return false }
-
-func (s *boundedCatalogSurface) List(ctx context.Context) ([]surface.Session, error) {
+func (s *boundedCatalogSurface) CatalogList(ctx context.Context) ([]surface.Session, bool, error) {
 	sessions, err := s.daemonSurface.List(ctx)
 	if len(sessions) > 50 {
 		sessions = sessions[:50]
 	}
-	return sessions, err
+	return sessions, false, err
 }
 
 func TestAPICatalogStreamReplaysPersistedEvent(t *testing.T) {
@@ -124,8 +123,8 @@ func TestCatalogScanFlushesCommittedDeliveryProblemBeforeObserving(t *testing.T)
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	sender := surface.Session{ID: "sender", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
-	target := surface.Session{ID: "target", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	sender := surface.Session{ID: "sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	target := surface.Session{ID: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 	for _, session := range []surface.Session{sender, target} {
 		if err := store.RegisterSession(session); err != nil {
 			t.Fatal(err)
@@ -463,18 +462,32 @@ func TestFailedDiscoveryKeepsCatalogRowsStaleThroughDashboardSnapshot(t *testing
 }
 
 func TestDiscoveryRemovesOnlyAfterTwoSuccessfulOmissions(t *testing.T) {
-	d, registry, fake, _, _ := daemonFixture(t)
+	d, store, fake, _, _ := daemonFixture(t)
 	d.discoverCatalog(context.Background())
 	fake.sessions = map[string]surface.Session{}
 	d.discoverCatalog(context.Background())
+	history, err := d.dashboardState(context.Background(), registry.CatalogPageRequest{Scope: "all", Limit: 50, Now: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history.Sessions) != 2 || history.Sessions[0].Status != surface.StatusOffline {
+		t.Fatalf("first omission kept %d sessions in history, want both offline", len(history.Sessions))
+	}
 	state, err := d.dashboardState(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(state.Sessions) != 2 {
-		t.Fatalf("first omission sessions=%d", len(state.Sessions))
+	if len(state.Sessions) != 0 {
+		t.Fatalf("first omission left %d offline sessions in the current snapshot", len(state.Sessions))
 	}
 	d.discoverCatalog(context.Background())
+	history, err = d.dashboardState(context.Background(), registry.CatalogPageRequest{Scope: "all", Limit: 50, Now: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history.Sessions) != 0 {
+		t.Fatalf("second omission history sessions=%d", len(history.Sessions))
+	}
 	state, err = d.dashboardState(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -482,7 +495,7 @@ func TestDiscoveryRemovesOnlyAfterTwoSuccessfulOmissions(t *testing.T) {
 	if len(state.Sessions) != 0 {
 		t.Fatalf("second omission sessions=%d", len(state.Sessions))
 	}
-	window, err := registry.CatalogEventsAfter(0, 20)
+	window, err := store.CatalogEventsAfter(0, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +565,7 @@ func TestDiscoveryStreamsFullDashboardSessionRow(t *testing.T) {
 		if err := json.Unmarshal(event.Payload, &payload); err != nil {
 			t.Fatal(err)
 		}
-		if payload.Session.ID == "" || payload.Session.Capabilities != d.Surfaces[0].Capabilities() || payload.Session.ObservedAt.IsZero() || payload.Session.HostProject == nil || payload.Session.Checkout == nil {
+		if payload.Session.ID == "" || payload.Session.Capabilities != d.Surfaces[0].Capabilities() || payload.Session.ObservedAt.IsZero() || payload.Session.Checkout == nil {
 			t.Fatalf("payload=%+v", payload.Session)
 		}
 		return
@@ -635,6 +648,7 @@ func TestDiscoveryProjectsSubagentIdentityAndRollup(t *testing.T) {
 	d, registry, fake, from, to := daemonFixture(t)
 	from.Subagents = &surface.SubagentRollup{Count: 3, Working: 1}
 	to.Subagent = &surface.Subagent{ParentID: from.ID, RootID: from.ID, Depth: 1, Nickname: "Ada", Role: "reviewer"}
+	to.Status = surface.StatusBusy
 	fake.sessions = map[string]surface.Session{from.ID: from, to.ID: to}
 	d.discoverCatalog(context.Background())
 
@@ -674,4 +688,310 @@ func TestDiscoveryProjectsSubagentIdentityAndRollup(t *testing.T) {
 			t.Fatalf("%s rows carry identity they do not own: %+v %+v", name, rows[from.ID], rows[to.ID])
 		}
 	}
+}
+
+func TestDiscoveryNestsARowStoredWithoutItsParentOnceTheParentIsReported(t *testing.T) {
+	d, registry, fake, from, _ := daemonFixture(t)
+	child := surface.Session{ID: "spawned-child", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "child", Status: surface.StatusIdle, Source: "subAgent", Transport: "desktop"}
+	if err := registry.RegisterSession(child); err != nil {
+		t.Fatal(err)
+	}
+	child.Subagent = &surface.Subagent{ParentID: from.ID, RootID: from.ID, Depth: 1}
+	fake.sessions[child.ID] = child
+	d.discoverCatalog(context.Background())
+	stored, err := registry.Session(child.ID)
+	if err != nil || stored.Subagent == nil || stored.Subagent.ParentID != from.ID {
+		t.Fatalf("stored child=%+v err=%v, want nested under %s", stored, err, from.ID)
+	}
+	state, err := registry.CatalogSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range state.Sessions {
+		if record.Session.ID == child.ID && (record.Session.Subagent == nil || record.Session.Subagent.ParentID != from.ID) {
+			t.Fatalf("catalog child=%+v, want nested under %s", record.Session, from.ID)
+		}
+	}
+}
+
+func TestSnapshotListsTopLevelSessionsAndOnlyActiveSubagents(t *testing.T) {
+	d, store, fake, lead, _ := daemonFixture(t)
+	lead.Subagents = &surface.SubagentRollup{Count: 2, Working: 1}
+	child := func(id, parent string, status surface.SessionStatus) surface.Session {
+		return surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: id, Status: status, Source: "subAgent", Transport: "desktop", Subagent: &surface.Subagent{ParentID: parent, RootID: lead.ID, Depth: 1}}
+	}
+	working := child("working-child", lead.ID, surface.StatusBusy)
+	resting := child("resting-child", lead.ID, surface.SessionStatus("notLoaded"))
+	grandchild := child("resting-grandchild", resting.ID, surface.SessionStatus("notLoaded"))
+	orphan := child("orphan-child", "parent-codex-never-listed", surface.StatusBusy)
+	fake.sessions = map[string]surface.Session{lead.ID: lead, working.ID: working, resting.ID: resting, grandchild.ID: grandchild, orphan.ID: orphan}
+	d.discoverCatalog(context.Background())
+	if err := store.RegisterSession(surface.Session{ID: "parentless-subagent", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "subAgent", Transport: "desktop"}); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := map[string]dashboardSession{}
+	for _, session := range state.Sessions {
+		listed[session.ID] = session
+	}
+	for _, hidden := range []string{resting.ID, grandchild.ID, orphan.ID, "parentless-subagent"} {
+		if _, found := listed[hidden]; found {
+			t.Fatalf("snapshot lists %s; it carries only top-level sessions and active subagents under a listed parent", hidden)
+		}
+	}
+	if _, found := listed[working.ID]; !found {
+		t.Fatal("snapshot dropped a working subagent")
+	}
+	if got := listed[lead.ID].Subagents; got == nil || *got != (surface.SubagentRollup{Count: 4, Working: 1}) {
+		t.Fatalf("lead rollup=%+v, want its own two plus the two resting descendants", got)
+	}
+
+	page, err := d.dashboardState(context.Background(), registry.CatalogPageRequest{Scope: "all", Limit: 50, Now: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paged := map[string]dashboardSession{}
+	for _, session := range page.Sessions {
+		paged[session.ID] = session
+	}
+	if _, found := paged[resting.ID]; found || page.TotalSessions != len(page.Sessions) {
+		t.Fatalf("page lists hidden subagents or miscounts: total=%d rows=%d", page.TotalSessions, len(page.Sessions))
+	}
+	if got := paged[lead.ID].Subagents; got == nil || got.Count != 4 {
+		t.Fatalf("paged lead rollup=%+v", got)
+	}
+
+	family, err := d.dashboardState(context.Background(), registry.CatalogPageRequest{ParentID: lead.ID, Limit: 50, Now: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	children := map[string]dashboardSession{}
+	for _, session := range family.Sessions {
+		children[session.ID] = session
+	}
+	if len(children) != 2 || children[resting.ID].ID == "" || children[working.ID].ID == "" || children[orphan.ID].ID != "" {
+		t.Fatalf("parent page=%v, want every direct subagent of the lead", children)
+	}
+	if got := children[resting.ID].Subagents; got == nil || got.Count != 1 {
+		t.Fatalf("resting child rollup=%+v, want its resting grandchild", got)
+	}
+
+	response := serveDashboardRequest(dashboardRouter(d), http.MethodGet, "/api/v1/snapshot?limit=50&parentId="+working.ID, "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"sessions":[]`) {
+		t.Fatalf("empty parent page status=%d body=%.300s, want an empty sessions array", response.Code, response.Body.String())
+	}
+}
+
+func TestCatalogStreamShowsDevicesTheSessionListAndHostsEveryRow(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	d, store, fake, lead, _ := daemonFixture(t)
+	child := func(id, parent string, status surface.SessionStatus) surface.Session {
+		return surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: id, Status: status, Source: "subAgent", Transport: "desktop", Subagent: &surface.Subagent{ParentID: parent, RootID: lead.ID, Depth: 1}}
+	}
+	working, resting := child("working-child", lead.ID, surface.StatusBusy), child("resting-child", lead.ID, surface.SessionStatus("notLoaded"))
+	buried := child("busy-under-resting", resting.ID, surface.StatusBusy)
+	fake.sessions = map[string]surface.Session{lead.ID: lead, working.ID: working, resting.ID: resting, buried.ID: buried}
+	d.discoverCatalog(context.Background())
+	d.publishCatalogPresence()
+	latestSeq := func() uint64 {
+		t.Helper()
+		_, seq, err := store.CatalogState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return seq
+	}
+	latest := latestSeq()
+
+	token := func(name string, scopes []string) string {
+		pairing, err := store.CreateDevicePairing(name, scopes, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, secret, err := store.CompleteDevicePairing(pairing.Secret, name, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return secret
+	}
+	deviceToken := token("Phone", []string{"read", "control"})
+	hostToken := token("Agenthail host", []string{"read", "control", registry.HostScope})
+	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "dashboard-secret"}))
+	defer server.Close()
+	stream := func(bearer string, after, until uint64) []catalogStreamEnvelope {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/catalog-events?after=%d", server.URL, after), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+bearer)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("catalog-events status=%d", response.StatusCode)
+		}
+		reader := bufio.NewReader(response.Body)
+		var events []catalogStreamEnvelope
+		for len(events) == 0 || events[len(events)-1].Seq < until {
+			events = append(events, receiveCatalogSSE(t, reader))
+		}
+		return events
+	}
+	type seen struct {
+		types        map[string]string
+		leadUpserted bool
+		subagents    *surface.SubagentRollup
+	}
+	read := func(events []catalogStreamEnvelope) seen {
+		result := seen{types: map[string]string{}}
+		for index, event := range events {
+			if index > 0 && event.Seq <= events[index-1].Seq {
+				t.Fatalf("sequence did not increase: %d after %d", event.Seq, events[index-1].Seq)
+			}
+			var data struct {
+				SessionID string           `json:"sessionId"`
+				Session   dashboardSession `json:"session"`
+			}
+			if err := json.Unmarshal(event.Data, &data); err != nil {
+				t.Fatal(err)
+			}
+			id := data.SessionID
+			if event.Type == "session.upserted" {
+				id = data.Session.ID
+				if id == lead.ID {
+					result.leadUpserted, result.subagents = true, data.Session.Subagents
+				}
+			}
+			if id != "" {
+				result.types[id] = event.Type
+			}
+		}
+		return result
+	}
+	snapshotIDs := func(bearer string) map[string]bool {
+		t.Helper()
+		request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/snapshot?fresh=1", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+bearer)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		var state struct {
+			Sessions []dashboardSession `json:"sessions"`
+		}
+		if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&state) != nil {
+			t.Fatalf("snapshot status=%d", response.StatusCode)
+		}
+		ids := map[string]bool{}
+		for _, session := range state.Sessions {
+			ids[session.ID] = true
+		}
+		return ids
+	}
+
+	device := read(stream(deviceToken, 0, latest))
+	if device.types[resting.ID] != "session.removed" || device.types[buried.ID] != "session.removed" || device.types[working.ID] != "session.upserted" {
+		t.Fatalf("device stream=%v, want the subagents under a resting one removed and the working one listed", device.types)
+	}
+	if device.subagents == nil || *device.subagents != (surface.SubagentRollup{Count: 2, Working: 1}) {
+		t.Fatalf("device lead rollup=%+v, want the resting subagent and its busy child counted", device.subagents)
+	}
+	host := read(stream(hostToken, 0, latest))
+	if host.types[resting.ID] != "session.upserted" || host.types[buried.ID] != "session.upserted" || host.types[working.ID] != "session.upserted" {
+		t.Fatalf("host stream=%v, want every row", host.types)
+	}
+	if ids := snapshotIDs(deviceToken); ids[resting.ID] || ids[buried.ID] || !ids[working.ID] {
+		t.Fatalf("device snapshot=%v, want the session list", ids)
+	}
+	if ids := snapshotIDs(hostToken); !ids[resting.ID] || !ids[buried.ID] || !ids[working.ID] {
+		t.Fatalf("host snapshot=%v, want every row", ids)
+	}
+	if err := os.MkdirAll(filepath.Dir(DashboardConfigPath()), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(DashboardConfigPath(), []byte(`{`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/snapshot?fresh=1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+hostToken)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode == http.StatusOK {
+		t.Fatal("host snapshot served the cached session list when the refresh failed; a host must see every row or an error")
+	}
+	if err := os.Remove(DashboardConfigPath()); err != nil {
+		t.Fatal(err)
+	}
+
+	resting.Status = surface.StatusBusy
+	fake.sessions[resting.ID] = resting
+	d.discoverCatalog(context.Background())
+	d.publishCatalogPresence()
+	reopened := read(stream(deviceToken, latest, latestSeq()))
+	if reopened.types[resting.ID] != "session.upserted" || reopened.types[buried.ID] != "session.upserted" {
+		t.Fatalf("device stream after the subagent resumed=%v, want it and its already busy child listed", reopened.types)
+	}
+	if !reopened.leadUpserted || reopened.subagents != nil {
+		t.Fatalf("lead rollup after its subagents were listed=%+v (upserted=%v), want none hidden", reopened.subagents, reopened.leadUpserted)
+	}
+}
+
+func TestSnapshotKeepsTheSubagentCountStoredBeforeHiddenCounts(t *testing.T) {
+	d, store, fake, lead, _ := daemonFixture(t)
+	lead.Subagents = &surface.SubagentRollup{Count: 3, Working: 1}
+	fake.sessions = map[string]surface.Session{lead.ID: lead}
+	d.discoverCatalog(context.Background())
+	db, err := sql.Open("sqlite", store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE catalog_sessions SET projection_fingerprint=json_remove(projection_fingerprint,'$.observedSubagents','$.hiddenSubagents','$.listed') WHERE session_id=?`, lead.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`PRAGMA user_version=18`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := registry.Open(store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { reopened.Close() })
+	d = New(reopened, []surface.Surface{&daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}}})
+	d.publishCatalogPresence()
+	state, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range state.Sessions {
+		if session.ID == lead.ID {
+			if session.Subagents == nil || *session.Subagents != (surface.SubagentRollup{Count: 3, Working: 1}) {
+				t.Fatalf("lead rollup=%+v, want the stored count", session.Subagents)
+			}
+			return
+		}
+	}
+	t.Fatal("snapshot dropped the lead")
 }

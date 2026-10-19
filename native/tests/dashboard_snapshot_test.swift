@@ -1,3 +1,4 @@
+@testable import AgenthailHelpers
 import Foundation
 
 @main
@@ -30,7 +31,7 @@ struct DashboardSnapshotTest {
         precondition(current.hasSamePresentation(as: transportOnlyChange))
         precondition(!current.hasSamePresentation(as: visibleChange))
         var problemChange = transportOnlyChange
-        problemChange.deliveryProblems = [DeliveryProblem(deliveryId: 7, sessionId: "s1", sourceSessionId: "s2", message: "Run the tests", reason: "target_not_writable", status: nil, at: "2026-10-04 12:00:00")]
+        problemChange.deliveryProblems = [DeliveryProblem(deliveryId: 7, sessionId: "s1", sourceSessionId: "s2", attentionSessionId: "s2", message: "Run the tests", reason: "target_not_writable", status: nil, at: "2026-10-04 12:00:00")]
         precondition(!current.hasSamePresentation(as: problemChange))
 
         let child = try! JSONDecoder().decode(SessionState.self, from: Data(#"{"id":"child","surface":"codex","name":"Review","status":"busy","queueCount":0,"open":false,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"compact":true,"model":true,"interrupt":true,"steer":true},"subagent":{"parentId":"root","rootId":"root","depth":2,"nickname":"Euclid","role":"reviewer"}}"#.utf8))
@@ -58,6 +59,12 @@ struct DashboardSnapshotTest {
         let settings = try! JSONDecoder().decode(DashboardSettingsState.self, from: Data(#"{"dashboard":{"enabled":true,"listen":"127.0.0.1:7412","codexRecentHours":8,"busyDelivery":"steer","remoteAccess":{"enabled":true,"provider":"tailscale","port":7412}},"remoteAccess":{"enabled":true,"desired":true,"provider":"tailscale","url":"https://mac.example.ts.net:7412/?token=fixture#overview","dnsName":"mac.example.ts.net","port":7412},"notifications":{"enabled":false,"available":true,"authorization":"unknown","authorized":false,"alerts":false,"sounds":false},"daemon":{"pid":1,"running":true}}"#.utf8))
         precondition(settings.dashboard.listen == "127.0.0.1:7412" && settings.dashboard.codexRecentHours == 8 && settings.dashboard.busyDelivery == "steer")
         precondition(settings.remoteAccess.url?.hasPrefix("https://mac.example.ts.net:7412/") == true)
+        let remote = try! JSONDecoder().decode(SessionState.self, from: Data(#"{"id":"h0123456789ab::remote-1","surface":"codex","name":"Remote","alias":"builder","status":"idle","queueCount":0,"open":false,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":true,"steer":true},"host":{"id":"h0123456789ab","name":"forge","state":"unreachable"},"unavailableReason":"host forge is unreachable"}"#.utf8))
+        precondition(remote.remoteHostName == "forge" && remote.isUnavailable)
+        let local = try! JSONDecoder().decode(SessionState.self, from: Data(#"{"id":"local-1","surface":"codex","name":"Local","status":"idle","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":true,"steer":true},"host":{"id":"hffffffffffff","name":"mac","state":"local"},"unavailableReason":"workspace path is unavailable"}"#.utf8))
+        precondition(local.remoteHostName == nil && !local.isUnavailable)
+        let daemon = try! JSONDecoder().decode(DaemonState.self, from: Data(#"{"running":true,"pid":1,"host":{"id":"hffffffffffff","name":"mac","state":"local"},"hosts":[{"id":"h0123456789ab","name":"forge","state":"unauthorized","detail":"pair it again"}]}"#.utf8))
+        precondition(daemon.host?.name == "mac" && daemon.hosts?.first?.stateLabel == "Pairing revoked" && daemon.hosts?.first?.isHealthy == false)
         print("dashboard snapshot tests passed")
     }
 }

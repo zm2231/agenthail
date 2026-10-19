@@ -12,10 +12,109 @@ struct ClaudeCreationSettings {
 }
 
 struct SessionCreationOptions: Decodable {
-    struct Surface: Decodable, Identifiable { let id: String; let workspace: Bool }
+    struct Surface: Decodable, Identifiable { let id: String; let workspace: Bool; var connected: Bool? = nil }
+    var host: SessionHost? = nil
     let surfaces: [Surface]
-    let workspaces: [String]
+    let projects: [LaunchProject]
     var launchers: [LauncherOption]? = nil
+}
+
+/// A project a new session can start in, most recently active first. The
+/// root path is where the session starts.
+struct LaunchProject: Decodable, Hashable, Identifiable {
+    let id: String
+    let displayName: String
+    let rootPath: String
+    let kind: String
+}
+
+struct CreationHost: Hashable, Identifiable {
+    let id: String
+    let name: String
+    let state: String
+    var isLocal: Bool { id.isEmpty }
+    var isAvailable: Bool { state == "connected" }
+    var stateLabel: String { HostHealth(id: id, name: name, state: state).stateLabel }
+}
+
+/// Where a new session starts and the launch catalog read from that host.
+/// An empty host id is this machine. Loads carry the generation they were
+/// started for, so an answer for a host the user already left is dropped.
+struct CreationHostPicker {
+    private(set) var hosts: [CreationHost] = []
+    private(set) var selected = ""
+    private(set) var options: SessionCreationOptions?
+    private(set) var models: [String: [ModelOption]] = [:]
+    private(set) var loadError: String?
+    private(set) var generation = 0
+
+    init(daemon: DaemonState?, selectedSession: SessionState?) {
+        update(daemon: daemon)
+        if let host = selectedSession?.host, host.state != "local", hosts.contains(where: { $0.id == host.id && $0.isAvailable }) {
+            selected = host.id
+        }
+    }
+
+    var isVisible: Bool { hosts.count > 1 }
+    var selectedHost: CreationHost? { hosts.first { $0.id == selected } }
+    var hostQuery: String? { selected.isEmpty ? nil : selected }
+    var isLoading: Bool { options == nil && loadError == nil }
+    var canStart: Bool { options != nil && (selected.isEmpty || selectedHost?.isAvailable == true) }
+    var projects: [LaunchProject] { options?.projects ?? [] }
+
+    mutating func update(daemon: DaemonState?) {
+        let paired = daemon?.hosts ?? []
+        if let local = daemon?.host, !paired.isEmpty {
+            hosts = [CreationHost(id: "", name: local.name, state: "connected")] + paired.map { CreationHost(id: $0.id, name: $0.name, state: $0.state) }
+        } else {
+            hosts = []
+        }
+        if !selected.isEmpty && selectedHost == nil {
+            selected = ""
+            options = nil
+            models = [:]
+            loadError = nil
+            generation += 1
+        }
+    }
+
+    @discardableResult
+    mutating func select(_ id: String) -> Bool {
+        guard id != selected, hosts.contains(where: { $0.id == id && $0.isAvailable }) else { return false }
+        selected = id
+        options = nil
+        models = [:]
+        loadError = nil
+        generation += 1
+        return true
+    }
+
+    func owns(_ session: SessionState?) -> Bool {
+        guard let session else { return false }
+        return (session.remoteHostName == nil ? "" : session.host?.id ?? "") == selected
+    }
+
+    /// Where a new session starts by default: the selected session's checkout
+    /// when it is on the chosen host, else that host's most recent project.
+    func defaultFolder(selected session: SessionState?) -> String {
+        (owns(session) ? session.flatMap { $0.checkout?.path ?? $0.cwd } : nil) ?? projects.first?.rootPath ?? ""
+    }
+
+    mutating func receive(options next: SessionCreationOptions, for loaded: Int) {
+        guard loaded == generation else { return }
+        options = next
+        loadError = nil
+    }
+
+    mutating func receive(models next: [ModelOption], agent: String, for loaded: Int) {
+        guard loaded == generation else { return }
+        models[agent] = next
+    }
+
+    mutating func fail(_ message: String, for loaded: Int) {
+        guard loaded == generation else { return }
+        loadError = message
+    }
 }
 struct CreationModels: Decodable { let models: [ModelOption] }
 struct QueueResponse: Decodable { let items: [QueueState] }
@@ -57,6 +156,25 @@ struct Capabilities: Codable, Hashable {
     var model = false
     var interrupt = false
     var steer = false
+    var attach = false
+
+    init(send: Bool = false, stream: Bool = false, reply: Bool = false, goal: Bool = false, compact: Bool = false, model: Bool = false, interrupt: Bool = false, steer: Bool = false, attach: Bool = false) {
+        (self.send, self.stream, self.reply, self.goal, self.compact, self.model, self.interrupt, self.steer, self.attach) = (send, stream, reply, goal, compact, model, interrupt, steer, attach)
+    }
+
+    // A paired host on an older release omits attach; it cannot store uploads.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        send = try container.decode(Bool.self, forKey: .send)
+        stream = try container.decode(Bool.self, forKey: .stream)
+        reply = try container.decode(Bool.self, forKey: .reply)
+        goal = try container.decode(Bool.self, forKey: .goal)
+        compact = try container.decode(Bool.self, forKey: .compact)
+        model = try container.decode(Bool.self, forKey: .model)
+        interrupt = try container.decode(Bool.self, forKey: .interrupt)
+        steer = try container.decode(Bool.self, forKey: .steer)
+        attach = try container.decodeIfPresent(Bool.self, forKey: .attach) ?? false
+    }
 }
 
 struct SurfaceState: Decodable, Identifiable, Equatable {
@@ -112,15 +230,20 @@ struct SessionState: Codable, Identifiable, Hashable {
     let open: Bool
     var current: Bool
     var currentReason: String?
+    var archived: Bool? = nil
     let capabilities: Capabilities
     let readOnly: Bool?
     let readOnlyReason: String?
     var cwd: String? = nil
-    var hostProject: HostProjectIdentity? = nil
+    var project: ProjectIdentity? = nil
     var checkout: CheckoutIdentity? = nil
     var runtime: SessionRuntime? = nil
     var subagent: SubagentIdentity? = nil
     var subagents: SubagentRollup? = nil
+    var hiddenSubagents: SubagentRollup? = nil
+    var listed: Bool? = nil
+    var host: SessionHost? = nil
+    var unavailableReason: String? = nil
     var transport: String? = nil
     var waitingOn: WaitingState? = nil
 
@@ -132,6 +255,45 @@ struct SessionState: Codable, Identifiable, Hashable {
     var isWorking: Bool { status == "busy" }
     var isWaitingOnYou: Bool { waitingOn != nil }
     var isReadOnly: Bool { readOnly == true }
+    var remoteHostName: String? {
+        guard let host, host.state != "local" else { return nil }
+        return host.name
+    }
+    /// The remote host's name without a DNS domain, for a one-line badge.
+    var shortRemoteHostName: String? {
+        remoteHostName.map { name in String(name.split(separator: ".", maxSplits: 1).first ?? Substring(name)) }
+    }
+    var isUnavailable: Bool { remoteHostName != nil && !(unavailableReason ?? "").isEmpty }
+    /// The paired host that owns this session, or nil for this machine.
+    var remoteHostID: String? { remoteHostName == nil ? nil : host?.id }
+    var modelCatalogKey: String { "\(remoteHostID ?? "")/\(surface)" }
+    var canCallByVoice: Bool { remoteHostID == nil }
+}
+
+struct SessionHost: Codable, Hashable {
+    let id: String
+    let name: String
+    let state: String
+}
+
+struct HostHealth: Decodable, Hashable, Identifiable {
+    let id: String
+    let name: String
+    let state: String
+    var detail: String? = nil
+    var notice: String? = nil
+
+    var stateLabel: String {
+        switch state {
+        case "connected": return "Connected"
+        case "connecting": return "Connecting"
+        case "unreachable": return "Unreachable"
+        case "unauthorized": return "Pairing revoked"
+        case "incompatible": return "Needs update"
+        default: return state.capitalized
+        }
+    }
+    var isHealthy: Bool { state == "connected" }
 }
 
 /// A question, plan or approval the session is waiting on its user to answer.
@@ -177,6 +339,78 @@ struct SessionFamily: Identifiable, Equatable {
     }
 }
 
+/// Refetches a session's subagents when it changes, its subagent counts do,
+/// or the catalog reports a change among its hidden subagents.
+struct SubagentFetchKey: Hashable {
+    let sessionID: String
+    let subagents: SubagentRollup?
+    let hidden: SubagentRollup?
+    let revision: Int
+
+    init(_ session: SessionState, revision: Int) {
+        sessionID = session.id
+        subagents = session.subagents
+        hidden = session.hiddenSubagents
+        self.revision = revision
+    }
+}
+
+/// The fetched subagent pages of the few sessions most recently shown; a
+/// parent's page can run to hundreds of kilobytes.
+struct SubagentPageCache {
+    static let capacity = 4
+    private(set) var errors: [String: String] = [:]
+    private var rows: [String: [SessionState]] = [:]
+    private var order: [String] = []
+    private var revisions: [String: Int] = [:]
+
+    func children(of parentID: String) -> [SessionState] { rows[parentID] ?? [] }
+    func revision(_ parentID: String) -> Int { revisions[parentID] ?? 0 }
+    func loading(_ parent: SessionState) -> Bool { (parent.hiddenSubagents?.count ?? 0) > 0 && rows[parent.id] == nil && errors[parent.id] == nil }
+    func session(_ id: String) -> SessionState? { rows.values.lazy.flatMap { $0 }.first { $0.id == id } }
+
+    mutating func store(_ sessions: [SessionState], for parentID: String) {
+        rows[parentID] = sessions
+        errors[parentID] = nil
+        touch(parentID)
+    }
+
+    mutating func fail(_ message: String, for parentID: String) {
+        errors[parentID] = message
+        touch(parentID)
+    }
+
+    mutating func drop(_ parentID: String) {
+        rows[parentID] = nil
+        errors[parentID] = nil
+        revisions[parentID] = nil
+        order.removeAll { $0 == parentID }
+    }
+
+    /// A device's catalog stream reports a hidden subagent's arrival or change
+    /// only as an unlisted removal without its parent, so an unknown one
+    /// refetches every cached page.
+    mutating func sessionRemoved(_ id: String, unlisted: Bool) {
+        drop(id)
+        let parents = rows.filter { $0.value.contains { $0.id == id } }.map(\.key)
+        for parent in parents { rows[parent]?.removeAll { $0.id == id } }
+        for parent in parents.isEmpty && unlisted ? Array(rows.keys) : parents {
+            revisions[parent, default: 0] += 1
+        }
+    }
+
+    private mutating func touch(_ parentID: String) {
+        order.removeAll { $0 == parentID }
+        order.append(parentID)
+        while order.count > Self.capacity {
+            let evicted = order.removeFirst()
+            rows[evicted] = nil
+            errors[evicted] = nil
+            revisions[evicted] = nil
+        }
+    }
+}
+
 enum SessionFamilies {
     static func build(_ sessions: [SessionState]) -> [SessionFamily] {
         let ids = Set(sessions.map(\.id))
@@ -202,13 +436,22 @@ enum SessionFamilies {
             }
             walk(root.id, depth: 1)
             let observed = root.subagents ?? SubagentRollup(count: 0, working: 0)
+            let counted = members.filter { $0.session.listed != false }
             return SessionFamily(
                 root: root,
                 members: members,
-                subagentCount: members.count + observed.count,
-                workingSubagents: members.filter { $0.session.isWorking }.count + observed.working
+                subagentCount: counted.count + observed.count,
+                workingSubagents: counted.filter { $0.session.isWorking }.count + observed.working
             )
         }
+    }
+
+    /// The direct subagents of a session: the fetched page, with any row the
+    /// live session list holds taking the place of its fetched copy.
+    static func children(of parentID: String, listed: [SessionState], fetched: [SessionState]) -> [SessionState] {
+        let live = listed.filter { $0.subagent?.parentId == parentID }
+        let liveIDs = Set(live.map(\.id))
+        return fetched.filter { $0.subagent?.parentId == parentID && !liveIDs.contains($0.id) } + live
     }
 
     static func subagentSummary(_ family: SessionFamily) -> String {
@@ -294,8 +537,20 @@ struct LauncherOption: Decodable, Identifiable, Hashable {
     let agents: [String]
     let available: Bool
     let detail: String?
+    /// Whether the launcher applies every creation setting. A terminal launcher
+    /// takes only the folder, message, model and name.
+    let sessionOptions: Bool
 
-    enum CodingKeys: String, CodingKey { case id, label, agents, available, detail }
+    enum CodingKeys: String, CodingKey { case id, label, agents, available, detail, sessionOptions }
+
+    init(id: String, label: String? = nil, agents: [String] = [], available: Bool = true, detail: String? = nil, sessionOptions: Bool = false) {
+        self.id = id
+        self.label = label ?? id
+        self.agents = agents
+        self.available = available
+        self.detail = detail
+        self.sessionOptions = sessionOptions
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -304,14 +559,18 @@ struct LauncherOption: Decodable, Identifiable, Hashable {
         agents = try container.decodeIfPresent([String].self, forKey: .agents) ?? []
         available = try container.decode(Bool.self, forKey: .available)
         detail = try container.decodeIfPresent(String.self, forKey: .detail)
+        sessionOptions = try container.decodeIfPresent(Bool.self, forKey: .sessionOptions) ?? false
     }
+
+    var isTerminal: Bool { !sessionOptions }
 }
 
-struct HostProjectIdentity: Codable, Hashable {
-    let id: String?
-    let displayName: String?
-    let commonDir: String?
-    let path: String?
+struct ProjectIdentity: Codable, Hashable {
+    let id: String
+    let displayName: String
+    let rootPath: String
+    let kind: String
+    var archived: Bool? = nil
 }
 
 struct CheckoutIdentity: Codable, Hashable {
@@ -376,6 +635,7 @@ struct QueueState: Decodable, Identifiable, Equatable {
         case "retrying": return "Held: waiting to retry"
         case "behind": return "Held: behind an earlier message"
         case "notLoaded": return "Held: this conversation is not loaded"
+        case "hostUnreachable": return "Held: this agent's host is unreachable"
         default: return "Delivers on the next scan"
         }
     }
@@ -423,6 +683,7 @@ struct DeliveryProblem: Decodable, Identifiable, Equatable {
     let deliveryId: Int64
     let sessionId: String
     let sourceSessionId: String?
+    let attentionSessionId: String?
     let message: String
     let reason: String
     let status: String?
@@ -483,6 +744,16 @@ struct DaemonState: Decodable, Equatable {
     let pid: Int?
     let stale: Bool?
     let refreshError: String?
+    var host: SessionHost? = nil
+    var hosts: [HostHealth]? = nil
+
+    /// The paired host a host-qualified session id names, for a session the
+    /// snapshot has not listed yet.
+    func pairedHost(owning sessionID: String) -> SessionHost? {
+        guard let range = sessionID.range(of: "::") else { return nil }
+        let hostID = String(sessionID[..<range.lowerBound])
+        return hosts?.first { $0.id == hostID }.map { SessionHost(id: $0.id, name: $0.name, state: $0.state) }
+    }
 }
 
 struct DashboardSnapshot: Decodable {
@@ -494,6 +765,7 @@ struct DashboardSnapshot: Decodable {
     var surfaces: [SurfaceState]
     var sessions: [SessionState]
     var totalSessions: Int
+    var nextCursor: String? = nil
     let queue: [QueueState]
     let channels: [ChannelState]
     let relays: [RelayState]
@@ -728,6 +1000,58 @@ struct HistoryPageResponse: Decodable {
     let kinds: [String]
 }
 
+struct SigninProfileState: Codable, Identifiable, Equatable {
+    let id: String
+    let label: String
+    let browser: String
+    let profile: String
+    let createdAt: String
+}
+
+struct SigninConsumerState: Codable, Identifiable, Equatable {
+    let id: String
+    let label: String
+    let purpose: String
+    let profileId: String?
+}
+
+struct SigninDetectedProfile: Codable, Identifiable, Equatable {
+    let profile: String
+    let name: String
+    let profileId: String?
+
+    var id: String { profile }
+    var choiceLabel: String { name == profile ? name : "\(name) (\(profile))" }
+}
+
+struct SigninBrowserState: Codable, Identifiable, Equatable {
+    let browser: String
+    let label: String
+    let available: Bool
+    let detail: String?
+    let profiles: [SigninDetectedProfile]
+
+    var id: String { browser }
+    var addableProfiles: [SigninDetectedProfile] { profiles.filter { $0.profileId == nil } }
+}
+
+struct SigninState: Codable, Equatable {
+    let profiles: [SigninProfileState]
+    let consumers: [SigninConsumerState]
+    let browsers: [SigninBrowserState]
+
+    func browserLabel(_ browser: String) -> String {
+        browsers.first { $0.browser == browser }?.label ?? browser
+    }
+
+    var addableBrowsers: [SigninBrowserState] { browsers.filter { $0.available && !$0.addableProfiles.isEmpty } }
+    var unavailableBrowsers: [SigninBrowserState] { browsers.filter { !$0.available } }
+}
+
+struct SigninProfileResponse: Decodable {
+    let profile: SigninProfileState?
+}
+
 struct PairingResponse: Decodable {
     let id: String
     let expiresAt: String
@@ -768,6 +1092,16 @@ struct SessionAttachment: Decodable, Equatable, Hashable {
     var isImage: Bool { mediaType.hasPrefix("image/") }
 }
 
+// A file sent with a message that the agent received as a stored path. The
+// path is on the host that owns the session.
+struct AttachedFile: Decodable, Equatable, Hashable {
+    let name: String
+    var path = ""
+    var bytes: Int64? = nil
+
+    var sizeLabel: String? { bytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } }
+}
+
 struct SessionStreamItem: Decodable {
     let itemId: String
     let version: UInt64
@@ -788,6 +1122,7 @@ struct SessionStreamItem: Decodable {
     let bodyRef: String?
     let reason: String?
     let attachment: SessionAttachment?
+    let files: [AttachedFile]?
 }
 
 struct SessionStreamBody: Decodable {
@@ -830,6 +1165,7 @@ struct CatalogStreamData: Decodable {
     let deliveryId: Int64?
     let queueCount: Int?
     let sourceSessionId: String?
+    let attentionSessionId: String?
     let message: String?
     let reason: String?
     let status: String?
@@ -851,6 +1187,7 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     let bodyRef: String?
     var attachment: SessionAttachment? = nil
     var sender: String? = nil
+    var files: [AttachedFile]? = nil
 
     var isPeerMessage: Bool { kind == "message" && role == "peer" }
     var peerSender: String { sender.flatMap { $0.isEmpty ? nil : $0 } ?? "another agent" }
@@ -865,4 +1202,11 @@ struct SessionSearchItem: Decodable, Identifiable {
     var id: String { session.id }
     let session: SessionState
     let snippet: String?
+}
+
+struct UploadedAttachment: Decodable, Equatable {
+    let id: String
+    let name: String
+    let mediaType: String
+    let bytes: Int64
 }

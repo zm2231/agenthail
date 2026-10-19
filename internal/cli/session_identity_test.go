@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
@@ -23,7 +25,7 @@ func liveClaudeApp(t *testing.T) (*App, *registry.Registry, *claudetest.Fixture,
 	fixture := claudetest.New(t)
 	posts := &claudePosts{}
 	app, r := cliFixture(t, &cliSurface{kind: surface.KindClaude})
-	app.Surfaces[0].Surface = surfaces.NewClaudeWithRequest("", fixture.Home, posts.request)
+	app.Surfaces[0].Surface = surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, posts.request)
 	return app, r, fixture, posts
 }
 
@@ -31,8 +33,9 @@ func branchTranscript(t *testing.T, fixture *claudetest.Fixture, conversation, p
 	t.Helper()
 	first, _ := json.Marshal(map[string]any{"type": "user", "uuid": "fixture-branch", "sessionId": conversation, "cwd": fixture.Home, "forkedFrom": map[string]any{"sessionId": parent, "messageUuid": "fixture-assistant"}, "message": map[string]any{"role": "user", "content": "fixture branch question"}})
 	answer, _ := json.Marshal(map[string]any{"type": "assistant", "uuid": "fixture-branch-answer", "sessionId": conversation, "cwd": fixture.Home, "message": map[string]any{"id": "fixture-branch-message", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": "fixture branch answer"}}}})
+	duration, _ := json.Marshal(map[string]any{"type": "system", "subtype": "turn_duration", "sessionId": conversation, "cwd": fixture.Home})
 	path := filepath.Join(fixture.Home, ".claude", "projects", "fixture-project", conversation+".jsonl")
-	if err := os.WriteFile(path, []byte(string(first)+"\n"+string(answer)+"\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(string(first)+"\n"+string(answer)+"\n"+string(duration)+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -105,11 +108,13 @@ func TestBranchInALiveProcessKeepsTheAliasOnTheOriginalConversation(t *testing.T
 	if sender := sendFrom(t, app, r, originalConversation, "claude:"+branchConversation, "to the branch"); sender != originalConversation || posts.count("to the branch") != 1 {
 		t.Fatalf("send to the branch: sender=%q posts=%d", sender, posts.count("to the branch"))
 	}
-	fixture.ResumeBridge("session_resumed")
-	if sender := sendFrom(t, app, r, branchConversation, "@worker", "to the original"); sender != branchConversation || posts.count("to the original") != 1 {
-		t.Fatalf("send to @worker: sender=%q posts=%d", sender, posts.count("to the original"))
+	host := claudehosttest.New(t, fixture.Home)
+	host.Start(t)
+	peers := claudetest.ListenPeerManager(t, fixture.Home)
+	if sender := sendFrom(t, app, r, branchConversation, "@worker", "to the original"); sender != branchConversation || peers.Count("to the original") != 1 {
+		t.Fatalf("send to @worker: sender=%q peer=%d", sender, peers.Count("to the original"))
 	}
-	if fixture.Invocations("--bg", "--resume", originalConversation) != 1 {
+	if len(host.Spawns(t, originalConversation)) != 1 {
 		t.Fatal("a send to the original was not delivered by resuming the original conversation")
 	}
 }
@@ -145,7 +150,7 @@ func TestResumeInAnotherProcessKeepsTheAlias(t *testing.T) {
 
 func TestALaunchedSessionAndItsDiscoveredProcessAreOneRow(t *testing.T) {
 	app, r, fixture, _ := liveClaudeApp(t)
-	launched := surface.Session{ID: originalConversation, Surface: surface.KindClaude, Name: "launched", PID: fixture.PID, Status: surface.StatusBusy, Cwd: fixture.Home}
+	launched := surface.Session{ID: originalConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "launched", PID: fixture.PID, Status: surface.StatusBusy, Cwd: fixture.Home}
 	if err := r.RegisterSession(launched); err != nil {
 		t.Fatal(err)
 	}

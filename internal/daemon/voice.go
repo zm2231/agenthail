@@ -24,7 +24,7 @@ var voicePeerScript string
 
 func (d *Daemon) registerVoiceAPI(mux *http.ServeMux, dashboard *dashboardServer) {
 	var provider voice.Provider
-	if codex, ok := d.surfaceForKind(surface.KindCodex).(*surfaces.Codex); ok {
+	if codex, ok := d.adapters().ForSurface(surface.KindCodex).(*surfaces.Codex); ok {
 		provider = &surfaces.CodexVoice{Codex: codex}
 	}
 	commandPath, err := os.Executable()
@@ -52,9 +52,9 @@ func (p daemonVoiceStreamProvider) PrepareSessionStream(ctx context.Context, ses
 	if p.daemon == nil || session == nil {
 		return sessionstream.Subscription{}, fmt.Errorf("voice session source is unavailable")
 	}
-	adapter := p.daemon.surfaceForKind(session.Surface)
-	if adapter == nil {
-		return sessionstream.Subscription{}, fmt.Errorf("voice session source has no adapter")
+	adapter, err := p.daemon.adapters().For(session)
+	if err != nil {
+		return sessionstream.Subscription{}, fmt.Errorf("voice session source: %w", err)
 	}
 	return p.daemon.sources.prepareStream(ctx, session, adapter)
 }
@@ -67,6 +67,9 @@ func (d *Daemon) resolveVoiceTarget(ctx context.Context, requested string) (*voi
 	if d.Registry == nil {
 		return nil, fmt.Errorf("session-bound voice requires the Agenthail registry")
 	}
+	if host, _, routeErr := d.routeSession(requested); routeErr == nil && host != nil {
+		return nil, fmt.Errorf("voice is not available for sessions on another host yet; %s is on host %s", requested, host.record.Name)
+	}
 	id, err := d.Registry.ExactTarget("", requested)
 	if err != nil {
 		return nil, fmt.Errorf("resolve voice target %q by alias or exact session ID: %w", requested, err)
@@ -75,7 +78,7 @@ func (d *Daemon) resolveVoiceTarget(ctx context.Context, requested string) (*voi
 	if err != nil {
 		return nil, fmt.Errorf("load voice target: %w", err)
 	}
-	adapter, err := d.surfaceForSession(session)
+	adapter, err := d.adapters().For(session)
 	if err != nil {
 		return nil, err
 	}

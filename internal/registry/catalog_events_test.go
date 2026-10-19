@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,9 +13,6 @@ import (
 
 func TestCatalogEventsReplayDeduplicateAndPersistEpoch(t *testing.T) {
 	r := openTestRegistry(t)
-	if err := r.EnsureCatalogState(); err != nil {
-		t.Fatal(err)
-	}
 	epoch, latest, err := r.CatalogState()
 	if err != nil || epoch == "" || latest != 0 {
 		t.Fatalf("epoch=%q latest=%d err=%v", epoch, latest, err)
@@ -41,7 +39,7 @@ func TestCatalogDiscoveryFailureRetainsRowAndAdvancesStaleGeneration(t *testing.
 	r := openTestRegistry(t)
 	observed := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
 	projection := `{"id":"catalog-session","surface":"codex","name":"Catalog","cwd":"/work","status":"idle"}`
-	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: "catalog-session", Surface: surface.KindCodex, Name: "Catalog", Cwd: "/work"}, HostProject: []byte(`{"id":"project"}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "catalog-session:initial", Type: "session.upserted", EntityID: "catalog-session", Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: "catalog-session", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Catalog", Cwd: "/work"}, Project: []byte(`{"id":"project"}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "catalog-session:initial", Type: "session.upserted", EntityID: "catalog-session", Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
 		t.Fatal(err)
 	}
 	events, err := r.MarkCatalogDiscoveryFailure(surface.KindCodex, "provider unavailable", observed.Add(time.Minute))
@@ -53,7 +51,7 @@ func TestCatalogDiscoveryFailureRetainsRowAndAdvancesStaleGeneration(t *testing.
 		t.Fatalf("snapshot=%+v err=%v", snapshot, err)
 	}
 	row := snapshot.Sessions[0]
-	if !row.Freshness.Stale || row.Freshness.Generation != 2 || !row.Freshness.ObservedAt.Equal(observed) || row.Session.ID != "catalog-session" || row.Session.Cwd != "/work" || string(row.HostProject) != `{"id":"project"}` {
+	if !row.Freshness.Stale || row.Freshness.Generation != 2 || !row.Freshness.ObservedAt.Equal(observed) || row.Session.ID != "catalog-session" || row.Session.Cwd != "/work" || string(row.Project) != `{"id":"project"}` {
 		t.Fatalf("row=%+v", row)
 	}
 	var payload struct {
@@ -64,7 +62,7 @@ func TestCatalogDiscoveryFailureRetainsRowAndAdvancesStaleGeneration(t *testing.
 	if err := json.Unmarshal(events[0].Payload, &payload); err != nil || !payload.Session.Freshness.Stale || payload.Session.Freshness.Generation != 2 {
 		t.Fatalf("payload=%s err=%v", events[0].Payload, err)
 	}
-	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: row.Session, HostProject: row.HostProject, Checkout: row.Checkout, ObservedAt: observed.Add(2 * time.Minute), ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "catalog-session:recovery", Type: "session.upserted", EntityID: row.Session.ID, Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: row.Session, Project: row.Project, Checkout: row.Checkout, ObservedAt: observed.Add(2 * time.Minute), ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "catalog-session:recovery", Type: "session.upserted", EntityID: row.Session.ID, Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
 		t.Fatal(err)
 	}
 	recovered, err := r.CatalogSnapshot()
@@ -76,10 +74,17 @@ func TestCatalogDiscoveryFailureRetainsRowAndAdvancesStaleGeneration(t *testing.
 func TestDiscoveryFailureBreaksSuccessfulOmissionRun(t *testing.T) {
 	r := openTestRegistry(t)
 	observed := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
-	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: "omission-run", Surface: surface.KindCodex}, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: `{"id":"omission-run","surface":"codex"}`}, CatalogEvent{DedupeKey: "omission-run:initial", Type: "session.upserted", EntityID: "omission-run", Payload: []byte(`{"session":{"id":"omission-run"}}`)}); err != nil {
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: "omission-run", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: `{"id":"omission-run","surface":"codex"}`}, CatalogEvent{DedupeKey: "omission-run:initial", Type: "session.upserted", EntityID: "omission-run", Payload: []byte(`{"session":{"id":"omission-run"}}`)}); err != nil {
 		t.Fatal(err)
 	}
-	if events, err := r.RecordCatalogDiscovery(surface.KindCodex, map[string]struct{}{}, time.Now(), true, 2); err != nil || len(events) != 0 {
+	events, err := r.RecordCatalogDiscovery(surface.KindCodex, map[string]struct{}{}, time.Now(), true, 2)
+	var retired struct {
+		Session struct {
+			Status  surface.SessionStatus `json:"status"`
+			Current bool                  `json:"current"`
+		} `json:"session"`
+	}
+	if err != nil || len(events) != 1 || json.Unmarshal(events[0].Payload, &retired) != nil || retired.Session.Status != surface.StatusOffline || retired.Session.Current {
 		t.Fatalf("first omission events=%+v err=%v", events, err)
 	}
 	if _, err := r.MarkCatalogDiscoveryFailure(surface.KindCodex, "provider unavailable", observed.Add(time.Minute)); err != nil {
@@ -107,7 +112,7 @@ func TestCatalogSnapshotPageFiltersAndBoundsRows(t *testing.T) {
 			project = "target"
 		}
 		projection := fmt.Sprintf(`{"id":%q,"surface":"codex","name":%q,"cwd":"/work/%s","status":"idle"}`, id, "worker-"+fmt.Sprint(i), project)
-		if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: id, Surface: surface.KindCodex, Name: "worker-" + fmt.Sprint(i), Cwd: "/work/" + project, LastActive: now.Add(-time.Duration(i) * time.Minute)}, HostProject: []byte(fmt.Sprintf(`{"id":%q}`, project)), Checkout: []byte(`{}`), ObservedAt: now, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: id, Type: "session.upserted", EntityID: id, Payload: []byte(`{}`)}); err != nil {
+		if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "worker-" + fmt.Sprint(i), Cwd: "/work/" + project, LastActive: now.Add(-time.Duration(i) * time.Minute)}, Project: []byte(fmt.Sprintf(`{"id":%q}`, project)), Checkout: []byte(`{}`), ObservedAt: now, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: id, Type: "session.upserted", EntityID: id, Payload: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -127,8 +132,8 @@ func TestCatalogSnapshotPageFiltersAndBoundsRows(t *testing.T) {
 
 func TestCatalogOmissionRequiresTwoSuccessfulReconciliations(t *testing.T) {
 	r := openTestRegistry(t)
-	session := surface.Session{ID: "omitted", Surface: surface.KindCodex}
-	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, HostProject: []byte(`{"id":"project"}`), Checkout: []byte(`{"id":"checkout"}`), ProjectionFingerprint: "initial"}, CatalogEvent{DedupeKey: "omitted:upsert", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
+	session := surface.Session{ID: "omitted", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, Project: []byte(`{"id":"project"}`), Checkout: []byte(`{"id":"checkout"}`), ProjectionFingerprint: "initial"}, CatalogEvent{DedupeKey: "omitted:upsert", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 	for attempt := 1; attempt <= 2; attempt++ {
@@ -216,8 +221,8 @@ func TestRetainCatalogSurfacesDropsUnregisteredSurfaces(t *testing.T) {
 
 func TestQueueMutationsAdvanceCatalogWatermarkWithPageMembership(t *testing.T) {
 	r := openTestRegistry(t)
-	session := surface.Session{ID: "queued-claude", Surface: surface.KindClaude, Name: "Queued", Status: surface.StatusIdle}
-	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now(), ProjectionFingerprint: `{"id":"queued-claude","open":false}`}, CatalogEvent{DedupeKey: "session.upserted:queued-claude", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":{"id":"queued-claude"}}`)}); err != nil {
+	session := surface.Session{ID: "queued-claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Queued", Status: surface.StatusIdle}
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now(), ProjectionFingerprint: `{"id":"queued-claude","open":false}`}, CatalogEvent{DedupeKey: "session.upserted:queued-claude", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":{"id":"queued-claude"}}`)}); err != nil {
 		t.Fatal(err)
 	}
 	page := func() CatalogPage {
@@ -264,5 +269,45 @@ func TestQueueMutationsAdvanceCatalogWatermarkWithPageMembership(t *testing.T) {
 	swept := page()
 	if swept.CatalogSeq <= beforeCancel.CatalogSeq || len(swept.Sessions) != 0 {
 		t.Fatalf("cancel seq=%d->%d sessions=%d", beforeCancel.CatalogSeq, swept.CatalogSeq, len(swept.Sessions))
+	}
+}
+
+func TestSessionMissingFromDiscoveryStopsBeingBusyOrCurrent(t *testing.T) {
+	r := openTestRegistry(t)
+	observed := time.Date(2026, 10, 7, 11, 0, 0, 0, time.UTC)
+	session := surface.Session{ID: "busy-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy, LastActive: observed, WaitingOn: &surface.Waiting{Kind: surface.WaitingQuestion, ID: "busy-thread:question"}}
+	projection := `{"id":"busy-thread","surface":"codex","status":"busy","current":true,"currentReason":"working","waitingOn":{"kind":"question","id":"busy-thread:question"}}`
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "busy-thread:initial", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
+		t.Fatal(err)
+	}
+	count := func(scope string) int {
+		t.Helper()
+		page, err := r.CatalogSnapshotPage(CatalogPageRequest{Scope: scope, Limit: 10, Now: observed.Add(time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(page.Sessions)
+	}
+	if count("current") != 1 || count("running") != 1 {
+		t.Fatalf("observed busy session current=%d running=%d", count("current"), count("running"))
+	}
+	if _, err := r.RecordCatalogDiscovery(surface.KindCodex, map[string]struct{}{}, observed.Add(time.Hour), true, 2); err != nil {
+		t.Fatal(err)
+	}
+	if count("current") != 0 || count("running") != 0 {
+		t.Fatalf("unobserved session current=%d running=%d", count("current"), count("running"))
+	}
+	page, err := r.CatalogSnapshotPage(CatalogPageRequest{Limit: 10, Now: observed.Add(time.Hour)})
+	if err != nil || len(page.Sessions) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	if retired := page.Sessions[0]; retired.Session.WaitingOn != nil || strings.Contains(retired.ProjectionFingerprint, "waitingOn") {
+		t.Fatalf("offline session still waiting: %+v", retired)
+	}
+	if err := r.QueueMessage(session.ID, "held"); err != nil {
+		t.Fatal(err)
+	}
+	if count("current") != 1 {
+		t.Fatal("unobserved session with a queued message left current")
 	}
 }

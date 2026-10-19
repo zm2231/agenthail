@@ -28,7 +28,18 @@ func timelineFixture(t *testing.T, data string) string {
 func TestMain(m *testing.M) {
 	os.Unsetenv("CLAUDE_CONFIG_DIR")
 	transcriptPollInterval = 20 * time.Millisecond
-	os.Exit(m.Run())
+	// Adapters write state such as the Codex write lock under HOME, so the
+	// package runs against a scratch HOME rather than the developer's own.
+	home, err := os.MkdirTemp("", "surfaces-home-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv("HOME", home)
+	os.Setenv("CFFIXED_USER_HOME", home)
+	code := m.Run()
+	os.RemoveAll(home)
+	os.Exit(code)
 }
 
 // readTimeline reads a transcript page through the adapter's public ReadSession.
@@ -348,6 +359,7 @@ func TestClaudeReadGroupsTurnsFiltersNonHumanRecordsAndKeepsFullReply(t *testing
 		`{"type":"assistant","timestamp":"2026-09-07T10:01:30Z","message":{"id":"m1","content":[{"type":"tool_use","id":"call-1","name":"Bash","input":{"command":"go test"}}]}}`,
 		`{"type":"user","timestamp":"2026-09-07T10:01:40Z","message":{"content":[{"type":"tool_result","tool_use_id":"call-1","content":"ok"}]}}`,
 		assistant("m1", long, true),
+		`{"type":"system","subtype":"stop_hook_summary"}`,
 	}, "\n")+"\n")
 	read, err := (&Claude{}).ReadSession(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 5})
 	if err != nil {
@@ -569,6 +581,7 @@ func TestClaudeReplyDoneFollowsTranscriptTurnStateNotRegistryStatus(t *testing.T
 	}
 	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
 	fmt.Fprintln(f, `{"type":"assistant","timestamp":"2026-09-07T10:02:00Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"Done, patched"}]}}`)
+	fmt.Fprintln(f, `{"type":"system","subtype":"stop_hook_summary"}`)
 	f.Close()
 	read, err = (&Claude{}).ReadSession(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusBusy}, surface.SessionReadRequest{Limit: 1})
 	if err != nil {

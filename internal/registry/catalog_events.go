@@ -28,44 +28,12 @@ type CatalogEventWindow struct {
 	Gap         bool
 }
 
-func (r *Registry) EnsureCatalogState() error {
-	if _, err := r.db.Exec(`CREATE TABLE IF NOT EXISTS catalog_sessions (
-		session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-		host_project BLOB NOT NULL,
-		checkout BLOB NOT NULL,
-		unavailable_reason TEXT NOT NULL DEFAULT '',
-		observed_at TEXT NOT NULL,
-		misses INTEGER NOT NULL DEFAULT 0,
-		projection_fingerprint TEXT NOT NULL DEFAULT '',
-		projection_generation INTEGER NOT NULL DEFAULT 0,
-		discovery_failures INTEGER NOT NULL DEFAULT 0
-	)`); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("catalog_sessions", "misses", `INTEGER NOT NULL DEFAULT 0`); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("catalog_sessions", "projection_fingerprint", `TEXT NOT NULL DEFAULT ''`); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("catalog_sessions", "projection_generation", `INTEGER NOT NULL DEFAULT 0`); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("catalog_sessions", "discovery_failures", `INTEGER NOT NULL DEFAULT 0`); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("catalog_sessions", "waiting_on", `BLOB NOT NULL DEFAULT ''`); err != nil {
-		return err
-	}
-	if _, err := r.db.Exec(`CREATE TABLE IF NOT EXISTS catalog_surfaces (
-		surface TEXT PRIMARY KEY,
-		health TEXT NOT NULL,
-		detail TEXT NOT NULL DEFAULT '',
-		observed_at TEXT NOT NULL
-	)`); err != nil {
-		return err
-	}
-	_, err := r.catalogHostEpoch(true)
+// recordObservedSubagents gives each stored projection the observed subagent
+// count the hidden count is added to. A projection written before hidden
+// counts existed holds only the subagents its surface observed.
+func recordObservedSubagents(tx *sql.Tx) error {
+	_, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=json_set(projection_fingerprint,'$.observedSubagents',json_extract(projection_fingerprint,'$.subagents'))
+		WHERE json_valid(projection_fingerprint) AND json_type(projection_fingerprint,'$.subagents')='object' AND json_type(projection_fingerprint,'$.observedSubagents') IS NULL AND json_type(projection_fingerprint,'$.hiddenSubagents') IS NULL`)
 	return err
 }
 
@@ -227,27 +195,6 @@ func (r *Registry) BeginSessionJournalSource(sessionID string) (string, error) {
 		}
 	}
 	return epoch, nil
-}
-
-func (r *Registry) catalogHostEpoch(create bool) (string, error) {
-	var epoch string
-	err := r.read.QueryRow(`SELECT host_epoch FROM catalog_state WHERE id=1`).Scan(&epoch)
-	if err == nil {
-		return epoch, nil
-	}
-	if err != sql.ErrNoRows || !create {
-		return "", err
-	}
-	tx, err := r.db.Begin()
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
-	epoch, err = catalogHostEpochTx(tx, create)
-	if err != nil {
-		return "", err
-	}
-	return epoch, tx.Commit()
 }
 
 func catalogHostEpochTx(tx *sql.Tx, create bool) (string, error) {

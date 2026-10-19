@@ -2,45 +2,54 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	registrypkg "github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
-func TestMobileClaudeCreationReachesNativeCLIAndRegistersReturnedSession(t *testing.T) {
-	_, registry, _, _, _ := daemonFixture(t)
-	home := t.TempDir()
-	executable := filepath.Join(home, "claude")
-	script := `#!/bin/sh
-printf '%s\n' "$@" >> "$HOME/argv"
-if [ "$1" = agents ]; then
- printf '[{"id":"ab12cd34","sessionId":"native-mobile-session","kind":"background","name":"phone-task","cwd":"%s","state":"working"}]\n' "$HOME"
-else
- printf 'backgrounded · ab12cd34\n'
-fi
-`
-	if err := os.WriteFile(executable, []byte(script), 0700); err != nil {
-		t.Fatal(err)
+func TestMobileClaudeCreationOpensTheSessionInTheHostAndRegistersIt(t *testing.T) {
+	for _, launcher := range []string{"", surface.LauncherClaudeSDK} {
+		t.Run("launcher="+launcher, func(t *testing.T) { createClaudeSessionInTheHost(t, launcher) })
 	}
-	t.Setenv("AGENTHAIL_CLAUDE_BIN", executable)
-	d := New(registry, []surface.Surface{surfaces.NewClaude("", home)})
+}
+
+// createClaudeSessionInTheHost creates a session through the default launcher
+// or the one named, which must carry every creation option to the host.
+func createClaudeSessionInTheHost(t *testing.T, launcher string) {
+	_, registry, _, _, _ := daemonFixture(t)
+	host := claudehosttest.New(t, "")
+	host.Start(t)
+	home := host.Cwd
+	d := New(registry, []surface.Surface{surfaces.NewClaude(nil, host.Home)})
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-options", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != 200 || !strings.Contains(response.Body.String(), `"id":"claude"`) {
+	var options struct {
+		Launchers []struct {
+			ID             string `json:"id"`
+			SessionOptions bool   `json:"sessionOptions"`
+		} `json:"launchers"`
+	}
+	if response.Code != 200 || !strings.Contains(response.Body.String(), `"id":"claude"`) || json.Unmarshal(response.Body.Bytes(), &options) != nil {
 		t.Fatal(response.Body.String())
 	}
-	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "claude", "message": "--literal instruction", "cwd": home, "model": "sonnet", "name": "phone-task", "worktree": "phone-work", "agent": "reviewer", "effort": "high", "permissionMode": "plan"})
+	for _, launcher := range options.Launchers {
+		if want := launcher.ID == surface.LauncherClaudeSDK || launcher.ID == surface.LauncherClaudeBG; launcher.SessionOptions != want {
+			t.Fatalf("launcher %s sessionOptions=%v, want %v", launcher.ID, launcher.SessionOptions, want)
+		}
+	}
+	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "claude", "message": "--literal instruction", "cwd": home, "model": "sonnet", "name": "phone-task", "worktree": "phone-work", "agent": "reviewer", "effort": "high", "permissionMode": "plan", "launcher": launcher})
 	request = httptest.NewRequest(http.MethodPost, "/api/v1/actions", bytes.NewReader(body))
 	request.Header.Set("Authorization", "Bearer secret")
 	response = httptest.NewRecorder()
@@ -53,42 +62,67 @@ fi
 	if err := json.Unmarshal(response.Body.Bytes(), &receipt); err != nil {
 		t.Fatal(response.Body.String(), err)
 	}
-	if response.Code != 201 || !receipt.OK || receipt.Session.ID != "native-mobile-session" || receipt.Result != nil {
+	if response.Code != 201 || !receipt.OK || receipt.Session.RuntimeKind != surface.RuntimeClaudeHost || receipt.Session.Transport != "uds" || receipt.Result == nil || !receipt.Result.Accepted {
 		t.Fatal(response.Body.String())
 	}
-	if _, err := registry.Session(receipt.Session.ID); err != nil {
+	if stored, err := registry.Session(receipt.Session.ID); err != nil || stored.RuntimeKind != surface.RuntimeClaudeHost || stored.Transport != "uds" || stored.Runtime == nil || stored.Runtime.Launcher != surface.LauncherClaudeSDK {
+		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+	spawns := host.Spawns(t, receipt.Session.ID)
+	if len(spawns) != 1 {
+		t.Fatalf("spawns=%+v", spawns)
+	}
+	argv := strings.Join(spawns[0].Argv, " ")
+	for _, want := range []string{"sonnet", "phone-task", "phone-work", "reviewer", "high", "plan"} {
+		if !strings.Contains(argv, want) {
+			t.Fatalf("missing %q in %s", want, argv)
+		}
+	}
+	claudehosttest.WaitFor(t, "the first turn", func() bool {
+		turns := host.Turns(t, receipt.Session.ID)
+		return len(turns) == 1 && turns[0].Text == "--literal instruction" && turns[0].UUID == receipt.Result.UUID
+	})
+}
+
+// lostAnswerClaude starts sessions in the host and then loses the answer to
+// the first turn, as a dropped connection after the host accepted it would.
+type lostAnswerClaude struct{ *surfaces.Claude }
+
+func (c lostAnswerClaude) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
+	session, _, err := c.Claude.StartSession(ctx, options)
+	if err != nil {
+		return nil, nil, err
+	}
+	return session, nil, surface.DeliveryOutcomeUnknown(errors.New("connection lost before the host answered"))
+}
+
+func TestAClaudeCreationWhoseFirstTurnIsUnconfirmedRecordsThatTurnsUUID(t *testing.T) {
+	_, registry, _, _, _ := daemonFixture(t)
+	host := claudehosttest.New(t, "")
+	host.Start(t)
+	d := New(registry, []surface.Surface{lostAnswerClaude{surfaces.NewClaude(nil, host.Home)}})
+	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "claude", "message": "first", "cwd": host.Cwd})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/actions", bytes.NewReader(body))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	d.dashboardHandler(&dashboardServer{token: "secret"}).ServeHTTP(response, request)
+	var receipt struct {
+		Status     string          `json:"status"`
+		DeliveryID int64           `json:"deliveryId"`
+		Session    surface.Session `json:"session"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &receipt); err != nil || receipt.Status != "submitted" || receipt.DeliveryID == 0 {
+		t.Fatalf("status=%d body=%s err=%v", response.Code, response.Body.String(), err)
+	}
+	intent, err := registry.DeliveryIntent(receipt.DeliveryID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	readSession := func() map[string]json.RawMessage {
-		request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id="+receipt.Session.ID+"&timeline=1", nil)
-		request.Header.Set("Authorization", "Bearer secret")
-		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, request)
-		if response.Code != http.StatusOK {
-			t.Fatal(response.Body.String())
-		}
-		var detail map[string]json.RawMessage
-		if err := json.Unmarshal(response.Body.Bytes(), &detail); err != nil {
-			t.Fatal(err)
-		}
-		return detail
-	}
-	pending := readSession()
-	if !strings.Contains(string(pending["readSource"]), "journal") || strings.Contains(string(pending["exchanges"]), "First instruction") || !strings.Contains(string(pending["timeline"]), `"items":[]`) {
-		t.Fatal(string(pending["readSource"]), string(pending["timeline"]), string(pending["exchanges"]))
-	}
-	if _, _, err := registry.AppendSessionJournalEntry(registrypkg.SessionJournalEntry{SessionID: receipt.Session.ID, Kind: "text", ProviderKey: "mobile-item", Payload: []byte(`{"itemId":"mobile-item","version":1,"op":"upsert","kind":"text","role":"user","body":"First instruction"}`)}, registrypkg.SessionJournalRetention{Count: 20, Bytes: 4096}); err != nil {
-		t.Fatal(err)
-	}
-	ready := readSession()
-	if !strings.Contains(string(ready["exchanges"]), "First instruction") || !strings.Contains(string(ready["readSource"]), "journal") {
-		t.Fatal(string(ready["exchanges"]), string(ready["timeline"]))
-	}
-	args, _ := os.ReadFile(filepath.Join(home, "argv"))
-	for _, want := range []string{"--bg\n", "--model\nsonnet", "--name\nphone-task", "--worktree\nphone-work", "--agent\nreviewer", "--effort\nhigh", "--permission-mode\nplan", "--\n--literal instruction", "agents\n--json\n--all"} {
-		if !strings.Contains(string(args), want) {
-			t.Fatalf("missing %q in %s", want, args)
-		}
+	claudehosttest.WaitFor(t, "the first turn", func() bool { return len(host.Turns(t, receipt.Session.ID)) == 1 })
+	time.Sleep(300 * time.Millisecond)
+	turns := host.Turns(t, receipt.Session.ID)
+	if len(turns) != 1 || turns[0].UUID != intent.UUID {
+		t.Fatalf("turns=%+v intent=%s, want one turn under the intent's uuid", turns, intent.UUID)
 	}
 }
 

@@ -18,7 +18,7 @@ State lives in `~/.agenthail`: a SQLite registry, plus the daemon lock, PID, and
 
 ## Trust boundaries
 
-**Browser cookies.** Claude Code and Notion surfaces authenticate as you, using the Chrome profile you are already signed into. A Node bridge (`sidecar/cookie.mjs`) reads fresh cookies for a specific URL and passes them over a pipe to the Python sidecar, which attaches them to that one request. They are not written to disk and not written to the log. If the bridge fails, the request stops there; it never falls back to an unauthenticated or weaker path. `AGENTHAIL_DEBUG=1` prints diagnostics with cookie values withheld.
+**Browser cookies.** Notion and Claude sessions reached over Remote Control authenticate as you, using a browser sign-in profile you choose (`agenthail signin`, or Settings > Browser Sign-in in the Mac app and web dashboard). The registry stores only the browser and profile selector, never cookies. A consumer with no profile reads no cookies and reports that it is not set up. For each request, a Node bridge (`sidecar/cookie.mjs`) reads fresh cookies for one URL from that one browser profile, and no other browser. Chromium-family browsers may ask macOS for access to their Safe Storage key in the Keychain. The daemon passes the cookie header to the Python sidecar, which attaches it to that one request. They are not written to disk and not written to the log. If the bridge fails, the request stops there; it never falls back to an unauthenticated or weaker path. `AGENTHAIL_DEBUG=1` prints diagnostics with cookie values withheld.
 
 Anyone who can already read your home directory can already read these cookies from Chrome directly. agenthail does not widen that boundary, but it does not narrow it either.
 

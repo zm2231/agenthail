@@ -224,7 +224,18 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("Connection", "keep-alive")
 	writeSSEOpen(w)
-	for _, event := range window.Events {
+	mirror := catalogMirror(r.Context())
+	view := func(batch []registry.CatalogEvent) ([]registry.CatalogEvent, error) {
+		if mirror {
+			return batch, nil
+		}
+		return d.listedCatalogEvents(batch)
+	}
+	backlog, err := view(window.Events)
+	if err != nil {
+		return
+	}
+	for _, event := range backlog {
 		if !d.apiEventStreamAuthorized(r) || writeCatalogStreamEntry(w, event) != nil {
 			return
 		}
@@ -237,8 +248,30 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 		case <-r.Context().Done():
 			return
 		case event, open := <-events:
-			if !open || !d.apiEventStreamAuthorized(r) || writeCatalogStreamEntry(w, event) != nil {
+			if !open {
 				return
+			}
+			batch := []registry.CatalogEvent{event}
+		drain:
+			for len(batch) < catalogStreamBatch {
+				select {
+				case next, more := <-events:
+					if !more {
+						break drain
+					}
+					batch = append(batch, next)
+				default:
+					break drain
+				}
+			}
+			listed, err := view(batch)
+			if err != nil {
+				return
+			}
+			for _, event := range listed {
+				if !d.apiEventStreamAuthorized(r) || writeCatalogStreamEntry(w, event) != nil {
+					return
+				}
 			}
 			flusher.Flush()
 		case <-keepalive.C:
@@ -249,6 +282,35 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 			flusher.Flush()
 		}
 	}
+}
+
+const catalogStreamBatch = 256
+
+// listedCatalogEvents is the catalog stream a device sees: the session list,
+// not every catalog row. An upsert of a session outside the current list, a
+// hidden subagent or a retired row, reaches it as a removal under the same
+// sequence. The presence pass republishes a row when it
+// enters or leaves the list and an ancestor when its hidden count changes, so
+// each of those changes arrives as its own event. Without the listing the
+// stream ends rather than show a device rows it must not list.
+func (d *Daemon) listedCatalogEvents(batch []registry.CatalogEvent) ([]registry.CatalogEvent, error) {
+	listing, err := d.Registry.CatalogListing()
+	if err != nil {
+		d.log.Printf("catalog listing: %s", err)
+		return nil, err
+	}
+	listed := make([]registry.CatalogEvent, 0, len(batch))
+	for _, event := range batch {
+		if event.Type == "session.upserted" && !listing.CurrentEntity(event.EntityID) {
+			payload, err := json.Marshal(map[string]string{"sessionId": event.EntityID, "reason": "unlisted"})
+			if err != nil {
+				continue
+			}
+			event.Type, event.Payload = "session.removed", payload
+		}
+		listed = append(listed, event)
+	}
+	return listed, nil
 }
 
 func parseCatalogStreamCursor(r *http.Request) (uint64, error) {
@@ -306,7 +368,16 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 	for _, alias := range aliases {
 		aliasByID[alias.SessionID] = alias.Name
 	}
-	openClaude := claudeOpenProcesses(ctx)
+	view, err := d.loadCatalogViewState()
+	if err != nil {
+		d.log.Printf("catalog view state: %s", err)
+		return
+	}
+	if projects, err := d.Registry.ListProjects(); err != nil {
+		d.log.Printf("catalog projects: %s", err)
+	} else {
+		d.catalogIdentities.setFolders(projects)
+	}
 	for _, adapter := range d.Surfaces {
 		priorStamps := map[string]catalogLiveSession{}
 		for id, live := range d.catalogLive {
@@ -315,7 +386,14 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			}
 		}
 		operationCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
-		sessions, err := adapter.List(operationCtx)
+		complete := true
+		var sessions []surface.Session
+		var err error
+		if lister, ok := adapter.(surface.CatalogLister); ok {
+			sessions, complete, err = lister.CatalogList(operationCtx)
+		} else {
+			sessions, err = adapter.List(operationCtx)
+		}
 		cancel()
 		health := d.recordSurfaceHealth(ctx, adapter, err)
 		if err != nil {
@@ -347,6 +425,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		d.correlatePendingLaunches(locateCtx, sessions)
 		d.correlateObservedTerminalLaunches(locateCtx, sessions)
 		locateCancel()
+		openSessions := surface.OpenSessions(ctx, adapter, sessions)
 		source, _ := adapter.(surface.LocalStatusSource)
 		for _, session := range sessions {
 			if session.Runtime == nil {
@@ -354,11 +433,11 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			}
 			seen[session.ID] = struct{}{}
 			identityCtx, identityCancel := context.WithTimeout(ctx, 3*time.Second)
-			identity := d.catalogIdentities.identity(identityCtx, session, observedAt)
+			identity := d.catalogIdentities.identity(identityCtx, session, observedAt, func() *catalogProject { return d.storedCatalogProject(session.ID) })
 			identityCancel()
-			open := session.Surface == surface.KindClaude && openClaude[session.PID]
+			open := openSessions[session.ID]
 			alias := aliasByID[session.ID]
-			if !d.publishCatalogSession(ctx, adapter, session, identity, alias, counts[session.ID], open, config, observedAt) {
+			if !d.publishCatalogSession(ctx, adapter, session, identity, alias, counts[session.ID], open, config, view, observedAt) {
 				delete(d.catalogLive, session.ID)
 				continue
 			}
@@ -375,16 +454,22 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			d.catalogLive[session.ID] = live
 		}
 		d.forgetCatalogLive(adapter.Name(), seen)
-		complete := true
-		if bounded, ok := adapter.(surface.CatalogListCompleteness); ok {
-			complete = bounded.CatalogListComplete()
-		}
 		if err := d.catalog.recordDiscovery(adapter.Name(), seen, observedAt, complete); err != nil {
 			d.log.Printf("catalog discovery %s: %s", adapter.Name(), err)
 		}
 		d.publishSurfaceHealth(health, time.Now().UTC())
 	}
 	d.catalogIdentities.prune(time.Now())
+	d.publishUnarchivedProjects()
+}
+
+// publishUnarchivedProjects republishes the other rows of a project that a
+// session's activity unarchived during a catalog pass.
+func (d *Daemon) publishUnarchivedProjects() {
+	if d.catalogProjectUnarchived {
+		d.catalogProjectUnarchived = false
+		d.publishCatalogPresence()
+	}
 }
 
 // forgetCatalogLive drops a surface's live sessions that are not in keep, so
@@ -404,8 +489,10 @@ func (d *Daemon) forgetCatalogLive(kind surface.SurfaceKind, keep map[string]str
 // local status files show it, without waiting for the next discovery pass.
 // Only status transitions publish; other fields follow discovery.
 func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
+	defer d.publishUnarchivedProjects()
 	var config *DashboardConfig
 	var counts map[string]int
+	var view catalogViewState
 	for id, live := range d.catalogLive {
 		stamps := catalogFileStamps(live.files)
 		if live.stamps != nil && equalStrings(live.stamps, stamps) {
@@ -433,8 +520,12 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 				d.log.Printf("catalog queue counts: %s", err)
 				return
 			}
+			if view, err = d.loadCatalogViewState(); err != nil {
+				d.log.Printf("catalog view state: %s", err)
+				return
+			}
 		}
-		if d.publishCatalogSession(ctx, live.adapter, refreshed, live.identity, live.alias, counts[id], live.open, *config, time.Now().UTC()) {
+		if d.publishCatalogSession(ctx, live.adapter, refreshed, live.identity, live.alias, counts[id], live.open, *config, view, time.Now().UTC()) {
 			live.session = refreshed
 		} else {
 			live.stamps = nil
@@ -444,8 +535,8 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 
 // publishCatalogSession records one session row, rebuilding the projection
 // when the queue count changed under it. It reports whether the row committed.
-func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, identity catalogIdentity, alias string, queueCount int, open bool, config DashboardConfig, observedAt time.Time) bool {
-	hostProject, err := json.Marshal(identity.HostProject)
+func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, identity catalogIdentity, alias string, queueCount int, open bool, config DashboardConfig, view catalogViewState, observedAt time.Time) bool {
+	project, err := json.Marshal(identity.Project)
 	if err != nil {
 		return false
 	}
@@ -458,8 +549,15 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 	if d.catalogSelected != nil {
 		d.catalogSelected(session.ID)
 	}
+	stored := d.storedListing(session.ID)
 	for attempt := 0; attempt < 3; attempt++ {
 		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, open, config)
+		row.HiddenSubagents, row.Listed = stored.HiddenSubagents, stored.Listed
+		row.Subagents = addSubagentRollups(row.ObservedSubagents, stored.HiddenSubagents)
+		if d.settleArchiveActivity([]dashboardSession{row}, view) {
+			d.catalogProjectUnarchived = true
+		}
+		applyCatalogView(&row, view)
 		payload, err := json.Marshal(map[string]any{"session": row})
 		if err != nil {
 			return false
@@ -471,7 +569,7 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 			return false
 		}
 		key := "session.upserted:" + session.ID
-		_, _, publishErr := d.catalog.publishSession(registry.CatalogSessionState{Session: session, HostProject: hostProject, Checkout: checkout, UnavailableReason: identity.UnavailableReason, ObservedAt: observedAt, ProjectionFingerprint: string(fingerprint)}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
+		_, _, publishErr := d.catalog.publishSession(registry.CatalogSessionState{Session: session, Project: project, Checkout: checkout, UnavailableReason: identity.UnavailableReason, ObservedAt: observedAt, ProjectionFingerprint: string(fingerprint)}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
 		if publishErr == nil {
 			return true
 		}
@@ -515,7 +613,13 @@ func (d *Daemon) publishSurfaceHealth(health dashboardSurface, observedAt time.T
 	_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: surface.SurfaceKind(health.Name), Health: health.Health, Detail: health.HealthDetail, ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + health.Name + ":" + health.Health, Type: "surface.health", EntityID: health.Name, Payload: payload})
 }
 
-func (d *Daemon) publishCatalogQueueCounts() {
+// publishCatalogPresence keeps each local row's queue count, presence, place
+// in the session list, hidden subagent count and archive state current between
+// discovery passes, so a new queue count, a changed Codex window, a lapsed
+// recent session, a subagent entering or leaving the list, or an archive change
+// is published on the next tick.
+func (d *Daemon) publishCatalogPresence() {
+	defer d.refreshHostQueueCounts()
 	counts, err := d.Registry.QueueCounts()
 	if err != nil {
 		d.log.Printf("catalog queue counts: %s", err)
@@ -531,34 +635,60 @@ func (d *Daemon) publishCatalogQueueCounts() {
 		d.log.Printf("catalog config: %s", err)
 		return
 	}
+	view, err := d.loadCatalogViewState()
+	if err != nil {
+		d.log.Printf("catalog view state: %s", err)
+		return
+	}
 	now := time.Now()
+	type localRow struct {
+		record     registry.CatalogSessionState
+		projection dashboardSession
+		adapter    surface.Surface
+	}
+	present := func(row *localRow, count int) {
+		row.projection.QueueCount = count
+		row.projection.Current, row.projection.CurrentReason = surface.PresenceFor(row.adapter, row.record.Session, surface.PresenceInput{QueueCount: count, Open: row.projection.Open, Now: now, CodexRecentHours: config.CodexRecentHours})
+	}
+	rows := make([]localRow, 0, len(snapshot.Sessions))
+	projections := make([]dashboardSession, 0, len(snapshot.Sessions))
 	for _, record := range snapshot.Sessions {
-		count := counts[record.Session.ID]
+		var projection dashboardSession
+		if record.HostID != "" || json.Unmarshal([]byte(record.ProjectionFingerprint), &projection) != nil {
+			continue
+		}
+		adapter, err := d.adapters().For(&record.Session)
+		if err != nil {
+			continue
+		}
+		row := localRow{record: record, projection: projection, adapter: adapter}
+		present(&row, counts[record.Session.ID])
+		hidden := snapshot.Listing.HiddenSubagents(record.Session.ID)
+		row.projection.HiddenSubagents = hidden
+		row.projection.Subagents = addSubagentRollups(projection.ObservedSubagents, hidden)
+		row.projection.Listed = snapshot.Listing.Current(record.Session.ID)
+		rows = append(rows, row)
+		projections = append(projections, row.projection)
+	}
+	d.settleArchiveActivity(projections, view)
+	for _, row := range rows {
 		for attempt := 0; attempt < 3; attempt++ {
-			var projection dashboardSession
-			if json.Unmarshal([]byte(record.ProjectionFingerprint), &projection) != nil {
+			applyCatalogView(&row.projection, view)
+			fingerprint, err := json.Marshal(row.projection)
+			if err != nil || string(fingerprint) == row.record.ProjectionFingerprint {
 				break
 			}
-			if projection.QueueCount == count {
-				break
-			}
-			projection.QueueCount = count
-			projection.Current, projection.CurrentReason = dashboardSessionPresence(record.Session, count, projection.Open, config.CodexRecentHours, now)
-			fingerprint, err := json.Marshal(projection)
-			if err != nil {
-				break
-			}
-			if err := d.catalog.updateProjection(record.Session.ID, record.ProjectionFingerprint, string(fingerprint)); err == nil {
+			if err := d.catalog.updateProjection(row.record.Session.ID, row.record.ProjectionFingerprint, string(fingerprint)); err == nil {
 				break
 			} else {
 				var conflict *registry.CatalogQueueProjectionConflict
 				if !errors.As(err, &conflict) {
-					d.log.Printf("catalog queue projection %s: %s", d.resolveDisplay(record.Session.ID), err)
+					d.log.Printf("catalog view projection %s: %s", d.resolveDisplay(row.record.Session.ID), err)
 					break
 				}
-				count = conflict.QueueCount
+				present(&row, conflict.QueueCount)
 				if attempt == 2 {
-					d.log.Printf("catalog queue projection %s remained unstable", d.resolveDisplay(record.Session.ID))
+					d.log.Printf("catalog queue projection %s remained unstable", d.resolveDisplay(row.record.Session.ID))
 				}
 			}
 		}
@@ -665,11 +795,61 @@ func (d *Daemon) correlateObservedTerminalLaunches(ctx context.Context, sessions
 	}
 }
 
+func (d *Daemon) storedCatalogProject(sessionID string) *catalogProject {
+	raw, err := d.Registry.CatalogSessionProject(sessionID)
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+	var project *catalogProject
+	if json.Unmarshal(raw, &project) != nil || project == nil || project.ID == "" || project.Kind == "" {
+		return nil
+	}
+	return project
+}
+
 func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time, alias string, queueCount int, open bool, config DashboardConfig) dashboardSession {
 	if session.Runtime == nil {
 		session.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: false}
 	}
-	current, reason := dashboardSessionPresence(session, queueCount, open, config.CodexRecentHours, observedAt)
-	effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
-	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Subagents: session.Subagents}
+	current, reason := surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: queueCount, Open: open, Now: observedAt, CodexRecentHours: config.CodexRecentHours})
+	host := d.localHost()
+	effective := surface.EffectiveCapabilities(adapter, &session)
+	return dashboardSession{ID: session.ID, Surface: session.Surface, RuntimeKind: session.RuntimeKind, ConfiguredModel: session.ConfiguredModel, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, Project: identity.Project, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Subagents: session.Subagents, ObservedSubagents: session.Subagents, Host: &host}
+}
+
+type catalogStoredListing struct {
+	HiddenSubagents *surface.SubagentRollup `json:"hiddenSubagents"`
+	Listed          bool                    `json:"listed"`
+}
+
+// storedListing carries a row's place in the session list and its hidden
+// subagent count forward when discovery republishes it; the presence pass
+// recomputes both from the listing.
+func (d *Daemon) storedListing(id string) catalogStoredListing {
+	var stored catalogStoredListing
+	fingerprint, found, err := d.Registry.CatalogProjectionFingerprint(id)
+	if err != nil || !found {
+		return stored
+	}
+	_ = json.Unmarshal([]byte(fingerprint), &stored)
+	return stored
+}
+
+func addSubagentRollups(observed, hidden *surface.SubagentRollup) *surface.SubagentRollup {
+	if hidden == nil {
+		return observed
+	}
+	sum := *hidden
+	if observed != nil {
+		sum.Count += observed.Count
+		sum.Working += observed.Working
+	}
+	return &sum
+}
+
+func sameSubagentRollup(a, b *surface.SubagentRollup) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }

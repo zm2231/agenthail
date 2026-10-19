@@ -10,7 +10,7 @@ import (
 )
 
 func TestActiveLastUsesDaemonPageAndDoesNotReadProvider(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	provider := &cliReadSurface{cliSurface: &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}}, result: &surface.SessionReadResult{Source: "provider"}}
 	app, _ := cliFixture(t, provider.cliSurface)
 	app.Surfaces[0].Surface = provider
@@ -29,7 +29,7 @@ func TestActiveLastUsesDaemonPageAndDoesNotReadProvider(t *testing.T) {
 }
 
 func TestActiveDaemonFailureDoesNotFallBackToProvider(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	provider := &cliReadSurface{cliSurface: &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}}, result: &surface.SessionReadResult{Source: "provider"}}
 	app, _ := cliFixture(t, provider.cliSurface)
 	app.Surfaces[0].Surface = provider
@@ -54,7 +54,7 @@ func TestActiveReplyDerivesDoneFromResolvedSessionStatus(t *testing.T) {
 		{name: "busy", status: surface.StatusBusy, done: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			session := surface.Session{ID: "s", Surface: surface.KindCodex, Status: test.status}
+			session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: test.status}
 			provider := &cliReadSurface{cliSurface: &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}}}
 			app, _ := cliFixture(t, provider.cliSurface)
 			app.Surfaces[0].Surface = provider

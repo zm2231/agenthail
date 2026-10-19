@@ -13,7 +13,7 @@ func TestSessionRuntimePersistsAcrossRegistryReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session := surface.Session{ID: "session-1", Surface: surface.KindClaude, Status: surface.StatusIdle}
+	session := surface.Session{ID: "session-1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}

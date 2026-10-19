@@ -40,9 +40,11 @@ func createVoiceOperator(ctx context.Context, client codexClient, cwd, instructi
 	if id == "" {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Codex did not return an operator thread ID"))
 	}
-	return &surface.Session{ID: id, Name: "Agenthail voice orchestrator", Cwd: cwd,
-		Surface: surface.KindCodex, Source: "agenthail", Transport: codexTransportDesktop,
-		HasLocal: true, Status: surface.StatusIdle, Transcript: str(thread, "path"), LastActive: time.Now()}, nil
+	session := &surface.Session{ID: id, Name: "Agenthail voice orchestrator", Cwd: cwd,
+		Surface: surface.KindCodex, Source: "agenthail",
+		HasLocal: true, Status: surface.StatusIdle, Transcript: str(thread, "path"), LastActive: time.Now()}
+	setCodexTransport(session, codexTransportDesktop)
+	return session, nil
 }
 
 func voiceDynamicTools() []map[string]any {

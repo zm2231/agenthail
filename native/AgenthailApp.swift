@@ -459,7 +459,7 @@ private struct SessionMenuSection: Identifiable {
     @MainActor
     static func build(_ model: AgenthailModel, limit: Int = 5) -> [SessionMenuSection] {
         let attention = model.attentionSessionIDs
-        let tree = SessionTree.build(model.knownSessions, filter: .all, attentionSessionIDs: attention, now: Date())
+        let tree = SessionTree.build(model.knownSessions, filter: .all, attentionSessionIDs: attention)
         let others = SessionTree.newestFirst(SessionFamilies.build(model.knownSessions).filter { !attention.contains($0.root.id) }, by: SessionTree.activity)
         return [
             SessionMenuSection(title: "Needs you", sessions: Array(tree.needsYou.prefix(limit))),
@@ -475,6 +475,7 @@ private struct SessionMenuSection: Identifiable {
 
 private struct AgenthailMenuContent: View {
     @ObservedObject var model: AgenthailModel
+    let voice: VoiceController
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -491,6 +492,11 @@ private struct AgenthailMenuContent: View {
         }
         Button("Open Agenthail") { open() }
             .keyboardShortcut("o")
+        Button("Talk to Orchestrator…") {
+            voice.route(to: "")
+            NSApplication.shared.activate()
+            openWindow(id: "voice")
+        }
         SettingsLink { Text("Settings…") }
             .keyboardShortcut(",")
         Divider()
@@ -519,31 +525,40 @@ private struct AgenthailMenuContent: View {
 private struct AgenthailMenuBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AgenthailModel()
+    @StateObject private var voice = VoiceController()
 
     var body: some Scene {
         Window("Agenthail", id: "main") {
             DesktopWindow(model: model)
                 .frame(minHeight: 560)
+                .environmentObject(voice)
         }
         .defaultSize(width: 1440, height: 900)
         .windowStyle(.hiddenTitleBar)
-        .commands { SessionCommands(model: model) }
+        .commands { SessionCommands(model: model, voice: voice) }
 
         WindowGroup("Session", id: "session", for: String.self) { $sessionID in
             if let sessionID {
                 SessionWindow(model: model, sessionID: sessionID)
                     .frame(minWidth: 620, minHeight: 480)
+                    .environmentObject(voice)
             }
         }
         .defaultSize(width: 900, height: 820)
         .windowStyle(.hiddenTitleBar)
+
+        Window("Voice", id: "voice") {
+            VoiceWindow(voice: voice) { model.openSession(reference: $0) }
+        }
+        .defaultSize(width: 460, height: 620)
+        .windowResizability(.contentMinSize)
 
         Settings {
             DesktopSettings(model: model)
         }
 
         MenuBarExtra {
-            AgenthailMenuContent(model: model)
+            AgenthailMenuContent(model: model, voice: voice)
         } label: {
             MenuBarLabel(model: model)
                 .onAppear { appDelegate.model = model }

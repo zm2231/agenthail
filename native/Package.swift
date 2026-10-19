@@ -28,11 +28,16 @@ let package = Package(
                 "AgenthailModels.swift",
                 "TurnSettings.swift",
                 "AgenthailAPI.swift",
+                "ComposerAttachment.swift",
                 "SessionSelection.swift",
+                "SessionTree.swift",
                 "EventRetryBackoff.swift",
                 "ToolPresentation.swift",
                 "OperationsRefreshPolicy.swift",
                 "AgenthailModel.swift",
+                "VoiceAPI.swift",
+                "VoiceAudioBridge.swift",
+                "VoiceOperatorModel.swift",
                 "macOS"
             ],
         )

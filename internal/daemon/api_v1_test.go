@@ -157,7 +157,7 @@ func TestAPIV1EventStreamResumesFromLastEventID(t *testing.T) {
 
 func TestAPIV1RevocationClosesOpenDeviceEventStream(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
-	device, token, err := d.Registry.CompleteDevicePairing(mustCreatePairing(t, d), "Phone")
+	device, token, err := d.Registry.CompleteDevicePairing(mustCreatePairing(t, d), "Phone", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,10 +347,11 @@ func TestAPIV1SessionAttachmentServesReferencedBytesAndRejectsOversize(t *testin
 		t.Fatal(err)
 	}
 	from.Surface, from.Transcript = surface.KindClaude, transcript
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	if err := registry.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
-	claude := surfaces.NewClaude("", t.TempDir())
+	claude := surfaces.NewClaude(nil, t.TempDir())
 	d.Surfaces = []surface.Surface{claude}
 	read, err := claude.ReadSession(context.Background(), &from, surface.SessionReadRequest{Limit: 20})
 	if err != nil || len(read.Items) != 2 || read.Items[1].Attachment == nil || read.Items[0].Text != "caption" || read.Items[1].CallID != "call-1" {
@@ -372,7 +373,7 @@ func TestAPIV1SessionAttachmentServesReferencedBytesAndRejectsOversize(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, controlToken, err := registry.CompleteDevicePairing(pairing.Secret, "control-only")
+	_, controlToken, err := registry.CompleteDevicePairing(pairing.Secret, "control-only", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -587,7 +588,7 @@ func TestAPIV1RejectsMutationWithoutPublishingChange(t *testing.T) {
 
 func TestAPIV1DeviceCanRevokeItself(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
-	device, token, err := d.Registry.CompleteDevicePairing(mustCreatePairing(t, d), "Phone")
+	device, token, err := d.Registry.CompleteDevicePairing(mustCreatePairing(t, d), "Phone", "")
 	if err != nil {
 		t.Fatal(err)
 	}
