@@ -52,18 +52,24 @@ struct SettingsRequestsTest {
         RecordingProtocol.reset()
         await model.loadSignin()
         check(model.signin?.consumers.map(\.id) == ["notion", "claude"] && model.signin?.addableBrowsers.first?.addableProfiles.map(\.profile) == ["Default"], "sign-in settings decode: \(String(describing: model.signin))")
+        check(model.signin?.consumers.first?.choice == "auto" && model.signin?.consumers.first?.resolvedLabel == "Automatic: Safari, the system default browser." && model.signin?.consumers.first?.problem?.contains("Full Disk Access") == true, "an automatic consumer shows its browser and problem: \(String(describing: model.signin?.consumers.first))")
+        check(model.signin?.consumers.last?.choice == "sp_0123456789ab" && model.signin?.consumers.last?.resolvedLabel == "Work Chrome: Google Chrome · Profile 2.", "a pinned consumer shows its profile: \(String(describing: model.signin?.consumers.last))")
         RecordingProtocol.reset()
         model.addSigninProfile(browser: "chrome", profile: "Default", label: "")
         let added = await waitFor { $0.path == "/api/v1/signin/profiles" && $0.method == "POST" }
         check(added?.body["browser"] as? String == "chrome" && added?.body["profile"] as? String == "Default", "adding sends the chosen browser profile: \(String(describing: added?.body))")
         RecordingProtocol.reset()
-        model.bindSignin(consumer: "notion", profileID: "sp_0123456789ab")
+        model.bindSignin(consumer: "notion", choice: "sp_0123456789ab")
         let bound = await waitFor { $0.path == "/api/v1/signin/bindings" }
         check(bound?.method == "PUT" && bound?.body["consumer"] as? String == "notion" && bound?.body["profileId"] as? String == "sp_0123456789ab", "binding names the consumer and profile: \(String(describing: bound?.body))")
         RecordingProtocol.reset()
-        model.bindSignin(consumer: "claude", profileID: nil)
-        let cleared = await waitFor { $0.path == "/api/v1/signin/bindings" }
-        check(cleared?.body["profileId"] is NSNull, "choosing Not set up sends a null profile: \(String(describing: cleared?.body))")
+        model.bindSignin(consumer: "claude", choice: "none")
+        let off = await waitFor { $0.path == "/api/v1/signin/bindings" }
+        check(off?.body["profileId"] as? String == "none", "choosing Off sends none: \(String(describing: off?.body))")
+        RecordingProtocol.reset()
+        model.bindSignin(consumer: "claude", choice: "auto")
+        let automatic = await waitFor { $0.path == "/api/v1/signin/bindings" }
+        check(automatic?.body["profileId"] as? String == "auto", "choosing Automatic sends auto: \(String(describing: automatic?.body))")
         RecordingProtocol.reset()
         model.removeSigninProfile("sp_0123456789ab")
         let removed = await waitFor { $0.path == "/api/v1/signin/profiles" && $0.method == "DELETE" }
@@ -161,7 +167,9 @@ final class RecordingProtocol: URLProtocol {
         case "/api/v1/snapshot":
             return #"{"updatedAt":"2026-10-05T12:00:01Z","daemon":{"running":true,"pid":1},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5,"busyDelivery":"steer"}"#
         case "/api/v1/signin":
-            return #"{"profiles":[{"id":"sp_0123456789ab","label":"Work Chrome","browser":"chrome","profile":"Profile 2","createdAt":"2026-10-18T00:00:00Z"}],"consumers":[{"id":"notion","label":"Notion","purpose":"p","profileId":null},{"id":"claude","label":"Claude Remote Control","purpose":"p","profileId":"sp_0123456789ab"}],"browsers":[{"browser":"chrome","label":"Google Chrome","available":true,"profiles":[{"profile":"Default","name":"Personal"},{"profile":"Profile 2","name":"Work","profileId":"sp_0123456789ab"}]},{"browser":"edge","label":"Microsoft Edge","available":false,"detail":"reading this browser's profiles did not finish in time","profiles":[]}]}"#
+            return #"{"profiles":[{"id":"sp_0123456789ab","label":"Work Chrome","browser":"chrome","profile":"Profile 2","createdAt":"2026-10-18T00:00:00Z"}],"consumers":[{"id":"notion","label":"Notion","purpose":"p","profileId":null,"mode":"automatic","browser":"safari","browserLabel":"Safari","profile":"Default","profileName":"Safari","problem":"permission denied reading Safari data at /fixture/Cookies.binarycookies (macOS needs Full Disk Access for this)"},{"id":"claude","label":"Claude Remote Control","purpose":"p","profileId":"sp_0123456789ab","mode":"profile","browser":"chrome","browserLabel":"Google Chrome","profile":"Profile 2","profileName":"Work Chrome"}],"browsers":[{"browser":"chrome","label":"Google Chrome","available":true,"profiles":[{"profile":"Default","name":"Personal"},{"profile":"Profile 2","name":"Work","profileId":"sp_0123456789ab"}]},{"browser":"edge","label":"Microsoft Edge","available":false,"detail":"reading this browser's profiles did not finish in time","profiles":[]}]}"#
+        case "/api/v1/signin/bindings":
+            return #"{"id":"claude","label":"Claude Remote Control","purpose":"p","profileId":null,"mode":"off"}"#
         case "/api/v1/settings":
             return #"{"dashboard":{"listen":"127.0.0.1:7412","codexRecentHours":12,"busyDelivery":"steer"},"remoteAccess":{"enabled":false,"desired":false,"provider":"tailscale","port":7412},"notifications":{"enabled":false,"available":true,"authorization":"unknown","authorized":false,"alerts":false,"sounds":false}}"#
         default:

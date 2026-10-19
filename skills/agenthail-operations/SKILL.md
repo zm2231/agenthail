@@ -45,9 +45,10 @@ agenthail doctor --json
 ```
 
 AgentHail targets macOS and runs headless on Linux. Native Claude messages use local sockets and require
-the daemon. Claude Remote Control and Notion read cookies only from the browser sign-in profile
-bound with `agenthail signin use <notion|claude> <profile>` (list with
-`agenthail signin list`); unbound consumers report "not set up" and read nothing. Codex
+the daemon. Claude Remote Control and Notion read cookies from the system default browser's
+last used profile unless pinned with `agenthail signin use <notion|claude> <profile>`;
+`auto` returns to the default and `none` turns a consumer's sign-in off. `agenthail signin list`
+shows what each consumer resolves to and any problem with its fix. Codex
 Desktop uses AgentHail's loopback Desktop bridge (`agenthail launch codex`).
 Without Desktop, AgentHail uses Codex's app-server daemon and starts it when a
 conversation needs it. Codex 0.151 and older can only start that daemon from the

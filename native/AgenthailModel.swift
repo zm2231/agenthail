@@ -532,11 +532,11 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func bindSignin(consumer: String, profileID: String?) {
+    func bindSignin(consumer: String, choice: String) {
         guard let api else { return }
         Task {
             do {
-                try await api.bindSignin(consumer: consumer, profileID: profileID)
+                _ = try await api.bindSignin(consumer: consumer, choice: choice)
                 await loadSignin()
             } catch {
                 signinError = AgenthailAPIError.userMessage(error)

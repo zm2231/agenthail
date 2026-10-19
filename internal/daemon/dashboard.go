@@ -129,6 +129,7 @@ type dashboardState struct {
 	DeliveryProblems   []registry.DeliveryProblem `json:"deliveryProblems"`
 	CodexRecentHours   int                        `json:"codexRecentHours"`
 	BusyDelivery       string                     `json:"busyDelivery"`
+	Signin             []signin.Status            `json:"signin"`
 	Rekeyed            map[string]string          `json:"rekeyed,omitempty"`
 	catalogPageApplied bool
 	catalogPageFilter  string
@@ -765,7 +766,10 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read session rekeys: %w", err)
 	}
-	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Rekeyed: rekeyed}
+	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Signin: make([]signin.Status, 0, len(signin.Consumers)), Rekeyed: rekeyed}
+	for _, consumer := range signin.Consumers {
+		state.Signin = append(state.Signin, d.signinConsumer(consumer))
+	}
 	if page != nil {
 		state.catalogPageApplied = true
 		state.catalogPageFilter = pageRequest[0].Scope + "\x00" + pageRequest[0].ProjectID + "\x00" + pageRequest[0].Query
@@ -910,8 +914,8 @@ func (d *Daemon) observedSurfaceHealth(kind surface.SurfaceKind) (dashboardSurfa
 
 func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Surface, listErr error) dashboardSurface {
 	entry := dashboardSurface{Name: string(adapter.Name()), Connected: listErr == nil, Health: "healthy", Capabilities: adapter.Capabilities()}
-	if signin.IsNotConfigured(listErr) {
-		entry.Health = "not_configured"
+	if signin.IsOff(listErr) {
+		entry.Health = "signin_off"
 		entry.HealthDetail = listErr.Error()
 		return entry
 	}

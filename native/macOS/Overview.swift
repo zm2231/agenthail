@@ -4,7 +4,7 @@ struct SurfaceOverview: Identifiable, Equatable {
     enum Health: Equatable {
         case healthy
         case degraded
-        case notConfigured
+        case signinOff
         case unavailable
     }
 
@@ -25,7 +25,7 @@ struct SurfaceOverview: Identifiable, Equatable {
         switch health {
         case .healthy: return "Healthy"
         case .degraded: return "Needs attention"
-        case .notConfigured: return "Not set up"
+        case .signinOff: return "Sign-in off"
         case .unavailable: return "Unavailable"
         }
     }
@@ -52,17 +52,17 @@ struct SurfaceOverview: Identifiable, Equatable {
         switch surface.health {
         case "healthy": return .healthy
         case "degraded": return .degraded
-        case "not_configured": return .notConfigured
+        case "signin_off": return .signinOff
         default: return .unavailable
         }
     }
 
     private static func detail(_ surface: SurfaceState) -> String {
         let raw = [surface.healthDetail, surface.error].compactMap { $0 }.first { !$0.isEmpty } ?? "Ready"
-        if surface.health == "not_configured" || raw.range(of: "choose a browser sign-in profile", options: .caseInsensitive) != nil {
+        if surface.health == "signin_off" {
             let claude = raw.hasPrefix("Claude Remote Control")
-            let consumer = claude ? "Claude sessions reached over Remote Control need" : "Notion needs"
-            return "\(consumer) a browser sign-in profile. Choose one in Settings > Browser Sign-in, or run agenthail signin use \(claude ? "claude" : "notion") <profile>."
+            let consumer = claude ? "Claude sessions reached over Remote Control read" : "Notion reads"
+            return "Browser sign-in is off, so \(consumer) no cookies. Turn it on in Settings > Browser Sign-in, or run agenthail signin use \(claude ? "claude" : "notion") auto."
         }
         if raw.range(of: "cookie bridge", options: .caseInsensitive) != nil {
             return "Claude Code needs to reconnect to your signed-in account."
