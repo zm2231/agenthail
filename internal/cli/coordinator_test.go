@@ -362,6 +362,16 @@ func TestLeadIsTheCoordinatorOfTheSendersProject(t *testing.T) {
 	if _, err := c.r.LookupAlias("alpha-lead"); err == nil {
 		t.Fatal("a beta worker's report started alpha's coordinator")
 	}
+	const removed = "8c9d0e1f-2a3b-4c4d-8e5f-6a7b8c9d0e1f"
+	c.register(t, surface.Session{ID: removed, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: exitedPID, Status: surface.StatusIdle, Cwd: filepath.Join(beta, "removed-worktree")})
+	t.Setenv("CLAUDE_CODE_SESSION_ID", removed)
+	if _, err := c.run(t, "send", "@lead", "report from a removed folder"); err != nil {
+		t.Fatalf("a worker whose folder was removed could not reach its project's coordinator: %v", err)
+	}
+	betaLead := c.current(t, "beta-lead")
+	claudehosttest.WaitFor(t, "the report at beta's coordinator", func() bool {
+		return len(c.host.Turns(t, betaLead)) == 2 || c.r.QueueCount(betaLead) == 1
+	})
 
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	t.Chdir(alpha)

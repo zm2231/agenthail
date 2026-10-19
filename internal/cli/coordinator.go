@@ -68,21 +68,20 @@ func (a *App) cmdCoordinator(args []string) error {
 	return errors.New(coordinatorUsage)
 }
 
-// projectAt resolves the project containing path, the working directory when
-// path is empty. A coordinator belongs to a project, so a folder outside every
-// project has none.
+// projectAt resolves the project containing a folder the user typed, the
+// working directory when path is empty.
 func (a *App) projectAt(path string) (*project.Project, error) {
-	if path == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, err
-		}
-		path = cwd
-	}
 	cwd, err := resolveThreadCwd(path)
 	if err != nil {
 		return nil, err
 	}
+	return a.projectOf(cwd)
+}
+
+// projectOf resolves the project of a session's folder, which may no longer
+// exist: a removed worktree stays in its repository's project. A coordinator
+// belongs to a project, so a folder outside every project has none.
+func (a *App) projectOf(cwd string) (*project.Project, error) {
 	records, err := a.registry().ListProjects()
 	if err != nil {
 		return nil, err
@@ -107,7 +106,14 @@ func (a *App) expandLead(target string) (string, error) {
 	if !ok || !strings.EqualFold(name, registry.LeadAlias) || a.registry() == nil {
 		return target, nil
 	}
-	found, err := a.projectAt(a.callerCwd())
+	cwd := a.callerCwd()
+	var found *project.Project
+	var err error
+	if cwd == "" {
+		found, err = a.projectAt("")
+	} else {
+		found, err = a.projectOf(cwd)
+	}
 	if err != nil {
 		return "", fmt.Errorf("@%s: %w", registry.LeadAlias, err)
 	}
@@ -218,7 +224,7 @@ func (a *App) coordinatorSet(target string, args []string) error {
 	if session.Cwd == "" {
 		return fmt.Errorf("%s has no known working directory to start again in", a.resolveDisplay(session.ID))
 	}
-	found, err := a.projectAt(session.Cwd)
+	found, err := a.projectOf(session.Cwd)
 	if err != nil {
 		return err
 	}
