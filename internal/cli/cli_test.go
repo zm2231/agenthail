@@ -532,6 +532,32 @@ func TestQueueAllowsUnloadedCodexDesktopSession(t *testing.T) {
 	}
 }
 
+func TestQueueRetryReturnsAnUnconfirmedHostSendToItsReplay(t *testing.T) {
+	app, r := cliFixture(t, &cliSurface{kind: surface.KindCodex})
+	hostID := "h0123456789ab"
+	if _, err := r.AddHost(registry.PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	entity := hostID + "::remote-thread"
+	if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := r.QueueHostDelivery("remote-thread", "retry me", "key-retry", []byte(`{"action":"send"}`), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.DeadLetterUnknown(id, errors.New("host forge has not confirmed the message")); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Run([]string{"queue", "retry", strconv.FormatInt(id, 10)}); err != nil {
+		t.Fatal(err)
+	}
+	deliveries, err := r.HostDeliveries(hostID)
+	if err != nil || len(deliveries) != 1 || deliveries[0].ID != id || deliveries[0].Key != "key-retry" || deliveries[0].Status != "pending" {
+		t.Fatalf("deliveries=%+v err=%v", deliveries, err)
+	}
+}
+
 func TestQueueRetryRejectsReadOnlyCodexTerminalSession(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex}
 	app, r := cliFixture(t, fake)

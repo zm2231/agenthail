@@ -1244,14 +1244,18 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, targetErr.Error(), http.StatusBadRequest)
 			return
 		}
-		adapter, adapterErr := d.adapters().For(target)
-		if adapterErr != nil {
-			http.Error(w, "target surface is not configured", http.StatusConflict)
-			return
-		}
-		if err := d.ensureDashboardWritable(r.Context(), adapter, target); err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
+		// A paired host's session is retried by replaying the held request
+		// with its original key; the host decides whether it can take it.
+		if owner, ownerErr := d.Registry.SessionHost(target.ID); ownerErr != nil || owner == "" {
+			adapter, adapterErr := d.adapters().For(target)
+			if adapterErr != nil {
+				http.Error(w, "target surface is not configured", http.StatusConflict)
+				return
+			}
+			if err := d.ensureDashboardWritable(r.Context(), adapter, target); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
 		}
 		if err := d.Registry.RetryMessage(request.QueueID); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)

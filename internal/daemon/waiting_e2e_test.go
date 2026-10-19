@@ -535,3 +535,31 @@ func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) 
 		t.Fatalf("one question notified %d times", got)
 	}
 }
+
+func TestQueuedSteerToAClaudeSessionWithoutABridgeWaitsForTheTurn(t *testing.T) {
+	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	adapters := surface.Adapters{surfaces.NewClaude(nil, t.TempDir())}
+	for _, test := range []struct {
+		bridge string
+		want   registry.QueueHold
+	}{{"", registry.QueueHeldBusy}, {"session_steerable", ""}} {
+		id := "conversation-bridge-" + test.bridge
+		if err := store.RegisterSession(surface.Session{ID: id, Bridge: test.bridge, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", Status: surface.StatusBusy}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SaveRuntimeState(id, surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}); err != nil {
+			t.Fatal(err)
+		}
+		queueID, err := store.QueueMessageWithOptions(id, "into the turn", "", surface.SendOptions{BusyDelivery: "steer"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if item, err := store.QueueItem(queueID, adapters); err != nil || item.HeldBy != test.want {
+			t.Fatalf("bridge %q: item=%+v err=%v, want held by %q", test.bridge, item, err, test.want)
+		}
+	}
+}

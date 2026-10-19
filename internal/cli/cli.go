@@ -2195,12 +2195,16 @@ func (a *App) cmdQueue(args []string) error {
 		if err != nil {
 			return err
 		}
-		adapter, adapterErr := a.adapters().For(session)
-		if adapterErr != nil {
-			return adapterErr
-		}
-		if err := a.ensureWritableTarget(context.Background(), session, adapter); err != nil {
-			return err
+		// A paired host's session is retried by the daemon replaying the
+		// held request with its original key.
+		if owner, ownerErr := a.Registry.SessionHost(session.ID); ownerErr != nil || owner == "" {
+			adapter, adapterErr := a.adapters().For(session)
+			if adapterErr != nil {
+				return adapterErr
+			}
+			if err := a.ensureWritableTarget(context.Background(), session, adapter); err != nil {
+				return err
+			}
 		}
 		if err := a.Registry.RetryMessage(id); err != nil {
 			return err
