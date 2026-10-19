@@ -2,7 +2,9 @@ package signin
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -178,43 +180,138 @@ func TestSourceForLocatesTheProfileDirectory(t *testing.T) {
 	home := t.TempDir()
 	chromeDir := filepath.Join(chromiumRoot(home, Chrome), "Profile 2")
 	firefoxDir := filepath.Join(firefoxRoot(home), "Profiles", "abcd.default-release")
-	for _, dir := range []string{chromeDir, firefoxDir} {
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
+	writeFile(t, filepath.Join(chromeDir, "Network", "Cookies"), "")
+	writeFile(t, filepath.Join(firefoxDir, "cookies.sqlite"), "")
+	writeFile(t, filepath.Join(chromiumRoot(home, Chrome), "Profile 3", "Preferences"), "{}")
 	for _, test := range []struct {
 		profile Profile
 		dir     string
 	}{
 		{Profile{ID: "sp_1", Browser: Chrome, Profile: "Profile 2"}, chromeDir},
 		{Profile{ID: "sp_2", Browser: Firefox, Profile: "Profiles/abcd.default-release"}, firefoxDir},
-		{Profile{ID: "sp_3", Browser: Safari, Profile: SafariProfile}, ""},
 	} {
 		source, err := SourceFor(home, test.profile)
 		if err != nil || source != (Source{ProfileID: test.profile.ID, Browser: test.profile.Browser, Dir: test.dir}) {
 			t.Fatalf("profile=%+v source=%+v err=%v", test.profile, source, err)
 		}
 	}
-	for _, profile := range []Profile{
-		{ID: "sp_4", Label: "Gone", Browser: Chrome, Profile: "Profile 9"},
-		{ID: "sp_5", Label: "Escape", Browser: Chrome, Profile: "../Profile 2"},
-		{ID: "sp_6", Label: "Unknown", Browser: "opera", Profile: "Default"},
+	for _, test := range []struct {
+		profile Profile
+		want    string
+	}{
+		{Profile{ID: "sp_4", Label: "Gone", Browser: Chrome, Profile: "Profile 9"}, "no longer exists"},
+		{Profile{ID: "sp_5", Label: "Escape", Browser: Chrome, Profile: "../Profile 2"}, "invalid"},
+		{Profile{ID: "sp_6", Label: "Unknown", Browser: "opera", Profile: "Default"}, "unsupported"},
+		{Profile{ID: "sp_7", Label: "Empty", Browser: Chrome, Profile: "Profile 3"}, `profile "Profile 3" has no cookie store`},
 	} {
-		if _, err := SourceFor(home, profile); err == nil {
-			t.Fatalf("profile=%+v resolved", profile)
+		if _, err := SourceFor(home, test.profile); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("profile=%+v err=%v, want %q", test.profile, err, test.want)
 		}
 	}
 }
 
-func TestUnsetConsumerNamesTheCommandAndSettingsPage(t *testing.T) {
-	_, err := Resolve(nil, Target{Consumer: Claude})
-	if !IsNotConfigured(err) {
+func TestUnreadableCookieStoreIsAPermissionProblemNotAnEmptyBrowser(t *testing.T) {
+	requireDesktopRoots(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root reads files whatever their mode")
+	}
+	home := t.TempDir()
+	cookies := filepath.Join(chromiumRoot(home, Chrome), "Default", "Network", "Cookies")
+	writeFile(t, cookies, "")
+	if err := os.Chmod(cookies, 0); err != nil {
+		t.Fatal(err)
+	}
+	_, err := SourceFor(home, Profile{ID: "sp_1", Browser: Chrome, Profile: "Default"})
+	if err == nil || !strings.Contains(err.Error(), "permission denied reading Google Chrome data at "+cookies) || strings.Contains(err.Error(), "no cookie") {
 		t.Fatalf("err=%v", err)
 	}
-	for _, want := range []string{"Claude Remote Control: choose a browser sign-in profile", "agenthail signin use claude <profile>", "agenthail signin list", "Settings > Browser Sign-in"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("err=%q missing %q", err, want)
+	if !strings.Contains(err.Error(), "make it readable by the user that runs Agenthail") || strings.Contains(err.Error(), "Full Disk Access") {
+		t.Fatalf("a file mode denial names the wrong fix: %v", err)
+	}
+	lockedDir := filepath.Join(chromiumRoot(home, Chrome), "Profile 2")
+	writeFile(t, filepath.Join(lockedDir, "Cookies"), "")
+	if err := os.Chmod(filepath.Dir(lockedDir), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(filepath.Dir(lockedDir), 0o700) })
+	if _, err := SourceFor(home, Profile{ID: "sp_2", Browser: Chrome, Profile: "Profile 2"}); err == nil || !strings.Contains(err.Error(), "permission denied reading Google Chrome data at "+lockedDir) {
+		t.Fatalf("a profile behind an unreadable folder was reported missing: %v", err)
+	}
+}
+
+func TestSafariCookieStoreBehindAContainerPermissionNamesFullDiskAccess(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Safari is macOS only")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root reads files whatever their mode")
+	}
+	home := t.TempDir()
+	if _, err := SourceFor(home, Profile{Browser: Safari, Profile: SafariProfile}); err == nil || !strings.Contains(err.Error(), "Safari has no cookie store") {
+		t.Fatalf("err=%v", err)
+	}
+	store := filepath.Join(home, "Library", "Containers", "com.apple.Safari", "Data", "Library", "Cookies", "Cookies.binarycookies")
+	writeFile(t, store, "")
+	source, err := SourceFor(home, Profile{ID: "sp_1", Browser: Safari, Profile: SafariProfile})
+	if err != nil || source != (Source{ProfileID: "sp_1", Browser: Safari}) {
+		t.Fatalf("source=%+v err=%v", source, err)
+	}
+	if err := os.Chmod(store, 0); err != nil {
+		t.Fatal(err)
+	}
+	_, err = SourceFor(home, Profile{Browser: Safari, Profile: SafariProfile})
+	if err == nil || !strings.Contains(err.Error(), "permission denied reading Safari data") || strings.Contains(err.Error(), "no cookie") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// macOS privacy protection refuses reads with EPERM. A sandbox deny rule
+// refuses the same way, so the check runs again inside one.
+func TestCookieStoreRefusedByMacOSPrivacyNamesFullDiskAccess(t *testing.T) {
+	if home := os.Getenv("AGENTHAIL_SIGNIN_SANDBOXED_HOME"); home != "" {
+		_, err := SourceFor(home, Profile{Browser: Safari, Profile: SafariProfile})
+		fmt.Printf("RESULT %v\n", err)
+		return
+	}
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS privacy protection only")
+	}
+	sandbox, err := exec.LookPath("sandbox-exec")
+	if err != nil {
+		t.Skip("sandbox-exec is unavailable")
+	}
+	home := t.TempDir()
+	store := filepath.Join(home, "Library", "Containers", "com.apple.Safari", "Data", "Library", "Cookies", "Cookies.binarycookies")
+	writeFile(t, store, "")
+	resolved, err := filepath.EvalSymlinks(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(sandbox, "-p", `(version 1)(allow default)(deny file-read* (literal "`+resolved+`"))`, os.Args[0], "-test.run=^TestCookieStoreRefusedByMacOSPrivacyNamesFullDiskAccess$")
+	command.Env = append(os.Environ(), "AGENTHAIL_SIGNIN_SANDBOXED_HOME="+home)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("sandboxed run failed: %v: %s", err, output)
+	}
+	for _, want := range []string{"RESULT permission denied reading Safari data at " + store, "System Settings > Privacy & Security > Full Disk Access"} {
+		if !strings.Contains(string(output), want) {
+			t.Fatalf("output=%s missing %q", output, want)
+		}
+	}
+}
+
+func TestOffConsumerSaysHowToTurnItBackOn(t *testing.T) {
+	for _, err := range []error{
+		func() error { _, err := Resolve(nil, Target{Consumer: Claude}); return err }(),
+		func() error { _, _, err := Select(t.TempDir(), Claude, Choice{Mode: Off}); return err }(),
+	} {
+		if !IsOff(err) {
+			t.Fatalf("err=%v", err)
+		}
+		for _, want := range []string{"Claude Remote Control: browser sign-in is turned off", "agenthail signin use claude auto", "Settings > Browser Sign-in"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("err=%q missing %q", err, want)
+			}
 		}
 	}
 }

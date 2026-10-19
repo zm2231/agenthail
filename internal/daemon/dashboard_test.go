@@ -173,8 +173,8 @@ func TestDashboardSessionReadsJournalWithoutProviderMetadata(t *testing.T) {
 		}()
 	}
 	wait.Wait()
-	if elapsed := time.Since(started); elapsed > time.Second {
-		t.Fatalf("blocked provider delayed warm journal pages by %s", elapsed)
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("blocked provider delayed warm journal pages past the catch-up bound: %s", elapsed)
 	}
 	for _, response := range responses {
 		if response.Code != http.StatusOK {

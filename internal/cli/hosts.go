@@ -72,6 +72,35 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 // resolveAnyTarget resolves host::target on the named host and an
 // unqualified target across this host and every paired host. A target that
 // matches on more than one host is an error, never a pick.
+// resolveReadTarget resolves a target for reading its history. A registered
+// session the provider no longer lists is still readable by any registry
+// match; writes resolve with resolveAnyTarget, which never resumes one by name.
+func (a *App) resolveReadTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, *remoteTarget, error) {
+	session, adapter, remote, err := a.resolveAnyTarget(ctx, target)
+	if err == nil || a.Registry == nil || !errors.Is(err, surface.ErrSessionNotFound) {
+		return session, adapter, remote, err
+	}
+	var sid string
+	var lookupErr error
+	if kindText, selector, qualified := strings.Cut(target, ":"); qualified && a.adapters().ForSurface(surface.SurfaceKind(strings.ToLower(kindText))) != nil {
+		sid, lookupErr = a.Registry.ResolveSurfaceTarget(surface.SurfaceKind(strings.ToLower(kindText)), selector)
+	} else {
+		sid, lookupErr = a.Registry.ResolveTarget(target)
+	}
+	if lookupErr != nil {
+		return nil, nil, nil, err
+	}
+	registered, lookupErr := a.Registry.Session(sid)
+	if lookupErr != nil {
+		return nil, nil, nil, err
+	}
+	registeredAdapter, adapterErr := a.adapters().For(registered)
+	if adapterErr != nil {
+		return nil, nil, nil, adapterErr
+	}
+	return registered, registeredAdapter, nil, nil
+}
+
 func (a *App) resolveAnyTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, *remoteTarget, error) {
 	if a.registry() == nil {
 		session, adapter, err := a.resolveLocalTarget(ctx, target)

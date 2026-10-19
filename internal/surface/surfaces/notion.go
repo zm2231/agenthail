@@ -326,11 +326,8 @@ var notionInferenceRequest = sidecarRequestWithCookies
 
 func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
 	cookies, err := n.cookies()
-	if signin.IsNotConfigured(err) {
-		return nil, surface.DeliveryTerminal(err, surface.DeliverySigninNotConfigured)
-	}
 	if err != nil {
-		return nil, surface.DeliveryTerminal(err, surface.DeliveryAuthenticationNeeded)
+		return nil, surface.DeliveryTerminal(err, signinTerminalKind(err))
 	}
 	account, err := n.accountFor(ctx, cookies)
 	if err != nil {
@@ -433,6 +430,9 @@ func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, mes
 	status, respBody, err := notionInferenceRequest(ctx, "POST",
 		notionAPI("runInferenceTranscript"),
 		headers, string(bodyBytes), account.cookies, 60*time.Second)
+	if surface.IsDeliveryUnavailable(err) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("notion send: %w", err))
 	}
