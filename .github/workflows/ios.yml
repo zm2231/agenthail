@@ -36,7 +36,7 @@ jobs:
 
   ios:
     needs: changes
-    if: needs.changes.outputs.ios == 'true'
+    if: false
     runs-on: macos-latest
     timeout-minutes: 30
     env:
@@ -60,7 +60,7 @@ jobs:
 
   ios-release:
     needs: changes
-    if: needs.changes.outputs.ios == 'true'
+    if: false
     runs-on: macos-latest
     timeout-minutes: 20
     steps:

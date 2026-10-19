@@ -1,0 +1,41 @@
+name: iOS boot experiment
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  experiment:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [overlap, boot-first, image-device]
+    runs-on: macos-latest
+    timeout-minutes: 40
+    env:
+      DERIVED: ${{ github.workspace }}/../ios-derived
+    steps:
+      - uses: actions/checkout@v5
+      - name: Pick simulator
+        run: |
+          xcrun simctl list runtimes
+          if [ "${{ matrix.variant }}" = image-device ]; then
+            udid="$(xcrun simctl list devices available --json | jq -r '.devices | to_entries | map(select(.key | contains("iOS"))) | last | .value | map(select(.name | startswith("iPhone"))) | first | .udid')"
+          else
+            udid="$(scripts/ios-simulator.sh iphone)"
+          fi
+          xcrun simctl list devices | grep "$udid"
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+      - name: Boot simulator
+        run: xcrun simctl boot "$SIMULATOR_UDID"
+      - name: Wait for boot
+        if: matrix.variant != 'overlap'
+        run: xcrun simctl bootstatus "$SIMULATOR_UDID" -b
+      - name: Build for simulator tests
+        run: xcodebuild build-for-testing -showBuildTimingSummary -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED"
+      - name: Wait for boot after build
+        run: xcrun simctl bootstatus "$SIMULATOR_UDID" -b
+      - name: iOS simulator tests
+        run: xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" -parallel-testing-enabled NO
