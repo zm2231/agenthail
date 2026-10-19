@@ -639,14 +639,14 @@ final class AgenthailModel: ObservableObject {
         if settings.isEmpty { turnSettingsDrafts.removeValue(forKey: sessionID) } else { turnSettingsDrafts[sessionID] = settings }
     }
 
-    func send(_ message: String, attachments: [URL] = [], to sessionID: String, busyDelivery: String? = nil, turnSettings: TurnSettings = .init(), completion: ((Bool) -> Void)? = nil) {
-        let text = ComposerDrop.message(text: message, attachments: attachments).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let api else {
-            restoreToComposer(message.trimmingCharacters(in: .whitespacesAndNewlines), attachments: attachments, sessionID: sessionID)
+    func send(_ message: String, attachments: [ComposerAttachment] = [], to sessionID: String, busyDelivery: String? = nil, turnSettings: TurnSettings = .init(), completion: ((Bool) -> Void)? = nil) {
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !ComposerAttachments.isEmpty(text: text, attachments: attachments), let api else {
+            restoreToComposer(text, attachments: attachments, sessionID: sessionID)
             completion?(false)
             return
         }
-        let pending = LocalSend(text: text, sentAt: Date(), status: nil, busyDelivery: busyDelivery, turnSettings: turnSettings)
+        let pending = LocalSend(text: text, attachments: attachments, sentAt: Date(), status: nil, busyDelivery: busyDelivery, turnSettings: turnSettings)
         localSends[sessionID, default: []].append(pending)
         deliver(pending, to: sessionID, api: api, completion: completion)
     }
@@ -660,7 +660,9 @@ final class AgenthailModel: ObservableObject {
     private func deliver(_ send: LocalSend, to sessionID: String, api: AgenthailAPI, completion: ((Bool) -> Void)? = nil) {
         Task {
             do {
-                let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: send.text, turnSettings: send.turnSettings, busyDelivery: send.busyDelivery, author: "person", idempotencyKey: send.idempotencyKey)
+                let uploaded = try await api.upload(send.attachments, sessionID: sessionID)
+                updateLocalSend(send.id, in: sessionID) { $0.uploaded = uploaded }
+                let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: send.text, turnSettings: send.turnSettings, busyDelivery: send.busyDelivery, author: "person", attachments: uploaded.map(\.id), idempotencyKey: send.idempotencyKey)
                 if !send.turnSettings.isEmpty, turnSettingsDrafts[sessionID] == send.turnSettings { turnSettingsDrafts.removeValue(forKey: sessionID) }
                 updateLocalSend(send.id, in: sessionID) { $0.status = LocalSend.label(for: receipt.result?.status, waitingOnYou: receipt.result?.waitingOn != nil) }
                 operationError = nil
@@ -800,7 +802,7 @@ final class AgenthailModel: ObservableObject {
         restoreToComposer(problem.message, sessionID: problem.sessionId)
     }
 
-    private func restoreToComposer(_ text: String, attachments: [URL] = [], sessionID: String) {
+    private func restoreToComposer(_ text: String, attachments: [ComposerAttachment] = [], sessionID: String) {
         draft(for: sessionID).restore(text, attachments: attachments)
     }
 
@@ -997,14 +999,14 @@ enum FollowUpAction: String {
 
 final class ComposerDraft: ObservableObject {
     @Published var text = ""
-    @Published var attachments: [URL] = []
+    @Published var attachments: [ComposerAttachment] = []
 
-    var isEmpty: Bool { ComposerDrop.isEmpty(text: text, attachments: attachments) }
+    var isEmpty: Bool { ComposerAttachments.isEmpty(text: text, attachments: attachments) }
 
-    func restore(_ restored: String, attachments restoredAttachments: [URL] = []) {
+    func restore(_ restored: String, attachments restoredAttachments: [ComposerAttachment] = []) {
         if !restored.isEmpty {
             text = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? restored : "\(text)\n\n\(restored)"
         }
-        attachments = ComposerDrop.adding(restoredAttachments, to: attachments)
+        attachments = ComposerAttachments.adding(restoredAttachments, to: attachments).attachments
     }
 }

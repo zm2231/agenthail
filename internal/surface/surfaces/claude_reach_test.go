@@ -74,7 +74,7 @@ func TestClaudeConcurrentTurnsToAnExitedSessionResumeItOnceInTheHost(t *testing.
 		go func() {
 			defer wait.Done()
 			session := exitedSession(fixture)
-			_, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), ids[index]), &session, message)
+			_, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), ids[index]), &session, message, nil)
 			if err == nil && (session.RuntimeKind != surface.RuntimeClaudeHost || session.ID != fixtureConversation || session.Bridge != "") {
 				t.Errorf("session=%+v", session)
 			}
@@ -162,7 +162,7 @@ func TestClaudeSendResumesTerminalSessionInItsTranscriptCwd(t *testing.T) {
 	fixture, host, c := hostResume(t)
 	session := exitedSession(fixture)
 	session.Cwd = ""
-	result, err := c.SendHumanTurn(context.Background(), &session, "hello")
+	result, err := c.SendHumanTurn(context.Background(), &session, "hello", nil)
 	if err != nil || !result.Accepted || session.ID != fixtureConversation || session.RuntimeKind != surface.RuntimeClaudeHost || session.Transport != "uds" {
 		t.Fatalf("result=%+v session=%+v err=%v", result, session, err)
 	}

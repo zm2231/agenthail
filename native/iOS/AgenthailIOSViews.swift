@@ -639,7 +639,7 @@ struct IOSComposer: View {
 
     private var canSend: Bool {
         !sending && !model.pendingControls.contains(session.id)
-            && !model.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !ComposerAttachments.isEmpty(text: model.composer, attachments: model.composerAttachments)
             && (steering || detail.capabilities.send)
     }
 
@@ -655,6 +655,13 @@ struct IOSComposer: View {
                     .accessibilityIdentifier("latest-instruction")
             }
             VStack(alignment: .leading, spacing: 6) {
+                if !model.composerAttachments.isEmpty {
+                    ComposerAttachmentStrip(model: model)
+                }
+                if let problem = model.attachmentProblem {
+                    Text(problem).font(.footnote).foregroundStyle(.red).padding(.horizontal, 8)
+                        .accessibilityIdentifier("attachment-problem")
+                }
                 TextField(steering ? "Steer this turn…" : "Message this agent…", text: $model.composer, axis: .vertical)
                     .font(.body).lineLimit(1...6).textFieldStyle(.plain)
                     .padding(.horizontal, 8).padding(.top, 8)
@@ -662,6 +669,10 @@ struct IOSComposer: View {
                     .accessibilityIdentifier("composer-input")
                 let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
                 layout {
+                    if detail.capabilities.attach && detail.capabilities.send {
+                        ComposerAttachmentMenu(model: model)
+                            .disabled(sending)
+                    }
                     if detail.capabilities.model {
                         Button { showingModels = true } label: { modelLabel }
                         .buttonStyle(.plain)
@@ -760,6 +771,7 @@ struct IOSMessage: View {
     let text: String
     let color: Color
     var timestamp: String? = nil
+    var files: [AttachedFile] = []
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.editMessage) private var editMessage
     @State private var showingFullMessage = false
@@ -769,12 +781,17 @@ struct IOSMessage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if isUser {
-                Text(isLongMessage ? String(text.prefix(700)) : text)
-                    .font(.body)
-                    .lineSpacing(4)
-                    .lineLimit(isLongMessage ? 6 : nil)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+                if !text.isEmpty {
+                    Text(isLongMessage ? String(text.prefix(700)) : text)
+                        .font(.body)
+                        .lineSpacing(4)
+                        .lineLimit(isLongMessage ? 6 : nil)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                ForEach(Array(files.enumerated()), id: \.offset) { _, file in
+                    AttachedFileChip(file: file)
+                }
                 if isLongMessage {
                     Button("Read full message") { showingFullMessage = true }
                         .font(.subheadline.weight(.medium))
@@ -805,6 +822,44 @@ struct IOSMessage: View {
     }
 }
 
+// The file lives on the host that owns the session, so the phone offers its
+// stored path rather than the file.
+struct AttachedFileChip: View {
+    let file: AttachedFile
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            UIPasteboard.general.string = file.path
+            copied = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "doc").foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(file.name).font(.subheadline.weight(.medium)).lineLimit(1)
+                    Text(copied ? "Path copied" : file.sizeLabel ?? "File")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: copied ? "checkmark" : "doc.on.doc").font(.footnote).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .disabled(file.path.isEmpty)
+        .accessibilityLabel("\(file.name), \(file.sizeLabel ?? "file")")
+        .accessibilityHint("Copies the path where the agent can read this file")
+        .accessibilityIdentifier("attached-file")
+        .task(id: copied) {
+            guard copied else { return }
+            try? await Task.sleep(for: .seconds(2))
+            copied = false
+        }
+    }
+}
+
 struct IOSTimelineRow: View {
     let item: TimelineItem
     var compactContext = true
@@ -818,7 +873,7 @@ struct IOSTimelineRow: View {
         if compactContext, let title = TranscriptContext.title(for: item) {
             ContextRecordRow(title: title, item: item)
         } else if item.kind == "message" {
-            IOSMessage(label: messageLabel, text: item.text, color: .secondary, timestamp: item.timestamp)
+            IOSMessage(label: messageLabel, text: item.text, color: .secondary, timestamp: item.timestamp, files: item.files ?? [])
             if item.truncated { shortened }
         } else if item.kind == "attachment" {
             AttachmentRow(item: item, loader: attachmentLoader.map { loader in { await loader(item) } })

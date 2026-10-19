@@ -1052,9 +1052,14 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Launcher        string                     `json:"launcher"`
 		Approval        string                     `json:"approvalPolicy"`
 		Author          surface.Author             `json:"author"`
+		Attachments     []string                   `json:"attachments"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid dashboard request", http.StatusBadRequest)
+		return
+	}
+	if len(request.Attachments) > 0 && request.Action != "send" {
+		http.Error(w, "attachments are only accepted with send", http.StatusBadRequest)
 		return
 	}
 	if request.Action == "delivery-dismiss" {
@@ -1620,8 +1625,17 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	var result any
 	switch request.Action {
 	case "send":
-		if strings.TrimSpace(request.Message) == "" {
+		if strings.TrimSpace(request.Message) == "" && len(request.Attachments) == 0 {
 			http.Error(w, "message is required", http.StatusBadRequest)
+			return
+		}
+		attached, uploadErr := d.resolveUploads(request.Attachments)
+		if uploadErr != nil {
+			http.Error(w, uploadErr.Error(), http.StatusBadRequest)
+			return
+		}
+		if len(attached) > 0 && !effective.Attach {
+			http.Error(w, "this session cannot take attached files", http.StatusBadRequest)
 			return
 		}
 		if request.Author != "" && request.Author != surface.AuthorPerson {
@@ -1638,7 +1652,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 		}
-		receipt, actionErr := d.dispatcher().DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author})
+		receipt, actionErr := d.dispatcher().DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, Uploads: attached})
 		if actionErr != nil {
 			http.Error(w, actionErr.Error(), http.StatusBadGateway)
 			return

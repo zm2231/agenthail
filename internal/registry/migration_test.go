@@ -560,3 +560,37 @@ func queueHasExpiry(r *Registry) (bool, error) {
 	defer tx.Rollback()
 	return columnExists(tx, "message_queue", "expires_at_ms")
 }
+
+func TestOpenAddsQueueUploadsToARegistryAtTheVersionBefore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, r, "target")
+	for _, statement := range []string{
+		`ALTER TABLE message_queue DROP COLUMN uploads`,
+		`INSERT INTO message_queue(id,session_id,message,status,updated_at) VALUES(70,'target','read the report','pending','2026-10-19 09:00:00')`,
+		`PRAGMA user_version=19`,
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var version int
+	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 20 {
+		t.Fatalf("user_version=%d err=%v", version, err)
+	}
+	claimed, err := r.ClaimNextMessage("target", time.Now())
+	if err != nil || claimed == nil || claimed.ID != 70 || claimed.Message != "read the report" || len(claimed.Uploads) != 0 {
+		t.Fatalf("claimed=%+v err=%v", claimed, err)
+	}
+}

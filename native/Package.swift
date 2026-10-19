@@ -28,6 +28,7 @@ let package = Package(
                 "AgenthailModels.swift",
                 "TurnSettings.swift",
                 "AgenthailAPI.swift",
+                "ComposerAttachment.swift",
                 "SessionSelection.swift",
                 "EventRetryBackoff.swift",
                 "ToolPresentation.swift",

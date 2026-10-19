@@ -232,7 +232,7 @@ func emitCodexTranscriptItem(session *surface.Session, uuid string, record map[s
 	if item.Kind == "done" {
 		operation = "phase"
 	}
-	onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: operation, Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
+	onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: operation, Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Files: item.Files, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
 }
 
 func codexRecordTurnID(record map[string]any) string {
@@ -294,6 +294,13 @@ func codexOpaqueTimelineItem(record map[string]any) *surface.TimelineItem {
 	switch typ {
 	case "message", "agent_message", "reasoning", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "web_search_call", "user_message", "token_count":
 		return nil
+	case "item_started", "item_completed":
+		// These mirror response_item records that already render as messages.
+		item, _ := payload["item"].(map[string]any)
+		switch str(item, "type") {
+		case "UserMessage", "AgentMessage", "Reasoning":
+			return nil
+		}
 	}
 	text := typ + ": " + timelineValue(payload)
 	truncated := false
@@ -628,7 +635,7 @@ func codexTranscriptExchanges(records []transcriptRecord) ([]surface.Exchange, [
 	offsets := make([]int64, 0)
 	for _, record := range records {
 		for _, item := range record.items {
-			if item.Kind != "message" || item.Text == "" {
+			if item.Kind != "message" || (item.Text == "" && len(item.Files) == 0) {
 				continue
 			}
 			timestamp, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
@@ -787,6 +794,9 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 		return nil
 	}
 	message, _ := record["message"].(map[string]any)
+	if kind == "user" && claudeImageSourceCompanion(record, message) {
+		return nil
+	}
 	if kind == "user" {
 		origin, _ := record["origin"].(map[string]any)
 		if text := claudeMessageText(message["content"]); text != "" && str(message, "tool_use_id") == "" {
@@ -827,6 +837,12 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 			item.Text = timelineToolResultText(block["content"])
 			if failed, _ := block["is_error"].(bool); failed {
 				item.Status = "error"
+			}
+			if images := toolResultImageContent(block["content"]); item.Text == "" && item.Status == "" && len(images) > 0 {
+				for range images {
+					items = append(items, surface.TimelineItem{Kind: "attachment", Role: kind, Title: "Image", Text: "Image attachment", CallID: item.CallID})
+				}
+				continue
 			}
 		case "image":
 			item.Kind = "attachment"
@@ -880,10 +896,49 @@ func timelineToolResultText(value any) string {
 		}
 	}
 	clean := sanitizeToolResultValue(value)
-	if clean == nil {
+	if remaining, ok := clean.([]any); clean == nil || ok && len(remaining) == 0 {
 		return ""
 	}
 	return timelineValue(clean)
+}
+
+// claudeImageSourceCompanion reports Claude's meta records that only describe
+// an image shown elsewhere: where a pasted image was saved, or how a read
+// image was resized. The image renders as an attachment, and a saved path is
+// local to that machine.
+func claudeImageSourceCompanion(record, message map[string]any) bool {
+	if meta, _ := record["isMeta"].(bool); !meta {
+		return false
+	}
+	if text, ok := message["content"].(string); ok {
+		return claudeImageNote(text)
+	}
+	blocks, _ := message["content"].([]any)
+	if len(blocks) == 0 {
+		return false
+	}
+	for _, raw := range blocks {
+		block, _ := raw.(map[string]any)
+		if str(block, "type") != "text" || !claudeImageNote(str(block, "text")) {
+			return false
+		}
+	}
+	return true
+}
+
+// claudeImageNote reports Claude Code's notes about an image it saved or
+// resized ("[Image: source: ...]", "[Image: original WxH, displayed at ...]").
+func claudeImageNote(text string) bool {
+	text = strings.TrimSpace(text)
+	return strings.HasPrefix(text, "[Image: ") && strings.HasSuffix(text, "]") && !strings.Contains(text, "\n")
+}
+
+// codexImageWrapper reports the text Codex puts around each image input
+// ("<image name=[Image #1] path=...>" and "</image>"). The image renders as an
+// attachment item, and the path is local to that machine.
+func codexImageWrapper(text string) bool {
+	text = strings.TrimSpace(text)
+	return text == "</image>" || strings.HasPrefix(text, "<image name=[Image #") && strings.HasSuffix(text, ">") && !strings.Contains(text, "\n")
 }
 
 func sanitizeToolResultValue(value any) any {
@@ -962,11 +1017,12 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 		var parts []string
 		for _, raw := range blocks {
 			block, _ := raw.(map[string]any)
-			if text := str(block, "text"); text != "" {
+			if text := str(block, "text"); codexImageWrapper(text) {
+				continue
+			} else if text != "" {
 				parts = append(parts, text)
 			} else if strings.Contains(str(block, "type"), "image") {
 				messageAttachmentCount++
-				parts = append(parts, "[Image attachment: open the original agent app to view]")
 			}
 		}
 		item.Text = strings.Join(parts, "\n\n")
@@ -1015,6 +1071,9 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 		return nil
 	}
 	items := []surface.TimelineItem{item}
+	if item.Kind == "message" && item.Text == "" && messageAttachmentCount > 0 {
+		items = nil
+	}
 	for i := 0; i < messageAttachmentCount; i++ {
 		items = append(items, surface.TimelineItem{Kind: "attachment", Role: item.Role, Title: "Image", Text: "Image attachment"})
 	}

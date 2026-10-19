@@ -57,7 +57,7 @@ final class SessionPane: ObservableObject, Identifiable {
 
     private func observeDraft() {
         draftObservation = composerDraft.$text.combineLatest(composerDraft.$attachments)
-            .map { ComposerDrop.isEmpty(text: $0, attachments: $1) }
+            .map { ComposerAttachments.isEmpty(text: $0, attachments: $1) }
             .removeDuplicates()
             .sink { [weak self] empty in
                 guard let self, self.draftIsEmpty != empty else { return }
@@ -289,12 +289,12 @@ final class SessionPane: ObservableObject, Identifiable {
         send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery)
     }
 
-    func resend(_ text: String) {
+    func resend(_ text: String, attachments: [ComposerAttachment] = []) {
         guard let sessionID = selectedSessionID, removedSession == nil else { return }
-        send(text, to: sessionID, busyDelivery: nil)
+        send(text, attachments: attachments, to: sessionID, busyDelivery: nil)
     }
 
-    private func send(_ text: String, attachments: [URL] = [], to sessionID: String, busyDelivery: String?) {
+    private func send(_ text: String, attachments: [ComposerAttachment] = [], to sessionID: String, busyDelivery: String?) {
         let settings = selectedSession?.surface == "codex" && busyDelivery != "steer" ? model.turnSettings(for: sessionID) : TurnSettings()
         model.send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery, turnSettings: settings)
     }
