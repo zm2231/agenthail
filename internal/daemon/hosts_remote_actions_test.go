@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -88,13 +91,18 @@ func TestFederationRoutesEverySessionActionToTheOwningHost(t *testing.T) {
 		t.Fatalf("alias on remote id=%q err=%v", id, err)
 	}
 
-	for _, path := range []string{"/api/v1/history?limit=150&sessionId=", "/api/history?sessionId="} {
+	for index := 0; index < 160; index++ {
+		if err := remote.reg.RecordHistory(registry.HistoryEntry{Kind: "send", SessionID: "remote-a", Message: "synthetic"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, want := range map[string]int{"/api/v1/history?limit=150&sessionId=": 150, "/api/history?limit=150&sessionId=": 150} {
 		history := local.request(t, http.MethodGet, path+url.QueryEscape(qualified), nil)
 		var page struct {
 			Items []dashboardHistory `json:"items"`
 		}
-		if history.Code != http.StatusOK || json.Unmarshal(history.Body.Bytes(), &page) != nil || len(page.Items) == 0 {
-			t.Fatalf("%s status=%d body=%s", path, history.Code, history.Body.String())
+		if history.Code != http.StatusOK || json.Unmarshal(history.Body.Bytes(), &page) != nil || len(page.Items) != want {
+			t.Fatalf("%s status=%d items=%d", path, history.Code, len(page.Items))
 		}
 		for _, item := range page.Items {
 			if item.SessionID != qualified {
@@ -219,5 +227,94 @@ func TestFederationReportsAnOlderHostAsNeedingAnUpdate(t *testing.T) {
 	}
 	if held, _ := local.reg.HostDeliveries(record.ID); len(held) != 0 {
 		t.Fatalf("a refused send was held for the incompatible host: %+v", held)
+	}
+}
+
+func TestFederationSendsNothingBeyondVersionUntilTheHostIsConfirmed(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	qualified := hosts.Qualify(record.ID, "remote-a")
+	hold := &snapshotHold{release: make(chan struct{})}
+	var released sync.Once
+	release := func() { released.Do(func() { close(hold.release) }) }
+	t.Cleanup(release)
+	remote.gate.versions.Store(hold)
+	host, _ := local.daemon.pairedHost(record.ID)
+	host.cancel()
+	if err := local.daemon.attachHost(record); err != nil {
+		t.Fatal(err)
+	}
+	awaitFederation(t, "reconnect waits on the version check", func() bool { return hold.waiting.Load() > 0 })
+	remote.gate.beyondVersion.Store(0)
+
+	local.request(t, http.MethodGet, "/api/v1/history?sessionId="+url.QueryEscape(qualified), nil)
+	streamCtx, cancelStream := context.WithTimeout(context.Background(), 2*time.Second)
+	stream := httptest.NewRequestWithContext(streamCtx, http.MethodGet, "/api/v1/session-stream?id="+url.QueryEscape(qualified), nil)
+	stream.Header.Set("Authorization", "Bearer "+dashboardTestToken)
+	local.handler.ServeHTTP(httptest.NewRecorder(), stream)
+	cancelStream()
+	local.request(t, http.MethodGet, "/api/v1/session-options?host=forge", nil)
+	send := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": qualified, "message": "before confirmed"})
+	if got := remote.gate.beyondVersion.Load(); got != 0 {
+		t.Fatalf("%d requests reached a host before its version was confirmed", got)
+	}
+	if !strings.Contains(send.Body.String(), `"status":"queued"`) {
+		t.Fatalf("a send before the host is confirmed is not held: %s", send.Body.String())
+	}
+
+	remote.gate.older.Store(true)
+	remote.gate.versions.Store(nil)
+	release()
+	awaitFederation(t, "older host marked incompatible", func() bool {
+		current, _ := local.daemon.pairedHost(record.ID)
+		state, _ := current.status()
+		return state == hostStateIncompatible
+	})
+	history := local.request(t, http.MethodGet, "/api/v1/history?sessionId="+url.QueryEscape(qualified), nil)
+	if history.Code != http.StatusConflict || !strings.Contains(history.Body.String(), "host_incompatible") {
+		t.Fatalf("history after incompatibility status=%d body=%s", history.Code, history.Body.String())
+	}
+	if got := remote.gate.beyondVersion.Load(); got != 0 || len(remote.fake.delivered()) != 0 {
+		t.Fatalf("an incompatible host received %d requests, delivered=%v", got, remote.fake.delivered())
+	}
+}
+
+func TestFederationStopsReplayingHeldSendsOnceTheHostIsIncompatible(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	hold := &snapshotHold{release: make(chan struct{})}
+	var released sync.Once
+	release := func() { released.Do(func() { close(hold.release) }) }
+	t.Cleanup(release)
+	remote.gate.actions.Store(hold)
+	var ids []int64
+	for _, message := range []string{"first", "second"} {
+		id, err := local.reg.QueueHostDelivery("remote-a", message, "fwd-"+message, []byte(`{"action":"send","sessionId":"remote-a","message":"`+message+`"}`), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	host, _ := local.daemon.pairedHost(record.ID)
+	done := make(chan struct{})
+	go func() {
+		local.daemon.drainHostDeliveries(context.Background(), host)
+		close(done)
+	}()
+	awaitFederation(t, "first held send reaches the host", func() bool { return hold.waiting.Load() == 1 })
+
+	remote.gate.older.Store(true)
+	_, err := host.client.Version(context.Background())
+	if err == nil {
+		t.Fatal("an older host passed the version check")
+	}
+	local.daemon.markHostDown(host, err)
+	remote.gate.actions.Store(nil)
+	release()
+	<-done
+
+	if got := remote.fake.delivered(); strings.Join(got, "|") != "first" {
+		t.Fatalf("host received %v after it became incompatible", got)
+	}
+	if item, err := local.reg.QueueItem(ids[1]); err != nil || item.Status != "pending" {
+		t.Fatalf("second held send item=%+v err=%v", item, err)
 	}
 }

@@ -104,9 +104,13 @@ type actionGate struct {
 	proxyDown atomic.Bool
 	older     atomic.Bool
 	snapshots atomic.Pointer[snapshotHold]
+	versions  atomic.Pointer[snapshotHold]
+	actions   atomic.Pointer[snapshotHold]
+	// beyondVersion counts requests for anything other than /api/v1/version.
+	beyondVersion atomic.Int32
 }
 
-// snapshotHold parks snapshot requests until release is closed.
+// snapshotHold parks the requests it is installed for until release is closed.
 type snapshotHold struct {
 	waiting atomic.Int32
 	release chan struct{}
@@ -162,6 +166,17 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 		if n.gate.proxyDown.Load() {
 			http.Error(w, "bad gateway", http.StatusBadGateway)
 			return
+		}
+		if r.URL.Path != "/api/v1/version" {
+			n.gate.beyondVersion.Add(1)
+		}
+		if hold := n.gate.versions.Load(); hold != nil && r.URL.Path == "/api/v1/version" {
+			hold.waiting.Add(1)
+			<-hold.release
+		}
+		if hold := n.gate.actions.Load(); hold != nil && r.URL.Path == "/api/v1/actions" {
+			hold.waiting.Add(1)
+			<-hold.release
 		}
 		if n.gate.older.Load() && r.URL.Path == "/api/v1/version" {
 			identity, _ := n.reg.HostIdentity()

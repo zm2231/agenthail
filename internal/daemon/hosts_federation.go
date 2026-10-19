@@ -181,7 +181,7 @@ func (d *Daemon) attachHost(record registry.PairedHost) error {
 // The caller holds federation.lifecycle; a host no longer in the registry is
 // never attached.
 func (d *Daemon) attachHostLocked(record registry.PairedHost) error {
-	client, err := hosts.NewClient(record.Endpoint, record.Address, record.Token, hosts.ClientOptions{RootCAs: d.federation.rootCAs})
+	client, err := hosts.NewClient(record.Endpoint, record.Address, record.Token, hosts.ClientOptions{RootCAs: d.federation.rootCAs, HostID: record.ID})
 	if err != nil {
 		return err
 	}
@@ -331,14 +331,12 @@ func hostFailureState(err error) string {
 	switch {
 	case errors.As(err, &status) && (status.Status == http.StatusUnauthorized || status.Status == http.StatusForbidden):
 		return hostStateUnauthorized
-	case errors.As(err, &mismatch), errors.Is(err, errHostIdentityChanged):
+	case errors.As(err, &mismatch), errors.Is(err, hosts.ErrHostIdentityChanged):
 		return hostStateIncompatible
 	default:
 		return hostStateUnreachable
 	}
 }
-
-var errHostIdentityChanged = errors.New("the daemon at this address is a different host")
 
 func (d *Daemon) markHostDown(host *pairedHost, cause error) {
 	state := hostFailureState(cause)
@@ -383,12 +381,8 @@ type remoteSnapshot struct {
 }
 
 func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost) (bool, error) {
-	version, err := host.client.Version(ctx)
-	if err != nil {
+	if _, err := host.client.Version(ctx); err != nil {
 		return false, err
-	}
-	if version.HostID != host.record.ID {
-		return false, fmt.Errorf("%w (%s)", errHostIdentityChanged, version.HostID)
 	}
 	d.setHostState(host, hostStateConnected, "", true)
 	for ctx.Err() == nil {
@@ -680,7 +674,7 @@ func (d *Daemon) drainHostDeliveries(ctx context.Context, host *pairedHost) {
 	}
 	defer d.refreshHostQueueCounts()
 	for _, item := range pending {
-		if ctx.Err() != nil {
+		if state, _ := host.status(); ctx.Err() != nil || state != hostStateConnected {
 			return
 		}
 		d.replayHostDelivery(ctx, host, item)

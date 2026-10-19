@@ -199,9 +199,7 @@ func (d *Daemon) revokeRemoteDevice(token, endpoint, address string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if response, err := client.Do(ctx, http.MethodDelete, "/api/v1/device", nil, nil, nil); err == nil {
-		response.Body.Close()
-	}
+	client.RevokeDevice(ctx)
 }
 
 func (d *Daemon) removeHostHandler(w http.ResponseWriter, r *http.Request) {

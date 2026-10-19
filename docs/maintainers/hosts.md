@@ -34,7 +34,9 @@ filtered by session. If the remote's protocol or federation range does not
 include this daemon's, pairing fails and the device it just issued is revoked.
 A paired host that later reports a range without this daemon's is
 `incompatible` (shown as needing an update), and nothing is forwarded to it
-until it is updated. Without `--address` it
+until it is updated. Each connection starts with that version check, and no
+read, stream, action or held send goes to the host until the latest check has
+passed; a send made while it is pending is held. Without `--address` it
 asks `tailscale status --json` for the peer's IPv4 address. No new port is
 opened: the remote is reached through the Tailscale Serve route it already
 has. Device tokens stay in the registry and never appear in API responses,

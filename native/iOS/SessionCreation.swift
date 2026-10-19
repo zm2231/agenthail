@@ -133,7 +133,9 @@ struct NewSessionSheet: View {
                     selectedModel = value ?? ""
                     turnSettings.effort = nil
                 }, reload: {
+                    let generation = hosts.generation
                     let values = try await model.creationModels(surface: selectedSurface, host: hosts.hostQuery)
+                    guard generation == hosts.generation else { throw CancellationError() }
                     models = values
                     modelError = nil
                     return values
@@ -143,7 +145,7 @@ struct NewSessionSheet: View {
             .onChange(of: model.snapshot?.daemon) { _, daemon in
                 let before = hosts.generation
                 hosts.update(daemon: daemon)
-                if hosts.generation != before { cwd = ""; selectedSurface = "" }
+                if hosts.generation != before { cwd = ""; selectedSurface = ""; showingModels = false }
             }
             .task(id: "\(hosts.generation)/\(selectedSurface)") {
                 selectedLauncher = nil

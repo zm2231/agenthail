@@ -59,6 +59,14 @@ type NotSentError struct{ Err error }
 func (e NotSentError) Error() string { return e.Err.Error() }
 func (e NotSentError) Unwrap() error { return e.Err }
 
+// ErrUnverified refuses a request to a host whose federation version and
+// identity have not been confirmed by the latest Version call.
+var ErrUnverified = errors.New("this daemon has not confirmed that it speaks the host's federation version")
+
+// ErrHostIdentityChanged means the daemon at the paired address reported a
+// different host id than the one this client was paired with.
+var ErrHostIdentityChanged = errors.New("the daemon at this address is a different host")
+
 // UnansweredError is a response written by something in front of the daemon,
 // such as Tailscale Serve answering 502 while the daemon is down. The request
 // reached that intermediary, so whether the daemon applied it is unknown.
@@ -86,16 +94,22 @@ func (e StatusError) Error() string {
 
 // Client talks to a paired daemon over the tailnet. It dials Address and
 // verifies TLS against the endpoint's DNS name, so the remote's Tailscale
-// Serve certificate is valid without resolving MagicDNS.
+// Serve certificate is valid without resolving MagicDNS. Do and Open send
+// nothing until Version has confirmed the host speaks this federation
+// version, and stop again as soon as a Version call fails.
 type Client struct {
 	endpoint *url.URL
 	token    string
+	hostID   string
 	http     *http.Client
 	stream   *http.Client
+	verified atomic.Bool
 }
 
 type ClientOptions struct {
 	RootCAs *x509.CertPool
+	// HostID, when set, is the id Version must report.
+	HostID string
 }
 
 func NewClient(endpoint, address, token string, options ClientOptions) (*Client, error) {
@@ -122,7 +136,7 @@ func NewClient(endpoint, address, token string, options ClientOptions) (*Client,
 		MaxIdleConnsPerHost: 4,
 	}
 	base := &url.URL{Scheme: parsed.Scheme, Host: parsed.Host}
-	return &Client{endpoint: base, token: token, http: &http.Client{Transport: transport, Timeout: 30 * time.Second}, stream: &http.Client{Transport: transport}}, nil
+	return &Client{endpoint: base, token: token, hostID: options.HostID, http: &http.Client{Transport: transport, Timeout: 30 * time.Second}, stream: &http.Client{Transport: transport}}, nil
 }
 
 func (c *Client) Endpoint() string { return c.endpoint.String() }
@@ -137,11 +151,17 @@ func (c *Client) url(path string, query url.Values) string {
 // Do sends one request. A failure before any byte was written is a
 // NotSentError; any later failure leaves the outcome unknown.
 func (c *Client) Do(ctx context.Context, method, path string, query url.Values, body []byte, header http.Header) (*http.Response, error) {
+	if !c.verified.Load() {
+		return nil, NotSentError{Err: ErrUnverified}
+	}
 	return c.do(ctx, c.http, method, path, query, body, header)
 }
 
 // Open is Do without a response deadline, for event streams.
 func (c *Client) Open(ctx context.Context, path string, query url.Values, header http.Header) (*http.Response, error) {
+	if !c.verified.Load() {
+		return nil, NotSentError{Err: ErrUnverified}
+	}
 	return c.do(ctx, c.stream, http.MethodGet, path, query, nil, header)
 }
 
@@ -217,6 +237,10 @@ func ReadResponse(response *http.Response) ([]byte, error) {
 
 func (c *Client) GetJSON(ctx context.Context, path string, query url.Values, value any) error {
 	response, err := c.Do(ctx, http.MethodGet, path, query, nil, nil)
+	return decodeJSON(response, err, value)
+}
+
+func decodeJSON(response *http.Response, err error, value any) error {
 	if err != nil {
 		return err
 	}
@@ -237,15 +261,32 @@ type Version struct {
 	HostName          string `json:"hostName"`
 }
 
+// Version asks the host what it speaks and who it is. Only a host in this
+// daemon's protocol and federation ranges, reporting the expected id, lets
+// Do and Open through; any failure stops them until the next success.
 func (c *Client) Version(ctx context.Context) (Version, error) {
+	c.verified.Store(false)
 	var version Version
-	if err := c.GetJSON(ctx, "/api/v1/version", nil, &version); err != nil {
+	response, err := c.do(ctx, c.http, http.MethodGet, "/api/v1/version", nil, nil, nil)
+	if err := decodeJSON(response, err, &version); err != nil {
 		return Version{}, err
 	}
 	if version.MinimumProtocol > ProtocolVersion || version.MaximumProtocol < ProtocolVersion || version.MinimumFederation > FederationVersion || version.MaximumFederation < FederationVersion {
 		return version, ErrProtocolMismatch{Remote: version}
 	}
+	if c.hostID != "" && version.HostID != c.hostID {
+		return version, fmt.Errorf("%w (%s)", ErrHostIdentityChanged, version.HostID)
+	}
+	c.verified.Store(true)
 	return version, nil
+}
+
+// RevokeDevice asks the host to forget this daemon's device token. It is
+// part of pairing, so it does not wait for Version.
+func (c *Client) RevokeDevice(ctx context.Context) {
+	if response, err := c.do(ctx, c.http, http.MethodDelete, "/api/v1/device", nil, nil, nil); err == nil {
+		response.Body.Close()
+	}
 }
 
 type ErrProtocolMismatch struct{ Remote Version }
@@ -284,7 +325,7 @@ func Pair(ctx context.Context, link PairingLink, address, deviceName string, opt
 		return "", Version{}, err
 	}
 	payload, _ := json.Marshal(map[string]string{"secret": link.Secret, "name": deviceName})
-	response, err := anonymous.Do(ctx, http.MethodPost, "/api/v1/pair", nil, payload, nil)
+	response, err := anonymous.do(ctx, anonymous.http, http.MethodPost, "/api/v1/pair", nil, payload, nil)
 	if err != nil {
 		return "", Version{}, err
 	}
@@ -306,9 +347,7 @@ func Pair(ctx context.Context, link PairingLink, address, deviceName string, opt
 	if err != nil {
 		revokeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if response, revokeErr := paired.Do(revokeCtx, http.MethodDelete, "/api/v1/device", nil, nil, nil); revokeErr == nil {
-			response.Body.Close()
-		}
+		paired.RevokeDevice(revokeCtx)
 		return "", version, err
 	}
 	return completed.Token, version, nil
