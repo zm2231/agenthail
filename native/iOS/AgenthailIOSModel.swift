@@ -50,6 +50,7 @@ final class AgenthailIOSModel: ObservableObject {
         let turnSettings: TurnSettings
         let claudeFields: [String: String]
         let launcher: String?
+        let host: String?
     }
     private var pendingSendRequests: [String: PendingSendRequest] = [:]
     private var creationRequestIdentity: CreationRequestIdentity?
@@ -137,13 +138,13 @@ final class AgenthailIOSModel: ObservableObject {
         await refresh(fresh: true)
     }
 
-    func sessionOptions() async throws -> SessionCreationOptions {
+    func sessionOptions(host: String?) async throws -> SessionCreationOptions {
         guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
-        return try await api.sessionOptions()
+        return try await api.sessionOptions(host: host)
     }
-    func creationModels(surface: String) async throws -> [ModelOption] {
+    func creationModels(surface: String, host: String?) async throws -> [ModelOption] {
         guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
-        return try await api.creationModels(surface: surface)
+        return try await api.creationModels(surface: surface, host: host)
     }
     func prepareNewSessionForm() {
         creationError = nil
@@ -151,19 +152,19 @@ final class AgenthailIOSModel: ObservableObject {
         creationRequestIdentity = nil
         creationRequestKey = nil
     }
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) async -> Bool {
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil, host: String? = nil) async -> Bool {
         guard !creatingSession, let api, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         creatingSession = true; creationError = nil; creationWarning = nil
         defer { creatingSession = false }
         let identity = CreationRequestIdentity(surface: surface, message: message, cwd: cwd, model: model,
                                                turnSettings: surface == "codex" ? turnSettings : .init(),
-                                               claudeFields: claude.fields, launcher: launcher)
+                                               claudeFields: claude.fields, launcher: launcher, host: host)
         if creationRequestIdentity != identity || creationRequestKey == nil {
             creationRequestIdentity = identity
             creationRequestKey = UUID().uuidString
         }
         do {
-            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher, idempotencyKey: creationRequestKey)
+            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher, host: host, idempotencyKey: creationRequestKey)
             guard receipt.ok || receipt.unknown == true || receipt.accepted == true else { throw AgenthailAPIError.invalidResponse }
             if receipt.status == "submitted" && receipt.id == nil {
                 creationWarning = "Submitted to \(receipt.launcher ?? launcher ?? surface)."

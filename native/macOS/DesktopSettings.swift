@@ -297,7 +297,7 @@ struct DeliverySettings: View {
     @State private var channelTarget = ""
     @State private var channelMessage = ""
 
-    private var sessions: [SessionState] { model.snapshot?.sessions ?? [] }
+    private var sessions: [SessionState] { (model.snapshot?.sessions ?? []).filter { $0.remoteHostID == nil } }
     private var writableSessions: [SessionState] { sessions.filter { !$0.isReadOnly } }
 
     var body: some View {

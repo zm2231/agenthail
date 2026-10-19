@@ -573,8 +573,10 @@ struct SessionScreen: View {
                             Text("Chat").tag(false)
                             Text("All events").tag(true)
                         }
-                        Button("Call this session", systemImage: "phone.fill") {
-                            showingVoice = true
+                        if session.canCallByVoice {
+                            Button("Call this session", systemImage: "phone.fill") {
+                                showingVoice = true
+                            }
                         }
                     } label: { Image(systemName: "ellipsis") }
                     .accessibilityLabel("Session menu")
@@ -733,7 +735,7 @@ struct IOSComposer: View {
         return options.first { $0.id == detail.model } ?? (detail.model == nil ? options.first { $0.default == true } : nil)
     }
     private func loadModels() async throws -> [ModelOption] {
-        let options = try await model.creationModels(surface: session.surface)
+        let options = try await model.creationModels(surface: session.surface, host: session.remoteHostID)
         loadedModels = options
         return options
     }
@@ -1089,7 +1091,7 @@ struct SessionInspector: View {
                         model.action("model", session: session, model: value)
                         dismiss()
                     }
-                }, reload: { try await model.creationModels(surface: session.surface) })
+                }, reload: { try await model.creationModels(surface: session.surface, host: session.remoteHostID) })
             }
         }
     }

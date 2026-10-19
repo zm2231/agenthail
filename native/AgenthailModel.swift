@@ -18,7 +18,6 @@ final class AgenthailModel: ObservableObject {
     @Published var newSessionVisible = false
     @Published var newSessionMessage: String?
     @Published var paletteVisible = false
-    @Published private(set) var creationOptions: SessionCreationOptions?
     @Published var searchQuery = ""
     @Published private(set) var searchResults: [SessionSearchItem] = []
     @Published private(set) var searching = false
@@ -272,18 +271,14 @@ final class AgenthailModel: ObservableObject {
         if next != finishedUnseen { finishedUnseen = next }
     }
 
-    func loadCreationOptions() async {
-        guard let api else { return }
-        do {
-            creationOptions = try await api.sessionOptions()
-        } catch {
-            if !error.isCancellation { operationError = AgenthailAPIError.userMessage(error) }
-        }
+    func creationOptions(host: String?) async throws -> SessionCreationOptions {
+        guard let api else { throw AgenthailAPIError.unavailable("Agenthail isn't connected.") }
+        return try await api.sessionOptions(host: host)
     }
 
-    func creationModels(for agent: String) async throws -> [ModelOption] {
+    func creationModels(for agent: String, host: String?) async throws -> [ModelOption] {
         guard let api else { throw AgenthailAPIError.unavailable("Agenthail isn't connected.") }
-        return try await api.creationModels(surface: agent)
+        return try await api.creationModels(surface: agent, host: host)
     }
 
     func launchSession(_ form: SessionLaunchForm) async -> SessionLaunchOutcome {
@@ -610,11 +605,12 @@ final class AgenthailModel: ObservableObject {
     @Published private(set) var modelCatalog: [String: [ModelOption]] = [:]
     private var modelCatalogLoads: Set<String> = []
 
-    func loadModelCatalog(surface: String) async {
-        guard modelCatalog[surface] == nil, !modelCatalogLoads.contains(surface), let api else { return }
-        modelCatalogLoads.insert(surface)
-        defer { modelCatalogLoads.remove(surface) }
-        if let options = try? await api.creationModels(surface: surface) { modelCatalog[surface] = options }
+    func loadModelCatalog(for session: SessionState) async {
+        let key = session.modelCatalogKey
+        guard modelCatalog[key] == nil, !modelCatalogLoads.contains(key), let api else { return }
+        modelCatalogLoads.insert(key)
+        defer { modelCatalogLoads.remove(key) }
+        if let options = try? await api.creationModels(surface: session.surface, host: session.remoteHostID) { modelCatalog[key] = options }
     }
 
     func rename(_ sessionID: String, to alias: String) async -> String? {

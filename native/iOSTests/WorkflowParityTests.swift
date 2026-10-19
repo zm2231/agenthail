@@ -150,7 +150,7 @@ final class WorkflowParityTests: XCTestCase {
     func testCreationNavigatesKnownSessionAndPreservesUnknownReceipt() async throws {
         ParityProtocol.state.reset(unknown: true)
         let model = makeModel()
-        let options = try await model.sessionOptions()
+        let options = try await model.sessionOptions(host: nil)
         XCTAssertEqual(options.surfaces.first?.id, "codex")
         XCTAssertEqual(options.workspaces, ["/project"])
         let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen")

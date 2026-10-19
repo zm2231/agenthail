@@ -579,7 +579,7 @@ struct ConversationPane: View {
     var body: some View {
         if let session = pane.displayedSession {
             VStack(spacing: 0) {
-                ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id ? nil : {
+                ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                     voice.route(to: session.id)
                     NSApplication.shared.activate()
                     openWindow(id: "voice")
@@ -1753,7 +1753,7 @@ struct DetailsTab: View {
     @State private var showTokens = false
     private var modelOptions: [ModelOption] {
         if let options = pane.detail?.models, !options.isEmpty { return options }
-        return model.modelCatalog[session.surface] ?? []
+        return model.modelCatalog[session.modelCatalogKey] ?? []
     }
 
     private var catalogNeeded: String? {
@@ -1845,7 +1845,7 @@ struct DetailsTab: View {
             ClaudeObservationsSection(detail: pane.detail)
         }
         .task(id: catalogNeeded) {
-            if let surface = catalogNeeded { await model.loadModelCatalog(surface: surface) }
+            if catalogNeeded != nil { await model.loadModelCatalog(for: session) }
         }
     }
 
