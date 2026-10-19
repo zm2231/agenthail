@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -29,11 +28,8 @@ type claudeRemoteEvent struct {
 
 func (c *Claude) remoteRequest(ctx context.Context, sess *surface.Session, method, path, body string) (string, error) {
 	cookies, err := c.cookieSource(sess.ID)
-	if signin.IsNotConfigured(err) {
-		return "", surface.DeliveryTerminal(err, surface.DeliverySigninNotConfigured)
-	}
 	if err != nil {
-		return "", surface.DeliveryTerminal(err, surface.DeliveryAuthenticationNeeded)
+		return "", surface.DeliveryTerminal(err, signinTerminalKind(err))
 	}
 	request := c.request
 	if request == nil {
