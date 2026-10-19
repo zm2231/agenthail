@@ -330,6 +330,22 @@ func awaitFederation(t *testing.T, what string, check func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
+// awaitReplayed drains held sends until the remote applies one. A catalog
+// stream that opened while the proxy was down leaves the host unreachable
+// until the mirror loop reconnects, and a drain skips a host that is not
+// connected.
+func awaitReplayed(t *testing.T, local, remote *federationNode, host *pairedHost, message string) {
+	t.Helper()
+	awaitFederation(t, "held send replayed", func() bool {
+		local.daemon.drainHostDeliveries(context.Background(), host)
+		return len(remote.fake.delivered()) > 0
+	})
+	local.daemon.drainHostDeliveries(context.Background(), host)
+	if got := remote.fake.delivered(); len(got) != 1 || got[0] != message {
+		t.Fatalf("remote delivered=%v", got)
+	}
+}
+
 func sessionsOf(state dashboardState, hostID string) []dashboardSession {
 	result := []dashboardSession{}
 	for _, session := range state.Sessions {
@@ -734,11 +750,7 @@ func TestFederationProxyAnswerWithDaemonDownHoldsSendAsUnknown(t *testing.T) {
 		t.Fatalf("held while down queue=%+v err=%v", queue, err)
 	}
 	remote.gate.proxyDown.Store(false)
-	local.daemon.drainHostDeliveries(context.Background(), host)
-	local.daemon.drainHostDeliveries(context.Background(), host)
-	if got := remote.fake.delivered(); len(got) != 1 || got[0] != "behind the proxy" {
-		t.Fatalf("remote delivered=%v", got)
-	}
+	awaitReplayed(t, local, remote, host, "behind the proxy")
 	queue, err = local.reg.ListQueue(true, nil)
 	if err != nil || len(queue) != 1 || queue[0].Status != "delivered" {
 		t.Fatalf("queue=%+v err=%v", queue, err)
@@ -770,11 +782,7 @@ func TestFederationUnconfirmedSendRetriesByReplayingItsKey(t *testing.T) {
 	}
 	remote.gate.proxyDown.Store(false)
 	host, _ := local.daemon.pairedHost(record.ID)
-	local.daemon.drainHostDeliveries(context.Background(), host)
-	local.daemon.drainHostDeliveries(context.Background(), host)
-	if got := remote.fake.delivered(); len(got) != 1 || got[0] != "retry me" {
-		t.Fatalf("remote delivered=%v", got)
-	}
+	awaitReplayed(t, local, remote, host, "retry me")
 	if item, err := local.reg.QueueItem(id, nil); err != nil || item.Status != "delivered" {
 		t.Fatalf("replayed item=%+v err=%v", item, err)
 	}
