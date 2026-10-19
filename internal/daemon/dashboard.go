@@ -522,7 +522,7 @@ func (d *Daemon) writeDashboardSnapshot(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	scope := r.URL.Query().Get("scope")
-	if !ValidScope(scope) {
+	if !validCatalogScope(scope) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_scope", "Use running, current, recent, all, or archived.")
 		return
 	}
@@ -601,7 +601,7 @@ func catalogPageRequestFromHTTP(r *http.Request) (*registry.CatalogPageRequest, 
 		return nil, fmt.Errorf("use a limit between 1 and 200")
 	}
 	scope := r.URL.Query().Get("scope")
-	if !ValidScope(scope) {
+	if !validCatalogScope(scope) {
 		return nil, fmt.Errorf("use running, current, recent, all, or archived")
 	}
 	projectID, query := r.URL.Query().Get("projectId"), strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))

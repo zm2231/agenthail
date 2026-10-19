@@ -103,16 +103,16 @@ type dashboardProject struct {
 	Archived     bool           `json:"archived"`
 }
 
-// CatalogScopes lists the session scopes every client renders. A scope counts
+// catalogScopes lists the session scopes every client renders. A scope counts
 // session families: a subagent belongs to its root's family when the root is
 // listed.
-var CatalogScopes = []string{"running", "current", "recent", "all", "archived"}
+var catalogScopes = []string{"running", "current", "recent", "all", "archived"}
 
-func ValidScope(scope string) bool {
+func validCatalogScope(scope string) bool {
 	if scope == "" {
 		return true
 	}
-	for _, known := range CatalogScopes {
+	for _, known := range catalogScopes {
 		if scope == known {
 			return true
 		}
@@ -155,8 +155,8 @@ func catalogScopeCounts(rows []dashboardSession) map[string]int {
 		}
 		return row.ID
 	}
-	counts := make(map[string]int, len(CatalogScopes))
-	for _, scope := range CatalogScopes {
+	counts := make(map[string]int, len(catalogScopes))
+	for _, scope := range catalogScopes {
 		matched := map[string]bool{}
 		for _, row := range rows {
 			if catalogScopeMatches(scope, row) {
