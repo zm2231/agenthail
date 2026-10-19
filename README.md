@@ -142,7 +142,9 @@ When an agent is already working, Agenthail queues the next message by default. 
 the daemon/dashboard `busyDelivery` setting to `steer` to steer busy targets that
 advertise that capability; unsupported targets remain queued. Use `steer` when you
 want an explicit active-turn control.
-If Agenthail cannot reach a Codex session before starting a turn, it keeps that message pending and retries safely. A timeout after a turn has started is kept as an explicit unknown outcome instead, so Agenthail never guesses whether to send duplicate work. Messages that still cannot move after one hour expire instead of building up forever. They remain visible in the audit trail.
+If Agenthail cannot reach a Codex session before starting a turn, it keeps that message pending and retries safely. A timeout after a turn has started is kept as an explicit unknown outcome instead, so Agenthail never guesses whether to send duplicate work. A queued message never expires: it stays pending until it is delivered, you cancel it, or delivery fails in a way Agenthail can prove. `queue list` shows how long each message has waited and why it is held.
+
+An agent that has asked you something is **waiting on you**, not working. That covers a Claude question (`AskUserQuestion`), plan approval or permission prompt, and a Codex approval or input request. `list`, the dashboard and the apps show "Waiting on you". Your Mac and paired iPhone get one notification per question. Messages to the agent wait until you answer, even a steer, so nothing lands in the middle of the question. A steer then goes into the turn you answered; an ordinary message waits for the turn to finish.
 
 Agenthail keeps current work fast by using Codex's bounded local state. To find an older Codex conversation, use the dashboard search box or `agenthail search codex <query>`; selected results are saved locally for later use.
 
@@ -169,7 +171,7 @@ When the investigation finishes with something the builder needs, Agenthail pass
 
 `turn_finished` (the default) forwards each successful matching completion. `goal_completed` requires a source with goal support, waits for an explicit completed goal and its final turn, and forwards the latest pending completion once per goal. Active, paused, blocked, missing, or unreadable goals keep the route waiting. The regex filters the selected result; it does not determine whether a goal is complete.
 
-New routes begin after existing provider history. Completion events and provider cursors survive daemon restarts; each route advances only when its queue item and receipt commit together. A busy or offline destination keeps its handoff in the delivery queue, subject to the existing one-hour expiry. Active routes remain until explicitly removed; an inactive route whose Claude Code source stays closed for an hour is removed. `relay list --json`, the dashboard, and native handoff controls show the condition, pending event count, and capture/consumption error. Queued means persisted for delivery, not received by the destination. See [relay recovery](docs/maintainers/durable-relays.md).
+New routes begin after existing provider history. Completion events and provider cursors survive daemon restarts; each route advances only when its queue item and receipt commit together. A busy or offline destination keeps its handoff in the delivery queue until it can be delivered. Active routes remain until explicitly removed; an inactive route whose Claude Code source stays closed for an hour is removed. `relay list --json`, the dashboard, and native handoff controls show the condition, pending event count, and capture/consumption error. Queued means persisted for delivery, not received by the destination. See [relay recovery](docs/maintainers/durable-relays.md).
 
 For a group that needs the same update:
 
@@ -203,7 +205,7 @@ The iPhone companion is distributed through TestFlight. [Request an iPhone invit
 
 After installing the iPhone app, install Tailscale on your Mac and iPhone, sign both into the same account, then open **Operations** in Agenthail on the Mac.
 
-Turn on **Private phone access** and choose **Pair an iPhone**. The iPhone app can then show current work, open conversations, send or steer messages, and notify you when an agent finishes. Your Mac is not opened to the public internet.
+Turn on **Private phone access** and choose **Pair an iPhone**. The iPhone app can then show current work, open conversations, send or steer messages, and notify you when an agent finishes or is waiting on you. Your Mac is not opened to the public internet.
 
 Matching voice-enabled builds also offer **Talk to orchestrator**: a real Codex
 Voice conversation that can inspect agents, delegate work, and read replies through
@@ -211,7 +213,7 @@ one persistent operator. [Voice setup, flow, and current limits](docs/maintainer
 
 ## See agents on your other machines
 
-Pair the Agenthail daemon on another machine in your tailnet and its sessions appear in the same list, app and phone. Run `agenthail hosts invite` there and `agenthail hosts add '<link>'` here, then address its sessions as `forge::@builder`. If a machine goes offline, its sessions stay listed as unavailable, and messages to them wait up to an hour for it to return; after that they expire and show in delivery history. [How paired hosts work](docs/maintainers/hosts.md).
+Pair the Agenthail daemon on another machine in your tailnet and its sessions appear in the same list, app and phone. Run `agenthail hosts invite` there and `agenthail hosts add '<link>'` here, then address its sessions as `forge::@builder`. If a machine goes offline, its sessions stay listed as unavailable, and messages to them wait until it returns; they never expire. [How paired hosts work](docs/maintainers/hosts.md).
 
 ## What Agenthail remembers
 

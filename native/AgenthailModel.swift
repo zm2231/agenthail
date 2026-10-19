@@ -639,7 +639,7 @@ final class AgenthailModel: ObservableObject {
             do {
                 let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: send.text, turnSettings: send.turnSettings, busyDelivery: send.busyDelivery, author: "person", idempotencyKey: send.idempotencyKey)
                 if !send.turnSettings.isEmpty, turnSettingsDrafts[sessionID] == send.turnSettings { turnSettingsDrafts.removeValue(forKey: sessionID) }
-                updateLocalSend(send.id, in: sessionID) { $0.status = LocalSend.label(for: receipt.result?.status) }
+                updateLocalSend(send.id, in: sessionID) { $0.status = LocalSend.label(for: receipt.result?.status, waitingOnYou: receipt.result?.waitingOn != nil) }
                 operationError = nil
                 completion?(true)
             } catch {

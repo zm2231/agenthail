@@ -677,7 +677,7 @@ struct ConversationHeader: View {
             Spacer()
             HStack(spacing: 6) {
                 StatusIndicator(session: session, needsYou: false)
-                Text(session.isWorking ? "Working" : session.open ? "Idle" : "Closed")
+                Text(session.isWaitingOnYou ? "Waiting on you" : session.isWorking ? "Working" : session.open ? "Idle" : "Closed")
             }
             .font(.system(size: 12))
             .foregroundStyle(DesktopPalette.text2)
@@ -773,7 +773,7 @@ struct TranscriptView: View {
                 if session.isWorking {
                     HStack(spacing: 8) {
                         StatusIndicator(session: session, needsYou: false)
-                        Text("Working")
+                        Text(session.isWaitingOnYou ? "Waiting on you" : "Working")
                     }
                     .font(.system(size: 12.5))
                     .foregroundStyle(DesktopPalette.text2)
@@ -1344,7 +1344,7 @@ struct ComposerView: View {
     }
 
     private var hasText: Bool { !draft.isEmpty }
-    private var canSteer: Bool { session.capabilities.steer }
+    private var canSteer: Bool { session.capabilities.steer && !session.isWaitingOnYou }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1374,7 +1374,7 @@ struct ComposerView: View {
                                 .padding(.bottom, 8)
                         }
                         if !queued.isEmpty {
-                            QueueDock(model: model, items: queued, canSteer: canSteer && session.isWorking)
+                            QueueDock(model: model, items: queued, target: session, canSteer: canSteer && session.isWorking)
                                 .padding(.horizontal, 10)
                         }
                         if !draft.attachments.isEmpty {
@@ -1502,7 +1502,7 @@ struct ComposerView: View {
                 .filter { query.isEmpty || $0.id.localizedCaseInsensitiveContains(query) || $0.displayName.localizedCaseInsensitiveContains(query) }
                 .map { SlashCommandMenu.Suggestion(id: "model:" + $0.id, title: $0.displayName, detail: $0.id == pane.detail?.model ? "Current" : ($0.description ?? $0.id), insertion: "/model " + $0.id) }
         }
-        let available = SlashCommand.available(capabilities: session.capabilities, working: session.isWorking)
+        let available = SlashCommand.available(capabilities: session.capabilities, working: session.isWorking, waitingOnYou: session.isWaitingOnYou)
         return SlashCommand.suggestions(for: draft.text, available: available).map {
             SlashCommandMenu.Suggestion(id: $0.token, title: $0.token, detail: $0.summary, insertion: $0.token + ($0.needsArgument ? " " : ""))
         }
@@ -1535,6 +1535,7 @@ struct ComposerView: View {
         return [shortcuts.help(queueFirst ? "Queue" : "Steer", .send), shortcuts.help(queueFirst ? "Steer" : "Queue", .sendAlternate)].joined(separator: " · ")
     }
     private var hint: String {
+        if session.isWaitingOnYou { return "Sends after you answer" }
         guard canSteer else { return "Sends after this turn" }
         let queueFirst = resolvedAction(alternate: false) == .queue
         guard let alternate = shortcuts.label(.sendAlternate) else { return queueFirst ? "Sends after this turn" : "Steers now" }
@@ -1605,6 +1606,7 @@ struct DeliveryProblemBanner: View {
 struct QueueDock: View {
     @ObservedObject var model: AgenthailModel
     let items: [QueueState]
+    let target: SessionState
     let canSteer: Bool
 
     var body: some View {
@@ -1615,16 +1617,22 @@ struct QueueDock: View {
                     Image(systemName: "text.line.last.and.arrowtriangle.forward")
                         .font(.system(size: 11))
                         .foregroundStyle(DesktopPalette.text2)
-                    HStack(spacing: 6) {
-                        if let sender = envelope.sender {
-                            Text(sender)
-                                .foregroundStyle(DesktopPalette.text2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            if let sender = envelope.sender {
+                                Text(sender)
+                                    .foregroundStyle(DesktopPalette.text2)
+                            }
+                            Text(envelope.body.split(separator: "\n").first.map(String.init) ?? envelope.body)
+                                .foregroundStyle(DesktopPalette.text)
                         }
-                        Text(envelope.body.split(separator: "\n").first.map(String.init) ?? envelope.body)
-                            .foregroundStyle(DesktopPalette.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        Text(QueueFacts.summary(item, target: target, attention: model.snapshot?.attention ?? [], age: relativeAge(item.queuedAt)))
+                            .font(.system(size: 11))
+                            .foregroundStyle(DesktopPalette.text2)
+                            .lineLimit(1)
                     }
-                    .lineLimit(1)
-                    .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     if canSteer {
                         Button {
@@ -1914,7 +1922,7 @@ struct DeliveryTab: View {
                 SidebarCaption("Undelivered").padding(.horizontal, -8)
                 ForEach(queued) { item in
                     VStack(alignment: .leading, spacing: 4) {
-                        deliveryCard(title: item.target, status: QueueFacts.statusLabel(item.status), text: item.message, detail: QueueFacts.detail(item, target: session, attention: model.snapshot?.attention ?? []).joined(separator: " · "), problem: item.status == "dead")
+                        deliveryCard(title: item.target, status: QueueFacts.statusLabel(item.status), text: item.message, detail: QueueFacts.summary(item, target: session, attention: model.snapshot?.attention ?? [], age: relativeAge(item.queuedAt)), problem: item.status == "dead")
                         HStack { QueueItemActions(model: model, item: item) }
                             .controlSize(.small)
                     }
