@@ -36,21 +36,21 @@ The VMs use [Tart](https://tart.run). The guest reaches the internet but not the
 
 The script refuses to start with less than 60 GB free. After a successful build it deletes older `agenthail-ci-*` images and the cached base image. Rebuild it after updating Xcode or the runner version in the script, or monthly to pick up base image updates. Slots pick up the newest image on their next job.
 
-### Slots
+### Supervisor
 
-`ci/vm/supervisor.sh <slot>` runs one slot in a loop. For each job it:
+`ci/vm/supervisor.sh` runs as one LaunchAgent and manages up to `AGENTHAIL_CI_VM_SLOTS` VMs (default 2). It keeps no VM running while nothing is queued:
 
-1. refuses to clone when less than 25 GB is free,
-2. clones the newest image (an APFS clone, so it takes no time or space up front) and boots it,
-3. mints a GitHub App installation token on the host, removes the slot's offline runners, and generates a just-in-time runner configuration for one job,
-4. passes only that configuration into the guest and starts the runner, which exits after one job,
-5. stops and deletes the VM. A job that runs longer than 90 minutes is discarded.
+1. Every 20 seconds it lists queued jobs labelled `agenthail-vm` and starts one worker per queued job that no booting or waiting VM already covers.
+2. A worker refuses to clone when less than 25 GB is free, clones the newest image (an APFS clone, so it takes no time or space up front), sets its CPU and memory (`AGENTHAIL_CI_VM_CPU`, `AGENTHAIL_CI_VM_MEMORY_MB`), boots it, mints a GitHub App installation token on the host and generates a just-in-time runner configuration for one job.
+3. Only that configuration enters the guest. The runner exits after one job.
+4. The worker then stops and deletes the VM and removes the runner registration, whether the job passed or failed. A VM whose runner gets no job within 5 minutes is discarded the same way.
+5. The supervisor kills any VM older than 50 minutes (the longest job timeout plus 5 minutes). On start and on exit it stops every worker and deletes every `agenthail-ci-slot-*` VM, so restarting the LaunchAgent leaves nothing behind.
 
-The App private key is read from setec over the tailnet each time and never written to disk or passed to the guest.
+The App private key is read from setec over the tailnet when a token is needed and is never written to disk or passed to the guest.
 
 ### Host setup
 
-1. Install Tart and Softnet with Homebrew, and let Softnet run as root without a password: `echo "<user> ALL=(root) NOPASSWD: /opt/homebrew/bin/softnet" | sudo tee /etc/sudoers.d/softnet` (check it with `sudo visudo -cf /etc/sudoers.d/softnet`).
-2. Clone this repository to `~/agenthail-ci-vm` and run `ci/vm/build-image.sh`.
-3. For each slot N, create `~/Library/LaunchAgents/agenthail.ci-vm-slot-N.plist` that runs `/bin/bash ~/agenthail-ci-vm/ci/vm/supervisor.sh N` with `RunAtLoad` and `KeepAlive`, logging to `~/Library/Logs/agenthail-ci-vm-slot-N.log`, then `launchctl bootstrap gui/$(id -u) <plist>`.
+1. Install Tart and Softnet with Homebrew, and let Softnet run as root without a password: add `<user> ALL=(root) NOPASSWD: <homebrew prefix>/bin/softnet` to a file in `/etc/sudoers.d/` and check it with `sudo visudo -cf <file>`.
+2. Clone this repository on the host and run `ci/vm/build-image.sh` from it.
+3. Create a LaunchAgent that runs `/bin/bash <clone>/ci/vm/supervisor.sh` with `RunAtLoad`, `KeepAlive`, an `ExitTimeOut` of 60 seconds and a log file, then load it with `launchctl bootstrap gui/$(id -u) <plist>`.
 4. Turn off system sleep on the host: `sudo pmset -a sleep 0 disksleep 0 powernap 0`.
