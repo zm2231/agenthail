@@ -12,6 +12,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/project"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/workspace"
@@ -82,10 +83,10 @@ func applyCatalogView(row *dashboardSession, view catalogViewState) {
 	_, sessionArchived := view.archive.Sessions[row.ID]
 	projectArchived := false
 	if row.Project != nil {
-		project := *row.Project
-		_, projectArchived = view.archive.Projects[project.ID]
-		project.Archived = projectArchived
-		row.Project = &project
+		rowProject := *row.Project
+		_, projectArchived = view.archive.Projects[rowProject.ID]
+		rowProject.Archived = projectArchived
+		row.Project = &rowProject
 	}
 	row.Archived = sessionArchived || projectArchived
 }
@@ -298,34 +299,34 @@ func (d *Daemon) catalogProjectRecord(projectID string) (registry.ProjectRecord,
 	if err != nil {
 		return registry.ProjectRecord{}, err
 	}
-	var project catalogProject
-	if err := json.Unmarshal(raw, &project); err != nil {
+	var stored project.Project
+	if err := json.Unmarshal(raw, &stored); err != nil {
 		return registry.ProjectRecord{}, err
 	}
-	return registry.ProjectRecord{ID: project.ID, Kind: project.Kind, RootPath: project.RootPath, DisplayName: project.DisplayName}, nil
+	return registry.ProjectRecord{ID: stored.ID, Kind: stored.Kind, RootPath: stored.RootPath, DisplayName: stored.DisplayName}, nil
 }
 
 // addProject makes a folder a project. A folder inside a Git repository is
 // already part of that repository's project and is returned unchanged.
-func (d *Daemon) addProject(ctx context.Context, path string) (catalogProject, error) {
+func (d *Daemon) addProject(ctx context.Context, path string) (project.Project, error) {
 	path, err := workspace.NormalizeCWD(path)
 	if err != nil || path == "" {
-		return catalogProject{}, fmt.Errorf("a folder path is required")
+		return project.Project{}, fmt.Errorf("a folder path is required")
 	}
 	if info, err := os.Stat(path); err != nil || !info.IsDir() {
-		return catalogProject{}, fmt.Errorf("%s is not a folder", path)
+		return project.Project{}, fmt.Errorf("%s is not a folder", path)
 	}
-	repository, notRepository, err := resolveCatalogRepository(ctx, path)
+	repository, notRepository, err := project.ReadRepository(ctx, path)
 	if err == nil {
-		return *repository.project(), nil
+		return *repository.Project(), nil
 	}
 	if !notRepository {
-		return catalogProject{}, fmt.Errorf("read repository for %s: %w", path, err)
+		return project.Project{}, fmt.Errorf("read repository for %s: %w", path, err)
 	}
-	project := catalogProject{ID: catalogPathID("project", path), DisplayName: filepath.Base(path), RootPath: path, Kind: catalogProjectFolder}
-	if err := d.Registry.RegisterFolderProject(project.ID, project.RootPath, project.DisplayName); err != nil {
-		return catalogProject{}, err
+	folder := project.Project{ID: project.PathID("project", path), DisplayName: filepath.Base(path), RootPath: path, Kind: project.KindFolder}
+	if err := d.Registry.RegisterFolderProject(folder.ID, folder.RootPath, folder.DisplayName); err != nil {
+		return project.Project{}, err
 	}
 	d.requestCatalogDiscovery()
-	return project, nil
+	return folder, nil
 }

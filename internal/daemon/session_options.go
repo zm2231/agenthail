@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/project"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -86,17 +87,17 @@ func (d *Daemon) launchProjects() ([]launchProject, error) {
 		if record.HostID != "" || record.Session.Subagent != nil {
 			continue
 		}
-		var project catalogProject
-		if json.Unmarshal(record.Project, &project) != nil || project.ID == "" || project.RootPath == "" {
+		var recorded project.Project
+		if json.Unmarshal(record.Project, &recorded) != nil || recorded.ID == "" || recorded.RootPath == "" {
 			continue
 		}
-		if _, archived := archive.Projects[project.ID]; archived {
+		if _, archived := archive.Projects[recorded.ID]; archived {
 			continue
 		}
-		entry, found := byID[project.ID]
+		entry, found := byID[recorded.ID]
 		if !found {
-			entry = &candidate{project: launchProject{ID: project.ID, DisplayName: project.DisplayName, RootPath: project.RootPath, Kind: project.Kind}}
-			byID[project.ID] = entry
+			entry = &candidate{project: launchProject{ID: recorded.ID, DisplayName: recorded.DisplayName, RootPath: recorded.RootPath, Kind: recorded.Kind}}
+			byID[recorded.ID] = entry
 		}
 		if record.Session.LastActive.After(entry.lastActive) {
 			entry.lastActive = record.Session.LastActive

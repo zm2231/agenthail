@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/project"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -433,7 +434,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			}
 			seen[session.ID] = struct{}{}
 			identityCtx, identityCancel := context.WithTimeout(ctx, 3*time.Second)
-			identity := d.catalogIdentities.identity(identityCtx, session, observedAt, func() *catalogProject { return d.storedCatalogProject(session.ID) })
+			identity := d.catalogIdentities.identity(identityCtx, session, observedAt, func() *project.Project { return d.storedCatalogProject(session.ID) })
 			identityCancel()
 			open := openSessions[session.ID]
 			alias := aliasByID[session.ID]
@@ -795,16 +796,16 @@ func (d *Daemon) correlateObservedTerminalLaunches(ctx context.Context, sessions
 	}
 }
 
-func (d *Daemon) storedCatalogProject(sessionID string) *catalogProject {
+func (d *Daemon) storedCatalogProject(sessionID string) *project.Project {
 	raw, err := d.Registry.CatalogSessionProject(sessionID)
 	if err != nil || len(raw) == 0 {
 		return nil
 	}
-	var project *catalogProject
-	if json.Unmarshal(raw, &project) != nil || project == nil || project.ID == "" || project.Kind == "" {
+	var stored *project.Project
+	if json.Unmarshal(raw, &stored) != nil || stored == nil || stored.ID == "" || stored.Kind == "" {
 		return nil
 	}
-	return project
+	return stored
 }
 
 func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time, alias string, queueCount int, open bool, config DashboardConfig) dashboardSession {

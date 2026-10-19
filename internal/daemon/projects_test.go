@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/project"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/workspace"
@@ -192,9 +193,9 @@ func TestAddingAFolderProjectClaimsItsSessions(t *testing.T) {
 		t.Fatalf("add: %d %s", response.Code, response.Body)
 	}
 	var added struct {
-		Project catalogProject `json:"project"`
+		Project project.Project `json:"project"`
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &added); err != nil || added.Project.Kind != catalogProjectFolder || added.Project.DisplayName != "notes" {
+	if err := json.Unmarshal(response.Body.Bytes(), &added); err != nil || added.Project.Kind != project.KindFolder || added.Project.DisplayName != "notes" {
 		t.Fatalf("added=%+v err=%v", added, err)
 	}
 	select {
@@ -209,9 +210,9 @@ func TestAddingAFolderProjectClaimsItsSessions(t *testing.T) {
 
 	repoResponse := runDashboardAction(t, d, `{"action":"project-add","path":"`+fake.sessions["to"].Cwd+`"}`)
 	var repoProject struct {
-		Project catalogProject `json:"project"`
+		Project project.Project `json:"project"`
 	}
-	if err := json.Unmarshal(repoResponse.Body.Bytes(), &repoProject); err != nil || repoProject.Project.Kind != catalogProjectGit || repoProject.Project.ID != storedProjection(t, r, "to").Project.ID {
+	if err := json.Unmarshal(repoResponse.Body.Bytes(), &repoProject); err != nil || repoProject.Project.Kind != project.KindGit || repoProject.Project.ID != storedProjection(t, r, "to").Project.ID {
 		t.Fatalf("a repository folder was registered on its own: %s", repoResponse.Body)
 	}
 	if projects, err := r.ListProjects(); err != nil || len(projects) != 1 {
@@ -242,7 +243,7 @@ func TestFederationProjectsStayOnTheirHostAndArchiveRoutesThere(t *testing.T) {
 	cwd := remote.fake.sessions["remote-a"].Cwd
 	added := remote.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-add", "path": cwd})
 	var answer struct {
-		Project catalogProject `json:"project"`
+		Project project.Project `json:"project"`
 	}
 	if added.Code != http.StatusOK || json.Unmarshal(added.Body.Bytes(), &answer) != nil {
 		t.Fatalf("add status=%d body=%s", added.Code, added.Body.String())

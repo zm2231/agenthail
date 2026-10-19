@@ -8,12 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/project"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/workspace"
 )
 
-func noStoredProject() *catalogProject { return nil }
+func noStoredProject() *project.Project { return nil }
 
 func catalogTestRepo(t *testing.T) string {
 	t.Helper()
@@ -56,7 +57,7 @@ func TestCatalogIdentityMapsWorktreesAndSubfoldersToTheMainCheckout(t *testing.T
 		if identity.UnavailableReason != "" || identity.Project == nil {
 			t.Fatalf("identity=%+v", identity)
 		}
-		if identity.Project.ID != base.Project.ID || identity.Project.DisplayName != "widget" || identity.Project.RootPath != canonicalRepo || identity.Project.Kind != catalogProjectGit {
+		if identity.Project.ID != base.Project.ID || identity.Project.DisplayName != "widget" || identity.Project.RootPath != canonicalRepo || identity.Project.Kind != project.KindGit {
 			t.Fatalf("project=%+v base=%+v", identity.Project, base.Project)
 		}
 	}
@@ -112,12 +113,12 @@ func TestCatalogIdentityUsesTheNearestRegisteredFolder(t *testing.T) {
 	}
 	cache := newCatalogIdentityCache()
 	cache.setFolders([]registry.ProjectRecord{
-		{ID: "project-outer", Kind: catalogProjectFolder, RootPath: outer, DisplayName: "notes", Registered: true},
-		{ID: "project-inner", Kind: catalogProjectFolder, RootPath: inner, DisplayName: "drafts", Registered: true},
-		{ID: "project-archived-only", Kind: catalogProjectGit, RootPath: root, DisplayName: "root"},
+		{ID: "project-outer", Kind: project.KindFolder, RootPath: outer, DisplayName: "notes", Registered: true},
+		{ID: "project-inner", Kind: project.KindFolder, RootPath: inner, DisplayName: "drafts", Registered: true},
+		{ID: "project-archived-only", Kind: project.KindGit, RootPath: root, DisplayName: "root"},
 	})
 	identity := cache.identity(context.Background(), surface.Session{Cwd: work}, time.Now(), noStoredProject)
-	if identity.Project == nil || identity.Project.ID != "project-inner" || identity.Project.Kind != catalogProjectFolder || identity.Project.RootPath != inner {
+	if identity.Project == nil || identity.Project.ID != "project-inner" || identity.Project.Kind != project.KindFolder || identity.Project.RootPath != inner {
 		t.Fatalf("identity=%+v", identity)
 	}
 	if outside := cache.identity(context.Background(), surface.Session{Cwd: root}, time.Now(), noStoredProject); outside.Project != nil {
@@ -138,8 +139,8 @@ func TestCatalogIdentityKeepsTheKnownProjectWhenGitFails(t *testing.T) {
 	if failed.UnavailableReason == "" || failed.Project == nil || failed.Project.ID != resolved.Project.ID {
 		t.Fatalf("failed=%+v resolved=%+v", failed, resolved.Project)
 	}
-	stored := &catalogProject{ID: "project-stored", DisplayName: "widget", RootPath: repo, Kind: catalogProjectGit}
-	fresh := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, later, func() *catalogProject { return stored })
+	stored := &project.Project{ID: "project-stored", DisplayName: "widget", RootPath: repo, Kind: project.KindGit}
+	fresh := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, later, func() *project.Project { return stored })
 	if fresh.UnavailableReason == "" || fresh.Project != stored {
 		t.Fatalf("fresh=%+v", fresh)
 	}
