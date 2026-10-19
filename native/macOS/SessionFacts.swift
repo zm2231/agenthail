@@ -49,21 +49,6 @@ enum SessionFacts {
         }
     }
 
-    static func exchangeCount(_ items: [TimelineItem]) -> Int {
-        var count = 0
-        var openAssistant = true
-        for item in items where ["message", "text", "assistant"].contains(item.kind) {
-            if item.role == "user" {
-                count += 1
-                openAssistant = false
-            } else if item.role == "assistant" || item.kind == "text" {
-                if count == 0 || openAssistant { count += 1 }
-                openAssistant = true
-            }
-        }
-        return count
-    }
-
     static func exchangeLabel(_ count: Int) -> String {
         "\(count) recent exchange\(count == 1 ? "" : "s")"
     }
