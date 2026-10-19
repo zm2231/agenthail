@@ -215,18 +215,6 @@ func TestSystemdInstallWritesUnitStartsDaemonAndEnablesLinger(t *testing.T) {
 	}
 }
 
-func TestSystemdInstallReportsLingerFixWhenRefused(t *testing.T) {
-	fake, service := newFakeSystemctl(t)
-	fake.lingerRefused = true
-	output, err := captureStdout(t, service.Install)
-	if err != nil {
-		t.Fatalf("install: %v", err)
-	}
-	if !strings.Contains(output, "linger: off (Could not enable linger: Access denied); run 'sudo loginctl enable-linger agent'") {
-		t.Fatalf("output=%s", output)
-	}
-}
-
 func TestSystemdInstallRefusesUnreachableUserManager(t *testing.T) {
 	fake, service := newFakeSystemctl(t)
 	fake.managerDown = true

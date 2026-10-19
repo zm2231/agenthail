@@ -3,12 +3,13 @@ package daemon
 import (
 	"context"
 	"encoding/json"
-	"github.com/zm2231/agenthail/internal/signin"
 	"net/http"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/signin"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"

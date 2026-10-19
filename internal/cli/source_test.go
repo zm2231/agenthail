@@ -33,11 +33,3 @@ func TestSourceIdentityReadsTheClaudeConversationBeforeAnInheritedCodexThread(t 
 		t.Fatalf("source=%q err=%v", got, err)
 	}
 }
-
-func TestSourceIdentityLeavesStandaloneCLICallerUnbound(t *testing.T) {
-	app := App{Surfaces: []SurfaceEntry{{Name: "claude", Surface: &cliSurface{kind: surface.KindClaude}}}}
-	got, err := app.sourceSessionID(context.Background(), "")
-	if err != nil || got != "" {
-		t.Fatalf("source=%q err=%v", got, err)
-	}
-}

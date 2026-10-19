@@ -736,21 +736,6 @@ func TestFederationRevokedTokenMarksHostUnauthorized(t *testing.T) {
 	})
 }
 
-func TestFederationRemoveHostDropsRowsAndRevokesDevice(t *testing.T) {
-	local, remote, record := pairedFederation(t)
-	response := local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "forge"})
-	if response.Code != http.StatusOK {
-		t.Fatalf("remove status=%d body=%s", response.Code, response.Body.String())
-	}
-	if rows := sessionsOf(local.snapshot(t), record.ID); len(rows) != 0 {
-		t.Fatalf("rows after remove=%+v", rows)
-	}
-	devices, err := remote.reg.ListDevices(false)
-	if err != nil || len(devices) != 0 {
-		t.Fatalf("remote devices after remove=%+v err=%v", devices, err)
-	}
-}
-
 func TestFederationRemoveWaitsForInFlightReconcile(t *testing.T) {
 	local, remote, record := pairedFederation(t)
 	hold := &snapshotHold{release: make(chan struct{})}

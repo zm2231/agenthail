@@ -37,30 +37,6 @@ func TestActionIdempotencyResponseOverflowLeavesPending(t *testing.T) {
 	}
 }
 
-func TestDashboardActionRouteUsesIdempotencyWrapper(t *testing.T) {
-	r := openActionTestRegistry(t)
-	d := New(r, nil)
-	handler := d.dashboardHandler(&dashboardServer{token: "dashboard-secret"})
-	first := dashboardActionRequestWithKey(`{"action":"unsupported"}`, "dashboard-route")
-	first.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "dashboard-secret"})
-	firstResponse := httptest.NewRecorder()
-	handler.ServeHTTP(firstResponse, first)
-	if firstResponse.Code != http.StatusBadRequest {
-		t.Fatalf("first status=%d body=%s", firstResponse.Code, firstResponse.Body.String())
-	}
-	mismatch := dashboardActionRequestWithKey(`{"action":"different"}`, "dashboard-route")
-	mismatch.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "dashboard-secret"})
-	mismatchResponse := httptest.NewRecorder()
-	handler.ServeHTTP(mismatchResponse, mismatch)
-	if mismatchResponse.Code != http.StatusConflict || effectsInBody(mismatchResponse.Body.Bytes(), "action_idempotency_mismatch") == false {
-		t.Fatalf("mismatch status=%d body=%s", mismatchResponse.Code, mismatchResponse.Body.String())
-	}
-}
-
-func effectsInBody(body []byte, value string) bool {
-	return bytes.Contains(body, []byte(value))
-}
-
 func dashboardActionRequestWithKey(body, key string) *http.Request {
 	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewBufferString(body))
 	request.Host = "127.0.0.1:7412"

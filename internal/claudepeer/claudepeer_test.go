@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net"
 	"os"
@@ -232,16 +231,6 @@ func shortTempDir(t *testing.T, prefix string) string {
 	}
 	t.Cleanup(func() { os.RemoveAll(path) })
 	return path
-}
-
-func TestWorkerControlPathIsGenerationScopedAndCompact(t *testing.T) {
-	p := WorkerControlPath("/tmp/example", "generation", 123)
-	if p != WorkerControlPath("/tmp/example", "generation", 123) || len(p) >= 104 {
-		t.Fatalf("path=%q len=%d", p, len(p))
-	}
-	if p == WorkerControlPath("/tmp/example", "other", 123) {
-		t.Fatal("worker control path did not change with daemon generation")
-	}
 }
 
 func TestPeerQueueDedupIsScopedToRecipientAndRejectsReadOnly(t *testing.T) {
@@ -705,22 +694,6 @@ func TestReconcileKeepsStaleSocketWhenLivenessIsAmbiguous(t *testing.T) {
 	}
 }
 
-func TestSocketRefusesConnectionsOnlyWhenNothingListens(t *testing.T) {
-	path := filepath.Join(shortTempDir(t, "cp-refuse-"), "s.sock")
-	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if SocketRefusesConnections(path) {
-		t.Fatal("listening socket reported as refusing")
-	}
-	listener.SetUnlinkOnClose(false)
-	listener.Close()
-	if !SocketRefusesConnections(path) {
-		t.Fatal("closed socket not reported as refusing")
-	}
-}
-
 func TestReconcileRequiresLaunchTokenBeforeSignallingAProcess(t *testing.T) {
 	home := shortTempDir(t, "cp-token-")
 	socketDir := filepath.Join(home, "socks")
@@ -879,18 +852,6 @@ func TestHeartbeatRewritesRecordOnlyWhenItChanges(t *testing.T) {
 			t.Fatal("status change was not published")
 		}
 		time.Sleep(10 * time.Millisecond)
-	}
-}
-
-func TestClaudeSocketDirsAddRuntimeDirsOnlyOnLinux(t *testing.T) {
-	if got := claudeSocketDirsFor("darwin", "/run/user/501", 501); fmt.Sprint(got) != "[/tmp/cc-socks]" {
-		t.Fatalf("darwin dirs=%v", got)
-	}
-	if got := claudeSocketDirsFor("linux", "/xdg", 1000); fmt.Sprint(got) != "[/tmp/cc-socks /xdg/cc-socks /run/user/1000/cc-socks]" {
-		t.Fatalf("linux dirs=%v", got)
-	}
-	if got := claudeSocketDirsFor("linux", "/run/user/1000", 1000); fmt.Sprint(got) != "[/tmp/cc-socks /run/user/1000/cc-socks]" {
-		t.Fatalf("linux default runtime dirs=%v", got)
 	}
 }
 

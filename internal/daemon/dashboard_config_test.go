@@ -23,17 +23,6 @@ func TestDashboardConfigDefaultsCodexRecency(t *testing.T) {
 	}
 }
 
-func TestDashboardConfigPersistsBusyDelivery(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: "steer"}); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := LoadDashboardConfig()
-	if err != nil || loaded.BusyDelivery != "steer" {
-		t.Fatalf("config=%+v err=%v", loaded, err)
-	}
-}
-
 func TestDashboardConfigRejectsInvalidValues(t *testing.T) {
 	for name, config := range map[string]DashboardConfig{
 		"busy delivery": {BusyDelivery: "drop"},

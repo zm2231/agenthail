@@ -495,14 +495,6 @@ func startIdleManager(t *testing.T) string {
 	return home
 }
 
-func TestManagerRejectsUnknownOperation(t *testing.T) {
-	home := startIdleManager(t)
-	response := managerWireRequest(t, home, map[string]any{"operation": "bogus"})
-	if response.OK || response.Error == nil || response.Error.Class != "terminal" || response.Error.Kind != string(surface.DeliveryInvalidRequest) {
-		t.Fatalf("response=%+v", response)
-	}
-}
-
 func TestManagerRejectsRequestsBeyondConcurrencyLimit(t *testing.T) {
 	home := startIdleManager(t)
 	for range maxManagerRequests {

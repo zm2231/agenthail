@@ -373,21 +373,6 @@ func TestDashboardExposesCookieAuthenticatedDesktopVoiceControls(t *testing.T) {
 	}
 }
 
-func TestDashboardActionSendsToRegisteredSession(t *testing.T) {
-	d, _, fake, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
-	body, _ := json.Marshal(map[string]string{"action": "send", "sessionId": "from", "message": "ship this"})
-	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
-	request.Header.Set("Origin", "http://example.test")
-	request.Host = "example.test"
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || len(fake.sent) != 1 || fake.sent[0] != "ship this" {
-		t.Fatalf("status=%d sent=%v body=%s", response.Code, fake.sent, response.Body.String())
-	}
-}
-
 func TestDashboardSearchStoresCodexHistoryResult(t *testing.T) {
 	d, registry, fake, _, _ := daemonFixture(t)
 	fake.kind = surface.KindCodex

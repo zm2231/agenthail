@@ -1,9 +1,10 @@
 package daemon
 
 import (
-	"github.com/zm2231/agenthail/internal/surface"
 	"net/http"
 	"sort"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func (d *Daemon) sessionOptionsHandler(w http.ResponseWriter, r *http.Request) {
