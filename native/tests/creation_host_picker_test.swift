@@ -51,6 +51,13 @@ struct CreationHostPickerTest {
 
         picker.update(daemon: DaemonState(running: true, pid: 1, stale: nil, refreshError: nil, host: daemon.host, hosts: [HostHealth(id: forge.id, name: "forge", state: "unreachable"), lab]))
         expect(!picker.canStart && picker.hostQuery == forge.id, "a chosen host that drops keeps the choice but cannot start")
+        let beforeRemoval = picker.generation
+        picker.update(daemon: DaemonState(running: true, pid: 1, stale: nil, refreshError: nil, host: daemon.host, hosts: [lab]))
+        expect(picker.hostQuery == nil && picker.options == nil && picker.generation == beforeRemoval + 1, "a chosen host that is unpaired falls back to this machine and reloads")
+        picker.receive(options: remote, for: beforeRemoval)
+        expect(picker.options == nil, "the removed host's late answer is dropped")
+        picker.update(daemon: DaemonState(running: true, pid: 1, stale: nil, refreshError: nil, host: daemon.host, hosts: []))
+        expect(!picker.isVisible && picker.hostQuery == nil, "unpairing every host hides the button")
 
         var form = SessionLaunchForm(agent: "codex", host: nil, folder: "/Users/me/app", model: "gpt-local", effort: "high", message: "build it")
         form.switchHost(to: forge.id, folder: "/srv/builder")

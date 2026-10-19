@@ -1795,12 +1795,23 @@ function renderStartHost() {
   const button = $("#new-conversation-host");
   const menu = $("#new-conversation-host-menu");
   const hosts = startHosts();
+  if (app.startHost && !hosts.some((host) => host.id === app.startHost)) {
+    app.startHost = "";
+    clearLogicalRequest("session-create");
+    if (!$("#new-conversation-form").hidden) {
+      reloadStartCatalog();
+      return;
+    }
+  }
   button.hidden = hosts.length === 0;
+  const submit = $("#new-conversation-form").querySelector('button[type="submit"]');
   if (hosts.length === 0) {
     menu.hidden = true;
+    submit.disabled = false;
     return;
   }
   const current = hosts.find((host) => host.id === app.startHost) || hosts[0];
+  submit.disabled = current.state !== "connected";
   button.innerHTML = `${hostIcon}<span>${escape(current.name)}</span>`;
   button.title = `Starts on ${current.name}`;
   button.setAttribute("aria-label", `Starts on ${current.name}. Choose where to start`);
@@ -1932,7 +1943,14 @@ $("#new-conversation-form").addEventListener("submit", async (event) => {
   const form = event.currentTarget;
   const button = form.querySelector('button[type="submit"]');
   const values = Object.fromEntries(new FormData(form).entries());
-  if (app.startHost) values.host = app.startHost;
+  if (app.startHost) {
+    const host = startHosts().find((item) => item.id === app.startHost);
+    if (host?.state !== "connected") {
+      toast(`${host?.name || "That host"} is not connected.`);
+      return;
+    }
+    values.host = app.startHost;
+  }
   button.disabled = true;
   try {
     if (values.outputSchema?.trim()) values.outputSchema = JSON.parse(values.outputSchema); else delete values.outputSchema;

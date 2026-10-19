@@ -140,7 +140,11 @@ struct NewSessionSheet: View {
                 })
             }
             .task(id: hosts.generation) { await load() }
-            .onChange(of: model.snapshot?.daemon) { _, daemon in hosts.update(daemon: daemon) }
+            .onChange(of: model.snapshot?.daemon) { _, daemon in
+                let before = hosts.generation
+                hosts.update(daemon: daemon)
+                if hosts.generation != before { cwd = ""; selectedSurface = "" }
+            }
             .task(id: "\(hosts.generation)/\(selectedSurface)") {
                 selectedLauncher = nil
                 models = []; selectedModel = ""; modelError = nil; turnSettings = .init(); claude = .init()

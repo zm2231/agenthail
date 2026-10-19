@@ -50,16 +50,23 @@ struct CreationHostPicker {
     var selectedHost: CreationHost? { hosts.first { $0.id == selected } }
     var hostQuery: String? { selected.isEmpty ? nil : selected }
     var isLoading: Bool { options == nil && loadError == nil }
-    var canStart: Bool { options != nil && selectedHost?.isAvailable != false }
+    var canStart: Bool { options != nil && (selected.isEmpty || selectedHost?.isAvailable == true) }
     var folders: [String] { options?.workspaces ?? [] }
 
     mutating func update(daemon: DaemonState?) {
         let paired = daemon?.hosts ?? []
-        guard let local = daemon?.host, !paired.isEmpty else {
+        if let local = daemon?.host, !paired.isEmpty {
+            hosts = [CreationHost(id: "", name: local.name, state: "connected")] + paired.map { CreationHost(id: $0.id, name: $0.name, state: $0.state) }
+        } else {
             hosts = []
-            return
         }
-        hosts = [CreationHost(id: "", name: local.name, state: "connected")] + paired.map { CreationHost(id: $0.id, name: $0.name, state: $0.state) }
+        if !selected.isEmpty && selectedHost == nil {
+            selected = ""
+            options = nil
+            models = [:]
+            loadError = nil
+            generation += 1
+        }
     }
 
     @discardableResult
@@ -218,6 +225,9 @@ struct SessionState: Codable, Identifiable, Hashable {
     var remoteHostID: String? { remoteHostName == nil ? nil : host?.id }
     var modelCatalogKey: String { "\(remoteHostID ?? "")/\(surface)" }
     var canCallByVoice: Bool { remoteHostID == nil }
+    /// Attachments are sent as this machine's file paths, which mean nothing
+    /// to an agent on another host.
+    var acceptsLocalFiles: Bool { remoteHostID == nil }
 }
 
 struct SessionHost: Codable, Hashable {

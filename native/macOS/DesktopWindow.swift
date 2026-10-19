@@ -1369,16 +1369,18 @@ struct ComposerView: View {
                         .padding(.bottom, 4)
                         .onSubmit { submit(alternate: false) }
                     HStack(spacing: 4) {
-                        Button(action: chooseAttachments) {
-                            Image(systemName: "paperclip")
-                                .font(.system(size: 13))
-                                .frame(width: 28, height: 28)
+                        if session.acceptsLocalFiles {
+                            Button(action: chooseAttachments) {
+                                Image(systemName: "paperclip")
+                                    .font(.system(size: 13))
+                                    .frame(width: 28, height: 28)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(DesktopPalette.text2)
+                            .help("Attach files or images")
+                            .accessibilityLabel("Attach files or images")
+                            .padding(.leading, 5)
                         }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(DesktopPalette.text2)
-                        .help("Attach files or images")
-                        .accessibilityLabel("Attach files or images")
-                        .padding(.leading, 5)
                         if session.surface == "codex" {
                             TurnSettingsMenu(model: model, sessionID: session.id, detail: pane.detail)
                         }
@@ -1420,7 +1422,7 @@ struct ComposerView: View {
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(dropTargeted ? DesktopPalette.accent : DesktopPalette.line, lineWidth: dropTargeted ? 2 : 1))
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
                 .dropDestination(for: URL.self) { urls, _ in
-                    guard let files = ComposerDrop.files(urls) else { return false }
+                    guard session.acceptsLocalFiles, let files = ComposerDrop.files(urls) else { return false }
                     draft.attachments = ComposerDrop.adding(files, to: draft.attachments)
                     focused = true
                     return true

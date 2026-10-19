@@ -1064,7 +1064,7 @@ struct SessionInspector: View {
                     }
                 }
                 Section("Controls") {
-                    if detail.session.runtime?.focusable == true {
+                    if session.runtime?.focusable == true {
                         Button("Open in host", systemImage: "arrow.up.forward.app") { model.focusSession(session); dismiss() }
                     }
                     if detail.readOnly { Label(detail.readOnlyReason, systemImage: "lock").font(.footnote) }

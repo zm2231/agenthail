@@ -143,7 +143,10 @@ struct NewSessionSheet: View {
         }
         .task(id: hosts.generation) { await loadOptions() }
         .task(id: "\(hosts.generation)/\(form.agent)/\(hosts.options != nil)") { await loadModels() }
-        .onChange(of: model.snapshot?.daemon) { hosts.update(daemon: model.snapshot?.daemon) }
+        .onChange(of: model.snapshot?.daemon) {
+            hosts.update(daemon: model.snapshot?.daemon)
+            if form.host != hosts.hostQuery { form.switchHost(to: hosts.hostQuery, folder: "") }
+        }
         .onChange(of: form.agent) { error = nil }
         .onChange(of: model.newSessionMessage) { takeSharedMessage() }
         .onChange(of: starting) { takeSharedMessage() }
