@@ -116,10 +116,13 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         var status = 200
         let body: String
         if let capture = SessionCapture.current {
-            let id = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "id" })?.value ?? ""
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let id = query.first(where: { $0.name == "id" })?.value ?? ""
             let captured: String?
             switch request.url?.path {
-            case "/api/v1/snapshot": captured = capture.snapshotJSON
+            case "/api/v1/snapshot":
+                if let parentID = query.first(where: { $0.name == "parentId" })?.value { captured = capture.subagentPageJSON[parentID] }
+                else { captured = capture.snapshotJSON }
             case "/api/v1/queue": captured = capture.queueJSON
             case "/api/v1/session":
                 let before = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "timelineBefore" })?.value
