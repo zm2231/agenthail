@@ -90,7 +90,7 @@ private struct SurfaceCard: View {
         switch overview.health {
         case .healthy: return DesktopPalette.green
         case .degraded: return DesktopPalette.amber
-        case .notConfigured: return DesktopPalette.text2
+        case .signinOff: return DesktopPalette.text2
         case .unavailable: return DesktopPalette.red
         }
     }
