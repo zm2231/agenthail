@@ -162,6 +162,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		return nil, modeErr
 	}
 	var intent *registry.DeliveryIntent
+	retry := true
 	if route == surface.RoutePeer {
 		observation, observeErr := adapter.Observe(ctx, session)
 		if observeErr != nil {
@@ -182,6 +183,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 			if !errors.Is(err, errTurnEnded) {
 				return receipt, err
 			}
+			retry = false
 		}
 	}
 	baselineCompletionID := ""
@@ -208,7 +210,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 			ctx = surface.WithMessageUUID(ctx, intent.UUID)
 		}
 	}
-	return d.send(ctx, adapter, session, route, message, deliveryKey, options, allowQueue, busyMode, intent, baselineCompletionID, target, true)
+	return d.send(ctx, adapter, session, route, message, deliveryKey, options, allowQueue, busyMode, intent, baselineCompletionID, target, retry)
 }
 
 // send delivers message as the session's next turn. A busy session is

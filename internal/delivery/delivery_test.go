@@ -739,3 +739,33 @@ func TestDispatcherPersistsBeforeSteerAndTransitionsSameID(t *testing.T) {
 		t.Fatalf("same-id transition intent=%+v err=%v", intent, err)
 	}
 }
+
+func TestPeerSteerWhoseTurnEndedIsSentOnceAndQueuedWhenBusyAgain(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "session_peer", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", Status: surface.StatusBusy}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeSurface{
+		kind:         surface.KindClaude,
+		observe:      &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn"},
+		steerErr:     surface.DeliveryUnavailable(fmt.Errorf("%w (use 'send' instead)", surface.ErrNothingToSteer)),
+		result:       &surface.SendResult{Accepted: false},
+		capabilities: surface.Capabilities{Send: true, Steer: true},
+	}
+	receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), adapter, session, "next task", "", surface.SendOptions{BusyDelivery: "steer"})
+	if err != nil || receipt.Evidence != surface.EvidenceQueued || r.QueueCount(session.ID) != 1 {
+		t.Fatalf("receipt=%+v err=%v queued=%d", receipt, err, r.QueueCount(session.ID))
+	}
+	if len(adapter.steered) != 1 || len(adapter.sent) != 1 {
+		t.Fatalf("steered=%v sent=%v", adapter.steered, adapter.sent)
+	}
+	intent, err := r.DeliveryIntent(receipt.DeliveryID)
+	if err != nil || adapter.messageUUIDs[0] != intent.UUID || adapter.messageUUIDs[1] != intent.UUID {
+		t.Fatalf("intent=%+v err=%v uuids=%v", intent, err, adapter.messageUUIDs)
+	}
+}
