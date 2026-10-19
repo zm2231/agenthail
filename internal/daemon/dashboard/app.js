@@ -720,8 +720,9 @@ function auditKindLabel(kind) {
   return String(kind || "event").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 function signinHint(detail) {
-  const consumer = /^Claude Remote Control/.test(detail) ? "Claude sessions reached over Remote Control" : "Notion";
-  return `${consumer} needs a browser sign-in profile. Choose one under Browser sign-in below, or run agenthail signin.`;
+  const claude = /^Claude Remote Control/.test(detail);
+  const consumer = claude ? "Claude sessions reached over Remote Control need" : "Notion needs";
+  return `${consumer} a browser sign-in profile. Choose one in Settings > Browser Sign-in, or run agenthail signin use ${claude ? "claude" : "notion"} <profile>.`;
 }
 async function signinRequest(path, options = {}) {
   const response = await fetch(path, { ...options, headers: { "content-type": "application/json", ...(options.headers || {}) } });

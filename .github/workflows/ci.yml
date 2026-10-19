@@ -65,6 +65,7 @@ jobs:
           node scripts/test-dashboard-timeline.mjs
           node scripts/test-dashboard-relays.mjs
           node scripts/test-dashboard-rekeys.mjs
+          node scripts/test-dashboard-signin.mjs
       - name: Public copy check
         run: scripts/check-public-copy.sh
       - name: Push relay tests
