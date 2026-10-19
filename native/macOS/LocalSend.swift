@@ -2,6 +2,7 @@ import Foundation
 
 struct LocalSend: Identifiable, Equatable {
     let id = UUID()
+    let idempotencyKey = UUID().uuidString
     let text: String
     let sentAt: Date
     var status: String?
