@@ -1547,6 +1547,11 @@ func (a *App) cmdSend(args []string) error {
 		return a.sendRemote(ctx, remote, message, args, timeout)
 	}
 	coordinated := coord.Is(sess.ID)
+	if current, replaced := coord.ReplacedBy(sess.ID); replaced {
+		if sess, surf, _, err = a.resolveAnyTarget(ctx, current); err != nil {
+			return err
+		}
+	}
 	if !surf.Capabilities().Send {
 		return fmt.Errorf("%s does not support send", surf.Name())
 	}

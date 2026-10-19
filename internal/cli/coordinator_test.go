@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -198,4 +199,34 @@ func mustEvalSymlinks(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return resolved
+}
+
+func TestReplyToAReplacedCoordinatorConversationFollowsTheCurrentOne(t *testing.T) {
+	app, _, fixture := goneCoordinatorApp(t)
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "@lead", "first"}) }); err != nil {
+		t.Fatal(err)
+	}
+	transcript := fixture.Transcript(freshConversation, fixture.Home)
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		at := time.Now().UTC().Format(time.RFC3339Nano)
+		user, _ := json.Marshal(map[string]any{"type": "user", "uuid": "fixture-follow-up", "sessionId": freshConversation, "cwd": fixture.Home, "timestamp": at, "message": map[string]any{"role": "user", "content": "follow up"}})
+		answer, _ := json.Marshal(map[string]any{"type": "assistant", "uuid": "fixture-follow-up-answer", "sessionId": freshConversation, "cwd": fixture.Home, "timestamp": at, "message": map[string]any{"id": "fixture-follow-up-message", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": "answer from the current coordinator"}}}})
+		duration, _ := json.Marshal(map[string]any{"type": "system", "subtype": "turn_duration", "sessionId": freshConversation, "cwd": fixture.Home, "timestamp": at})
+		file, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			return
+		}
+		defer file.Close()
+		_, _ = file.WriteString(string(user) + "\n" + string(answer) + "\n" + string(duration) + "\n")
+	}()
+	output, err := captureStdout(t, func() error {
+		return app.Run([]string{"send", goneConversation, "follow up", "--reply", "--timeout", "5s"})
+	})
+	if err != nil || !strings.Contains(output, "answer from the current coordinator") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	if fixture.Starts() != 1 || fixture.Invocations("--bg", "--resume", goneConversation) != 0 {
+		t.Fatalf("starts=%d resumes=%d", fixture.Starts(), fixture.Invocations("--bg", "--resume", goneConversation))
+	}
 }
