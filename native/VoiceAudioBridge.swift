@@ -13,6 +13,16 @@ protocol VoiceAudioClient: AnyObject {
     func close()
 }
 
+struct VoiceMicrophoneDenied: LocalizedError {
+    var errorDescription: String? {
+#if os(macOS)
+        "Microphone access is off for Agenthail. Turn it on in System Settings, Privacy & Security, Microphone, then call again."
+#else
+        "Microphone access is off. Enable it for Agenthail in Settings."
+#endif
+    }
+}
+
 @MainActor
 final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
     let webView: WKWebView
@@ -23,15 +33,19 @@ final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKSc
     override init() {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
-        configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
+#if os(iOS)
+        configuration.allowsInlineMediaPlayback = true
+#endif
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         configuration.userContentController.add(self, name: "voice")
         webView.uiDelegate = self
         webView.navigationDelegate = self
+#if os(iOS)
         webView.isOpaque = false
         webView.backgroundColor = .clear
+#endif
     }
 
     func load(_ request: URLRequest) {
@@ -55,7 +69,7 @@ final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKSc
             AVAudioApplication.requestRecordPermission { continuation.resume(returning: $0) }
         }
         guard generation == permissionGeneration else { throw CancellationError() }
-        guard allowed else { throw AgenthailAPIError.unavailable("Microphone access is off. Enable it for Agenthail in Settings.") }
+        guard allowed else { throw VoiceMicrophoneDenied() }
         try await webView.evaluateJavaScript("void window.agenthailVoice.start()")
     }
 
@@ -96,8 +110,9 @@ final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKSc
     }
 
     private func sameOrigin(_ url: URL?) -> Bool {
-        guard let url, let origin else { return false }
-        return url.scheme == "https" && url.host == origin.host && (url.port ?? 443) == (origin.port ?? 443)
+        guard let url, let origin, VoiceAPI.secureOrigin(url) else { return false }
+        return url.scheme == origin.scheme && url.host == origin.host
+            && (url.port ?? VoiceAPI.defaultPort(url.scheme)) == (origin.port ?? VoiceAPI.defaultPort(origin.scheme))
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
@@ -129,8 +144,9 @@ final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKSc
 #if DEBUG && targetEnvironment(simulator)
         if VoiceEvaluation.enabled { decisionHandler(.deny); return }
 #endif
-        guard let expected = self.origin, origin.protocol == "https", origin.host == expected.host,
-              (origin.port == 0 ? 443 : origin.port) == (expected.port ?? 443), frame.isMainFrame, type == .microphone else {
+        guard let expected = self.origin, origin.protocol == expected.scheme, origin.host == expected.host,
+              (origin.port == 0 ? VoiceAPI.defaultPort(origin.protocol) : origin.port) == (expected.port ?? VoiceAPI.defaultPort(expected.scheme)),
+              frame.isMainFrame, type == .microphone else {
             decisionHandler(.deny); return
         }
         decisionHandler(.grant)
@@ -141,8 +157,16 @@ final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKSc
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { onMessage?("unavailable", "The audio process ended. Hang up and reopen Voice to reconnect.") }
 }
 
+#if os(iOS)
 struct VoiceAudioSurface: UIViewRepresentable {
     let bridge: VoiceAudioBridge
     func makeUIView(context: Context) -> WKWebView { bridge.webView }
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 }
+#else
+struct VoiceAudioSurface: NSViewRepresentable {
+    let bridge: VoiceAudioBridge
+    func makeNSView(context: Context) -> WKWebView { bridge.webView }
+    func updateNSView(_ nsView: WKWebView, context: Context) {}
+}
+#endif
