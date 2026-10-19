@@ -144,7 +144,7 @@ func TestClaudeResumeThatClaudeRefusesSaysWhy(t *testing.T) {
 	host.Refuse(t, fixtureConversation, "Error: Settings file not found: /fixture/settings.json")
 	session := exitedSession(fixture)
 	_, err := c.Send(context.Background(), &session, "hello")
-	if err == nil || surface.IsDeliveryOutcomeUnknown(err) || surface.IsDeliveryHeld(err) || !strings.Contains(err.Error(), "Claude refused to resume "+fixtureConversation) || !strings.Contains(err.Error(), "Settings file not found") {
+	if !surface.IsDeliveryRefused(err) || surface.IsDeliveryOutcomeUnknown(err) || surface.IsDeliveryHeld(err) || !strings.Contains(err.Error(), "Claude refused to resume "+fixtureConversation) || !strings.Contains(err.Error(), "Settings file not found") {
 		t.Fatalf("err=%v", err)
 	}
 }

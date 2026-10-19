@@ -221,9 +221,33 @@ func IsDeliveryUnavailable(err error) bool {
 // cannot accept a message yet; the message waits in the queue until it can.
 var ErrDeliveryHeld = errors.New("target is running but not reachable yet")
 
+// ErrNothingToSteer is a steer that found the session idle: its turn ended
+// before the steer reached it.
+var ErrNothingToSteer = errors.New("session idle; nothing to steer")
+
 func IsDeliveryHeld(err error) bool {
 	return IsDeliveryUnavailable(err) && errors.Is(err, ErrDeliveryHeld)
 }
+
+// DeliveryRefused marks an unavailable delivery the target refused to start,
+// such as a resume Claude declines. The message waits in the queue, but only a
+// person can clear the reason, so the refusal is announced.
+func DeliveryRefused(err error) error {
+	if err == nil {
+		return nil
+	}
+	return DeliveryUnavailable(refusedError{err: err})
+}
+
+func IsDeliveryRefused(err error) bool {
+	var target refusedError
+	return IsDeliveryUnavailable(err) && errors.As(err, &target)
+}
+
+type refusedError struct{ err error }
+
+func (e refusedError) Error() string { return e.err.Error() }
+func (e refusedError) Unwrap() error { return e.err }
 
 type DeliveryTerminalKind string
 

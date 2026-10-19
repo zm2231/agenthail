@@ -955,6 +955,9 @@ func (c *Claude) postContent(ctx context.Context, sess *surface.Session, content
 	status, respBody, err := request(ctx, "POST",
 		"https://claude.ai/v1/code/sessions/"+cse+"/events",
 		headers, string(bodyBytes), cookies, 30*time.Second)
+	if surface.IsDeliveryUnavailable(err) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(err)
 	}
@@ -1410,7 +1413,7 @@ func (c *Claude) Steer(ctx context.Context, sess *surface.Session, message strin
 		return err
 	}
 	if current.Status != surface.StatusBusy {
-		return surface.DeliveryUnavailable(errors.New("session idle; nothing to steer (use 'send' instead)"))
+		return surface.DeliveryUnavailable(fmt.Errorf("%w (use 'send' instead)", surface.ErrNothingToSteer))
 	}
 	_, err = c.postMessage(ctx, current, message)
 	return err
