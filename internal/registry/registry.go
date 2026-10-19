@@ -1704,7 +1704,15 @@ func queueEvidence(row QueueRow, recorded surface.DeliveryEvidence) surface.Deli
 	if recorded != "" {
 		return recorded
 	}
-	switch row.Status {
+	if row.Status == "dead" && strings.HasPrefix(row.LastError, "delivery outcome is unknown") {
+		return surface.EvidenceUnknown
+	}
+	return QueueStatusEvidence(row.Status)
+}
+
+// QueueStatusEvidence is the evidence a queue status implies on its own.
+func QueueStatusEvidence(status string) surface.DeliveryEvidence {
+	switch status {
 	case "pending", "inflight":
 		return surface.EvidenceQueued
 	case "delivered":
@@ -1712,9 +1720,6 @@ func queueEvidence(row QueueRow, recorded surface.DeliveryEvidence) surface.Deli
 	case "canceled":
 		return surface.EvidenceCanceled
 	case "dead":
-		if strings.HasPrefix(row.LastError, "delivery outcome is unknown") {
-			return surface.EvidenceUnknown
-		}
 		return surface.EvidenceFailed
 	default:
 		return ""

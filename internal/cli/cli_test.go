@@ -1299,6 +1299,57 @@ func TestListShowsAPairedHostSessionWaitingOnItsUser(t *testing.T) {
 	}
 }
 
+func TestQueueStatusLabelShowsEvidenceBesideADifferentStatus(t *testing.T) {
+	for _, tc := range []struct {
+		status   string
+		evidence surface.DeliveryEvidence
+		remote   bool
+		want     string
+	}{
+		{"pending", surface.EvidenceQueued, false, "pending"},
+		{"inflight", surface.EvidenceQueued, false, "inflight"},
+		{"inflight", surface.EvidenceUnknown, true, "inflight (unknown)"},
+		{"delivered", surface.EvidenceDelivered, false, "delivered"},
+		{"delivered", surface.EvidenceTransportAccepted, false, "delivered (transport accepted)"},
+		{"delivered", surface.EvidenceQueued, true, "delivered (remote queued)"},
+		{"dead", surface.EvidenceFailed, false, "dead"},
+		{"dead", surface.EvidenceUnknown, false, "dead (unknown)"},
+		{"canceled", surface.EvidenceCanceled, false, "canceled"},
+		{"canceled", surface.EvidenceQueued, true, "canceled"},
+		{"canceled", "", false, "canceled"},
+	} {
+		got := queueStatusLabel(registry.QueueRow{Status: tc.status, Evidence: tc.evidence}, tc.remote)
+		if got != tc.want {
+			t.Errorf("status=%s evidence=%s remote=%v label=%q want %q", tc.status, tc.evidence, tc.remote, got, tc.want)
+		}
+	}
+}
+
+func TestQueueListShowsASendAPairedHostQueuedAsDelivered(t *testing.T) {
+	app, r := cliFixture(t, &cliSurface{kind: surface.KindCodex})
+	hostID := "h0123456789ab"
+	if _, err := r.AddHost(registry.PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-busy", Name: "remote-busy", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}, EntityID: hostID + "::remote-busy", Projection: json.RawMessage(`{"id":"` + hostID + `::remote-busy","status":"busy"}`), ObservedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := r.QueueHostDelivery("remote-busy", "after your turn", "key-synthetic", []byte(`{"action":"send"}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed, err := r.ClaimHostDelivery(id); err != nil || !claimed {
+		t.Fatalf("claimed=%v err=%v", claimed, err)
+	}
+	if err := r.AckMessageWithEvidence(id, "remote-busy", 0, surface.EvidenceQueued, ""); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := captureStdout(t, func() error { return app.Run([]string{"queue", "list", "--all"}) })
+	if err != nil || !strings.Contains(listed, "delivered (remote queued)") {
+		t.Fatalf("queue list --all=%s err=%v", listed, err)
+	}
+}
+
 func TestListAndQueueShowASessionWaitingOnTheUser(t *testing.T) {
 	waiting := &surface.Waiting{Kind: surface.WaitingQuestion, ID: "toolu_synthetic"}
 	asking := surface.Session{ID: "asking", Name: "asking", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "app-server", Status: surface.StatusBusy, WaitingOn: waiting, LastActive: time.Now()}
@@ -1318,7 +1369,7 @@ func TestListAndQueueShowASessionWaitingOnTheUser(t *testing.T) {
 		t.Fatalf("list=%s err=%v", listed, err)
 	}
 	queued, err := captureStdout(t, func() error { return app.Run([]string{"queue", "list"}) })
-	if err != nil || !strings.Contains(queued, "queued just now; held: target is waiting on you") {
+	if err != nil || !strings.Contains(queued, " pending ") || !strings.Contains(queued, "queued just now; held: target is waiting on you") {
 		t.Fatalf("queue list=%s err=%v", queued, err)
 	}
 	document, err := captureStdout(t, func() error { return app.Run([]string{"queue", "list", "--json"}) })
