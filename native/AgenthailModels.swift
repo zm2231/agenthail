@@ -124,6 +124,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var host: SessionHost? = nil
     var unavailableReason: String? = nil
     var transport: String? = nil
+    var waitingOn: WaitingState? = nil
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }
@@ -131,6 +132,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     }
 
     var isWorking: Bool { status == "busy" }
+    var isWaitingOnYou: Bool { waitingOn != nil }
     var isReadOnly: Bool { readOnly == true }
     var remoteHostName: String? {
         guard let host, host.state != "local" else { return nil }
@@ -163,6 +165,13 @@ struct HostHealth: Decodable, Hashable, Identifiable {
         }
     }
     var isHealthy: Bool { state == "connected" }
+}
+
+/// A question, plan or approval the session is waiting on its user to answer.
+struct WaitingState: Codable, Hashable {
+    let kind: String
+    let id: String
+    var since: String? = nil
 }
 
 struct SubagentIdentity: Codable, Hashable {
@@ -363,12 +372,45 @@ struct QueueState: Decodable, Identifiable, Equatable {
     let attempts: Int
     let lastError: String?
     let queuedAt: String
-    let expiresAt: Int64?
+    var heldBy: String? = nil
     let historical: Bool?
     let evidence: String
 
     var isHistorical: Bool {
-        historical == true || status == "expired" || status == "delivered" || status == "canceled"
+        historical == true || status == "delivered" || status == "canceled"
+    }
+
+    /// The queue stores queuedAt as SQLite's UTC "yyyy-MM-dd HH:mm:ss".
+    var queuedDate: Date? { QueueState.queuedAtFormat.date(from: queuedAt) }
+
+    private static let queuedAtFormat: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+
+    /// The send receipt for a queued message, worded as the daemon words it.
+    var queuedReceipt: String {
+        heldBy == "waiting"
+            ? "Queued for \(target), which is waiting on you; sends after you answer."
+            : "Queued for \(target); sends when current turn ends."
+    }
+
+    /// Why a pending message has not been delivered yet.
+    var holdLabel: String {
+        switch heldBy {
+        case "waiting": return "Held: this agent is waiting on you"
+        case "busy": return "Held: this agent is working"
+        case "offline": return "Held: this agent is offline"
+        case "unknown": return "Held: this agent's state is unknown"
+        case "retrying": return "Held: waiting to retry"
+        case "behind": return "Held: behind an earlier message"
+        case "notLoaded": return "Held: this conversation is not loaded"
+        case "hostUnreachable": return "Held: this agent's host is unreachable"
+        default: return "Delivers on the next scan"
+        }
     }
 }
 
@@ -626,6 +668,7 @@ struct RawSession: Decodable {
     let transport: String?
     let cwd: String?
     let runtime: SessionRuntime?
+    var waitingOn: WaitingState? = nil
 }
 
 struct GoalState: Decodable {

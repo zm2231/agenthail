@@ -99,16 +99,16 @@ A send to a remote session carries an idempotency key (the CLI and native
 clients send one; the daemon generates one otherwise):
 
 - If no byte reached the remote, the daemon holds the exact request as a
-  pending queue row with the normal one-hour queue TTL and reports `queued`.
-  A row the host does not take within the hour expires into delivery history
-  as `expired`.
+  pending queue row and reports `queued`. The row never expires: `queue list`,
+  the dashboard and the apps show it held by `hostUnreachable` until the host
+  takes it or you cancel it.
 - If the request was written but no complete answer came back (no response,
   a body cut off mid-read, or an answer from something in front of the daemon
   such as Tailscale Serve without the `Agenthail-Host` header), the row is
   inflight with evidence `unknown`, and the CLI reports `delivery submitted`.
 - While the host is connected the daemon replays held rows with the same key.
-  Each row is claimed inflight before it is sent, and a pending row past its
-  deadline is never claimed, so an expired message is not delivered late.
+  Each row is claimed inflight before it is sent, so a canceled message or
+  one another drain already took is never sent.
   The remote's action receipts make a replay return the first result instead
   of starting a second turn. A replay the remote still reports as in progress
   stays unknown, then becomes a dead letter marked unknown 15 minutes after

@@ -54,6 +54,9 @@ func (r *Registry) EnsureCatalogState() error {
 	if err := r.ensureColumn("catalog_sessions", "discovery_failures", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	if err := r.ensureColumn("catalog_sessions", "waiting_on", `BLOB NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	if err := r.ensureColumn("catalog_sessions", "host_queue_count", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}

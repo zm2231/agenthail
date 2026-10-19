@@ -2,6 +2,7 @@ package registry
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -75,7 +76,7 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 	}
 	rowArgs := append(append([]any{}, args...), request.Limit+1, request.Offset)
 	rows, err := tx.Query(`SELECT s.id,s.host_id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
-		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,
+		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,cs.waiting_on,
 		COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+`
 		`+from+` WHERE `+where+` ORDER BY CASE WHEN s.status=? THEN 0 ELSE 1 END,s.last_active_ms DESC,s.updated_at DESC,s.id LIMIT ? OFFSET ?`, append(rowArgs[:len(rowArgs)-2], string(surface.StatusBusy), rowArgs[len(rowArgs)-2], rowArgs[len(rowArgs)-1])...)
 	if err != nil {
@@ -113,9 +114,9 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 func catalogPageSQL(request CatalogPageRequest) (string, string, []any) {
 	from := `FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id
 		LEFT JOIN aliases a ON a.session_id=s.id
-		LEFT JOIN (SELECT session_id,COUNT(*) AS queue_count FROM message_queue WHERE status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?) GROUP BY session_id) qc ON qc.session_id=s.id
+		LEFT JOIN (SELECT session_id,COUNT(*) AS queue_count FROM message_queue WHERE status IN ('pending','inflight') GROUP BY session_id) qc ON qc.session_id=s.id
 		LEFT JOIN session_runtime sr ON sr.session_id=s.id`
-	args := []any{request.Now.UnixMilli()}
+	args := []any{}
 	conditions := []string{"1=1"}
 	if request.ProjectID != "" {
 		conditions = append(conditions, "json_extract(cs.host_project,'$.id')=?")
@@ -150,10 +151,15 @@ func scanCatalogSession(scanner interface{ Scan(...any) error }) (CatalogSession
 	var hasLocal, focusable, generation, misses, discoveryFailures int
 	var lastActiveMS int64
 	var launcher string
-	var location []byte
+	var location, waitingOn []byte
 	var subagent subagentColumns
-	if err := scanner.Scan(append([]any{&state.Session.ID, &state.HostID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.RuntimeKind, &state.Session.ConfiguredModel, &state.Session.Bridge, &state.Session.ForkedFrom, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
+	if err := scanner.Scan(append([]any{&state.Session.ID, &state.HostID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.RuntimeKind, &state.Session.ConfiguredModel, &state.Session.Bridge, &state.Session.ForkedFrom, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &waitingOn, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 		return CatalogSessionState{}, err
+	}
+	if len(waitingOn) > 0 {
+		if err := json.Unmarshal(waitingOn, &state.Session.WaitingOn); err != nil {
+			return CatalogSessionState{}, fmt.Errorf("parse catalog waiting state: %w", err)
+		}
 	}
 	subagent.apply(&state.Session)
 	state.Session.Surface = surface.SurfaceKind(kind)
