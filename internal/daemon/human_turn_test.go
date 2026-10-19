@@ -361,7 +361,7 @@ func TestQueuedPersonSendThatCannotStartIsDeferredForRetry(t *testing.T) {
 	f.withoutWebBridgeSidecar(t)
 	f.d.drainMessageQueue(context.Background(), f.claude, &f.bridged)
 	f.d.queueWorkers.Wait()
-	item, err := f.r.QueueItem(queueID)
+	item, err := f.r.QueueItem(queueID, nil)
 	if err != nil || item.Status == "dead" || item.Evidence == surface.EvidenceUnknown || !strings.Contains(item.LastError, "did not start") || len(f.claude.native) != 0 {
 		t.Fatalf("item=%+v err=%v native=%q", item, err, f.claude.native)
 	}
