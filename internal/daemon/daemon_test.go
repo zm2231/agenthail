@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/zm2231/agenthail/internal/signin"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -1047,7 +1048,7 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 		t.Fatal(err)
 	}
 	requestSent := make(chan string, 1)
-	claude := surfaces.NewClaudeWithRequest("", fixture.Home, func(_ context.Context, method, url string, _ map[string]string, body, _ string, _ string, _ time.Duration) (int, string, error) {
+	claude := surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
 		if method != "POST" || !strings.Contains(url, "/v1/code/sessions/") {
 			t.Fatalf("method=%s url=%s", method, url)
 		}

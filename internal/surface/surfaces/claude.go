@@ -20,11 +20,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type Claude struct {
-	profile      string
+	signins      signin.Resolver
 	home         string
 	cookieBridge string
 	contextMu    sync.Mutex
@@ -41,24 +42,17 @@ type Claude struct {
 	localOnly    bool
 }
 
-type ClaudeRequest func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error)
+type ClaudeRequest func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error)
 
-func NewClaude(profile, home string) *Claude {
-	return NewClaudeWithRequest(profile, home, claudeSendRequest)
+func NewClaude(signins signin.Resolver, home string) *Claude {
+	return NewClaudeWithRequest(signins, home, claudeSendRequest)
 }
 
-func NewClaudeWithRequest(profile, home string, request ClaudeRequest) *Claude {
-	if profile == "" {
-		profile = "Default"
-	}
+func NewClaudeWithRequest(signins signin.Resolver, home string, request ClaudeRequest) *Claude {
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	bridge := os.Getenv("AGENTHAIL_COOKIE_BRIDGE")
-	if bridge == "" {
-		bridge = cookieBridgePath("cookie")
-	}
-	return &Claude{profile: profile, home: home, cookieBridge: bridge, subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(home)}
+	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(home)}
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
@@ -112,15 +106,29 @@ func (c *Claude) DisableRemoteControl() {
 
 func (c *Claude) Health(ctx context.Context) error {
 	sessions, err := c.List(ctx)
-	if err == nil {
-		for _, session := range sessions {
-			if session.Transport == "uds" {
-				return nil
-			}
-		}
+	native, bridged := false, false
+	for _, session := range sessions {
+		native = native || session.Transport == "uds"
+		bridged = bridged || session.Bridge != ""
 	}
 	if c.localOnly {
+		if native {
+			return nil
+		}
 		return err
+	}
+	cookies, signinErr := c.cookieSource("")
+	if signin.IsNotConfigured(signinErr) {
+		if bridged {
+			return signinErr
+		}
+		return err
+	}
+	if native {
+		return nil
+	}
+	if signinErr != nil {
+		return signinErr
 	}
 	if _, err := sidecarPath(); err != nil {
 		return err
@@ -128,7 +136,7 @@ func (c *Claude) Health(ctx context.Context) error {
 	if c.cookieBridge == "" || !fileExists(c.cookieBridge) {
 		return fmt.Errorf("Claude cookie bridge not found (set AGENTHAIL_COOKIE_BRIDGE or install cookie.mjs alongside agenthail)")
 	}
-	status, body, err := sidecarRequestWithCookies(ctx, "GET", "https://claude.ai/api/organizations", c.headerMap("", ""), "", c.cookieBridge, "https://claude.ai/", 15*time.Second)
+	status, body, err := sidecarRequestWithCookies(ctx, "GET", "https://claude.ai/api/organizations", c.headerMap("", ""), "", cookies, 15*time.Second)
 	if err != nil {
 		return fmt.Errorf("Claude authentication probe: %w", err)
 	}
@@ -136,6 +144,17 @@ func (c *Claude) Health(ctx context.Context) error {
 		return fmt.Errorf("Claude authentication probe returned HTTP %d: %s", status, diagnosticExcerpt(body))
 	}
 	return nil
+}
+
+// cookieSource resolves the browser profile for one claude.ai request. It runs
+// before anything is posted, so an unset profile never becomes an uncertain
+// delivery.
+func (c *Claude) cookieSource(sessionID string) (CookieSource, error) {
+	source, err := signin.Resolve(c.signins, signin.Target{Consumer: signin.Claude, SessionID: sessionID})
+	if err != nil {
+		return CookieSource{}, err
+	}
+	return CookieSource{Bridge: c.cookieBridge, URL: "https://claude.ai/", Signin: source}, nil
 }
 
 func (c *Claude) headerMap(_, _ string) map[string]string {
@@ -787,6 +806,13 @@ func (c *Claude) postMessage(ctx context.Context, sess *surface.Session, message
 	if sess.Bridge == "" {
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude conversation %s has no Remote Control attachment", sess.ID))
 	}
+	cookies, err := c.cookieSource(sess.ID)
+	if signin.IsNotConfigured(err) {
+		return nil, surface.DeliveryTerminal(err, surface.DeliverySigninNotConfigured)
+	}
+	if err != nil {
+		return nil, surface.DeliveryTerminal(err, surface.DeliveryAuthenticationNeeded)
+	}
 	uuid := newUUID()
 	cse := toCse(sess.Bridge)
 	body := map[string]any{
@@ -807,7 +833,7 @@ func (c *Claude) postMessage(ctx context.Context, sess *surface.Session, message
 	}
 	status, respBody, err := request(ctx, "POST",
 		"https://claude.ai/v1/code/sessions/"+cse+"/events",
-		headers, string(bodyBytes), c.cookieBridge, "https://claude.ai/", 30*time.Second)
+		headers, string(bodyBytes), cookies, 30*time.Second)
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(err)
 	}
@@ -1224,12 +1250,16 @@ func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
 			},
 		}},
 	}
+	cookies, err := c.cookieSource(sess.ID)
+	if err != nil {
+		return err
+	}
 	bodyBytes, _ := json.Marshal(body)
 	headers := c.headerMap("", sess.Bridge)
 	headers["content-type"] = "application/json"
 	status, respBody, err := sidecarRequestWithCookies(ctx, "POST",
 		"https://claude.ai/v1/code/sessions/"+cse+"/events",
-		headers, string(bodyBytes), c.cookieBridge, "https://claude.ai/", 10*time.Second)
+		headers, string(bodyBytes), cookies, 10*time.Second)
 	if err != nil {
 		return err
 	}

@@ -11,7 +11,7 @@ import (
 
 func TestPresenceUsesEachRuntimesTruth(t *testing.T) {
 	now := time.Date(2026, 7, 12, 20, 0, 0, 0, time.UTC)
-	claude, codex := NewClaude("", t.TempDir()), &Codex{}
+	claude, codex := NewClaude(nil, t.TempDir()), &Codex{}
 	tests := []struct {
 		name        string
 		adapter     surface.Surface
@@ -40,7 +40,7 @@ func TestPresenceUsesEachRuntimesTruth(t *testing.T) {
 }
 
 func TestClaudeOpenSessionsRejectsOtherProcesses(t *testing.T) {
-	open := NewClaude("", t.TempDir()).OpenSessions(context.Background(), []surface.Session{{ID: "self", PID: os.Getpid()}, {ID: "none"}})
+	open := NewClaude(nil, t.TempDir()).OpenSessions(context.Background(), []surface.Session{{ID: "self", PID: os.Getpid()}, {ID: "none"}})
 	if len(open) != 0 {
 		t.Fatalf("open=%v, want no Claude process", open)
 	}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, os, subprocess, sys
+import json, os, sys
 from curl_cffi import requests
 
 DEBUG = os.environ.get("AGENTHAIL_DEBUG") == "1"
@@ -7,23 +7,6 @@ DEBUG = os.environ.get("AGENTHAIL_DEBUG") == "1"
 def debug(message):
     if DEBUG:
         sys.stderr.write(f"DEBUG: {message}\n")
-
-def load_cookies(bridge, args=None, profile=None):
-    if not bridge:
-        debug("no cookie bridge")
-        return None
-    try:
-        cmd = ["node", bridge]
-        if args:
-            cmd.extend(args)
-        env = os.environ.copy()
-        if profile:
-            env["AGENTHAIL_CHROME_PROFILE"] = profile
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15, check=True, env=env).stdout.strip()
-        debug(f"cookie header length={len(out)}")
-        return out if out else None
-    except Exception as e:
-        raise RuntimeError(f"cookie bridge failed: {type(e).__name__}: {e}") from e
 
 def main():
     try:
@@ -35,14 +18,6 @@ def main():
         sys.stdout.write(json.dumps({"status": 0, "body": "", "error": "request requires a URL"}))
         return
     headers = dict(req.get("headers", {}))
-    bridge = req.get("cookie_bridge") or (None if headers.get("cookie") else os.environ.get("AGENTHAIL_COOKIE_BRIDGE"))
-    try:
-        cookie = load_cookies(bridge, req.get("cookie_bridge_args"), req.get("profile"))
-    except Exception as e:
-        sys.stdout.write(json.dumps({"status": 0, "body": "", "error": str(e)}))
-        return
-    if cookie:
-        headers["cookie"] = cookie
     debug(f"request host={req['url'].split('/')[2] if '//' in req['url'] else '?'} has_cookie={'cookie' in headers}")
     try:
         resp = requests.request(

@@ -20,7 +20,7 @@ func TestClaudeContextUsageTracksCompactionAndAppends(t *testing.T) {
 		`{"type":"user","timestamp":"2026-07-16T01:01:00Z","message":{"content":"/compact"}}`,
 		`{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-16T01:01:02Z","compactMetadata":{"preTokens":150000,"postTokens":42000}}`,
 	)
-	adapter := NewClaude("", t.TempDir())
+	adapter := NewClaude(nil, t.TempDir())
 	session := &surface.Session{ID: "claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transcript: path}
 	usage, err := adapter.ContextUsage(context.Background(), session)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestClaudeContextUsageReturnsTokensWhenWindowIsUnknown(t *testing.T) {
 	writeTestTranscript(t, path,
 		`{"type":"assistant","timestamp":"2026-07-16T01:00:00Z","message":{"model":"claude-opus-5-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":249000,"output_tokens":500}}}`,
 	)
-	adapter := NewClaude("", t.TempDir())
+	adapter := NewClaude(nil, t.TempDir())
 	usage, err := adapter.ContextUsage(context.Background(), &surface.Session{ID: "claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transcript: path})
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestClaudeContextUsageUsesExplicitConfiguredWindow(t *testing.T) {
 	writeTestTranscript(t, path,
 		`{"type":"assistant","timestamp":"2026-07-16T01:00:00Z","message":{"model":"claude-opus-5-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":249000,"output_tokens":500}}}`,
 	)
-	adapter := NewClaude("", t.TempDir())
+	adapter := NewClaude(nil, t.TempDir())
 	usage, err := adapter.ContextUsage(context.Background(), &surface.Session{ID: "claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transcript: path, ConfiguredModel: "claude-opus-5-5[1m]"})
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func TestClaudeContextUsageInvalidatesStaleConfiguredWindowAfterObservedModelSwi
 	writeTestTranscript(t, path,
 		`{"type":"assistant","timestamp":"2026-07-16T01:00:00Z","message":{"model":"claude-opus-5-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":249000,"output_tokens":500}}}`,
 	)
-	adapter := NewClaude("", t.TempDir())
+	adapter := NewClaude(nil, t.TempDir())
 	session := &surface.Session{ID: "claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transcript: path, ConfiguredModel: "claude-opus-5-5[1m]"}
 	usage, err := adapter.ContextUsage(context.Background(), session)
 	if err != nil || usage.ContextWindow != 1_000_000 {
@@ -138,7 +138,7 @@ func TestClaudeContextUsageCompactCommandEndsAtBoundary(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "claude.jsonl")
 			writeTestTranscript(t, path, records...)
-			usage, err := NewClaude("", t.TempDir()).ContextUsage(context.Background(), &surface.Session{ID: "claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transcript: path})
+			usage, err := NewClaude(nil, t.TempDir()).ContextUsage(context.Background(), &surface.Session{ID: "claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transcript: path})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -159,7 +159,7 @@ func TestClaudeContextUsageDeduplicatesReplayedRecords(t *testing.T) {
 		`{"uuid":"boundary-old","type":"system","subtype":"compact_boundary","timestamp":"2026-06-29T01:01:00Z","compactMetadata":{"preTokens":150000,"postTokens":42000}}`,
 		`{"type":"assistant","timestamp":"2026-05-11T01:00:00Z","message":{"model":"claude-opus-4-8","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":47192,"output_tokens":500}}}`,
 	)
-	adapter := NewClaude("", t.TempDir())
+	adapter := NewClaude(nil, t.TempDir())
 	usage, err := adapter.ContextUsage(context.Background(), &surface.Session{ID: "claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transcript: path})
 	if err != nil {
 		t.Fatal(err)

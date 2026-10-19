@@ -45,7 +45,9 @@ agenthail doctor --json
 ```
 
 AgentHail targets macOS and runs headless on Linux. Native Claude messages use local sockets and require
-the daemon. Claude Remote Control and Notion use a signed-in Chrome profile. Codex
+the daemon. Claude Remote Control and Notion read cookies only from the browser sign-in profile
+bound with `agenthail signin use <notion|claude> <profile>` (list with
+`agenthail signin list`); unbound consumers report "not set up" and read nothing. Codex
 Desktop uses AgentHail's loopback Desktop bridge (`agenthail launch codex`).
 Without Desktop, AgentHail uses Codex's app-server daemon and starts it when a
 conversation needs it. Codex 0.151 and older can only start that daemon from the
@@ -53,7 +55,7 @@ standalone runtime; `doctor --json` reports a typed runtime `problem` plus
 non-failing `notes` with the exact install step
 (`curl -fsSL https://chatgpt.com/codex/install.sh | sh`). Never run that
 installer on the user's behalf. Relevant overrides are
-`AGENTHAIL_CHROME_PROFILE`, `AGENTHAIL_PYTHON`, `AGENTHAIL_CLAUDE_BIN`,
+`AGENTHAIL_PYTHON`, `AGENTHAIL_CLAUDE_BIN`,
 `AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT`, `AGENTHAIL_NOTION_SPACE`, and
 `AGENTHAIL_NOTION_USER`. Never print browser cookies, dashboard tokens, or
 credentials.

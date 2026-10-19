@@ -15,6 +15,8 @@ struct DesktopSettings: View {
                 .tabItem { Label("Keyboard", systemImage: "keyboard") }
             DevicesSettings(model: model)
                 .tabItem { Label("Devices", systemImage: "iphone") }
+            SigninSettings(model: model)
+                .tabItem { Label("Browser Sign-in", systemImage: "key") }
             NotificationSettings(model: model)
                 .tabItem { Label("Notifications", systemImage: "bell.badge") }
             DeliverySettings(model: model)

@@ -25,6 +25,7 @@ import (
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/voice"
 )
@@ -909,6 +910,11 @@ func (d *Daemon) observedSurfaceHealth(kind surface.SurfaceKind) (dashboardSurfa
 
 func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Surface, listErr error) dashboardSurface {
 	entry := dashboardSurface{Name: string(adapter.Name()), Connected: listErr == nil, Health: "healthy", Capabilities: adapter.Capabilities()}
+	if signin.IsNotConfigured(listErr) {
+		entry.Health = "not_configured"
+		entry.HealthDetail = listErr.Error()
+		return entry
+	}
 	if listErr != nil {
 		entry.Error = listErr.Error()
 		entry.Health = "unavailable"

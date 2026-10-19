@@ -590,6 +590,18 @@ CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	host_epoch TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS signin_profiles (
+	id TEXT PRIMARY KEY,
+	label TEXT NOT NULL UNIQUE,
+	browser TEXT NOT NULL,
+	profile TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	UNIQUE(browser, profile)
+);
+CREATE TABLE IF NOT EXISTS signin_bindings (
+	consumer TEXT PRIMARY KEY,
+	profile_id TEXT NOT NULL REFERENCES signin_profiles(id) ON DELETE CASCADE
+);
 `
 
 func (r *Registry) RegisterSession(s surface.Session) error {
