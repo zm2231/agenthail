@@ -154,7 +154,6 @@ func TestFederationRefusesActionsThatOnlyMeanSomethingOnOneHost(t *testing.T) {
 		reason  string
 	}{
 		{map[string]any{"action": "session-focus", "sessionId": qualified}, "opening the terminal is not available for sessions on another host yet"},
-		{map[string]any{"action": "relay-add", "fromId": qualified, "toId": hosts.Qualify(record.ID, "remote-b"), "pattern": "."}, "relay-add is not available for sessions on another host yet"},
 	} {
 		response := local.request(t, http.MethodPost, "/api/v1/actions", test.request)
 		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), test.reason) {

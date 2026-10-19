@@ -8,8 +8,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -112,17 +114,14 @@ func (a *App) cmdChannel(args []string) error {
 			return fmt.Errorf("usage: agenthail channel add <channel> <target>")
 		}
 		channelName := strings.TrimPrefix(args[1], "#")
-		sess, adapter, err := a.resolveTarget(ctx, args[2])
+		member, label, err := a.channelMember(ctx, args[2], true)
 		if err != nil {
 			return err
 		}
-		if err := a.ensureWritableTarget(ctx, sess, adapter); err != nil {
+		if err := a.Registry.AddToChannel(channelName, member); err != nil {
 			return err
 		}
-		if err := a.Registry.AddToChannel(channelName, sess.ID); err != nil {
-			return err
-		}
-		fmt.Printf("added %s to #%s\n", a.resolveDisplay(sess.ID), channelName)
+		fmt.Printf("added %s to #%s\n", label, channelName)
 		return nil
 	case "rm", "remove":
 		if len(args) != 3 {
@@ -136,14 +135,14 @@ func (a *App) cmdChannel(args []string) error {
 			fmt.Printf("deleted channel #%s\n", channelName)
 			return nil
 		}
-		sess, _, err := a.resolveTarget(ctx, args[2])
+		member, label, err := a.channelMember(ctx, args[2], false)
 		if err != nil {
 			return err
 		}
-		if err := a.Registry.RemoveFromChannel(channelName, sess.ID); err != nil {
+		if err := a.Registry.RemoveFromChannel(channelName, member); err != nil {
 			return err
 		}
-		fmt.Printf("removed %s from #%s\n", a.resolveDisplay(sess.ID), channelName)
+		fmt.Printf("removed %s from #%s\n", label, channelName)
 		return nil
 	case "list":
 		if len(args) != 1 {
@@ -205,6 +204,16 @@ func (a *App) cmdChannel(args []string) error {
 		}
 		var sent, queued, submitted, failed int
 		for _, mid := range members {
+			if owner, err := a.Registry.SessionHost(mid); err == nil && owner != "" {
+				if _, err := a.Registry.QueueHostSend(registry.HostSend{SessionID: mid, Message: payload, Key: "channel:" + channelName + ":" + mid + ":" + uuid.NewString(), SourceSessionID: sourceID}); err != nil {
+					failed++
+					fmt.Printf("  [FAIL] %s: %s\n", a.resolveDisplay(mid), err)
+				} else {
+					queued++
+					fmt.Printf("  [QUEUE] %s (held for its host)\n", a.resolveDisplay(mid))
+				}
+				continue
+			}
 			sess, surf, err := a.resolveTarget(ctx, mid)
 			if err != nil {
 				failed++
@@ -257,17 +266,6 @@ func (a *App) cmdRelay(args []string) error {
 			return fmt.Errorf("usage: agenthail relay add <from-target> <to-target> [regex] [--once] [--when turn_finished|goal_completed]")
 		}
 		ctx := context.Background()
-		fromSess, fromAdapter, err := a.resolveTarget(ctx, positional[1])
-		if err != nil {
-			return fmt.Errorf("from-target: %w", err)
-		}
-		toSess, toAdapter, err := a.resolveTarget(ctx, positional[2])
-		if err != nil {
-			return fmt.Errorf("to-target: %w", err)
-		}
-		if err := a.ensureWritableTarget(ctx, toSess, toAdapter); err != nil {
-			return fmt.Errorf("to-target: %w", err)
-		}
 		pattern := ".*"
 		if len(positional) > 3 {
 			pattern = positional[3]
@@ -276,6 +274,20 @@ func (a *App) cmdRelay(args []string) error {
 		handoff := flagVal(args, "--when")
 		if handoff == "" {
 			handoff = registry.HandoffTurnFinished
+		}
+		fromSess, fromAdapter, fromRemote, err := a.resolveAnyTarget(ctx, positional[1])
+		if err != nil {
+			return fmt.Errorf("from-target: %w", err)
+		}
+		toSess, toAdapter, toRemote, err := a.resolveAnyTarget(ctx, positional[2])
+		if err != nil {
+			return fmt.Errorf("to-target: %w", err)
+		}
+		if fromRemote != nil || toRemote != nil {
+			return a.addHostRelay(ctx, fromSess, fromRemote, toSess, toRemote, pattern, once, handoff)
+		}
+		if err := a.ensureWritableTarget(ctx, toSess, toAdapter); err != nil {
+			return fmt.Errorf("to-target: %w", err)
 		}
 		if err := a.Registry.PrepareRelaySource(ctx, fromAdapter, fromSess, handoff); err != nil {
 			return fmt.Errorf("relay source: %w", err)
@@ -302,17 +314,13 @@ func (a *App) cmdRelay(args []string) error {
 		if err != nil {
 			return err
 		}
-		if len(routes) == 0 {
-			if hasFlag(args, "--json") {
-				return json.NewEncoder(os.Stdout).Encode(map[string]any{"relays": routes})
-			}
-			fmt.Println("(no relays; use: agenthail relay add <from> <to> [regex])")
-			return nil
-		}
+		ctx, cancel := context.WithTimeout(context.Background(), a.DefaultTimeout)
+		defer cancel()
+		remote, remoteErr := a.pairedHostRelays(ctx)
 		if hasFlag(args, "--json") {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"relays": routes})
+			return json.NewEncoder(os.Stdout).Encode(map[string]any{"relays": routes, "hosts": remote})
 		}
-		for _, r := range routes {
+		printRelay := func(prefix string, r registry.RouteRow) {
 			lastFired := "never"
 			if r.LastFiredAt != "" {
 				lastFired = r.LastFiredAt
@@ -325,13 +333,36 @@ func (a *App) cmdRelay(args []string) error {
 			if !r.Active {
 				state = "complete"
 			}
-			fmt.Printf("#%-3d %s -> %s /%s/ %s %s fires=%d last-fired=%s when=%s pending=%d error=%q\n",
-				r.ID, a.resolveDisplay(r.FromSession), a.resolveDisplay(r.ToSession), r.Pattern, mode, state, r.FireCount, lastFired, r.Handoff, r.PendingCount, r.LastError)
+			fmt.Printf("%s#%-3d %s -> %s /%s/ %s %s fires=%d last-fired=%s when=%s pending=%d error=%q\n",
+				prefix, r.ID, a.resolveDisplay(r.FromSession), a.resolveDisplay(r.ToSession), r.Pattern, mode, state, r.FireCount, lastFired, r.Handoff, r.PendingCount, r.LastError)
+		}
+		listed := len(routes)
+		for _, r := range routes {
+			printRelay("", r)
+		}
+		for _, host := range remote {
+			if host.Error != "" {
+				fmt.Printf("host %s: relays unavailable: %s\n", host.Host, host.Error)
+				continue
+			}
+			for _, r := range host.Relays {
+				printRelay(host.Host+hosts.Separator, r)
+				listed++
+			}
+		}
+		if remoteErr != nil {
+			fmt.Fprintf(os.Stderr, "paired hosts' relays unavailable: %s\n", remoteErr)
+		}
+		if listed == 0 {
+			fmt.Println("(no relays; use: agenthail relay add <from> <to> [regex])")
 		}
 		return nil
 	case "rm", "remove", "delete":
 		if len(args) != 2 {
-			return fmt.Errorf("usage: agenthail relay rm <id>")
+			return fmt.Errorf("usage: agenthail relay rm <id|host::id>")
+		}
+		if hostRef, relay, qualified := hosts.Split(args[1]); qualified {
+			return a.removeHostRelay(hostRef, relay)
 		}
 		id, err := strconv.ParseInt(args[1], 10, 64)
 		if err != nil || id <= 0 {

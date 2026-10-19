@@ -25,7 +25,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
-	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -1058,55 +1057,42 @@ func sourceEvidence(f frame) string { return f.From }
 // pairing; a sender that is not a current native Claude endpoint goes as
 // this host's operator.
 func queueHostFrame(reg *registry.Registry, c Config, f frame, targetID, key, content string) error {
-	request := map[string]any{"action": "send", "sessionId": targetID, "message": content}
-	if sender, name, ok := nativeSenderSession(reg, c, f.From); ok {
-		identity, err := reg.HostIdentity()
-		if err != nil {
-			return err
-		}
-		request["sourceSessionId"] = hosts.Qualify(identity.ID, sender)
-		request["sourceName"] = name
+	send := registry.HostSend{SessionID: targetID, Message: content, Key: key}
+	if sender, ok := nativeSenderSession(reg, c, f.From); ok {
+		send.SourceSessionID = sender
 	} else {
-		request["message"] = "[Claude peer message from " + f.From + "]\n" + content
+		send.Message = "[Claude peer message from " + f.From + "]\n" + content
 	}
-	body, err := json.Marshal(request)
-	if err != nil {
-		return err
-	}
-	queueID, err := reg.QueueHostDelivery(targetID, content, key, body, false)
+	queueID, err := reg.QueueHostSend(send)
 	if err != nil {
 		return err
 	}
 	return reg.RecordHistory(registry.HistoryEntry{Kind: "peer_received", SessionID: targetID, SourceSessionID: sourceEvidence(f), QueueID: queueID, Message: content, Result: "held for its host; sent once the host is reachable"})
 }
 
-// nativeSenderSession resolves a frame's sender to the registered Claude
-// session behind its messaging socket.
-func nativeSenderSession(reg *registry.Registry, c Config, from string) (string, string, bool) {
+// nativeSenderSession resolves a frame's sender to this host's registered
+// Claude session behind its messaging socket.
+func nativeSenderSession(reg *registry.Registry, c Config, from string) (string, bool) {
 	if validateNativeSender(c.Home, c.SocketDir, from) != nil {
-		return "", "", false
+		return "", false
 	}
 	pid := strings.TrimSuffix(filepath.Base(strings.TrimPrefix(from, "uds:")), ".sock")
 	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.Home), "sessions", pid+".json"))
 	if err != nil {
-		return "", "", false
+		return "", false
 	}
 	var record sessionRecord
 	if json.Unmarshal(data, &record) != nil || record.SessionID == "" {
-		return "", "", false
+		return "", false
 	}
 	session, err := reg.Session(record.SessionID)
 	if err != nil {
-		return "", "", false
+		return "", false
 	}
 	if owner, err := reg.SessionHost(session.ID); err != nil || owner != "" {
-		return "", "", false
+		return "", false
 	}
-	name := session.Name
-	if alias, err := reg.ReverseAlias(session.ID); err == nil && alias != "" {
-		name = "@" + alias
-	}
-	return session.ID, name, true
+	return session.ID, true
 }
 
 func acceptControls(wg *sync.WaitGroup, ln net.Listener, reg *registry.Registry, c Config, ownSocket string) {

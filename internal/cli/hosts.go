@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -573,4 +574,107 @@ type listSessionView struct {
 	surface.Session
 	Host              *hostRef `json:"host,omitempty"`
 	UnavailableReason string   `json:"unavailableReason,omitempty"`
+}
+
+// channelMember resolves a channel member on this host or a paired host. A
+// member on a paired host is stored as its mirrored row; whether it can take
+// a message is that host's call when the channel sends.
+func (a *App) channelMember(ctx context.Context, target string, joining bool) (string, string, error) {
+	session, adapter, remote, err := a.resolveAnyTarget(ctx, target)
+	if err != nil {
+		return "", "", err
+	}
+	if remote != nil {
+		_, raw, _ := hosts.Split(remote.ID)
+		return raw, remote.label(), nil
+	}
+	if joining {
+		if err := a.ensureWritableTarget(ctx, session, adapter); err != nil {
+			return "", "", err
+		}
+	}
+	return session.ID, a.resolveDisplay(session.ID), nil
+}
+
+func relayRef(session *surface.Session, remote *remoteTarget) string {
+	if remote != nil {
+		return remote.ID
+	}
+	return session.ID
+}
+
+// addHostRelay creates a relay with an end on a paired host through the
+// daemon, which stores it with its source: on that host when the source is
+// there, otherwise here.
+func (a *App) addHostRelay(ctx context.Context, from *surface.Session, fromRemote *remoteTarget, to *surface.Session, toRemote *remoteTarget, pattern string, once bool, handoff string) error {
+	client, err := a.daemonAPI()
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{"action": "relay-add", "fromId": relayRef(from, fromRemote), "toId": relayRef(to, toRemote), "pattern": pattern, "once": once, "handoff": handoff}
+	if _, _, err := client.action(ctx, payload); err != nil {
+		return err
+	}
+	where := "this host"
+	if fromRemote != nil {
+		where = "host " + fromRemote.Host.Name
+	}
+	fromLabel, toLabel := a.resolveDisplay(relayRef(from, fromRemote)), a.resolveDisplay(relayRef(to, toRemote))
+	if fromRemote != nil {
+		fromLabel = fromRemote.label()
+	}
+	if toRemote != nil {
+		toLabel = toRemote.label()
+	}
+	fmt.Printf("relay on %s: %s -> %s (pattern /%s/, %s)\n", where, fromLabel, toLabel, pattern, handoff)
+	return nil
+}
+
+func (a *App) removeHostRelay(hostRef, relay string) error {
+	id, err := strconv.ParseInt(strings.TrimPrefix(relay, "#"), 10, 64)
+	if err != nil || id <= 0 {
+		return fmt.Errorf("invalid relay id %q", relay)
+	}
+	client, err := a.daemonAPI()
+	if err != nil {
+		return err
+	}
+	if _, _, err := client.action(context.Background(), map[string]any{"action": "relay-remove", "relayId": id, "host": hostRef}); err != nil {
+		return err
+	}
+	fmt.Printf("removed relay %s%s%d\n", hostRef, hosts.Separator, id)
+	return nil
+}
+
+type hostRelays struct {
+	Host   string              `json:"host"`
+	Relays []registry.RouteRow `json:"relays,omitempty"`
+	Error  string              `json:"error,omitempty"`
+}
+
+// pairedHostRelays reads each paired host's relays through the daemon. A
+// host that cannot answer is listed with why.
+func (a *App) pairedHostRelays(ctx context.Context) ([]hostRelays, error) {
+	paired, err := a.Registry.ListHosts()
+	if err != nil || len(paired) == 0 {
+		return nil, err
+	}
+	client, err := a.daemonAPI()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]hostRelays, 0, len(paired))
+	for _, host := range paired {
+		var page struct {
+			Relays []registry.RouteRow `json:"relays"`
+		}
+		entry := hostRelays{Host: host.Name}
+		if err := client.getJSON(ctx, "/api/v1/relays", url.Values{"host": []string{host.ID}}, &page); err != nil {
+			entry.Error = err.Error()
+		} else {
+			entry.Relays = page.Relays
+		}
+		result = append(result, entry)
+	}
+	return result, nil
 }

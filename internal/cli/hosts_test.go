@@ -177,22 +177,27 @@ func TestHeldRemoteSendReportsQueuedNotSent(t *testing.T) {
 	}
 }
 
-func TestCrossHostCommandsRefuseRemoteSession(t *testing.T) {
+func TestChannelsAndRelaysReachARemoteSession(t *testing.T) {
 	app, _, _, api := federatedCLIFixture(t, true)
 	if _, err := app.Registry.CreateChannel("ops"); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"channel", "add", "ops", "forge::@builder"}, {"relay", "add", "forge::@builder", "forge::@builder"}} {
-		err := app.Run(args)
-		if err == nil || !strings.Contains(err.Error(), "forge::@builder is a session on host forge") || !strings.Contains(err.Error(), "not available for sessions on another host yet") {
-			t.Fatalf("%v err=%v", args, err)
-		}
+	if output, err := captureStdout(t, func() error { return app.Run([]string{"channel", "add", "ops", "forge::@builder"}) }); err != nil || !strings.Contains(output, "forge::@builder") {
+		t.Fatalf("channel add output=%q err=%v", output, err)
+	}
+	members, err := app.Registry.ChannelMembers("ops")
+	if err != nil || len(members) != 1 || members[0] != "remote-1" {
+		t.Fatalf("members=%v err=%v", members, err)
+	}
+	if output, err := captureStdout(t, func() error { return app.Run([]string{"relay", "add", "forge::@builder", "forge::@builder", "done"}) }); err != nil || !strings.Contains(output, "relay on host forge") {
+		t.Fatalf("relay add output=%q err=%v", output, err)
+	}
+	actions, _ := api.recorded()
+	if len(actions) != 1 || actions[0]["action"] != "relay-add" || actions[0]["fromId"] != forgeBuilder.ID || actions[0]["pattern"] != "done" {
+		t.Fatalf("actions=%v", actions)
 	}
 	if err := app.Run([]string{"send", "nowhere::x", "hi"}); err == nil || !strings.Contains(err.Error(), `no paired host is named "nowhere"`) {
 		t.Fatalf("unknown host err=%v", err)
-	}
-	if actions, _ := api.recorded(); len(actions) != 0 {
-		t.Fatalf("actions=%v", actions)
 	}
 }
 

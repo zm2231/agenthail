@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -579,14 +580,31 @@ type HostDelivery struct {
 }
 
 func (r *Registry) QueueHostDelivery(sessionID, message, key string, request []byte, sent bool) (int64, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	id, err := queueHostDeliveryTx(tx, r.now(), sessionID, message, key, request, sent)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: message})
+	return id, nil
+}
+
+func queueHostDeliveryTx(tx *sql.Tx, now time.Time, sessionID, message, key string, request []byte, sent bool) (int64, error) {
 	if key == "" || len(request) == 0 {
 		return 0, fmt.Errorf("a held host delivery needs its idempotency key and request")
 	}
 	status, inflightAt, evidence := "pending", int64(0), surface.EvidenceQueued
 	if sent {
-		status, inflightAt, evidence = "inflight", r.now().UnixMilli(), surface.EvidenceUnknown
+		status, inflightAt, evidence = "inflight", now.UnixMilli(), surface.EvidenceUnknown
 	}
-	result, err := r.db.Exec(`INSERT INTO message_queue(session_id,message,delivery_key,host_request,status,attempts,inflight_at_ms,evidence,updated_at)
+	result, err := tx.Exec(`INSERT INTO message_queue(session_id,message,delivery_key,host_request,status,attempts,inflight_at_ms,evidence,updated_at)
 		SELECT ?,?,?,?,?,1,?,?,datetime('now') WHERE EXISTS(SELECT 1 FROM sessions WHERE id=? AND host_id<>'')`,
 		sessionID, message, key, request, status, inflightAt, evidence, sessionID)
 	if err != nil {
@@ -595,12 +613,57 @@ func (r *Registry) QueueHostDelivery(sessionID, message, key string, request []b
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return 0, fmt.Errorf("session %s is not owned by a paired host", sessionID)
 	}
-	id, err := result.LastInsertId()
+	return result.LastInsertId()
+}
+
+// HostSend is a message this host holds for a session a paired host owns,
+// sent to that host as an ordinary send once it is reachable.
+type HostSend struct {
+	SessionID string
+	Message   string
+	Key       string
+	// SourceSessionID is one of this host's sessions, or empty to send as
+	// this host's operator. It goes qualified with this host's id, so the
+	// owner can reply across the pairing.
+	SourceSessionID string
+	BusyDelivery    string
+	// RelayHops counts relay legs so far, so a relay loop that crosses hosts
+	// still stops at the hop limit.
+	RelayHops int
+}
+
+// QueueHostSend holds a send for its host.
+func (r *Registry) QueueHostSend(send HostSend) (int64, error) {
+	request, err := r.hostSendRequest(send)
 	if err != nil {
 		return 0, err
 	}
-	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: message})
-	return id, nil
+	return r.QueueHostDelivery(send.SessionID, send.Message, send.Key, request, false)
+}
+
+func (r *Registry) hostSendRequest(send HostSend) ([]byte, error) {
+	request := map[string]any{"action": "send", "sessionId": send.SessionID, "message": send.Message}
+	if send.SourceSessionID != "" {
+		identity, err := r.HostIdentity()
+		if err != nil {
+			return nil, err
+		}
+		name := send.SourceSessionID
+		if alias, err := r.ReverseAlias(send.SourceSessionID); err == nil && alias != "" {
+			name = "@" + alias
+		} else if session, err := r.Session(send.SourceSessionID); err == nil && session.Name != "" {
+			name = session.Name
+		}
+		request["sourceSessionId"] = hosts.Qualify(identity.ID, send.SourceSessionID)
+		request["sourceName"] = name
+	}
+	if send.BusyDelivery != "" {
+		request["busyDelivery"] = send.BusyDelivery
+	}
+	if send.RelayHops > 0 {
+		request["relayHops"] = send.RelayHops
+	}
+	return json.Marshal(request)
 }
 
 func (r *Registry) HostDeliveries(hostID string) ([]HostDelivery, error) {
