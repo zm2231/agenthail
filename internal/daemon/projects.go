@@ -10,8 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/workspace"
@@ -90,15 +92,23 @@ func applyCatalogView(row *dashboardSession, view catalogViewState) {
 	row.Archived = sessionArchived || projectArchived
 }
 
+// dashboardProject is one repository or folder across every host that has a
+// checkout of it. It is archived when every checkout is.
 type dashboardProject struct {
-	ID           string         `json:"id"`
-	DisplayName  string         `json:"displayName"`
-	RootPath     string         `json:"rootPath"`
-	Kind         string         `json:"kind"`
-	Host         *dashboardHost `json:"host,omitempty"`
-	LastActive   time.Time      `json:"lastActive,omitempty"`
-	SessionCount int            `json:"sessionCount"`
-	Archived     bool           `json:"archived"`
+	ID           string                     `json:"id"`
+	DisplayName  string                     `json:"displayName"`
+	Kind         string                     `json:"kind"`
+	Checkouts    []dashboardProjectCheckout `json:"checkouts"`
+	LastActive   time.Time                  `json:"lastActive,omitempty"`
+	SessionCount int                        `json:"sessionCount"`
+	Archived     bool                       `json:"archived"`
+}
+
+type dashboardProjectCheckout struct {
+	Host         dashboardHost `json:"host"`
+	RootPath     string        `json:"rootPath"`
+	SessionCount int           `json:"sessionCount"`
+	Archived     bool          `json:"archived"`
 }
 
 // catalogScopes lists the session scopes every client renders. A scope counts
@@ -174,38 +184,65 @@ func catalogScopeCounts(rows []dashboardSession) map[string]int {
 func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, local dashboardHost) []dashboardProject {
 	byID := map[string]*dashboardProject{}
 	order := []string{}
+	checkout := func(found *dashboardProject, host dashboardHost, root string, archived bool) *dashboardProjectCheckout {
+		for index := range found.Checkouts {
+			if found.Checkouts[index].Host.ID == host.ID {
+				return &found.Checkouts[index]
+			}
+		}
+		found.Checkouts = append(found.Checkouts, dashboardProjectCheckout{Host: host, RootPath: root, Archived: archived})
+		return &found.Checkouts[len(found.Checkouts)-1]
+	}
+	entry := func(id, name, kind string) *dashboardProject {
+		found, ok := byID[id]
+		if !ok {
+			found = &dashboardProject{ID: id, DisplayName: name, Kind: kind}
+			byID[id] = found
+			order = append(order, id)
+		}
+		return found
+	}
 	for _, row := range rows {
 		if row.Project == nil || row.Project.ID == "" {
 			continue
 		}
-		project, found := byID[row.Project.ID]
-		if !found {
-			project = &dashboardProject{ID: row.Project.ID, DisplayName: row.Project.DisplayName, RootPath: row.Project.RootPath, Kind: row.Project.Kind, Host: row.Host, Archived: row.Project.Archived}
-			byID[row.Project.ID] = project
-			order = append(order, row.Project.ID)
+		host := local
+		if row.Host != nil {
+			host = *row.Host
 		}
+		found := entry(row.Project.ID, row.Project.DisplayName, row.Project.Kind)
+		at := checkout(found, host, row.Project.RootPath, row.Project.Archived)
 		if row.Archived || (row.Subagent != nil && row.Subagent.ParentID != "") {
 			continue
 		}
-		project.SessionCount++
-		if row.LastActive.After(project.LastActive) {
-			project.LastActive = row.LastActive
+		found.SessionCount++
+		at.SessionCount++
+		if row.LastActive.After(found.LastActive) {
+			found.LastActive = row.LastActive
 		}
 	}
 	for _, record := range records {
 		if !record.Registered {
 			continue
 		}
-		if _, found := byID[record.ID]; found {
-			continue
-		}
-		host := local
-		byID[record.ID] = &dashboardProject{ID: record.ID, DisplayName: record.DisplayName, RootPath: record.RootPath, Kind: record.Kind, Host: &host, Archived: !record.ArchivedAt.IsZero()}
-		order = append(order, record.ID)
+		found := entry(record.ID, record.DisplayName, record.Kind)
+		checkout(found, local, record.RootPath, !record.ArchivedAt.IsZero())
 	}
 	projects := make([]dashboardProject, 0, len(order))
 	for _, id := range order {
-		projects = append(projects, *byID[id])
+		found := byID[id]
+		found.Archived = true
+		for _, at := range found.Checkouts {
+			found.Archived = found.Archived && at.Archived
+		}
+		sort.SliceStable(found.Checkouts, func(i, j int) bool {
+			left, right := found.Checkouts[i].Host, found.Checkouts[j].Host
+			if (left.ID == local.ID) != (right.ID == local.ID) {
+				return left.ID == local.ID
+			}
+			return left.Name < right.Name
+		})
+		projects = append(projects, *found)
 	}
 	sort.SliceStable(projects, func(i, j int) bool { return projects[i].LastActive.After(projects[j].LastActive) })
 	return projects
@@ -218,7 +255,8 @@ func (d *Daemon) requestCatalogDiscovery() {
 	}
 }
 
-func (d *Daemon) projectAction(ctx context.Context, w http.ResponseWriter, action, projectID, path string) {
+func (d *Daemon) projectAction(r *http.Request, w http.ResponseWriter, action, projectID, path string) {
+	ctx := r.Context()
 	switch action {
 	case "project-add":
 		project, err := d.addProject(ctx, path)
@@ -237,29 +275,98 @@ func (d *Daemon) projectAction(ctx context.Context, w http.ResponseWriter, actio
 		http.Error(w, "projectId is required", http.StatusBadRequest)
 		return
 	}
-	var err error
-	if action == "project-archive" {
-		var record registry.ProjectRecord
-		record, err = d.catalogProjectRecord(projectID)
-		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "project not found", http.StatusNotFound)
+	archive := action == "project-archive"
+	local, err := d.archiveLocalProject(projectID, archive)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var checkouts []map[string]any
+	if local {
+		checkouts = append(checkouts, map[string]any{"host": d.localHost().Name, "ok": true})
+	}
+	failed := false
+	// A paired host forwarding this action archives only its own checkout,
+	// so the action never travels back.
+	if _, fromHost := requestingHost(ctx); !fromHost {
+		hostIDs, err := d.Registry.CatalogProjectHosts(projectID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if err == nil {
-			err = d.Registry.ArchiveProject(record, time.Now().UTC())
+		for _, hostID := range hostIDs {
+			result := map[string]any{"host": hostID, "ok": true}
+			if host, found := d.pairedHost(hostID); found {
+				result["host"] = host.record.Name
+				if err := d.forwardProjectArchive(r, host, action, projectID); err != nil {
+					result["ok"], result["error"] = false, err.Error()
+					failed = true
+				}
+			} else {
+				result["ok"], result["error"] = false, "host is no longer paired"
+				failed = true
+			}
+			checkouts = append(checkouts, result)
 		}
+	}
+	if len(checkouts) == 0 {
+		http.Error(w, "project not found", http.StatusNotFound)
+		return
+	}
+	status := http.StatusOK
+	if failed {
+		status = http.StatusBadGateway
+	}
+	writeDashboardJSON(w, status, map[string]any{"ok": !failed, "projectId": projectID, "archived": archive, "checkouts": checkouts})
+}
+
+// archiveLocalProject archives or unarchives this host's checkout of the
+// project, reporting false when this host has none.
+func (d *Daemon) archiveLocalProject(projectID string, archive bool) (bool, error) {
+	record, err := d.catalogProjectRecord(projectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if archive {
+		err = d.Registry.ArchiveProject(record, time.Now().UTC())
 	} else {
 		err = d.Registry.UnarchiveProject(projectID)
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return true, err
 	}
 	d.publishCatalogPresence()
 	// A catalog pass that read the archive state before this change may still
 	// publish its rows; the pass this requests runs after it and settles them.
 	d.requestCatalogDiscovery()
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "projectId": projectID, "archived": action == "project-archive"})
+	return true, nil
+}
+
+func (d *Daemon) forwardProjectArchive(r *http.Request, host *pairedHost, action, projectID string) error {
+	body, err := json.Marshal(map[string]string{"action": action, "projectId": projectID})
+	if err != nil {
+		return err
+	}
+	key := r.Header.Get(actionIdempotencyHeader)
+	if key == "" {
+		key = "fwd-" + uuid.NewString()
+	}
+	header := http.Header{actionIdempotencyHeader: []string{key + ":" + host.record.ID}}
+	response, err := host.client.Do(r.Context(), http.MethodPost, "/api/v1/actions", nil, body, header)
+	if err != nil {
+		return err
+	}
+	answer, err := readHostAnswer(host, response)
+	if err != nil {
+		return err
+	}
+	if answer.status != http.StatusOK {
+		return fmt.Errorf("%s answered %d: %s", host.record.Name, answer.status, strings.TrimSpace(string(answer.payload)))
+	}
+	return nil
 }
 
 func (d *Daemon) sessionArchiveAction(w http.ResponseWriter, action, sessionID string) {
@@ -315,7 +422,7 @@ func (d *Daemon) addProject(ctx context.Context, path string) (catalogProject, e
 	if info, err := os.Stat(path); err != nil || !info.IsDir() {
 		return catalogProject{}, fmt.Errorf("%s is not a folder", path)
 	}
-	repository, notRepository, err := resolveCatalogRepository(ctx, path)
+	repository, notRepository, err := resolveCatalogRepository(ctx, path, nil)
 	if err == nil {
 		return *repository.project(), nil
 	}

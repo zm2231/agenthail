@@ -6,15 +6,19 @@ import (
 )
 
 const projectsSnapshot = `{"projects":[
-{"id":"project-widget","displayName":"widget","rootPath":"/work/widget","kind":"git","sessionCount":2},
-{"id":"h0123456789ab::project-widget","displayName":"widget","rootPath":"/home/remote/widget","kind":"git","host":{"id":"h0123456789ab","name":"forge"},"sessionCount":1},
-{"id":"project-notes","displayName":"notes","rootPath":"/work/notes","kind":"folder","archived":true}]}`
+{"id":"project-widget","displayName":"widget","kind":"git","sessionCount":3,"checkouts":[
+ {"host":{"id":"local","name":"mac","state":"local"},"rootPath":"/work/widget","sessionCount":2},
+ {"host":{"id":"h0123456789ab","name":"forge","state":"connected"},"rootPath":"/home/remote/widget","sessionCount":1}]},
+{"id":"h0123456789ab::project-scratch","displayName":"widget","kind":"git","sessionCount":1,"checkouts":[
+ {"host":{"id":"h0123456789ab","name":"forge","state":"connected"},"rootPath":"/home/remote/scratch/widget","sessionCount":1}]},
+{"id":"project-notes","displayName":"notes","kind":"folder","archived":true,"checkouts":[
+ {"host":{"id":"local","name":"mac","state":"local"},"rootPath":"/work/notes","archived":true}]}]}`
 
 func TestProjectListHidesArchivedUnlessAll(t *testing.T) {
 	app, _, _, api := federatedCLIFixture(t, true)
 	api.snapshot = projectsSnapshot
 	output, err := captureStdout(t, func() error { return app.Run([]string{"project", "list"}) })
-	if err != nil || !strings.Contains(output, "/work/widget") || !strings.Contains(output, "forge") || strings.Contains(output, "notes") {
+	if err != nil || !strings.Contains(output, "mac,forge") || !strings.Contains(output, " /work/widget\n") || !strings.Contains(output, " /home/remote/scratch/widget\n") || strings.Contains(output, "notes") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
 	output, err = captureStdout(t, func() error { return app.Run([]string{"project", "list", "--all"}) })
@@ -31,7 +35,7 @@ func TestProjectArchiveResolvesByIdAndRejectsAmbiguousNames(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 	if _, err := captureStdout(t, func() error {
-		return app.Run([]string{"project", "archive", "h0123456789ab::project-widget"})
+		return app.Run([]string{"project", "archive", "h0123456789ab::project-scratch"})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +43,7 @@ func TestProjectArchiveResolvesByIdAndRejectsAmbiguousNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	actions, _ := api.recorded()
-	if len(actions) != 2 || actions[0]["action"] != "project-archive" || actions[0]["projectId"] != "h0123456789ab::project-widget" || actions[1]["action"] != "project-unarchive" || actions[1]["projectId"] != "project-notes" {
+	if len(actions) != 2 || actions[0]["action"] != "project-archive" || actions[0]["projectId"] != "h0123456789ab::project-scratch" || actions[1]["action"] != "project-unarchive" || actions[1]["projectId"] != "project-notes" {
 		t.Fatalf("actions=%v", actions)
 	}
 }

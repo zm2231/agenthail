@@ -81,7 +81,7 @@ func TestSnapshotGroupsWorktreeSessionsIntoOneProject(t *testing.T) {
 	if from.Project == nil || to.Project == nil || from.Project.ID != to.Project.ID || to.Checkout.Branch != "feature/c3" {
 		t.Fatalf("from=%+v to=%+v checkout=%+v", from.Project, to.Project, to.Checkout)
 	}
-	if len(state.Projects) != 1 || state.Projects[0].DisplayName != "widget" || state.Projects[0].RootPath != canonicalRepo || state.Projects[0].SessionCount != 2 || state.Projects[0].Archived {
+	if len(state.Projects) != 1 || state.Projects[0].DisplayName != "widget" || len(state.Projects[0].Checkouts) != 1 || state.Projects[0].Checkouts[0].RootPath != canonicalRepo || state.Projects[0].SessionCount != 2 || state.Projects[0].Archived {
 		t.Fatalf("projects=%+v", state.Projects)
 	}
 	if from.Current || state.Counts["recent"] != 0 || state.Counts["current"] != 0 || state.Counts["all"] != 2 || state.Counts["archived"] != 0 {
@@ -259,7 +259,7 @@ func TestFederationProjectsStayOnTheirHostAndArchiveRoutesThere(t *testing.T) {
 	}
 	awaitFederation(t, "remote project mirrored", func() bool {
 		project := mirroredProject()
-		return project != nil && project.SessionCount == 2 && project.Host != nil && project.Host.ID == record.ID
+		return project != nil && project.SessionCount == 2 && len(project.Checkouts) == 1 && project.Checkouts[0].Host.ID == record.ID
 	})
 
 	archived := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-archive", "projectId": qualified})
@@ -277,4 +277,83 @@ func TestFederationProjectsStayOnTheirHostAndArchiveRoutesThere(t *testing.T) {
 		rows := sessionsOf(local.snapshot(t), record.ID)
 		return project != nil && project.Archived && len(rows) == 2 && rows[0].Archived && rows[1].Archived
 	})
+}
+
+func cloneAt(t *testing.T, origin, path string) string {
+	t.Helper()
+	gitRun(t, origin, "clone", "--quiet", origin, path)
+	gitRun(t, path, "remote", "set-url", "origin", "https://github.com/example/gadget.git")
+	return path
+}
+
+func moveSessions(t *testing.T, node *federationNode, cwd string) {
+	t.Helper()
+	for id, session := range node.fake.sessions {
+		session.Cwd = cwd
+		node.fake.sessions[id] = session
+		if err := node.reg.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	node.daemon.discoverCatalog(context.Background())
+}
+
+func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	upstream := catalogTestRepo(t)
+	remote := newFederationNode(t, "remote-a", "remote-b")
+	moveSessions(t, remote, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "forge-gadget")), "src"))
+	remote.serve(t, nil)
+	local := newFederationNode(t, "local-a")
+	localRoot := cloneAt(t, upstream, filepath.Join(t.TempDir(), "mac-gadget"))
+	worktree := filepath.Join(localRoot, ".worktrees", "task-e5")
+	gitRun(t, localRoot, "worktree", "add", "-b", "feature/e5", worktree)
+	moveSessions(t, local, worktree)
+	local.start(t, testRoots(remote.server))
+	record := local.pair(t, remote, "forge")
+
+	projectID := storedProjection(t, local.reg, "local-a").Project.ID
+	merged := func() []dashboardProject {
+		var found []dashboardProject
+		for _, project := range local.snapshot(t).Projects {
+			if project.ID == projectID || project.ID == hosts.Qualify(record.ID, projectID) {
+				found = append(found, project)
+			}
+		}
+		return found
+	}
+	awaitFederation(t, "one project with both checkouts", func() bool {
+		projects := merged()
+		return len(projects) == 1 && projects[0].ID == projectID && len(projects[0].Checkouts) == 2 && projects[0].SessionCount == 3
+	})
+	project := merged()[0]
+	if project.DisplayName != "gadget" || project.Checkouts[0].Host.State != hostStateLocal || project.Checkouts[1].Host.ID != record.ID || project.Checkouts[0].SessionCount != 1 || project.Checkouts[1].SessionCount != 2 {
+		t.Fatalf("project=%+v", project)
+	}
+
+	if response := remote.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-archive", "projectId": projectID}); response.Code != http.StatusOK {
+		t.Fatalf("archive on forge: %d %s", response.Code, response.Body)
+	}
+	awaitFederation(t, "forge checkout archived", func() bool {
+		projects := merged()
+		return len(projects) == 1 && projects[0].Checkouts[1].Archived && !projects[0].Checkouts[0].Archived && !projects[0].Archived
+	})
+
+	if response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-unarchive", "projectId": projectID}); response.Code != http.StatusOK {
+		t.Fatalf("unarchive everywhere: %d %s", response.Code, response.Body)
+	}
+	if state, err := remote.reg.ArchiveState(); err != nil || !state.Projects[projectID].IsZero() {
+		t.Fatalf("forge kept the archive: %+v err=%v", state, err)
+	}
+	archived := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-archive", "projectId": projectID})
+	if archived.Code != http.StatusOK || !strings.Contains(archived.Body.String(), `"host":"forge","ok":true`) {
+		t.Fatalf("archive everywhere: %d %s", archived.Code, archived.Body)
+	}
+	awaitFederation(t, "project archived on both hosts", func() bool {
+		projects := merged()
+		return len(projects) == 1 && projects[0].Archived && projects[0].Checkouts[0].Archived && projects[0].Checkouts[1].Archived
+	})
+	if state, err := remote.reg.ArchiveState(); err != nil || state.Projects[projectID].IsZero() {
+		t.Fatalf("forge did not record the archive: %+v err=%v", state, err)
+	}
 }

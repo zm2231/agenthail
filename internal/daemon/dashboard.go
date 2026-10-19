@@ -1091,7 +1091,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if strings.HasPrefix(request.Action, "project-") {
-		d.projectAction(r.Context(), w, request.Action, request.ProjectID, request.Path)
+		d.projectAction(r, w, request.Action, request.ProjectID, request.Path)
 		return
 	}
 	if request.Action == "delivery-dismiss" {

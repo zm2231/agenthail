@@ -575,15 +575,16 @@ function projectSection(project, sessions) {
   const ordered = [...sessions].sort((a, b) => Date.parse(b.lastActive || 0) - Date.parse(a.lastActive || 0));
   const shown = expanded ? ordered : ordered.filter((session, index) => index < collapsedProjectSessions || sessionNeedsYou(session));
   const hidden = ordered.length - shown.length;
-  const host = project.host && project.host.state !== "local" ? `<span class="host-badge" title="On ${escape(project.host.name)}">${escape(shortHostName(project.host.name))}</span>` : "";
+  const host = (project.checkouts || []).filter((checkout) => checkout.host.state !== "local").map((checkout) => `<span class="host-badge" title="${escape(`${checkout.rootPath} on ${checkout.host.name}${checkout.archived ? " (archived there)" : ""}`)}">${escape(shortHostName(checkout.host.name))}</span>`).join("");
   const toggle = project.archived ? "project-unarchive" : "project-archive";
   return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button></header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
 }
 function renderProjects(query) {
   const byProject = new Map();
+  const projectArchived = new Map((app.state.projects || []).map((project) => [project.id, project.archived]));
   for (const session of app.state.sessions) {
     if (!session.project) continue;
-    if (session.archived && !session.project.archived) continue;
+    if (session.archived && !projectArchived.get(session.project.id)) continue;
     if (query && !`${displayName(session)} ${session.project.displayName} ${remoteHostName(session)}`.toLowerCase().includes(query)) continue;
     if (!byProject.has(session.project.id)) byProject.set(session.project.id, []);
     byProject.get(session.project.id).push(session);

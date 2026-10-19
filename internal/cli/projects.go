@@ -26,22 +26,42 @@ type projectHost struct {
 	State string `json:"state,omitempty"`
 }
 
-type projectRow struct {
-	ID           string       `json:"id"`
-	DisplayName  string       `json:"displayName"`
-	RootPath     string       `json:"rootPath"`
-	Kind         string       `json:"kind"`
-	Host         *projectHost `json:"host,omitempty"`
-	LastActive   time.Time    `json:"lastActive,omitempty"`
-	SessionCount int          `json:"sessionCount"`
-	Archived     bool         `json:"archived"`
+type projectCheckout struct {
+	Host         projectHost `json:"host"`
+	RootPath     string      `json:"rootPath"`
+	SessionCount int         `json:"sessionCount"`
+	Archived     bool        `json:"archived"`
 }
 
-func (p projectRow) hostName() string {
-	if p.Host == nil {
+type projectRow struct {
+	ID           string            `json:"id"`
+	DisplayName  string            `json:"displayName"`
+	Kind         string            `json:"kind"`
+	Checkouts    []projectCheckout `json:"checkouts"`
+	LastActive   time.Time         `json:"lastActive,omitempty"`
+	SessionCount int               `json:"sessionCount"`
+	Archived     bool              `json:"archived"`
+}
+
+func (p projectRow) hostNames() string {
+	names := make([]string, 0, len(p.Checkouts))
+	for _, checkout := range p.Checkouts {
+		names = append(names, checkout.Host.Name)
+	}
+	return strings.Join(names, ",")
+}
+
+// rootPath is this host's checkout, else the first one listed.
+func (p projectRow) rootPath() string {
+	for _, checkout := range p.Checkouts {
+		if checkout.Host.State == "local" {
+			return checkout.RootPath
+		}
+	}
+	if len(p.Checkouts) == 0 {
 		return ""
 	}
-	return p.Host.Name
+	return p.Checkouts[0].RootPath
 }
 
 func (a *App) cmdProject(args []string) error {
@@ -79,13 +99,13 @@ func (a *App) cmdProject(args []string) error {
 			fmt.Println("no projects found")
 			return nil
 		}
-		fmt.Printf("%-24s %-12s %-8s %-10s %s\n", "PROJECT", "HOST", "SESSIONS", "LAST", "ROOT")
+		fmt.Printf("%-24s %-20s %-8s %-10s %s\n", "PROJECT", "HOSTS", "SESSIONS", "LAST", "ROOT")
 		for _, project := range projects {
 			name := project.DisplayName
 			if project.Archived {
 				name += " (archived)"
 			}
-			fmt.Printf("%-24s %-12s %-8d %-10s %s\n", truncate(name, 24), truncate(project.hostName(), 12), project.SessionCount, relTime(project.LastActive), project.RootPath)
+			fmt.Printf("%-24s %-20s %-8d %-10s %s\n", truncate(name, 24), truncate(project.hostNames(), 20), project.SessionCount, relTime(project.LastActive), project.rootPath())
 		}
 		return nil
 	case "add":
@@ -99,7 +119,11 @@ func (a *App) cmdProject(args []string) error {
 			payload["path"] = absolute
 		}
 		var answer struct {
-			Project projectRow `json:"project"`
+			Project struct {
+				DisplayName string `json:"displayName"`
+				RootPath    string `json:"rootPath"`
+				Kind        string `json:"kind"`
+			} `json:"project"`
 		}
 		if err := projectAction(ctx, client, payload, &answer); err != nil {
 			return err
@@ -169,7 +193,7 @@ func resolveProject(projects []projectRow, selector string) (projectRow, error) 
 	}
 	labels := make([]string, 0, len(named))
 	for _, project := range named {
-		labels = append(labels, fmt.Sprintf("%s on %s (%s)", project.RootPath, project.hostName(), project.ID))
+		labels = append(labels, fmt.Sprintf("%s on %s (%s)", project.rootPath(), project.hostNames(), project.ID))
 	}
 	return projectRow{}, fmt.Errorf("project %q is ambiguous: %s; use its id", selector, strings.Join(labels, ", "))
 }

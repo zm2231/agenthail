@@ -66,6 +66,9 @@ Each paired host has one mirror loop:
 - It imports only sessions the remote serves itself: a row that is already
   host-qualified, or that names another host, is skipped. Two daemons paired
   both ways therefore show each other's sessions exactly once.
+- A mirrored row's project id is qualified with the host, unless the project
+  is `portable`: a repository keyed by its remote or root commit keeps its id,
+  so a host's checkout and this machine's checkout of it are one project.
 
 A conversation moved between machines keeps its id, so a local row and a
 host's row can name the same session. Whichever registered first keeps it. A

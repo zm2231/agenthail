@@ -579,7 +579,7 @@ func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession) error {
 		qualified.RootID = hosts.Qualify(host.record.ID, subagent.RootID)
 		row.Subagent = &qualified
 	}
-	if row.Project != nil {
+	if row.Project != nil && !row.Project.Portable {
 		qualified := *row.Project
 		qualified.ID = hosts.Qualify(host.record.ID, qualified.ID)
 		row.Project = &qualified

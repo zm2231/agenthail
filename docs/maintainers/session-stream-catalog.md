@@ -14,7 +14,8 @@ change.
 and `q` filters plus a stable page cursor, and returns saved rows plus
 `hostEpoch` and `catalogSeq`, captured in the same registry read transaction.
 Each row retains the existing session summary fields and adds
-`project` (`id`, `displayName`, `rootPath`, `kind`), `checkout`
+`project` (`id`, `displayName`, `rootPath`, `kind`, and `portable` when the id
+names the repository on every host), `checkout`
 (`id`, `path`, `branch` or `detachedHead`, `isMain`, and `dirty`), and
 `freshness` (`generation`, `observedAt`, and `stale`). A Claude branch adds
 `forkedFrom`, the session it was branched from.

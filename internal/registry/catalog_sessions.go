@@ -639,10 +639,31 @@ func (r *Registry) CatalogSessionProject(sessionID string) (json.RawMessage, err
 	return project, err
 }
 
+// CatalogProjectByID reads the project as one of this host's sessions
+// recorded it.
 func (r *Registry) CatalogProjectByID(projectID string) (json.RawMessage, error) {
 	var project []byte
-	err := r.read.QueryRow(`SELECT host_project FROM catalog_sessions WHERE json_extract(host_project,'$.id')=? LIMIT 1`, projectID).Scan(&project)
+	err := r.read.QueryRow(`SELECT cs.host_project FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id='' AND json_extract(cs.host_project,'$.id')=? LIMIT 1`, projectID).Scan(&project)
 	return project, err
+}
+
+// CatalogProjectHosts lists the paired hosts whose mirrored sessions belong
+// to the project.
+func (r *Registry) CatalogProjectHosts(projectID string) ([]string, error) {
+	rows, err := r.read.Query(`SELECT DISTINCT s.host_id FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id<>'' AND json_extract(cs.host_project,'$.id')=? ORDER BY s.host_id`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var hostIDs []string
+	for rows.Next() {
+		var hostID string
+		if err := rows.Scan(&hostID); err != nil {
+			return nil, err
+		}
+		hostIDs = append(hostIDs, hostID)
+	}
+	return hostIDs, rows.Err()
 }
 
 func (r *Registry) CatalogProjectionFingerprint(sessionID string) (string, bool, error) {

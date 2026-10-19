@@ -9,9 +9,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/project"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/workspace"
@@ -28,6 +30,9 @@ type catalogProject struct {
 	RootPath    string `json:"rootPath"`
 	Kind        string `json:"kind"`
 	Archived    bool   `json:"archived,omitempty"`
+	// Portable is set when the id names the repository on every host, so a
+	// paired host's checkout of it is the same project.
+	Portable bool `json:"portable,omitempty"`
 }
 
 type catalogCheckout struct {
@@ -61,6 +66,7 @@ type catalogIdentityCache struct {
 	// failure that is not "not a repository" never moves a session.
 	known   map[string]*catalogProject
 	folders []registry.ProjectRecord
+	keys    catalogKeyCache
 }
 
 type catalogIdentityEntry struct {
@@ -71,7 +77,7 @@ type catalogIdentityEntry struct {
 }
 
 func newCatalogIdentityCache() *catalogIdentityCache {
-	return &catalogIdentityCache{entries: map[string]catalogIdentityEntry{}, known: map[string]*catalogProject{}}
+	return &catalogIdentityCache{entries: map[string]catalogIdentityEntry{}, known: map[string]*catalogProject{}, keys: catalogKeyCache{}}
 }
 
 // setFolders replaces the registered folder projects. A changed set drops the
@@ -113,7 +119,7 @@ func (c *catalogIdentityCache) identity(ctx context.Context, session surface.Ses
 	if entry, found := c.entries[path]; found && now.Sub(entry.resolvedAt) < catalogIdentityTTL && catalogGitStamp(entry.gitDir) == entry.gitStamp {
 		return entry.identity
 	}
-	identity, gitDir, transient := resolveCatalogIdentity(ctx, path, c.folders)
+	identity, gitDir, transient := resolveCatalogIdentity(ctx, path, c.folders, c.keys)
 	if transient {
 		if known, found := c.known[path]; found {
 			identity.Project = known
@@ -163,11 +169,11 @@ func catalogGitStamp(gitDir string) string {
 // resolveCatalogIdentity returns the workspace's identity, the checkout's git
 // directory (empty outside a repository), and whether the project could not
 // be resolved for a reason other than the path not being in a repository.
-func resolveCatalogIdentity(ctx context.Context, path string, folders []registry.ProjectRecord) (catalogIdentity, string, bool) {
+func resolveCatalogIdentity(ctx context.Context, path string, folders []registry.ProjectRecord, keys catalogKeyCache) (catalogIdentity, string, bool) {
 	identity := catalogIdentity{Checkout: catalogCheckout{ID: catalogPathID("checkout", path), Path: path}}
 	existing := nearestExistingDirectory(path)
 	if existing != path {
-		repository, notRepository, err := resolveCatalogRepository(ctx, existing)
+		repository, notRepository, err := resolveCatalogRepository(ctx, existing, keys)
 		switch {
 		case err == nil:
 			identity.Project = repository.project()
@@ -179,7 +185,7 @@ func resolveCatalogIdentity(ctx context.Context, path string, folders []registry
 		}
 		return identity, "", false
 	}
-	repository, notRepository, err := resolveCatalogRepository(ctx, path)
+	repository, notRepository, err := resolveCatalogRepository(ctx, path, keys)
 	if err != nil {
 		if notRepository {
 			identity.Project = catalogFolderProject(path, folders)
@@ -204,10 +210,93 @@ type catalogRepository struct {
 	commonDir   string
 	gitDir      string
 	projectRoot string
+	key         string
 }
 
 func (repository catalogRepository) project() *catalogProject {
-	return &catalogProject{ID: catalogPathID("project", repository.commonDir), DisplayName: catalogProjectName(repository.projectRoot), RootPath: repository.projectRoot, Kind: catalogProjectGit}
+	name := project.RepoName(repository.key)
+	if name == "" {
+		name = catalogProjectName(repository.projectRoot)
+	}
+	return &catalogProject{ID: catalogPathID("project", repository.key), DisplayName: name, RootPath: repository.projectRoot, Kind: catalogProjectGit, Portable: project.Portable(repository.key)}
+}
+
+// catalogKeyCache holds each repository's key by its common directory until
+// the repository's config or refs change.
+type catalogKeyCache map[string]catalogKeyEntry
+
+type catalogKeyEntry struct {
+	key   string
+	stamp string
+}
+
+func catalogKeyStamp(commonDir string) string {
+	var stamp strings.Builder
+	for _, name := range []string{"config", "HEAD", "packed-refs", filepath.Join("refs", "heads")} {
+		if info, err := os.Stat(filepath.Join(commonDir, name)); err == nil {
+			fmt.Fprintf(&stamp, "%s:%d:%d;", name, info.ModTime().UnixNano(), info.Size())
+		} else {
+			fmt.Fprintf(&stamp, "%s:missing;", name)
+		}
+	}
+	return stamp.String()
+}
+
+func (keys catalogKeyCache) key(ctx context.Context, commonDir string) (string, error) {
+	stamp := catalogKeyStamp(commonDir)
+	if entry, found := keys[commonDir]; found && entry.stamp == stamp {
+		return entry.key, nil
+	}
+	key, err := readRepositoryKey(ctx, commonDir)
+	if err != nil {
+		return "", err
+	}
+	if keys != nil {
+		keys[commonDir] = catalogKeyEntry{key: key, stamp: stamp}
+	}
+	return key, nil
+}
+
+// readRepositoryKey reads from the common directory, so every worktree of a
+// repository gets the key of its main checkout: origin's URL, else the only
+// remote's, else the smallest root commit of the main checkout's HEAD, else
+// the common directory's path.
+func readRepositoryKey(ctx context.Context, commonDir string) (string, error) {
+	remotes, err := catalogGit(ctx, commonDir, "remote")
+	if err != nil {
+		return "", err
+	}
+	names := strings.Fields(remotes)
+	remote := ""
+	switch {
+	case slices.Contains(names, "origin"):
+		remote = "origin"
+	case len(names) == 1:
+		remote = names[0]
+	}
+	if remote != "" {
+		raw, err := catalogGit(ctx, commonDir, "config", "--get", "remote."+remote+".url")
+		if err == nil {
+			if key, ok := project.RemoteKey(raw); ok {
+				return key, nil
+			}
+		}
+	}
+	if _, err := catalogGit(ctx, commonDir, "rev-parse", "--verify", "--quiet", "HEAD^{commit}"); err != nil {
+		if !isCatalogNoCommit(err) {
+			return "", err
+		}
+		return project.PathKey(commonDir), nil
+	}
+	roots, err := catalogGit(ctx, commonDir, "rev-list", "--max-parents=0", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	commits := strings.Fields(roots)
+	if len(commits) == 0 {
+		return project.PathKey(commonDir), nil
+	}
+	return project.CommitKey(slices.Min(commits)), nil
 }
 
 // nearestExistingDirectory returns path, or its closest ancestor that still
@@ -230,7 +319,7 @@ func nearestExistingDirectory(path string) string {
 // checkout: the parent of a ".git" common directory, the checkout itself
 // when it owns its git directory (a submodule), and the common directory of
 // a bare repository.
-func resolveCatalogRepository(ctx context.Context, path string) (repository catalogRepository, notRepository bool, err error) {
+func resolveCatalogRepository(ctx context.Context, path string, keys catalogKeyCache) (repository catalogRepository, notRepository bool, err error) {
 	gitCtx, cancel := context.WithTimeout(ctx, catalogIdentityGitTimeout)
 	defer cancel()
 	toplevel, err := catalogGit(gitCtx, path, "rev-parse", "--show-toplevel")
@@ -262,6 +351,9 @@ func resolveCatalogRepository(ctx context.Context, path string) (repository cata
 		repository.projectRoot = repository.toplevel
 	default:
 		repository.projectRoot = repository.commonDir
+	}
+	if repository.key, err = keys.key(gitCtx, repository.commonDir); err != nil {
+		return catalogRepository{}, false, err
 	}
 	return repository, false, nil
 }
@@ -383,6 +475,14 @@ func (e *catalogGitError) Error() string {
 }
 
 func (e *catalogGitError) Unwrap() error { return e.err }
+
+// isCatalogNoCommit reports "rev-parse --verify --quiet" finding no commit,
+// which it says with exit status 1 and nothing on stderr.
+func isCatalogNoCommit(err error) bool {
+	var gitErr *catalogGitError
+	var exitErr *exec.ExitError
+	return errors.As(err, &gitErr) && strings.TrimSpace(gitErr.stderr) == "" && errors.As(err, &exitErr) && exitErr.ExitCode() == 1
+}
 
 // isCatalogNonGit reports git's answer that the folder is outside any
 // repository. Other failures, such as unreadable metadata or a dubious

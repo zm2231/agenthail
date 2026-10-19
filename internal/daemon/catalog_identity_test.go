@@ -171,3 +171,62 @@ func gitRun(t *testing.T, dir string, args ...string) {
 		t.Fatalf("git %v: %v\n%s", args, err, output)
 	}
 }
+
+func catalogProjectAt(t *testing.T, cache *catalogIdentityCache, path string, now time.Time) *catalogProject {
+	t.Helper()
+	identity := cache.identity(context.Background(), surface.Session{Cwd: path}, now, noStoredProject)
+	if identity.UnavailableReason != "" || identity.Project == nil {
+		t.Fatalf("identity for %s: %+v", path, identity)
+	}
+	return identity.Project
+}
+
+func TestCatalogIdentityNamesARepositoryByItsRemoteOnEveryClone(t *testing.T) {
+	first := catalogTestRepo(t)
+	gitRun(t, first, "remote", "add", "origin", "https://github.com/example/gadget.git")
+	second := filepath.Join(t.TempDir(), "checkout-two")
+	gitRun(t, first, "clone", "--quiet", first, second)
+	gitRun(t, second, "remote", "set-url", "origin", "git@github.com:example/gadget")
+	worktree := filepath.Join(second, ".worktrees", "task-d4")
+	gitRun(t, second, "worktree", "add", "-b", "feature/d4", worktree)
+
+	cache := newCatalogIdentityCache()
+	now := time.Now()
+	one := catalogProjectAt(t, cache, filepath.Join(first, "src", "lib"), now)
+	two := catalogProjectAt(t, cache, worktree, now)
+	if one.ID != two.ID || !one.Portable || one.DisplayName != "gadget" || two.DisplayName != "gadget" || one.RootPath == two.RootPath {
+		t.Fatalf("one=%+v two=%+v", one, two)
+	}
+
+	gitRun(t, second, "remote", "set-url", "origin", "https://github.com/someone-else/gadget.git")
+	fork := catalogProjectAt(t, cache, worktree, now.Add(catalogIdentityTTL))
+	if fork.ID == one.ID || !fork.Portable {
+		t.Fatalf("a fork kept the upstream project: fork=%+v one=%+v", fork, one)
+	}
+}
+
+func TestCatalogIdentityFallsBackToTheRootCommitThenThePath(t *testing.T) {
+	first := catalogTestRepo(t)
+	second := filepath.Join(t.TempDir(), "copy")
+	gitRun(t, first, "clone", "--quiet", first, second)
+	cache := newCatalogIdentityCache()
+	one := catalogProjectAt(t, cache, first, time.Now())
+	two := catalogProjectAt(t, cache, second, time.Now())
+	if one.ID != two.ID || !one.Portable || one.DisplayName != "widget" || two.DisplayName != "copy" {
+		t.Fatalf("clones without a usable remote: one=%+v two=%+v", one, two)
+	}
+
+	empty := filepath.Join(t.TempDir(), "empty")
+	other := filepath.Join(t.TempDir(), "empty")
+	for _, repo := range []string{empty, other} {
+		if err := os.MkdirAll(repo, 0700); err != nil {
+			t.Fatal(err)
+		}
+		gitRun(t, repo, "init", "-b", "main")
+	}
+	unborn := catalogProjectAt(t, cache, empty, time.Now())
+	unbornOther := catalogProjectAt(t, cache, other, time.Now())
+	if unborn.Portable || unborn.ID == unbornOther.ID || unborn.DisplayName != "empty" {
+		t.Fatalf("repositories without commits: %+v %+v", unborn, unbornOther)
+	}
+}
