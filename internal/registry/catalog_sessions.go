@@ -12,12 +12,16 @@ import (
 
 type CatalogSessionState struct {
 	Session               surface.Session
+	HostID                string
 	HostProject           json.RawMessage
 	Checkout              json.RawMessage
 	UnavailableReason     string
 	ObservedAt            time.Time
 	ProjectionFingerprint string
 	Freshness             CatalogFreshness
+	// HostQueueCount is the queue count the owning host reported for a
+	// mirrored row; the projection adds this daemon's held sends to it.
+	HostQueueCount int
 }
 
 type CatalogFreshness struct {
@@ -193,6 +197,13 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 		return CatalogEvent{}, false, err
 	}
 	defer tx.Rollback()
+	var owner string
+	if err := tx.QueryRow(`SELECT host_id FROM sessions WHERE id=?`, state.Session.ID).Scan(&owner); err != nil && err != sql.ErrNoRows {
+		return CatalogEvent{}, false, err
+	}
+	if owner != "" {
+		return CatalogEvent{}, false, SessionOwnedError{SessionID: state.Session.ID, HostID: owner}
+	}
 	if err := validateQueueProjectionTx(tx, state.Session.ID, []byte(state.ProjectionFingerprint), event.Payload); err != nil {
 		return CatalogEvent{}, false, err
 	}
@@ -360,7 +371,7 @@ func (r *Registry) MarkCatalogDiscoveryFailure(kind surface.SurfaceKind, reason 
 		return nil, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.Query(`SELECT cs.session_id,cs.projection_fingerprint,cs.projection_generation,cs.observed_at,s.surface,s.name,s.cwd,s.status FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.surface=?`, string(kind))
+	rows, err := tx.Query(`SELECT cs.session_id,cs.projection_fingerprint,cs.projection_generation,cs.observed_at,s.surface,s.name,s.cwd,s.status FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.surface=? AND s.host_id=''`, string(kind))
 	if err != nil {
 		return nil, err
 	}
@@ -508,7 +519,7 @@ func (r *Registry) RecordCatalogDiscovery(kind surface.SurfaceKind, seen map[str
 	if !complete {
 		return nil, tx.Commit()
 	}
-	rows, err := tx.Query(`SELECT cs.session_id,cs.observed_at,cs.misses FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.surface=?`, string(kind))
+	rows, err := tx.Query(`SELECT cs.session_id,cs.observed_at,cs.misses FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.surface=? AND s.host_id=''`, string(kind))
 	if err != nil {
 		return nil, err
 	}
@@ -590,7 +601,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 	if err := tx.QueryRow(`SELECT MAX(seq) FROM catalog_events`).Scan(&latest); err != nil {
 		return CatalogSnapshot{}, err
 	}
-	rows, err := tx.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
+	rows, err := tx.Query(`SELECT s.id,s.host_id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
 		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id LEFT JOIN session_runtime sr ON sr.session_id=s.id
 		ORDER BY s.last_active_ms DESC,s.updated_at DESC,s.id`)
@@ -615,7 +626,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		var location []byte
 		var focusable int
 		var subagent subagentColumns
-		if err := rows.Scan(append([]any{&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.ConfiguredModel, &state.Session.Bridge, &state.Session.ForkedFrom, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
+		if err := rows.Scan(append([]any{&state.Session.ID, &state.HostID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.ConfiguredModel, &state.Session.Bridge, &state.Session.ForkedFrom, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 			return CatalogSnapshot{}, err
 		}
 		subagent.apply(&state.Session)
@@ -630,7 +641,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 			return CatalogSnapshot{}, fmt.Errorf("parse catalog observation: %w", err)
 		}
 		state.ObservedAt = parsed
-		state.Freshness = CatalogFreshness{Generation: uint64(generation), ObservedAt: parsed, Stale: misses > 0 || discoveryFailures > 0}
+		state.Freshness = CatalogFreshness{Generation: uint64(generation), ObservedAt: parsed, Stale: misses > 0 || discoveryFailures > 0 || (state.HostID != "" && state.UnavailableReason != "")}
 		if runtime, err := runtimeFromColumns(launcher, location, focusable); err != nil {
 			return CatalogSnapshot{}, err
 		} else {

@@ -74,7 +74,7 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 		return CatalogPage{}, err
 	}
 	rowArgs := append(append([]any{}, args...), request.Limit+1, request.Offset)
-	rows, err := tx.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
+	rows, err := tx.Query(`SELECT s.id,s.host_id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
 		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,
 		COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+`
 		`+from+` WHERE `+where+` ORDER BY CASE WHEN s.status=? THEN 0 ELSE 1 END,s.last_active_ms DESC,s.updated_at DESC,s.id LIMIT ? OFFSET ?`, append(rowArgs[:len(rowArgs)-2], string(surface.StatusBusy), rowArgs[len(rowArgs)-2], rowArgs[len(rowArgs)-1])...)
@@ -122,7 +122,7 @@ func catalogPageSQL(request CatalogPageRequest) (string, string, []any) {
 		args = append(args, request.ProjectID)
 	}
 	if query := strings.ToLower(strings.TrimSpace(request.Query)); query != "" {
-		conditions = append(conditions, "instr(lower(s.name||' '||s.cwd||' '||coalesce(a.name,'')),?)>0")
+		conditions = append(conditions, "instr(lower(s.name||' '||s.cwd||' '||coalesce(a.name,json_extract(cs.projection_fingerprint,'$.alias'),'')),?)>0")
 		args = append(args, query)
 	}
 	if request.Scope == "running" {
@@ -152,7 +152,7 @@ func scanCatalogSession(scanner interface{ Scan(...any) error }) (CatalogSession
 	var launcher string
 	var location []byte
 	var subagent subagentColumns
-	if err := scanner.Scan(append([]any{&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.ConfiguredModel, &state.Session.Bridge, &state.Session.ForkedFrom, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
+	if err := scanner.Scan(append([]any{&state.Session.ID, &state.HostID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.ConfiguredModel, &state.Session.Bridge, &state.Session.ForkedFrom, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 		return CatalogSessionState{}, err
 	}
 	subagent.apply(&state.Session)
@@ -167,7 +167,7 @@ func scanCatalogSession(scanner interface{ Scan(...any) error }) (CatalogSession
 		return CatalogSessionState{}, fmt.Errorf("parse catalog observation: %w", err)
 	}
 	state.ObservedAt = parsed
-	state.Freshness = CatalogFreshness{Generation: uint64(generation), ObservedAt: parsed, Stale: misses > 0 || discoveryFailures > 0}
+	state.Freshness = CatalogFreshness{Generation: uint64(generation), ObservedAt: parsed, Stale: misses > 0 || discoveryFailures > 0 || (state.HostID != "" && state.UnavailableReason != "")}
 	runtime, err := runtimeFromColumns(launcher, location, focusable)
 	if err != nil {
 		return CatalogSessionState{}, err

@@ -9,12 +9,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
 
-	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -30,22 +28,11 @@ type daemonSessionStreamClient struct {
 }
 
 func newDaemonSessionStreamClient() (sessionStreamReader, error) {
-	config, err := daemon.LoadDashboardConfig()
+	baseURL, token, err := daemonEndpoint()
 	if err != nil {
 		return nil, err
 	}
-	if !config.Enabled {
-		return nil, errors.New("dashboard is disabled")
-	}
-	tokenBytes, err := os.ReadFile(daemon.DashboardTokenPath())
-	if err != nil {
-		return nil, fmt.Errorf("read dashboard token: %w", err)
-	}
-	token := strings.TrimSpace(string(tokenBytes))
-	if token == "" {
-		return nil, errors.New("dashboard token is empty")
-	}
-	return &daemonSessionStreamClient{baseURL: "http://" + config.Listen, token: token, httpClient: &http.Client{}}, nil
+	return &daemonSessionStreamClient{baseURL: baseURL, token: token, httpClient: &http.Client{}}, nil
 }
 
 func (c *daemonSessionStreamClient) OpenSessionStream(ctx context.Context, session *surface.Session, after uint64) (sessionstream.Subscription, error) {
