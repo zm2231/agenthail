@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudehost"
+	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/uploads"
@@ -97,6 +98,9 @@ func (d *Daemon) resolveDisplay(sessionID string) string {
 }
 
 func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
+	if reg != nil {
+		reg.SetBusyPolicy(deliverypolicy.Load)
+	}
 	d := &Daemon{
 		Registry:          reg,
 		pollInterval:      defaultPollInterval,

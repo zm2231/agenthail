@@ -21,6 +21,7 @@ import (
 	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
+	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sessionstream"
@@ -80,6 +81,8 @@ func (a *App) openRegistry() (*registry.Registry, error) {
 	a.Registry, a.registryErr = a.OpenRegistry()
 	if a.registryErr != nil {
 		a.registryErr = fmt.Errorf("open registry: %w", a.registryErr)
+	} else {
+		a.Registry.SetBusyPolicy(deliverypolicy.Load)
 	}
 	return a.Registry, a.registryErr
 }
@@ -2522,7 +2525,7 @@ func (a *App) cmdQueue(args []string) error {
 	if _, ok := daemon.IsRunning(); !ok {
 		fmt.Fprintf(os.Stderr, "warning: daemon is not running; queued message will not be delivered until you start it (agenthail daemon start)\n")
 	}
-	if err := a.registry().QueueMessage(sess.ID, message); err != nil {
+	if _, err := a.registry().QueueMessageWithOptions(sess.ID, message, "", surface.SendOptions{BusyDelivery: string(deliverypolicy.Queue)}); err != nil {
 		return err
 	}
 	if waiting, err := a.registry().SessionWaiting(sess.ID); err == nil && waiting != nil {

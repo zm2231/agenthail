@@ -349,8 +349,8 @@ func TestBusySteerRelayUsesDurableQueueUntilOutbox(t *testing.T) {
 		t.Fatalf("relay steered before outbox: %v", fake.steered)
 	}
 	item, err := r.QueueItem(1, nil)
-	if err != nil || item.BusyDelivery != "steer" {
-		t.Fatalf("item=%+v err=%v", item, err)
+	if err != nil || item.BusyDelivery != "" {
+		t.Fatalf("item=%+v err=%v, want the relay to follow the live policy", item, err)
 	}
 	d.drainSteerMessageQueue(context.Background(), fake, &to)
 	if len(fake.steered) != 1 || r.QueueCount(to.ID) != 0 {
