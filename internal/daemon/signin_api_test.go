@@ -159,7 +159,7 @@ func TestSigninAPIAddListUseRemove(t *testing.T) {
 
 func TestSigninAPIRejectsProfilesThatAreNotOnThisComputer(t *testing.T) {
 	signinFixtureHome(t)
-	d, _, _, _, _ := daemonFixture(t)
+	d, r, _, _, _ := daemonFixture(t)
 	api := signinAPIClient{t: t, handler: d.dashboardHandler(&dashboardServer{token: "secret"}), token: "secret"}
 	for _, test := range []struct {
 		method, path, body string
@@ -170,6 +170,8 @@ func TestSigninAPIRejectsProfilesThatAreNotOnThisComputer(t *testing.T) {
 		{http.MethodPost, "/api/v1/signin/profiles", `{"browser":"chrome","profile":"Profile 9"}`, http.StatusBadRequest, "browser_profile_not_found"},
 		{http.MethodPost, "/api/v1/signin/profiles", `{"browser":"brave","profile":"Default"}`, http.StatusBadRequest, "browser_profile_not_found"},
 		{http.MethodPut, "/api/v1/signin/bindings", `{"consumer":"codex","profileId":null}`, http.StatusBadRequest, "invalid_consumer"},
+		{http.MethodPut, "/api/v1/signin/bindings", `{"consumer":"notion"}`, http.StatusBadRequest, "invalid_request"},
+		{http.MethodPut, "/api/v1/signin/bindings", `{"consumer":"notion","profileId":""}`, http.StatusBadRequest, "invalid_request"},
 		{http.MethodPut, "/api/v1/signin/bindings", `{"consumer":"notion","profileId":"sp_000000000000"}`, http.StatusNotFound, "signin_profile_not_found"},
 		{http.MethodDelete, "/api/v1/signin/profiles?id=missing", "", http.StatusNotFound, "signin_profile_not_found"},
 	} {
@@ -178,8 +180,18 @@ func TestSigninAPIRejectsProfilesThatAreNotOnThisComputer(t *testing.T) {
 			t.Fatalf("%s %s %s: status=%d error=%+v", test.method, test.path, test.body, code, failure.Error)
 		}
 	}
+	var added struct {
+		Profile signin.Profile `json:"profile"`
+	}
+	api.do(http.MethodPost, "/api/v1/signin/profiles", `{"browser":"chrome","profile":"Default"}`, &added)
+	api.do(http.MethodPut, "/api/v1/signin/bindings", `{"consumer":"notion","profileId":"`+added.Profile.ID+`"}`, nil)
+	if code := api.do(http.MethodPut, "/api/v1/signin/bindings", `{"consumer":"notion"}`, nil); code != http.StatusBadRequest {
+		t.Fatalf("a binding change without profileId was accepted: status=%d", code)
+	}
+	if source, err := r.ResolveSignin(signin.Target{Consumer: signin.Notion}); err != nil || source.ProfileID != added.Profile.ID {
+		t.Fatalf("a rejected binding change altered the binding: %+v %v", source, err)
+	}
 	var failure signinAPIError
-	api.do(http.MethodPost, "/api/v1/signin/profiles", `{"browser":"chrome","profile":"Default"}`, nil)
 	if code := api.do(http.MethodPost, "/api/v1/signin/profiles", `{"browser":"chrome","profile":"Default","label":"Again"}`, &failure); code != http.StatusConflict || !strings.Contains(failure.Error.Message, "already added") {
 		t.Fatalf("status=%d error=%+v", code, failure.Error)
 	}

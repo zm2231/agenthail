@@ -286,6 +286,15 @@ func sidecarRequestWithCookies(parent context.Context, method, url string, heade
 	return resp.Status, resp.Body, nil
 }
 
+// configuredCookieBridge locates cookie.mjs: AGENTHAIL_COOKIE_BRIDGE, then a
+// copy beside the executable or on PATH.
+func configuredCookieBridge() string {
+	if bridge := os.Getenv("AGENTHAIL_COOKIE_BRIDGE"); bridge != "" {
+		return bridge
+	}
+	return cookieBridgePath("cookie")
+}
+
 func cookieBridgePath(name string) string {
 	for _, check := range []string{name, name + ".mjs"} {
 		if exe, err := os.Executable(); err == nil {

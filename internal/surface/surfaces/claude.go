@@ -52,11 +52,7 @@ func NewClaudeWithRequest(signins signin.Resolver, home string, request ClaudeRe
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	bridge := os.Getenv("AGENTHAIL_COOKIE_BRIDGE")
-	if bridge == "" {
-		bridge = cookieBridgePath("cookie")
-	}
-	return &Claude{signins: signins, home: home, cookieBridge: bridge, subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(home)}
+	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(home)}
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }

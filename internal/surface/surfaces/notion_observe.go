@@ -23,15 +23,12 @@ func (n *Notion) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 }
 
 func (n *Notion) threadExists(ctx context.Context, threadID string) (bool, error) {
-	if err := n.ensureContext(ctx); err != nil {
-		return false, err
-	}
-	cookies, err := n.cookies()
+	account, err := n.currentAccount(ctx)
 	if err != nil {
 		return false, err
 	}
 	body, _ := json.Marshal(map[string]any{"requests": []map[string]any{{"pointer": map[string]any{"table": "thread", "id": threadID}, "version": -1}}})
-	status, responseBody, err := sidecarRequestWithCookies(ctx, "POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), cookies, 15*time.Second)
+	status, responseBody, err := sidecarRequestWithCookies(ctx, "POST", notionAPI("syncRecordValues"), account.headers(), string(body), account.cookies, 15*time.Second)
 	if err != nil {
 		return false, fmt.Errorf("resolve Notion thread: %w", err)
 	}
@@ -50,8 +47,23 @@ func (n *Notion) threadExists(ctx context.Context, threadID string) (bool, error
 	return found, nil
 }
 
+func isNewNotionThread(sess *surface.Session) bool {
+	return sess.ID == "" || strings.HasPrefix(sess.ID, "new")
+}
+
 func (n *Notion) latestAgentReply(ctx context.Context, sess *surface.Session) (string, *surface.ReplyResult, error) {
-	events, err := n.agentCompletions(ctx, sess, "", false)
+	if isNewNotionThread(sess) {
+		return "", nil, nil
+	}
+	account, err := n.currentAccount(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	return account.latestAgentReply(ctx, sess)
+}
+
+func (a notionAccount) latestAgentReply(ctx context.Context, sess *surface.Session) (string, *surface.ReplyResult, error) {
+	events, err := a.agentCompletions(ctx, sess, "", false)
 	if err != nil || len(events) == 0 {
 		return "", nil, err
 	}
@@ -66,9 +78,15 @@ func (n *Notion) ReadCompletions(ctx context.Context, sess *surface.Session, cur
 			return surface.CompletionBatch{}, err
 		}
 	}
-	events, err := n.agentCompletions(ctx, sess, after, cursor != "")
-	if err != nil {
-		return surface.CompletionBatch{}, err
+	var events []surface.Completion
+	if !isNewNotionThread(sess) {
+		account, err := n.currentAccount(ctx)
+		if err != nil {
+			return surface.CompletionBatch{}, err
+		}
+		if events, err = account.agentCompletions(ctx, sess, after, cursor != ""); err != nil {
+			return surface.CompletionBatch{}, err
+		}
 	}
 	last := after
 	if len(events) > 0 {
@@ -83,22 +101,15 @@ func (n *Notion) ReadCompletions(ctx context.Context, sess *surface.Session, cur
 	return batch, nil
 }
 
-func (n *Notion) agentCompletions(ctx context.Context, sess *surface.Session, after string, requireComplete bool) ([]surface.Completion, error) {
-	if sess.ID == "" || strings.HasPrefix(sess.ID, "new") {
+func (a notionAccount) agentCompletions(ctx context.Context, sess *surface.Session, after string, requireComplete bool) ([]surface.Completion, error) {
+	if isNewNotionThread(sess) {
 		return nil, nil
-	}
-	if err := n.ensureContext(ctx); err != nil {
-		return nil, err
-	}
-	cookies, err := n.cookies()
-	if err != nil {
-		return nil, err
 	}
 	body, _ := json.Marshal(map[string]any{
 		"requests": []map[string]any{{"pointer": map[string]any{"table": "thread", "id": sess.ID}, "version": -1}},
 	})
 	status, responseBody, err := notionRecordRequest(ctx,
-		"POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), cookies, 15*time.Second)
+		"POST", notionAPI("syncRecordValues"), a.headers(), string(body), a.cookies, 15*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("notion reply: %w", err)
 	}
@@ -146,7 +157,7 @@ func (n *Notion) agentCompletions(ctx context.Context, sess *surface.Session, af
 	}
 	body, _ = json.Marshal(map[string]any{"requests": requests})
 	status, responseBody, err = notionRecordRequest(ctx,
-		"POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), cookies, 15*time.Second)
+		"POST", notionAPI("syncRecordValues"), a.headers(), string(body), a.cookies, 15*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("notion reply messages: %w", err)
 	}

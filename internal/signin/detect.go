@@ -2,13 +2,19 @@ package signin
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 )
 
@@ -32,6 +38,38 @@ var ProbeTimeout = 2 * time.Second
 
 var safariApp = "/Applications/Safari.app"
 
+var probeBrowser = probe
+
+const maxMetadataBytes = 16 << 20
+
+// A filesystem call cannot be cancelled, so a probe that outlives its timeout
+// keeps running. At most one probe per home and browser runs at a time; later
+// lists report the browser unavailable until it returns.
+var probes = struct {
+	sync.Mutex
+	running map[string]bool
+}{running: map[string]bool{}}
+
+func startProbe(key string) bool {
+	probes.Lock()
+	defer probes.Unlock()
+	if probes.running[key] {
+		return false
+	}
+	probes.running[key] = true
+	return true
+}
+
+func finishProbe(key string) {
+	probes.Lock()
+	delete(probes.running, key)
+	probes.Unlock()
+}
+
+func unavailable(browser Browser, detail string) *DetectedBrowser {
+	return &DetectedBrowser{Browser: browser, Label: browser.Label(), Detail: detail, Profiles: []DetectedProfile{}}
+}
+
 // Detect lists the installed browsers and their profiles. It reads profile
 // metadata only, never a cookie store.
 func Detect(ctx context.Context, home string) []DetectedBrowser {
@@ -40,15 +78,23 @@ func Detect(ctx context.Context, home string) []DetectedBrowser {
 	for i, browser := range Browsers {
 		go func() {
 			defer func() { done <- struct{}{} }()
+			key := home + "\x00" + string(browser)
+			if !startProbe(key) {
+				results[i] = unavailable(browser, "an earlier read of this browser's profiles has not finished")
+				return
+			}
 			probeCtx, cancel := context.WithTimeout(ctx, ProbeTimeout)
 			defer cancel()
 			found := make(chan *DetectedBrowser, 1)
-			go func() { found <- probe(home, browser) }()
+			go func() {
+				defer finishProbe(key)
+				found <- probeBrowser(home, browser)
+			}()
 			select {
 			case result := <-found:
 				results[i] = result
 			case <-probeCtx.Done():
-				results[i] = &DetectedBrowser{Browser: browser, Label: browser.Label(), Detail: "reading this browser's profiles did not finish in time", Profiles: []DetectedProfile{}}
+				results[i] = unavailable(browser, "reading this browser's profiles did not finish in time")
 			}
 		}()
 	}
@@ -80,18 +126,22 @@ func probe(home string, browser Browser) *DetectedBrowser {
 		if root == "" {
 			return nil
 		}
-		var ok bool
-		if profiles, ok = firefoxProfiles(root); !ok {
+		var err error
+		if profiles, err = firefoxProfiles(root); errors.Is(err, os.ErrNotExist) {
 			return nil
+		} else if err != nil {
+			return unavailable(browser, err.Error())
 		}
 	default:
 		root := chromiumRoot(home, browser)
 		if root == "" {
 			return nil
 		}
-		var ok bool
-		if profiles, ok = chromiumProfiles(root); !ok {
+		var err error
+		if profiles, err = chromiumProfiles(root); errors.Is(err, os.ErrNotExist) {
 			return nil
+		} else if err != nil {
+			return unavailable(browser, err.Error())
 		}
 	}
 	result := &DetectedBrowser{Browser: browser, Label: browser.Label(), Available: true, Profiles: profiles}
@@ -102,10 +152,35 @@ func probe(home string, browser Browser) *DetectedBrowser {
 	return result
 }
 
-func chromiumProfiles(root string) ([]DetectedProfile, bool) {
-	data, err := os.ReadFile(filepath.Join(root, "Local State"))
+// readMetadata reads a small regular file without blocking on special files:
+// the open is non-blocking and anything but a regular file is refused.
+func readMetadata(path string) ([]byte, error) {
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
-		return nil, false
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", filepath.Base(path))
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxMetadataBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxMetadataBytes {
+		return nil, fmt.Errorf("%s is too large", filepath.Base(path))
+	}
+	return data, nil
+}
+
+func chromiumProfiles(root string) ([]DetectedProfile, error) {
+	data, err := readMetadata(filepath.Join(root, "Local State"))
+	if err != nil {
+		return nil, err
 	}
 	var state struct {
 		Profile struct {
@@ -115,7 +190,7 @@ func chromiumProfiles(root string) ([]DetectedProfile, bool) {
 		} `json:"profile"`
 	}
 	if err := json.Unmarshal(data, &state); err != nil {
-		return []DetectedProfile{}, true
+		return []DetectedProfile{}, nil
 	}
 	profiles := []DetectedProfile{}
 	for dir, info := range state.Profile.InfoCache {
@@ -129,7 +204,7 @@ func chromiumProfiles(root string) ([]DetectedProfile, bool) {
 		profiles = append(profiles, DetectedProfile{Profile: dir, Name: name})
 	}
 	sortProfiles(profiles)
-	return profiles, true
+	return profiles, nil
 }
 
 func chromiumCookieStoreExists(dir string) bool {
@@ -141,12 +216,11 @@ func chromiumCookieStoreExists(dir string) bool {
 	return false
 }
 
-func firefoxProfiles(root string) ([]DetectedProfile, bool) {
-	file, err := os.Open(filepath.Join(root, "profiles.ini"))
+func firefoxProfiles(root string) ([]DetectedProfile, error) {
+	data, err := readMetadata(filepath.Join(root, "profiles.ini"))
 	if err != nil {
-		return nil, false
+		return nil, err
 	}
-	defer file.Close()
 	profiles := []DetectedProfile{}
 	var name, path string
 	inProfile := false
@@ -165,7 +239,7 @@ func firefoxProfiles(root string) ([]DetectedProfile, bool) {
 		}
 		name, path = "", ""
 	}
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
@@ -186,7 +260,7 @@ func firefoxProfiles(root string) ([]DetectedProfile, bool) {
 	}
 	flush()
 	sortProfiles(profiles)
-	return profiles, true
+	return profiles, nil
 }
 
 func sortProfiles(profiles []DetectedProfile) {

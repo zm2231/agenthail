@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -62,7 +63,7 @@ func TestDetectListsProfilesWithCookieStores(t *testing.T) {
 	}
 }
 
-func TestDetectReportsABlockedBrowserUnavailableWithoutWaiting(t *testing.T) {
+func TestDetectRefusesSpecialFilesWithoutBlocking(t *testing.T) {
 	requireDesktopRoots(t)
 	home := t.TempDir()
 	edge := chromiumRoot(home, Edge)
@@ -73,29 +74,77 @@ func TestDetectReportsABlockedBrowserUnavailableWithoutWaiting(t *testing.T) {
 	if err := syscall.Mkfifo(blocking, 0600); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if writer, err := os.OpenFile(blocking, os.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
-			writer.Close()
-		}
-	})
 	chrome := chromiumRoot(home, Chrome)
 	writeFile(t, filepath.Join(chrome, "Local State"), `{"profile":{"info_cache":{"Default":{"name":"Personal"}}}}`)
 	writeFile(t, filepath.Join(chrome, "Default", "Network", "Cookies"), "")
-	original := ProbeTimeout
-	ProbeTimeout = 200 * time.Millisecond
-	t.Cleanup(func() { ProbeTimeout = original })
 
 	started := time.Now()
 	detected := Detect(context.Background(), home)
-	if elapsed := time.Since(started); elapsed > 2*time.Second {
-		t.Fatalf("detect waited %s on a blocked browser", elapsed)
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("detect waited %s on a FIFO", elapsed)
 	}
 	got, ok := browserByName(detected, Edge)
-	if !ok || got.Available || !strings.Contains(got.Detail, "did not finish") {
+	if !ok || got.Available || !strings.Contains(got.Detail, "not a regular file") {
 		t.Fatalf("edge=%+v", got)
 	}
 	if got, ok := browserByName(detected, Chrome); !ok || !got.Available || len(got.Profiles) != 1 {
-		t.Fatalf("a blocked browser hid another: %+v", got)
+		t.Fatalf("a refused browser hid another: %+v", got)
+	}
+}
+
+func TestDetectRunsOneProbePerBrowserUntilAStuckOneReturns(t *testing.T) {
+	release := make(chan struct{})
+	var mu sync.Mutex
+	calls := 0
+	original, originalTimeout := probeBrowser, ProbeTimeout
+	t.Cleanup(func() { probeBrowser, ProbeTimeout = original, originalTimeout })
+	ProbeTimeout = 100 * time.Millisecond
+	probeBrowser = func(home string, browser Browser) *DetectedBrowser {
+		if browser != Edge {
+			return nil
+		}
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		<-release
+		return &DetectedBrowser{Browser: Edge, Label: Edge.Label(), Available: true, Profiles: []DetectedProfile{}}
+	}
+	home := t.TempDir()
+
+	started := time.Now()
+	got, ok := browserByName(Detect(context.Background(), home), Edge)
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("detect waited %s on a stuck probe", elapsed)
+	}
+	if !ok || got.Available || !strings.Contains(got.Detail, "did not finish") {
+		t.Fatalf("edge=%+v", got)
+	}
+	got, _ = browserByName(Detect(context.Background(), home), Edge)
+	if got.Available || !strings.Contains(got.Detail, "has not finished") {
+		t.Fatalf("edge=%+v", got)
+	}
+	mu.Lock()
+	if calls != 1 {
+		t.Fatalf("a stuck probe was started again: calls=%d", calls)
+	}
+	mu.Unlock()
+
+	close(release)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		probes.Lock()
+		running := len(probes.running)
+		probes.Unlock()
+		if running == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d probes still running after release", running)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got, _ := browserByName(Detect(context.Background(), home), Edge); !got.Available {
+		t.Fatalf("edge=%+v", got)
 	}
 }
 

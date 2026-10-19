@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -161,11 +162,12 @@ func (d *Daemon) apiSigninBindingsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var request struct {
-		Consumer  string  `json:"consumer"`
-		ProfileID *string `json:"profileId"`
+		Consumer  string          `json:"consumer"`
+		ProfileID json.RawMessage `json:"profileId"`
 	}
-	if err := decodeAPIV1JSON(w, r, &request, false); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "A consumer and a profileId (or null) are required.")
+	const required = "A consumer and a profileId (or null to clear it) are required."
+	if err := decodeAPIV1JSON(w, r, &request, false); err != nil || len(request.ProfileID) == 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", required)
 		return
 	}
 	consumer, ok := signin.LookupConsumer(request.Consumer)
@@ -174,8 +176,12 @@ func (d *Daemon) apiSigninBindingsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	ref := ""
-	if request.ProfileID != nil {
-		ref = strings.TrimSpace(*request.ProfileID)
+	if string(request.ProfileID) != "null" {
+		if err := json.Unmarshal(request.ProfileID, &ref); err != nil || strings.TrimSpace(ref) == "" {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", required)
+			return
+		}
+		ref = strings.TrimSpace(ref)
 	}
 	profile, err := d.Registry.BindSignin(consumer.ID, ref)
 	if errors.Is(err, registry.ErrSigninProfileNotFound) {

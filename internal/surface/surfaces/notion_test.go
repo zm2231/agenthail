@@ -69,13 +69,10 @@ func TestNotionPostDispatchFailuresHaveUnknownOutcome(t *testing.T) {
 				return test.status, test.body, test.err
 			}
 			notion := &Notion{
-				signins: signin.Fixed{Browser: signin.Chrome},
-				spaceID: "00000000-0000-0000-0000-000000000000",
-				userID:  "user",
-				modelLabels: map[string]string{
-					"almond-croissant-low": "Default",
-				},
-				modelsAt: time.Now(),
+				signins:         signin.Fixed{Browser: signin.Chrome},
+				configuredSpace: "00000000-0000-0000-0000-000000000000",
+				configuredUser:  "user",
+				models:          &notionModels{labels: map[string]string{"almond-croissant-low": "Default"}, at: time.Now()},
 			}
 			_, err := notion.Send(context.Background(), &surface.Session{ID: "new"}, "message")
 			if !surface.IsDeliveryOutcomeUnknown(err) {
@@ -116,11 +113,10 @@ func TestNotionRepeatSendsToExistingThreadReturnPerTurnKeys(t *testing.T) {
 		return 200, string(payload), nil
 	}
 	notion := &Notion{
-		signins:     signin.Fixed{Browser: signin.Chrome},
-		spaceID:     "00000000-0000-0000-0000-000000000000",
-		userID:      "user",
-		modelLabels: map[string]string{"almond-croissant-low": "Default"},
-		modelsAt:    time.Now(),
+		signins:         signin.Fixed{Browser: signin.Chrome},
+		configuredSpace: "00000000-0000-0000-0000-000000000000",
+		configuredUser:  "user",
+		models:          &notionModels{labels: map[string]string{"almond-croissant-low": "Default"}, at: time.Now()},
 	}
 	session := &surface.Session{ID: threadID, Surface: surface.KindNotion}
 	first, err := notion.Send(context.Background(), session, "one")
