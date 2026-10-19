@@ -3,8 +3,10 @@ package surfaces
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -288,5 +290,77 @@ func TestClaudeSourceStreamDropsClosingTurnWhenTranscriptIsRewrittenMidWindow(t 
 	defer mu.Unlock()
 	if !errors.Is(err, surface.ErrStreamWindow) || len(done) != 0 {
 		t.Fatalf("stale closing turn finished after mid-window rewrite: err=%v done=%v", err, done)
+	}
+}
+
+// A session run through the SDK writes no turn_duration, so its final turn
+// closes when the process records idle after the turn's last block.
+func TestClaudeSDKTurnClosesWhenItsProcessRecordsIdle(t *testing.T) {
+	textAt := time.Date(2026, 10, 18, 22, 7, 54, 200_000_000, time.UTC)
+	home := t.TempDir()
+	recordIdle := func(at time.Time) {
+		t.Helper()
+		dir := filepath.Join(home, ".claude", "sessions")
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		record := fmt.Sprintf(`{"pid":%d,"sessionId":"bridge","status":"idle","statusUpdatedAt":%d}`, os.Getpid(), at.UnixMilli())
+		if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(os.Getpid())+".json"), []byte(record), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claude := NewClaude(nil, home)
+	path := writeTranscript(t, closedTurnRecords)
+	source := seededClaudeStreamSession(t, path, "uds")
+	source.PID = os.Getpid()
+	baseline, err := claude.ReadCompletions(context.Background(), source, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendRecords(t, path, promptRecord, thinkingRecord, textRecord)
+	stale := *source
+	stale.PID = 0
+
+	recordIdle(textAt.Add(-time.Millisecond))
+	for _, session := range []*surface.Session{source, &stale} {
+		observed := *session
+		observed.Status = surface.StatusIdle
+		if observation, err := NewClaude(nil, home).observe(context.Background(), &observed); err != nil || observation.Status != surface.StatusBusy || observation.CompletedTurnID != "m0" {
+			t.Fatalf("turn closed by an idle recorded before it: %+v err=%v", observation, err)
+		}
+	}
+	if pending, err := claude.ReadCompletions(context.Background(), source, baseline.Cursor); err != nil || len(pending.Events) != 0 {
+		t.Fatalf("completion before idle: %+v err=%v", pending.Events, err)
+	}
+
+	recordIdle(textAt.Add(24 * time.Millisecond))
+	for _, session := range []*surface.Session{source, &stale} {
+		observed := *session
+		observed.Status = surface.StatusIdle
+		observation, err := NewClaude(nil, home).observe(context.Background(), &observed)
+		if err != nil || observation.Status != surface.StatusIdle || observation.CompletedTurnID != "m1" || observation.Reply == nil || observation.Reply.Text != "ONE" {
+			t.Fatalf("idle turn observation=%+v err=%v", observation, err)
+		}
+	}
+	batch, err := claude.ReadCompletions(context.Background(), source, baseline.Cursor)
+	if err != nil || len(batch.Events) != 1 || batch.Events[0].ID != "m1" || batch.Events[0].Text != "ONE" || !batch.Events[0].CompletedAt.Equal(textAt) {
+		t.Fatalf("events=%+v err=%v", batch.Events, err)
+	}
+	appendRecords(t, path, nextRecord)
+	if replay, err := claude.ReadCompletions(context.Background(), source, batch.Cursor); err != nil || len(replay.Events) != 0 {
+		t.Fatalf("settled turn completed again: %+v err=%v", replay, err)
+	}
+	read, err := claude.ReadSession(context.Background(), &stale, surface.SessionReadRequest{Limit: 20})
+	if err != nil || read.Reply == nil || read.Reply.Text != "ONE" || !read.Reply.Done {
+		t.Fatalf("reply=%+v err=%v", read.Reply, err)
+	}
+	done := map[string]int{}
+	err = claude.Stream(context.Background(), source, "", func(event surface.StreamEvent) {
+		if event.Kind == "done" {
+			done[event.TurnID]++
+		}
+	}, 150*time.Millisecond)
+	if !errors.Is(err, surface.ErrStreamWindow) || done["u1"] != 1 || source.ClaudeClosingTurn.TurnID != "" {
+		t.Fatalf("stream err=%v done=%v closing=%+v", err, done, source.ClaudeClosingTurn)
 	}
 }

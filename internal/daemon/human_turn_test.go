@@ -46,6 +46,7 @@ type humanTurnFixture struct {
 	postErr error
 	bridged surface.Session
 	native  surface.Session
+	process *claudetest.Fixture
 }
 
 func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
@@ -55,8 +56,8 @@ func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	f := &humanTurnFixture{r: r}
 	process := claudetest.New(t)
+	f := &humanTurnFixture{r: r, process: process}
 	process.Listen()
 	process.Record("conversation-bridge", process.Home, "session_bridge")
 	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
@@ -71,7 +72,7 @@ func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
 	})}
 	dir := t.TempDir()
 	f.bridged = surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: process.PID, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "bridged.jsonl")}
-	f.native = surface.Session{ID: "native-only", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "native.jsonl")}
+	f.native = surface.Session{ID: "native-only", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: os.Getpid(), Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "native.jsonl")}
 	agent := surface.Session{ID: "agent", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "managed", Status: surface.StatusIdle}
 	for _, session := range []surface.Session{f.bridged, f.native, agent} {
 		if err := r.RegisterSession(session); err != nil {
@@ -88,6 +89,13 @@ func (f *humanTurnFixture) transcript(t *testing.T, session surface.Session, con
 	t.Helper()
 	if err := os.WriteFile(session.Transcript, []byte(content), 0600); err != nil {
 		t.Fatal(err)
+	}
+	if session.ID == f.bridged.ID {
+		status := "idle"
+		if strings.HasSuffix(content, busyClaudeTranscript) {
+			status = "busy"
+		}
+		f.process.RecordStatus(session.ID, f.process.Home, session.Bridge, status, "", time.Time{})
 	}
 }
 

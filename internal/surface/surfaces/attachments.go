@@ -2,17 +2,12 @@ package surfaces
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 	"io"
 	"net/http"
 	"os"
@@ -214,15 +209,11 @@ func readAttachmentReference(ctx context.Context, ref attachmentReference) ([]by
 }
 
 func validateAttachment(data []byte) (string, int, int, error) {
-	media := http.DetectContentType(data)
-	if media != "image/png" && media != "image/jpeg" && media != "image/gif" {
+	media, width, height, ok := surface.DetectImage(data)
+	if !ok {
 		return "", 0, 0, ErrAttachmentInvalid
 	}
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		return "", 0, 0, ErrAttachmentInvalid
-	}
-	return media, cfg.Width, cfg.Height, nil
+	return media, width, height, nil
 }
 func hashBytes(data []byte) string { h := sha256.Sum256(data); return hex.EncodeToString(h[:]) }
 func attachmentID(offset int64, index int, data []byte) string {
@@ -325,6 +316,22 @@ func attachmentReferencesForSource(record map[string]any, source string) []attac
 	return codexAttachmentReferences(record)
 }
 func decorateTimelineAttachments(ctx context.Context, items []surface.TimelineItem, record map[string]any, source string, offset int64) error {
+	for itemIndex := range items {
+		item := &items[itemIndex]
+		if item.Kind != "message" || item.Role != "user" {
+			continue
+		}
+		text, files := surface.SplitAttachedFiles(item.Text)
+		if len(files) == 0 {
+			continue
+		}
+		for fileIndex := range files {
+			if info, err := os.Stat(files[fileIndex].Path); err == nil && info.Mode().IsRegular() {
+				files[fileIndex].Bytes = info.Size()
+			}
+		}
+		item.Text, item.Files = text, files
+	}
 	refs := attachmentReferencesForSource(record, source)
 	refIndex := 0
 	for itemIndex := range items {

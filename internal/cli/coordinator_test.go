@@ -1,13 +1,13 @@
 package cli
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
@@ -17,131 +17,181 @@ import (
 )
 
 const (
-	goneConversation  = "0d1e2f3a-4b5c-4d6e-8f70-81a2b3c4d5e6"
-	freshConversation = "9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d"
+	goneConversation     = "0d1e2f3a-4b5c-4d6e-8f70-81a2b3c4d5e6"
+	replacedConversation = "5f4e3d2c-1b0a-4f9e-8d7c-6b5a4f3e2d1c"
 )
 
-func coordinatorApp(t *testing.T) (*App, *registry.Registry, *claudetest.Fixture, *claudePosts) {
+type coordinatorCLI struct {
+	app    *App
+	r      *registry.Registry
+	claude *claudetest.Fixture
+	host   *claudehosttest.Fixture
+}
+
+// newCoordinatorCLI runs the CLI against the real Claude adapter and a running
+// Claude host, which starts new conversations.
+func newCoordinatorCLI(t *testing.T) *coordinatorCLI {
 	t.Helper()
-	fixture := claudetest.New(t)
-	fixture.StartAs(freshConversation)
-	fixture.ResumeBridge("session_fresh")
+	c := &coordinatorCLI{claude: claudetest.New(t)}
+	c.host = claudehosttest.New(t, c.claude.Home)
+	c.host.Start(t)
 	posts := &claudePosts{}
-	app, r := cliFixture(t, &cliSurface{kind: surface.KindClaude})
-	app.Surfaces[0].Surface = surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, posts.request)
-	return app, r, fixture, posts
+	c.app, c.r = cliFixture(t, &cliSurface{kind: surface.KindClaude})
+	c.app.Surfaces[0].Surface = surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, c.claude.Home, posts.request)
+	return c
+}
+
+func (c *coordinatorCLI) withGoneCoordinator(t *testing.T) *coordinatorCLI {
+	t.Helper()
+	c.register(t, surface.Session{ID: goneConversation, Bridge: "session_gone", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: exitedPID, Status: surface.StatusIdle, Cwd: c.host.Cwd})
+	if err := c.r.SetCoordinator(registry.CoordinatorSpec{Name: "lead", Surface: string(surface.KindClaude), Cwd: c.host.Cwd, Instructions: "You coordinate fixture workers."}, goneConversation); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func (c *coordinatorCLI) register(t *testing.T, session surface.Session) {
+	t.Helper()
+	if err := c.r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (c *coordinatorCLI) run(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	return captureStdout(t, func() error { return c.app.Run(args) })
+}
+
+func (c *coordinatorCLI) current(t *testing.T, name string) string {
+	t.Helper()
+	sid, err := c.r.LookupAlias(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sid
+}
+
+func (c *coordinatorCLI) started(t *testing.T) int {
+	t.Helper()
+	sessions, err := c.r.ListSessions(1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, session := range sessions {
+		if session.RuntimeKind == surface.RuntimeClaudeHost {
+			count++
+		}
+	}
+	return count
+}
+
+func (c *coordinatorCLI) resumed(t *testing.T, conversation string) bool {
+	t.Helper()
+	return len(c.host.Spawns(t, conversation)) != 0
+}
+
+func (c *coordinatorCLI) firstTurn(t *testing.T, conversation string) string {
+	t.Helper()
+	claudehosttest.WaitFor(t, "the first turn", func() bool { return len(c.host.Turns(t, conversation)) > 0 })
+	return c.host.Turns(t, conversation)[0].Text
+}
+
+// heldReplacement hands @lead from the gone conversation to a live process
+// that has neither a messaging socket nor Remote Control, so a send to it waits
+// in the queue.
+func (c *coordinatorCLI) heldReplacement(t *testing.T) {
+	t.Helper()
+	c.register(t, surface.Session{ID: replacedConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: c.claude.PID, Status: surface.StatusBusy, Cwd: c.host.Cwd, Transcript: c.claude.Transcript(replacedConversation, c.host.Cwd)})
+	c.claude.RecordStatus(replacedConversation, c.host.Cwd, "", "busy", "", time.Now())
+	if err := c.r.HandOverCoordinator("lead", goneConversation, replacedConversation); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestSendToCoordinatorWhoseConversationIsGoneStartsOneFromItsInstructions(t *testing.T) {
-	app, r, fixture, _ := coordinatorApp(t)
-	gone := surface.Session{ID: goneConversation, Bridge: "session_gone", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: exitedPID, Status: surface.StatusIdle, Cwd: fixture.Home}
-	if err := r.RegisterSession(gone); err != nil {
-		t.Fatal(err)
-	}
+	c := newCoordinatorCLI(t)
+	c.register(t, surface.Session{ID: goneConversation, Bridge: "session_gone", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: exitedPID, Status: surface.StatusIdle, Cwd: c.host.Cwd})
 	instructions := filepath.Join(t.TempDir(), "brief.md")
 	if err := os.WriteFile(instructions, []byte("You coordinate fixture workers."), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := captureStdout(t, func() error { return app.Run([]string{"identify", goneConversation, "lead"}) }); err != nil {
+	if _, err := c.run(t, "identify", goneConversation, "lead"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := captureStdout(t, func() error {
-		return app.Run([]string{"coordinator", "set", "@lead", "--instructions", instructions})
-	}); err != nil {
+	if _, err := c.run(t, "coordinator", "set", "@lead", "--instructions", instructions); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.QueueMessage(goneConversation, "queued before the restart"); err != nil {
+	if err := c.r.QueueMessage(goneConversation, "queued before the restart"); err != nil {
 		t.Fatal(err)
 	}
 
-	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "@lead", "plan the fixture release"}) })
+	output, err := c.run(t, "send", "@lead", "plan the fixture release")
 	if err != nil || !strings.Contains(output, "Started a new conversation for coordinator @lead") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
-	prompt := fixture.Prompt(freshConversation)
+	current := c.current(t, "lead")
+	if current == goneConversation || c.started(t) != 1 || c.resumed(t, goneConversation) {
+		t.Fatalf("current=%s started=%d resumed gone=%v", current, c.started(t), c.resumed(t, goneConversation))
+	}
+	first := c.firstTurn(t, current)
 	for _, part := range []string{"You coordinate fixture workers.", "conversation " + goneConversation + " no longer exists", "plan the fixture release"} {
-		if !strings.Contains(prompt, part) {
-			t.Fatalf("prompt %q lacks %q", prompt, part)
+		if !strings.Contains(first, part) {
+			t.Fatalf("first turn %q lacks %q", first, part)
 		}
 	}
-	if fixture.Invocations("--bg", "--resume", goneConversation) != 0 || fixture.Starts() != 1 {
-		t.Fatalf("resumes=%d starts=%d", fixture.Invocations("--bg", "--resume", goneConversation), fixture.Starts())
-	}
-	if sid, err := r.LookupAlias("lead"); err != nil || sid != freshConversation {
-		t.Fatalf("alias=%q err=%v", sid, err)
-	}
-	if r.QueueCount(freshConversation) != 1 || r.QueueCount(goneConversation) != 0 {
-		t.Fatalf("queue fresh=%d gone=%d", r.QueueCount(freshConversation), r.QueueCount(goneConversation))
+	if c.r.QueueCount(current) != 1 || c.r.QueueCount(goneConversation) != 0 {
+		t.Fatalf("queue current=%d gone=%d", c.r.QueueCount(current), c.r.QueueCount(goneConversation))
 	}
 
-	output, err = captureStdout(t, func() error { return app.Run([]string{"send", "@lead", "next task"}) })
-	if err != nil || !strings.Contains(output, "for @lead and will deliver") || fixture.Starts() != 1 || r.QueueCount(freshConversation) != 2 {
-		t.Fatalf("output=%q err=%v starts=%d queued=%d", output, err, fixture.Starts(), r.QueueCount(freshConversation))
+	if _, err := c.run(t, "send", "@lead", "next task"); err != nil || c.started(t) != 1 || c.current(t, "lead") != current {
+		t.Fatalf("err=%v started=%d current=%s", err, c.started(t), c.current(t, "lead"))
 	}
 }
 
 func TestDefinedCoordinatorStartsOnItsFirstMessage(t *testing.T) {
-	app, r, fixture, _ := coordinatorApp(t)
-	if _, err := captureStdout(t, func() error {
-		return app.Run([]string{"coordinator", "new", "claude", "--cwd", fixture.Home, "--model", "fixture-model"})
-	}); err != nil {
+	c := newCoordinatorCLI(t)
+	if _, err := c.run(t, "coordinator", "new", "claude", "--cwd", c.host.Cwd, "--model", "fixture-model"); err != nil {
 		t.Fatal(err)
 	}
-	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "@coordinator", "first task"}) })
+	output, err := c.run(t, "send", "@coordinator", "first task")
 	if err != nil || !strings.Contains(output, "Started coordinator @coordinator") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
-	if !strings.HasSuffix(fixture.Prompt(freshConversation), "first task") {
-		t.Fatalf("prompt=%q", fixture.Prompt(freshConversation))
+	current := c.current(t, "coordinator")
+	if first := c.firstTurn(t, current); !strings.HasSuffix(first, "first task") {
+		t.Fatalf("first turn=%q", first)
 	}
-	home, err := filepath.EvalSymlinks(fixture.Home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if started, err := r.Session(freshConversation); err != nil || started.ConfiguredModel != "fixture-model" || mustEvalSymlinks(t, started.Cwd) != home {
+	if started, err := c.r.Session(current); err != nil || started.ConfiguredModel != "fixture-model" || mustEvalSymlinks(t, started.Cwd) != mustEvalSymlinks(t, c.host.Cwd) {
 		t.Fatalf("started=%+v err=%v", started, err)
 	}
-	if sid, err := r.LookupAlias("coordinator"); err != nil || sid != freshConversation {
-		t.Fatalf("alias=%q err=%v", sid, err)
+	spawns := c.host.Spawns(t, current)
+	if len(spawns) != 1 || !strings.Contains(strings.Join(spawns[0].Argv, " "), "fixture-model") {
+		t.Fatalf("spawns=%+v", spawns)
 	}
-}
-
-func goneCoordinatorApp(t *testing.T) (*App, *registry.Registry, *claudetest.Fixture) {
-	t.Helper()
-	app, r, fixture, _ := coordinatorApp(t)
-	gone := surface.Session{ID: goneConversation, Bridge: "session_gone", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: exitedPID, Status: surface.StatusIdle, Cwd: fixture.Home}
-	if err := r.RegisterSession(gone); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.SetCoordinator(registry.CoordinatorSpec{Name: "lead", Surface: string(surface.KindClaude), Cwd: fixture.Home, Instructions: "You coordinate fixture workers."}, goneConversation); err != nil {
-		t.Fatal(err)
-	}
-	return app, r, fixture
 }
 
 func TestNoQueueSendToAGoneCoordinatorStillStartsIt(t *testing.T) {
-	app, r, fixture := goneCoordinatorApp(t)
-	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "@lead", "urgent task", "--no-queue"}) })
+	c := newCoordinatorCLI(t).withGoneCoordinator(t)
+	output, err := c.run(t, "send", "@lead", "urgent task", "--no-queue")
 	if err != nil || !strings.Contains(output, "Started a new conversation for coordinator @lead") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
-	if fixture.Starts() != 1 || fixture.Invocations("--bg", "--resume", goneConversation) != 0 || !strings.HasSuffix(fixture.Prompt(freshConversation), "urgent task") {
-		t.Fatalf("starts=%d resumes=%d", fixture.Starts(), fixture.Invocations("--bg", "--resume", goneConversation))
-	}
-	if sid, err := r.LookupAlias("lead"); err != nil || sid != freshConversation {
-		t.Fatalf("alias=%q err=%v", sid, err)
+	current := c.current(t, "lead")
+	if c.started(t) != 1 || c.resumed(t, goneConversation) || !strings.HasSuffix(c.firstTurn(t, current), "urgent task") {
+		t.Fatalf("started=%d resumed gone=%v", c.started(t), c.resumed(t, goneConversation))
 	}
 }
 
 func TestSendToACoordinatorClaudeCannotReportOnWaitsInTheQueue(t *testing.T) {
-	app, r, fixture := goneCoordinatorApp(t)
-	fixture.AgentsUnreadable()
-	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "@lead", "keep this"}) })
-	if err != nil || !strings.Contains(output, "queued") || r.QueueCount(goneConversation) != 1 {
-		t.Fatalf("output=%q err=%v queued=%d", output, err, r.QueueCount(goneConversation))
+	c := newCoordinatorCLI(t).withGoneCoordinator(t)
+	c.claude.AgentsUnreadable()
+	output, err := c.run(t, "send", "@lead", "keep this")
+	if err != nil || !strings.Contains(output, "queued") || c.r.QueueCount(goneConversation) != 1 {
+		t.Fatalf("output=%q err=%v queued=%d", output, err, c.r.QueueCount(goneConversation))
 	}
-	if fixture.Starts() != 0 || fixture.Invocations("--bg", "--resume", goneConversation) != 0 {
-		t.Fatalf("starts=%d resumes=%d", fixture.Starts(), fixture.Invocations("--bg", "--resume", goneConversation))
+	if c.started(t) != 0 || c.resumed(t, goneConversation) {
+		t.Fatalf("started=%d resumed gone=%v", c.started(t), c.resumed(t, goneConversation))
 	}
 }
 
@@ -178,17 +228,15 @@ func TestCodexCoordinatorStartsOnItsFirstMessage(t *testing.T) {
 }
 
 func TestBareCoordinatorNameIsAFragmentNotTheCoordinator(t *testing.T) {
-	app, _, fixture, _ := coordinatorApp(t)
-	if _, err := captureStdout(t, func() error {
-		return app.Run([]string{"coordinator", "new", "claude", "--cwd", fixture.Home, "--name", "lead"})
-	}); err != nil {
+	c := newCoordinatorCLI(t)
+	if _, err := c.run(t, "coordinator", "new", "claude", "--cwd", c.host.Cwd, "--name", "lead"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "lead", "not for the coordinator"}) }); err == nil || fixture.Starts() != 0 {
-		t.Fatalf("a bare name started the coordinator: err=%v starts=%d", err, fixture.Starts())
+	if _, err := c.run(t, "send", "lead", "not for the coordinator"); err == nil || c.started(t) != 0 {
+		t.Fatalf("a bare name started the coordinator: err=%v started=%d", err, c.started(t))
 	}
-	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "@lead", "for the coordinator"}) }); err != nil || fixture.Starts() != 1 {
-		t.Fatalf("err=%v starts=%d", err, fixture.Starts())
+	if _, err := c.run(t, "send", "@lead", "for the coordinator"); err != nil || c.started(t) != 1 {
+		t.Fatalf("err=%v started=%d", err, c.started(t))
 	}
 }
 
@@ -202,57 +250,39 @@ func mustEvalSymlinks(t *testing.T, path string) string {
 }
 
 func TestReplyToAReplacedCoordinatorConversationFollowsTheCurrentOne(t *testing.T) {
-	app, _, fixture := goneCoordinatorApp(t)
-	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "@lead", "first"}) }); err != nil {
+	c := newCoordinatorCLI(t).withGoneCoordinator(t)
+	if _, err := c.run(t, "send", "@lead", "first"); err != nil {
 		t.Fatal(err)
 	}
-	transcript := fixture.Transcript(freshConversation, fixture.Home)
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		at := time.Now().UTC().Format(time.RFC3339Nano)
-		user, _ := json.Marshal(map[string]any{"type": "user", "uuid": "fixture-follow-up", "sessionId": freshConversation, "cwd": fixture.Home, "timestamp": at, "message": map[string]any{"role": "user", "content": "follow up"}})
-		answer, _ := json.Marshal(map[string]any{"type": "assistant", "uuid": "fixture-follow-up-answer", "sessionId": freshConversation, "cwd": fixture.Home, "timestamp": at, "message": map[string]any{"id": "fixture-follow-up-message", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": "answer from the current coordinator"}}}})
-		duration, _ := json.Marshal(map[string]any{"type": "system", "subtype": "turn_duration", "sessionId": freshConversation, "cwd": fixture.Home, "timestamp": at})
-		file, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0)
-		if err != nil {
-			return
-		}
-		defer file.Close()
-		_, _ = file.WriteString(string(user) + "\n" + string(answer) + "\n" + string(duration) + "\n")
-	}()
-	output, err := captureStdout(t, func() error {
-		return app.Run([]string{"send", goneConversation, "follow up", "--reply", "--timeout", "5s"})
-	})
-	if err != nil || !strings.Contains(output, "answer from the current coordinator") {
-		t.Fatalf("output=%q err=%v", output, err)
+	current := c.current(t, "lead")
+	c.firstTurn(t, current)
+	_, err := c.run(t, "send", goneConversation, "follow up", "--reply", "--timeout", "3s")
+	if err == nil || !strings.Contains(err.Error(), "cannot be correlated with transcript turns") {
+		t.Fatalf("a reply was awaited on a conversation other than the coordinator's: err=%v", err)
 	}
-	if fixture.Starts() != 1 || fixture.Invocations("--bg", "--resume", goneConversation) != 0 {
-		t.Fatalf("starts=%d resumes=%d", fixture.Starts(), fixture.Invocations("--bg", "--resume", goneConversation))
+	if c.started(t) != 1 || c.resumed(t, goneConversation) {
+		t.Fatalf("started=%d resumed gone=%v", c.started(t), c.resumed(t, goneConversation))
 	}
 }
 
 func TestQueuedSendToAReplacedCoordinatorConversationNamesTheCurrentOne(t *testing.T) {
-	app, r, _ := goneCoordinatorApp(t)
-	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "@lead", "first"}) }); err != nil {
-		t.Fatal(err)
-	}
-	output, err := captureStdout(t, func() error { return app.Run([]string{"send", goneConversation, "second"}) })
-	if err != nil || r.QueueCount(freshConversation) != 1 || !strings.Contains(output, "agenthail steer "+freshConversation) {
-		t.Fatalf("output=%q err=%v queued=%d", output, err, r.QueueCount(freshConversation))
+	c := newCoordinatorCLI(t).withGoneCoordinator(t)
+	c.heldReplacement(t)
+	output, err := c.run(t, "send", goneConversation, "second")
+	if err != nil || c.r.QueueCount(replacedConversation) != 1 || !strings.Contains(output, "agenthail steer "+replacedConversation) {
+		t.Fatalf("output=%q err=%v queued=%d", output, err, c.r.QueueCount(replacedConversation))
 	}
 }
 
 func TestStartFromAReplacedCoordinatorConversationNamesTheNewOne(t *testing.T) {
-	app, r, fixture := goneCoordinatorApp(t)
-	const replacement = "5f4e3d2c-1b0a-4f9e-8d7c-6b5a4f3e2d1c"
-	if err := r.RegisterSession(surface.Session{ID: replacement, Bridge: "session_replacement", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: exitedPID, Status: surface.StatusIdle, Cwd: fixture.Home}); err != nil {
+	c := newCoordinatorCLI(t).withGoneCoordinator(t)
+	c.register(t, surface.Session{ID: replacedConversation, Bridge: "session_replacement", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: exitedPID, Status: surface.StatusIdle, Cwd: c.host.Cwd})
+	if err := c.r.HandOverCoordinator("lead", goneConversation, replacedConversation); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.HandOverCoordinator("lead", goneConversation, replacement); err != nil {
-		t.Fatal(err)
-	}
-	output, err := captureStdout(t, func() error { return app.Run([]string{"send", goneConversation, "task"}) })
-	if err != nil || fixture.Starts() != 1 || !strings.Contains(output, "agenthail last "+freshConversation) {
-		t.Fatalf("output=%q err=%v starts=%d", output, err, fixture.Starts())
+	output, err := c.run(t, "send", goneConversation, "task")
+	current := c.current(t, "lead")
+	if err != nil || c.started(t) != 1 || current == replacedConversation || !strings.Contains(output, "agenthail last "+current) {
+		t.Fatalf("output=%q err=%v started=%d current=%s", output, err, c.started(t), current)
 	}
 }

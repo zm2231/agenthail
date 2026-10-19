@@ -200,6 +200,7 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		{"api_action_reservations", `UPDATE api_action_reservations SET source_session_id=?2 WHERE source_session_id=?1`, false},
 		{"delivery_intents", `UPDATE delivery_intents SET sender_session_id=?2 WHERE sender_session_id=?1`, false},
 		{"delivery_intents", `UPDATE OR IGNORE delivery_intents SET target_session_id=?2 WHERE target_session_id=?1`, false},
+		{"session_archive", `UPDATE OR IGNORE session_archive SET session_id=?2 WHERE session_id=?1`, false},
 		{"session_runtime", `UPDATE session_runtime SET session_id=?2 WHERE session_id=?1`, hasRuntime},
 		{"session_journal_state", `UPDATE session_journal_state SET session_id=?2 WHERE session_id=?1`, hasJournal},
 		{"session_journal", `UPDATE session_journal SET session_id=?2 WHERE session_id=?1`, hasJournal},

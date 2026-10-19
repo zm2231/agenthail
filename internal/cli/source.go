@@ -24,15 +24,15 @@ func (a *App) sourceSessionID(ctx context.Context, selector string) (string, err
 	if selector == "" {
 		return "", nil
 	}
-	if a.Registry != nil {
+	if a.registry() != nil {
 		registrySelector := selector
 		expectedSurface := ""
 		if kind, target, qualified := strings.Cut(registrySelector, ":"); qualified {
 			expectedSurface = strings.ToLower(kind)
 			registrySelector = target
 		}
-		if id, err := a.Registry.ResolveTarget(registrySelector); err == nil {
-			kind, _, _, sessionErr := a.Registry.GetSession(id)
+		if id, err := a.registry().ResolveTarget(registrySelector); err == nil {
+			kind, _, _, sessionErr := a.registry().GetSession(id)
 			if sessionErr == nil && (expectedSurface == "" || expectedSurface == strings.ToLower(kind)) {
 				return id, nil
 			}

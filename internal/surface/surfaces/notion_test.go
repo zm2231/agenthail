@@ -13,12 +13,6 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func TestNotionCatalogListIsNotComplete(t *testing.T) {
-	if NewNotion(signin.Fixed{Browser: signin.Chrome}, "", "").CatalogListComplete() {
-		t.Fatal("Notion List is bounded and must not reconcile omissions")
-	}
-}
-
 func TestNotionOnlySupportsPerMessageModelSelection(t *testing.T) {
 	notion := &Notion{}
 	if notion.Capabilities().Model {

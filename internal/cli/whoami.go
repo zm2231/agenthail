@@ -32,11 +32,11 @@ func (a *App) cmdWhoami(args []string) error {
 		result.Reason = "no caller session binding; set AGENTHAIL_SESSION_ID, CODEX_THREAD_ID, or CLAUDE_CODE_SESSION_ID"
 		return a.writeWhoami(result, hasFlag(args, "--json"))
 	}
-	if a.Registry == nil {
+	if a.registry() == nil {
 		result.Reason = "caller session context is unavailable; run through the Agenthail CLI with its session registry"
 		return a.writeWhoami(result, hasFlag(args, "--json"))
 	}
-	session, err := a.Registry.Session(id)
+	session, err := a.registry().Session(id)
 	if err != nil {
 		result.Reason = fmt.Sprintf("caller session %q is not registered; run agenthail list from the caller session", id)
 		return a.writeWhoami(result, hasFlag(args, "--json"))
@@ -45,7 +45,7 @@ func (a *App) cmdWhoami(args []string) error {
 	if session.Cwd != "" {
 		result.Project = filepath.Base(session.Cwd)
 	}
-	aliases, err := a.Registry.ListAliases()
+	aliases, err := a.registry().ListAliases()
 	if err != nil {
 		return fmt.Errorf("list caller aliases: %w", err)
 	}

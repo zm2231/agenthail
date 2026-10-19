@@ -12,8 +12,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/uploads"
 )
 
 const (
@@ -49,16 +51,20 @@ type Daemon struct {
 	catalog           *catalogHub
 	catalogLive       map[string]*catalogLiveSession
 	catalogIdentities *catalogIdentityCache
-	sources           *sessionSourceManager
-	sourceHoldMu      sync.Mutex
-	surfaceHealthMu   sync.Mutex
-	surfaceHealth     map[surface.SurfaceKind]dashboardSurface
-	sourceHolds       map[string]map[string]func()
-	dashboard         *dashboardServer
-	transportResolver *SessionTransportResolver
-	identityMu        sync.RWMutex
-	identity          registry.HostIdentity
-	federation        *federation
+	// catalogProjectUnarchived is set and cleared by the catalog goroutine.
+	catalogProjectUnarchived bool
+	sources                  *sessionSourceManager
+	sourceHoldMu             sync.Mutex
+	surfaceHealthMu          sync.Mutex
+	surfaceHealth            map[surface.SurfaceKind]dashboardSurface
+	sourceHolds              map[string]map[string]func()
+	dashboard                *dashboardServer
+	transportResolver        *SessionTransportResolver
+	claudeHost               *claudehost.Manager
+	identityMu               sync.RWMutex
+	identity                 registry.HostIdentity
+	federation               *federation
+	uploads                  *uploads.Store
 }
 
 func (d *Daemon) SetLaunchers(launchers []surface.Launcher) {
@@ -106,6 +112,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		catalogIdentities: newCatalogIdentityCache(),
 		catalogNudge:      make(chan struct{}, 1),
 		federation:        newFederation(),
+		uploads:           uploads.New(uploadsDir(reg)),
 	}
 	identity, err := reg.HostIdentity()
 	if err != nil {
@@ -220,6 +227,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 		defer close(catalogDone)
 		d.runCatalog(ctx)
 	}()
+	go d.superviseClaudeHost(ctx)
+	go d.sweepUploads(ctx)
 	observerTicker := time.NewTicker(d.pollInterval)
 	defer observerTicker.Stop()
 	d.scanAndRelay(ctx)

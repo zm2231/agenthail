@@ -11,25 +11,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      ios: ${{ steps.diff.outputs.ios }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - id: diff
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-        run: |
-          if git diff --name-only "$BASE" HEAD | grep -qE '^(native/|scripts/(ios-simulator|test-xcodegen-project)\.sh$|\.github/workflows/ci\.yml$)'; then
-            echo "ios=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ios=false" >> "$GITHUB_OUTPUT"
-          fi
-
   verify:
     runs-on: macos-26
     timeout-minutes: 20
@@ -45,7 +26,12 @@ jobs:
           cache: npm
           cache-dependency-path: |
             push-relay/package-lock.json
+            claude-host/package-lock.json
             sidecar/package-lock.json
+      - name: Claude host tests
+        run: |
+          npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
+          npm test --prefix claude-host
       - name: Cookie bridge dependencies
         working-directory: sidecar
         run: npm ci --ignore-scripts
@@ -63,6 +49,7 @@ jobs:
           node scripts/test-dashboard-relays.mjs
           node scripts/test-dashboard-rekeys.mjs
           node scripts/test-dashboard-signin.mjs
+          node scripts/test-dashboard-projects.mjs
       - name: Public copy check
         run: scripts/check-public-copy.sh
       - name: Push relay tests
@@ -108,8 +95,17 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: claude-host/package-lock.json
       - name: Vet
         run: go vet ./...
+      - name: Claude host tests
+        run: |
+          npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
+          npm test --prefix claude-host
       - name: Race tests
         run: go test ./... -race -count=1
       - name: Build Linux archives
@@ -118,44 +114,6 @@ jobs:
             GOOS=linux GOARCH=$arch AGENTHAIL_VERSION=v0.0.0-ci scripts/package-release.sh
           done
           (cd dist && sha256sum -c agenthail-v0.0.0-ci-linux-amd64.tar.gz.sha256 agenthail-v0.0.0-ci-linux-arm64.tar.gz.sha256)
-
-  ios:
-    needs: changes
-    if: needs.changes.outputs.ios == 'true'
-    runs-on: macos-latest
-    timeout-minutes: 30
-    env:
-      DERIVED: ${{ github.workspace }}/../ios-derived
-    steps:
-      - uses: actions/checkout@v5
-      - name: Start simulator
-        run: |
-          udid="$(scripts/ios-simulator.sh iphone)"
-          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
-          xcrun simctl boot "$udid"
-      - name: Build for simulator tests
-        run: xcodebuild build-for-testing -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED"
-      - name: iOS simulator tests
-        run: |
-          xcrun simctl bootstatus "$SIMULATOR_UDID" -b
-          xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" -parallel-testing-enabled NO
-          plist="$DERIVED/Build/Products/Debug-iphonesimulator/Agenthail.app/Info.plist"
-          test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your Mac."
-          test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"
-
-  ios-release:
-    needs: changes
-    if: needs.changes.outputs.ios == 'true'
-    runs-on: macos-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v5
-      - name: Verify generated iOS project
-        run: |
-          command -v xcodegen >/dev/null || brew install xcodegen
-          scripts/test-xcodegen-project.sh
-      - name: iOS release device build
-        run: xcodebuild build -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Release -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO
 
   installer:
     runs-on: macos-latest

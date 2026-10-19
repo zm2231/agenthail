@@ -14,7 +14,7 @@ The owning host keeps one row in the `coordinator` table of its registry: the na
 | --- | --- |
 | Running and idle | Delivers. |
 | Running and busy | Steers the current turn when the session can be steered, otherwise queues. A sender that chooses a busy policy keeps it. |
-| Ended, conversation on disk | Delivers through the surface's own resume. For Claude this is `claude --bg --resume`. |
+| Ended, conversation on disk | Delivers through the surface's own resume. For Claude the Claude host resumes it. |
 | Resume failed for now, or Agenthail cannot tell whether the conversation still exists | Queues the message. Agenthail never replaces a conversation because of a transient failure. |
 | Conversation gone, or the name points at no session | Starts a new conversation from the spec, points the alias at it, and moves pending queue items from the old session. The first turn is the instructions, a line saying why it started, and the message. The receipt says it started. |
 

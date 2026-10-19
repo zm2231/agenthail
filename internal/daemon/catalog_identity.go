@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,15 +12,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/workspace"
 )
 
-type catalogHostProject struct {
+const (
+	catalogProjectGit    = "git"
+	catalogProjectFolder = "folder"
+)
+
+type catalogProject struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"displayName"`
-	CommonDir   string `json:"commonDir,omitempty"`
-	Path        string `json:"path,omitempty"`
+	RootPath    string `json:"rootPath"`
+	Kind        string `json:"kind"`
+	Archived    bool   `json:"archived,omitempty"`
 }
 
 type catalogCheckout struct {
@@ -32,9 +40,9 @@ type catalogCheckout struct {
 }
 
 type catalogIdentity struct {
-	HostProject       catalogHostProject `json:"hostProject"`
-	Checkout          catalogCheckout    `json:"checkout"`
-	UnavailableReason string             `json:"unavailableReason,omitempty"`
+	Project           *catalogProject `json:"project,omitempty"`
+	Checkout          catalogCheckout `json:"checkout"`
+	UnavailableReason string          `json:"unavailableReason,omitempty"`
 }
 
 // catalogIdentityTTL bounds how long a resolved workspace identity is reused.
@@ -42,11 +50,17 @@ type catalogIdentity struct {
 // tree edits that touch neither show up in Dirty once the entry expires.
 const catalogIdentityTTL = 2 * time.Minute
 
+const catalogIdentityGitTimeout = 3 * time.Second
+
 // catalogIdentityCache resolves each workspace path at most once per TTL. It
 // is owned by the catalog discovery goroutine and is not safe for concurrent
 // use.
 type catalogIdentityCache struct {
 	entries map[string]catalogIdentityEntry
+	// known keeps the last resolved project per path past the TTL, so a git
+	// failure that is not "not a repository" never moves a session.
+	known   map[string]*catalogProject
+	folders []registry.ProjectRecord
 }
 
 type catalogIdentityEntry struct {
@@ -57,25 +71,65 @@ type catalogIdentityEntry struct {
 }
 
 func newCatalogIdentityCache() *catalogIdentityCache {
-	return &catalogIdentityCache{entries: map[string]catalogIdentityEntry{}}
+	return &catalogIdentityCache{entries: map[string]catalogIdentityEntry{}, known: map[string]*catalogProject{}}
 }
 
-func (c *catalogIdentityCache) identity(ctx context.Context, session surface.Session, now time.Time) catalogIdentity {
-	path, err := workspace.NormalizeCWD(session.Cwd)
+// setFolders replaces the registered folder projects. A changed set drops the
+// cached identities, since a non-git path may now belong to a folder project.
+func (c *catalogIdentityCache) setFolders(records []registry.ProjectRecord) {
+	folders := make([]registry.ProjectRecord, 0, len(records))
+	for _, record := range records {
+		if record.Registered && record.Kind == catalogProjectFolder {
+			folders = append(folders, record)
+		}
+	}
+	if sameCatalogFolders(c.folders, folders) {
+		return
+	}
+	c.folders = folders
+	c.entries = map[string]catalogIdentityEntry{}
+}
+
+func sameCatalogFolders(left, right []registry.ProjectRecord) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index].ID != right[index].ID || left[index].RootPath != right[index].RootPath || left[index].DisplayName != right[index].DisplayName {
+			return false
+		}
+	}
+	return true
+}
+
+// identity resolves a session's project and checkout. prior reads the project
+// last stored for the session; it is used when git fails and this cache has
+// never resolved the path.
+func (c *catalogIdentityCache) identity(ctx context.Context, session surface.Session, now time.Time, prior func() *catalogProject) catalogIdentity {
+	path, err := catalogSessionPath(session.Cwd)
 	if err != nil || path == "" {
-		return catalogIdentity{UnavailableReason: "workspace path is unavailable"}
+		return catalogIdentity{Project: prior(), UnavailableReason: "workspace path is unavailable"}
 	}
 	if entry, found := c.entries[path]; found && now.Sub(entry.resolvedAt) < catalogIdentityTTL && catalogGitStamp(entry.gitDir) == entry.gitStamp {
 		return entry.identity
 	}
-	stamp := ""
-	identity, gitDir := resolveCatalogIdentity(ctx, path)
-	if gitDir != "" {
-		stamp = catalogGitStamp(gitDir)
+	identity, gitDir, transient := resolveCatalogIdentity(ctx, path, c.folders)
+	if transient {
+		if known, found := c.known[path]; found {
+			identity.Project = known
+		} else {
+			identity.Project = prior()
+		}
+	} else {
+		c.known[path] = identity.Project
 	}
 	if identity.UnavailableReason != "" {
 		delete(c.entries, path)
 		return identity
+	}
+	stamp := ""
+	if gitDir != "" {
+		stamp = catalogGitStamp(gitDir)
 	}
 	c.entries[path] = catalogIdentityEntry{identity: identity, gitDir: gitDir, gitStamp: stamp, resolvedAt: now}
 	return identity
@@ -106,74 +160,197 @@ func catalogGitStamp(gitDir string) string {
 	return stamp.String()
 }
 
-// resolveCatalogIdentity reads the workspace's repository identity and returns
-// it with the checkout's git directory, which is empty outside a repository.
-func resolveCatalogIdentity(ctx context.Context, path string) (catalogIdentity, string) {
-	identity := catalogIdentity{HostProject: catalogHostProject{ID: catalogPathID("project", path), DisplayName: filepath.Base(path), Path: path}, Checkout: catalogCheckout{ID: catalogPathID("checkout", path), Path: path}}
-	root, err := catalogGit(ctx, path, "rev-parse", "--show-toplevel")
+// resolveCatalogIdentity returns the workspace's identity, the checkout's git
+// directory (empty outside a repository), and whether the project could not
+// be resolved for a reason other than the path not being in a repository.
+func resolveCatalogIdentity(ctx context.Context, path string, folders []registry.ProjectRecord) (catalogIdentity, string, bool) {
+	identity := catalogIdentity{Checkout: catalogCheckout{ID: catalogPathID("checkout", path), Path: path}}
+	existing := nearestExistingDirectory(path)
+	if existing != path {
+		repository, notRepository, err := resolveCatalogRepository(ctx, existing)
+		switch {
+		case err == nil:
+			identity.Project = repository.project()
+		case notRepository:
+			identity.Project = catalogFolderProject(path, folders)
+		default:
+			identity.UnavailableReason = "repository identity is unavailable"
+			return identity, "", true
+		}
+		return identity, "", false
+	}
+	repository, notRepository, err := resolveCatalogRepository(ctx, path)
 	if err != nil {
-		if isCatalogNonGit(err) {
-			return identity, ""
+		if notRepository {
+			identity.Project = catalogFolderProject(path, folders)
+			return identity, "", false
 		}
 		identity.UnavailableReason = "repository identity is unavailable"
-		return identity, ""
+		return identity, "", true
 	}
-	root, err = canonicalCatalogPath(root)
+	identity.Project = repository.project()
+	identity.Checkout.Path = repository.toplevel
+	identity.Checkout.ID = catalogPathID("checkout", repository.toplevel)
+	checkoutCtx, cancel := context.WithTimeout(ctx, catalogIdentityGitTimeout)
+	defer cancel()
+	if reason := resolveCatalogCheckout(checkoutCtx, &identity.Checkout); reason != "" {
+		identity.UnavailableReason = reason
+	}
+	return identity, repository.gitDir, false
+}
+
+type catalogRepository struct {
+	toplevel    string
+	commonDir   string
+	gitDir      string
+	projectRoot string
+}
+
+func (repository catalogRepository) project() *catalogProject {
+	return &catalogProject{ID: catalogPathID("project", repository.commonDir), DisplayName: catalogProjectName(repository.projectRoot), RootPath: repository.projectRoot, Kind: catalogProjectGit}
+}
+
+// nearestExistingDirectory returns path, or its closest ancestor that still
+// exists. A session whose worktree was removed keeps the project of the
+// repository the worktree lived in.
+func nearestExistingDirectory(path string) string {
+	for candidate := path; ; candidate = filepath.Dir(candidate) {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
+		if parent := filepath.Dir(candidate); parent == candidate {
+			return candidate
+		}
+	}
+}
+
+// resolveCatalogRepository reads the checkout root, the shared repository
+// directory and the checkout's own git directory. Each is its own git call
+// because a path may contain a newline. The project root is the main
+// checkout: the parent of a ".git" common directory, the checkout itself
+// when it owns its git directory (a submodule), and the common directory of
+// a bare repository.
+func resolveCatalogRepository(ctx context.Context, path string) (repository catalogRepository, notRepository bool, err error) {
+	gitCtx, cancel := context.WithTimeout(ctx, catalogIdentityGitTimeout)
+	defer cancel()
+	toplevel, err := catalogGit(gitCtx, path, "rev-parse", "--show-toplevel")
 	if err != nil {
-		identity.UnavailableReason = "repository root is unavailable"
-		return identity, ""
+		return catalogRepository{}, isCatalogNonGit(err), err
 	}
-	identity.Checkout.Path = root
-	identity.Checkout.ID = catalogPathID("checkout", root)
-	identity.HostProject.DisplayName = filepath.Base(root)
-	commonDir, err := catalogGit(ctx, root, "rev-parse", "--path-format=absolute", "--git-common-dir")
-	if err == nil {
-		commonDir, err = canonicalCatalogPath(commonDir)
+	if repository.toplevel, err = canonicalCatalogPath(toplevel); err != nil {
+		return catalogRepository{}, false, err
 	}
-	if err != nil {
-		identity.UnavailableReason = "repository common directory is unavailable"
-		return identity, ""
+	for _, read := range []struct {
+		target *string
+		args   []string
+	}{
+		{&repository.commonDir, []string{"rev-parse", "--path-format=absolute", "--git-common-dir"}},
+		{&repository.gitDir, []string{"rev-parse", "--absolute-git-dir"}},
+	} {
+		value, err := catalogGit(gitCtx, repository.toplevel, read.args...)
+		if err != nil {
+			return catalogRepository{}, false, err
+		}
+		if *read.target, err = canonicalCatalogPath(value); err != nil {
+			return catalogRepository{}, false, err
+		}
 	}
-	gitDir, err := catalogGit(ctx, root, "rev-parse", "--absolute-git-dir")
-	if err == nil {
-		gitDir, err = canonicalCatalogPath(gitDir)
+	switch {
+	case filepath.Base(repository.commonDir) == ".git":
+		repository.projectRoot = filepath.Dir(repository.commonDir)
+	case repository.gitDir == repository.commonDir:
+		repository.projectRoot = repository.toplevel
+	default:
+		repository.projectRoot = repository.commonDir
 	}
-	if err != nil {
-		identity.UnavailableReason = "repository directory is unavailable"
-		return identity, ""
-	}
-	identity.HostProject.ID = catalogPathID("project", commonDir)
-	identity.HostProject.CommonDir = commonDir
-	identity.HostProject.Path = ""
+	return repository, false, nil
+}
+
+func resolveCatalogCheckout(ctx context.Context, checkout *catalogCheckout) string {
+	root := checkout.Path
 	branch, err := catalogGit(ctx, root, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err == nil {
-		identity.Checkout.Branch = branch
+		checkout.Branch = branch
 		if upstream, upstreamErr := catalogGit(ctx, root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); upstreamErr == nil {
-			identity.Checkout.IsMain = strings.TrimPrefix(upstream, "origin/") == branch
+			checkout.IsMain = strings.TrimPrefix(upstream, "origin/") == branch
 		} else {
-			identity.Checkout.IsMain = branch == "main" || branch == "master"
+			checkout.IsMain = branch == "main" || branch == "master"
 		}
 	} else if head, headErr := catalogGit(ctx, root, "rev-parse", "HEAD"); headErr == nil {
-		identity.Checkout.DetachedHead = head
+		checkout.DetachedHead = head
 	} else {
-		identity.UnavailableReason = "repository head is unavailable"
-		return identity, gitDir
+		return "repository head is unavailable"
 	}
-	if porcelain, statusErr := catalogGit(ctx, root, "status", "--porcelain=v1", "-z", "--untracked-files=all"); statusErr == nil {
-		identity.Checkout.Dirty = porcelain != ""
-	} else {
-		identity.UnavailableReason = "repository status is unavailable"
+	porcelain, err := catalogGit(ctx, root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	if err != nil {
+		return "repository status is unavailable"
 	}
-	return identity, gitDir
+	checkout.Dirty = porcelain != ""
+	return ""
+}
+
+// catalogFolderProject returns the registered folder project nearest to path,
+// or nil when no registered folder contains it.
+func catalogFolderProject(path string, folders []registry.ProjectRecord) *catalogProject {
+	var nearest *registry.ProjectRecord
+	for index := range folders {
+		within, err := workspace.IsWithin(folders[index].RootPath, path)
+		if err != nil || !within {
+			continue
+		}
+		if nearest == nil || len(folders[index].RootPath) > len(nearest.RootPath) {
+			nearest = &folders[index]
+		}
+	}
+	if nearest == nil {
+		return nil
+	}
+	return &catalogProject{ID: nearest.ID, DisplayName: nearest.DisplayName, RootPath: nearest.RootPath, Kind: catalogProjectFolder}
+}
+
+func catalogProjectName(root string) string {
+	name := filepath.Base(root)
+	if trimmed := strings.TrimSuffix(name, ".git"); trimmed != "" {
+		return trimmed
+	}
+	return name
 }
 
 func catalogGit(ctx context.Context, dir string, args ...string) (string, error) {
 	command := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	command.Env = append(os.Environ(), "LC_ALL=C")
+	var stderr strings.Builder
+	command.Stderr = &stderr
 	output, err := command.Output()
 	if err != nil {
-		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		return "", &catalogGitError{args: args, stderr: stderr.String(), err: err}
 	}
-	return strings.TrimSpace(string(output)), nil
+	return strings.TrimSuffix(string(output), "\n"), nil
+}
+
+// catalogSessionPath makes a discovered working directory absolute and
+// canonical. Unlike typed input, its bytes are exact, so nothing is trimmed.
+// A directory that no longer exists is canonical through its nearest existing
+// ancestor, so a removed worktree keeps the same path form as its repository.
+func catalogSessionPath(cwd string) (string, error) {
+	if cwd == "" {
+		return "", nil
+	}
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+	existing := nearestExistingDirectory(abs)
+	resolved, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return abs, nil
+	}
+	rest, err := filepath.Rel(existing, abs)
+	if err != nil {
+		return abs, nil
+	}
+	return filepath.Join(resolved, rest), nil
 }
 
 func canonicalCatalogPath(path string) (string, error) {
@@ -195,6 +372,22 @@ func catalogPathID(prefix, path string) string {
 	return prefix + "-" + hex.EncodeToString(digest[:12])
 }
 
+type catalogGitError struct {
+	args   []string
+	stderr string
+	err    error
+}
+
+func (e *catalogGitError) Error() string {
+	return fmt.Sprintf("git %s: %s", strings.Join(e.args, " "), strings.TrimSpace(e.stderr+" "+e.err.Error()))
+}
+
+func (e *catalogGitError) Unwrap() error { return e.err }
+
+// isCatalogNonGit reports git's answer that the folder is outside any
+// repository. Other failures, such as unreadable metadata or a dubious
+// ownership refusal, are transient for identity and keep the last project.
 func isCatalogNonGit(err error) bool {
-	return strings.Contains(err.Error(), "exit status 128")
+	var gitErr *catalogGitError
+	return errors.As(err, &gitErr) && strings.Contains(gitErr.stderr, "not a git repository")
 }

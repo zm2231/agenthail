@@ -128,8 +128,17 @@ func (d *Daemon) registerRecentClaudePeers(ctx context.Context, advertise func(c
 	var eligible []surface.Session
 	for _, record := range snapshot.Sessions {
 		session := record.Session
-		// Native Claude sessions publish their own records and socket endpoints.
-		if record.HostID != "" || session.Surface == surface.KindClaude || !configured[session.Surface] || record.Freshness.Stale || !claudePeerEligible(session, now) {
+		if record.Freshness.Stale || !claudePeerEligible(session, now) {
+			continue
+		}
+		// A paired host's sessions, Claude included, have no socket on this
+		// machine, so each one gets a peer while its host is connected.
+		// Native Claude sessions here publish their own records and sockets.
+		if record.HostID != "" {
+			if !d.hostConnected(record.HostID) {
+				continue
+			}
+		} else if session.Surface == surface.KindClaude || !configured[session.Surface] {
 			continue
 		}
 		eligible = append(eligible, session)

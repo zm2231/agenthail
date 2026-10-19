@@ -38,7 +38,7 @@ func TestCMUXLaunchUsesDirectArgvAndKeepsMessageOneArgument(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("CMUX_TEST_ARGS", logPath)
 	launcher := newCMUX().(*processLauncher)
-	request := LaunchRequest{Agent: KindCodex, Cwd: "/tmp/project", Model: "model x", Name: "named", Message: `$(touch /tmp/nope); "quoted"`}
+	request := LaunchRequest{Surface: KindCodex, Options: SessionStartOptions{Cwd: "/tmp/project", Model: "model x", Name: "named", Message: `$(touch /tmp/nope); "quoted"`}}
 	result, err := launcher.Launch(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestCMUXLaunchUsesDirectArgvAndKeepsMessageOneArgument(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSuffix(string(args), "\n"), "\n")
-	if !containsLine(lines, "--json") || !containsLine(lines, "--command") || !containsLine(lines, request.Name) || containsLine(lines, request.Message) {
+	if !containsLine(lines, "--json") || !containsLine(lines, "--command") || !containsLine(lines, request.Options.Name) || containsLine(lines, request.Options.Message) {
 		t.Fatalf("argv log = %#v", lines)
 	}
 	commandIndex := slices.Index(lines, "--command")
@@ -76,7 +76,7 @@ func TestCMUXLaunchUsesDirectArgvAndKeepsMessageOneArgument(t *testing.T) {
 	if err := json.Unmarshal(data, &intent); err != nil {
 		t.Fatal(err)
 	}
-	if len(intent.Argv) == 0 || intent.Argv[len(intent.Argv)-1] != request.Message {
+	if len(intent.Argv) == 0 || intent.Argv[len(intent.Argv)-1] != request.Options.Message {
 		t.Fatalf("intent did not preserve message: %#v", intent)
 	}
 	if executable, err := os.Executable(); err != nil || intent.Argv[0] != executable {
@@ -98,7 +98,7 @@ func TestCMUXMalformedAcceptedOutputCleansIntentAndReturnsAcceptedError(t *testi
 		args = append([]string(nil), got...)
 		return []byte("not-json"), nil
 	}
-	_, err := launcher.Launch(context.Background(), LaunchRequest{Agent: KindClaude, Cwd: "/tmp/project", Message: "hello"})
+	_, err := launcher.Launch(context.Background(), LaunchRequest{Surface: KindClaude, Options: SessionStartOptions{Cwd: "/tmp/project", Message: "hello"}})
 	var acceptedErr LaunchAcceptedError
 	if !errors.As(err, &acceptedErr) || acceptedErr.Launcher != LauncherCMUX {
 		t.Fatalf("err=%v", err)
@@ -206,7 +206,7 @@ func TestTMUXLaunchPassesMessageAsDirectArgument(t *testing.T) {
 		return []byte("build:1"), nil
 	}
 	message := `$(touch /tmp/nope); echo unsafe`
-	result, err := launcher.Launch(context.Background(), LaunchRequest{Agent: KindClaude, Cwd: "/work", Name: "build", Message: message})
+	result, err := launcher.Launch(context.Background(), LaunchRequest{Surface: KindClaude, Options: SessionStartOptions{Cwd: "/work", Name: "build", Message: message}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestTMUXLaunchClassifiesPostDispatchFailureAsAccepted(t *testing.T) {
 			launcher.run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
 				return test.run(args)
 			}
-			result, err := launcher.Launch(context.Background(), LaunchRequest{Agent: test.agent, Cwd: "/work", Message: "hello"})
+			result, err := launcher.Launch(context.Background(), LaunchRequest{Surface: test.agent, Options: SessionStartOptions{Cwd: "/work", Message: "hello"}})
 			var acceptedErr LaunchAcceptedError
 			if !test.accepted {
 				if err == nil || errors.As(err, &acceptedErr) || result.Location != nil {
@@ -313,7 +313,7 @@ func TestProcessLaunchFailsBeforeLaunchWhenClaudeIsMissing(t *testing.T) {
 		launched = true
 		return []byte("build:1"), nil
 	}
-	if _, err := launcher.Launch(context.Background(), LaunchRequest{Agent: KindClaude, Cwd: "/work", Message: "hello"}); err == nil || launched {
+	if _, err := launcher.Launch(context.Background(), LaunchRequest{Surface: KindClaude, Options: SessionStartOptions{Cwd: "/work", Message: "hello"}}); err == nil || launched {
 		t.Fatalf("launch with missing Claude executable err=%v launched=%v", err, launched)
 	}
 }
@@ -417,5 +417,16 @@ func TestTMUXFocusWithoutClientNamesAttachCommandOffMac(t *testing.T) {
 	}
 	if slices.Contains(commands, "osascript") {
 		t.Fatalf("commands=%q", commands)
+	}
+}
+
+func TestATerminalLaunchRefusesOptionsItCannotPassToTheAgent(t *testing.T) {
+	for _, options := range []SessionStartOptions{{Worktree: "w"}, {Agent: "reviewer"}, {PermissionMode: "plan"}, {ApprovalPolicy: "never"}, {TurnOptions: TurnOptions{Effort: "high"}}} {
+		options.Cwd, options.Message = "/work", "hello"
+		for _, launcher := range []Launcher{newCMUX(), newTMUX()} {
+			if _, err := launcher.Launch(context.Background(), LaunchRequest{Surface: KindClaude, Options: options}); !errors.Is(err, ErrLaunchOptionUnsupported) {
+				t.Fatalf("%s %+v: err=%v, want the option refused", launcher.ID(), options, err)
+			}
+		}
 	}
 }

@@ -576,7 +576,7 @@ func (s *Service) delegate(ctx context.Context, a Action) error {
 		s.published.Store(s.capture())
 	}
 	addressed := *target.Session
-	receipt, err := s.dispatcher.DeliverWithoutQueue(ctx, target.Adapter, target.Session, a.Text, "voice:"+v.AttemptID+":"+a.MessageID, surface.SendOptions{SourceSessionID: v.Session.ID})
+	receipt, err := s.dispatcher.DeliverWithoutQueue(ctx, target.Adapter, target.Session, a.Text, "voice:"+v.AttemptID+":"+a.MessageID, surface.SendOptions{SourceSessionID: v.Session.ID, Author: surface.AuthorPerson})
 	if target.Session.ID != addressed.ID {
 		v.Target = target.Session
 	}
@@ -586,11 +586,11 @@ func (s *Service) delegate(ctx context.Context, a Action) error {
 		}
 		return err
 	}
-	// The stream was prepared for the session as addressed, so voice follows a
-	// reply only when the send kept that identity and transport and the route
-	// carries turns.
+	// A delegation is the person speaking, so it is sent as their turn. The
+	// stream was prepared for the session as addressed, so voice follows a reply
+	// only when the send kept that identity and the route it took carries turns.
 	if receipt.Evidence == surface.EvidenceDelivered || receipt.Evidence == surface.EvidenceTransportAccepted {
-		if target.Session.ID != addressed.ID || target.Session.Transport != addressed.Transport || surface.RouteFor(target.Adapter, target.Session, "").TransportOnly() {
+		if target.Session.ID != addressed.ID || surface.RouteFor(target.Adapter, target.Session, surface.AuthorPerson).TransportOnly() {
 			if streamSubscription.Cancel != nil {
 				streamSubscription.Cancel()
 			}

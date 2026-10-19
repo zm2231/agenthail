@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -41,6 +42,7 @@ type threadCreateRequest struct {
 const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree <name>] [--agent <name>] [--permission-mode <mode>] [--host <host>] [--timeout <duration>] [--json]
        agenthail thread fork <target> [--model <model>] [--last-turn <id>] [--alias <name>] [--json]
        agenthail thread <status|stop|resume|logs> <target> [--json]
+       agenthail thread <archive|unarchive> <target> [--json]
        agenthail thread queue <target> <list|add|update|delete|reorder|start> [message] [--id <id>] [--ids <id,id>] [--client-id <stable-id>] [--cursor <cursor>] [--json]
 
 Codex threads start on Codex Desktop when its bridge is reachable and on Codex's app-server daemon otherwise.
@@ -51,6 +53,9 @@ func (a *App) cmdThread(args []string) error {
 		fmt.Println(threadUsage)
 		return nil
 	}
+	if len(args) > 0 && (args[0] == "archive" || args[0] == "unarchive") {
+		return a.cmdThreadArchive(args)
+	}
 	if len(args) > 0 && args[0] != "create" {
 		return a.cmdThreadOperation(args)
 	}
@@ -58,7 +63,7 @@ func (a *App) cmdThread(args []string) error {
 	if err != nil {
 		return err
 	}
-	if a.Registry == nil {
+	if a.registry() == nil {
 		return fmt.Errorf("registry not available")
 	}
 	if hostText := strings.TrimSpace(flagVal(args, "--host")); hostText != "" {
@@ -82,7 +87,7 @@ func (a *App) cmdThread(args []string) error {
 	if !ok {
 		return fmt.Errorf("%s cannot start conversations", request.surface)
 	}
-	if err := a.Registry.EnsureAliasAvailable(request.alias); err != nil {
+	if err := a.registry().EnsureAliasAvailable(request.alias); err != nil {
 		return fmt.Errorf("check thread alias: %w", err)
 	}
 	timeout, err := commandTimeout(args, a.DefaultTimeout)
@@ -91,14 +96,16 @@ func (a *App) cmdThread(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	messageUUID := uuid.NewString()
+	ctx = surface.WithMessageUUID(ctx, messageUUID)
 
 	session, deliveryResult, startErr := starter.StartSession(ctx, request.options)
 	if session != nil {
-		if err := a.Registry.RegisterSession(*session); err != nil {
+		if err := a.registry().RegisterSession(*session); err != nil {
 			return emitCreateStorageFailure(request, session, fmt.Sprintf("thread %s was created, but local registration failed: %s; do not retry automatically", session.ID, err))
 		}
 		if request.alias != "" {
-			if err := a.Registry.SetAlias(request.alias, session.ID); err != nil {
+			if err := a.registry().SetAlias(request.alias, session.ID); err != nil {
 				return emitCreateStorageFailure(request, session, fmt.Sprintf("thread %s was created, but its name could not be persisted: %s; do not retry automatically", session.ID, err))
 			}
 		}
@@ -107,7 +114,7 @@ func (a *App) cmdThread(args []string) error {
 	output := threadCreateOutput{OK: startErr == nil, Session: session, Delivery: deliveryResult, Alias: request.alias}
 	if startErr != nil {
 		if session != nil {
-			intent, intentErr := a.Registry.RecordSessionCreationIntent(session.ID, request.message)
+			intent, intentErr := a.registry().RecordSessionCreationIntent(session.ID, messageUUID, request.message)
 			if intentErr != nil {
 				output.Status = "storage_failed"
 				output.Retryable = false
@@ -116,11 +123,11 @@ func (a *App) cmdThread(args []string) error {
 			}
 			output.DeliveryID = intent.ID
 			if surface.IsDeliveryOutcomeUnknown(startErr) {
-				recordThreadCreateHistory(a.Registry, "submitted", session, request.message, "", startErr.Error())
+				recordThreadCreateHistory(a.registry(), "submitted", session, request.message, "", startErr.Error())
 				return emitSubmittedThreadOutput(request, output)
 			}
-			_, _ = a.Registry.FailDeliveryIntentWithNotice(intent.ID, startErr.Error())
-			recordThreadCreateHistory(a.Registry, "failed", session, request.message, "", startErr.Error())
+			_, _ = a.registry().FailDeliveryIntentWithNotice(intent.ID, startErr.Error())
+			recordThreadCreateHistory(a.registry(), "failed", session, request.message, "", startErr.Error())
 			output.OK = false
 			output.Status = "failed"
 			output.Retryable = false
@@ -133,7 +140,7 @@ func (a *App) cmdThread(args []string) error {
 		if ambiguous {
 			output.Error = fmt.Sprintf("initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: %s", startErr)
 		}
-		recordThreadCreateHistory(a.Registry, kind, session, request.message, "", output.Error)
+		recordThreadCreateHistory(a.registry(), kind, session, request.message, "", output.Error)
 		output.Status = "failed"
 		output.Retryable = false
 		if ambiguous {
@@ -149,11 +156,11 @@ func (a *App) cmdThread(args []string) error {
 		result = deliveryResult.UUID
 	}
 	if result != "" {
-		if err := a.Registry.MarkDeliveryStarted(session.ID, result, ""); err != nil {
-			_ = a.Registry.RecordHistory(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, Message: request.message, Result: result, Error: err.Error()})
+		if err := a.registry().MarkDeliveryStarted(session.ID, result, ""); err != nil {
+			_ = a.registry().RecordHistory(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, Message: request.message, Result: result, Error: err.Error()})
 		}
 	}
-	recordThreadCreateHistory(a.Registry, "sent", session, request.message, result, "")
+	recordThreadCreateHistory(a.registry(), "sent", session, request.message, result, "")
 	if request.jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(output)
 	}

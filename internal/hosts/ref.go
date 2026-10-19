@@ -25,7 +25,7 @@ func Split(ref string) (host, target string, ok bool) {
 	return host, target, true
 }
 
-var qualifiedKeys = map[string]bool{"sessionId": true, "parentId": true, "rootId": true, "fromSession": true, "toSession": true, "forkedFrom": true}
+var qualifiedKeys = map[string]bool{"sessionId": true, "projectId": true, "parentId": true, "rootId": true, "fromSession": true, "toSession": true, "forkedFrom": true}
 
 func sessionReferenceKey(key string) bool {
 	return qualifiedKeys[key] || strings.HasSuffix(key, "SessionId")

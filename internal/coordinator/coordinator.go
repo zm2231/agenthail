@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -234,7 +235,8 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	if spec.Surface == string(surface.KindClaude) {
 		options.Name, options.PermissionMode = spec.Name, spec.PermissionMode
 	}
-	session, sent, startErr := starter.StartSession(ctx, options)
+	messageUUID := uuid.NewString()
+	session, sent, startErr := starter.StartSession(surface.WithMessageUUID(ctx, messageUUID), options)
 	if session == nil {
 		if startErr == nil {
 			startErr = errors.New("session starter returned no session")
@@ -250,7 +252,7 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	}
 	outcome := &Outcome{Session: session, Started: true, Previous: previous, Reason: reason}
 	if startErr != nil {
-		intent, intentErr := s.Registry.RecordSessionCreationIntent(session.ID, message)
+		intent, intentErr := s.Registry.RecordSessionCreationIntent(session.ID, messageUUID, message)
 		if intentErr != nil {
 			return nil, errors.Join(startErr, intentErr)
 		}

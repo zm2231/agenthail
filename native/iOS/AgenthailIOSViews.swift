@@ -174,11 +174,14 @@ struct SessionRouteView: View {
     private var session: SessionState? {
         if let value = model.snapshot?.sessions.first(where: { $0.id == sessionID }) { return value }
         if let value = model.searchResults.first(where: { $0.id == sessionID })?.session { return value }
+        if let value = model.fetchedSubagents.session(sessionID) { return value }
         guard let detail = model.selectedDetail, detail.session.id == sessionID else { return nil }
-        return SessionState(id: sessionID, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
-                            status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: false,
-                            current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly,
-                            readOnlyReason: detail.readOnlyReason)
+        var unlisted = SessionState(id: sessionID, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
+                                    status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: false,
+                                    current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly,
+                                    readOnlyReason: detail.readOnlyReason)
+        unlisted.host = model.snapshot?.daemon.pairedHost(owning: sessionID)
+        return unlisted
     }
     var body: some View {
         Group {
@@ -199,28 +202,23 @@ struct ConversationListView: View {
     @ObservedObject var model: AgenthailIOSModel
     var selectedID: String? = nil
     let openSession: (String) -> Void
-    @State private var scope = SessionScope.recent
+    @State private var scope = SessionFilter.recent
     @State private var showingNewSession = false
     @State private var search = ""
-    @State private var collapsedWorkspaces: Set<String> = []
+    @State private var collapsedProjects: Set<String> = []
     @State private var expandedFamilies: Set<String> = []
 
-    private enum SessionScope: String, CaseIterable {
-        case running = "Running", recent = "Recent", all = "All"
+    private var tree: SessionTree {
+        let sessions = SessionFamilies.build(model.snapshot?.sessions ?? []).filter { family in
+            search.isEmpty || family.sessions.contains { session in
+                session.displayName.localizedCaseInsensitiveContains(search) || SessionFamilies.label(session).localizedCaseInsensitiveContains(search) || session.surface.localizedCaseInsensitiveContains(search) || (session.project?.displayName.localizedCaseInsensitiveContains(search) ?? false) || (session.cwd?.localizedCaseInsensitiveContains(search) ?? false)
+            }
+        }.flatMap(\.sessions)
+        return SessionTree.build(sessions, filter: scope, attentionSessionIDs: Set(model.snapshot?.attention.map(\.sessionId) ?? []))
     }
 
     private var families: [SessionFamily] {
-        SessionFamilies.build(model.snapshot?.sessions ?? []).filter { family in
-            let matchesScope = scope == .all || (scope == .running ? family.isWorking : family.isCurrent)
-            let matchesSearch = search.isEmpty || family.sessions.contains { session in
-                session.displayName.localizedCaseInsensitiveContains(search) || SessionFamilies.label(session).localizedCaseInsensitiveContains(search) || session.surface.localizedCaseInsensitiveContains(search) || (session.cwd?.localizedCaseInsensitiveContains(search) ?? false)
-            }
-            return matchesScope && matchesSearch
-        }
-    }
-
-    private var workspaces: [WorkspaceGroup] {
-        WorkspaceHierarchy.groups(for: families.map { $0.root.cwd ?? "" })
+        tree.projects.flatMap { $0.checkouts.flatMap(\.families) }
     }
 
     var body: some View {
@@ -231,7 +229,7 @@ struct ConversationListView: View {
             Label(model.reconnecting ? "Reconnecting to your Mac" : "Work on your Mac", systemImage: "desktopcomputer")
                 .font(.subheadline).foregroundStyle(.secondary).listRowSeparator(.hidden)
             Picker("Sessions to show", selection: $scope) {
-                ForEach(SessionScope.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                ForEach(SessionFilter.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             .listRowSeparator(.hidden)
@@ -239,44 +237,48 @@ struct ConversationListView: View {
                 VoiceOperatorEntry(model: model)
                     .listRowSeparator(.hidden)
             }
-            ForEach(workspaces) { group in
-                let workspace = group.path
+            let tree = tree
+            ForEach(tree.projects) { project in
+                let collapsed = collapsedProjects.contains(project.id)
                 Section {
-                    if !collapsedWorkspaces.contains(workspace) {
-                        ForEach(families.filter { WorkspaceHierarchy.normalize($0.root.cwd ?? "") == workspace }) { family in familyRows(family) }
-                    }
+                    ForEach(project.checkouts.flatMap(\.families).filter { !collapsed || project.pinned.contains($0.id) }) { family in familyRows(family) }
                 } header: {
                     Button {
-                        if !collapsedWorkspaces.insert(workspace).inserted { collapsedWorkspaces.remove(workspace) }
+                        if !collapsedProjects.insert(project.id).inserted { collapsedProjects.remove(project.id) }
                     } label: {
                         HStack(spacing: 8) {
-                            Image(systemName: "folder")
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(workspace.isEmpty ? "Other locations" : URL(fileURLWithPath: workspace).lastPathComponent)
-                                    .font(.subheadline.weight(.semibold))
-                                if !workspace.isEmpty {
-                                    Text(workspace).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                                }
+                            Image(systemName: project.identity == nil ? "tray" : project.archived ? "archivebox" : "folder")
+                            Text(project.name)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                            if let host = project.host {
+                                IOSHostBadge(name: host)
                             }
                             Spacer(minLength: 0)
-                            Image(systemName: collapsedWorkspaces.contains(workspace) ? "chevron.right" : "chevron.down")
+                            Image(systemName: collapsed ? "chevron.right" : "chevron.down")
                                 .font(.caption.weight(.semibold))
                         }
-                        .padding(.leading, CGFloat(group.depth) * 16)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.primary)
                     .textCase(nil)
-                    .accessibilityLabel("Workspace \(workspace.isEmpty ? "Other locations" : workspace)")
-                    .accessibilityValue(collapsedWorkspaces.contains(workspace) ? "Collapsed" : "Expanded")
-                    .accessibilityIdentifier("workspace-" + workspace)
+                    .contextMenu {
+                        if let identity = project.identity {
+                            Button(project.archived ? "Unarchive Project" : "Archive Project", systemImage: "archivebox") {
+                                Task { await model.setProjectArchived(identity.id, !project.archived) }
+                            }
+                        }
+                    }
+                    .accessibilityLabel(project.host.map { "Project \(project.name) on \($0)" } ?? "Project \(project.name)")
+                    .accessibilityValue(collapsed ? "Collapsed" : "Expanded")
+                    .accessibilityIdentifier("project-" + project.id)
                 }
             }
             if families.isEmpty && !model.searching {
                 ContentUnavailableView {
-                    Label(scope == .running ? "No agents working" : "No sessions here", systemImage: "bubble.left.and.bubble.right")
+                    Label(scope == .running ? "No agents working" : scope == .archived ? "Nothing archived" : "No sessions here", systemImage: "bubble.left.and.bubble.right")
                 } description: {
                     Text(search.isEmpty ? "Start a session, or browse All to continue earlier work." : "Try another title or search All sessions.")
                 } actions: {
@@ -354,54 +356,14 @@ struct ConversationListView: View {
         }
         .buttonStyle(.plain)
         .listRowBackground(selectedID == session.id ? SessionStyle.surface : Color.clear)
+        .swipeActions(edge: .trailing) {
+            if snippet == nil {
+                Button(session.archived == true ? "Unarchive" : "Archive", systemImage: "archivebox") {
+                    Task { await model.setArchived(sessionID: session.id, session.archived != true) }
+                }
+            }
+        }
         .accessibilityIdentifier("session-" + session.id)
-    }
-}
-
-struct WorkspaceGroup: Identifiable, Equatable {
-    let path: String
-    let depth: Int
-    var id: String { path }
-}
-
-enum WorkspaceHierarchy {
-    static func groups(for paths: [String]) -> [WorkspaceGroup] {
-        var seen = Set<String>()
-        let unique = paths.map(normalize).filter { seen.insert($0).inserted }
-        let indexed = Dictionary(uniqueKeysWithValues: unique.enumerated().map { ($0.element, $0.offset) })
-        var children: [String?: [String]] = [:]
-        for path in unique {
-            let parent = unique
-                .filter { $0 != path && isAncestor($0, of: path) }
-                .max { components($0).count < components($1).count }
-            children[parent, default: []].append(path)
-        }
-        for key in children.keys {
-            children[key]?.sort { indexed[$0, default: 0] < indexed[$1, default: 0] }
-        }
-        var result: [WorkspaceGroup] = []
-        func append(_ path: String, depth: Int) {
-            result.append(WorkspaceGroup(path: path, depth: depth))
-            for child in children[path] ?? [] { append(child, depth: depth + 1) }
-        }
-        for root in children[nil] ?? [] { append(root, depth: 0) }
-        return result
-    }
-
-    static func normalize(_ path: String) -> String {
-        guard !path.isEmpty else { return "" }
-        return URL(fileURLWithPath: path).standardizedFileURL.path
-    }
-
-    private static func components(_ path: String) -> [String] {
-        guard !path.isEmpty else { return [] }
-        return URL(fileURLWithPath: path).standardizedFileURL.pathComponents
-    }
-
-    private static func isAncestor(_ candidate: String, of path: String) -> Bool {
-        let parent = components(candidate)
-        let child = components(path)
-        return !parent.isEmpty && parent.count < child.count && child.starts(with: parent)
     }
 }
 
@@ -563,7 +525,7 @@ struct SessionScreen: View {
                     VStack(spacing: 2) {
                         Text(displayTitle).font(.body.weight(.semibold)).lineLimit(1)
                         if let cwd = detail?.session.cwd, !cwd.isEmpty {
-                            Text(URL(fileURLWithPath: cwd).lastPathComponent + " · Mac").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            Text(URL(fileURLWithPath: cwd).lastPathComponent + " · " + (session.remoteHostID == nil ? "Mac" : session.host?.name ?? "Mac")).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
                 }
@@ -574,8 +536,10 @@ struct SessionScreen: View {
                             Text("Chat").tag(false)
                             Text("All events").tag(true)
                         }
-                        Button("Call this session", systemImage: "phone.fill") {
-                            showingVoice = true
+                        if session.canCallByVoice {
+                            Button("Call this session", systemImage: "phone.fill") {
+                                showingVoice = true
+                            }
                         }
                     } label: { Image(systemName: "ellipsis") }
                     .accessibilityLabel("Session menu")
@@ -634,7 +598,7 @@ struct IOSComposer: View {
 
     private var canSend: Bool {
         !sending && !model.pendingControls.contains(session.id)
-            && !model.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !ComposerAttachments.isEmpty(text: model.composer, attachments: model.composerAttachments)
             && (steering || detail.capabilities.send)
     }
 
@@ -650,6 +614,13 @@ struct IOSComposer: View {
                     .accessibilityIdentifier("latest-instruction")
             }
             VStack(alignment: .leading, spacing: 6) {
+                if !model.composerAttachments.isEmpty {
+                    ComposerAttachmentStrip(model: model)
+                }
+                if let problem = model.attachmentProblem {
+                    Text(problem).font(.footnote).foregroundStyle(.red).padding(.horizontal, 8)
+                        .accessibilityIdentifier("attachment-problem")
+                }
                 TextField(steering ? "Steer this turn…" : "Message this agent…", text: $model.composer, axis: .vertical)
                     .font(.body).lineLimit(1...6).textFieldStyle(.plain)
                     .padding(.horizontal, 8).padding(.top, 8)
@@ -657,6 +628,10 @@ struct IOSComposer: View {
                     .accessibilityIdentifier("composer-input")
                 let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
                 layout {
+                    if detail.capabilities.attach && detail.capabilities.send {
+                        ComposerAttachmentMenu(model: model)
+                            .disabled(sending)
+                    }
                     if detail.capabilities.model {
                         Button { showingModels = true } label: { modelLabel }
                         .buttonStyle(.plain)
@@ -734,7 +709,7 @@ struct IOSComposer: View {
         return options.first { $0.id == detail.model } ?? (detail.model == nil ? options.first { $0.default == true } : nil)
     }
     private func loadModels() async throws -> [ModelOption] {
-        let options = try await model.creationModels(surface: session.surface)
+        let options = try await model.creationModels(surface: session.surface, host: session.remoteHostID)
         loadedModels = options
         return options
     }
@@ -755,6 +730,7 @@ struct IOSMessage: View {
     let text: String
     let color: Color
     var timestamp: String? = nil
+    var files: [AttachedFile] = []
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.editMessage) private var editMessage
     @State private var showingFullMessage = false
@@ -764,12 +740,17 @@ struct IOSMessage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if isUser {
-                Text(isLongMessage ? String(text.prefix(700)) : text)
-                    .font(.body)
-                    .lineSpacing(4)
-                    .lineLimit(isLongMessage ? 6 : nil)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+                if !text.isEmpty {
+                    Text(isLongMessage ? String(text.prefix(700)) : text)
+                        .font(.body)
+                        .lineSpacing(4)
+                        .lineLimit(isLongMessage ? 6 : nil)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                ForEach(Array(files.enumerated()), id: \.offset) { _, file in
+                    AttachedFileChip(file: file)
+                }
                 if isLongMessage {
                     Button("Read full message") { showingFullMessage = true }
                         .font(.subheadline.weight(.medium))
@@ -800,6 +781,44 @@ struct IOSMessage: View {
     }
 }
 
+// The file lives on the host that owns the session, so the phone offers its
+// stored path rather than the file.
+struct AttachedFileChip: View {
+    let file: AttachedFile
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            UIPasteboard.general.string = file.path
+            copied = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "doc").foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(file.name).font(.subheadline.weight(.medium)).lineLimit(1)
+                    Text(copied ? "Path copied" : file.sizeLabel ?? "File")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: copied ? "checkmark" : "doc.on.doc").font(.footnote).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .disabled(file.path.isEmpty)
+        .accessibilityLabel("\(file.name), \(file.sizeLabel ?? "file")")
+        .accessibilityHint("Copies the path where the agent can read this file")
+        .accessibilityIdentifier("attached-file")
+        .task(id: copied) {
+            guard copied else { return }
+            try? await Task.sleep(for: .seconds(2))
+            copied = false
+        }
+    }
+}
+
 struct IOSTimelineRow: View {
     let item: TimelineItem
     var compactContext = true
@@ -813,7 +832,7 @@ struct IOSTimelineRow: View {
         if compactContext, let title = TranscriptContext.title(for: item) {
             ContextRecordRow(title: title, item: item)
         } else if item.kind == "message" {
-            IOSMessage(label: messageLabel, text: item.text, color: .secondary, timestamp: item.timestamp)
+            IOSMessage(label: messageLabel, text: item.text, color: .secondary, timestamp: item.timestamp, files: item.files ?? [])
             if item.truncated { shortened }
         } else if item.kind == "attachment" {
             AttachmentRow(item: item, loader: attachmentLoader.map { loader in { await loader(item) } })
@@ -982,6 +1001,7 @@ struct SessionInspector: View {
         guard let liveDetail = model.selectedDetail, liveDetail.session.id == session.id else { return initialDetail }
         return liveDetail
     }
+    private var liveSession: SessionState { model.snapshot?.sessions.first { $0.id == session.id } ?? session }
     var body: some View {
         NavigationStack {
             List {
@@ -1046,6 +1066,29 @@ struct SessionInspector: View {
                         }
                     }
                 }
+                let children = model.subagents(of: session.id)
+                let subagentsLoading = model.fetchedSubagents.loading(liveSession)
+                let subagentsError = model.fetchedSubagents.errors[session.id]
+                if !children.isEmpty || subagentsLoading || subagentsError != nil {
+                    Section("Subagents") {
+                        if subagentsLoading || subagentsError != nil {
+                            Text(subagentsError ?? "Loading subagents").foregroundStyle(.secondary)
+                        }
+                        ForEach(children) { child in
+                            Button {
+                                dismiss()
+                                model.openSession(child.id)
+                            } label: {
+                                HStack {
+                                    Text(SessionFamilies.label(child)).lineLimit(1)
+                                    Spacer(minLength: 0)
+                                    if child.isWorking { Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(SessionStyle.accent) }
+                                }
+                            }
+                            .accessibilityIdentifier("subagent-" + child.id)
+                        }
+                    }
+                }
                 if let links = detail.claudeSubagents, !links.isEmpty {
                     Section("Claude subagents") {
                         ForEach(links) { link in
@@ -1071,7 +1114,7 @@ struct SessionInspector: View {
                     }
                 }
                 Section("Controls") {
-                    if detail.session.runtime?.focusable == true {
+                    if session.runtime?.focusable == true {
                         Button("Open in host", systemImage: "arrow.up.forward.app") { model.focusSession(session); dismiss() }
                     }
                     if detail.readOnly { Label(detail.readOnlyReason, systemImage: "lock").font(.footnote) }
@@ -1089,6 +1132,7 @@ struct SessionInspector: View {
             }
             .navigationTitle("Session details").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .task(id: SubagentFetchKey(liveSession, revision: model.fetchedSubagents.revision(session.id))) { await model.loadSubagents(of: liveSession) }
             .sheet(isPresented: $showingModels) {
                 SearchableModelSelectionSheet(initialOptions: detail.models ?? [], currentSelectedID: detail.model, allowsDefault: false, onSelect: { value in
                     if let value {
@@ -1098,7 +1142,7 @@ struct SessionInspector: View {
                         model.action("model", session: session, model: value)
                         dismiss()
                     }
-                }, reload: { try await model.creationModels(surface: session.surface) })
+                }, reload: { try await model.creationModels(surface: session.surface, host: session.remoteHostID) })
             }
         }
     }
@@ -1136,20 +1180,34 @@ struct IOSSessionRow: View {
             let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
             layout {
                 Text(SessionStyle.agentName(session.surface)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                if let host = session.remoteHostName {
-                    Label(host, systemImage: session.isUnavailable ? "wifi.slash" : "server.rack")
-                        .font(.caption)
-                        .foregroundStyle(session.isUnavailable ? Color.orange : Color.secondary)
+                    .lineLimit(1).fixedSize()
+                if let host = session.shortRemoteHostName {
+                    IOSHostBadge(name: host, unavailable: session.isUnavailable)
                         .accessibilityLabel(session.isUnavailable ? "Unavailable on \(host)" : "On \(host)")
                 }
                 if session.isWaitingOnYou {
-                    Label("Waiting on you", systemImage: "questionmark.bubble").font(.caption).foregroundStyle(SessionStyle.accent)
+                    HStack(spacing: 4) {
+                        Image(systemName: "questionmark.bubble")
+                        Text("Waiting on you")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(SessionStyle.accent)
+                    .lineLimit(1)
+                    .fixedSize()
                 } else if session.isWorking {
-                    Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(SessionStyle.accent)
+                    HStack(spacing: 4) {
+                        Image(systemName: "waveform")
+                        Text("Working")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(SessionStyle.accent)
+                    .lineLimit(1)
+                    .fixedSize()
                 }
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
                 if let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
                     Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).fixedSize()
                 }
             }
             if session.isUnavailable, let reason = session.unavailableReason {
@@ -1169,6 +1227,25 @@ struct IOSSessionRow: View {
         }
         .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A one-line host label for remote sessions and projects. It truncates
+/// rather than wrapping so it never squeezes the row's status.
+struct IOSHostBadge: View {
+    let name: String
+    var unavailable = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: unavailable ? "wifi.slash" : "server.rack").imageScale(.small)
+            Text(name).lineLimit(1).truncationMode(.tail)
+        }
+        .font(.caption)
+        .foregroundStyle(unavailable ? Color.orange : Color.secondary)
+        .frame(maxWidth: 110, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .layoutPriority(-1)
     }
 }
 

@@ -21,6 +21,7 @@ import (
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/uploads"
 )
 
 const hostPairTimeout = 20 * time.Second
@@ -158,7 +159,7 @@ func (d *Daemon) addHostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), hostPairTimeout)
 	defer cancel()
-	token, version, err := hosts.Pair(ctx, link, address, d.hostIdentity().Name, hosts.ClientOptions{RootCAs: d.federation.rootCAs})
+	token, version, err := hosts.Pair(ctx, link, address, d.hostIdentity().Name, d.hostIdentity().ID, hosts.ClientOptions{RootCAs: d.federation.rootCAs})
 	if err != nil {
 		var status hosts.StatusError
 		if errors.As(err, &status) {
@@ -199,9 +200,7 @@ func (d *Daemon) revokeRemoteDevice(token, endpoint, address string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if response, err := client.Do(ctx, http.MethodDelete, "/api/v1/device", nil, nil, nil); err == nil {
-		response.Body.Close()
-	}
+	client.RevokeDevice(ctx)
 }
 
 func (d *Daemon) removeHostHandler(w http.ResponseWriter, r *http.Request) {
@@ -410,8 +409,8 @@ func (d *Daemon) resolveMirrored(host *pairedHost, target string) []resolveMatch
 	return matches
 }
 
-// hostRouted forwards a GET whose session (param) or host query names a
-// paired host; everything else reaches next unchanged.
+// hostRouted forwards a request whose session (param) or host query names a
+// paired host, body included; everything else reaches next unchanged.
 func (d *Daemon) hostRouted(param string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
@@ -450,12 +449,36 @@ func (d *Daemon) hostRouted(param string, next http.HandlerFunc) http.HandlerFun
 			next(w, r)
 			return
 		}
+		if !writeIncompatibleHost(w, host) {
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "-stream") {
 			d.relayHostStream(w, r, host, query)
 			return
 		}
-		d.forwardHostRequest(w, r, host, r.Method, query, nil)
+		var body []byte
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			read, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxForwardedBodyBytes))
+			if err != nil {
+				writeAPIError(w, http.StatusRequestEntityTooLarge, "request_too_large", "The request body is too large to forward.")
+				return
+			}
+			body = read
+		}
+		d.forwardHostRequest(w, r, host, r.Method, query, body)
 	}
+}
+
+// writeIncompatibleHost refuses to forward to a host whose federation
+// version this daemon does not speak, so an older host never answers a
+// request it would misread. It reports whether the request may proceed.
+func writeIncompatibleHost(w http.ResponseWriter, host *pairedHost) bool {
+	state, detail := host.status()
+	if state != hostStateIncompatible {
+		return true
+	}
+	writeAPIError(w, http.StatusConflict, "host_incompatible", fmt.Sprintf("Host %s needs an update: %s", host.record.Name, detail))
+	return false
 }
 
 // writeRouteError answers a request routeSession refused: a qualifier naming
@@ -489,10 +512,16 @@ func writeHostReadError(w http.ResponseWriter, host *pairedHost, err error) {
 	writeAPIError(w, http.StatusServiceUnavailable, "host_unreachable", fmt.Sprintf("Host %s is unreachable: %s", host.record.Name, err))
 }
 
+// maxForwardedBodyBytes admits the largest upload with room for nothing else.
+const maxForwardedBodyBytes = uploads.MaxFileBytes + 1
+
 func (d *Daemon) forwardHostRequest(w http.ResponseWriter, r *http.Request, host *pairedHost, method string, query url.Values, body []byte) {
 	header := http.Header{}
 	if key := r.Header.Get(actionIdempotencyHeader); key != "" {
 		header.Set(actionIdempotencyHeader, key)
+	}
+	if contentType := r.Header.Get("Content-Type"); body != nil && contentType != "" {
+		header.Set("Content-Type", contentType)
 	}
 	response, err := host.client.Do(r.Context(), method, apiPath(r.URL.Path), query, body, header)
 	if err != nil {
@@ -611,7 +640,7 @@ func (d *Daemon) hostRoutedAction(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
-		host, rewritten, err := d.routeActionRequest(request)
+		host, rewritten, err := d.routeActionRequest(r.Context(), request)
 		if err != nil {
 			var owned registry.SessionOwnedError
 			if errors.As(err, &owned) {
@@ -629,14 +658,19 @@ func (d *Daemon) hostRoutedAction(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
+		if !writeIncompatibleHost(w, host) {
+			return
+		}
 		body, _ := json.Marshal(request)
 		d.forwardHostAction(w, r, host, request, body)
 	}
 }
 
-var actionSessionFields = []string{"sessionId", "sourceSessionId", "targetId", "fromId", "toId"}
+var actionSessionFields = []string{"sessionId", "targetId", "fromId", "toId"}
 
-func (d *Daemon) routeActionRequest(request map[string]any) (*pairedHost, bool, error) {
+// routeActionRequest picks the host an action runs on from the sessions it
+// acts on. The sender it names is routed separately by routeSource.
+func (d *Daemon) routeActionRequest(ctx context.Context, request map[string]any) (*pairedHost, bool, error) {
 	var host *pairedHost
 	local := false
 	rewritten := false
@@ -670,6 +704,27 @@ func (d *Daemon) routeActionRequest(request map[string]any) (*pairedHost, bool, 
 			}
 		}
 	}
+	if value, ok := request["projectId"].(string); ok {
+		if hostRef, target, qualified := hosts.Split(strings.TrimSpace(value)); qualified {
+			var owner *pairedHost
+			if !d.isLocalHostRef(hostRef) {
+				found, exists := d.pairedHost(hostRef)
+				if !exists {
+					return nil, false, fmt.Errorf("%w %q", errUnknownHost, hostRef)
+				}
+				owner = found
+			}
+			if err := assign(owner); err != nil {
+				return nil, false, err
+			}
+			request["projectId"] = target
+			rewritten = true
+		}
+	}
+	action, _ := request["action"].(string)
+	if strings.HasPrefix(action, "channel-") || strings.HasPrefix(action, "relay-") {
+		return d.routeLinkAction(ctx, request, action, host, local, rewritten)
+	}
 	for _, field := range actionSessionFields {
 		value, ok := request[field].(string)
 		if !ok || strings.TrimSpace(value) == "" {
@@ -688,14 +743,157 @@ func (d *Daemon) routeActionRequest(request map[string]any) (*pairedHost, bool, 
 		}
 	}
 	if host != nil {
-		if action, _ := request["action"].(string); strings.HasPrefix(action, "channel-") || strings.HasPrefix(action, "relay-") || strings.HasPrefix(action, "queue-") || action == "delivery-dismiss" {
-			return nil, false, fmt.Errorf("%s is not available for sessions on host %s", action, host.record.Name)
+		if action == "session-focus" {
+			return nil, false, fmt.Errorf("opening the terminal is not available for sessions on another host yet; this session runs on host %s", host.record.Name)
 		}
-		if source, _ := request["sourceSessionId"].(string); source != "" {
-			return nil, false, fmt.Errorf("a message from a session cannot be relayed to host %s", host.record.Name)
+		if strings.HasPrefix(action, "queue-") || action == "delivery-dismiss" {
+			return nil, false, fmt.Errorf("%s is not available for sessions on another host yet", action)
 		}
 	}
-	return host, rewritten, nil
+	sourceRewritten, err := d.routeSource(ctx, request, host)
+	if err != nil {
+		return nil, false, err
+	}
+	return host, rewritten || sourceRewritten, nil
+}
+
+// routeLinkAction routes a relay or channel action to the daemon that owns
+// the link: a relay lives with its source, where its completions are seen; a
+// channel lives where it was made, which the request names with host. Every
+// other session the action names is rewritten for that daemon, so a session
+// of this host reaches it qualified and resolves there as its mirrored row.
+func (d *Daemon) routeLinkAction(ctx context.Context, request map[string]any, action string, named *pairedHost, namedLocal, rewritten bool) (*pairedHost, bool, error) {
+	owner := named
+	if action == "relay-add" {
+		from, _ := request["fromId"].(string)
+		routed, rawID, err := d.routeSession(from)
+		if err != nil {
+			return nil, false, err
+		}
+		if (named != nil || namedLocal) && routed != named {
+			return nil, false, fmt.Errorf("a relay lives on the host of its source; %s is not on the host this request names", from)
+		}
+		owner = routed
+		if rawID != from {
+			request["fromId"], rewritten = rawID, true
+		}
+	}
+	for _, field := range []string{"toId", "targetId", "sessionId"} {
+		value, ok := request[field].(string)
+		if !ok || strings.TrimSpace(value) == "" {
+			continue
+		}
+		relative, err := d.sessionRelativeTo(owner, value)
+		if err != nil {
+			return nil, false, err
+		}
+		if relative != value {
+			request[field], rewritten = relative, true
+		}
+	}
+	sourceRewritten, err := d.routeSource(ctx, request, owner)
+	if err != nil {
+		return nil, false, err
+	}
+	return owner, rewritten || sourceRewritten, nil
+}
+
+// sessionRelativeTo names a session the way the daemon of owner (nil for
+// this one) resolves it.
+func (d *Daemon) sessionRelativeTo(owner *pairedHost, ref string) (string, error) {
+	routed, rawID, err := d.routeSession(ref)
+	if errors.Is(err, errUnknownHost) {
+		return "", fmt.Errorf("%s is on a host this host has not paired; pair it here first: run 'agenthail hosts invite' on that host, then 'agenthail hosts add <pairing-link>' here", ref)
+	}
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case routed == owner:
+		return rawID, nil
+	case routed == nil:
+		return hosts.Qualify(d.hostIdentity().ID, rawID), nil
+	case owner == nil:
+		return rawID, nil
+	default:
+		return "", fmt.Errorf("%s is on host %s; a relay or channel on host %s can reach only that host's and this host's sessions", ref, routed.record.Name, owner.record.Name)
+	}
+}
+
+// routeSource rewrites the sender an action names for the daemon that will
+// deliver it. Only a session's own host names it as a sender. Forwarding to a
+// host qualifies a local sender with this host's id, so the receiver can reply
+// across the pairing. Receiving from a host, the sender must be qualified with
+// the host whose token sent the request, and becomes its mirrored row when
+// that host is paired back, otherwise a sender with no reply address.
+func (d *Daemon) routeSource(ctx context.Context, request map[string]any, target *pairedHost) (bool, error) {
+	source, _ := request["sourceSessionId"].(string)
+	source = strings.TrimSpace(source)
+	senderName, _ := request["sourceName"].(string)
+	delete(request, "sourceName")
+	if source == "" {
+		return senderName != "", nil
+	}
+	if target != nil {
+		routed, rawID, err := d.routeSession(source)
+		if err != nil {
+			return false, err
+		}
+		if routed != nil {
+			return false, fmt.Errorf("%s is a session on host %s; only that host can send as it", source, routed.record.Name)
+		}
+		request["sourceSessionId"] = hosts.Qualify(d.hostIdentity().ID, rawID)
+		request["sourceName"] = d.senderName(rawID)
+		return true, nil
+	}
+	principalHost, fromHost := requestingHost(ctx)
+	hostRef, rawID, qualified := hosts.Split(source)
+	if !fromHost {
+		_, rawID, err := d.routeSession(source)
+		if err != nil {
+			return false, err
+		}
+		request["sourceSessionId"] = rawID
+		return rawID != source, nil
+	}
+	if !qualified {
+		return false, fmt.Errorf("host_mismatch: a host names its sender qualified with its own host id")
+	}
+	if principalHost == "" {
+		return false, errUnboundHostToken
+	}
+	if hostRef != principalHost {
+		return false, fmt.Errorf("host_mismatch: a host may only name its own sessions as the sender")
+	}
+	if host, paired := d.pairedHost(hostRef); paired {
+		if owner, err := d.Registry.SessionHost(rawID); err == nil && owner == host.record.ID {
+			request["sourceSessionId"] = rawID
+			return true, nil
+		}
+	}
+	if senderName = strings.TrimSpace(senderName); senderName == "" {
+		senderName = rawID
+	}
+	sender, err := d.Registry.EnsureUnrepliableSender(principalHost, rawID, requestingHostName(ctx)+"/"+senderName)
+	if err != nil {
+		return false, err
+	}
+	request["sourceSessionId"] = sender
+	return true, nil
+}
+
+var errUnboundHostToken = errors.New("this host was paired before hosts could name their sessions as senders; pair it again: run 'agenthail hosts invite' on this machine, then 'agenthail hosts add <pairing-link>' on the other host")
+
+// senderName is how a receiving host names one of this host's sessions when
+// it cannot mirror it: the alias, else the session's name.
+func (d *Daemon) senderName(sessionID string) string {
+	if alias, err := d.Registry.ReverseAlias(sessionID); err == nil && alias != "" {
+		return "@" + alias
+	}
+	if _, name, _, err := d.Registry.GetSession(sessionID); err == nil && name != "" {
+		return name
+	}
+	return sessionID
 }
 
 func (d *Daemon) forwardHostAction(w http.ResponseWriter, r *http.Request, host *pairedHost, request map[string]any, body []byte) {
@@ -735,4 +933,70 @@ func (d *Daemon) forwardHostAction(w http.ResponseWriter, r *http.Request, host 
 		receipt.Detail = fmt.Sprintf("host %s did not answer; the outcome is unknown until it confirms this request", host.record.Name)
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": receipt})
+}
+
+// hostOwned reports whether a paired host owns the session; its owner, not
+// this daemon, decides whether it can take a message.
+func (d *Daemon) hostOwned(sessionID string) bool {
+	owner, err := d.Registry.SessionHost(sessionID)
+	return err == nil && owner != ""
+}
+
+// queueHostRelay takes a relay leg another host forwarded. It joins this
+// host's relay queue with its hop count, so relays chained across hosts stop
+// at the same limit as relays here.
+func (d *Daemon) queueHostRelay(w http.ResponseWriter, r *http.Request, session *surface.Session, message, sourceID, busyDelivery string, hops int) {
+	if _, fromHost := requestingHost(r.Context()); !fromHost {
+		http.Error(w, "relayHops is set only by a paired host forwarding a relay", http.StatusBadRequest)
+		return
+	}
+	if hops < 1 || hops > maxRelayHops {
+		http.Error(w, fmt.Sprintf("a relay may take at most %d hops", maxRelayHops), http.StatusBadRequest)
+		return
+	}
+	key := r.Header.Get(actionIdempotencyHeader)
+	if key == "" {
+		http.Error(w, "a forwarded relay needs its idempotency key", http.StatusBadRequest)
+		return
+	}
+	queueID, err := d.Registry.QueueRelayMessageWithOptions(session.ID, message, "host-relay:"+key, hops, surface.SendOptions{SourceSessionID: sourceID, BusyDelivery: busyDelivery})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": delivery.Receipt{Evidence: surface.EvidenceQueued, Status: "queued", SessionID: session.ID, QueueID: queueID, Detail: "relay queued"}})
+}
+
+// apiRelaysHandler lists this daemon's relays. A destination a paired host
+// owns is named with that host, so a host reading the list through the
+// pairing resolves every session to its owner.
+func (d *Daemon) apiRelaysHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for relays.")
+		return
+	}
+	routes, err := d.Registry.ListRoutes()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "relays_unavailable", err.Error())
+		return
+	}
+	for index := range routes {
+		for _, id := range []*string{&routes[index].FromSession, &routes[index].ToSession} {
+			if owner, ownerErr := d.Registry.SessionHost(*id); ownerErr == nil && owner != "" {
+				*id = hosts.Qualify(owner, *id)
+			}
+		}
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"relays": routes})
+}
+
+// resolveLinkTarget resolves a relay destination or channel member. Routing
+// has already rewritten a host-qualified reference to the exact id of its
+// mirrored row, which is taken as is; anything else resolves among this
+// host's sessions.
+func (d *Daemon) resolveLinkTarget(ref string) (string, error) {
+	if d.hostOwned(ref) {
+		return ref, nil
+	}
+	return d.Registry.ResolveTarget(ref)
 }

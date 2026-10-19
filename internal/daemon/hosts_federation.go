@@ -181,7 +181,7 @@ func (d *Daemon) attachHost(record registry.PairedHost) error {
 // The caller holds federation.lifecycle; a host no longer in the registry is
 // never attached.
 func (d *Daemon) attachHostLocked(record registry.PairedHost) error {
-	client, err := hosts.NewClient(record.Endpoint, record.Address, record.Token, hosts.ClientOptions{RootCAs: d.federation.rootCAs})
+	client, err := hosts.NewClient(record.Endpoint, record.Address, record.Token, hosts.ClientOptions{RootCAs: d.federation.rootCAs, HostID: record.ID})
 	if err != nil {
 		return err
 	}
@@ -227,6 +227,17 @@ func (d *Daemon) detachHostLocked(hostID string) {
 		host.cancel()
 		host.done.Wait()
 	}
+}
+
+// hostConnected reports whether a paired host is reachable and compatible
+// now, the only time its sessions are offered as peers here.
+func (d *Daemon) hostConnected(hostID string) bool {
+	host, found := d.pairedHost(hostID)
+	if !found {
+		return false
+	}
+	state, _ := host.status()
+	return state == hostStateConnected
 }
 
 func (d *Daemon) pairedHost(ref string) (*pairedHost, bool) {
@@ -331,14 +342,12 @@ func hostFailureState(err error) string {
 	switch {
 	case errors.As(err, &status) && (status.Status == http.StatusUnauthorized || status.Status == http.StatusForbidden):
 		return hostStateUnauthorized
-	case errors.As(err, &mismatch), errors.Is(err, errHostIdentityChanged):
+	case errors.As(err, &mismatch), errors.Is(err, hosts.ErrHostIdentityChanged):
 		return hostStateIncompatible
 	default:
 		return hostStateUnreachable
 	}
 }
-
-var errHostIdentityChanged = errors.New("the daemon at this address is a different host")
 
 func (d *Daemon) markHostDown(host *pairedHost, cause error) {
 	state := hostFailureState(cause)
@@ -359,7 +368,7 @@ func (d *Daemon) markHostDown(host *pairedHost, cause error) {
 		projection.Host = &ref
 		projection.UnavailableReason = reason
 		projection.QueueCount = row.HostQueueCount
-		if err := d.applyMirroredProjection(host.record.ID, row.Session, projection, row.HostProject, row.Checkout); err != nil {
+		if err := d.applyMirroredProjection(host.record.ID, row.Session, projection, row.Project, row.Checkout); err != nil {
 			d.log.Printf("host %s mark unavailable: %s", host.record.Name, err)
 		}
 	}
@@ -383,12 +392,8 @@ type remoteSnapshot struct {
 }
 
 func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost) (bool, error) {
-	version, err := host.client.Version(ctx)
-	if err != nil {
+	if _, err := host.client.Version(ctx); err != nil {
 		return false, err
-	}
-	if version.HostID != host.record.ID {
-		return false, fmt.Errorf("%w (%s)", errHostIdentityChanged, version.HostID)
 	}
 	d.setHostState(host, hostStateConnected, "", true)
 	for ctx.Err() == nil {
@@ -543,7 +548,7 @@ func (d *Daemon) updateMirroredQueueCount(host *pairedHost, sessionID string, co
 			return err
 		}
 		projection.QueueCount = count
-		return d.applyMirroredProjection(host.record.ID, row.Session, projection, row.HostProject, row.Checkout)
+		return d.applyMirroredProjection(host.record.ID, row.Session, projection, row.Project, row.Checkout)
 	}
 	return nil
 }
@@ -565,7 +570,7 @@ func (d *Daemon) mirrorOrHide(host *pairedHost, row dashboardSession) error {
 }
 
 func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession) error {
-	session := surface.Session{ID: row.ID, Surface: row.Surface, Name: row.Name, Cwd: row.Cwd, Status: row.Status, LastActive: row.LastActive, Source: row.Source, Transport: row.Transport}
+	session := surface.Session{ID: row.ID, Surface: row.Surface, RuntimeKind: row.RuntimeKind, ConfiguredModel: row.ConfiguredModel, Name: row.Name, Cwd: row.Cwd, Status: row.Status, LastActive: row.LastActive, Source: row.Source, Transport: row.Transport}
 	if row.Subagent != nil {
 		subagent := *row.Subagent
 		session.Subagent = &subagent
@@ -574,7 +579,12 @@ func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession) error {
 		qualified.RootID = hosts.Qualify(host.record.ID, subagent.RootID)
 		row.Subagent = &qualified
 	}
-	hostProject, _ := json.Marshal(row.HostProject)
+	if row.Project != nil {
+		qualified := *row.Project
+		qualified.ID = hosts.Qualify(host.record.ID, qualified.ID)
+		row.Project = &qualified
+	}
+	project, _ := json.Marshal(row.Project)
 	checkout, _ := json.Marshal(row.Checkout)
 	row.ID = hosts.Qualify(host.record.ID, row.ID)
 	if row.ForkedFrom != "" {
@@ -588,17 +598,17 @@ func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession) error {
 	}
 	ref := host.ref()
 	row.Host = &ref
-	return d.applyMirroredProjection(host.record.ID, session, row, hostProject, checkout)
+	return d.applyMirroredProjection(host.record.ID, session, row, project, checkout)
 }
 
-func (d *Daemon) applyMirroredProjection(hostID string, session surface.Session, projection dashboardSession, hostProject, checkout json.RawMessage) error {
+func (d *Daemon) applyMirroredProjection(hostID string, session surface.Session, projection dashboardSession, project, checkout json.RawMessage) error {
 	projection.ObservedAt = time.Time{}
 	projection.Freshness = nil
 	encoded, err := json.Marshal(projection)
 	if err != nil {
 		return err
 	}
-	return d.publishHostRow(hostID, registry.HostCatalogRow{Session: session, EntityID: projection.ID, Projection: encoded, HostProject: hostProject, Checkout: checkout, UnavailableReason: projection.UnavailableReason, ObservedAt: time.Now().UTC(), QueueCount: projection.QueueCount})
+	return d.publishHostRow(hostID, registry.HostCatalogRow{Session: session, EntityID: projection.ID, Projection: encoded, Project: project, Checkout: checkout, UnavailableReason: projection.UnavailableReason, ObservedAt: time.Now().UTC(), QueueCount: projection.QueueCount})
 }
 
 func (d *Daemon) refreshHostQueueCounts() {
@@ -680,7 +690,7 @@ func (d *Daemon) drainHostDeliveries(ctx context.Context, host *pairedHost) {
 	}
 	defer d.refreshHostQueueCounts()
 	for _, item := range pending {
-		if ctx.Err() != nil {
+		if state, _ := host.status(); ctx.Err() != nil || state != hostStateConnected {
 			return
 		}
 		d.replayHostDelivery(ctx, host, item)

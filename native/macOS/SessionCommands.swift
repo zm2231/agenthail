@@ -38,7 +38,7 @@ struct SessionCommands: Commands {
             Divider()
             Button("Talk to Orchestrator…") { openVoice("") }
             Button("Call This Session…") { if let id = session?.id { openVoice(id) } }
-                .disabled(session == nil || pane?.removedSession != nil)
+                .disabled(session?.canCallByVoice != true || pane?.removedSession != nil)
             Divider()
             Button("Stop") {
                 if let pane, pane.canStop { pane.interrupt() }
@@ -83,6 +83,7 @@ extension SessionFilter {
         case .running: return .showRunning
         case .recent: return .showRecent
         case .all: return .showAll
+        case .archived: return .showArchived
         }
     }
 }

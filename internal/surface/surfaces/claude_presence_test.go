@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -39,22 +40,79 @@ func TestPresenceUsesEachRuntimesTruth(t *testing.T) {
 	}
 }
 
-func TestClaudeOpenSessionsRejectsOtherProcesses(t *testing.T) {
-	open := NewClaude(nil, t.TempDir()).OpenSessions(context.Background(), []surface.Session{{ID: "self", PID: os.Getpid()}, {ID: "none"}})
-	if len(open) != 0 {
-		t.Fatalf("open=%v, want no Claude process", open)
+func testProcessStart(t *testing.T) string {
+	t.Helper()
+	if ticks, err := claudepeer.ProcStartTicks(os.Getpid()); err == nil {
+		return ticks
+	}
+	start, err := processStartTime(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return start.UTC().Format(claudeProcessStartLayout)
+}
+
+func TestClaudeOpenSessionsFollowTheSessionRecord(t *testing.T) {
+	home := t.TempDir()
+	claude := NewClaude(nil, home)
+	pid := os.Getpid()
+	session := surface.Session{ID: "conversation-1", PID: pid}
+	record := map[string]any{"pid": pid, "sessionId": "conversation-1", "status": "busy", "procStart": testProcessStart(t), "version": "2.1.303"}
+	writePeerRecord(t, home, pid, record)
+	if open := claude.OpenSessions(context.Background(), []surface.Session{session, {ID: "none"}}); !open["conversation-1"] || len(open) != 1 {
+		t.Fatalf("live record open=%v, want only conversation-1", open)
+	}
+	record["procStart"] = "1"
+	writePeerRecord(t, home, pid, record)
+	if open := claude.OpenSessions(context.Background(), []surface.Session{session}); len(open) != 0 {
+		t.Fatalf("record from a reused pid open=%v", open)
+	}
+	record["procStart"] = testProcessStart(t)
+	record["sessionId"] = "conversation-2"
+	writePeerRecord(t, home, pid, record)
+	if open := claude.OpenSessions(context.Background(), []surface.Session{session}); len(open) != 0 {
+		t.Fatalf("record for another conversation open=%v", open)
 	}
 }
 
-func TestParseClaudeOpenProcessesRequiresPositivePIDAndExactClaudeBasename(t *testing.T) {
-	got := parseClaudeOpenProcesses("" +
-		"0 /Applications/Claude/claude\n" +
-		"not-a-pid /Applications/Claude/claude\n" +
-		"101 /Applications/Claude Code/claude\n" +
-		"102 /usr/local/bin/claude-helper\n" +
-		"103 /Applications/Claude Code/Claude\n" +
-		"104 /Applications/Claude Code/claude\n")
-	if len(got) != 2 || !got[101] || !got[104] {
-		t.Fatalf("parsed=%v", got)
+func TestClaudeObserveTakesIdleFromTheSessionRecord(t *testing.T) {
+	home := t.TempDir()
+	claude := NewClaude(nil, home)
+	pid := os.Getpid()
+	path := writeTranscript(t, `{"type":"user","uuid":"resumed","message":{"content":"<task-notification>synthetic</task-notification>"}}`)
+	session := &surface.Session{ID: "conversation-1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: pid, Status: surface.StatusBusy, Transcript: path, HasLocal: true}
+	writePeerRecord(t, home, pid, map[string]any{"pid": pid, "sessionId": "conversation-1", "status": "idle", "peerFeatures": []any{"notify_idle"}})
+	observation, err := claude.Observe(context.Background(), session)
+	if err != nil || observation.Status != surface.StatusIdle || observation.ActiveTurnID != "" {
+		t.Fatalf("idle record observation=%+v err=%v", observation, err)
+	}
+	refreshed, err := claude.LocalStatus(context.Background(), *session)
+	if err != nil || refreshed.Status != surface.StatusIdle {
+		t.Fatalf("idle record status=%s err=%v", refreshed.Status, err)
+	}
+	writePeerRecord(t, home, pid, map[string]any{"pid": pid, "sessionId": "conversation-1", "status": "shell", "peerFeatures": []any{"notify_idle"}})
+	observation, err = claude.Observe(context.Background(), session)
+	if err != nil || observation.Status != surface.StatusIdle || observation.ActiveTurnID != "" {
+		t.Fatalf("shell record observation=%+v err=%v", observation, err)
+	}
+	for _, status := range []string{"busy", "waiting"} {
+		writePeerRecord(t, home, pid, map[string]any{"pid": pid, "sessionId": "conversation-1", "status": status, "peerFeatures": []any{"notify_idle"}})
+		observation, err = claude.Observe(context.Background(), session)
+		if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "resumed" {
+			t.Fatalf("%s record observation=%+v err=%v", status, observation, err)
+		}
+	}
+	writePeerRecord(t, home, pid, map[string]any{"pid": pid, "sessionId": "conversation-1", "status": "waiting", "waitingFor": "input needed", "procStart": "1", "peerFeatures": []any{"notify_idle"}})
+	session.Status = surface.StatusBusy
+	observation, err = claude.Observe(context.Background(), session)
+	if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "resumed" || observation.WaitingOn != nil {
+		t.Fatalf("record from a reused pid observation=%+v err=%v", observation, err)
+	}
+	writePeerRecord(t, home, pid, map[string]any{"pid": pid, "sessionId": "conversation-1", "status": "idle", "procStart": "1", "peerFeatures": []any{"notify_idle"}})
+	if observation, err = claude.Observe(context.Background(), session); err != nil || observation.Status != surface.StatusBusy {
+		t.Fatalf("idle record from a reused pid observation=%+v err=%v", observation, err)
+	}
+	if _, err := claude.LocalStatus(context.Background(), *session); err == nil {
+		t.Fatal("LocalStatus applied a record from a reused pid")
 	}
 }

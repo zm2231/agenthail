@@ -34,10 +34,10 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 	var session *surface.Session
 	var adapter surface.Surface
 	if operation == "stop" || operation == "resume" || operation == "logs" || operation == "status" {
-		if a.Registry != nil {
+		if a.registry() != nil {
 			selector := strings.TrimPrefix(target, "claude:")
-			if id, e := a.Registry.ResolveTarget(selector); e == nil {
-				session, _ = a.Registry.Session(id)
+			if id, e := a.registry().ResolveTarget(selector); e == nil {
+				session, _ = a.registry().Session(id)
 			}
 		}
 		if session != nil {
@@ -48,9 +48,13 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 		}
 	}
 	if session == nil {
-		session, adapter, err = a.resolveTarget(ctx, target)
+		var remote *remoteTarget
+		session, adapter, remote, err = a.resolveAnyTarget(ctx, target)
 		if err != nil {
 			return err
+		}
+		if remote != nil {
+			return a.threadOperationRemote(ctx, remote, operation, positional, args)
 		}
 	}
 	var output any
@@ -67,12 +71,12 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 		if fork == nil {
 			return fmt.Errorf("fork returned no session")
 		}
-		if a.Registry != nil {
-			if err := a.Registry.RegisterSession(*fork); err != nil {
+		if a.registry() != nil {
+			if err := a.registry().RegisterSession(*fork); err != nil {
 				return err
 			}
 			if alias := strings.TrimPrefix(flagVal(args, "--alias"), "@"); alias != "" {
-				if err := a.Registry.SetAlias(alias, fork.ID); err != nil {
+				if err := a.registry().SetAlias(alias, fork.ID); err != nil {
 					return err
 				}
 			}
@@ -103,8 +107,8 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 	if err != nil {
 		return err
 	}
-	if a.Registry != nil && operation != "status" && operation != "logs" && !(operation == "queue" && len(positional) > 2 && positional[2] == "list") {
-		_ = a.Registry.RecordHistory(registry.HistoryEntry{Kind: "session-operation", SessionID: session.ID, Result: strings.Join(positional[:min(3, len(positional))], " ")})
+	if a.registry() != nil && operation != "status" && operation != "logs" && !(operation == "queue" && len(positional) > 2 && positional[2] == "list") {
+		_ = a.registry().RecordHistory(registry.HistoryEntry{Kind: "session-operation", SessionID: session.ID, Result: strings.Join(positional[:min(3, len(positional))], " ")})
 	}
 	return json.NewEncoder(os.Stdout).Encode(output)
 }

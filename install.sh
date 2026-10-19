@@ -239,6 +239,12 @@ if [ -d "$REPO_DIR/sidecar/node_modules" ]; then
 fi
 
 cp sidecar/package.json sidecar/package-lock.json "$STAGE_DIR/"
+if [ -f "$REPO_DIR/claude-host/host.mjs" ] && [ -f "$REPO_DIR/scripts/stage-claude-host.sh" ]; then
+	"$REPO_DIR/scripts/stage-claude-host.sh" "$STAGE_DIR/claude-host"
+elif [ -d "$REPO_DIR/claude-host" ]; then
+	cp -R "$REPO_DIR/claude-host" "$STAGE_DIR/claude-host"
+fi
+test -f "$STAGE_DIR/claude-host/node_modules/@anthropic-ai/claude-agent-sdk/package.json"
 
 SERVICE_PROGRAM=""
 SERVICE_MANAGED=0

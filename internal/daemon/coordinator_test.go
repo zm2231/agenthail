@@ -8,7 +8,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -16,13 +18,11 @@ import (
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
-const (
-	goneCoordinator  = "0d1e2f3a-4b5c-4d6e-8f70-81a2b3c4d5e6"
-	freshCoordinator = "9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d"
-)
+const goneCoordinator = "0d1e2f3a-4b5c-4d6e-8f70-81a2b3c4d5e6"
 
 type coordinatorFixture struct {
 	claude  *claudetest.Fixture
+	host    *claudehosttest.Fixture
 	daemon  *Daemon
 	r       *registry.Registry
 	handler http.Handler
@@ -30,23 +30,24 @@ type coordinatorFixture struct {
 }
 
 // newCoordinatorFixture sets a coordinator whose conversation Claude no
-// longer has: no transcript, no process and no background job.
+// longer has: no transcript, no process and no background job. A running
+// Claude host starts its replacement.
 func newCoordinatorFixture(t *testing.T) *coordinatorFixture {
 	t.Helper()
 	f := &coordinatorFixture{claude: claudetest.New(t)}
-	f.claude.StartAs(freshCoordinator)
-	f.claude.ResumeBridge("session_fresh")
+	f.host = claudehosttest.New(t, f.claude.Home)
+	f.host.Start(t)
 	r, err := registry.Open(t.TempDir() + "/registry.db")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = r.Close() })
 	f.r = r
-	gone := surface.Session{ID: goneCoordinator, Bridge: "session_gone", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: orphanPID, Status: surface.StatusIdle, Cwd: f.claude.Home}
+	gone := surface.Session{ID: goneCoordinator, Bridge: "session_gone", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: orphanPID, Status: surface.StatusIdle, Cwd: f.host.Cwd}
 	if err := r.RegisterSession(gone); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.SetCoordinator(registry.CoordinatorSpec{Name: "lead", Surface: string(surface.KindClaude), Cwd: f.claude.Home, Instructions: "You coordinate fixture workers."}, goneCoordinator); err != nil {
+	if err := r.SetCoordinator(registry.CoordinatorSpec{Name: "lead", Surface: string(surface.KindClaude), Cwd: f.host.Cwd, Instructions: "You coordinate fixture workers."}, goneCoordinator); err != nil {
 		t.Fatal(err)
 	}
 	posts := &orphanPosts{}
@@ -67,6 +68,71 @@ func (f *coordinatorFixture) send(t *testing.T, key, sessionID, message string) 
 	return response.Code, decoded
 }
 
+// current is the conversation @lead names.
+func (f *coordinatorFixture) current(t *testing.T) string {
+	t.Helper()
+	sid, err := f.r.LookupAlias("lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sid
+}
+
+// started counts the conversations the Claude host started for Agenthail.
+func (f *coordinatorFixture) started(t *testing.T) int {
+	t.Helper()
+	sessions, err := f.r.ListSessions(1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, session := range sessions {
+		if session.RuntimeKind == surface.RuntimeClaudeHost {
+			count++
+		}
+	}
+	return count
+}
+
+// resumedGone reports whether anything reopened the gone conversation.
+func (f *coordinatorFixture) resumedGone(t *testing.T) bool {
+	t.Helper()
+	return len(f.host.Spawns(t, goneCoordinator)) != 0
+}
+
+// landed waits until each text reached conversation, as a turn it ran or a
+// message queued for it, and returns its turns.
+func (f *coordinatorFixture) landed(t *testing.T, conversation string, texts ...string) []claudehosttest.Turn {
+	t.Helper()
+	var turns []claudehosttest.Turn
+	var queue []registry.QueueRow
+	reached := func() bool {
+		f.daemon.scanAndRelay(context.Background())
+		turns = f.host.Turns(t, conversation)
+		queue, _ = f.r.ListQueue(false, nil)
+		for _, text := range texts {
+			found := false
+			for _, turn := range turns {
+				found = found || strings.Contains(turn.Text, text)
+			}
+			for _, row := range queue {
+				found = found || (row.SessionID == conversation && row.Message == text)
+			}
+			if !found {
+				return false
+			}
+		}
+		return true
+	}
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(25 * time.Millisecond) {
+		if reached() {
+			return turns
+		}
+	}
+	t.Fatalf("%q did not all reach %s: turns=%+v queue=%+v", texts, conversation, turns, queue)
+	return nil
+}
+
 func TestAPISendsToAGoneCoordinatorStartOneConversation(t *testing.T) {
 	f := newCoordinatorFixture(t)
 	var wg sync.WaitGroup
@@ -83,23 +149,19 @@ func TestAPISendsToAGoneCoordinatorStartOneConversation(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	if f.claude.Starts() != 1 {
-		t.Fatalf("starts=%d", f.claude.Starts())
-	}
 	started := 0
 	for _, detail := range details {
 		if strings.Contains(detail, "Started a new conversation for coordinator @lead") {
 			started++
 		}
 	}
-	if started != 1 || f.r.QueueCount(freshCoordinator) != 2 {
-		t.Fatalf("details=%q queued=%d", details, f.r.QueueCount(freshCoordinator))
+	current := f.current(t)
+	if started != 1 || f.started(t) != 1 || current == goneCoordinator || f.resumedGone(t) {
+		t.Fatalf("details=%q started=%d current=%s resumed gone=%v", details, f.started(t), current, f.resumedGone(t))
 	}
-	if sid, err := f.r.LookupAlias("lead"); err != nil || sid != freshCoordinator {
-		t.Fatalf("alias=%q err=%v", sid, err)
-	}
-	if prompt := f.claude.Prompt(freshCoordinator); !strings.HasPrefix(prompt, "You coordinate fixture workers.") {
-		t.Fatalf("prompt=%q", prompt)
+	turns := f.landed(t, current, "task 0", "task 1", "task 2")
+	if !strings.HasPrefix(turns[0].Text, "You coordinate fixture workers.") {
+		t.Fatalf("first turn=%q", turns[0].Text)
 	}
 }
 
@@ -109,14 +171,16 @@ func TestQueuedMessageForAGoneCoordinatorStartsItInsteadOfResumingBlank(t *testi
 		t.Fatal(err)
 	}
 	f.daemon.scanAndRelay(context.Background())
-	if f.claude.Starts() != 1 || f.claude.Invocations("--bg", "--resume", goneCoordinator) != 0 {
-		t.Fatalf("starts=%d resumes=%d", f.claude.Starts(), f.claude.Invocations("--bg", "--resume", goneCoordinator))
+	current := f.current(t)
+	if current == goneCoordinator || f.started(t) != 1 || f.resumedGone(t) {
+		t.Fatalf("current=%s started=%d resumed gone=%v", current, f.started(t), f.resumedGone(t))
 	}
-	if prompt := f.claude.Prompt(freshCoordinator); !strings.HasSuffix(prompt, "held for the coordinator") {
-		t.Fatalf("prompt=%q", prompt)
+	turns := f.landed(t, current, "held for the coordinator")
+	if len(turns) != 1 || !strings.HasSuffix(turns[0].Text, "held for the coordinator") {
+		t.Fatalf("turns=%+v", turns)
 	}
-	if f.r.QueueCount(goneCoordinator) != 0 || f.r.QueueCount(freshCoordinator) != 0 {
-		t.Fatalf("queue gone=%d fresh=%d", f.r.QueueCount(goneCoordinator), f.r.QueueCount(freshCoordinator))
+	if f.r.QueueCount(goneCoordinator) != 0 || f.r.QueueCount(current) != 0 {
+		t.Fatalf("queue gone=%d current=%d", f.r.QueueCount(goneCoordinator), f.r.QueueCount(current))
 	}
 }
 
@@ -127,8 +191,8 @@ func TestAPISendToACoordinatorClaudeCannotReportOnWaitsInTheQueue(t *testing.T) 
 	if code != http.StatusOK || receiptField(body, "evidence") != string(surface.EvidenceQueued) || f.r.QueueCount(goneCoordinator) != 1 {
 		t.Fatalf("status=%d body=%v queued=%d", code, body, f.r.QueueCount(goneCoordinator))
 	}
-	if f.claude.Starts() != 0 || f.claude.Invocations("--bg", "--resume", goneCoordinator) != 0 {
-		t.Fatalf("starts=%d resumes=%d", f.claude.Starts(), f.claude.Invocations("--bg", "--resume", goneCoordinator))
+	if f.started(t) != 0 || f.resumedGone(t) {
+		t.Fatalf("started=%d resumed gone=%v", f.started(t), f.resumedGone(t))
 	}
 }
 
@@ -151,16 +215,14 @@ func TestSendsToAConversationARestartReplacedReachTheCoordinator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.daemon.scanAndRelay(context.Background())
-	if f.claude.Starts() != 1 || f.claude.Invocations("--bg", "--resume", goneCoordinator) != 0 {
-		t.Fatalf("starts=%d resumes=%d", f.claude.Starts(), f.claude.Invocations("--bg", "--resume", goneCoordinator))
-	}
-	if f.r.QueueCount(goneCoordinator) != 0 {
-		t.Fatalf("queued for the replaced conversation=%d", f.r.QueueCount(goneCoordinator))
+	current := f.current(t)
+	f.landed(t, current, "first", "reply to an old notification", "queued before the restart", "queued by an old client")
+	if f.started(t) != 1 || f.resumedGone(t) || f.r.QueueCount(goneCoordinator) != 0 {
+		t.Fatalf("started=%d resumed gone=%v queued for the replaced conversation=%d", f.started(t), f.resumedGone(t), f.r.QueueCount(goneCoordinator))
 	}
 	for _, id := range []int64{pending, claimed} {
 		intent, err := f.r.DeliveryIntent(id)
-		if err != nil || intent.TargetSessionID != freshCoordinator {
+		if err != nil || intent.TargetSessionID != current {
 			t.Fatalf("intent %d=%+v err=%v", id, intent, err)
 		}
 	}

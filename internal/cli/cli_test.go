@@ -539,7 +539,7 @@ func TestQueueRetryReturnsAnUnconfirmedHostSendToItsReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-thread"
-	if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
+	if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	id, err := r.QueueHostDelivery("remote-thread", "retry me", "key-retry", []byte(`{"action":"send"}`), true)
@@ -872,7 +872,7 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 	} {
 		if _, _, err := store.RecordCatalogSession(registry.CatalogSessionState{
 			Session:               item,
-			HostProject:           json.RawMessage(`{}`),
+			Project:               json.RawMessage(`{}`),
 			Checkout:              json.RawMessage(`{}`),
 			ObservedAt:            observedAt,
 			ProjectionFingerprint: item.ID,
@@ -884,7 +884,7 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 		t.Fatal(err)
 	}
 
-	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--cwd", root, "--wide", "--json"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all", "--cwd", root, "--wide", "--json"}) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -923,20 +923,85 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 	}
 }
 
-func TestListWideAndBasenameCollisionRetainFullCwd(t *testing.T) {
+func TestListWithoutDaemonShowsTheWorkingDirectory(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{
 		{ID: "one", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "one", Cwd: "/work/one/agenthail"},
-		{ID: "two", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "two", Cwd: "/work/two/agenthail"},
-		{ID: "three", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "three", Cwd: "/work/three/" + strings.Repeat("other", 12)},
+		{ID: "two", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "two", Cwd: "/work/two/agenthail/.worktrees/task"},
 	}}
 	app, _ := cliFixture(t, fake)
-	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
-	if err != nil || !strings.Contains(output, "/work/one/agenthail") || !strings.Contains(output, "/work/two/agenthail") || strings.Contains(output, "/work/three/other") {
+	output, err := captureStdout(t, func() error { return app.Run([]string{"list"}) })
+	if err != nil || !strings.Contains(output, "CWD") || !strings.Contains(output, "/work/one/agenthail") || !strings.Contains(output, "/work/two/agenthail/.worktrees/task") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
-	wide, err := captureStdout(t, func() error { return app.Run([]string{"list", "--wide"}) })
-	if err != nil || !strings.Contains(wide, fake.listed[2].Cwd) {
-		t.Fatalf("wide=%q err=%v", wide, err)
+	if err := app.Run([]string{"list", "--project", "agenthail"}); err == nil || !strings.Contains(err.Error(), "need the daemon") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestListUsesTheDaemonScopesAndProjects(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex}
+	app, store := cliFixture(t, fake)
+	app.catalogDaemonRunning = func() bool { return true }
+	observedAt := time.Now().UTC()
+	widget := `{"id":"project-widget","displayName":"widget","rootPath":"/work/widget","kind":"git"}`
+	for _, row := range []struct {
+		session    surface.Session
+		projection string
+	}{
+		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "working", Surface: surface.KindCodex, Name: "working", Status: surface.StatusBusy, Cwd: "/work/widget/.worktrees/a", LastActive: observedAt}, `{"project":` + widget + `,"current":true}`},
+		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "yesterday", Surface: surface.KindCodex, Name: "yesterday", Status: surface.StatusIdle, Cwd: "/work/widget", LastActive: observedAt.Add(-20 * time.Hour)}, `{"project":` + widget + `}`},
+		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "child", Surface: surface.KindCodex, Name: "child", Status: surface.StatusIdle, Cwd: "/work/widget", LastActive: observedAt.Add(-30 * time.Hour), Subagent: &surface.Subagent{ParentID: "yesterday", RootID: "yesterday"}}, `{"project":` + widget + `}`},
+		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "scratch", Surface: surface.KindCodex, Name: "scratch", Status: surface.StatusIdle, Cwd: "/tmp/scratch", LastActive: observedAt.Add(-40 * time.Hour)}, `{}`},
+		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "hidden", Surface: surface.KindCodex, Name: "hidden", Status: surface.StatusIdle, Cwd: "/work/widget", LastActive: observedAt}, `{"project":` + widget + `,"current":true,"archived":true}`},
+		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "twin", Surface: surface.KindCodex, Name: "twin", Status: surface.StatusIdle, Cwd: "/other/widget", LastActive: observedAt.Add(-50 * time.Hour)}, `{"project":{"id":"project-widget-2","displayName":"widget","rootPath":"/other/widget","kind":"git"}}`},
+	} {
+		if err := store.RegisterSession(row.session); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := store.RecordCatalogSession(registry.CatalogSessionState{Session: row.session, Project: json.RawMessage(`null`), Checkout: json.RawMessage(`{}`), ObservedAt: observedAt, ProjectionFingerprint: row.projection}, registry.CatalogEvent{DedupeKey: "session:" + row.session.ID, Type: "session.upserted", EntityID: row.session.ID, Payload: json.RawMessage(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listed := func(args ...string) []string {
+		t.Helper()
+		output, err := captureStdout(t, func() error { return app.Run(append([]string{"list", "--json"}, args...)) })
+		if err != nil {
+			t.Fatal(err)
+		}
+		var document struct {
+			Sessions []listSessionView `json:"sessions"`
+		}
+		if err := json.Unmarshal([]byte(output), &document); err != nil {
+			t.Fatal(err)
+		}
+		ids := []string{}
+		for _, session := range document.Sessions {
+			ids = append(ids, session.ID)
+		}
+		return ids
+	}
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "working"},
+		{[]string{"--all"}, "working,yesterday,child,scratch,twin"},
+		{[]string{"--archived"}, "hidden"},
+		{[]string{"--all", "--project", "project-widget"}, "working,yesterday,child"},
+	} {
+		if got := strings.Join(listed(test.args...), ","); got != test.want {
+			t.Fatalf("list %v = %s, want %s", test.args, got, test.want)
+		}
+	}
+	text, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
+	if err != nil || !strings.Contains(text, "PROJECT") || !strings.Contains(text, "widget") || strings.Contains(text, "/work/widget") {
+		t.Fatalf("text=%q err=%v", text, err)
+	}
+	if err := app.Run([]string{"list", "--all", "--project", "WIDGET"}); err == nil || !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), "project-widget-2") {
+		t.Fatalf("a shared project name was accepted: %v", err)
+	}
+	if err := app.Run([]string{"list", "--all", "--archived"}); err == nil {
+		t.Fatal("conflicting scopes were accepted")
 	}
 }
 
@@ -1166,6 +1231,48 @@ func TestQualifiedTargetsFallBackWithinTheirSurfaceWhileItIsUnreachable(t *testi
 	}
 }
 
+func TestListAllReportsSessionsOutsideTheCatalogAsOffline(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindClaude}
+	app, store := cliFixture(t, fake)
+	app.catalogDaemonRunning = func() bool { return true }
+	observedAt := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	live := surface.Session{ID: "catalog-live", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "live", Status: surface.StatusBusy, LastActive: observedAt}
+	if _, _, err := store.RecordCatalogSession(registry.CatalogSessionState{Session: live, Project: json.RawMessage(`{}`), Checkout: json.RawMessage(`{}`), ObservedAt: observedAt, ProjectionFingerprint: live.ID}, registry.CatalogEvent{DedupeKey: "session:" + live.ID, Type: "session.upserted", EntityID: live.ID, Payload: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	exited := surface.Session{ID: "exited-busy", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "exited", Status: surface.StatusBusy, LastActive: observedAt.Add(-time.Hour)}
+	if err := store.RegisterSession(exited); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all", "--json"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Sessions []surface.Session `json:"sessions"`
+	}
+	if err := json.Unmarshal([]byte(output), &document); err != nil {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	statuses := map[string]surface.SessionStatus{}
+	for _, session := range document.Sessions {
+		statuses[session.ID] = session.Status
+	}
+	if statuses["catalog-live"] != surface.StatusBusy || statuses["exited-busy"] != surface.StatusOffline {
+		t.Fatalf("statuses=%v, want live busy and exited offline", statuses)
+	}
+	text, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "exited") && !strings.Contains(line, " off ") {
+			t.Fatalf("exited row=%q, want STAT off", line)
+		}
+	}
+}
+
 func TestListShowsAPairedHostSessionWaitingOnItsUser(t *testing.T) {
 	app, r := cliFixture(t, &cliSurface{kind: surface.KindCodex})
 	app.catalogDaemonRunning = func() bool { return true }
@@ -1176,7 +1283,7 @@ func TestListShowsAPairedHostSessionWaitingOnItsUser(t *testing.T) {
 	entity := hostID + "::remote-asking"
 	mirror := func(projection string) {
 		t.Helper()
-		if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-asking", Name: "remote-asking", Surface: surface.KindCodex, Status: surface.StatusBusy}, EntityID: entity, Projection: json.RawMessage(projection), ObservedAt: time.Now()}); err != nil {
+		if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-asking", Name: "remote-asking", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}, EntityID: entity, Projection: json.RawMessage(projection), ObservedAt: time.Now()}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1189,6 +1296,57 @@ func TestListShowsAPairedHostSessionWaitingOnItsUser(t *testing.T) {
 	listed, err = captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
 	if err != nil || strings.Contains(listed, "wait") {
 		t.Fatalf("list after the host's session was answered=%s err=%v", listed, err)
+	}
+}
+
+func TestQueueStatusLabelShowsEvidenceBesideADifferentStatus(t *testing.T) {
+	for _, tc := range []struct {
+		status   string
+		evidence surface.DeliveryEvidence
+		remote   bool
+		want     string
+	}{
+		{"pending", surface.EvidenceQueued, false, "pending"},
+		{"inflight", surface.EvidenceQueued, false, "inflight"},
+		{"inflight", surface.EvidenceUnknown, true, "inflight (unknown)"},
+		{"delivered", surface.EvidenceDelivered, false, "delivered"},
+		{"delivered", surface.EvidenceTransportAccepted, false, "delivered (transport accepted)"},
+		{"delivered", surface.EvidenceQueued, true, "delivered (remote queued)"},
+		{"dead", surface.EvidenceFailed, false, "dead"},
+		{"dead", surface.EvidenceUnknown, false, "dead (unknown)"},
+		{"canceled", surface.EvidenceCanceled, false, "canceled"},
+		{"canceled", surface.EvidenceQueued, true, "canceled"},
+		{"canceled", "", false, "canceled"},
+	} {
+		got := queueStatusLabel(registry.QueueRow{Status: tc.status, Evidence: tc.evidence}, tc.remote)
+		if got != tc.want {
+			t.Errorf("status=%s evidence=%s remote=%v label=%q want %q", tc.status, tc.evidence, tc.remote, got, tc.want)
+		}
+	}
+}
+
+func TestQueueListShowsASendAPairedHostQueuedAsDelivered(t *testing.T) {
+	app, r := cliFixture(t, &cliSurface{kind: surface.KindCodex})
+	hostID := "h0123456789ab"
+	if _, err := r.AddHost(registry.PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-busy", Name: "remote-busy", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}, EntityID: hostID + "::remote-busy", Projection: json.RawMessage(`{"id":"` + hostID + `::remote-busy","status":"busy"}`), ObservedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := r.QueueHostDelivery("remote-busy", "after your turn", "key-synthetic", []byte(`{"action":"send"}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed, err := r.ClaimHostDelivery(id); err != nil || !claimed {
+		t.Fatalf("claimed=%v err=%v", claimed, err)
+	}
+	if err := r.AckMessageWithEvidence(id, "remote-busy", 0, surface.EvidenceQueued, ""); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := captureStdout(t, func() error { return app.Run([]string{"queue", "list", "--all"}) })
+	if err != nil || !strings.Contains(listed, "delivered (remote queued)") {
+		t.Fatalf("queue list --all=%s err=%v", listed, err)
 	}
 }
 
@@ -1211,7 +1369,7 @@ func TestListAndQueueShowASessionWaitingOnTheUser(t *testing.T) {
 		t.Fatalf("list=%s err=%v", listed, err)
 	}
 	queued, err := captureStdout(t, func() error { return app.Run([]string{"queue", "list"}) })
-	if err != nil || !strings.Contains(queued, "queued just now; held: target is waiting on you") {
+	if err != nil || !strings.Contains(queued, " pending ") || !strings.Contains(queued, "queued just now; held: target is waiting on you") {
 		t.Fatalf("queue list=%s err=%v", queued, err)
 	}
 	document, err := captureStdout(t, func() error { return app.Run([]string{"queue", "list", "--json"}) })

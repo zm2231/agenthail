@@ -18,9 +18,12 @@ func (a *App) cmdGoal(args []string) error {
 		return fmt.Errorf("usage: agenthail goal <target> [set|edit|pause|resume|budget|clear] [value]")
 	}
 	ctx := context.Background()
-	sess, surf, err := a.resolveTarget(ctx, positional[0])
+	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
 		return err
+	}
+	if remote != nil {
+		return a.goalRemote(ctx, remote, positional, hasFlag(args, "--json"))
 	}
 	if !surface.CapabilitiesFor(surf, sess).Goal {
 		return fmt.Errorf("%s does not support goal management", surf.Name())
