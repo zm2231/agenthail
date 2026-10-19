@@ -109,6 +109,8 @@ type dashboardSession struct {
 	Freshness         *registry.CatalogFreshness `json:"freshness,omitempty"`
 	Subagent          *surface.Subagent          `json:"subagent,omitempty"`
 	Subagents         *surface.SubagentRollup    `json:"subagents,omitempty"`
+	ObservedSubagents *surface.SubagentRollup    `json:"observedSubagents,omitempty"`
+	HiddenSubagents   *surface.SubagentRollup    `json:"hiddenSubagents,omitempty"`
 	Host              *dashboardHost             `json:"host,omitempty"`
 }
 
@@ -850,7 +852,8 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			}
 			mirrored.ObservedAt = record.ObservedAt
 			mirrored.Freshness = &record.Freshness
-			mirrored.Subagents = catalogSnapshot.Listing.AddSubagents(session.ID, mirrored.Subagents)
+			mirrored.HiddenSubagents = catalogSnapshot.Listing.HiddenSubagents(session.ID)
+			mirrored.Subagents = addSubagentRollups(mirrored.ObservedSubagents, mirrored.HiddenSubagents)
 			state.Sessions = append(state.Sessions, mirrored)
 			continue
 		}
@@ -878,11 +881,12 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			var saved dashboardSession
 			if json.Unmarshal([]byte(record.ProjectionFingerprint), &saved) == nil {
 				entry.Open = saved.Open
-				entry.Subagents = saved.Subagents
+				entry.ObservedSubagents = saved.ObservedSubagents
 				entry.Current, entry.CurrentReason = saved.Current, saved.CurrentReason
 			}
 		}
-		entry.Subagents = catalogSnapshot.Listing.AddSubagents(session.ID, entry.Subagents)
+		entry.HiddenSubagents = catalogSnapshot.Listing.HiddenSubagents(session.ID)
+		entry.Subagents = addSubagentRollups(entry.ObservedSubagents, entry.HiddenSubagents)
 		state.Sessions = append(state.Sessions, entry)
 	}
 	sort.Slice(state.Surfaces, func(i, j int) bool { return state.Surfaces[i].Name < state.Surfaces[j].Name })

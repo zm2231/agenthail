@@ -224,7 +224,14 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("Connection", "keep-alive")
 	writeSSEOpen(w)
-	for _, event := range window.Events {
+	mirror, _ := r.Context().Value(apiHostPrincipalContextKey{}).(bool)
+	view := func(batch []registry.CatalogEvent) []registry.CatalogEvent {
+		if mirror {
+			return batch
+		}
+		return d.listedCatalogEvents(batch)
+	}
+	for _, event := range view(window.Events) {
 		if !d.apiEventStreamAuthorized(r) || writeCatalogStreamEntry(w, event) != nil {
 			return
 		}
@@ -237,8 +244,26 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 		case <-r.Context().Done():
 			return
 		case event, open := <-events:
-			if !open || !d.apiEventStreamAuthorized(r) || writeCatalogStreamEntry(w, event) != nil {
+			if !open {
 				return
+			}
+			batch := []registry.CatalogEvent{event}
+		drain:
+			for len(batch) < catalogStreamBatch {
+				select {
+				case next, more := <-events:
+					if !more {
+						break drain
+					}
+					batch = append(batch, next)
+				default:
+					break drain
+				}
+			}
+			for _, event := range view(batch) {
+				if !d.apiEventStreamAuthorized(r) || writeCatalogStreamEntry(w, event) != nil {
+					return
+				}
 			}
 			flusher.Flush()
 		case <-keepalive.C:
@@ -249,6 +274,32 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 			flusher.Flush()
 		}
 	}
+}
+
+const catalogStreamBatch = 256
+
+// listedCatalogEvents is the catalog stream a device sees: the session list,
+// not every catalog row. An upsert of a session the list hides reaches it as a
+// removal under the same sequence, so a subagent leaving the list disappears
+// and its listed ancestor's rollup, republished by the presence pass, counts it.
+func (d *Daemon) listedCatalogEvents(batch []registry.CatalogEvent) []registry.CatalogEvent {
+	listing, err := d.Registry.CatalogListing()
+	if err != nil {
+		d.log.Printf("catalog listing: %s", err)
+		return batch
+	}
+	listed := make([]registry.CatalogEvent, 0, len(batch))
+	for _, event := range batch {
+		if event.Type == "session.upserted" && listing.HidesEntity(event.EntityID) {
+			payload, err := json.Marshal(map[string]string{"sessionId": event.EntityID, "reason": "unlisted"})
+			if err != nil {
+				continue
+			}
+			event.Type, event.Payload = "session.removed", payload
+		}
+		listed = append(listed, event)
+	}
+	return listed
 }
 
 func parseCatalogStreamCursor(r *http.Request) (uint64, error) {
@@ -461,8 +512,11 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 	if d.catalogSelected != nil {
 		d.catalogSelected(session.ID)
 	}
+	hidden := d.storedHiddenSubagents(session.ID)
 	for attempt := 0; attempt < 3; attempt++ {
 		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, open, config)
+		row.HiddenSubagents = hidden
+		row.Subagents = addSubagentRollups(row.ObservedSubagents, hidden)
 		payload, err := json.Marshal(map[string]any{"session": row})
 		if err != nil {
 			return false
@@ -518,9 +572,10 @@ func (d *Daemon) publishSurfaceHealth(health dashboardSurface, observedAt time.T
 	_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: surface.SurfaceKind(health.Name), Health: health.Health, Detail: health.HealthDetail, ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + health.Name + ":" + health.Health, Type: "surface.health", EntityID: health.Name, Payload: payload})
 }
 
-// publishCatalogPresence keeps each local row's queue count and presence
-// current between discovery passes, so a new queue count, a changed Codex
-// window or a lapsed recent session is published on the next tick.
+// publishCatalogPresence keeps each local row's queue count, presence and
+// hidden subagent count current between discovery passes, so a new queue
+// count, a changed Codex window, a lapsed recent session or a subagent leaving
+// the session list is published on the next tick.
 func (d *Daemon) publishCatalogPresence() {
 	defer d.refreshHostQueueCounts()
 	counts, err := d.Registry.QueueCounts()
@@ -554,10 +609,13 @@ func (d *Daemon) publishCatalogPresence() {
 				break
 			}
 			current, reason := surface.PresenceFor(adapter, record.Session, surface.PresenceInput{QueueCount: count, Open: projection.Open, Now: now, CodexRecentHours: config.CodexRecentHours})
-			if projection.QueueCount == count && projection.Current == current && projection.CurrentReason == reason {
+			hidden := snapshot.Listing.HiddenSubagents(record.Session.ID)
+			subagents := addSubagentRollups(projection.ObservedSubagents, hidden)
+			if projection.QueueCount == count && projection.Current == current && projection.CurrentReason == reason && sameSubagentRollup(projection.HiddenSubagents, hidden) && sameSubagentRollup(projection.Subagents, subagents) {
 				break
 			}
 			projection.QueueCount, projection.Current, projection.CurrentReason = count, current, reason
+			projection.HiddenSubagents, projection.Subagents = hidden, subagents
 			fingerprint, err := json.Marshal(projection)
 			if err != nil {
 				break
@@ -686,5 +744,41 @@ func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surfa
 	current, reason := surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: queueCount, Open: open, Now: observedAt, CodexRecentHours: config.CodexRecentHours})
 	host := d.localHost()
 	effective := surface.EffectiveCapabilities(adapter, &session)
-	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Subagents: session.Subagents, Host: &host}
+	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Subagents: session.Subagents, ObservedSubagents: session.Subagents, Host: &host}
+}
+
+// storedHiddenSubagents carries the hidden subagent count forward when
+// discovery republishes a row; the presence pass recomputes it from the
+// listing.
+func (d *Daemon) storedHiddenSubagents(id string) *surface.SubagentRollup {
+	fingerprint, found, err := d.Registry.CatalogProjectionFingerprint(id)
+	if err != nil || !found {
+		return nil
+	}
+	var stored struct {
+		HiddenSubagents *surface.SubagentRollup `json:"hiddenSubagents"`
+	}
+	if json.Unmarshal([]byte(fingerprint), &stored) != nil {
+		return nil
+	}
+	return stored.HiddenSubagents
+}
+
+func addSubagentRollups(observed, hidden *surface.SubagentRollup) *surface.SubagentRollup {
+	if hidden == nil {
+		return observed
+	}
+	sum := *hidden
+	if observed != nil {
+		sum.Count += observed.Count
+		sum.Working += observed.Working
+	}
+	return &sum
+}
+
+func sameSubagentRollup(a, b *surface.SubagentRollup) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }

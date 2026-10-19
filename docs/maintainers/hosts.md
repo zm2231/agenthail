@@ -18,8 +18,11 @@ it paired with.
 Pairing reuses the device-token model the phone uses.
 
 1. On the remote: `agenthail hosts invite` creates a five-minute, single-use
-   pairing link with the `read` and `control` scopes. It needs remote access
-   (Tailscale Serve), which is what gives the link an HTTPS endpoint.
+   pairing link with the `read`, `control` and `host` scopes. It needs remote
+   access (Tailscale Serve), which is what gives the link an HTTPS endpoint.
+   The `host` scope gives the catalog stream every row, so the pairing mirrors
+   subagents the session list hides; a device token without it streams the
+   session list. A host paired without it must be paired again.
 2. On the Mac: `agenthail hosts add '<link>' [--address <tailnet-ip>]`. The
    daemon redeems the secret, receives an `ahd_` device token, checks the
    protocol version and host id, and stores the pairing in `hosts`.

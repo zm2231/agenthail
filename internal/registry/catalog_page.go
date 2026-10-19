@@ -18,10 +18,10 @@ type CatalogPageRequest struct {
 	// ParentID lists every subagent of one session, including the ones a
 	// session list hides.
 	ParentID string
-	Query     string
-	Offset    int
-	Limit     int
-	Now       time.Time
+	Query    string
+	Offset   int
+	Limit    int
+	Now      time.Time
 }
 
 type CatalogPage struct {

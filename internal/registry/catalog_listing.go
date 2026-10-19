@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -12,12 +13,14 @@ import (
 // row and never at the top level. Each hidden subagent counts toward its
 // nearest listed ancestor's rollup.
 type CatalogListing struct {
-	Hidden      map[string]bool
-	Rollups     map[string]surface.SubagentRollup
-	descendants map[string]surface.SubagentRollup
+	Hidden         map[string]bool
+	Rollups        map[string]surface.SubagentRollup
+	descendants    map[string]surface.SubagentRollup
+	hiddenEntities map[string]bool
 }
 
 type catalogListingRow struct {
+	entity   string
 	parent   string
 	subagent bool
 	active   bool
@@ -25,21 +28,21 @@ type catalogListingRow struct {
 }
 
 func catalogListingTx(q catalogQuerier) (CatalogListing, error) {
-	rows, err := q.Query(`SELECT s.id,s.parent_session_id,s.source,s.status,CASE WHEN json_valid(cs.projection_fingerprint) THEN COALESCE(json_extract(cs.projection_fingerprint,'$.current'),0) ELSE 0 END
+	rows, err := q.Query(`SELECT s.id,s.host_id,s.parent_session_id,s.source,s.status,CASE WHEN json_valid(cs.projection_fingerprint) THEN COALESCE(json_extract(cs.projection_fingerprint,'$.current'),0) ELSE 0 END
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id`)
 	if err != nil {
 		return CatalogListing{}, err
 	}
 	byID := map[string]catalogListingRow{}
 	for rows.Next() {
-		var id, parent, source, status string
+		var id, hostID, parent, source, status string
 		var current bool
-		if err := rows.Scan(&id, &parent, &source, &status, &current); err != nil {
+		if err := rows.Scan(&id, &hostID, &parent, &source, &status, &current); err != nil {
 			rows.Close()
 			return CatalogListing{}, err
 		}
 		busy := status == string(surface.StatusBusy)
-		byID[id] = catalogListingRow{parent: parent, subagent: parent != "" || source == "subAgent", active: busy || current, busy: busy}
+		byID[id] = catalogListingRow{entity: hosts.Qualify(hostID, id), parent: parent, subagent: parent != "" || source == "subAgent", active: busy || current, busy: busy}
 	}
 	if err := rows.Close(); err != nil {
 		return CatalogListing{}, err
@@ -48,7 +51,7 @@ func catalogListingTx(q catalogQuerier) (CatalogListing, error) {
 }
 
 func catalogListing(byID map[string]catalogListingRow) CatalogListing {
-	listing := CatalogListing{Hidden: map[string]bool{}, Rollups: map[string]surface.SubagentRollup{}, descendants: map[string]surface.SubagentRollup{}}
+	listing := CatalogListing{Hidden: map[string]bool{}, Rollups: map[string]surface.SubagentRollup{}, descendants: map[string]surface.SubagentRollup{}, hiddenEntities: map[string]bool{}}
 	listed := map[string]bool{}
 	var decide func(id string, path map[string]bool) bool
 	decide = func(id string, path map[string]bool) bool {
@@ -69,6 +72,7 @@ func catalogListing(byID map[string]catalogListingRow) CatalogListing {
 	for id := range byID {
 		if !decide(id, map[string]bool{}) {
 			listing.Hidden[id] = true
+			listing.hiddenEntities[byID[id].entity] = true
 		}
 	}
 	for id, row := range byID {
@@ -108,16 +112,20 @@ func catalogListing(byID map[string]catalogListingRow) CatalogListing {
 	return listing
 }
 
-func (l CatalogListing) AddSubagents(id string, observed *surface.SubagentRollup) *surface.SubagentRollup {
-	hidden, found := l.Rollups[id]
+func (l CatalogListing) HiddenSubagents(id string) *surface.SubagentRollup {
+	rollup, found := l.Rollups[id]
 	if !found {
-		return observed
+		return nil
 	}
-	if observed != nil {
-		hidden.Count += observed.Count
-		hidden.Working += observed.Working
-	}
-	return &hidden
+	return &rollup
+}
+
+func (l CatalogListing) HidesEntity(entityID string) bool {
+	return l.hiddenEntities[entityID]
+}
+
+func (r *Registry) CatalogListing() (CatalogListing, error) {
+	return catalogListingTx(r.read)
 }
 
 func (l CatalogListing) hiddenJSON() string {
