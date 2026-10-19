@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
@@ -88,6 +89,60 @@ func TestClaudeConversationInTwoConfigRootsIsRefused(t *testing.T) {
 	}
 	if _, err := c.SessionAction(ctx, session, "stop"); !ambiguous(err) {
 		t.Fatalf("stop err=%v", err)
+	}
+	if _, err := c.Send(ctx, session, "hello"); !ambiguous(err) {
+		t.Fatalf("send err=%v", err)
+	}
+	if _, err := c.SendHumanTurn(ctx, session, "hello", nil); !ambiguous(err) {
+		t.Fatalf("human turn err=%v", err)
+	}
+	if err := c.Steer(ctx, session, "hello"); !ambiguous(err) {
+		t.Fatalf("steer err=%v", err)
+	}
+	if err := c.Interrupt(ctx, session); !ambiguous(err) {
+		t.Fatalf("interrupt err=%v", err)
+	}
+	if err := c.Compact(ctx, session); !ambiguous(err) {
+		t.Fatalf("compact err=%v", err)
+	}
+	if _, err := c.Model(ctx, session, "opus"); !ambiguous(err) {
+		t.Fatalf("model err=%v", err)
+	}
+}
+
+func TestClaudeHostedConversationInTwoConfigRootsIsRefused(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	host := claudehosttest.New(t, "")
+	claudetest.New(t)
+	host.Start(t)
+	c := NewClaude(nil, host.Home)
+	ctx := context.Background()
+	session, _, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listedSession(t, c, session.ID)
+	second := filepath.Join(host.Home, "claude-work")
+	duplicate := filepath.Join(second, "projects", "copied", session.ID+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(duplicate), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(duplicate, []byte("{}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(host.Home, ".agenthail", "config.json"), []byte(`{"claudeConfigDirs":["`+second+`"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"status", "stop", "resume"} {
+		if _, err := c.SessionAction(ctx, session, action); err == nil || !strings.Contains(err.Error(), "more than one Claude config directory") {
+			t.Fatalf("%s err=%v", action, err)
+		}
+	}
+	if err := c.Interrupt(ctx, session); err == nil || !strings.Contains(err.Error(), "more than one Claude config directory") {
+		t.Fatalf("interrupt err=%v", err)
+	}
+	if !claudehosttest.Alive(session.PID) || len(host.Spawns(t, session.ID)) != 1 {
+		t.Fatal("a refused lifecycle action reached the host")
 	}
 }
 

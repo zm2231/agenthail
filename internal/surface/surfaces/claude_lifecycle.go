@@ -168,12 +168,12 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 	if action != "stop" && action != "resume" && action != "logs" && action != "status" {
 		return nil, fmt.Errorf("Claude lifecycle action must be status, stop, resume, or logs")
 	}
-	if claudeHosted(session) {
-		return c.hostSessionAction(ctx, session, action)
-	}
 	root, err := c.conversationRoot(session.ID)
 	if err != nil {
 		return nil, err
+	}
+	if claudeHosted(session) {
+		return c.hostSessionAction(ctx, session, action)
 	}
 	records, err := c.backgroundSessions(ctx, root)
 	if err != nil {

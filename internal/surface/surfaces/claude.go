@@ -548,8 +548,12 @@ func (c *Claude) sessionTranscript(sess *surface.Session) (string, error) {
 }
 
 // EnsureWritable refuses a conversation that more than one config root
-// holds, since a send could reach either copy.
+// holds, since a send or control could reach either copy. Every write path of
+// the adapter checks it itself as well, whoever calls it.
 func (c *Claude) EnsureWritable(_ context.Context, sess *surface.Session) error {
+	if sess == nil {
+		return nil
+	}
 	_, err := c.conversationRoot(sess.ID)
 	return err
 }
@@ -922,6 +926,9 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 	if err := peerSlashCommand(sess, message); err != nil {
 		return nil, err
 	}
+	if err := c.EnsureWritable(ctx, sess); err != nil {
+		return nil, err
+	}
 	if _, err := c.reach(ctx, sess); err != nil {
 		return nil, err
 	}
@@ -1009,6 +1016,9 @@ func (c *Claude) canSendHumanTurn(sess *surface.Session) bool {
 func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, message string, images surface.Uploads) (*surface.SendResult, error) {
 	if sess == nil {
 		return nil, surface.DeliveryTerminal(errors.New("Claude session is required"), surface.DeliveryInvalidRequest)
+	}
+	if err := c.EnsureWritable(ctx, sess); err != nil {
+		return nil, err
 	}
 	if !c.canSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude web bridge session is unavailable"))
@@ -1383,6 +1393,9 @@ func (c *Claude) Compact(ctx context.Context, sess *surface.Session) error {
 	if nativeClaudeOnly(sess) {
 		return surface.ErrUnsupported
 	}
+	if err := c.EnsureWritable(ctx, sess); err != nil {
+		return err
+	}
 	if err := c.reachRunning(ctx, sess); err != nil {
 		return err
 	}
@@ -1419,6 +1432,9 @@ func (c *Claude) Compact(ctx context.Context, sess *surface.Session) error {
 func (c *Claude) Model(ctx context.Context, sess *surface.Session, name string) (string, error) {
 	if nativeClaudeOnly(sess) && name != "" {
 		return "", surface.ErrUnsupported
+	}
+	if err := c.EnsureWritable(ctx, sess); err != nil {
+		return "", err
 	}
 	if name != "" {
 		result, err := c.confirmedCommand(ctx, sess, "/model", name, 5*time.Second)
@@ -1484,6 +1500,9 @@ func (c *Claude) confirmedCommand(ctx context.Context, sess *surface.Session, co
 }
 
 func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
+	if err := c.EnsureWritable(ctx, sess); err != nil {
+		return err
+	}
 	if claudeHosted(sess) {
 		return c.interruptHost(ctx, sess)
 	}
@@ -1533,6 +1552,9 @@ func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
 }
 
 func (c *Claude) Steer(ctx context.Context, sess *surface.Session, message string) error {
+	if err := c.EnsureWritable(ctx, sess); err != nil {
+		return err
+	}
 	if claudeHosted(sess) {
 		return c.steerHost(ctx, sess, message)
 	}
