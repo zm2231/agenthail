@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -208,6 +209,75 @@ func (f *Fixture) Invocations(args ...string) int {
 	count := 0
 	for _, line := range strings.Split(string(data), "\n") {
 		if line == want {
+			count++
+		}
+	}
+	return count
+}
+
+// PeerManager answers the daemon's Claude peer manager socket under a home,
+// accepting every send and recording its message.
+type PeerManager struct {
+	mu       sync.Mutex
+	messages []string
+}
+
+func ListenPeerManager(t testing.TB, home string) *PeerManager {
+	t.Helper()
+	manager := &PeerManager{}
+	path := filepath.Join(home, ".agenthail", "claude-peers.sock")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			var request struct {
+				Message string `json:"message"`
+			}
+			if json.NewDecoder(conn).Decode(&request) == nil {
+				manager.mu.Lock()
+				manager.messages = append(manager.messages, request.Message)
+				id := fmt.Sprintf("peer-%d", len(manager.messages))
+				manager.mu.Unlock()
+				_ = json.NewEncoder(conn).Encode(map[string]any{"ok": true, "result": map[string]any{"uuid": id, "accepted": true}})
+			}
+			_ = conn.Close()
+		}
+	}()
+	return manager
+}
+
+// Count is how many sends carried exactly message.
+func (m *PeerManager) Count(message string) int {
+	return m.matching(func(sent string) bool { return sent == message })
+}
+
+// Containing is how many sends contained text.
+func (m *PeerManager) Containing(text string) int {
+	return m.matching(func(sent string) bool { return strings.Contains(sent, text) })
+}
+
+func (m *PeerManager) Messages() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.messages...)
+}
+
+func (m *PeerManager) matching(match func(string) bool) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, sent := range m.messages {
+		if match(sent) {
 			count++
 		}
 	}

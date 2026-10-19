@@ -56,7 +56,7 @@ func (r *SessionTransportResolver) Require(id string, agent surface.SurfaceKind)
 func defaultLauncherForSurface(kind surface.SurfaceKind) string {
 	switch kind {
 	case surface.KindClaude:
-		return surface.LauncherClaudeBG
+		return surface.LauncherClaudeSDK
 	case surface.KindCodex:
 		return surface.LauncherCodexAppServer
 	default:

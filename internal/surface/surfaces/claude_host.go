@@ -43,6 +43,13 @@ func (h *claudeHost) runs(ctx context.Context, pid int, conversation string) boo
 	return pid > 0 && conversation != "" && h.listing(ctx)[conversation] == pid
 }
 
+// forget drops the cached listing, so the next read asks the host.
+func (h *claudeHost) forget() {
+	h.mu.Lock()
+	h.listed = time.Time{}
+	h.mu.Unlock()
+}
+
 // listing is the host's sessions by conversation, with their process ids.
 func (h *claudeHost) listing(ctx context.Context) map[string]int {
 	if h == nil {

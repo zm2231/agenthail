@@ -56,6 +56,10 @@ type OpenRequest struct {
 	Cwd            string `json:"cwd"`
 	Model          string `json:"model,omitempty"`
 	PermissionMode string `json:"permissionMode,omitempty"`
+	Effort         string `json:"effort,omitempty"`
+	Agent          string `json:"agent,omitempty"`
+	Name           string `json:"name,omitempty"`
+	Worktree       string `json:"worktree,omitempty"`
 }
 
 type Session struct {

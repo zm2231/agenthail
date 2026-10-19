@@ -4,10 +4,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
-	"time"
 
+	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
@@ -37,7 +39,7 @@ func TestClaudeBackgroundCommandsDropCmuxTerminalState(t *testing.T) {
 	t.Setenv("CMUX_CLAUDE_HOOKS_DISABLED", "0")
 	t.Setenv("AGENTHAIL_FIXTURE_KEEP", "kept")
 	home, c := fakeBackgroundClaude(t)
-	if _, _, err := c.StartSession(context.Background(), surface.SessionStartOptions{Message: "hello", Cwd: home}); err != nil {
+	if _, _, err := c.BackgroundStarter().StartSession(context.Background(), surface.SessionStartOptions{Message: "hello", Cwd: home}); err != nil {
 		t.Fatal(err)
 	}
 	env, err := os.ReadFile(filepath.Join(home, "env"))
@@ -56,86 +58,94 @@ func TestClaudeBackgroundCommandsDropCmuxTerminalState(t *testing.T) {
 
 const fixtureConversation = "fe758937-0caa-4912-823f-927677775b2b"
 
-func endedBackgroundJob(t *testing.T) (*claudetest.Fixture, *Claude) {
+func TestClaudeStartsASessionInTheHostWithItsFirstTurn(t *testing.T) {
+	host := claudehosttest.New(t, "")
+	host.Start(t)
+	c := NewClaude("", host.Home)
+	turn := uuid.NewString()
+	session, sent, err := c.StartSession(surface.WithMessageUUID(context.Background(), turn), surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, Name: "builder", PermissionMode: "acceptEdits", TurnOptions: surface.TurnOptions{Effort: "high"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.RuntimeKind != surface.RuntimeClaudeHost || session.PID <= 0 || session.Name != "builder" || sent == nil || sent.UUID != turn || !sent.Accepted {
+		t.Fatalf("session=%+v sent=%+v", session, sent)
+	}
+	spawns := host.Spawns(t, session.ID)
+	if len(spawns) != 1 || !slices.Contains(spawns[0].Argv, "--permission-mode=acceptEdits") && !slices.Contains(spawns[0].Argv, "acceptEdits") {
+		t.Fatalf("spawns=%+v", spawns)
+	}
+	claudehosttest.WaitFor(t, "the first turn", func() bool {
+		turns := host.Turns(t, session.ID)
+		return len(turns) == 1 && turns[0].UUID == turn && turns[0].Text == "build it" && string(turns[0].Origin) == `{"kind":"human"}`
+	})
+	listed := listedSession(t, c, session.ID)
+	if listed.PID != session.PID {
+		t.Fatalf("listed=%+v, want pid %d", listed, session.PID)
+	}
+}
+
+func TestClaudeStartWithoutTheHostCreatesNothing(t *testing.T) {
+	home := t.TempDir()
+	session, sent, err := NewClaude("", home).StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: home})
+	if err == nil || session != nil || sent != nil || surface.IsDeliveryOutcomeUnknown(err) || !strings.Contains(err.Error(), "Claude host is not running") {
+		t.Fatalf("session=%+v sent=%+v err=%v", session, sent, err)
+	}
+}
+
+func endedBackgroundJob(t *testing.T) (*claudetest.Fixture, *claudehosttest.Fixture, *Claude) {
 	t.Helper()
-	fixture := claudetest.New(t)
+	fixture, host, c := hostResume(t)
 	fixture.Transcript(fixtureConversation, fixture.Home)
 	fixture.Job("fe758937", fixtureConversation, fixture.Home, "done", 0)
-	fixture.ResumeBridge("session_fixture")
-	return fixture, NewClaude("", fixture.Home)
+	return fixture, host, c
 }
 
-func shortResumeSettle(t *testing.T) {
-	timeout := claudeResumeSettleTimeout
-	claudeResumeSettleTimeout = 500 * time.Millisecond
-	t.Cleanup(func() { claudeResumeSettleTimeout = timeout })
-}
-
-func TestClaudeResumeSettlesOnReachableProcessWhileJobStillSaysDone(t *testing.T) {
-	fixture, c := endedBackgroundJob(t)
-	fixture.JobState("fe758937", "done", "", time.Now().Add(time.Hour))
+func TestClaudeResumeActionOpensAnEndedJobInTheHost(t *testing.T) {
+	_, host, c := endedBackgroundJob(t)
 	result, err := c.SessionAction(context.Background(), &surface.Session{ID: fixtureConversation}, "resume")
-	if err != nil || result["id"] != "fe758937" || result["unchanged"] != false || result["state"] != string(surface.StatusIdle) {
+	if err != nil || result["id"] != "fe758937" || result["unchanged"] != false {
 		t.Fatalf("result=%v err=%v", result, err)
 	}
-	if count := fixture.Invocations("--bg", "--resume", fixtureConversation); count != 1 {
-		t.Fatalf("resumes=%d", count)
+	if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 1 {
+		t.Fatalf("spawns=%+v", spawns)
 	}
 }
 
 func TestClaudeResumeLeavesReachableProcessAlone(t *testing.T) {
-	fixture, c := endedBackgroundJob(t)
+	fixture, host, c := endedBackgroundJob(t)
 	fixture.Record(fixtureConversation, fixture.Home, "session_fixture")
 	result, err := c.SessionAction(context.Background(), &surface.Session{ID: fixtureConversation}, "resume")
-	if err != nil || result["unchanged"] != true || fixture.Invocations("--bg", "--resume", fixtureConversation) != 0 {
+	if err != nil || result["unchanged"] != true || len(host.Spawns(t, fixtureConversation)) != 0 {
 		t.Fatalf("result=%v err=%v", result, err)
 	}
 }
 
-func TestClaudeResumeReportsJobThatFailsToStart(t *testing.T) {
-	detail := "exit 1 before init: Error: Settings file not found: /fixture/settings.json"
-	fixture, c := endedBackgroundJob(t)
-	fixture.ResumeNeverReady()
-	fixture.JobState("fe758937", "failed", detail, time.Now().Add(time.Hour))
-	result, err := c.SessionAction(context.Background(), &surface.Session{ID: fixtureConversation}, "resume")
-	if err == nil || !strings.Contains(err.Error(), "is failed after resume") || !strings.Contains(err.Error(), detail) || surface.IsDeliveryOutcomeUnknown(err) {
-		t.Fatalf("result=%v err=%v", result, err)
-	}
-}
-
-func TestClaudeResumeIgnoresFailureLeftFromBeforeResume(t *testing.T) {
-	shortResumeSettle(t)
-	fixture, c := endedBackgroundJob(t)
-	fixture.ResumeNeverReady()
-	fixture.JobState("fe758937", "failed", "earlier failure", time.Now().Add(-time.Hour))
-	result, err := c.SessionAction(context.Background(), &surface.Session{ID: fixtureConversation}, "resume")
-	if err == nil || !surface.IsDeliveryOutcomeUnknown(err) || strings.Contains(err.Error(), "earlier failure") {
-		t.Fatalf("result=%v err=%v", result, err)
-	}
-}
-
-func TestClaudeResumeWithUnreadableJobRecordIsUnknown(t *testing.T) {
-	shortResumeSettle(t)
-	fixture, c := endedBackgroundJob(t)
-	fixture.ResumeNeverReady()
-	if err := os.MkdirAll(filepath.Join(fixture.Home, ".claude", "jobs", "fe758937"), 0700); err != nil {
+func TestClaudeHostSessionLifecycle(t *testing.T) {
+	host := claudehosttest.New(t, "")
+	host.Start(t)
+	c := NewClaude("", host.Home)
+	session, _, err := c.StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(fixture.Home, ".claude", "jobs", "fe758937", "state.json"), []byte(`{"state":"fai`), 0600); err != nil {
+	listedSession(t, c, session.ID)
+	if status, err := c.SessionAction(context.Background(), session, "status"); err != nil || status["pid"] != session.PID {
+		t.Fatalf("status=%v err=%v", status, err)
+	}
+	if _, err := c.SessionAction(context.Background(), session, "logs"); err == nil || !strings.Contains(err.Error(), "agenthail last") {
+		t.Fatalf("logs err=%v", err)
+	}
+	if _, err := c.SessionAction(context.Background(), session, "stop"); err != nil {
 		t.Fatal(err)
 	}
-	result, err := c.SessionAction(context.Background(), &surface.Session{ID: fixtureConversation}, "resume")
-	if err == nil || !surface.IsDeliveryOutcomeUnknown(err) {
-		t.Fatalf("result=%v err=%v", result, err)
+	claudehosttest.WaitFor(t, "the session to close", func() bool { return !claudehosttest.Alive(session.PID) })
+	if status, err := c.SessionAction(context.Background(), session, "status"); err != nil || status["state"] != "closed" {
+		t.Fatalf("status after stop=%v err=%v", status, err)
 	}
-}
-
-func TestClaudeResumeCountsFailureInTheSameMillisecond(t *testing.T) {
-	fixture, c := endedBackgroundJob(t)
-	started := time.Date(2026, 1, 2, 3, 4, 5, 123_600_000, time.UTC)
-	fixture.JobState("fe758937", "failed", "fixture failure", started.Truncate(time.Millisecond))
-	_, err := c.awaitReachable(context.Background(), fixtureConversation, "fe758937", started, false)
-	if err == nil || !strings.Contains(err.Error(), "fixture failure") || surface.IsDeliveryOutcomeUnknown(err) {
-		t.Fatalf("err=%v", err)
+	if result, err := c.SessionAction(context.Background(), session, "resume"); err != nil || result["unchanged"] != false {
+		t.Fatalf("resume=%v err=%v", result, err)
+	}
+	if spawns := host.Spawns(t, session.ID); len(spawns) != 2 {
+		t.Fatalf("spawns=%+v, want the open and the resume", spawns)
 	}
 }

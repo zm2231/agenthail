@@ -4,11 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -16,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 	"github.com/zm2231/agenthail/internal/voice"
 )
 
@@ -70,59 +68,6 @@ func (c *voiceCall) said(text string) bool {
 	return false
 }
 
-// peerManager answers the Claude peer manager socket under home, accepting
-// every send.
-type peerManager struct {
-	mu       sync.Mutex
-	messages []string
-}
-
-func listenPeerManager(t *testing.T, home string) *peerManager {
-	t.Helper()
-	manager := &peerManager{}
-	path := filepath.Join(home, ".agenthail", "claude-peers.sock")
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
-	}
-	listener, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = listener.Close() })
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			var request struct {
-				Message string `json:"message"`
-			}
-			if json.NewDecoder(conn).Decode(&request) == nil {
-				manager.mu.Lock()
-				manager.messages = append(manager.messages, request.Message)
-				id := fmt.Sprintf("peer-%d", len(manager.messages))
-				manager.mu.Unlock()
-				_ = json.NewEncoder(conn).Encode(map[string]any{"ok": true, "result": map[string]any{"uuid": id, "accepted": true}})
-			}
-			_ = conn.Close()
-		}
-	}()
-	return manager
-}
-
-func (m *peerManager) count(message string) int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	count := 0
-	for _, sent := range m.messages {
-		if sent == message {
-			count++
-		}
-	}
-	return count
-}
-
 // connectVoice starts a voice call through the daemon's voice target
 // resolution, delivery and session streams, and selects target.
 func connectVoice(t *testing.T, f *orphanFixture, target string) (*voice.Service, *voiceCall) {
@@ -162,105 +107,32 @@ func delegate(t *testing.T, service *voice.Service, text string) voice.State {
 	return state
 }
 
-// recordTurns makes each posted message a transcript turn Claude has not
-// answered yet.
-func (f *orphanFixture) recordTurns(t *testing.T) {
+// delegateToResumed delegates to the exited session, which resumes in the
+// Claude host. A delegation is the operator's message, so it takes the native
+// socket and its reply cannot be followed.
+func (f *orphanFixture) delegateToResumed(t *testing.T) {
 	t.Helper()
-	f.posts.onPost = func(body string) {
-		var envelope struct {
-			Events []struct {
-				Payload struct {
-					UUID    string `json:"uuid"`
-					Message struct {
-						Content string `json:"content"`
-					} `json:"message"`
-				} `json:"payload"`
-			} `json:"events"`
-		}
-		if json.Unmarshal([]byte(body), &envelope) != nil || len(envelope.Events) != 1 {
-			return
-		}
-		f.appendTranscript(t, map[string]any{"type": "user", "uuid": envelope.Events[0].Payload.UUID, "timestamp": time.Now().UTC().Format(time.RFC3339Nano), "message": map[string]any{"role": "user", "content": envelope.Events[0].Payload.Message.Content}})
-	}
-}
-
-func (f *orphanFixture) appendTranscript(t *testing.T, record map[string]any) {
-	t.Helper()
-	line, _ := json.Marshal(record)
-	file, err := os.OpenFile(f.session.Transcript, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	defer file.Close()
-	if _, err := file.Write(append(line, '\n')); err != nil {
-		t.Error(err)
-	}
-}
-
-func (f *orphanFixture) answer(t *testing.T, text string) {
-	t.Helper()
-	f.appendTranscript(t, map[string]any{"type": "assistant", "uuid": "fixture-reply", "timestamp": time.Now().UTC().Format(time.RFC3339Nano), "message": map[string]any{"id": "fixture-reply-message", "role": "assistant", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": text}}}})
-	f.appendTranscript(t, map[string]any{"type": "system", "subtype": "turn_duration", "timestamp": time.Now().UTC().Format(time.RFC3339Nano)})
-}
-
-func TestVoiceDelegationToEndedBackgroundJobResumesItAndSpeaksTheReply(t *testing.T) {
-	f := newOrphanFixtureOn(t, "")
-	f.recordTurns(t)
-	service, call := connectVoice(t, f, "orphan")
-	delegate(t, service, "hello")
-	time.Sleep(200 * time.Millisecond)
-	f.answer(t, "fixture reply")
-	deadline := time.Now().Add(5 * time.Second)
-	for !call.said("fixture reply") {
-		if time.Now().After(deadline) {
-			window, _ := f.r.SessionJournalAfter(f.session.ID, 0, 100)
-			var payloads []string
-			for _, entry := range window.Entries {
-				payloads = append(payloads, string(entry.Payload))
-			}
-			t.Fatalf("reply was not spoken: spoken=%q journal=%s events=%+v", call.spoken, strings.Join(payloads, "\n"), service.View("phone").Events)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if f.resumes() != 1 || f.posts.count("hello") != 1 || !strings.Contains(service.View("phone").Message, "Woke orphan") || failed(service.View("phone")) {
-		t.Fatalf("resumes=%d posts=%d message=%q", f.resumes(), f.posts.count("hello"), service.View("phone").Message)
-	}
-}
-
-func TestVoiceDelegationWhoseResumeChangesTransportDeliversAndCannotFollow(t *testing.T) {
-	f := newOrphanFixture(t)
+	manager := claudetest.ListenPeerManager(t, f.claude.Home)
 	service, call := connectVoice(t, f, "orphan")
 	state := delegate(t, service, "hello")
-	if !strings.Contains(state.Message, "cannot follow this session's reply") || f.resumes() != 1 || f.posts.count("hello") != 1 || call.said("hello") {
-		t.Fatalf("message=%q resumes=%d posts=%d", state.Message, f.resumes(), f.posts.count("hello"))
+	if !strings.Contains(state.Message, "cannot follow this session's reply") || f.resumes(t) != 1 || manager.Count("hello") != 1 || f.posts.count("hello") != 0 || call.said("hello") {
+		t.Fatalf("message=%q resumes=%d peer=%d posts=%d", state.Message, f.resumes(t), manager.Count("hello"), f.posts.count("hello"))
 	}
 }
 
-func TestVoiceDelegationWhoseResumeComesBackSocketOnlyDeliversAndCannotFollow(t *testing.T) {
-	f := newOrphanFixture(t)
-	f.claude.Listen()
-	f.claude.ResumeBridge("")
-	manager := listenPeerManager(t, f.claude.Home)
-	f.session = surface.Session{ID: orphanConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "orphan", PID: orphanPID, Status: surface.StatusIdle, Transport: "uds", Cwd: f.claude.Home, Transcript: f.session.Transcript}
-	if err := f.r.RegisterSession(f.session); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.r.SetAlias("orphan", f.session.ID); err != nil {
-		t.Fatal(err)
-	}
-	service, call := connectVoice(t, f, "orphan")
-	state := delegate(t, service, "hello")
-	if !strings.Contains(state.Message, "cannot follow this session's reply") || f.resumes() != 1 || manager.count("hello") != 1 || f.posts.count("hello") != 0 || call.said("hello") {
-		t.Fatalf("message=%q resumes=%d peer=%d posts=%d", state.Message, f.resumes(), manager.count("hello"), f.posts.count("hello"))
-	}
+func TestVoiceDelegationToEndedBackgroundJobResumesItInTheHostAndCannotFollow(t *testing.T) {
+	newOrphanFixtureOn(t, "").delegateToResumed(t)
+}
+
+func TestVoiceDelegationToEndedSocketSessionResumesItInTheHostAndCannotFollow(t *testing.T) {
+	newOrphanFixture(t).delegateToResumed(t)
 }
 
 func TestVoiceDelegationToLiveSocketOnlySessionDeliversInsteadOfRejecting(t *testing.T) {
 	f := newOrphanFixture(t)
 	f.claude.Listen()
 	f.claude.Record(orphanConversation, f.claude.Home, "")
-	manager := listenPeerManager(t, f.claude.Home)
+	manager := claudetest.ListenPeerManager(t, f.claude.Home)
 	f.session = surface.Session{ID: orphanConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "orphan", PID: f.claude.PID, Status: surface.StatusIdle, Transport: "uds", Cwd: f.claude.Home, Transcript: f.session.Transcript}
 	if err := f.r.RegisterSession(f.session); err != nil {
 		t.Fatal(err)
@@ -270,8 +142,8 @@ func TestVoiceDelegationToLiveSocketOnlySessionDeliversInsteadOfRejecting(t *tes
 	}
 	service, _ := connectVoice(t, f, "orphan")
 	state := delegate(t, service, "hello")
-	if !strings.Contains(state.Message, "cannot follow this session's reply") || f.resumes() != 0 || manager.count("hello") != 1 {
-		t.Fatalf("message=%q resumes=%d peer=%d", state.Message, f.resumes(), manager.count("hello"))
+	if !strings.Contains(state.Message, "cannot follow this session's reply") || f.resumes(t) != 0 || manager.Count("hello") != 1 {
+		t.Fatalf("message=%q resumes=%d peer=%d", state.Message, f.resumes(t), manager.Count("hello"))
 	}
 }
 

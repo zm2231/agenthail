@@ -85,7 +85,8 @@ Claude's control capabilities depend on its transport. Native UDS messages
 cannot execute slash commands, steer a running turn, or correlate message IDs
 with transcript turns for `send --reply` / `--stream`. Use `last` to inspect
 the transcript or native `SendMessage` for an explicit reply. Compact, model,
-interrupt, and steer are typed controls that require a Remote Control attachment.
+interrupt, and steer are typed controls that require a Remote Control attachment;
+a session the Claude host runs takes interrupt and steer through the host.
 A receipt with `evidence: "transport_accepted"` only proves socket acceptance;
 receiver policy can still hold or deny the message. Do not claim model delivery
 from it. Report the immediate send status and target as returned: Sent, Queued,
@@ -194,7 +195,10 @@ terminal thread with `agenthail codex` in a human TTY. It uses the caller's
 current directory unless `--cd` is provided. `agenthail launch codex` starts
 Desktop with a writable bridge but does not itself create a thread.
 
-Create Claude background sessions with `agenthail thread create claude "task" --alias worker --json`.
+Create Claude sessions with `agenthail thread create claude "task" --alias worker --json`.
+The session runs in Agenthail's Claude host, which needs the daemon running. It
+has no Remote Control and the host denies tools its permission mode would prompt
+for, so pick a permission mode that allows the work.
 A Claude session ID is the conversation ID (the transcript name). The process,
 messaging socket and Remote Control session are attachments; Remote Control is
 never the identity. `/branch` and `/clear` create a new session without an alias
@@ -202,19 +206,20 @@ never the identity. `/branch` and `/clear` create a new session without an alias
 After `/branch`, `agenthail whoami` names the branch. Move an alias only with
 `agenthail identify <target> <name>`.
 
-Use `thread status`, `logs`, `stop` or `resume` with the alias. Preserve unknown
-launch outcomes; inspect `claude agents --json --all` before retrying.
+Use `thread status`, `stop` or `resume` with the alias; a host session has no
+`logs`, so read it with `agenthail last`. Preserve unknown launch outcomes;
+inspect `agenthail list` before retrying.
 Send to a Claude session whose process has ended (a stopped or finished
 background job, or a closed terminal session) like any other session: the send
-resumes it in the background by its session ID and delivers the message once.
+resumes it in the Claude host by its session ID and delivers the message once.
 This holds for every sender, voice delegation included. Do not run `thread resume` first. The alias and session ID keep working
 afterwards. If another process still holds the conversation but cannot take
 messages yet, the send is queued and goes out once it can, or once that process
 exits and the session is resumed. An `unknown` or `submitted` outcome means the
 resume or the delivery may have happened; inspect the session before sending
-again. `thread resume` remains for waking a background job without a message;
-it returns once the job can take messages, and a job that fails to start
-returns Claude's failure detail.
+again. `thread resume` remains for waking a session without a message; it
+returns once the session can take messages, and a session Claude refuses to
+start returns Claude's output.
 
 Codex supports `thread fork <target>` and `thread queue <target> <list|add|update|delete|reorder|start>`.
 Native queue adds require `--client-id <stable-id>`; reuse it only for retries

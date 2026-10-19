@@ -19,6 +19,13 @@ const sessionId = flag('session-id') || flag('resume');
 const dir = process.env.FAKE_CLAUDE_DIR;
 const transcript = path.join(dir, `${sessionId}.jsonl`);
 fs.appendFileSync(path.join(dir, 'spawns.jsonl'), JSON.stringify({ pid: process.pid, sessionId, argv, cwd: process.cwd(), env: Object.keys(process.env) }) + '\n');
+// A refuse-<session id> file makes the CLI exit before it starts, printing the
+// file's text the way Claude reports a session it cannot open.
+const refusal = path.join(dir, `refuse-${sessionId}`);
+if (fs.existsSync(refusal)) {
+  process.stderr.write(fs.readFileSync(refusal, 'utf8'));
+  process.exit(1);
+}
 const seen = new Set(
   fs.existsSync(transcript) ? fs.readFileSync(transcript, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).uuid) : [],
 );
@@ -64,9 +71,31 @@ async function turn(message) {
     reply = interrupted ? 'interrupted' : `slow:${ms}`;
   }
   fs.appendFileSync(transcript, JSON.stringify({ uuid, text, reply, origin: message.origin ?? null, priority: message.priority ?? null, pid: process.pid, inputClosed }) + '\n');
+  claudeTranscript(uuid, text, reply);
   write({ type: 'assistant', uuid: crypto.randomUUID(), session_id: sessionId, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: reply }] } });
   write({ type: 'result', subtype: 'success', is_error: false, result: reply, uuid: crypto.randomUUID(), session_id: sessionId, user_message_uuids: [uuid], duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {} });
   write({ type: 'system', subtype: 'session_state_changed', state: 'idle', uuid: crypto.randomUUID(), session_id: sessionId });
+}
+
+// With FAKE_CLAUDE_RECORD set each turn is also written to the conversation's
+// transcript under ~/.claude/projects in Claude's own record format, appending
+// to an existing transcript of the conversation.
+function claudeTranscript(uuid, text, reply) {
+  if (!process.env.FAKE_CLAUDE_RECORD) return;
+  const projects = path.join(process.env.HOME, '.claude', 'projects');
+  const existing = fs.existsSync(projects)
+    ? fs.readdirSync(projects).map((dir) => path.join(projects, dir, `${sessionId}.jsonl`)).find((file) => fs.existsSync(file))
+    : undefined;
+  const file = existing ?? path.join(projects, 'fake-project', `${sessionId}.jsonl`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const at = new Date().toISOString();
+  const base = { sessionId, cwd: process.cwd(), timestamp: at };
+  const records = [
+    { ...base, type: 'user', uuid, message: { role: 'user', content: text } },
+    { ...base, type: 'assistant', uuid: crypto.randomUUID(), message: { id: `msg-${uuid}`, role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: reply }] } },
+    { ...base, type: 'system', subtype: 'turn_duration' },
+  ];
+  fs.appendFileSync(file, records.map((r) => JSON.stringify(r)).join('\n') + '\n');
 }
 
 // With FAKE_CLAUDE_RECORD set it also writes the session record and serves

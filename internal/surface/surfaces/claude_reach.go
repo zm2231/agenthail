@@ -11,14 +11,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/surface"
 )
-
-var claudeResumeSettleTimeout = 10 * time.Second
 
 // claudeConversation is what Claude's own records say about one conversation:
 // a process Agenthail can deliver to, whether any process holds it, and its
 // background job.
+var claudeResumeListTimeout = 10 * time.Second
+
 type claudeConversation struct {
 	reachable *surface.Session
 	alive     bool
@@ -26,7 +27,7 @@ type claudeConversation struct {
 }
 
 // reach points sess at a live process of its conversation that can take a
-// message, resuming the conversation in the background when no process holds
+// message, resuming the conversation in the Claude host when no process holds
 // it. A conversation held by a process that cannot take messages yet returns
 // a held delivery, and a resume whose result is uncertain returns an unknown
 // outcome. It reports whether it started a process.
@@ -64,12 +65,30 @@ func (c *Claude) reach(ctx context.Context, sess *surface.Session) (bool, error)
 	if cwd == "" {
 		return false, surface.DeliveryTerminal(fmt.Errorf("Claude conversation %s has no known working directory to resume in", conversation), surface.DeliveryTargetMissing)
 	}
-	resumed, err := c.resume(ctx, conversation, cwd, state.job, sess.Transport != "uds" && !c.localOnly)
+	resumed, err := c.resume(ctx, conversation, cwd)
 	if err != nil {
 		return false, err
 	}
 	adoptClaudeProcess(sess, resumed)
 	return true, nil
+}
+
+// reachRunning points sess at a running process of its conversation that has
+// Remote Control, which slash commands need. It never resumes one: a resumed
+// conversation runs in the Claude host, which has no Remote Control.
+func (c *Claude) reachRunning(ctx context.Context, sess *surface.Session) error {
+	if c.reachableAsIs(ctx, sess) {
+		return nil
+	}
+	state, err := c.conversation(ctx, sess.ID)
+	if err != nil {
+		return surface.DeliveryUnavailable(err)
+	}
+	if state.reachable == nil || state.reachable.Bridge == "" {
+		return fmt.Errorf("%w: Claude conversation %s has no running process with Remote Control", surface.ErrUnsupported, sess.ID)
+	}
+	adoptClaudeProcess(sess, state.reachable)
+	return nil
 }
 
 // NeedsWake reports whether a send to sess would first have to find or resume
@@ -157,74 +176,39 @@ func (c *Claude) conversationProcess(ctx context.Context, id string) (*surface.S
 	return &best.session, true, nil
 }
 
-// resume continues a conversation in the background without a prompt, so the
-// message is sent only once the resumed process is reachable. Claude starts a
-// copy under a new id instead when it finds the conversation running; a copy
-// is stopped and the outcome is unknown.
-func (c *Claude) resume(ctx context.Context, conversation, cwd string, job *claudeBackground, bridged bool) (*surface.Session, error) {
-	started := time.Now()
-	output, err := c.backgroundCommand(ctx, cwd, "--bg", "--resume", conversation)
+// resume opens the conversation in the Claude host and waits until its
+// process is listed. A process from an earlier host that still runs holds the
+// conversation, and a Claude that fails to start has refused it.
+func (c *Claude) resume(ctx context.Context, conversation, cwd string) (*surface.Session, error) {
+	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd})
 	if err != nil {
-		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude resume: %w: %s", err, string(output)))
+		return nil, claudeHostResumeError(conversation, err)
 	}
-	id, err := claudeBackgroundID(string(output))
-	if err != nil {
-		return nil, surface.DeliveryOutcomeUnknown(err)
-	}
-	if (job != nil && id != job.ID) || (job == nil && !strings.HasPrefix(conversation, id)) {
-		return nil, surface.DeliveryOutcomeUnknown(c.stopCopy(conversation, id))
-	}
-	return c.awaitReachable(ctx, conversation, id, started, bridged)
-}
-
-func (c *Claude) stopCopy(conversation, id string) error {
-	stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if output, err := c.backgroundCommand(stopCtx, "", "stop", id); err != nil {
-		return fmt.Errorf("Claude started copy %s instead of resuming %s, and stopping it failed: %w: %s", id, conversation, err, string(output))
-	}
-	return fmt.Errorf("Claude started copy %s instead of resuming %s; the copy was stopped", id, conversation)
-}
-
-// awaitReachable waits for the resumed process to become reachable. Claude
-// prints its backgrounded line before the session initializes, and the job
-// state is not evidence: a resumed idle job keeps reporting done. A failure
-// counts only when this resume wrote it, since Claude records updatedAt to the
-// millisecond. A session reached through Remote Control waits for the process
-// to register Remote Control again; the socket is used if it never does.
-func (c *Claude) awaitReachable(ctx context.Context, conversation, id string, started time.Time, bridged bool) (*surface.Session, error) {
-	started = started.Truncate(time.Millisecond)
-	deadline := time.NewTimer(claudeResumeSettleTimeout)
+	deadline := time.NewTimer(claudeResumeListTimeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	var socketOnly *surface.Session
 	for {
-		process, alive, err := c.conversationProcess(ctx, conversation)
-		if err == nil && process != nil {
-			if !bridged || process.Bridge != "" {
-				return process, nil
-			}
-			socketOnly = process
-		}
-		if job, ok := c.backgroundJob(id); ok && !alive && !job.UpdatedAt.Before(started) && (job.State == "failed" || job.State == "crashed") {
-			detail := job.Detail
-			if strings.TrimSpace(detail) == "" {
-				detail = "no job detail recorded"
-			}
-			return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude background job %s is %s after resume: %s", id, job.State, detail))
+		c.host.forget()
+		process, _, err := c.conversationProcess(ctx, conversation)
+		if err == nil && process != nil && process.PID == opened.PID && claudeHosted(process) {
+			return process, nil
 		}
 		select {
 		case <-ctx.Done():
-			return nil, surface.DeliveryOutcomeUnknown(ctx.Err())
+			return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude conversation %s opened in the host as process %d but was not listed: %w", conversation, opened.PID, ctx.Err()))
 		case <-deadline.C:
-			if socketOnly != nil {
-				return socketOnly, nil
-			}
-			return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude background job %s did not become reachable after resume; inspect claude agents", id))
+			return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude conversation %s opened in the host as process %d but was not listed", conversation, opened.PID))
 		case <-ticker.C:
 		}
 	}
+}
+
+func claudeHostResumeError(conversation string, err error) error {
+	if claudehost.IsCode(err, "open_failed") {
+		return surface.DeliveryUnavailable(fmt.Errorf("Claude refused to resume %s: %s", conversation, err))
+	}
+	return claudeHostDeliveryError(err)
 }
 
 // adoptClaudeProcess attaches process to sess, keeping the Remote Control

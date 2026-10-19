@@ -1103,7 +1103,7 @@ func (c *Claude) Compact(ctx context.Context, sess *surface.Session) error {
 	if nativeClaudeOnly(sess) {
 		return surface.ErrUnsupported
 	}
-	if _, err := c.reach(ctx, sess); err != nil {
+	if err := c.reachRunning(ctx, sess); err != nil {
 		return err
 	}
 	path := sess.Transcript
@@ -1156,7 +1156,7 @@ func (c *Claude) Model(ctx context.Context, sess *surface.Session, name string) 
 }
 
 func (c *Claude) confirmedCommand(ctx context.Context, sess *surface.Session, commandName, args string, timeout time.Duration) (string, error) {
-	if _, err := c.reach(ctx, sess); err != nil {
+	if err := c.reachRunning(ctx, sess); err != nil {
 		return "", err
 	}
 	path := sess.Transcript

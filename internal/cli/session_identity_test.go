@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
@@ -106,11 +107,13 @@ func TestBranchInALiveProcessKeepsTheAliasOnTheOriginalConversation(t *testing.T
 	if sender := sendFrom(t, app, r, originalConversation, "claude:"+branchConversation, "to the branch"); sender != originalConversation || posts.count("to the branch") != 1 {
 		t.Fatalf("send to the branch: sender=%q posts=%d", sender, posts.count("to the branch"))
 	}
-	fixture.ResumeBridge("session_resumed")
-	if sender := sendFrom(t, app, r, branchConversation, "@worker", "to the original"); sender != branchConversation || posts.count("to the original") != 1 {
-		t.Fatalf("send to @worker: sender=%q posts=%d", sender, posts.count("to the original"))
+	host := claudehosttest.New(t, fixture.Home)
+	host.Start(t)
+	peers := claudetest.ListenPeerManager(t, fixture.Home)
+	if sender := sendFrom(t, app, r, branchConversation, "@worker", "to the original"); sender != branchConversation || peers.Count("to the original") != 1 {
+		t.Fatalf("send to @worker: sender=%q peer=%d", sender, peers.Count("to the original"))
 	}
-	if fixture.Invocations("--bg", "--resume", originalConversation) != 1 {
+	if len(host.Spawns(t, originalConversation)) != 1 {
 		t.Fatal("a send to the original was not delivered by resuming the original conversation")
 	}
 }

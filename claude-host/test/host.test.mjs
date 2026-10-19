@@ -129,13 +129,18 @@ test('open, send and stream a turn bound to the message uuid', async () => {
   assert.deepEqual(await c.call('hello'), { protocol: 1, hostVersion: '1.2.3', pid: (await c.call('hello')).pid });
   await c.call('subscribe', { after: 0 });
   const id = randomUUID();
-  const opened = await c.call('open', { sessionId: id, cwd: f.cwd, permissionMode: 'acceptEdits' });
+  const opened = await c.call('open', { sessionId: id, cwd: f.cwd, permissionMode: 'acceptEdits', model: 'opus', effort: 'high', agent: 'reviewer', name: 'Review the parser' });
   assert.equal(opened.sessionId, id);
   assert.equal(opened.state, 'idle');
   assert.ok(opened.pid > 0);
   const spawnRecord = JSON.parse(fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim());
   assert.ok(spawnRecord.argv.includes(`--session-id=${id}`) || spawnRecord.argv.includes(id));
   assert.ok(spawnRecord.argv.some((a) => a.includes('acceptEdits')));
+  for (const [flag, value] of [['--model', 'opus'], ['--effort', 'high'], ['--agent', 'reviewer'], ['--name', 'Review the parser']]) {
+    const at = spawnRecord.argv.indexOf(flag);
+    const passed = spawnRecord.argv.includes(`${flag}=${value}`) || (at >= 0 && spawnRecord.argv[at + 1] === value);
+    assert.ok(passed, `${flag} ${value} in ${spawnRecord.argv.join(' ')}`);
+  }
   assert.equal(spawnRecord.cwd, fs.realpathSync(f.cwd));
 
   const uuid = randomUUID();
@@ -342,6 +347,8 @@ test('open rejects a bad request', async () => {
   await assert.rejects(c.call('open', { cwd: 'relative' }), { code: 'invalid' });
   await assert.rejects(c.call('open', { cwd: f.cwd, sessionId: 'nope' }), { code: 'invalid' });
   await assert.rejects(c.call('open', { cwd: f.cwd, permissionMode: 'yolo' }), { code: 'invalid' });
+  await assert.rejects(c.call('open', { cwd: f.cwd, effort: 'extreme' }), { code: 'invalid' });
+  await assert.rejects(c.call('open', { cwd: f.cwd, resume: randomUUID(), name: 'renamed' }), { code: 'invalid' });
   await assert.rejects(c.call('nope'), { code: 'invalid' });
   c.close();
 });

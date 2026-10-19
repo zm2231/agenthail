@@ -82,12 +82,31 @@ Every delivery intent has a uuid (`delivery_intents.uuid`). The dispatcher
 passes it to the adapter for direct sends, steers and busy handling, and the
 outbox for queued messages (`surface.WithMessageUUID`).
 
+## Creation and resume
+
+`Claude.StartSession` opens a new conversation in the host under a uuid it
+chooses, with the model, permission mode, effort, agent, name and worktree
+asked for, then sends the message as the conversation's first turn: a person's
+turn under the delivery intent's uuid. It is the `claude-sdk` launcher, the
+default for the CLI, the dashboard and the apps. An open whose answer is lost
+still names the session, so creation reports it as unknown rather than failed.
+Without a running host nothing is created.
+
+`Claude.reach` resumes a conversation no process holds with `open({resume})`
+and waits until the host lists the process. The host's `held` answer holds the
+delivery; `open_failed` means Claude refused the conversation and fails it with
+Claude's output.
+
+`thread status` reads the host's listing, `thread stop` closes the session in
+the host, and `thread resume` reopens it. The host keeps no background log.
+
 ## Remote Control
 
 A Claude process started through the SDK does not register a Remote Control
 bridge, with or without `--remote-control`, while `claude --bg` under the same
 account does. Host sessions therefore have no `bridgeSessionId` and are not
-controllable from claude.ai or the Claude apps.
+controllable from claude.ai or the Claude apps, and `/compact` and `/model`,
+which go through Remote Control, are unsupported for them.
 
 ## Packaging
 

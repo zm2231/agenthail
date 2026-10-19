@@ -22,7 +22,8 @@ const MAX_SUBSCRIBER_BUFFER = 8 << 20;
 const OPEN_TIMEOUT_MS = 60_000;
 const TAKE_TIMEOUT_MS = 10_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const PERMISSION_MODES = new Set(['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']);
+const PERMISSION_MODES = new Set(['default', 'manual', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']);
+const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 const DENIED = 'Agenthail cannot answer permission prompts for this session; allow the tool through its permission mode or Claude settings.';
 
 const { values: args } = parseArgs({
@@ -144,6 +145,15 @@ async function open(params) {
   if (params.permissionMode && !PERMISSION_MODES.has(params.permissionMode)) {
     throw new HostError('invalid', `unknown permission mode: ${params.permissionMode}`);
   }
+  if (params.effort && !EFFORTS.has(params.effort)) throw new HostError('invalid', `unknown effort: ${params.effort}`);
+  for (const name of ['model', 'agent', 'name', 'worktree']) {
+    if (params[name] !== undefined && typeof params[name] !== 'string') throw new HostError('invalid', `${name} must be a string`);
+  }
+  if (params.resume && (params.name || params.worktree)) throw new HostError('invalid', 'a resumed session keeps its name and worktree');
+  const extraArgs = {
+    ...(params.name ? { name: params.name } : {}),
+    ...(params.worktree ? { worktree: params.worktree } : {}),
+  };
   const existing = sessions.get(id);
   if (existing) return existing.describe();
   const orphan = liveOrphans().find((o) => o.sessionId === id);
@@ -163,6 +173,9 @@ async function open(params) {
         ...(params.resume ? { resume: id } : { sessionId: id }),
         ...(params.permissionMode ? { permissionMode: params.permissionMode } : {}),
         ...(params.model ? { model: params.model } : {}),
+        ...(params.effort ? { effort: params.effort } : {}),
+        ...(params.agent ? { agent: params.agent } : {}),
+        extraArgs,
         canUseTool: async (toolName, _input, { toolUseID }) => {
           emit(id, 'permission_denied', { tool: toolName, toolUseId: toolUseID, reason: DENIED });
           return { behavior: 'deny', message: DENIED };

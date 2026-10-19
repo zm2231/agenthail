@@ -113,6 +113,12 @@ func (l unavailableLauncher) Launch(context.Context, LaunchRequest) (LaunchResul
 	return LaunchResult{}, fmt.Errorf("launcher %s is unavailable: %s", l.id, l.detail)
 }
 
+// BackgroundStarterSource is a surface that can also start a conversation
+// outside the Claude host, as a Claude Code background job.
+type BackgroundStarterSource interface {
+	BackgroundStarter() SessionStarter
+}
+
 // NewLaunchers injects existing surface starters into the launcher registry.
 // Direct callers that do not select a launcher continue to call StartSession.
 func NewLaunchers(surfaces []Surface) []Launcher {
@@ -124,13 +130,15 @@ func NewLaunchers(surfaces []Surface) []Launcher {
 		}
 		switch candidate.Name() {
 		case KindClaude:
-			launchers = append(launchers, starterLauncher{id: LauncherClaudeBG, agents: []SurfaceKind{KindClaude}, starter: starter})
+			launchers = append(launchers, starterLauncher{id: LauncherClaudeSDK, agents: []SurfaceKind{KindClaude}, starter: starter})
+			if background, ok := candidate.(BackgroundStarterSource); ok {
+				launchers = append(launchers, starterLauncher{id: LauncherClaudeBG, agents: []SurfaceKind{KindClaude}, starter: background.BackgroundStarter()})
+			}
 		case KindCodex:
 			launchers = append(launchers, starterLauncher{id: LauncherCodexAppServer, agents: []SurfaceKind{KindCodex}, starter: starter})
 		}
 	}
 	launchers = append(launchers,
-		unavailableLauncher{id: LauncherClaudeSDK, agents: []SurfaceKind{KindClaude}, detail: "SDK runtime is not implemented"},
 		unavailableLauncher{id: LauncherExternal, detail: "external command policy is not configured"},
 	)
 	return launchers

@@ -132,6 +132,44 @@ func (f *Fixture) Turns(t testing.TB, sessionID string) []Turn {
 	return out
 }
 
+type Spawn struct {
+	PID       int      `json:"pid"`
+	SessionID string   `json:"sessionId"`
+	Argv      []string `json:"argv"`
+	Cwd       string   `json:"cwd"`
+}
+
+// Spawns are the fake CLIs the host started for a session, in order.
+func (f *Fixture) Spawns(t testing.TB, sessionID string) []Spawn {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(f.ClaudeDir, "spawns.jsonl"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []Spawn
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var spawn Spawn
+		if err := json.Unmarshal([]byte(line), &spawn); err != nil {
+			t.Fatal(err)
+		}
+		if spawn.SessionID == sessionID {
+			out = append(out, spawn)
+		}
+	}
+	return out
+}
+
+// Refuse makes the fake CLI exit with message before it starts the session.
+func (f *Fixture) Refuse(t testing.TB, sessionID, message string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(f.ClaudeDir, "refuse-"+sessionID), []byte(message), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // KillHost kills only the host, as a crash would. Its CLIs keep running
 // until they finish their turn.
 func (f *Fixture) KillHost(t testing.TB) {
