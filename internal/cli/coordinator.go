@@ -128,8 +128,8 @@ func (a *App) expandLead(target string) (string, error) {
 }
 
 func (a *App) callerCwd() string {
-	for _, variable := range []string{"AGENTHAIL_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"} {
-		id := os.Getenv(variable)
+	for _, variable := range callerEnv {
+		id := os.Getenv(variable.name)
 		if id == "" {
 			continue
 		}
