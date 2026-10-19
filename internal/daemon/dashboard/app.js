@@ -1280,6 +1280,7 @@ function renderChat() {
   }
   syncComposerAction();
   renderSlashMenu();
+  syncRequests();
   $("#chat-subtitle").textContent = conversationMeta(session, model);
   $("#thread-count").textContent =
     `${exchanges.length} recent exchange${exchanges.length === 1 ? "" : "s"}`;
@@ -1365,6 +1366,122 @@ function renderGoalAttention(goal) {
   if (!goal || !["blocked", "usageLimited", "budgetLimited"].includes(goal.status)) return "";
   return `<p class="goal-attention" role="status">Needs you: ${escape(goalStatusLabel(goal.status))}. Review the goal in Conversation settings.</p>`;
 }
+const permissionModes = [
+  ["", "Default (Claude settings)"],
+  ["acceptEdits", "Accept edits"],
+  ["auto", "Auto"],
+  ["plan", "Plan"],
+  ["manual", "Manual"],
+  ["dontAsk", "Don't ask"],
+  ["bypassPermissions", "Bypass permissions"],
+];
+// syncRequests reads what the selected session waits on whenever the session
+// or the request it shows changes. The provider holds the requests, so each
+// read is fresh rather than taken from the session list.
+async function syncRequests() {
+  const session = app.selected;
+  const panel = $("#request-panel");
+  const capabilities = app.history?.capabilities || {};
+  if (!session || !capabilities.respond || app.history?.readOnly) {
+    app.requests = null;
+    app.requestsKey = "";
+    panel.hidden = true;
+    panel.innerHTML = "";
+    return;
+  }
+  const key = `${session.id}|${session.waitingOn?.id || ""}`;
+  if (app.requestsKey === key) return;
+  app.requestsKey = key;
+  try {
+    const response = await fetch(`/api/requests?sessionId=${encodeURIComponent(session.id)}`);
+    if (!response.ok) throw Error(await response.text());
+    const state = await response.json();
+    if (app.selected?.id !== session.id) return;
+    app.requests = state;
+  } catch (error) {
+    app.requests = { permissionMode: app.requests?.permissionMode || "", requests: [], error: error.message };
+  }
+  renderRequests();
+}
+function renderRequests() {
+  const panel = $("#request-panel");
+  const state = app.requests || { requests: [] };
+  const capabilities = app.history?.capabilities || {};
+  const cards = (state.requests || []).map(renderRequestCard);
+  const mode = capabilities.permissionMode
+    ? `<form class="request-mode" data-permission-mode><label for="permission-mode">Permission mode</label><select id="permission-mode" name="permissionMode">${permissionModes.map(([value, label]) => `<option value="${value}"${value === (state.permissionMode || "") ? " selected" : ""}${value === "" ? " disabled" : ""}>${escape(label)}</option>`).join("")}</select><button class="soft-button" type="submit">Change</button></form>`
+    : "";
+  const failure = state.error ? `<p role="status">Could not read this session's requests: ${escape(state.error)}</p>` : "";
+  panel.innerHTML = cards.join("") + failure + mode;
+  panel.hidden = panel.innerHTML === "";
+}
+function renderRequestCard(request) {
+  const created = request.createdAt ? ` · <time datetime="${escape(request.createdAt)}">${escape(new Date(request.createdAt).toLocaleTimeString())}</time>` : "";
+  if (request.kind === "question") {
+    const questions = (request.questions || []).map((question, index) => {
+      const type = question.multiSelect ? "checkbox" : "radio";
+      const name = `answer-${index}`;
+      const options = (question.options || []).map((option) => `<label><input type="${type}" name="${name}" value="${escape(option.label)}"><span>${escape(option.label)}</span>${option.description ? `<small>${escape(option.description)}</small>` : ""}</label>`).join("");
+      return `<fieldset data-question="${escape(question.question)}"><legend>${question.header ? `${escape(question.header)}: ` : ""}${escape(question.question)}</legend>${options}<label><span>Other</span><input type="text" name="${name}-other" placeholder="Your own answer"></label></fieldset>`;
+    }).join("");
+    return `<form class="request-card" data-request-question="${escape(request.id)}"><h3>Claude asks${created}</h3>${questions}<div class="request-actions"><button class="primary-button" type="submit">Answer</button><button class="soft-button" type="button" data-request-respond="deny" data-request-id="${escape(request.id)}">Decline</button></div></form>`;
+  }
+  const title = request.title || `Claude wants to use ${request.tool}`;
+  const input = request.input && Object.keys(request.input).length ? `<pre>${escape(JSON.stringify(request.input, null, 2))}</pre>` : "";
+  const detail = [request.description, request.reason, request.blockedPath && `Path: ${request.blockedPath}`].filter(Boolean).map((line) => `<p>${escape(line)}</p>`).join("");
+  return `<div class="request-card"><h3>${escape(title)}${created}</h3>${detail}${input}<div class="request-actions"><button class="primary-button" type="button" data-request-respond="allow" data-request-id="${escape(request.id)}">Allow</button>${request.alwaysAllow ? `<button class="soft-button" type="button" data-request-respond="always" data-request-id="${escape(request.id)}">Always allow</button>` : ""}<button class="soft-button" type="button" data-request-respond="deny" data-request-id="${escape(request.id)}">Deny</button></div></div>`;
+}
+async function respondToRequest(requestId, decision) {
+  try {
+    const result = await action("respond", { requestId, decision });
+    toast(`Request ${result?.result?.outcome || "answered"}.`);
+  } catch (error) {
+    toast(/already answered or has expired/.test(error.message) ? "That request was already answered or has expired." : error.message);
+  }
+  app.requestsKey = "";
+  await load();
+  if (app.selected) await selectSession(app.selected.id);
+}
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-request-respond]");
+  if (!button) return;
+  button.disabled = true;
+  const choice = button.dataset.requestRespond;
+  await respondToRequest(button.dataset.requestId, choice === "deny" ? { behavior: "deny" } : { behavior: "allow", always: choice === "always" });
+});
+document.addEventListener("submit", async (event) => {
+  const form = event.target.closest("[data-request-question]");
+  if (!form) return;
+  event.preventDefault();
+  const answers = {};
+  for (const [index, fieldset] of [...form.querySelectorAll("fieldset[data-question]")].entries()) {
+    const other = form.querySelector(`[name="answer-${index}-other"]`).value.trim();
+    const picked = [...form.querySelectorAll(`[name="answer-${index}"]:checked`)].map((input) => input.value);
+    const answer = other || picked.join(", ");
+    if (!answer) {
+      toast(`Answer: ${fieldset.dataset.question}`);
+      return;
+    }
+    answers[fieldset.dataset.question] = answer;
+  }
+  form.querySelector('[type="submit"]').disabled = true;
+  await respondToRequest(form.dataset.requestQuestion, { behavior: "allow", answers });
+});
+document.addEventListener("submit", async (event) => {
+  const form = event.target.closest("[data-permission-mode]");
+  if (!form) return;
+  event.preventDefault();
+  const permissionMode = form.elements.permissionMode.value;
+  if (!permissionMode) return;
+  try {
+    await action("permission-mode", { permissionMode });
+    toast(`Permission mode set to ${permissionMode}.`);
+  } catch (error) {
+    toast(error.message);
+  }
+  app.requestsKey = "";
+  await syncRequests();
+});
 function formatGoalDuration(seconds) {
   const value = Number(seconds);
   if (!Number.isFinite(value)) return "Unknown";

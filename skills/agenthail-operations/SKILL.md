@@ -206,8 +206,11 @@ Desktop with a writable bridge but does not itself create a thread.
 
 Create Claude sessions with `agenthail thread create claude "task" --alias worker --json`.
 The session runs in Agenthail's Claude host, which needs the daemon running. It
-has no Remote Control and the host denies tools its permission mode would prompt
-for, so pick a permission mode that allows the work.
+has no Remote Control. A tool its permission mode does not allow, and every
+question it asks, waits for a person: `agenthail requests <target>` lists them
+and `agenthail answer <target> allow|always|deny|"answer"` answers the oldest.
+Do not answer them yourself unless your user asked you to.
+`agenthail permission-mode <target> <mode>` changes the mode while it runs.
 A Claude session ID is the conversation ID (the transcript name). The process,
 messaging socket and Remote Control session are attachments; Remote Control is
 never the identity. `/branch` and `/clear` create a new session without an alias
@@ -254,6 +257,9 @@ agenthail interrupt @builder
 agenthail compact @builder
 agenthail model @builder
 agenthail model @builder <model-name> --json
+agenthail permission-mode @builder acceptEdits
+agenthail requests @builder --json
+agenthail answer @builder deny --reason "Not this file."
 agenthail control @builder context --json
 agenthail control @builder effort medium
 agenthail goal @builder --json
