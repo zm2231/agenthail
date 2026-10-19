@@ -45,6 +45,7 @@ const events = [];
 const subscribers = new Set();
 let seq = 0;
 let draining = false;
+let exiting = false;
 
 class HostError extends Error {
   constructor(code, message) {
@@ -257,6 +258,10 @@ function spawnDetached(s, options, exited) {
   child.stderr.on('data', (chunk) => {
     s.stderr = (s.stderr + chunk).slice(-4096);
   });
+  // The SDK signals every Claude process it spawned when the host exits. These
+  // outlive the host, so a running turn finishes after it.
+  const kill = child.kill.bind(child);
+  child.kill = (signal) => !exiting && kill(signal);
   child.on('exit', (code, signal) => exited({ code, signal }));
   child.on('error', (error) => exited({ code: null, signal: null, error: error.message }));
   options.signal?.addEventListener('abort', () => {
@@ -451,6 +456,9 @@ server.listen(args.socket, () => {
   fs.chmodSync(args.socket, 0o600);
   writeState();
   process.stderr.write(`claude-host: pid ${process.pid} protocol ${PROTOCOL} version ${args.version} listening on ${args.socket}\n`);
+});
+process.on('exit', () => {
+  exiting = true;
 });
 process.on('SIGTERM', () => shutdown(0));
 process.on('SIGINT', () => shutdown(0));

@@ -277,6 +277,23 @@ test('a host restart keeps the running turn and resumes the session afterwards',
   d.close();
 });
 
+test('a host stopped by a signal leaves the running turn to finish', async () => {
+  const f = fixture();
+  const first = await startHost(f);
+  const c = new Client(f.socket);
+  const id = randomUUID();
+  const { pid } = await c.call('open', { sessionId: id, cwd: f.cwd });
+  const running = randomUUID();
+  await c.call('send', { sessionId: id, uuid: running, text: 'SLOW 1500' });
+  await sleep(300);
+  first.kill('SIGTERM');
+  await first.exited;
+  c.close();
+  assert.ok(alive(pid), 'the CLI outlives the host');
+  for (let i = 0; i < 100 && alive(pid); i++) await sleep(50);
+  assert.deepEqual(transcript(f, id).map((l) => [l.uuid, l.reply]), [[running, 'slow:1500']]);
+});
+
 test('a recorded pid now used by another process is not an orphan', async () => {
   const f = fixture();
   const other = spawn('sleep', ['30'], { stdio: 'ignore' });
