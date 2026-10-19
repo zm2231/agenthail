@@ -61,6 +61,7 @@ enum SessionLaunchDecision: Equatable {
 
 struct SessionLaunchForm: Equatable {
     var agent = "claude"
+    var host: String?
     var launcher: LauncherOption?
     var folder = ""
     var model = ""
@@ -76,7 +77,12 @@ struct SessionLaunchForm: Equatable {
 
     mutating func switchAgent(to next: String) {
         guard next != agent else { return }
-        self = SessionLaunchForm(agent: next, folder: folder, message: message)
+        self = SessionLaunchForm(agent: next, host: host, folder: folder, message: message)
+    }
+
+    mutating func switchHost(to next: String?, folder nextFolder: String) {
+        guard next != host else { return }
+        self = SessionLaunchForm(agent: agent, host: next, folder: nextFolder, message: message)
     }
 
     mutating func selectModel(_ next: String) {
@@ -97,7 +103,7 @@ struct SessionLaunchForm: Equatable {
         let effort = setsEffort ? effort : ""
         let turnSettings = agent == "codex" && !effort.isEmpty ? TurnSettings(effort: effort) : TurnSettings()
         let claude = agent == "claude" ? ClaudeCreationSettings(effort: effort) : ClaudeCreationSettings()
-        return try AgenthailAPI.creationBody(surface: agent, message: trimmedMessage, cwd: cwd, model: modelID, turnSettings: turnSettings, claude: claude, launcher: launcher)
+        return try AgenthailAPI.creationBody(surface: agent, message: trimmedMessage, cwd: cwd, model: modelID, turnSettings: turnSettings, claude: claude, launcher: launcher, host: host)
     }
 
     func efforts(models: [ModelOption]) -> [String] {

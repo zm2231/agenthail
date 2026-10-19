@@ -86,6 +86,8 @@ type dashboardSurface struct {
 type dashboardSession struct {
 	ID                string                     `json:"id"`
 	Surface           surface.SurfaceKind        `json:"surface"`
+	RuntimeKind       surface.RuntimeKind        `json:"runtimeKind,omitempty"`
+	ConfiguredModel   string                     `json:"configuredModel,omitempty"`
 	Name              string                     `json:"name"`
 	Cwd               string                     `json:"cwd,omitempty"`
 	Alias             string                     `json:"alias,omitempty"`
@@ -274,7 +276,7 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/api/session-stream", dashboard.guard(d.hostRouted("id", d.apiSessionStreamHandler)))
 	mux.HandleFunc("/api/models", dashboard.guard(d.hostRouted("id", d.dashboardModelsHandler)))
 	mux.HandleFunc("/api/search", dashboard.guard(d.dashboardSearchHandler))
-	mux.HandleFunc("/api/history", dashboard.guard(d.dashboardHistoryHandler))
+	mux.HandleFunc("/api/history", dashboard.guard(d.hostRouted("sessionId", d.dashboardHistoryHandler)))
 	mux.HandleFunc("/api/action", dashboard.guard(d.idempotentActionHandler(d.hostRoutedAction(d.dashboardActionHandler))))
 	mux.HandleFunc("/api/settings", dashboard.guard(d.dashboardSettingsHandler))
 	mux.HandleFunc("/api/settings/remote-qr", dashboard.guard(d.dashboardRemoteQRHandler))
@@ -403,10 +405,15 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	limit := 25
+	sessionID := strings.TrimSpace(r.URL.Query().Get("sessionId"))
+	maxLimit := 100
+	if sessionID != "" {
+		maxLimit = 200
+	}
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > 100 {
-			http.Error(w, "limit must be between 1 and 100", http.StatusBadRequest)
+		if err != nil || parsed < 1 || parsed > maxLimit {
+			http.Error(w, fmt.Sprintf("limit must be between 1 and %d", maxLimit), http.StatusBadRequest)
 			return
 		}
 		limit = parsed
@@ -426,7 +433,18 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "history filters are too long", http.StatusBadRequest)
 		return
 	}
-	entries, hasMore, err := d.Registry.ListHistoryPage(limit, beforeID, kind, queryText)
+	var entries []registry.HistoryEntry
+	hasMore := false
+	var err error
+	if sessionID != "" {
+		if beforeID != 0 || kind != "" || queryText != "" {
+			http.Error(w, "a session's history takes only a limit", http.StatusBadRequest)
+			return
+		}
+		entries, err = d.Registry.ListHistory(limit, sessionID)
+	} else {
+		entries, hasMore, err = d.Registry.ListHistoryPage(limit, beforeID, kind, queryText)
+	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf("read delivery history: %s", err), http.StatusInternalServerError)
 		return

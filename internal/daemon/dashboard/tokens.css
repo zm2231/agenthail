@@ -553,6 +553,61 @@ textarea:focus-visible {
   color: var(--muted);
   font-size: 20px;
 }
+.new-thread-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.new-thread-heading .host-picker-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 160px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--raised);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.host-picker-button[hidden],
+.host-picker-menu[hidden] {
+  display: none;
+}
+.host-picker-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.host-picker-menu {
+  display: grid;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--raised);
+}
+.host-picker-menu button {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  text-align: left;
+}
+.host-picker-menu button[aria-selected="true"] {
+  background: var(--panel);
+  font-weight: 650;
+}
+.host-picker-menu button:disabled {
+  color: var(--quiet);
+}
+.host-picker-menu small {
+  color: var(--quiet);
+}
 .new-thread-form label {
   display: grid;
   gap: 6px;

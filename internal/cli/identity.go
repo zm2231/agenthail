@@ -58,9 +58,12 @@ func (a *App) cmdIdentify(args []string) error {
 	target := strings.TrimPrefix(args[0], "@")
 	name := strings.TrimPrefix(args[1], "@")
 	ctx := context.Background()
-	sess, _, err := a.resolveTarget(ctx, target)
+	sess, _, remote, err := a.resolveAnyTarget(ctx, target)
 	if err != nil {
 		return err
+	}
+	if remote != nil {
+		return a.identifyRemote(ctx, remote, name)
 	}
 	if err := a.Registry.SetAlias(name, sess.ID); err != nil {
 		return err

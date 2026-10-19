@@ -103,10 +103,15 @@ type actionGate struct {
 	drops     atomic.Int32
 	truncate  atomic.Int32
 	proxyDown atomic.Bool
+	older     atomic.Bool
 	snapshots atomic.Pointer[snapshotHold]
+	versions  atomic.Pointer[snapshotHold]
+	actions   atomic.Pointer[snapshotHold]
+	// beyondVersion counts requests for anything other than /api/v1/version.
+	beyondVersion atomic.Int32
 }
 
-// snapshotHold parks snapshot requests until release is closed.
+// snapshotHold parks the requests it is installed for until release is closed.
 type snapshotHold struct {
 	waiting atomic.Int32
 	release chan struct{}
@@ -148,7 +153,7 @@ func newFederationNode(t *testing.T, sessionIDs ...string) *federationNode {
 			t.Fatal(err)
 		}
 	}
-	fake := &federatedSurface{daemonSurface: &daemonSurface{sessions: sessions, observations: map[string]*surface.TurnObservation{}, accepted: true, caps: surface.Capabilities{Send: true, Steer: true, Interrupt: true, Stream: true}}}
+	fake := &federatedSurface{daemonSurface: &daemonSurface{sessions: sessions, observations: map[string]*surface.TurnObservation{}, accepted: true, caps: surface.Capabilities{Send: true, Steer: true, Interrupt: true, Stream: true, Compact: true, Model: true, Goal: true}}}
 	d := New(reg, []surface.Surface{fake})
 	node := &federationNode{daemon: d, reg: reg, fake: fake, gate: &actionGate{}}
 	node.handler = d.dashboardHandler(&dashboardServer{token: dashboardTestToken})
@@ -161,6 +166,24 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 	gated := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if n.gate.proxyDown.Load() {
 			http.Error(w, "bad gateway", http.StatusBadGateway)
+			return
+		}
+		if r.URL.Path != "/api/v1/version" {
+			n.gate.beyondVersion.Add(1)
+		}
+		if hold := n.gate.versions.Load(); hold != nil && r.URL.Path == "/api/v1/version" {
+			hold.waiting.Add(1)
+			<-hold.release
+		}
+		if hold := n.gate.actions.Load(); hold != nil && r.URL.Path == "/api/v1/actions" {
+			hold.waiting.Add(1)
+			<-hold.release
+		}
+		if n.gate.older.Load() && r.URL.Path == "/api/v1/version" {
+			identity, _ := n.reg.HostIdentity()
+			w.Header().Set(hosts.ResponseHeader, identity.ID)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"protocol": 1, "minimumProtocol": 1, "maximumProtocol": 1, "hostId": identity.ID, "hostName": identity.Name})
 			return
 		}
 		if hold := n.gate.snapshots.Load(); hold != nil && r.URL.Path == "/api/v1/snapshot" {
@@ -260,6 +283,7 @@ func (n *federationNode) request(t *testing.T, method, target string, body any) 
 	}
 	request := httptest.NewRequest(method, target, reader)
 	request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: dashboardTestToken})
 	response := httptest.NewRecorder()
 	n.handler.ServeHTTP(response, request)
 	return response
