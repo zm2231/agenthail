@@ -171,7 +171,7 @@ func (c *Claude) resume(ctx context.Context, conversation, cwd string, job *clau
 	id, idErr := claudeBackgroundID(string(output))
 	var exit *exec.ExitError
 	if err != nil && idErr != nil && ctx.Err() == nil && errors.As(err, &exit) && exit.Exited() {
-		return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude refused to resume %s: %s", conversation, strings.TrimSpace(claudeANSI.ReplaceAllString(string(output), ""))))
+		return nil, surface.DeliveryRefused(fmt.Errorf("Claude refused to resume %s: %s", conversation, strings.TrimSpace(claudeANSI.ReplaceAllString(string(output), ""))))
 	}
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude resume: %w: %s", err, string(output)))

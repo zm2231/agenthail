@@ -147,7 +147,7 @@ func TestClaudeResumeThatClaudeRefusesFailsWithItsMessage(t *testing.T) {
 	posts := &claudePosts{}
 	session := exitedSession(fixture)
 	_, err := NewClaudeWithRequest("", fixture.Home, posts.request).Send(context.Background(), &session, "hello")
-	if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryHeld(err) || surface.IsDeliveryOutcomeUnknown(err) || !strings.Contains(err.Error(), refusal) || posts.count("hello") != 0 {
+	if !surface.IsDeliveryRefused(err) || surface.IsDeliveryHeld(err) || surface.IsDeliveryOutcomeUnknown(err) || !strings.Contains(err.Error(), refusal) || posts.count("hello") != 0 {
 		t.Fatalf("err=%v posts=%d", err, posts.count("hello"))
 	}
 }

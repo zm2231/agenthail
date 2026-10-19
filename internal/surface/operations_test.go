@@ -2,6 +2,8 @@ package surface
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 )
 
@@ -23,5 +25,15 @@ func TestEffectiveCapabilitiesKeepsClaudeTranscriptStream(t *testing.T) {
 	}
 	if got := EffectiveCapabilities(&Session{Surface: KindClaude, Transport: "uds", Transcript: "/tmp/session.jsonl"}, base); got.Stream {
 		t.Fatal("Claude UDS session without a local transcript should not claim stream support")
+	}
+}
+
+func TestDeliveryRefusedIsUnavailableAndDistinct(t *testing.T) {
+	refused := DeliveryRefused(errors.New("Claude refused to resume s: Workspace not trusted"))
+	if !IsDeliveryUnavailable(refused) || !IsDeliveryRefused(refused) || IsDeliveryHeld(refused) || !strings.Contains(refused.Error(), "Workspace not trusted") {
+		t.Fatalf("refused=%v", refused)
+	}
+	if IsDeliveryRefused(DeliveryUnavailable(errors.New("offline"))) || DeliveryRefused(nil) != nil {
+		t.Fatal("an ordinary unavailable delivery reads as refused")
 	}
 }

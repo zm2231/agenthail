@@ -244,3 +244,39 @@ func TestAPIPersonSendToEndedBackgroundJobResumesAndPostsOneHumanTurn(t *testing
 		t.Fatalf("resumes=%d posts=%v", f.resumes(), f.posts.bodies)
 	}
 }
+
+func TestQueuedMessageToAResumeClaudeRefusesIsHeldWithItsReasonAndAnnouncedOnce(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	f := newOrphanFixture(t)
+	f.claude.ResumeRefused("Workspace not trusted. Run claude in this directory first.")
+	sender := surface.Session{ID: "sender", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	if err := f.r.RegisterSession(sender); err != nil {
+		t.Fatal(err)
+	}
+	id, _, err := f.r.QueueDeliveryWithIntent(f.session.ID, "hello", "refused-1", surface.SendOptions{SourceSessionID: sender.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.daemon.scanAndRelay(context.Background())
+	item, err := f.r.QueueItem(id, nil)
+	if err != nil || item.Status != "pending" || item.HeldBy != registry.QueueHeldRefused || !strings.Contains(item.LastError, "Workspace not trusted") || f.posts.count("hello") != 0 {
+		t.Fatalf("item=%+v err=%v posts=%d", item, err, f.posts.count("hello"))
+	}
+	attention, err := f.r.ListAttentionItems(false)
+	if err != nil || len(attention) != 1 || attention[0].QueueID != id {
+		t.Fatalf("attention=%+v err=%v", attention, err)
+	}
+	rows, err := f.r.ListQueue(false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notices := 0
+	for _, row := range rows {
+		if row.SessionID == sender.ID && strings.Contains(row.Message, "Workspace not trusted") {
+			notices++
+		}
+	}
+	if notices != 1 {
+		t.Fatalf("sender notices=%d rows=%+v", notices, rows)
+	}
+}

@@ -495,6 +495,30 @@ func queueDeliveryFailureNotice(tx *sql.Tx, id int64) (int64, bool, error) {
 	return queueID, true, nil
 }
 
+// queueDeliveryRefusalNotice tells the agent that sent a queued message that
+// its target refused to start and why. The message stays queued.
+func queueDeliveryRefusalNotice(tx *sql.Tx, queueID int64, reason string) error {
+	id, err := queuedDeliveryIntentID(tx, queueID)
+	if err != nil || id == 0 {
+		return err
+	}
+	intent, err := deliveryIntentByID(tx, id)
+	if err != nil {
+		return err
+	}
+	if intent.Relayed || intent.SenderSessionID == "" {
+		return nil
+	}
+	var deferrals int
+	if err := tx.QueryRow(`SELECT deferrals FROM message_queue WHERE id=?`, queueID).Scan(&deferrals); err != nil {
+		return err
+	}
+	notice := fmt.Sprintf("[agenthail delivery held id=%d target=%s] %s. The message stays queued and is delivered once the target starts.", intent.ID, intent.TargetSessionID, reason)
+	key := fmt.Sprintf("delivery-intent-refusal:%d:%d", intent.ID, deferrals)
+	_, err = tx.Exec(`INSERT INTO message_queue(session_id,message,operation,delivery_key,status,updated_at) VALUES(?,?,?,?,'pending',datetime('now')) ON CONFLICT DO NOTHING`, intent.SenderSessionID, notice, QueueOperationMessage, key)
+	return err
+}
+
 func appendDeliveryProblemEvent(tx *sql.Tx, intent *DeliveryIntent) (bool, error) {
 	at := time.Now().UTC()
 	payload, err := json.Marshal(map[string]any{"deliveryId": intent.ID, "sessionId": intent.TargetSessionID, "sourceSessionId": intent.SenderSessionID, "message": boundedIntentMessage(intent.Message), "reason": intent.Failure, "at": at.Format(time.RFC3339Nano)})

@@ -139,7 +139,7 @@ func TestDeferMessageNeverDeadLettersPreDeliveryFailures(t *testing.T) {
 		if err != nil || item == nil {
 			t.Fatalf("attempt=%d item=%+v err=%v", attempt, item, err)
 		}
-		if err := r.DeferMessage(item.ID, errors.New("delivery did not start"), now); err != nil {
+		if _, err := r.DeferMessage(item.ID, errors.New("delivery did not start"), now); err != nil {
 			t.Fatal(err)
 		}
 		now = now.Add(6 * time.Minute)
@@ -1325,7 +1325,7 @@ func TestQueueHoldFollowsTheDrainRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	claimable(r.ClaimNextSteerMessage, steer)
-	if err := r.DeferMessage(steer, errors.New("target refused the steer"), time.Now()); err != nil {
+	if _, err := r.DeferMessage(steer, errors.New("target refused the steer"), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if held(steer, steers) != QueueHeldRetrying || held(nextSteer, steers) != QueueHeldBehind {
@@ -1341,7 +1341,7 @@ func TestQueueHoldFollowsTheDrainRules(t *testing.T) {
 		t.Fatalf("idle: queued=%q steer=%q next=%q, want nothing then behind", held(queued, steers), held(steer, steers), held(nextSteer, steers))
 	}
 	claimable(r.ClaimNextMessage, queued)
-	if err := r.DeferMessage(queued, errors.New("target refused the message"), time.Now()); err != nil {
+	if _, err := r.DeferMessage(queued, errors.New("target refused the message"), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if held(queued, steers) != QueueHeldRetrying || held(steer, steers) != QueueHeldBehind {
@@ -1368,5 +1368,92 @@ func TestQueueHoldFollowsTheDrainRules(t *testing.T) {
 		if got := held(queueID, steers); got != unloaded.want {
 			t.Fatalf("unloaded %s conversation held=%q, want %q: the daemon loads only a Codex Desktop conversation to deliver", unloaded.transport, got, unloaded.want)
 		}
+	}
+}
+
+func TestRefusedDeferralHoldsTheMessageAndAnnouncesOncePerRefusal(t *testing.T) {
+	r := openTestRegistry(t)
+	for _, id := range []string{"sender", "target"} {
+		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.SaveRuntimeState("target", surface.TurnObservation{Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	id, _, err := r.QueueDeliveryWithIntent("target", "hello", "refused-key", surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	refusal := surface.DeliveryRefused(errors.New("Claude refused to resume target: Workspace not trusted"))
+	attempt := func(cause error) bool {
+		t.Helper()
+		now = now.Add(time.Hour)
+		item, err := r.ClaimNextMessage("target", now)
+		if err != nil || item == nil || item.ID != id {
+			t.Fatalf("claim=%+v err=%v, want %d", item, err, id)
+		}
+		announce, err := r.DeferMessage(id, cause, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return announce
+	}
+	notices := func() int {
+		t.Helper()
+		rows, err := r.ListQueue(false, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		count := 0
+		for _, row := range rows {
+			if row.SessionID == "sender" && strings.Contains(row.Message, "[agenthail delivery held") && strings.Contains(row.Message, "Workspace not trusted") {
+				count++
+			}
+		}
+		return count
+	}
+	attention := func() bool {
+		t.Helper()
+		items, err := r.ListAttentionItems(false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range items {
+			if item.QueueID == id {
+				return true
+			}
+		}
+		return false
+	}
+	held := func() *QueueRow {
+		t.Helper()
+		item, err := r.QueueItem(id, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return item
+	}
+	if !attempt(refusal) {
+		t.Fatal("first refusal was not announced")
+	}
+	if row := held(); row.HeldBy != QueueHeldRefused || !strings.Contains(row.LastError, "Workspace not trusted") || row.Status != "pending" {
+		t.Fatalf("refused row=%+v", row)
+	}
+	if notices() != 1 || !attention() {
+		t.Fatalf("notices=%d attention=%v after the first refusal", notices(), attention())
+	}
+	if attempt(refusal) || notices() != 1 || !attention() {
+		t.Fatalf("a repeated refusal announced again: notices=%d attention=%v", notices(), attention())
+	}
+	if attempt(surface.DeliveryUnavailable(errors.New("target offline"))) {
+		t.Fatal("an ordinary deferral was announced")
+	}
+	if row := held(); row.HeldBy != QueueHeldRetrying || attention() {
+		t.Fatalf("after an ordinary deferral heldBy=%q attention=%v", row.HeldBy, attention())
+	}
+	if !attempt(refusal) || notices() != 2 || !attention() {
+		t.Fatalf("a new refusal was not announced: notices=%d attention=%v", notices(), attention())
 	}
 }

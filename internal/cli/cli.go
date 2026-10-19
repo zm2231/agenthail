@@ -1023,6 +1023,8 @@ func queueHoldLabel(hold registry.QueueHold) string {
 		return "held: target is offline"
 	case registry.QueueHeldUnknown:
 		return "held: target state is unknown"
+	case registry.QueueHeldRefused:
+		return "held: target refused to start; see the last error"
 	case registry.QueueHeldRetrying:
 		return "held: waiting to retry"
 	case registry.QueueHeldBehind:

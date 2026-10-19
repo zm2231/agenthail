@@ -82,7 +82,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	}
 	if !result.Accepted {
 		busyErr := fmt.Errorf("target remained busy")
-		if err := d.Registry.DeferMessage(item.ID, busyErr, now); err != nil {
+		if _, err := d.Registry.DeferMessage(item.ID, busyErr, now); err != nil {
 			d.log.Printf("defer queue item %d: %s", item.ID, err)
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: busyErr.Error()})
@@ -134,8 +134,12 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 		message = string(item.Operation)
 	}
 	if surface.IsDeliveryUnavailable(sendErr) {
-		if err := d.Registry.DeferMessage(item.ID, sendErr, now); err != nil {
+		announce, err := d.Registry.DeferMessage(item.ID, sendErr, now)
+		if err != nil {
 			d.log.Printf("defer queue item %d: %s", item.ID, err)
+		}
+		if announce {
+			d.announceRefusal(session.ID, item.ID)
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "deferred", SessionID: session.ID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
 		return
@@ -165,4 +169,20 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 		d.log.Printf("nack queue item %d: %s", item.ID, err)
 	}
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
+}
+
+// announceRefusal tells the user, on the desktop and on paired devices, that a
+// queued message waits because its target refused to start. It runs once per
+// refusal; the queue row and its attention item carry the reason.
+func (d *Daemon) announceRefusal(sessionID string, queueID int64) {
+	desktopMessage := fmt.Sprintf("%s refused to start; a queued message is waiting", d.resolveDisplay(sessionID))
+	key := fmt.Sprintf("refused-%d", queueID)
+	go func() {
+		if err := Notify("Agenthail", desktopMessage, sessionID, "agenthail-"+key); err != nil {
+			d.log.Printf("desktop notification: %s", err)
+		}
+		notificationCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		d.notifyPairedDevices(notificationCtx, mobileNotification{Title: "Agenthail", Message: "A session refused to start; a queued message is waiting", SessionID: sessionID, EventType: "delivery.refused", CollapseID: key})
+	}()
 }

@@ -79,9 +79,15 @@ already shown rather than adding a second. While a target waits, nothing is
 steered into it: `send` under the `steer` policy and `steer` both queue a steer,
 with a receipt that names the wait. The daemon steers queued steers once the
 question is answered and delivers other messages when the turn ends. Queue rows
-report `heldBy`: `waiting`, `busy`, `offline`, `unknown`, `retrying`,
-`notLoaded` (an unloaded conversation that only Codex Desktop can load), or
-`behind` when an earlier message to the same session is still open. Empty means
+report `heldBy`: `waiting`, `busy`, `offline`, `unknown`, `refused`,
+`retrying`, `notLoaded` (an unloaded conversation that only Codex Desktop can
+load), or `behind` when an earlier message to the same session is still open.
+`refused` means the target refused to start, such as a Claude resume declined
+because the workspace is not trusted. The row's last error carries Claude's
+message, the row raises an attention item, and the refusal is announced once on
+the desktop and paired devices; an agent sender gets a notice with the reason.
+The message stays queued and is delivered on the first attempt after the cause
+is fixed. Empty means
 the next scan claims that message: a drain takes only a session's earliest open
 message, or its earliest steer while a turn runs and the target can steer.
 

@@ -28,7 +28,7 @@ type Registry struct {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 15
+	schemaVersion   = 17
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -116,6 +116,8 @@ func (r *Registry) migrate() error {
 		{"operation", `TEXT NOT NULL DEFAULT 'message'`},
 		{"busy_delivery", `TEXT NOT NULL DEFAULT ''`},
 		{"author", `TEXT NOT NULL DEFAULT ''`},
+		{"refused", `INTEGER NOT NULL DEFAULT 0`},
+		{"refusal_announced", `INTEGER NOT NULL DEFAULT 0`},
 	} {
 		if err := r.ensureColumn("message_queue", column.name, column.decl); err != nil {
 			return err
@@ -1399,6 +1401,7 @@ const (
 	QueueHeldBusy     QueueHold = "busy"
 	QueueHeldOffline  QueueHold = "offline"
 	QueueHeldUnknown  QueueHold = "unknown"
+	QueueHeldRefused  QueueHold = "refused"
 	QueueHeldRetrying QueueHold = "retrying"
 	QueueHeldBehind   QueueHold = "behind"
 	QueueHeldUnloaded QueueHold = "notLoaded"
@@ -1420,14 +1423,15 @@ const queueSteerRow = `%[1]s.busy_delivery='steer' AND %[1]s.model='' AND (%[1]s
 // session, or of its steerable messages while a turn runs, so a message
 // behind an earlier one is held by it. A busy turn holds a message but not a
 // steer into it when the target can steer. An unloaded conversation is
-// drained only when Codex Desktop can load it. Its first argument is the current
-// time.
+// drained only when Codex Desktop can load it. A message whose last attempt
+// the target refused to start waits out its backoff as refused. Its first
+// argument is the current time.
 func queueHoldCase(canSteer bool) string {
 	earliest := `(SELECT MIN(m.id) FROM message_queue m WHERE m.session_id=q.session_id AND m.status IN ('pending','inflight')%s)`
 	steer := ""
 	if canSteer {
 		steer = `
-		WHEN ` + queueTargetStatus + `='busy' AND ` + fmt.Sprintf(queueSteerRow, "q") + ` THEN CASE WHEN q.id!=` + fmt.Sprintf(earliest, " AND "+fmt.Sprintf(queueSteerRow, "m")) + ` THEN 'behind' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END`
+		WHEN ` + queueTargetStatus + `='busy' AND ` + fmt.Sprintf(queueSteerRow, "q") + ` THEN CASE WHEN q.id!=` + fmt.Sprintf(earliest, " AND "+fmt.Sprintf(queueSteerRow, "m")) + ` THEN 'behind' WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END`
 	}
 	return `CASE WHEN q.status!='pending' THEN ''
 		WHEN COALESCE(sr.waiting_id,'')!='' THEN 'waiting'` + steer + `
@@ -1436,6 +1440,7 @@ func queueHoldCase(canSteer bool) string {
 		WHEN ` + queueTargetStatus + ` NOT IN ('idle','notLoaded') THEN 'unknown'
 		WHEN ` + queueTargetStatus + `='notLoaded' AND NOT (COALESCE(s.surface,'')='codex' AND COALESCE(s.transport,'')='desktop') THEN 'notLoaded'
 		WHEN q.id!=` + fmt.Sprintf(earliest, "") + ` THEN 'behind'
+		WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused'
 		WHEN q.available_at_ms>?1 THEN 'retrying'
 		ELSE '' END`
 }
@@ -1551,10 +1556,14 @@ func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, er
 	return items, rows.Err()
 }
 
+// queueRefusedRow matches an open message whose last attempt the target
+// refused to start.
+const queueRefusedRow = `refused=1 AND status IN ('pending','inflight')`
+
 // ReconcileAttentionItems materializes attention rows from queue state. It is
 // called by queue state writers and the background scan, never by snapshot reads.
 func (r *Registry) ReconcileAttentionItems(now time.Time) error {
-	if open, err := r.readExists(`SELECT EXISTS(SELECT 1 FROM message_queue WHERE status='dead') OR EXISTS(SELECT 1 FROM attention_items WHERE resolved_at='')`); err != nil || !open {
+	if open, err := r.readExists(`SELECT EXISTS(SELECT 1 FROM message_queue WHERE status='dead' OR ` + queueRefusedRow + `) OR EXISTS(SELECT 1 FROM attention_items WHERE resolved_at='')`); err != nil || !open {
 		return err
 	}
 	tx, err := r.db.Begin()
@@ -1595,10 +1604,23 @@ func (r *Registry) ReconcileAttentionItems(now time.Time) error {
 	if err != nil {
 		return err
 	}
+	// A message refused again after its refusal cleared reopens its item.
+	_, err = tx.Exec(`INSERT INTO attention_items(session_id,queue_id,reason,requested_action)
+		SELECT session_id,id,'The target refused to start','Fix what the target reported; the message is delivered on its next attempt, or cancel it'
+		FROM message_queue WHERE ` + queueRefusedRow + `
+		ON CONFLICT(queue_id) DO UPDATE SET
+			reason=excluded.reason,
+			requested_action=excluded.requested_action,
+			created_at=CASE WHEN attention_items.resolved_at!='' THEN datetime('now') ELSE attention_items.created_at END,
+			resolved_at='',
+			resolution=''`)
+	if err != nil {
+		return err
+	}
 	_, err = tx.Exec(`UPDATE attention_items SET
 		resolved_at=datetime('now'),
 		resolution=COALESCE((SELECT CASE WHEN status='dead' AND dead_at_ms<=? THEN 'history' WHEN status='pending' THEN 'retrying' WHEN status='delivered' THEN 'delivered' WHEN status='canceled' THEN 'canceled' ELSE status END FROM message_queue WHERE id=attention_items.queue_id),'removed')
-		WHERE resolved_at='' AND NOT EXISTS (SELECT 1 FROM message_queue WHERE id=attention_items.queue_id AND status='dead' AND dead_at_ms>?)`, now.Add(-deadReviewWindow).UnixMilli(), now.Add(-deadReviewWindow).UnixMilli())
+		WHERE resolved_at='' AND NOT EXISTS (SELECT 1 FROM message_queue WHERE id=attention_items.queue_id AND (status='dead' AND dead_at_ms>? OR `+queueRefusedRow+`))`, now.Add(-deadReviewWindow).UnixMilli(), now.Add(-deadReviewWindow).UnixMilli())
 	if err != nil {
 		return err
 	}
@@ -1886,22 +1908,42 @@ func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts
 // DeferMessage returns a claim that provably did not reach the target, such as
 // a busy refusal or an unavailable transport. The claim's attempt is given
 // back so only real delivery errors spend the retry budget; deferrals keep
-// their own count for backoff.
-func (r *Registry) DeferMessage(id int64, cause error, now time.Time) error {
+// their own count for backoff. A deferral the target refused marks the message
+// refused, and the first one since the message was last not refused tells an
+// agent sender why its message waits. It reports whether that refusal still
+// needs announcing to the user.
+func (r *Registry) DeferMessage(id int64, cause error, now time.Time) (bool, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
 	var deferrals int
-	if err := r.db.QueryRow(`SELECT deferrals FROM message_queue WHERE id=?`, id).Scan(&deferrals); err != nil {
-		return err
+	var announced bool
+	if err := tx.QueryRow(`SELECT deferrals,refusal_announced FROM message_queue WHERE id=?`, id).Scan(&deferrals, &announced); err != nil {
+		return false, err
 	}
 	shift := min(deferrals, 6)
 	message := "delivery did not start"
 	if cause != nil {
 		message = cause.Error()
 	}
-	_, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),deferrals=deferrals+1,last_error=?,available_at_ms=?,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(5*time.Second*time.Duration(1<<shift)).UnixMilli(), id)
+	refused := surface.IsDeliveryRefused(cause)
+	res, err := tx.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),deferrals=deferrals+1,last_error=?,available_at_ms=?,inflight_at_ms=0,refused=?,refusal_announced=?,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(5*time.Second*time.Duration(1<<shift)).UnixMilli(), refused, refused, id)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return r.ReconcileAttentionItems(now)
+	announce := false
+	if n, _ := res.RowsAffected(); n == 1 && refused && !announced {
+		if err := queueDeliveryRefusalNotice(tx, id, message); err != nil {
+			return false, err
+		}
+		announce = true
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return announce, r.ReconcileAttentionItems(now)
 }
 
 func (r *Registry) DeadLetterUnknown(id int64, cause error) error {

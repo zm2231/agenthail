@@ -633,6 +633,7 @@ function queueReason(item) {
       busy: "Held: this agent is working",
       offline: "Held: this agent is offline",
       unknown: "Held: this agent's state is unknown",
+      refused: "Held: this agent refused to start",
       retrying: "Held: waiting to retry",
       behind: "Held: behind an earlier message",
       notLoaded: "Held: this conversation is not loaded",
