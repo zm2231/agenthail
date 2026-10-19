@@ -60,7 +60,7 @@ func TestLiveCodexVoice(t *testing.T) {
 	for _, item := range baseline.Items {
 		priorItems[item.ID] = true
 	}
-	workerSession := &surface.Session{ID: workerID, Surface: surface.KindCodex}
+	workerSession := &surface.Session{ID: workerID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	workerBaseline, err := codex.ReadSession(context.Background(), workerSession, surface.SessionReadRequest{})
 	if err != nil || workerBaseline.UnavailableReason != "" {
 		t.Fatalf("existing worker activity unavailable: %v", err)

@@ -450,14 +450,7 @@ func (a *App) allSurfaces() []surface.Surface {
 	return out
 }
 
-func (a *App) surfaceByKind(kind surface.SurfaceKind) surface.Surface {
-	for _, entry := range a.Surfaces {
-		if entry.Surface.Name() == kind {
-			return entry.Surface
-		}
-	}
-	return nil
-}
+func (a *App) adapters() surface.Adapters { return surface.Adapters(a.allSurfaces()) }
 
 func hasFlag(args []string, flag string) bool {
 	for _, a := range args {
@@ -581,7 +574,7 @@ func (a *App) cmdClaudeRuns(args []string) error {
 	if len(stripFlags(args)) != 0 {
 		return fmt.Errorf("usage: agenthail runs [--json]")
 	}
-	adapter := a.surfaceByKind(surface.KindClaude)
+	adapter := a.adapters().ForSurface(surface.KindClaude)
 	observer, ok := adapter.(surface.ClaudeRunObserver)
 	if !ok {
 		return fmt.Errorf("Claude run observation is unavailable")
@@ -984,7 +977,7 @@ func (a *App) cmdSearch(args []string) error {
 	if len(positional) < 2 || positional[0] != "codex" {
 		return fmt.Errorf("usage: agenthail search codex <query> [--json]")
 	}
-	adapter := a.surfaceByKind(surface.KindCodex)
+	adapter := a.adapters().ForSurface(surface.KindCodex)
 	if adapter == nil {
 		return fmt.Errorf("Codex is not configured")
 	}
@@ -1139,7 +1132,7 @@ func (a *App) resolveSession(ctx context.Context, kind surface.SurfaceKind, adap
 func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, error) {
 	if kindText, selector, ok := strings.Cut(target, ":"); ok {
 		kind := surface.SurfaceKind(strings.ToLower(kindText))
-		adapter := a.surfaceByKind(kind)
+		adapter := a.adapters().ForSurface(kind)
 		if adapter == nil {
 			return nil, nil, fmt.Errorf("unknown surface %q", kindText)
 		}
@@ -1152,9 +1145,6 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 			if err := a.Registry.RegisterSession(*session); err != nil {
 				return nil, nil, fmt.Errorf("register %s session: %w", kind, err)
 			}
-		}
-		if err := surface.ValidateRuntimeTransport(session); err != nil {
-			return nil, nil, err
 		}
 		return session, adapter, nil
 	}
@@ -1171,13 +1161,13 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 			return nil, nil, err
 		}
 		if err == nil {
-			kindText, _, _, lookupErr := a.Registry.GetSession(sid)
+			registered, lookupErr := a.Registry.Session(sid)
 			if lookupErr == nil {
-				adapter := a.surfaceByKind(surface.SurfaceKind(kindText))
-				if adapter == nil {
-					return nil, nil, fmt.Errorf("session %s has unknown surface %q", sid, kindText)
+				adapter, adapterErr := a.adapters().For(registered)
+				if adapterErr != nil {
+					return nil, nil, adapterErr
 				}
-				session, live, resolveErr := a.resolveSession(ctx, surface.SurfaceKind(kindText), adapter, sid, target)
+				session, live, resolveErr := a.resolveSession(ctx, registered.Surface, adapter, sid, target)
 				if resolveErr != nil {
 					return nil, nil, fmt.Errorf("resolve registered %s session: %w", adapter.Name(), resolveErr)
 				}
@@ -1185,9 +1175,6 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 					if err := a.Registry.RegisterSession(*session); err != nil {
 						return nil, nil, fmt.Errorf("register %s session: %w", adapter.Name(), err)
 					}
-				}
-				if err := surface.ValidateRuntimeTransport(session); err != nil {
-					return nil, nil, err
 				}
 				return session, adapter, nil
 			}
@@ -1226,9 +1213,6 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 			if err := a.Registry.RegisterSession(*candidate.session); err != nil {
 				return nil, nil, fmt.Errorf("register %s session: %w", candidate.adapter.Name(), err)
 			}
-		}
-		if err := surface.ValidateRuntimeTransport(candidate.session); err != nil {
-			return nil, nil, err
 		}
 		return candidate.session, candidate.adapter, nil
 	}
@@ -1506,7 +1490,7 @@ func (a *App) cmdSend(args []string) error {
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
-	if delivery.RouteFor(surf, sess, "") == delivery.RoutePeer && (wantStream || wantReply) {
+	if surface.RouteFor(surf, sess, "") == surface.RoutePeer && (wantStream || wantReply) {
 		return fmt.Errorf("Claude peer message IDs cannot be correlated with transcript turns; use 'last' or native SendMessage replies")
 	}
 
@@ -1600,7 +1584,7 @@ func (a *App) cmdSend(args []string) error {
 		}
 	}
 
-	if (wantStream || wantReply) && sess.Surface == surface.KindClaude && (sess.ID != addressed.ID || delivery.RouteFor(surf, sess, options.Author).TransportOnly()) {
+	if (wantStream || wantReply) && sess.Surface == surface.KindClaude && (sess.ID != addressed.ID || surface.RouteFor(surf, sess, options.Author).TransportOnly()) {
 		fmt.Fprintf(os.Stderr, "the closed session was resumed as %s, whose turns this send cannot follow; read the reply with 'agenthail last %s'\n", sess.ID, target)
 		wantStream, wantReply = false, false
 	}
@@ -1731,7 +1715,7 @@ func (a *App) cmdReply(args []string) error {
 	}
 	if remote != nil {
 		sess = remote.session()
-	} else if !surf.Capabilities().Reply {
+	} else if !surface.CapabilitiesFor(surf, sess).Reply {
 		return fmt.Errorf("%s does not support reply", surf.Name())
 	}
 	before, err := sessionReadBefore(args)
@@ -1928,7 +1912,7 @@ func (a *App) cmdStream(args []string) error {
 	}
 	if remote != nil {
 		sess = remote.session()
-	} else if !surf.Capabilities().Stream {
+	} else if !surface.CapabilitiesFor(surf, sess).Stream {
 		return fmt.Errorf("%s does not support stream", surf.Name())
 	}
 	if a.daemonIsRunning() {
@@ -1989,7 +1973,7 @@ func (a *App) cmdCompact(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Compact {
+	if !surface.EffectiveCapabilities(surf, sess).Compact {
 		return fmt.Errorf("%s does not support compact", surf.Name())
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
@@ -2017,7 +2001,7 @@ func (a *App) cmdModel(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Model {
+	if !surface.EffectiveCapabilities(surf, sess).Model {
 		return fmt.Errorf("%s does not support model switching", surf.Name())
 	}
 	name := ""
@@ -2055,7 +2039,7 @@ func (a *App) cmdInterrupt(args []string) error {
 	if remote != nil {
 		return a.interruptRemote(ctx, remote)
 	}
-	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Interrupt {
+	if !surface.EffectiveCapabilities(surf, sess).Interrupt {
 		return fmt.Errorf("%s does not support interrupt", surf.Name())
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
@@ -2077,7 +2061,7 @@ func (a *App) cmdSteer(args []string) error {
 	if remote != nil {
 		return a.steerRemote(ctx, remote, strings.Join(positional[1:], " "))
 	}
-	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Steer {
+	if !surface.EffectiveCapabilities(surf, sess).Steer {
 		return fmt.Errorf("%s does not support steer", surf.Name())
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
@@ -2165,9 +2149,9 @@ func (a *App) cmdQueue(args []string) error {
 		if err != nil {
 			return err
 		}
-		adapter := a.surfaceByKind(session.Surface)
-		if adapter == nil {
-			return errors.New(surface.ReadOnlySessionReason(session))
+		adapter, adapterErr := a.adapters().For(session)
+		if adapterErr != nil {
+			return adapterErr
 		}
 		if err := a.ensureWritableTarget(context.Background(), session, adapter); err != nil {
 			return err
@@ -2571,7 +2555,7 @@ func (a *App) cmdLaunch(args []string) error {
 	}
 	switch target {
 	case "codex":
-		return launchCodex(a.surfaceByKind(surface.KindCodex))
+		return launchCodex(a.adapters().ForSurface(surface.KindCodex))
 	case "claude":
 		return fmt.Errorf("claude must be launched manually (open the app or visit claude.ai/code)")
 	case "notion":

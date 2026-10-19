@@ -118,7 +118,7 @@ func TestNotionRepeatSendsToExistingThreadReturnPerTurnKeys(t *testing.T) {
 		configuredUser:  "user",
 		models:          &notionModels{labels: map[string]string{"almond-croissant-low": "Default"}, at: time.Now()},
 	}
-	session := &surface.Session{ID: threadID, Surface: surface.KindNotion}
+	session := &surface.Session{ID: threadID, Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb}
 	first, err := notion.Send(context.Background(), session, "one")
 	if err != nil || first == nil || !first.Accepted {
 		t.Fatalf("first=%+v err=%v", first, err)

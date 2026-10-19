@@ -45,7 +45,7 @@ func TestSessionCreateKnownLauncherIDPreservesProviderSession(t *testing.T) {
 	d, r, fake, _, _ := daemonFixture(t)
 	fake.kind = surface.KindClaude
 	d.Surfaces = []surface.Surface{fake}
-	launcher := &launcherFixture{id: surface.LauncherClaudeBG, agents: []surface.SurfaceKind{surface.KindClaude}, result: surface.LaunchResult{SessionID: "created", Session: &surface.Session{ID: "created", Surface: surface.KindClaude, Name: "Created", Cwd: "/repo", Status: surface.StatusIdle}}}
+	launcher := &launcherFixture{id: surface.LauncherClaudeBG, agents: []surface.SurfaceKind{surface.KindClaude}, result: surface.LaunchResult{SessionID: "created", Session: &surface.Session{ID: "created", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Created", Cwd: "/repo", Status: surface.StatusIdle}}}
 	d.SetLaunchers([]surface.Launcher{launcher})
 	w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"session-create","surface":"claude","launcher":"claude-bg","message":"hello"}`)
 	if w.Code != http.StatusCreated {
@@ -149,7 +149,7 @@ func TestSessionCreateTerminalLocationPersistsPendingWithoutGuessingID(t *testin
 		t.Fatalf("pending=%+v", pending)
 	}
 	launcher.locations = map[string]surface.Location{"created": {Workspace: "workspace-1", Surface: "surface-1"}}
-	d.correlatePendingLaunches(context.Background(), []surface.Session{{ID: "created", Surface: surface.KindClaude, Cwd: cwd, Status: surface.StatusIdle}})
+	d.correlatePendingLaunches(context.Background(), []surface.Session{{ID: "created", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: cwd, Status: surface.StatusIdle}})
 	alias, err := r.ReverseAlias("created")
 	if err != nil || alias != "builder" {
 		t.Fatalf("alias=%q err=%v", alias, err)
@@ -274,8 +274,8 @@ func TestPendingCorrelationFiltersAgentAndCwd(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.correlatePendingLaunches(context.Background(), []surface.Session{
-		{ID: "codex", Surface: surface.KindCodex, Cwd: "/repo"},
-		{ID: "claude", Surface: surface.KindClaude, Cwd: "/other"},
+		{ID: "codex", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: "/repo"},
+		{ID: "claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: "/other"},
 	})
 	pending, err := r.PendingLaunches()
 	if err != nil {
@@ -297,7 +297,7 @@ func TestWorkspaceOnlyLaunchCorrelationUsesDiscoveredLocation(t *testing.T) {
 	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Created", "", location); err != nil {
 		t.Fatal(err)
 	}
-	d.correlatePendingLaunches(context.Background(), []surface.Session{{ID: "created", Surface: surface.KindClaude, Cwd: "/repo", Status: surface.StatusIdle}})
+	d.correlatePendingLaunches(context.Background(), []surface.Session{{ID: "created", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: "/repo", Status: surface.StatusIdle}})
 	pending, err := r.PendingLaunches()
 	if err != nil {
 		t.Fatal(err)
@@ -317,7 +317,7 @@ func TestWorkspaceOnlyLaunchCorrelationUsesDiscoveredLocation(t *testing.T) {
 func TestCatalogDiscoveryUsesFreshLocateContextAndPreservesTerminalRuntime(t *testing.T) {
 	d, r, fake, _, _ := daemonFixture(t)
 	fake.kind = surface.KindClaude
-	session := surface.Session{ID: "hand-started", Surface: surface.KindClaude, Cwd: "/repo", Status: surface.StatusIdle}
+	session := surface.Session{ID: "hand-started", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: "/repo", Status: surface.StatusIdle}
 	fake.sessions = map[string]surface.Session{session.ID: session}
 	d.Surfaces = []surface.Surface{fake}
 	launcher := &launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}, locations: map[string]surface.Location{session.ID: {Workspace: "workspace-1", Surface: "surface-1"}}}

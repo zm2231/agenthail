@@ -14,13 +14,13 @@ func TestRegisterSessionAndDeletePendingRejectsAliasCollisionWithoutStealing(t *
 		t.Fatal(err)
 	}
 	defer r.Close()
-	if err := r.RegisterSession(surface.Session{ID: "owner", Surface: surface.KindClaude}); err != nil {
+	if err := r.RegisterSession(surface.Session{ID: "owner", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetAlias("builder", "owner"); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "known", Surface: surface.KindClaude}); err != nil {
+	if err := r.RegisterSession(surface.Session{ID: "known", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
 	var directTaken AliasTakenError
@@ -31,7 +31,7 @@ func TestRegisterSessionAndDeletePendingRejectsAliasCollisionWithoutStealing(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = r.RegisterSessionAndDeletePending(surface.Session{ID: "created", Surface: surface.KindClaude}, pendingID, "builder")
+	err = r.RegisterSessionAndDeletePending(surface.Session{ID: "created", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}, pendingID, "builder")
 	var taken AliasTakenError
 	if !errors.As(err, &taken) {
 		t.Fatalf("err=%v", err)

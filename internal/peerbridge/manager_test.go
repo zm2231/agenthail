@@ -75,7 +75,7 @@ func newPeerFixture(t *testing.T, sessionIDs ...string) *peerFixture {
 	}
 	t.Cleanup(func() { _ = reg.Close() })
 	for _, id := range sessionIDs {
-		if err := reg.RegisterSession(surface.Session{ID: id, Surface: surface.KindNotion, Name: id, Status: surface.StatusIdle}); err != nil {
+		if err := reg.RegisterSession(surface.Session{ID: id, Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: id, Status: surface.StatusIdle}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -429,7 +429,7 @@ func TestManagerReplyRelayLifecycle(t *testing.T) {
 		t.Fatalf("old relay socket remains after restart: %v", err)
 	}
 
-	if err := f.reg.RegisterSession(surface.Session{ID: "recent", Surface: surface.KindNotion, Name: "recent", Status: surface.StatusOffline}); err != nil {
+	if err := f.reg.RegisterSession(surface.Session{ID: "recent", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: "recent", Status: surface.StatusOffline}); err != nil {
 		t.Fatal(err)
 	}
 	f.manager.RetireInactive(time.Now().Add(48*time.Hour), 24*time.Hour)
@@ -525,7 +525,7 @@ func TestEnsureReportsWorkerStartupDiagnostic(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reg.Close()
-	if err := reg.RegisterSession(surface.Session{ID: "source", Surface: surface.KindCodex, Status: surface.StatusBusy}); err != nil {
+	if err := reg.RegisterSession(surface.Session{ID: "source", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -552,7 +552,7 @@ func TestManagerRestartReconcilesCrashArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reg.Close()
-	session := surface.Session{ID: "source", Surface: surface.KindCodex, Name: "source", Status: surface.StatusBusy, LastActive: time.Now()}
+	session := surface.Session{ID: "source", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "source", Status: surface.StatusBusy, LastActive: time.Now()}
 	if err := reg.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
@@ -791,9 +791,9 @@ func TestFullPeerPoolAdmitsSendersAndAdvertisingNeverExtendsLife(t *testing.T) {
 	f := newPeerFixture(t, "a", "b", "c", "s1", "s2")
 	f.manager.peerLimit, f.manager.reserve = 3, 1
 	now := time.Now()
-	a := surface.Session{ID: "a", Surface: surface.KindNotion, Status: surface.StatusIdle, LastActive: now}
-	b := surface.Session{ID: "b", Surface: surface.KindNotion, Status: surface.StatusIdle, LastActive: now.Add(-time.Hour)}
-	c := surface.Session{ID: "c", Surface: surface.KindNotion, Status: surface.StatusIdle, LastActive: now.Add(-2 * time.Hour)}
+	a := surface.Session{ID: "a", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Status: surface.StatusIdle, LastActive: now}
+	b := surface.Session{ID: "b", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Status: surface.StatusIdle, LastActive: now.Add(-time.Hour)}
+	c := surface.Session{ID: "c", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Status: surface.StatusIdle, LastActive: now.Add(-2 * time.Hour)}
 
 	for range 3 {
 		if failures := f.manager.Advertise(f.ctx, []surface.Session{c, b, a}); len(failures) != 0 {
@@ -832,7 +832,7 @@ func TestAdvertisedSessionDisplacesSenderPeersInAFullPool(t *testing.T) {
 		}
 	}
 	f.expectWorkers("s1", "s2", "s3")
-	busy := surface.Session{ID: "a", Surface: surface.KindNotion, Status: surface.StatusBusy, LastActive: time.Now()}
+	busy := surface.Session{ID: "a", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Status: surface.StatusBusy, LastActive: time.Now()}
 	if failures := f.manager.Advertise(f.ctx, []surface.Session{busy}); len(failures) != 0 {
 		t.Fatalf("advertise failures=%v", failures)
 	}

@@ -201,7 +201,7 @@ func (d *Daemon) apiSigninBindingsHandler(w http.ResponseWriter, r *http.Request
 // binding shows in health without waiting for the next discovery pass.
 func (d *Daemon) refreshSigninSurfaces() {
 	for _, kind := range []surface.SurfaceKind{surface.KindNotion, surface.KindClaude} {
-		adapter := d.surfaceForKind(kind)
+		adapter := d.adapters().ForSurface(kind)
 		if adapter == nil {
 			continue
 		}

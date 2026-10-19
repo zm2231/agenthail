@@ -94,14 +94,14 @@ func openIdempotencyFixture(t *testing.T, path string, adapter surface.Surface) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = r.Close() })
-	if err := r.RegisterSession(surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}); err != nil {
+	if err := r.RegisterSession(surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}); err != nil {
 		t.Fatal(err)
 	}
 	return r, dashboardRouter(New(r, []surface.Surface{adapter}))
 }
 
 func idempotencyFake() *daemonSurface {
-	session := surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	session := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 	return &daemonSurface{sessions: map[string]surface.Session{"from": session}, observations: map[string]*surface.TurnObservation{}, accepted: true}
 }
 

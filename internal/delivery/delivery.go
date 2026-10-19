@@ -111,7 +111,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if target == "" {
 		target = session.ID
 	}
-	route := RouteFor(adapter, session, options.Author)
+	route := surface.RouteFor(adapter, session, options.Author)
 	syntheticNotion := session.Surface == surface.KindNotion && (session.ID == "new" || strings.HasPrefix(session.ID, "new:"))
 	if err := options.TurnOptions.Validate(adapter.Name()); err != nil {
 		return nil, surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
@@ -131,7 +131,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if modeErr != nil {
 		return nil, modeErr
 	}
-	if route == RoutePeer {
+	if route == surface.RoutePeer {
 		observation, observeErr := adapter.Observe(ctx, session)
 		if observeErr != nil {
 			return nil, observeErr
@@ -206,7 +206,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	}
 	if result.Accepted {
 		receipt := &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, TurnID: result.UUID}
-		peerTransport := RouteFor(adapter, session, options.Author).TransportOnly()
+		peerTransport := surface.RouteFor(adapter, session, options.Author).TransportOnly()
 		if peerTransport {
 			receipt.Evidence = surface.EvidenceTransportAccepted
 		}
@@ -250,7 +250,7 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 		target = session.ID
 	}
 	needsOptionSender := options.Model != "" || !options.TurnOptions.Empty()
-	if busyMode == deliverypolicy.Steer && !needsOptionSender && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer {
+	if busyMode == deliverypolicy.Steer && !needsOptionSender && surface.EffectiveCapabilities(adapter, session).Steer {
 		if steerErr := adapter.Steer(ctx, session, message); steerErr != nil {
 			if intent != nil {
 				if surface.IsDeliveryOutcomeUnknown(steerErr) {

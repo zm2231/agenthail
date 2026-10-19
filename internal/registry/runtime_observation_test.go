@@ -13,7 +13,7 @@ func TestLauncherMetadataIsNotAnObservedTurnBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reg.Close()
-	launched := surface.Session{ID: "launched", Surface: surface.KindCodex, Runtime: &surface.Runtime{Launcher: "tmux", Focusable: true}}
+	launched := surface.Session{ID: "launched", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Runtime: &surface.Runtime{Launcher: "tmux", Focusable: true}}
 	if err := reg.RegisterSession(launched); err != nil {
 		t.Fatal(err)
 	}
@@ -38,13 +38,13 @@ func TestUpgradeKeepsObservedRuntimeAndDropsLauncherPlaceholders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := old.RegisterSession(surface.Session{ID: "observed", Surface: surface.KindCodex}); err != nil {
+	if err := old.RegisterSession(surface.Session{ID: "observed", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 		t.Fatal(err)
 	}
 	if err := old.SaveRuntimeState("observed", surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := old.RegisterSession(surface.Session{ID: "launched", Surface: surface.KindCodex, Runtime: &surface.Runtime{Launcher: "cmux"}}); err != nil {
+	if err := old.RegisterSession(surface.Session{ID: "launched", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Runtime: &surface.Runtime{Launcher: "cmux"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := old.db.Exec(`ALTER TABLE session_runtime DROP COLUMN turn_observed`); err != nil {

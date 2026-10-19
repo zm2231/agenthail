@@ -14,7 +14,7 @@ func TestGoalReportsStatusUsageAndAttention(t *testing.T) {
 	at := time.Date(2026, 10, 4, 8, 0, 0, 0, time.UTC)
 	fake := &cliSurface{
 		kind:     surface.KindCodex,
-		sessions: map[string]surface.Session{"g": {ID: "g", Surface: surface.KindCodex}},
+		sessions: map[string]surface.Session{"g": {ID: "g", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}},
 		caps:     surface.Capabilities{Goal: true},
 	}
 	app, _ := cliFixture(t, fake)
