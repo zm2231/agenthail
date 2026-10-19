@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/signin"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 const chromeUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
@@ -165,7 +166,7 @@ func processGroupCommand(ctx context.Context, path string, args ...string) *exec
 
 func loadCookieHeader(parent context.Context, source CookieSource) (string, error) {
 	if source.Bridge == "" {
-		return "", nil
+		return "", fmt.Errorf("cookie bridge not found (set AGENTHAIL_COOKIE_BRIDGE or install cookie.mjs alongside agenthail)")
 	}
 	if source.Signin.Browser == "" {
 		return "", fmt.Errorf("cookie bridge: no browser profile resolved")
@@ -220,15 +221,15 @@ func invalidateCookieHeader(source CookieSource) {
 func sidecarRequestWithCookies(parent context.Context, method, url string, headers map[string]string, body string, cookies CookieSource, timeout time.Duration) (int, string, error) {
 	worker, err := sidecarPath()
 	if err != nil {
-		return 0, "", err
+		return 0, "", surface.DeliveryUnavailable(err)
 	}
 	python, err := sidecarPython()
 	if err != nil {
-		return 0, "", err
+		return 0, "", surface.DeliveryUnavailable(err)
 	}
 	cookie, err := loadCookieHeader(parent, cookies)
 	if err != nil {
-		return 0, "", err
+		return 0, "", surface.DeliveryUnavailable(err)
 	}
 	requestHeaders := make(map[string]string, len(headers)+1)
 	for key, value := range headers {
