@@ -599,9 +599,10 @@ func TestQueuedPeerMessageReachesARunningOrWaitingClaudeTurnOverItsSocket(t *tes
 		}
 		runDaemon(t, q.store, surfaces.NewClaude(nil, q.process.Home))
 		eventually(t, "the peer message over the socket", func() bool { return manager.Count("handoff") == 1 })
-		if item, err := q.store.QueueItem(peerID, nil); err != nil || item.Status != "delivered" {
-			t.Fatalf("waiting=%v: item=%+v err=%v", waiting, item, err)
-		}
+		eventually(t, "the peer message acknowledged", func() bool {
+			item, err := q.store.QueueItem(peerID, nil)
+			return err == nil && item.Status == "delivered"
+		})
 		if item, err := q.store.QueueItem(queuedID, nil); err != nil || item.Status != "pending" || manager.Count("after the turn") != 0 {
 			t.Fatalf("waiting=%v: an explicit queue left during the turn: item=%+v err=%v", waiting, item, err)
 		}

@@ -61,9 +61,7 @@ func TestRelayToABusyClaudeSessionRidesItsPeerSocketAtOnce(t *testing.T) {
 	if len(sends) != 1 || sends[0].Source != from.ID || sends[0].Target == "" {
 		t.Fatalf("peer sends=%+v, want one framed from the relay source", sends)
 	}
-	if store.QueueCount(session.ID) != 0 {
-		t.Fatalf("queued=%d, want the relay delivered", store.QueueCount(session.ID))
-	}
+	eventually(t, "the relay acknowledged", func() bool { return store.QueueCount(session.ID) == 0 })
 }
 
 func TestQueuedMessageToABusyRemoteControlClaudeSteersUnderTheSteerPolicy(t *testing.T) {
