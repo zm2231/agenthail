@@ -710,6 +710,68 @@ select {
   width: 100%;
   margin-top: 8px;
 }
+.segmented [data-inbox-count] {
+  margin-left: 4px;
+  color: var(--quiet);
+  font-weight: 600;
+}
+.show-archived {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.session.archived {
+  opacity: 0.6;
+}
+.project-group {
+  margin-bottom: 10px;
+}
+.project-group.archived .project-name {
+  color: var(--muted);
+}
+.project-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 4px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+.project-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-header .link-button,
+.project-more {
+  border: 0;
+  background: transparent;
+  color: var(--quiet);
+  font-size: 12px;
+}
+.project-header .link-button {
+  opacity: 0;
+}
+.project-header:hover .link-button,
+.project-header .link-button:focus-visible {
+  opacity: 1;
+}
+.project-more {
+  margin-left: 29px;
+  padding: 4px 0;
+}
+.archived-projects > summary {
+  padding: 8px 12px;
+  color: var(--quiet);
+  font-size: 12px;
+  cursor: pointer;
+}
 .notebook {
   display: grid;
   grid-template-rows: auto auto minmax(300px, 1fr) auto;
@@ -1969,4 +2031,9 @@ select {
 
 .copy-output {
   margin: 8px 0 4px;
+}
+@media (hover: none) {
+  .project-header .link-button {
+    opacity: 1;
+  }
 }
