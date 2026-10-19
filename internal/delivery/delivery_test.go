@@ -600,7 +600,7 @@ func TestDispatcherQueuesSteerPolicyWhenOptionsNeedPreserving(t *testing.T) {
 	if err != nil || receipt.Evidence != surface.EvidenceQueued || len(adapter.steered) != 0 || r.QueueCount(session.ID) != 1 {
 		t.Fatalf("receipt=%+v err=%v steered=%v queued=%d", receipt, err, adapter.steered, r.QueueCount(session.ID))
 	}
-	item, err := r.QueueItem(receipt.QueueID)
+	item, err := r.QueueItem(receipt.QueueID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

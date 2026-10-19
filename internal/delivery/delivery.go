@@ -21,6 +21,9 @@ type Receipt struct {
 	QueueID    int64                    `json:"queueId,omitempty"`
 	DeliveryID int64                    `json:"deliveryId,omitempty"`
 	Detail     string                   `json:"detail,omitempty"`
+	// WaitingOn is set on a queued receipt when the target is waiting on its
+	// user; the message is delivered after the user answers.
+	WaitingOn *surface.Waiting `json:"waitingOn,omitempty"`
 }
 
 type Dispatcher struct {
@@ -67,6 +70,13 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
 		return nil, err
 	}
+	observation, err := adapter.Observe(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	if observation != nil && observation.WaitingOn != nil && d.Registry != nil {
+		return d.queueForWaiting(ctx, session, message, target, observation.WaitingOn)
+	}
 	var intent *registry.DeliveryIntent
 	if d.Registry != nil {
 		sourceID := surface.SourceSessionID(ctx)
@@ -96,6 +106,25 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 	d.markSent(receipt, intent, "", target)
 	d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, Message: "steer"})
 	return receipt, nil
+}
+
+// queueForWaiting holds a steer for a turn that is waiting on its user, so the
+// message cannot land in the middle of the question. It steers once answered.
+func (d Dispatcher) queueForWaiting(ctx context.Context, session *surface.Session, message, target string, waiting *surface.Waiting) (*Receipt, error) {
+	sourceID := surface.SourceSessionID(ctx)
+	if sourceID == "" {
+		if err := d.Registry.EnsureOperatorSession(); err != nil {
+			return nil, fmt.Errorf("persist operator delivery source: %w", err)
+		}
+		sourceID = registry.OperatorSessionID
+	}
+	options := surface.SendOptions{SourceSessionID: sourceID, BusyDelivery: string(deliverypolicy.Steer)}
+	queueID, deliveryID, err := d.Registry.QueueDeliveryWithIntent(session.ID, message, "", options)
+	if err != nil {
+		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: sourceID, Message: message, Error: fmt.Sprintf("queue storage failed: %s", err)})
+		return nil, err
+	}
+	return &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, QueueID: queueID, DeliveryID: deliveryID, Detail: fmt.Sprintf("Queued for %s, which is waiting on you; sends after you answer.", target), WaitingOn: waiting}, nil
 }
 
 // failureKind keeps an uncertain outcome distinct from a confirmed failure so every surface shows the same evidence.
@@ -145,7 +174,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 					return nil, intentErr
 				}
 			}
-			return d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, busyMode, "", intent)
+			return d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, busyMode, "", intent, observation)
 		}
 	}
 	baselineCompletionID := ""
@@ -178,7 +207,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		return nil, ownedErr
 	}
 	if surface.IsDeliveryHeld(err) {
-		return d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, deliverypolicy.Queue, "", intent)
+		return d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, deliverypolicy.Queue, "", intent, nil)
 	}
 	if err != nil {
 		if surface.IsDeliveryOutcomeUnknown(err) {
@@ -224,7 +253,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result.UUID})
 		return receipt, nil
 	}
-	return d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, busyMode, result.UUID, intent)
+	return d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, busyMode, result.UUID, intent, nil)
 }
 
 func (d Dispatcher) prepareIntent(sourceID, targetID, message string) (*registry.DeliveryIntent, error) {
@@ -244,13 +273,36 @@ func (d Dispatcher) prepareIntent(sourceID, targetID, message string) (*registry
 	return intent, nil
 }
 
-func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool, busyMode deliverypolicy.Mode, turnID string, intent *registry.DeliveryIntent) (*Receipt, error) {
+// handleBusy steers or queues a message for a busy target. observation is the
+// target's state when the caller already has it; without it, a steer observes
+// the target first. A target waiting on its user is never steered: the
+// message is queued and delivered after the user answers.
+func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool, busyMode deliverypolicy.Mode, turnID string, intent *registry.DeliveryIntent, observation *surface.TurnObservation) (*Receipt, error) {
 	target := session.Name
 	if target == "" {
 		target = session.ID
 	}
 	needsOptionSender := options.Model != "" || !options.TurnOptions.Empty()
-	if busyMode == deliverypolicy.Steer && !needsOptionSender && surface.EffectiveCapabilities(adapter, session).Steer {
+	steerable := busyMode == deliverypolicy.Steer && !needsOptionSender && surface.EffectiveCapabilities(adapter, session).Steer
+	if steerable && observation == nil {
+		observed, observeErr := adapter.Observe(ctx, session)
+		if observeErr != nil {
+			d.discardIntent(intent, session.ID)
+			return nil, observeErr
+		}
+		observation = observed
+	}
+	var waiting *surface.Waiting
+	if observation != nil {
+		waiting = observation.WaitingOn
+	} else if d.Registry != nil {
+		recorded, err := d.Registry.SessionWaiting(session.ID)
+		if err != nil {
+			d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, Error: fmt.Sprintf("read waiting state: %s", err)})
+		}
+		waiting = recorded
+	}
+	if steerable && waiting == nil {
 		if steerErr := adapter.Steer(ctx, session, message); steerErr != nil {
 			if intent != nil {
 				if surface.IsDeliveryOutcomeUnknown(steerErr) {
@@ -292,7 +344,11 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: fmt.Sprintf("queue storage failed: %s", err)})
 		return nil, err
 	}
-	return &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, TurnID: turnID, QueueID: queueID, DeliveryID: deliveryID, Detail: fmt.Sprintf("Queued for %s; sends when current turn ends.", target)}, nil
+	receipt := &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, TurnID: turnID, QueueID: queueID, DeliveryID: deliveryID, Detail: fmt.Sprintf("Queued for %s; sends when current turn ends.", target), WaitingOn: waiting}
+	if waiting != nil {
+		receipt.Detail = fmt.Sprintf("Queued for %s, which is waiting on you; sends after you answer.", target)
+	}
+	return receipt, nil
 }
 
 // failIntent publishes a durable problem and sender notice only when the

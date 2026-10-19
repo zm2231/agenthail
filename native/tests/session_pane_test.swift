@@ -122,11 +122,9 @@ struct SessionPaneTest {
         let sent = await withCheckedContinuation { done in
             offline.send(" look at this ", attachments: [picture], to: "X") { done.resume(returning: $0) }
         }
-        check(!sent && offline.draft(for: "X").text == "look at this" && offline.draft(for: "X").attachments == [picture], "a failed send returns the text and the attachments to the draft")
-        let onlyFile = await withCheckedContinuation { done in
-            offline.send("", attachments: [picture], to: "Y") { done.resume(returning: $0) }
-        }
-        check(!onlyFile && offline.draft(for: "Y").text.isEmpty && offline.draft(for: "Y").attachments == [picture], "a failed attachment-only send keeps the attachment")
+        let failed = offline.localSends["X"]?.first
+        check(!sent && failed?.failure != nil && failed?.text == ComposerDrop.message(text: "look at this", attachments: [picture]), "a failed send stays in the transcript with its attachments, ready to retry")
+        check(offline.draft(for: "X").text.isEmpty && offline.draft(for: "X").attachments.isEmpty, "a failed send is not also restored to the composer")
         let catalog = AgenthailModel(connecting: false)
         let codexSurface = try! JSONDecoder().decode(SurfaceState.self, from: Data(#"{"name":"codex","connected":true,"health":"healthy","capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}}"#.utf8))
         catalog.snapshot = DashboardSnapshot(updatedAt: "2026-10-04T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [codexSurface], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")

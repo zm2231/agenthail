@@ -348,7 +348,7 @@ func TestBusySteerRelayUsesDurableQueueUntilOutbox(t *testing.T) {
 	if len(fake.steered) != 0 {
 		t.Fatalf("relay steered before outbox: %v", fake.steered)
 	}
-	item, err := r.QueueItem(1)
+	item, err := r.QueueItem(1, nil)
 	if err != nil || item.BusyDelivery != "steer" {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
@@ -396,7 +396,7 @@ func TestRelayOutboxPreservesOptionsWhenBusySteerIsConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item, err := r.QueueItem(queueID)
+	item, err := r.QueueItem(queueID, nil)
 	if err != nil || item.BusyDelivery != "queue" {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
@@ -692,7 +692,7 @@ func TestRelayBoundsVerboseCompletionText(t *testing.T) {
 	fake.accepted = false
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "verbose", Reply: &surface.ReplyResult{Text: text, Done: true}}
 	daemon.observeSession(context.Background(), fake, &from)
-	items, err := r.ListQueue(false)
+	items, err := r.ListQueue(false, nil)
 	if err != nil || len(items) != 1 {
 		t.Fatalf("items=%+v err=%v", items, err)
 	}
@@ -770,7 +770,7 @@ func TestRelayStopsAtHopLimit(t *testing.T) {
 	daemon.observeSession(context.Background(), fake, sessionPointer(fake.sessions["hop-0"]))
 	for index := 1; index <= maxRelayHops; index++ {
 		id := fmt.Sprintf("hop-%d", index)
-		item, err := r.QueueItem(int64(index))
+		item, err := r.QueueItem(int64(index), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -956,7 +956,7 @@ func TestQueuedCompactUnknownOutcomeIsNotRetried(t *testing.T) {
 	deadline := time.Now().Add(time.Second)
 	var item *registry.QueueRow
 	for time.Now().Before(deadline) {
-		item, err = r.QueueItem(id)
+		item, err = r.QueueItem(id, nil)
 		if err == nil && item.Status == "dead" {
 			break
 		}
@@ -1017,7 +1017,7 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 	case <-time.After(time.Second):
 		t.Fatal("compact command was not sent")
 	}
-	item, err := r.QueueItem(id)
+	item, err := r.QueueItem(id, nil)
 	if err != nil || item.Status != "inflight" || item.Evidence == surface.EvidenceDelivered {
 		t.Fatalf("before boundary item=%+v err=%v", item, err)
 	}
@@ -1035,7 +1035,7 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 	}
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		item, err = r.QueueItem(id)
+		item, err = r.QueueItem(id, nil)
 		if err == nil && item.Status == "delivered" {
 			break
 		}

@@ -82,15 +82,15 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(RecoveryProtocol.state.freshSnapshotReads, before + 1)
     }
 
-    func testQueuedReceiptFollowsExpirationWithoutResending() async throws {
+    func testQueuedReceiptFollowsCancellationWithoutResending() async throws {
         RecoveryProtocol.state.reset()
         let model = makeModel()
         try await sendQueuedInstruction(model)
         XCTAssertEqual(model.deliveryStatus["demo"], "Queued for demo; sends when current turn ends.")
         XCTAssertEqual(model.deliveryIDs["demo"], 42)
-        RecoveryProtocol.state.configure(queueStatus: "expired")
+        RecoveryProtocol.state.configure(queueStatus: "canceled", evidence: "canceled")
         await model.eventStreamConnected()
-        XCTAssertEqual(model.deliveryStatus["demo"], "Instruction expired. You can review it in Inbox history.")
+        XCTAssertEqual(model.deliveryStatus["demo"], "Instruction canceled.")
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
     }
 
@@ -123,7 +123,7 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
     }
 
-    func testExpiredDeadReceiptsStopDemandingReviewButKeepUnknownTruth() async throws {
+    func testHistoricalDeadReceiptsStopDemandingReviewButKeepUnknownTruth() async throws {
         RecoveryProtocol.state.reset()
         let model = makeModel()
         try await sendQueuedInstruction(model)
@@ -132,17 +132,17 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(model.deliveryStatus["demo"], "Submitted to demo.")
         RecoveryProtocol.state.configure(queueHistorical: true)
         await model.refreshSession("demo")
-        XCTAssertEqual(model.deliveryStatus["demo"], "Instruction expired. You can review it in Inbox history.")
+        XCTAssertEqual(model.deliveryStatus["demo"], "Delivery was never confirmed. Review it in Inbox history.")
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
     }
 
-    func testExpiredKnownFailureReceiptStopsDemandingReview() async throws {
+    func testHistoricalKnownFailureReceiptStopsDemandingReview() async throws {
         RecoveryProtocol.state.reset()
         let model = makeModel()
         try await sendQueuedInstruction(model)
         RecoveryProtocol.state.configure(queueStatus: "dead", queueHistorical: true, evidence: "failed")
         await model.refreshSession("demo")
-        XCTAssertEqual(model.deliveryStatus["demo"], "Delivery failed; the queue entry has expired. Review it in Inbox history.")
+        XCTAssertEqual(model.deliveryStatus["demo"], "Delivery failed. Review it in Inbox history.")
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
     }
 

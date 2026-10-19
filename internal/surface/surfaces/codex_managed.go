@@ -220,7 +220,7 @@ func (c *Codex) requireDirectInput(ctx context.Context, client codexClient, sess
 	}
 	result, _ := readResponse["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
-	sess.Source, sess.Status = codexSource(thread["source"]), codexStatus(thread["status"])
+	sess.Source, sess.Status, sess.WaitingOn = codexSource(thread["source"]), codexStatus(thread["status"]), codexSessionWaiting(sess.ID, thread["status"])
 	return nil
 }
 

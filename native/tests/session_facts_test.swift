@@ -15,6 +15,10 @@ struct SessionFactsTest {
         expect(SessionFacts.presenceLabel(session(reason: "queued")) == "Queued", "current reason wins")
         expect(SessionFacts.presenceLabel(session(status: "busy")) == "Working", "status label without a reason")
         expect(SessionFacts.presenceLabel(session(status: "notLoaded")) == "Unavailable", "not loaded reads as unavailable")
+        var waiting = session(status: "busy", reason: "working")
+        waiting.waitingOn = WaitingState(kind: "question", id: "toolu_synthetic")
+        expect(SessionFacts.presenceLabel(waiting) == "Waiting on you", "a turn waiting on its user says so over working")
+        expect(SessionFacts.rowDetail(waiting) == "Claude · Waiting on you", "row detail names the wait")
         expect(SessionFacts.rowDetail(session(reason: "open")) == "Claude · Open", "row detail names surface and presence")
         expect(SessionFacts.rowDetail(session(surface: "codex", status: "busy", queued: 2, reason: "working")) == "Codex · Working · 2 queued", "row detail adds the queued count")
         var remote = session(reason: "open")
@@ -37,8 +41,6 @@ struct SessionFactsTest {
 
         expect(SessionFacts.filterSummary(.recent, codexRecentHours: 6).contains("last 6 hours"), "recent summary names the Codex window")
         expect(SettingsCounts.history(50) == "50+" && SettingsCounts.history(12) == "12", "history count caps like the web")
-
-        expect(!LongReply.isLong(String(repeating: "a", count: 2400)) && LongReply.isLong(String(repeating: "a", count: 2401)), "long replies start past 2400 characters")
 
         let detailed = item("toolResult", title: "Bash", timestamp: "2026-10-18T06:00:00Z", callId: "call_synthetic", status: "completed", truncated: true, reason: "size limit", bodyRef: "body/synthetic")
         expect(TimelineMetadata.fields(detailed) == ["Title: Bash", "Call: call_synthetic", "Status: completed", "2026-10-18T06:00:00Z", "Content truncated (size limit)", "Body reference: body/synthetic"], "timeline metadata lists every field like the web")

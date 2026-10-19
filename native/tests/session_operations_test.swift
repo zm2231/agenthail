@@ -73,15 +73,16 @@ struct SessionOperationsTest {
 
     static func checkSlashCommands() {
         var capabilities = Capabilities()
-        check(SlashCommand.available(capabilities: capabilities, working: false) == [.name], "only /name is offered without capabilities")
+        check(SlashCommand.available(capabilities: capabilities, working: false, waitingOnYou: false) == [.name], "only /name is offered without capabilities")
         capabilities.compact = true
         capabilities.model = true
         capabilities.goal = true
         capabilities.interrupt = true
         capabilities.steer = true
-        check(SlashCommand.available(capabilities: capabilities, working: false) == [.name, .compact, .model, .goal], "stop and steer need a running turn")
-        let all = SlashCommand.available(capabilities: capabilities, working: true)
+        check(SlashCommand.available(capabilities: capabilities, working: false, waitingOnYou: false) == [.name, .compact, .model, .goal], "stop and steer need a running turn")
+        let all = SlashCommand.available(capabilities: capabilities, working: true, waitingOnYou: false)
         check(all == SlashCommand.allCases, "a running capable session offers every command")
+        check(SlashCommand.available(capabilities: capabilities, working: true, waitingOnYou: true) == [.name, .compact, .stop, .model, .goal], "a turn waiting on its user offers no steer")
 
         check(SlashCommand.suggestions(for: "/st", available: all) == [.stop, .steer], "suggestions filter by prefix")
         check(SlashCommand.suggestions(for: "  /CO", available: all) == [.compact], "suggestions ignore leading space and case")

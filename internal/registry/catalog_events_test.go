@@ -251,15 +251,15 @@ func TestQueueMutationsAdvanceCatalogWatermarkWithPageMembership(t *testing.T) {
 	if drained.CatalogSeq <= claimed.CatalogSeq || len(drained.Sessions) != 0 {
 		t.Fatalf("drain seq=%d->%d sessions=%d", claimed.CatalogSeq, drained.CatalogSeq, len(drained.Sessions))
 	}
-	if err := r.QueueMessage(session.ID, "expires"); err != nil {
+	if err := r.QueueMessage(session.ID, "canceled later"); err != nil {
 		t.Fatal(err)
 	}
-	beforeExpiry := page()
-	if expired, err := r.ExpireMessages(time.Now().Add(365 * 24 * time.Hour)); err != nil || expired != 1 {
-		t.Fatalf("expired=%d err=%v", expired, err)
+	beforeCancel := page()
+	if count, err := r.CancelMessagesForSession(session.ID); err != nil || count != 1 {
+		t.Fatalf("canceled=%d err=%v", count, err)
 	}
 	swept := page()
-	if swept.CatalogSeq <= beforeExpiry.CatalogSeq || len(swept.Sessions) != 0 {
-		t.Fatalf("expiry seq=%d->%d sessions=%d", beforeExpiry.CatalogSeq, swept.CatalogSeq, len(swept.Sessions))
+	if swept.CatalogSeq <= beforeCancel.CatalogSeq || len(swept.Sessions) != 0 {
+		t.Fatalf("cancel seq=%d->%d sessions=%d", beforeCancel.CatalogSeq, swept.CatalogSeq, len(swept.Sessions))
 	}
 }

@@ -397,19 +397,53 @@ func (c *Codex) listPage(ctx context.Context, conn codexClient, params map[strin
 
 func codexSession(thread map[string]any) surface.Session {
 	session := surface.Session{
-		ID:       str(thread, "id"),
-		Surface:  surface.KindCodex,
-		Name:     surface.DeriveName(str(thread, "name"), str(thread, "preview"), 60),
-		Cwd:      str(thread, "cwd"),
-		Status:   codexStatus(thread["status"]),
-		Source:   codexSource(thread["source"]),
-		Subagent: codexSubagent(thread),
+		ID:        str(thread, "id"),
+		Surface:   surface.KindCodex,
+		Name:      surface.DeriveName(str(thread, "name"), str(thread, "preview"), 60),
+		Cwd:       str(thread, "cwd"),
+		Status:    codexStatus(thread["status"]),
+		Source:    codexSource(thread["source"]),
+		WaitingOn: codexSessionWaiting(str(thread, "id"), thread["status"]),
+		Subagent:  codexSubagent(thread),
 	}
 	setCodexTransport(&session, "")
 	if timestamp, ok := thread["recencyAt"].(float64); ok && timestamp > 0 {
 		session.LastActive = time.Unix(int64(timestamp), 0)
 	}
 	return session
+}
+
+// codexWaitingKind reads the waiting flags of an active ThreadStatus: the
+// app-server sets them while an approval or user-input request is pending.
+func codexWaitingKind(status any) surface.WaitingKind {
+	object, _ := status.(map[string]any)
+	if object == nil || object["type"] != "active" {
+		return ""
+	}
+	flags, _ := object["activeFlags"].([]any)
+	for _, flag := range flags {
+		switch flag {
+		case "waitingOnApproval":
+			return surface.WaitingApproval
+		case "waitingOnUserInput":
+			return surface.WaitingInput
+		}
+	}
+	return ""
+}
+
+func codexSessionWaiting(threadID string, status any) *surface.Waiting {
+	return codexWaiting(threadID, codexWaitingKind(status))
+}
+
+// codexWaiting names what a thread waits on the same way from a thread
+// listing and from an observation, so either one recognizes the other's
+// record. Codex reports the wait on the thread, without the request id.
+func codexWaiting(threadID string, kind surface.WaitingKind) *surface.Waiting {
+	if kind == "" {
+		return nil
+	}
+	return &surface.Waiting{Kind: kind, ID: threadID + ":" + string(kind)}
 }
 
 func codexStatus(s any) surface.SessionStatus {
@@ -561,7 +595,19 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 	if err != nil {
 		return nil, err
 	}
-	return codexObservation(thread), nil
+	observation := codexObservation(thread)
+	if observation.Status == surface.StatusBusy {
+		// Only thread status carries the pending approval and input flags.
+		response, err := conn.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
+		if err != nil {
+			return nil, fmt.Errorf("thread/read: %w", err)
+		}
+		result, _ := response["result"].(map[string]any)
+		value, _ := result["thread"].(map[string]any)
+		thread.Waiting = codexWaitingKind(value["status"])
+		observation = codexObservation(thread)
+	}
+	return observation, nil
 }
 
 func (c *Codex) activeTurnID(ctx context.Context, conn codexClient, threadID string) (string, error) {

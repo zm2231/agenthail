@@ -1,13 +1,13 @@
 # Delivery problem snapshot and dismissal
 
 Snapshots expose at most the 50 newest undismissed delivery intents whose
-status is `failed` or `expired` as `deliveryProblems`. Each item contains the
+status is `failed` as `deliveryProblems`. Each item contains the
 numeric `deliveryId`, target and sender session IDs, bounded message, failure
 reason, status, and the status update time in RFC3339 form.
 
 A problem, its `delivery.problem` catalog event, and the sender's failure
 notice are produced only when a provider rejects a submitted delivery or queued
-work later fails or expires. Deliveries the daemon runs (API, voice, queue)
+work later fails. Deliveries the daemon runs (API, voice, queue)
 publish the event to live catalog subscribers as soon as it commits; CLI
 commands deliver in-process, so their problems reach subscribers on the
 daemon's next queue scan, within its 5-second poll interval. Refusals that

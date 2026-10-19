@@ -28,7 +28,7 @@ func TestSendDevicePushUsesBoundedCapabilityPayload(t *testing.T) {
 	defer server.Close()
 	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", server.URL)
 	target := registry.DevicePushTarget{InstallationID: "install", Credential: "secret"}
-	if err := sendDevicePush(context.Background(), target, "Agenthail", "Session finished", "codex/session", "turn-42", "turn.completed"); err != nil {
+	if err := sendDevicePush(context.Background(), target, mobileNotification{Title: "Agenthail", Message: "Session finished", SessionID: "codex/session", TurnID: "turn-42", EventType: "turn.completed"}); err != nil {
 		t.Fatal(err)
 	}
 	if received["installationId"] != "install" || received["credential"] != "secret" || received["sessionId"] != "codex/session" || received["turnId"] != "turn-42" {
@@ -42,7 +42,7 @@ func TestSendDevicePushFailsWhenRelayIsNotConfigured(t *testing.T) {
 	bundledPushRelayURL = ""
 	t.Cleanup(func() { bundledPushRelayURL = previous })
 	target := registry.DevicePushTarget{InstallationID: "install", Credential: "secret"}
-	if err := sendDevicePush(context.Background(), target, "Agenthail", "Session finished", "codex/session", "turn-42", "turn.completed"); err == nil {
+	if err := sendDevicePush(context.Background(), target, mobileNotification{Title: "Agenthail", Message: "Session finished", SessionID: "codex/session", TurnID: "turn-42", EventType: "turn.completed"}); err == nil {
 		t.Fatalf("error=%v", err)
 	}
 }
@@ -75,7 +75,7 @@ func TestSendDevicePushRetriesTransientFailures(t *testing.T) {
 	defer server.Close()
 	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", server.URL)
 	target := registry.DevicePushTarget{InstallationID: "install", Credential: "secret"}
-	if err := sendDevicePushWithRetry(context.Background(), target, "Agenthail", "Session finished", "codex/session", "turn-42", "turn.completed"); err != nil {
+	if err := sendDevicePushWithRetry(context.Background(), target, mobileNotification{Title: "Agenthail", Message: "Session finished", SessionID: "codex/session", TurnID: "turn-42", EventType: "turn.completed"}); err != nil {
 		t.Fatal(err)
 	}
 	if attempts.Load() != 3 {
@@ -92,7 +92,7 @@ func TestSendDevicePushDoesNotRetryTerminalFailures(t *testing.T) {
 	defer server.Close()
 	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", server.URL)
 	target := registry.DevicePushTarget{InstallationID: "install", Credential: "secret"}
-	if err := sendDevicePushWithRetry(context.Background(), target, "Agenthail", "Session finished", "codex/session", "turn-42", "turn.completed"); err == nil {
+	if err := sendDevicePushWithRetry(context.Background(), target, mobileNotification{Title: "Agenthail", Message: "Session finished", SessionID: "codex/session", TurnID: "turn-42", EventType: "turn.completed"}); err == nil {
 		t.Fatal("expected delivery error")
 	}
 	if attempts.Load() != 1 {
@@ -129,7 +129,7 @@ func TestNotifyPairedDevicesRetiresOnlyTerminalTargets(t *testing.T) {
 			if err := reg.SaveDevicePushTarget(device.ID, "installation", "credential"); err != nil {
 				t.Fatal(err)
 			}
-			New(reg, nil).notifyPairedDevices(context.Background(), "Agenthail", "Finished", "codex/session", "turn-1", "turn.completed")
+			New(reg, nil).notifyPairedDevices(context.Background(), mobileNotification{Title: "Agenthail", Message: "Finished", SessionID: "codex/session", TurnID: "turn-1", EventType: "turn.completed"})
 			targets, err := reg.DevicePushTargets()
 			if err != nil || len(targets) != test.remaining {
 				t.Fatalf("targets=%+v err=%v", targets, err)
