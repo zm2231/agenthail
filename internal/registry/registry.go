@@ -38,6 +38,18 @@ const (
 // SchemaVersion is the user_version a registry has once this build opens it.
 func SchemaVersion() int { return schemaVersion }
 
+// NewerSchemaError is returned by Open for a registry a newer agenthail has
+// migrated. This build does not know that schema, so it refuses to read or
+// write it rather than run against tables it would misuse.
+type NewerSchemaError struct {
+	Found     int
+	Supported int
+}
+
+func (e *NewerSchemaError) Error() string {
+	return fmt.Sprintf("registry is schema %d; this agenthail supports %d; install a newer agenthail", e.Found, e.Supported)
+}
+
 func Open(path string) (*Registry, error) {
 	private := path == ""
 	if private {
@@ -56,7 +68,7 @@ func Open(path string) (*Registry, error) {
 	if strings.Contains(path, "?") {
 		sep = "&"
 	}
-	db, err := sql.Open("sqlite", path+sep+"_pragma=foreign_keys(1)&_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate")
+	db, err := sql.Open("sqlite", path+sep+"_pragma=foreign_keys(1)&_pragma=busy_timeout(15000)&_pragma=synchronous(NORMAL)&_txlock=immediate")
 	if err != nil {
 		return nil, err
 	}
@@ -73,6 +85,12 @@ func Open(path string) (*Registry, error) {
 	if err := r.migrate(); err != nil {
 		r.Close()
 		return nil, err
+	}
+	// WAL mode is a property of the file, so it is set only once migrate has
+	// accepted the schema; a registry this build refuses keeps its journal mode.
+	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+		r.Close()
+		return nil, fmt.Errorf("enable registry WAL: %w", err)
 	}
 	return r, nil
 }
@@ -99,6 +117,9 @@ func migrateTx(tx *sql.Tx) error {
 	var version int
 	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
+	}
+	if version > schemaVersion {
+		return &NewerSchemaError{Found: version, Supported: schemaVersion}
 	}
 	if _, err := tx.Exec(schema); err != nil {
 		return err
@@ -298,7 +319,7 @@ func migrateTx(tx *sql.Tx) error {
 			return err
 		}
 	}
-	if version >= schemaVersion {
+	if version == schemaVersion {
 		return nil
 	}
 	if version >= 1 {
