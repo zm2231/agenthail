@@ -79,7 +79,14 @@ func TestDiscoveryFailureBreaksSuccessfulOmissionRun(t *testing.T) {
 	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: "omission-run", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: `{"id":"omission-run","surface":"codex"}`}, CatalogEvent{DedupeKey: "omission-run:initial", Type: "session.upserted", EntityID: "omission-run", Payload: []byte(`{"session":{"id":"omission-run"}}`)}); err != nil {
 		t.Fatal(err)
 	}
-	if events, err := r.RecordCatalogDiscovery(surface.KindCodex, map[string]struct{}{}, time.Now(), true, 2); err != nil || len(events) != 0 {
+	events, err := r.RecordCatalogDiscovery(surface.KindCodex, map[string]struct{}{}, time.Now(), true, 2)
+	var retired struct {
+		Session struct {
+			Status  surface.SessionStatus `json:"status"`
+			Current bool                  `json:"current"`
+		} `json:"session"`
+	}
+	if err != nil || len(events) != 1 || json.Unmarshal(events[0].Payload, &retired) != nil || retired.Session.Status != surface.StatusOffline || retired.Session.Current {
 		t.Fatalf("first omission events=%+v err=%v", events, err)
 	}
 	if _, err := r.MarkCatalogDiscoveryFailure(surface.KindCodex, "provider unavailable", observed.Add(time.Minute)); err != nil {
@@ -264,5 +271,38 @@ func TestQueueMutationsAdvanceCatalogWatermarkWithPageMembership(t *testing.T) {
 	swept := page()
 	if swept.CatalogSeq <= beforeExpiry.CatalogSeq || len(swept.Sessions) != 0 {
 		t.Fatalf("expiry seq=%d->%d sessions=%d", beforeExpiry.CatalogSeq, swept.CatalogSeq, len(swept.Sessions))
+	}
+}
+
+func TestSessionMissingFromDiscoveryStopsBeingBusyOrCurrent(t *testing.T) {
+	r := openTestRegistry(t)
+	observed := time.Date(2026, 10, 7, 11, 0, 0, 0, time.UTC)
+	session := surface.Session{ID: "busy-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy, LastActive: observed}
+	projection := `{"id":"busy-thread","surface":"codex","status":"busy","current":true,"currentReason":"working"}`
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "busy-thread:initial", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
+		t.Fatal(err)
+	}
+	count := func(scope string) int {
+		t.Helper()
+		page, err := r.CatalogSnapshotPage(CatalogPageRequest{Scope: scope, Limit: 10, Now: observed.Add(time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(page.Sessions)
+	}
+	if count("current") != 1 || count("running") != 1 {
+		t.Fatalf("observed busy session current=%d running=%d", count("current"), count("running"))
+	}
+	if _, err := r.RecordCatalogDiscovery(surface.KindCodex, map[string]struct{}{}, observed.Add(time.Hour), true, 2); err != nil {
+		t.Fatal(err)
+	}
+	if count("current") != 0 || count("running") != 0 {
+		t.Fatalf("unobserved session current=%d running=%d", count("current"), count("running"))
+	}
+	if err := r.QueueMessage(session.ID, "held"); err != nil {
+		t.Fatal(err)
+	}
+	if count("current") != 1 {
+		t.Fatal("unobserved session with a queued message left current")
 	}
 }

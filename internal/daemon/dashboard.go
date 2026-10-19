@@ -605,7 +605,7 @@ func catalogPageRequestFromHTTP(r *http.Request) (*registry.CatalogPageRequest, 
 	}
 	projectID, query := r.URL.Query().Get("projectId"), strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	filter := scope + "\x00" + projectID + "\x00" + query
-	request := &registry.CatalogPageRequest{Scope: scope, ProjectID: projectID, Query: query, Limit: limit, CodexRecentHours: 24}
+	request := &registry.CatalogPageRequest{Scope: scope, ProjectID: projectID, Query: query, Limit: limit}
 	if raw := r.URL.Query().Get("cursor"); raw != "" {
 		decoded, err := base64.RawURLEncoding.DecodeString(raw)
 		var cursor catalogPageCursor
@@ -707,7 +707,6 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	var page *registry.CatalogPage
 	if len(pageRequest) > 0 {
 		request := pageRequest[0]
-		request.CodexRecentHours = config.CodexRecentHours
 		loaded, err := d.Registry.CatalogSnapshotPage(request)
 		if err != nil {
 			return dashboardState{}, fmt.Errorf("read catalog page: %w", err)
@@ -859,15 +858,15 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		if record, found := catalogSessions[session.ID]; found {
 			entry.Freshness = &record.Freshness
 		}
+		entry.QueueCount = counts[session.ID]
 		if record, found := catalogSessions[session.ID]; found && record.ProjectionFingerprint != "" {
 			var saved dashboardSession
 			if json.Unmarshal([]byte(record.ProjectionFingerprint), &saved) == nil {
 				entry.Open = saved.Open
 				entry.Subagents = saved.Subagents
+				entry.Current, entry.CurrentReason = saved.Current, saved.CurrentReason
 			}
 		}
-		entry.QueueCount = counts[session.ID]
-		entry.Current, entry.CurrentReason = surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: entry.QueueCount, Open: entry.Open, Now: now, CodexRecentHours: config.CodexRecentHours})
 		state.Sessions = append(state.Sessions, entry)
 	}
 	sort.Slice(state.Surfaces, func(i, j int) bool { return state.Surfaces[i].Name < state.Surfaces[j].Name })

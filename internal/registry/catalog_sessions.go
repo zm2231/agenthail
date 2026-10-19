@@ -550,6 +550,13 @@ func (r *Registry) RecordCatalogDiscovery(kind surface.SurfaceKind, seen map[str
 			if _, err := tx.Exec(`UPDATE catalog_sessions SET misses=? WHERE session_id=?`, misses, item.id); err != nil {
 				return nil, err
 			}
+			event, created, err := r.retireUnobservedSessionTx(tx, item.id, observedAt)
+			if err != nil {
+				return nil, err
+			}
+			if created {
+				events = append(events, event)
+			}
 			continue
 		}
 		payload, err := json.Marshal(map[string]string{"sessionId": item.id, "surface": string(kind), "reason": "omitted_from_successful_discovery"})
@@ -571,6 +578,59 @@ func (r *Registry) RecordCatalogDiscovery(kind surface.SurfaceKind, seen map[str
 		return nil, err
 	}
 	return events, nil
+}
+
+// retireUnobservedSessionTx records that a successful discovery pass did not
+// report the session: it is offline, no longer open, and current only while
+// messages are queued for it.
+func (r *Registry) retireUnobservedSessionTx(tx *sql.Tx, sessionID string, now time.Time) (CatalogEvent, bool, error) {
+	var fingerprint, observedAt string
+	var generation int64
+	if err := tx.QueryRow(`SELECT projection_fingerprint,projection_generation,observed_at FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&fingerprint, &generation, &observedAt); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	if _, err := tx.Exec(`UPDATE sessions SET status=? WHERE id=?`, string(surface.StatusOffline), sessionID); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	var session map[string]any
+	if json.Unmarshal([]byte(fingerprint), &session) != nil || session == nil {
+		return CatalogEvent{}, false, nil
+	}
+	queueCount, err := queueCountTx(tx, sessionID, now)
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	current, reason := surface.UnobservedPresence(queueCount)
+	session["status"] = surface.StatusOffline
+	session["open"] = false
+	session["queueCount"] = queueCount
+	session["current"] = current
+	delete(session, "currentReason")
+	if reason != "" {
+		session["currentReason"] = reason
+	}
+	next, err := json.Marshal(session)
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	if string(next) == fingerprint {
+		return CatalogEvent{}, false, nil
+	}
+	lastObserved, err := time.Parse(time.RFC3339Nano, observedAt)
+	if err != nil {
+		return CatalogEvent{}, false, fmt.Errorf("parse catalog observation: %w", err)
+	}
+	generation++
+	if _, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=?,projection_generation=? WHERE session_id=?`, string(next), generation, sessionID); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	session["observedAt"] = lastObserved
+	session["freshness"] = CatalogFreshness{Generation: uint64(generation), ObservedAt: lastObserved, Stale: true}
+	envelope, err := json.Marshal(map[string]any{"session": session})
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	return r.AppendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("session.upserted:%s:%d", sessionID, generation), Type: "session.upserted", EntityID: sessionID, Payload: envelope})
 }
 
 // CatalogProjectionFingerprint returns the committed projection of one
