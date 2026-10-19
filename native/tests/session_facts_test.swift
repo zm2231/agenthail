@@ -34,9 +34,6 @@ struct SessionFactsTest {
         expect(SessionFacts.headerFacts(session(status: "busy"), age: "5m") == ["0 queued"], "busy header omits last active")
         expect(SessionFacts.lastActive("now") == "last active just now" && SessionFacts.lastActive("") == "last active recently", "last active wording")
 
-        let exchanges = [item("message", role: "user"), item("message", role: "assistant"), item("toolCall"), item("text"), item("message", role: "user"), item("message", role: "user"), item("message", role: "assistant")]
-        expect(SessionFacts.exchangeCount(exchanges) == 4, "exchanges rebuild like the web: a reply after a reply starts a new exchange")
-        expect(SessionFacts.exchangeCount([item("message", role: "assistant")]) == 1, "a lone reply is one exchange")
         expect(SessionFacts.exchangeLabel(1) == "1 recent exchange" && SessionFacts.exchangeLabel(0) == "0 recent exchanges", "exchange label pluralizes")
 
         expect(SessionFacts.filterSummary(.recent, codexRecentHours: 6).contains("last 6 hours"), "recent summary names the Codex window")

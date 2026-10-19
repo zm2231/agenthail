@@ -10,20 +10,20 @@ final class SessionNavigationTests: XCTestCase {
         let workspace = app.buttons["project-project-fieldnotes"]
         XCTAssertTrue(workspace.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["session-codex-demo"].waitForExistence(timeout: 5))
-        workspace.tap()
+        tap(workspace)
         XCTAssertFalse(app.buttons["session-codex-demo"].exists)
         XCTAssertTrue(app.buttons["session-demo"].exists, "a collapsed project keeps its working session")
-        workspace.tap()
+        tap(workspace)
         XCTAssertTrue(app.buttons["session-codex-demo"].waitForExistence(timeout: 5))
-        app.buttons["voice-entry"].tap()
+        tap(app.buttons["voice-entry"])
         XCTAssertTrue(app.navigationBars["Talk to orchestrator"].waitForExistence(timeout: 5))
-        app.buttons["Done"].tap()
+        tap(app.buttons["Done"])
         for tab in ["Sessions", "Inbox", "Settings"] {
             XCTAssertTrue(app.tabBars.buttons[tab].isHittable, "\(tab) tab is covered by the Voice entry")
         }
-        app.tabBars.buttons["Inbox"].tap()
+        tap(app.tabBars.buttons["Inbox"])
         XCTAssertTrue(app.tabBars.buttons["Inbox"].isSelected)
-        app.tabBars.buttons["Settings"].tap()
+        tap(app.tabBars.buttons["Settings"])
         XCTAssertTrue(app.tabBars.buttons["Settings"].isSelected)
         XCTAssertFalse(app.buttons["voice-entry"].exists)
     }
@@ -34,40 +34,40 @@ final class SessionNavigationTests: XCTestCase {
         app.launch()
         let session = app.buttons["session-demo"]
         XCTAssertTrue(session.waitForExistence(timeout: 10))
-        session.tap()
+        tap(session)
         XCTAssertFalse(app.buttons["voice-entry"].exists)
         XCTAssertFalse(app.staticTexts["Working on your Mac"].exists)
         XCTAssertTrue(app.buttons["Session menu"].waitForExistence(timeout: 10))
-        app.buttons["Session menu"].tap()
+        tap(app.buttons["Session menu"])
         let allEvents = app.buttons["All events"]
         let call = app.buttons["Call this session"]
         XCTAssertTrue(allEvents.waitForExistence(timeout: 5))
         XCTAssertTrue(call.waitForExistence(timeout: 5))
         XCTAssertLessThan(allEvents.frame.maxY, call.frame.minY)
-        app.buttons["Chat"].tap()
+        tap(app.buttons["Chat"])
         XCTAssertTrue(app.buttons["Stop current turn"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.tabBars.buttons["Inbox"].isHittable)
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        tap(app.navigationBars.buttons.element(boundBy: 0))
         XCTAssertTrue(session.waitForExistence(timeout: 5))
-        app.buttons["new-session"].tap()
+        tap(app.buttons["new-session"])
         XCTAssertTrue(app.navigationBars["New session"].waitForExistence(timeout: 5))
-        app.navigationBars["New session"].buttons["Cancel"].tap()
+        tap(app.navigationBars["New session"].buttons["Cancel"])
         XCTAssertTrue(session.waitForExistence(timeout: 5))
 
-        app.tabBars.buttons["Inbox"].tap()
+        tap(app.tabBars.buttons["Inbox"])
         let inboxSession = app.buttons["inbox-session-2"]
         XCTAssertTrue(inboxSession.waitForExistence(timeout: 10))
-        inboxSession.tap()
+        tap(inboxSession)
         let menu = app.buttons["Session menu"]
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        tap(app.navigationBars.buttons.element(boundBy: 0))
         XCTAssertTrue(app.navigationBars["Sessions"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.tabBars.buttons["Sessions"].isSelected)
-        app.buttons["session-demo"].tap()
+        tap(session)
         XCTAssertTrue(app.buttons["Stop current turn"].waitForExistence(timeout: 10))
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
-        menu.tap()
-        app.buttons["Session details"].tap()
+        tap(menu)
+        tap(app.buttons["Session details"])
         XCTAssertFalse(app.buttons["Call this session"].exists)
         let inbox = app.buttons["Session inbox"]
         XCTAssertTrue(app.navigationBars["Session details"].waitForExistence(timeout: 5))
@@ -81,16 +81,22 @@ final class SessionNavigationTests: XCTestCase {
             inspector.swipeUp()
         }
         XCTAssertTrue(waitUntilHittable(inbox, timeout: 2))
-        inbox.tap()
-        app.buttons["inbox-session-1"].tap()
+        tap(inbox)
+        let inboxEntry = app.buttons["inbox-session-1"]
+        tap(inboxEntry)
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Session details"].exists)
         let receipt = app.buttons["latest-instruction"]
         XCTAssertTrue(receipt.waitForExistence(timeout: 5))
-        receipt.tap()
-        app.buttons["inbox-session-1"].tap()
+        tap(receipt)
+        tap(inboxEntry)
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Session inbox"].exists)
+    }
+
+    private func tap(_ element: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5), "\(element) did not appear", file: file, line: line)
+        element.tap()
     }
 
     private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
