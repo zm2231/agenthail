@@ -185,6 +185,10 @@ clients send one; the daemon generates one otherwise):
   of starting a second turn. A replay the remote still reports as in progress
   stays unknown, then becomes a dead letter marked unknown 15 minutes after
   it was first sent.
+- A replay the remote answers is delivered here with the remote's receipt as
+  its evidence. `queue list` shows `delivered (remote queued)` when the host
+  queued it for a busy session: the message now waits in that host's queue,
+  and this daemon's row is finished.
 
 `net/http` itself replays a request that carries an `Idempotency-Key` header
 once when a reused connection fails, which is safe for the same reason.
