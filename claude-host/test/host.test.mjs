@@ -156,6 +156,18 @@ test('open, send and stream a turn bound to the message uuid', async () => {
   c.close();
 });
 
+test('bypassPermissions opens with explicit consent to skip permissions', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd, permissionMode: 'bypassPermissions' });
+  const spawnRecord = JSON.parse(fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim());
+  assert.ok(spawnRecord.argv.some((a) => a.includes('bypassPermissions')), spawnRecord.argv.join(' '));
+  assert.ok(spawnRecord.argv.includes('--allow-dangerously-skip-permissions'), spawnRecord.argv.join(' '));
+  c.close();
+});
+
 test('a peer message keeps its text and carries the sender as origin', async () => {
   const f = fixture();
   await startHost(f);

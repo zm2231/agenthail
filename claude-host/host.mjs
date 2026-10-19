@@ -171,6 +171,7 @@ async function open(params) {
         pathToClaudeCodeExecutable: args.claude,
         ...(params.resume ? { resume: id } : { sessionId: id }),
         ...(params.permissionMode ? { permissionMode: params.permissionMode } : {}),
+        ...(params.permissionMode === 'bypassPermissions' ? { allowDangerouslySkipPermissions: true } : {}),
         ...(params.model ? { model: params.model } : {}),
         ...(params.effort ? { effort: params.effort } : {}),
         ...(params.agent ? { agent: params.agent } : {}),

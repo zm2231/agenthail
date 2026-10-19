@@ -90,6 +90,7 @@ struct NewSessionSheet: View {
                                         Text("Accept edits").tag("acceptEdits")
                                         Text("Automatic review").tag("auto")
                                         Text("Deny approval prompts").tag("dontAsk")
+                                        Text("Bypass permissions").tag("bypassPermissions")
                                         Text("Plan only").tag("plan")
                                     }
                                     Text("Worktrees require a Git repository or configured worktree hooks. Named agents must exist in Claude’s configuration.").font(.footnote).foregroundStyle(.secondary)
