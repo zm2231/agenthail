@@ -626,7 +626,7 @@ func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
 	if err := reg.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
-	adapter := providers.NewClaude("Default", t.TempDir())
+	adapter := providers.NewClaude(nil, t.TempDir())
 	manager := newSessionSourceManager(reg)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
@@ -734,7 +734,7 @@ func TestClaudeSessionSourceJournalsFullTimelineAcrossTransports(t *testing.T) {
 			if err := reg.RegisterSession(from); err != nil {
 				t.Fatal(err)
 			}
-			adapter := providers.NewClaude("Default", t.TempDir())
+			adapter := providers.NewClaude(nil, t.TempDir())
 			manager := newSessionSourceManager(reg)
 			subscription, err := manager.subscribe(&from, adapter)
 			if err != nil {
@@ -816,7 +816,7 @@ func TestClaudeSessionSourceJournalsInterruptedTerminalBeforeNextTurn(t *testing
 			if err := reg.RegisterSession(from); err != nil {
 				t.Fatal(err)
 			}
-			adapter := providers.NewClaude("Default", t.TempDir())
+			adapter := providers.NewClaude(nil, t.TempDir())
 			subscription, err := newSessionSourceManager(reg).subscribe(&from, adapter)
 			if err != nil {
 				t.Fatal(err)
@@ -1222,7 +1222,7 @@ func TestClaudeSessionSourceResumesTurnsWrittenWhileUnheld(t *testing.T) {
 		t.Fatal(err)
 	}
 	firstManager := newSessionSourceManager(reg)
-	first, err := firstManager.subscribe(&from, providers.NewClaude("Default", t.TempDir()))
+	first, err := firstManager.subscribe(&from, providers.NewClaude(nil, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1240,7 +1240,7 @@ func TestClaudeSessionSourceResumesTurnsWrittenWhileUnheld(t *testing.T) {
 	}
 	file.Close()
 	manager := newSessionSourceManager(reg)
-	second, err := manager.subscribe(&from, providers.NewClaude("Default", t.TempDir()))
+	second, err := manager.subscribe(&from, providers.NewClaude(nil, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1290,7 +1290,7 @@ func TestClaudeSessionSourceJournalsInjectedPromptOrigins(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager := newSessionSourceManager(reg)
-	subscription, err := manager.subscribe(&from, providers.NewClaude("Default", t.TempDir()))
+	subscription, err := manager.subscribe(&from, providers.NewClaude(nil, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}

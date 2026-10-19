@@ -12,49 +12,91 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 var langTagRe = regexp.MustCompile(`(?i)^<lang[^>]*/?>\s*`)
 
 type Notion struct {
-	spaceID      string
-	userID       string
-	userName     string
-	timezone     string
-	cookieBridge string
-	modelMu      sync.Mutex
-	modelLabels  map[string]string
-	modelsAt     time.Time
+	signins            signin.Resolver
+	configuredSpace    string
+	configuredUser     string
+	configuredTimezone string
+	cookieBridge       string
+	accountMu          sync.Mutex
+	account            *notionAccount
+	modelMu            sync.Mutex
+	models             *notionModels
 }
 
-func NewNotion(spaceID, userID string) *Notion {
+// notionAccount is the Notion identity one operation runs as: the cookies of
+// one sign-in profile and the user and space detected through them. It is
+// never mutated, so a binding change cannot mix two accounts in one request.
+type notionAccount struct {
+	cookies  CookieSource
+	spaceID  string
+	userID   string
+	userName string
+	timezone string
+}
+
+type notionModels struct {
+	profileID string
+	labels    map[string]string
+	at        time.Time
+}
+
+func NewNotion(signins signin.Resolver, spaceID, userID string) *Notion {
 	return &Notion{
-		spaceID:  spaceID,
-		userID:   userID,
-		timezone: os.Getenv("AGENTHAIL_NOTION_TZ"),
+		signins:            signins,
+		configuredSpace:    spaceID,
+		configuredUser:     userID,
+		configuredTimezone: os.Getenv("AGENTHAIL_NOTION_TZ"),
+		cookieBridge:       configuredCookieBridge(),
 	}
 }
 
-func (n *Notion) bridge() string {
-	if n.cookieBridge == "" {
-		n.cookieBridge = cookieBridgePath("cookie")
+func (n *Notion) cookies() (CookieSource, error) {
+	source, err := signin.Resolve(n.signins, signin.Target{Consumer: signin.Notion})
+	if err != nil {
+		return CookieSource{}, err
 	}
-	return n.cookieBridge
+	return CookieSource{Bridge: n.cookieBridge, URL: "https://app.notion.com/", Signin: source}, nil
 }
 
-func (n *Notion) ensureContext(ctx context.Context) error {
-	if n.spaceID == "" || n.userID == "" {
-		if err := n.autoDetect(ctx); err != nil {
-			return err
+// currentAccount resolves the sign-in profile, then reuses the account
+// detected for that same profile or detects it again.
+func (n *Notion) currentAccount(ctx context.Context) (notionAccount, error) {
+	cookies, err := n.cookies()
+	if err != nil {
+		return notionAccount{}, err
+	}
+	return n.accountFor(ctx, cookies)
+}
+
+func (n *Notion) accountFor(ctx context.Context, cookies CookieSource) (notionAccount, error) {
+	n.accountMu.Lock()
+	cached := n.account
+	n.accountMu.Unlock()
+	if cached != nil && cached.cookies == cookies {
+		return *cached, nil
+	}
+	account := notionAccount{cookies: cookies, spaceID: n.configuredSpace, userID: n.configuredUser, timezone: n.configuredTimezone}
+	if account.spaceID == "" || account.userID == "" {
+		if err := account.detect(ctx); err != nil {
+			return notionAccount{}, err
 		}
 	}
-	canonical, err := canonicalNotionSpaceID(n.spaceID)
+	canonical, err := canonicalNotionSpaceID(account.spaceID)
 	if err != nil {
-		return err
+		return notionAccount{}, err
 	}
-	n.spaceID = canonical
-	return nil
+	account.spaceID = canonical
+	n.accountMu.Lock()
+	n.account = &account
+	n.accountMu.Unlock()
+	return account, nil
 }
 
 func canonicalNotionSpaceID(spaceID string) (string, error) {
@@ -83,10 +125,10 @@ func newNotionThreadID(spaceID string) (string, error) {
 	return threadID, nil
 }
 
-func (n *Notion) autoDetect(ctx context.Context) error {
+func (a *notionAccount) detect(ctx context.Context) error {
 	status, respBody, err := sidecarRequestWithCookies(ctx, "POST",
 		"https://app.notion.com/api/v3/getSpaces",
-		n.headers(), "{}", n.bridge(), "https://app.notion.com/", 15*time.Second)
+		a.headers(), "{}", a.cookies, 15*time.Second)
 	if err != nil {
 		return fmt.Errorf("detect Notion context: %w", err)
 	}
@@ -107,45 +149,45 @@ func (n *Notion) autoDetect(ctx context.Context) error {
 		}
 	}
 	sort.Strings(users)
-	if n.userID == "" {
+	if a.userID == "" {
 		if len(users) == 0 {
 			return fmt.Errorf("no Notion user found; set AGENTHAIL_NOTION_USER")
 		}
 		if len(users) > 1 {
 			return fmt.Errorf("multiple Notion users found; set AGENTHAIL_NOTION_USER")
 		}
-		n.userID = users[0]
+		a.userID = users[0]
 	}
-	udataMap, ok := resp[n.userID].(map[string]any)
+	udataMap, ok := resp[a.userID].(map[string]any)
 	if !ok {
-		return fmt.Errorf("Notion user %q not found", n.userID)
+		return fmt.Errorf("Notion user %q not found", a.userID)
 	}
-	uid := n.userID
-	if n.userName == "" {
+	uid := a.userID
+	if a.userName == "" {
 		if usersByID, ok := udataMap["notion_user"].(map[string]any); ok {
 			if record, ok := usersByID[uid].(map[string]any); ok {
 				if value, ok := record["value"].(map[string]any); ok {
 					if inner, ok := value["value"].(map[string]any); ok {
-						n.userName, _ = inner["name"].(string)
+						a.userName, _ = inner["name"].(string)
 					}
 				}
 			}
 		}
 	}
-	if n.timezone == "" {
+	if a.timezone == "" {
 		if settingsByID, ok := udataMap["user_settings"].(map[string]any); ok {
 			if record, ok := settingsByID[uid].(map[string]any); ok {
 				if value, ok := record["value"].(map[string]any); ok {
 					if inner, ok := value["value"].(map[string]any); ok {
 						if settings, ok := inner["settings"].(map[string]any); ok {
-							n.timezone, _ = settings["time_zone"].(string)
+							a.timezone, _ = settings["time_zone"].(string)
 						}
 					}
 				}
 			}
 		}
 	}
-	if spaces, ok := udataMap["space"].(map[string]any); ok && n.spaceID == "" {
+	if spaces, ok := udataMap["space"].(map[string]any); ok && a.spaceID == "" {
 		var ids []string
 		for sid := range spaces {
 			ids = append(ids, sid)
@@ -157,9 +199,9 @@ func (n *Notion) autoDetect(ctx context.Context) error {
 		if len(ids) > 1 {
 			return fmt.Errorf("multiple Notion spaces found; set AGENTHAIL_NOTION_SPACE")
 		}
-		n.spaceID = ids[0]
+		a.spaceID = ids[0]
 	}
-	if n.spaceID == "" {
+	if a.spaceID == "" {
 		return fmt.Errorf("Notion space unavailable; set AGENTHAIL_NOTION_SPACE")
 	}
 	return nil
@@ -176,34 +218,35 @@ func (n *Notion) Capabilities() surface.Capabilities {
 
 func (n *Notion) CatalogListComplete() bool { return false }
 
-func (n *Notion) headers() map[string]string {
+func (a notionAccount) headers() map[string]string {
 	return map[string]string{
 		"content-type":                "application/json",
-		"x-notion-active-user-header": n.userID,
-		"x-notion-space-id":           n.spaceID,
+		"x-notion-active-user-header": a.userID,
+		"x-notion-space-id":           a.spaceID,
 	}
 }
 
-func (n *Notion) inferenceURL(action string) string {
+func notionAPI(action string) string {
 	return "https://app.notion.com/api/v3/" + action
 }
 
 func (n *Notion) List(ctx context.Context) ([]surface.Session, error) {
-	if err := n.ensureContext(ctx); err != nil {
+	account, err := n.currentAccount(ctx)
+	if err != nil {
 		return nil, err
 	}
 	body, _ := json.Marshal(map[string]any{
 		"threadParentPointer": map[string]any{
 			"table":   "space",
-			"id":      n.spaceID,
-			"spaceId": n.spaceID,
+			"id":      account.spaceID,
+			"spaceId": account.spaceID,
 		},
 		"limit":              50,
 		"includeWriterChats": false,
 	})
 	status, respBody, err := sidecarRequestWithCookies(ctx, "POST",
-		n.inferenceURL("getInferenceTranscriptsForUser"),
-		n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
+		notionAPI("getInferenceTranscriptsForUser"),
+		account.headers(), string(body), account.cookies, 15*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("list threads: %w", err)
 	}
@@ -274,10 +317,18 @@ func (n *Notion) Send(ctx context.Context, sess *surface.Session, message string
 var notionInferenceRequest = sidecarRequestWithCookies
 
 func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
-	if err := n.ensureContext(ctx); err != nil {
+	cookies, err := n.cookies()
+	if signin.IsNotConfigured(err) {
+		return nil, surface.DeliveryTerminal(err, surface.DeliverySigninNotConfigured)
+	}
+	if err != nil {
+		return nil, surface.DeliveryTerminal(err, surface.DeliveryAuthenticationNeeded)
+	}
+	account, err := n.accountFor(ctx, cookies)
+	if err != nil {
 		return nil, err
 	}
-	baselineID, _, err := n.latestAgentReply(ctx, sess)
+	baselineID, _, err := account.latestAgentReply(ctx, sess)
 	if err != nil {
 		return nil, fmt.Errorf("notion send target: %w", err)
 	}
@@ -285,26 +336,24 @@ func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, mes
 	if model == "" {
 		model = "almond-croissant-low"
 	} else {
-		resolved, rErr := n.resolveModelCodename(ctx, model)
+		resolved, rErr := n.resolveModelCodename(ctx, account, model)
 		if rErr != nil {
 			return nil, rErr
 		}
 		model = resolved
 	}
-	if err := n.fetchModels(ctx); err != nil {
+	labels, err := n.modelLabels(ctx, account)
+	if err != nil {
 		return nil, err
 	}
-	n.modelMu.Lock()
-	if _, ok := n.modelLabels[model]; !ok {
-		n.modelMu.Unlock()
+	if _, ok := labels[model]; !ok {
 		return nil, fmt.Errorf("Notion model %q is not available for this workspace", model)
 	}
-	n.modelMu.Unlock()
 	now := time.Now().UTC().Format(time.RFC3339)
 	newThread := sess.ID == "" || strings.HasPrefix(sess.ID, "new")
 	threadID := sess.ID
 	if newThread {
-		threadID, err = newNotionThreadID(n.spaceID)
+		threadID, err = newNotionThreadID(account.spaceID)
 		if err != nil {
 			return nil, err
 		}
@@ -328,10 +377,10 @@ func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, mes
 			"id":   uuid.NewString(),
 			"type": "context",
 			"value": map[string]any{
-				"timezone":        n.timezone,
-				"userName":        n.userName,
-				"userId":          n.userID,
-				"spaceId":         n.spaceID,
+				"timezone":        account.timezone,
+				"userName":        account.userName,
+				"userId":          account.userID,
+				"spaceId":         account.spaceID,
 				"currentDatetime": now,
 				"surface":         "ai_module",
 			},
@@ -340,14 +389,14 @@ func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, mes
 			"id":        uuid.NewString(),
 			"type":      "user",
 			"value":     [][]string{{message}},
-			"userId":    n.userID,
+			"userId":    account.userID,
 			"createdAt": now,
 		},
 	}
 
 	reqBody := map[string]any{
 		"traceId":                       uuid.NewString(),
-		"spaceId":                       n.spaceID,
+		"spaceId":                       account.spaceID,
 		"transcript":                    transcript,
 		"threadId":                      threadID,
 		"createThread":                  newThread,
@@ -365,17 +414,17 @@ func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, mes
 	if newThread {
 		reqBody["threadParentPointer"] = map[string]any{
 			"table":   "space",
-			"id":      n.spaceID,
-			"spaceId": n.spaceID,
+			"id":      account.spaceID,
+			"spaceId": account.spaceID,
 		}
 	}
 	bodyBytes, _ := json.Marshal(reqBody)
-	headers := n.headers()
+	headers := account.headers()
 	headers["accept"] = "application/x-ndjson"
 
 	status, respBody, err := notionInferenceRequest(ctx, "POST",
-		n.inferenceURL("runInferenceTranscript"),
-		headers, string(bodyBytes), n.bridge(), "https://app.notion.com/", 60*time.Second)
+		notionAPI("runInferenceTranscript"),
+		headers, string(bodyBytes), account.cookies, 60*time.Second)
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("notion send: %w", err))
 	}
@@ -392,7 +441,7 @@ func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, mes
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		completionID, reply, observeErr := n.latestAgentReply(ctx, &surface.Session{ID: resultThreadID, Surface: surface.KindNotion})
+		completionID, reply, observeErr := account.latestAgentReply(ctx, &surface.Session{ID: resultThreadID, Surface: surface.KindNotion})
 		if observeErr != nil {
 			return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("confirm Notion persistence: %w", observeErr))
 		}
@@ -411,22 +460,22 @@ func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, mes
 	return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Notion inference completed but no new persisted agent message appeared within 10s"))
 }
 
-func (n *Notion) fetchModels(ctx context.Context) error {
-	if err := n.ensureContext(ctx); err != nil {
-		return err
-	}
+// modelLabels returns the models available to the account's workspace. The
+// returned map is never modified afterwards.
+func (n *Notion) modelLabels(ctx context.Context, account notionAccount) (map[string]string, error) {
 	n.modelMu.Lock()
-	defer n.modelMu.Unlock()
-	if n.modelLabels != nil && time.Since(n.modelsAt) < 5*time.Minute {
-		return nil
+	cached := n.models
+	n.modelMu.Unlock()
+	if cached != nil && cached.profileID == account.cookies.Signin.ProfileID && time.Since(cached.at) < 5*time.Minute {
+		return cached.labels, nil
 	}
-	body, _ := json.Marshal(map[string]any{"spaceId": n.spaceID})
-	status, responseBody, err := sidecarRequestWithCookies(ctx, "POST", n.inferenceURL("getAvailableModels"), n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
+	body, _ := json.Marshal(map[string]any{"spaceId": account.spaceID})
+	status, responseBody, err := sidecarRequestWithCookies(ctx, "POST", notionAPI("getAvailableModels"), account.headers(), string(body), account.cookies, 15*time.Second)
 	if err != nil {
-		return fmt.Errorf("list Notion models: %w", err)
+		return nil, fmt.Errorf("list Notion models: %w", err)
 	}
 	if status != 200 {
-		return fmt.Errorf("list Notion models (HTTP %d): %s", status, diagnosticExcerpt(responseBody))
+		return nil, fmt.Errorf("list Notion models (HTTP %d): %s", status, diagnosticExcerpt(responseBody))
 	}
 	var response struct {
 		Models []struct {
@@ -436,28 +485,29 @@ func (n *Notion) fetchModels(ctx context.Context) error {
 		} `json:"models"`
 	}
 	if err := json.Unmarshal([]byte(responseBody), &response); err != nil {
-		return fmt.Errorf("parse Notion models: %w", err)
+		return nil, fmt.Errorf("parse Notion models: %w", err)
 	}
-	n.modelLabels = make(map[string]string, len(response.Models))
+	labels := make(map[string]string, len(response.Models))
 	for _, entry := range response.Models {
 		if entry.Model != "" && !entry.IsDisabled {
-			n.modelLabels[entry.Model] = entry.Label
+			labels[entry.Model] = entry.Label
 		}
 	}
-	n.modelsAt = time.Now()
-	return nil
+	n.modelMu.Lock()
+	n.models = &notionModels{profileID: account.cookies.Signin.ProfileID, labels: labels, at: time.Now()}
+	n.modelMu.Unlock()
+	return labels, nil
 }
 
-func (n *Notion) resolveModelCodename(ctx context.Context, name string) (string, error) {
-	if err := n.fetchModels(ctx); err != nil {
+func (n *Notion) resolveModelCodename(ctx context.Context, account notionAccount, name string) (string, error) {
+	labels, err := n.modelLabels(ctx, account)
+	if err != nil {
 		return "", err
 	}
-	n.modelMu.Lock()
-	defer n.modelMu.Unlock()
-	if _, ok := n.modelLabels[name]; ok {
+	if _, ok := labels[name]; ok {
 		return name, nil
 	}
-	for codename, label := range n.modelLabels {
+	for codename, label := range labels {
 		if strings.EqualFold(label, name) {
 			return codename, nil
 		}
