@@ -164,6 +164,9 @@ async function open(params) {
     if (params[name] !== undefined && typeof params[name] !== 'string') throw new HostError('invalid', `${name} must be a string`);
   }
   if (params.resume && (params.name || params.worktree)) throw new HostError('invalid', 'a resumed session keeps its name and worktree');
+  if (params.configDir !== undefined && (typeof params.configDir !== 'string' || !path.isAbsolute(params.configDir))) {
+    throw new HostError('invalid', `configDir must be an absolute path: ${params.configDir}`);
+  }
   const extraArgs = {
     ...(params.name ? { name: params.name } : {}),
     ...(params.worktree ? { worktree: params.worktree } : {}),
@@ -181,7 +184,7 @@ async function open(params) {
       prompt: s.input(),
       options: {
         cwd,
-        env: process.env,
+        env: params.configDir ? { ...process.env, CLAUDE_CONFIG_DIR: params.configDir } : process.env,
         pathToClaudeCodeExecutable: args.claude,
         ...(params.resume ? { resume: id } : { sessionId: id }),
         ...(params.permissionMode ? { permissionMode: params.permissionMode } : {}),
@@ -291,6 +294,7 @@ function spawnDetached(s, options, exited) {
   child.stderr.on('data', (chunk) => {
     s.stderr = (s.stderr + chunk).slice(-4096);
   });
+  child.stderr.on('error', () => {});
   // The SDK signals every Claude process it spawned when the host exits. These
   // outlive the host, so a running turn finishes after it.
   const kill = child.kill.bind(child);
@@ -366,10 +370,14 @@ function subscribe(socket, id, after) {
   subscribers.add(socket);
 }
 
+// A client may hang up before its reply is written. The write then fails
+// with EPIPE, which the socket reports and readline repeats on its interface;
+// both are that client's loss, not the host's, so neither may end the host.
 function serve(socket) {
   socket.on('error', () => {});
   socket.on('close', () => subscribers.delete(socket));
   const lines = readline.createInterface({ input: socket, crlfDelay: Infinity });
+  lines.on('error', () => {});
   lines.on('line', async (line) => {
     if (line.length > MAX_LINE) return socket.destroy();
     let request;
@@ -485,6 +493,12 @@ try {
   fs.unlinkSync(args.socket);
 } catch {}
 const server = net.createServer(serve);
+// A host that cannot listen exits with the reason. Once listening, a failed
+// accept costs that one client, not the sessions this host runs.
+server.on('error', (error) => {
+  if (!server.listening) fail(`cannot listen on ${args.socket}: ${error.message}`);
+  process.stderr.write(`claude-host: ${error.message}\n`);
+});
 server.listen(args.socket, () => {
   fs.chmodSync(args.socket, 0o600);
   writeState();
@@ -495,3 +509,5 @@ process.on('exit', () => {
 });
 process.on('SIGTERM', () => shutdown(0));
 process.on('SIGINT', () => shutdown(0));
+// stderr is host.log. A log that cannot be written loses lines, not sessions.
+process.stderr.on('error', () => {});

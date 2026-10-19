@@ -70,45 +70,47 @@ func TestClaudeTranscriptDoesNotGuessBetweenProjects(t *testing.T) {
 
 func TestClaudeTranscriptIndexRelistsOnlyChangedProjects(t *testing.T) {
 	home := t.TempDir()
-	index := newClaudeTranscriptIndex(home)
+	index := newClaudeTranscriptIndex()
+	roots := []string{filepath.Join(home, ".claude")}
 	for _, dir := range []string{"-a", "-b", "-c"} {
 		writeClaudeProjectTranscript(t, home, dir, "seed"+dir)
 	}
-	index.pass()
+	index.pass(roots)
 	stale := filepath.Join(home, ".claude", "projects", "-b", "unindexed.jsonl")
 	if err := os.WriteFile(stale, []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	old := index.dirs["-b"].modified
+	old := index.dirs[filepath.Dir(stale)].modified
 	if err := os.Chtimes(filepath.Dir(stale), old, old); err != nil {
 		t.Fatal(err)
 	}
-	if got := index.pass()("unindexed"); got != "" {
+	if got := onlyTranscript(index.pass(roots)("unindexed")); got != "" {
 		t.Fatalf("a project whose modification time did not change was listed again: %q", got)
 	}
 	if err := os.RemoveAll(filepath.Join(home, ".claude", "projects", "-c")); err != nil {
 		t.Fatal(err)
 	}
-	if got := index.pass()("seed-c"); got != "" {
+	if got := onlyTranscript(index.pass(roots)("seed-c")); got != "" {
 		t.Fatalf("a removed project still resolved to %q", got)
 	}
-	if _, ok := index.dirs["-c"]; ok {
+	if _, ok := index.dirs[filepath.Join(roots[0], "projects", "-c")]; ok {
 		t.Fatal("a removed project stayed in the index")
 	}
 }
 
 func TestClaudeTranscriptPassListsProjectsOnce(t *testing.T) {
 	home := t.TempDir()
-	index := newClaudeTranscriptIndex(home)
+	index := newClaudeTranscriptIndex()
+	roots := []string{filepath.Join(home, ".claude")}
 	writeClaudeProjectTranscript(t, home, "-a", "seed")
-	lookup := index.pass()
+	lookup := index.pass(roots)
 	created := writeClaudeProjectTranscript(t, home, "-new", "late")
 	for _, id := range []string{"missing-1", "missing-2", "late"} {
-		if got := lookup(id); got != "" {
+		if got := onlyTranscript(lookup(id)); got != "" {
 			t.Fatalf("a lookup within one pass listed the projects again and found %q for %s", got, id)
 		}
 	}
-	if got := index.pass()("late"); got != created {
+	if got := onlyTranscript(index.pass(roots)("late")); got != created {
 		t.Fatalf("the next pass resolved %q, want %q", got, created)
 	}
 }

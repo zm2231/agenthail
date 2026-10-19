@@ -38,6 +38,7 @@ extension Notification.Name {
 struct AgenthailIOSApp: App {
     @UIApplicationDelegateAdaptor(IOSAppDelegate.self) private var appDelegate
     @StateObject private var model = AgenthailIOSModel(autoConnect: !sessionPreviewEnabled)
+    @StateObject private var voiceCalls = VoiceCallCoordinator()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -53,6 +54,7 @@ struct AgenthailIOSApp: App {
                 connectedRoot
 #endif
             }
+            .environmentObject(voiceCalls)
         }
     }
     private var connectedRoot: some View {
@@ -67,6 +69,9 @@ struct AgenthailIOSApp: App {
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { model.resumeConnection() }
+            }
+            .onChange(of: model.isPaired) { _, paired in
+                if !paired { voiceCalls.disconnect() }
             }
     }
 

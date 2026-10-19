@@ -1618,6 +1618,11 @@ type AttentionItem struct {
 	Resolution      string `json:"resolution,omitempty"`
 }
 
+// QueueRetryBackoff is how long a queued message waits before it is tried
+// again after a failed or deferred attempt. Each later retry doubles it, up to
+// 64 times this.
+const QueueRetryBackoff = 5 * time.Second
+
 const uncertainDeliveryError = "delivery outcome is unknown after daemon interruption; retry explicitly if the target did not receive it"
 
 // QueueHold says why a pending message has not been delivered yet. Empty
@@ -2111,7 +2116,7 @@ func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts
 		if shift > 6 {
 			shift = 6
 		}
-		available = now.Add(5 * time.Second * time.Duration(1<<shift))
+		available = now.Add(QueueRetryBackoff * time.Duration(1<<shift))
 	}
 	message := ""
 	if cause != nil {
@@ -2172,7 +2177,7 @@ func (r *Registry) DeferMessage(id int64, cause error, now time.Time) (int64, er
 	if began {
 		refusal++
 	}
-	res, err := tx.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),deferrals=deferrals+1,last_error=?,available_at_ms=?,inflight_at_ms=0,refused=?,refusal=?,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(5*time.Second*time.Duration(1<<shift)).UnixMilli(), refused, refusal, id)
+	res, err := tx.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),deferrals=deferrals+1,last_error=?,available_at_ms=?,inflight_at_ms=0,refused=?,refusal=?,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(QueueRetryBackoff*time.Duration(1<<shift)).UnixMilli(), refused, refusal, id)
 	if err != nil {
 		return 0, err
 	}

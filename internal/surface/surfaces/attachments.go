@@ -28,6 +28,9 @@ var ErrAttachmentInvalid = errors.New("attachment is not a supported image")
 type attachmentReference struct{ MediaType, Data, Path string }
 
 func (c *Claude) ReadAttachment(ctx context.Context, s *surface.Session, id string) (*surface.Attachment, []byte, error) {
+	if _, err := c.sessionTranscript(s); err != nil {
+		return nil, nil, err
+	}
 	return readTranscriptAttachment(ctx, s, id, "claude", c.transcriptPath)
 }
 func (c *Codex) ReadAttachment(ctx context.Context, s *surface.Session, id string) (*surface.Attachment, []byte, error) {

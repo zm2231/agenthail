@@ -1025,6 +1025,30 @@ func TestDashboardChannelSendCountsSubmittedSeparately(t *testing.T) {
 	}
 }
 
+func TestDashboardChannelSendSkipsTheSendingMember(t *testing.T) {
+	d, registry, fake, from, to := daemonFixture(t)
+	for _, channel := range []string{"reviewers", "solo"} {
+		if _, err := registry.CreateChannel(channel); err != nil {
+			t.Fatal(err)
+		}
+		if err := registry.AddToChannel(channel, from.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := registry.AddToChannel("reviewers", to.ID); err != nil {
+		t.Fatal(err)
+	}
+	response := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"channel-send","channel":"reviewers","message":"handoff","sourceSessionId":"from"}`)
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK || body["sent"] != float64(1) || len(fake.sent) != 1 {
+		t.Fatalf("code=%d body=%s sent=%q", response.Code, response.Body.String(), fake.sent)
+	}
+	response = serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"channel-send","channel":"solo","message":"handoff","sourceSessionId":"from"}`)
+	if response.Code != http.StatusBadRequest || len(fake.sent) != 1 {
+		t.Fatalf("a sender alone in its channel got its own message: code=%d sent=%q", response.Code, fake.sent)
+	}
+}
+
 func TestDashboardChannelPreservesMemberIdentity(t *testing.T) {
 	d, registry, _, from, _ := daemonFixture(t)
 	if _, err := registry.CreateChannel("reviewers"); err != nil {

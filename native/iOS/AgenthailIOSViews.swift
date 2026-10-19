@@ -369,6 +369,7 @@ struct ConversationListView: View {
 
 struct SessionScreen: View {
     @ObservedObject var model: AgenthailIOSModel
+    @EnvironmentObject private var voiceCalls: VoiceCallCoordinator
     let session: SessionState
     @State private var showingInfo = false
     @State private var showingVoice = false
@@ -538,6 +539,7 @@ struct SessionScreen: View {
                         }
                         if session.canCallByVoice {
                             Button("Call this session", systemImage: "phone.fill") {
+                                voiceCalls.open(targetID: session.id)
                                 showingVoice = true
                             }
                         }
@@ -552,7 +554,9 @@ struct SessionScreen: View {
                 }
             }
             .sheet(isPresented: $showingVoice) {
-                AgenthailVoiceOperatorSheet(targetID: session.id) { _ in }
+                if let call = voiceCalls.model {
+                    AgenthailVoiceOperatorSheet(model: call) { _ in }
+                }
             }
             .task(id: session.id) {
                 let startsAtOldest = ProcessInfo.processInfo.arguments.contains("--preview-reading-top")
