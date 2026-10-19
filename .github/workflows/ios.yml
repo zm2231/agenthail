@@ -24,14 +24,17 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
+          yq '.targets[].sources[].path' native/project.yml > "$RUNNER_TEMP/sources"
+          test -s "$RUNNER_TEMP/sources"
+          git diff --name-only --no-renames "$BASE" HEAD > "$RUNNER_TEMP/changed"
           inputs=(native/project.yml native/Agenthail.xcodeproj scripts/ios-simulator.sh scripts/test-xcodegen-project.sh .github/workflows/ios.yml)
-          while read -r source; do inputs+=("native/$source"); done < <(yq '.targets[].sources[].path' native/project.yml)
+          while read -r source; do inputs+=("native/$source"); done < "$RUNNER_TEMP/sources"
           ios=false
           while read -r file; do
             for input in "${inputs[@]}"; do
               if [ "$file" = "$input" ] || [[ "$file" == "$input"/* ]]; then ios=true; fi
             done
-          done < <(git diff --name-only --no-renames "$BASE" HEAD)
+          done < "$RUNNER_TEMP/changed"
           echo "ios=$ios" >> "$GITHUB_OUTPUT"
 
   ios:
