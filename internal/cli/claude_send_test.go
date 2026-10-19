@@ -3,11 +3,12 @@ package cli
 import (
 	"context"
 	"errors"
-	"github.com/zm2231/agenthail/internal/signin"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/signin"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
