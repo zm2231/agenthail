@@ -330,6 +330,8 @@ func catalogGit(ctx context.Context, dir string, args ...string) (string, error)
 
 // catalogSessionPath makes a discovered working directory absolute and
 // canonical. Unlike typed input, its bytes are exact, so nothing is trimmed.
+// A directory that no longer exists is canonical through its nearest existing
+// ancestor, so a removed worktree keeps the same path form as its repository.
 func catalogSessionPath(cwd string) (string, error) {
 	if cwd == "" {
 		return "", nil
@@ -338,10 +340,17 @@ func catalogSessionPath(cwd string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		return filepath.Clean(resolved), nil
+	abs = filepath.Clean(abs)
+	existing := nearestExistingDirectory(abs)
+	resolved, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return abs, nil
 	}
-	return filepath.Clean(abs), nil
+	rest, err := filepath.Rel(existing, abs)
+	if err != nil {
+		return abs, nil
+	}
+	return filepath.Join(resolved, rest), nil
 }
 
 func canonicalCatalogPath(path string) (string, error) {
