@@ -253,7 +253,8 @@ const (
 	DeliveryAccessDenied         DeliveryTerminalKind = "access_denied"
 	DeliveryInvalidRequest       DeliveryTerminalKind = "invalid_request"
 	DeliveryOwnershipConflict    DeliveryTerminalKind = "ownership_conflict"
-	DeliverySigninNotConfigured  DeliveryTerminalKind = "signin_not_configured"
+	DeliverySigninOff            DeliveryTerminalKind = "signin_off"
+	DeliverySigninUnreadable     DeliveryTerminalKind = "signin_unreadable"
 )
 
 type DeliveryTerminalError struct {
@@ -280,8 +281,10 @@ func deliveryTerminalLabel(kind DeliveryTerminalKind) string {
 		return "invalid request"
 	case DeliveryOwnershipConflict:
 		return "session ownership conflict"
-	case DeliverySigninNotConfigured:
-		return "browser sign-in not set up"
+	case DeliverySigninOff:
+		return "browser sign-in turned off"
+	case DeliverySigninUnreadable:
+		return "browser sign-in unreadable"
 	default:
 		return "delivery rejected"
 	}

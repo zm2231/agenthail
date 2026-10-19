@@ -58,7 +58,7 @@ func (r *Registry) AddSigninProfile(label string, browser signin.Browser, select
 	if strings.HasPrefix(label, "sp_") {
 		return signin.Profile{}, fmt.Errorf("label %q is reserved for profile IDs", label)
 	}
-	if label == "none" {
+	if label == signin.RefOff || label == signin.RefAutomatic {
 		return signin.Profile{}, fmt.Errorf("label %q is reserved", label)
 	}
 	if !browser.Valid() {
@@ -87,8 +87,8 @@ func (r *Registry) AddSigninProfile(label string, browser signin.Browser, select
 	return profile, nil
 }
 
-// RemoveSigninProfile deletes a profile. Consumers bound to it become
-// unconfigured rather than moving to another profile.
+// RemoveSigninProfile deletes a profile. Consumers bound to it go back to
+// the system default browser rather than moving to another profile.
 func (r *Registry) RemoveSigninProfile(ref string) (signin.Profile, error) {
 	profile, err := r.SigninProfile(ref)
 	if err != nil {
@@ -100,53 +100,92 @@ func (r *Registry) RemoveSigninProfile(ref string) (signin.Profile, error) {
 	return profile, nil
 }
 
-func (r *Registry) SigninBindings() (map[signin.Consumer]string, error) {
-	rows, err := r.read.Query(`SELECT consumer,profile_id FROM signin_bindings`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	bindings := map[signin.Consumer]string{}
-	for rows.Next() {
-		var consumer, profileID string
-		if err := rows.Scan(&consumer, &profileID); err != nil {
+func (r *Registry) SigninChoices() (map[signin.Consumer]signin.Choice, error) {
+	choices := map[signin.Consumer]signin.Choice{}
+	for _, consumer := range signin.Consumers {
+		choice, err := r.SigninChoice(consumer.ID)
+		if err != nil {
 			return nil, err
 		}
-		bindings[signin.Consumer(consumer)] = profileID
+		choices[consumer.ID] = choice
 	}
-	return bindings, rows.Err()
+	return choices, nil
 }
 
-// BindSignin points a consumer at a profile, or clears it when ref is empty.
-func (r *Registry) BindSignin(consumer signin.Consumer, ref string) (*signin.Profile, error) {
-	if _, ok := signin.LookupConsumer(string(consumer)); !ok {
-		return nil, fmt.Errorf("unknown sign-in consumer %q", consumer)
+func (r *Registry) SigninChoice(consumer signin.Consumer) (signin.Choice, error) {
+	var off int
+	if err := r.read.QueryRow(`SELECT COUNT(*) FROM signin_off WHERE consumer=?`, string(consumer)).Scan(&off); err != nil {
+		return signin.Choice{}, fmt.Errorf("read %s sign-in choice: %w", consumer.Label(), err)
 	}
-	if ref == "" {
-		_, err := r.db.Exec(`DELETE FROM signin_bindings WHERE consumer=?`, string(consumer))
-		return nil, err
+	if off > 0 {
+		return signin.Choice{Mode: signin.Off}, nil
 	}
-	profile, err := r.SigninProfile(ref)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := r.db.Exec(`INSERT INTO signin_bindings(consumer,profile_id) VALUES(?,?) ON CONFLICT(consumer) DO UPDATE SET profile_id=excluded.profile_id`, string(consumer), profile.ID); err != nil {
-		return nil, err
-	}
-	return &profile, nil
-}
-
-func (r *Registry) ResolveSignin(target signin.Target) (signin.Source, error) {
-	profile, err := scanSigninProfile(r.read.QueryRow(`SELECT p.id,p.label,p.browser,p.profile,p.created_at FROM signin_bindings b JOIN signin_profiles p ON p.id=b.profile_id WHERE b.consumer=?`, string(target.Consumer)))
+	profile, err := scanSigninProfile(r.read.QueryRow(`SELECT p.id,p.label,p.browser,p.profile,p.created_at FROM signin_bindings b JOIN signin_profiles p ON p.id=b.profile_id WHERE b.consumer=?`, string(consumer)))
 	if errors.Is(err, sql.ErrNoRows) {
-		return signin.Source{}, signin.NotConfiguredError{Consumer: target.Consumer}
+		return signin.Choice{Mode: signin.Automatic}, nil
 	}
 	if err != nil {
-		return signin.Source{}, fmt.Errorf("read %s sign-in profile: %w", target.Consumer.Label(), err)
+		return signin.Choice{}, fmt.Errorf("read %s sign-in profile: %w", consumer.Label(), err)
+	}
+	return signin.Choice{Mode: signin.Chosen, Profile: &profile}, nil
+}
+
+// BindSignin points a consumer at a profile, at the system default browser
+// when ref is signin.RefAutomatic, or at nothing when ref is signin.RefOff.
+func (r *Registry) BindSignin(consumer signin.Consumer, ref string) (signin.Choice, error) {
+	if _, ok := signin.LookupConsumer(string(consumer)); !ok {
+		return signin.Choice{}, fmt.Errorf("unknown sign-in consumer %q", consumer)
+	}
+	choice := signin.Choice{Mode: signin.Automatic}
+	switch ref {
+	case signin.RefAutomatic:
+	case signin.RefOff:
+		choice.Mode = signin.Off
+	default:
+		profile, err := r.SigninProfile(ref)
+		if err != nil {
+			return signin.Choice{}, err
+		}
+		choice = signin.Choice{Mode: signin.Chosen, Profile: &profile}
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return signin.Choice{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM signin_bindings WHERE consumer=?`, string(consumer)); err != nil {
+		return signin.Choice{}, err
+	}
+	if _, err := tx.Exec(`DELETE FROM signin_off WHERE consumer=?`, string(consumer)); err != nil {
+		return signin.Choice{}, err
+	}
+	switch choice.Mode {
+	case signin.Off:
+		_, err = tx.Exec(`INSERT INTO signin_off(consumer) VALUES(?)`, string(consumer))
+	case signin.Chosen:
+		_, err = tx.Exec(`INSERT INTO signin_bindings(consumer,profile_id) VALUES(?,?)`, string(consumer), choice.Profile.ID)
+	}
+	if err != nil {
+		return signin.Choice{}, err
+	}
+	return choice, tx.Commit()
+}
+
+// SigninSelection resolves a consumer's choice against this computer's
+// browsers, as ResolveSignin does for a request.
+func (r *Registry) SigninSelection(consumer signin.Consumer) (signin.Selection, signin.Source, error) {
+	choice, err := r.SigninChoice(consumer)
+	if err != nil {
+		return signin.Selection{}, signin.Source{}, err
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return signin.Source{}, err
+		return signin.Selection{Mode: choice.Mode}, signin.Source{}, err
 	}
-	return signin.SourceFor(home, profile)
+	return signin.Select(home, consumer, choice)
+}
+
+func (r *Registry) ResolveSignin(target signin.Target) (signin.Source, error) {
+	_, source, err := r.SigninSelection(target.Consumer)
+	return source, err
 }

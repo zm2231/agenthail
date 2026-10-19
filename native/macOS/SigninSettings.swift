@@ -9,7 +9,7 @@ struct SigninSettings: View {
     var body: some View {
         Form {
             Section {
-                Text("Notion and Claude sessions reached over Remote Control read your sign-in cookies from the browser profile you choose. Nothing else reads cookies, and a consumer that is not set up reads none.")
+                Text("Notion and Claude sessions reached over Remote Control read your sign-in cookies from your system default browser's last used profile. Pick another profile or turn sign-in off for each below, or run agenthail signin use. Nothing else reads cookies.")
                     .font(.system(size: 12))
                     .foregroundStyle(DesktopPalette.text2)
             }
@@ -17,9 +17,18 @@ struct SigninSettings: View {
                 Section("Used by") {
                     ForEach(signin.consumers) { consumer in
                         VStack(alignment: .leading, spacing: 4) {
-                            Picker(consumer.label, selection: Binding(get: { consumer.profileId ?? "" }, set: { model.bindSignin(consumer: consumer.id, profileID: $0.isEmpty ? nil : $0) })) {
-                                Text("Not set up").tag("")
+                            Picker(consumer.label, selection: Binding(get: { consumer.choice }, set: { model.bindSignin(consumer: consumer.id, choice: $0) })) {
+                                Text("Automatic (system default browser)").tag("auto")
                                 ForEach(signin.profiles) { Text($0.label).tag($0.id) }
+                                Text("Off").tag("none")
+                            }
+                            Text(consumer.resolvedLabel)
+                                .font(.system(size: 12))
+                            if let problem = consumer.problem {
+                                Text(problem)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(DesktopPalette.red)
+                                    .textSelection(.enabled)
                             }
                             Text(consumer.purpose)
                                 .font(.system(size: 12))
@@ -27,9 +36,9 @@ struct SigninSettings: View {
                         }
                     }
                 }
-                Section("Sign-in profiles") {
+                Section("Pinned profiles") {
                     if signin.profiles.isEmpty {
-                        Text("No sign-in profiles yet. Add one from a browser below.")
+                        Text("No pinned profiles. Add one below to use a profile other than the default browser's.")
                             .foregroundStyle(DesktopPalette.text2)
                     }
                     ForEach(signin.profiles) { item in

@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -15,9 +14,9 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-type signinConsumerView struct {
-	signin.ConsumerInfo
-	ProfileID *string `json:"profileId"`
+func (d *Daemon) signinConsumer(consumer signin.ConsumerInfo) signin.Status {
+	selection, _, err := d.Registry.SigninSelection(consumer.ID)
+	return signin.NewStatus(consumer, selection, err)
 }
 
 type signinDetectedProfileView struct {
@@ -31,9 +30,9 @@ type signinBrowserView struct {
 }
 
 type signinView struct {
-	Profiles  []signin.Profile     `json:"profiles"`
-	Consumers []signinConsumerView `json:"consumers"`
-	Browsers  []signinBrowserView  `json:"browsers"`
+	Profiles  []signin.Profile    `json:"profiles"`
+	Consumers []signin.Status     `json:"consumers"`
+	Browsers  []signinBrowserView `json:"browsers"`
 }
 
 func (d *Daemon) registerSigninAPI(mux *http.ServeMux, dashboard *dashboardServer) {
@@ -47,17 +46,9 @@ func (d *Daemon) signinView(r *http.Request) (signinView, error) {
 	if err != nil {
 		return signinView{}, err
 	}
-	bindings, err := d.Registry.SigninBindings()
-	if err != nil {
-		return signinView{}, err
-	}
-	view := signinView{Profiles: profiles, Consumers: []signinConsumerView{}, Browsers: []signinBrowserView{}}
+	view := signinView{Profiles: profiles, Consumers: []signin.Status{}, Browsers: []signinBrowserView{}}
 	for _, consumer := range signin.Consumers {
-		entry := signinConsumerView{ConsumerInfo: consumer}
-		if id, ok := bindings[consumer.ID]; ok {
-			entry.ProfileID = &id
-		}
-		view.Consumers = append(view.Consumers, entry)
+		view.Consumers = append(view.Consumers, d.signinConsumer(consumer))
 	}
 	added := map[string]string{}
 	for _, profile := range profiles {
@@ -162,11 +153,11 @@ func (d *Daemon) apiSigninBindingsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var request struct {
-		Consumer  string          `json:"consumer"`
-		ProfileID json.RawMessage `json:"profileId"`
+		Consumer  string  `json:"consumer"`
+		ProfileID *string `json:"profileId"`
 	}
-	const required = "A consumer and a profileId (or null to clear it) are required."
-	if err := decodeAPIV1JSON(w, r, &request, false); err != nil || len(request.ProfileID) == 0 {
+	const required = "A consumer and a profileId are required: a profile ID or label, \"auto\" for the system default browser, or \"none\" to turn sign-in off."
+	if err := decodeAPIV1JSON(w, r, &request, false); err != nil || request.ProfileID == nil || strings.TrimSpace(*request.ProfileID) == "" {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", required)
 		return
 	}
@@ -175,15 +166,7 @@ func (d *Daemon) apiSigninBindingsHandler(w http.ResponseWriter, r *http.Request
 		writeAPIError(w, http.StatusBadRequest, "invalid_consumer", fmt.Sprintf("Unknown consumer %q. Choose one of: %s.", request.Consumer, consumerNames()))
 		return
 	}
-	ref := ""
-	if string(request.ProfileID) != "null" {
-		if err := json.Unmarshal(request.ProfileID, &ref); err != nil || strings.TrimSpace(ref) == "" {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", required)
-			return
-		}
-		ref = strings.TrimSpace(ref)
-	}
-	profile, err := d.Registry.BindSignin(consumer.ID, ref)
+	_, err := d.Registry.BindSignin(consumer.ID, strings.TrimSpace(*request.ProfileID))
 	if errors.Is(err, registry.ErrSigninProfileNotFound) {
 		writeAPIError(w, http.StatusNotFound, "signin_profile_not_found", err.Error())
 		return
@@ -194,7 +177,7 @@ func (d *Daemon) apiSigninBindingsHandler(w http.ResponseWriter, r *http.Request
 	}
 	d.publishEvent("signin.changed", string(consumer.ID), map[string]any{"consumer": consumer.ID})
 	go d.refreshSigninSurfaces()
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"consumer": consumer.ID, "profile": profile})
+	writeDashboardJSON(w, http.StatusOK, d.signinConsumer(consumer))
 }
 
 // refreshSigninSurfaces re-checks the surfaces that read cookies so a new
