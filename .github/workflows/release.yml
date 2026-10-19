@@ -110,6 +110,14 @@ jobs:
           : "${NOTARY_KEY:?missing APPLE_NOTARY_KEY_BASE64}"
           printf '%s' "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
           xcrun notarytool store-credentials agenthail-ci --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sidecar/package-lock.json
+      - name: Cookie bridge dependencies
+        working-directory: sidecar
+        run: npm ci --ignore-scripts
       - name: Test source
         run: |
           go test ./... -race -count=1

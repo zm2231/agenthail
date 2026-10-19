@@ -4,7 +4,7 @@ Use this runbook to release the iPhone app, manage internal tester access, and d
 
 ## Release a build
 
-Pushing a `v*` tag triggers Release. A normal push to `main` runs CI; it does **not** upload an IPA. Release also supports manual dispatch with a version:
+Pushing a `v*` tag triggers Release. CI runs on pull requests and never uploads an IPA. Release also supports manual dispatch with a version:
 
 ```sh
 export GH_TOKEN="$(~/.config/github-apps/gh-app-token.sh zm2231)"
