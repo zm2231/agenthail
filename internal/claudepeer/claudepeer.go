@@ -936,8 +936,8 @@ func handleRelay(conn net.Conn, reg *registry.Registry, c Config, ownSocket stri
 			continue
 		}
 		if err := queueFrame(reg, c, f, ownSocket); err != nil {
-			_ = reg.RecordHistory(registry.HistoryEntry{Kind: "peer_rejected", SessionID: c.Session.ID, Message: string(s.Bytes()), Error: err.Error()})
-			_ = sendReceipt(c.SocketDir, f.From, ownSocket, f.MsgID, "denied", err.Error())
+			recordRejection(reg, c, f, s.Bytes(), err)
+			rejectFrame(c, f, ownSocket, err)
 			continue
 		}
 		_ = sendReceipt(c.SocketDir, f.From, ownSocket, f.MsgID, "received", "transport accepted; logical source queue updated")
@@ -996,8 +996,8 @@ func handlePeer(conn net.Conn, reg *registry.Registry, c Config, ownSocket strin
 	s := bufio.NewScanner(io.LimitReader(conn, maxLineBytes*maxFrames))
 	s.Buffer(make([]byte, 1024), maxLineBytes)
 	type rejection struct {
-		frame  frame
-		detail string
+		frame frame
+		err   error
 	}
 	var rejected []rejection
 	var accepted []frame
@@ -1007,7 +1007,7 @@ func handlePeer(conn net.Conn, reg *registry.Registry, c Config, ownSocket strin
 			_ = sendReceipt(c.SocketDir, item.From, ownSocket, item.MsgID, "received", "transport accepted; logical source queue updated")
 		}
 		for _, item := range rejected {
-			_ = sendReceipt(c.SocketDir, item.frame.From, ownSocket, item.frame.MsgID, "denied", item.detail)
+			rejectFrame(c, item.frame, ownSocket, item.err)
 		}
 	}()
 	for n := 0; n < maxFrames && s.Scan(); n++ {
@@ -1030,8 +1030,8 @@ func handlePeer(conn net.Conn, reg *registry.Registry, c Config, ownSocket strin
 			continue
 		}
 		if err := queueFrame(reg, c, f, ownSocket); err != nil {
-			rejected = append(rejected, rejection{frame: f, detail: err.Error()})
-			_ = reg.RecordHistory(registry.HistoryEntry{Kind: "peer_rejected", SessionID: c.Session.ID, Message: string(s.Bytes()), Error: err.Error()})
+			rejected = append(rejected, rejection{frame: f, err: err})
+			recordRejection(reg, c, f, s.Bytes(), err)
 		} else {
 			accepted = append(accepted, f)
 		}
@@ -1056,8 +1056,8 @@ func queueFrame(reg *registry.Registry, c Config, f frame, ownSocket string) err
 	if err != nil {
 		return fmt.Errorf("canonical target is not registered: %w", err)
 	}
-	if target.Surface == surface.SurfaceKind("agenthail") {
-		return reg.RecordHistory(registry.HistoryEntry{Kind: "peer_received", SessionID: target.ID, SourceSessionID: sourceEvidence(f), Message: body.Content, Result: "operator sink; no model queue"})
+	if err := surface.NoReplyRoute(target); err != nil {
+		return err
 	}
 	key := "peer:" + target.ID + ":" + f.From + ":" + f.MsgID
 	// The host that owns a session decides whether it can take a message.
@@ -1095,6 +1095,75 @@ func queueFrame(reg *registry.Registry, c Config, f frame, ownSocket string) err
 }
 
 func sourceEvidence(f frame) string { return f.From }
+
+// recordRejection keeps a refused frame in delivery history as a failure,
+// with its message text when the frame carried one.
+func recordRejection(reg *registry.Registry, c Config, f frame, raw []byte, err error) {
+	message := string(raw)
+	var body messageBody
+	if json.Unmarshal(f.Message, &body) == nil && body.Content != "" {
+		message = body.Content
+	}
+	_ = reg.RecordHistory(registry.HistoryEntry{Kind: "peer_rejected", SessionID: c.Session.ID, SourceSessionID: sourceEvidence(f), Message: message, Error: err.Error()})
+}
+
+// noRouteNoticeInterval bounds how often one sender is told why its messages
+// to a session with no reply route are refused, so a model that answers the
+// notice cannot start an endless exchange with it. At most
+// noRouteNoticeSenders senders are remembered at once; while that many are,
+// a new sender gets only its refused receipt.
+const (
+	noRouteNoticeInterval = 10 * time.Minute
+	noRouteNoticeSenders  = 256
+)
+
+var noRouteNotices = struct {
+	sync.Mutex
+	sent map[string]time.Time
+}{sent: map[string]time.Time{}}
+
+// takeNoRouteNotice reports whether the sender is due a notice now, and
+// records it when it is.
+func takeNoRouteNotice(from string, now time.Time) bool {
+	noRouteNotices.Lock()
+	defer noRouteNotices.Unlock()
+	if last, ok := noRouteNotices.sent[from]; ok && now.Sub(last) < noRouteNoticeInterval {
+		return false
+	}
+	for sender, last := range noRouteNotices.sent {
+		if now.Sub(last) >= noRouteNoticeInterval {
+			delete(noRouteNotices.sent, sender)
+		}
+	}
+	if len(noRouteNotices.sent) >= noRouteNoticeSenders {
+		return false
+	}
+	noRouteNotices.sent[from] = now
+	return true
+}
+
+// rejectFrame tells a sender its frame was not delivered. Claude shows its
+// model a fixed notice for each receipt status and never the receipt's
+// detail, so a frame refused for having no reply route is followed by a
+// message that gives the reason and where to send instead.
+func rejectFrame(c Config, f frame, ownSocket string, err error) {
+	var noRoute surface.NoReplyRouteError
+	if !errors.As(err, &noRoute) {
+		_ = sendReceipt(c.SocketDir, f.From, ownSocket, f.MsgID, "denied", err.Error())
+		return
+	}
+	_ = sendReceipt(c.SocketDir, f.From, ownSocket, f.MsgID, "refused", err.Error())
+	target := strings.TrimPrefix(f.From, "uds:")
+	if validateTargetSocket(c.SocketDir, target) != nil {
+		return
+	}
+	if !takeNoRouteNotice(f.From, time.Now()) {
+		return
+	}
+	notice := fmt.Sprintf("Agenthail could not deliver your message %s. %s Messages to this address are refused the same way.", f.MsgID, err)
+	payload, _ := json.Marshal(frame{MsgV: peerProtocol, MsgID: uuid.New().String(), Type: "user", Message: mustJSON(messageBody{Role: "user", Content: peerContent(c.HostName, c.Session, ownSocket, notice)}), Priority: "next", From: "uds:" + ownSocket})
+	_ = sendAuthenticatedFrame(c.Home, target, payload)
+}
 
 // queueHostFrame holds a message for a session another host owns, to be sent
 // to that host as this sender's own message once it is reachable. The sender

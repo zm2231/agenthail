@@ -1271,6 +1271,13 @@ func (a *App) resolveSession(ctx context.Context, kind surface.SurfaceKind, adap
 }
 
 func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, error) {
+	if a.registry() != nil {
+		if registered, err := a.registry().Session(target); err == nil {
+			if err := surface.NoReplyRoute(registered); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
 	if kindText, selector, ok := strings.Cut(target, ":"); ok {
 		kind := surface.SurfaceKind(strings.ToLower(kindText))
 		adapter := a.adapters().ForSurface(kind)
