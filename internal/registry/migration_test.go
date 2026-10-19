@@ -1,11 +1,15 @@
 package registry
 
 import (
+	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +19,7 @@ import (
 
 var migrationFixtureClock = time.Date(2026, 9, 1, 0, 30, 0, 0, time.UTC)
 
-func openMigrationFixture(t *testing.T, name string, stampVersion int) *Registry {
+func openMigrationFixture(t *testing.T, name string) *Registry {
 	t.Helper()
 	dump, err := os.ReadFile(filepath.Join("testdata", "migrations", name+".sql"))
 	if err != nil {
@@ -30,12 +34,6 @@ func openMigrationFixture(t *testing.T, name string, stampVersion int) *Registry
 		db.Close()
 		t.Fatal(err)
 	}
-	if stampVersion > 0 {
-		if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, stampVersion)); err != nil {
-			db.Close()
-			t.Fatal(err)
-		}
-	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -49,17 +47,15 @@ func openMigrationFixture(t *testing.T, name string, stampVersion int) *Registry
 
 func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 	for _, fixture := range []struct {
-		name         string
-		stampVersion int
-		wantVersion  int
-		source       string
-		check        func(*testing.T, *Registry)
+		name        string
+		wantVersion int
+		source      string
+		check       func(*testing.T, *Registry)
 	}{
 		{name: "v0", wantVersion: schemaVersion},
 		{name: "v1", wantVersion: schemaVersion, check: assertLegacyStatusNotNormalized},
 		{name: "v2", wantVersion: schemaVersion, source: "sender"},
 		{name: "v3", wantVersion: schemaVersion, source: "sender"},
-		{name: "v3", stampVersion: schemaVersion + 1, wantVersion: schemaVersion + 1, source: "sender"},
 		{name: "v4", wantVersion: schemaVersion, source: "sender"},
 		{name: "v5", wantVersion: schemaVersion, source: "sender"},
 		{name: "v7", wantVersion: schemaVersion, source: "sender"},
@@ -68,18 +64,14 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 		{name: "v10", wantVersion: schemaVersion, source: "sender", check: assertV10SeedStatusMigrated},
 		{name: "v11", wantVersion: schemaVersion, source: "sender", check: assertV11SeedCheckpointMigrated},
 	} {
-		label := fixture.name
-		if fixture.stampVersion > 0 {
-			label += "-stamped-newer"
-		}
-		t.Run(label, func(t *testing.T) {
-			r := openMigrationFixture(t, fixture.name, fixture.stampVersion)
+		t.Run(fixture.name, func(t *testing.T) {
+			r := openMigrationFixture(t, fixture.name)
 			var version int
 			if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != fixture.wantVersion {
 				t.Fatalf("user_version=%d err=%v, want %d", version, err, fixture.wantVersion)
 			}
 			assertMigratedSessionsAndRoutes(t, r)
-			if exists, err := queueHasExpiry(r); fixture.stampVersion == 0 && (err != nil || exists) {
+			if exists, err := queueHasExpiry(r); err != nil || exists {
 				t.Fatalf("expires_at_ms exists=%v err=%v", exists, err)
 			}
 			assertMigratedQueue(t, r, fixture.source)
@@ -87,9 +79,7 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 				fixture.check(t, r)
 			}
 			assertMigratedRegistryAcceptsCurrentWrites(t, r)
-			if fixture.stampVersion == 0 {
-				assertSchemaMatchesFreshRegistry(t, r)
-			}
+			assertSchemaMatchesFreshRegistry(t, r)
 			if identity, err := r.HostIdentity(); err != nil || !ValidHostID(identity.ID) || !ValidHostName(identity.Name) {
 				t.Fatalf("host identity=%+v err=%v", identity, err)
 			}
@@ -626,4 +616,132 @@ func TestOpenAddsQueueUploadsToARegistryAtTheVersionBefore(t *testing.T) {
 	if err != nil || claimed == nil || claimed.ID != 70 || claimed.Message != "read the report" || len(claimed.Uploads) != 0 {
 		t.Fatalf("claimed=%+v err=%v", claimed, err)
 	}
+}
+
+func TestOpenRefusesARegistryANewerAgenthailMigrated(t *testing.T) {
+	for _, journal := range []string{"WAL", "DELETE"} {
+		t.Run(journal, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "registry.db")
+			r, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			register(t, r, "target")
+			newer := schemaVersion + 3
+			if _, err := r.db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, newer)); err != nil {
+				t.Fatal(err)
+			}
+			if journal == "DELETE" {
+				if _, err := r.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := r.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if journal == "DELETE" {
+				plain, err := sql.Open("sqlite", path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var mode string
+				if err := plain.QueryRow(`PRAGMA journal_mode=DELETE`).Scan(&mode); err != nil || mode != "delete" {
+					t.Fatalf("journal_mode=%q err=%v", mode, err)
+				}
+				plain.Close()
+			}
+			before := registryFiles(t, path)
+			opened, err := Open(path)
+			var refused *NewerSchemaError
+			if !errors.As(err, &refused) || refused.Found != newer || refused.Supported != schemaVersion {
+				if opened != nil {
+					opened.Close()
+				}
+				t.Fatalf("Open err=%v, want a NewerSchemaError for schema %d", err, newer)
+			}
+			if want := fmt.Sprintf("registry is schema %d; this agenthail supports %d; install a newer agenthail", newer, schemaVersion); err.Error() != want {
+				t.Fatalf("message=%q want %q", err.Error(), want)
+			}
+			if after := registryFiles(t, path); !reflect.DeepEqual(after, before) {
+				t.Fatalf("refused open changed the registry files: before=%v after=%v", before, after)
+			}
+		})
+	}
+}
+
+func TestOpenWaitingOnANewerAgenthailsMigrationRefusesItsSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var accepted string
+	if err := r.db.QueryRow(`PRAGMA journal_mode`).Scan(&accepted); err != nil || accepted != "wal" {
+		t.Fatalf("an accepted registry is in journal_mode %q (err %v), want wal", accepted, err)
+	}
+	if _, err := r.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	newer, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(15000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer newer.Close()
+	newer.SetMaxOpenConns(1)
+	var mode string
+	if err := newer.QueryRow(`PRAGMA journal_mode=DELETE`).Scan(&mode); err != nil || mode != "delete" {
+		t.Fatalf("journal_mode=%q err=%v", mode, err)
+	}
+	ctx := context.Background()
+	conn, err := newer.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+	opened := make(chan error, 1)
+	go func() {
+		r, err := Open(path)
+		if r != nil {
+			r.Close()
+		}
+		opened <- err
+	}()
+	time.Sleep(200 * time.Millisecond)
+	stamp := schemaVersion + 1
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version=%d`, stamp)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		t.Fatal(err)
+	}
+	var refused *NewerSchemaError
+	if err := <-opened; !errors.As(err, &refused) || refused.Found != stamp {
+		t.Fatalf("Open err=%v, want a NewerSchemaError for schema %d", err, stamp)
+	}
+	if err := conn.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "delete" {
+		t.Fatalf("refused open changed journal_mode to %q (err %v)", mode, err)
+	}
+}
+
+// registryFiles is the content of the database and its journals, keyed by name.
+func registryFiles(t *testing.T, path string) map[string]string {
+	t.Helper()
+	files := map[string]string{}
+	for _, name := range []string{path, path + "-wal", path + "-journal"} {
+		data, err := os.ReadFile(name)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(data) > 0 {
+			files[filepath.Base(name)] = fmt.Sprintf("%x", sha256.Sum256(data))
+		}
+	}
+	return files
 }
