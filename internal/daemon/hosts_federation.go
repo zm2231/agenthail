@@ -229,6 +229,17 @@ func (d *Daemon) detachHostLocked(hostID string) {
 	}
 }
 
+// hostConnected reports whether a paired host is reachable and compatible
+// now, the only time its sessions are offered as peers here.
+func (d *Daemon) hostConnected(hostID string) bool {
+	host, found := d.pairedHost(hostID)
+	if !found {
+		return false
+	}
+	state, _ := host.status()
+	return state == hostStateConnected
+}
+
 func (d *Daemon) pairedHost(ref string) (*pairedHost, bool) {
 	ref = strings.ToLower(strings.TrimSpace(ref))
 	d.federation.mu.Lock()

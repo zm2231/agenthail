@@ -21,11 +21,31 @@ type apiDeviceTokenContextKey struct{}
 
 type apiHostPrincipalContextKey struct{}
 
+type apiHostPrincipal struct {
+	host     bool
+	hostID   string
+	hostName string
+}
+
 // catalogMirror reports whether the request comes from a paired host, which
 // mirrors every catalog row rather than the session list.
 func catalogMirror(ctx context.Context) bool {
-	mirror, _ := ctx.Value(apiHostPrincipalContextKey{}).(bool)
-	return mirror
+	principal, _ := ctx.Value(apiHostPrincipalContextKey{}).(apiHostPrincipal)
+	return principal.host
+}
+
+// requestingHost is the host a paired host's token was issued to, and whether
+// the request came from a paired host at all.
+func requestingHost(ctx context.Context) (string, bool) {
+	principal, _ := ctx.Value(apiHostPrincipalContextKey{}).(apiHostPrincipal)
+	return principal.hostID, principal.host
+}
+
+// requestingHostName is the device name a paired host registered with, its
+// host name at pairing time.
+func requestingHostName(ctx context.Context) string {
+	principal, _ := ctx.Value(apiHostPrincipalContextKey{}).(apiHostPrincipal)
+	return principal.hostName
 }
 
 const (
@@ -66,6 +86,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/search", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.dashboardSearchHandler)))
 	mux.HandleFunc("/api/v1/models", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.dashboardModelsHandler))))
 	mux.HandleFunc("/api/v1/session-options", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.sessionOptionsHandler))))
+	mux.HandleFunc("/api/v1/relays", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("", d.apiRelaysHandler))))
 	mux.HandleFunc("/api/v1/queue", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.mobileQueueHandler)))
 	mux.HandleFunc("/api/v1/history", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("sessionId", d.dashboardHistoryHandler))))
 	mux.HandleFunc("/api/v1/actions", d.apiV1Guard(dashboard, "control", d.idempotentActionHandler(apiV1JSONHandler(d.hostRoutedAction(d.dashboardActionHandler)))))
@@ -88,7 +109,7 @@ func (d *Daemon) apiV1Guard(dashboard *dashboardServer, scope string, next http.
 				bearerAuthorized = true
 				ctx := context.WithValue(r.Context(), apiDeviceTokenContextKey{}, token)
 				ctx = context.WithValue(ctx, actionPrincipalContextKey{}, device.ID)
-				ctx = context.WithValue(ctx, apiHostPrincipalContextKey{}, device.IsHost())
+				ctx = context.WithValue(ctx, apiHostPrincipalContextKey{}, apiHostPrincipal{host: device.IsHost(), hostID: device.HostID, hostName: device.Name})
 				r = r.WithContext(ctx)
 			}
 		}
@@ -221,12 +242,13 @@ func (d *Daemon) apiPairHandler(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Secret string `json:"secret"`
 		Name   string `json:"name"`
+		HostID string `json:"hostId"`
 	}
 	if err := decodeAPIV1JSON(w, r, &request, false); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "The pairing request is invalid.")
 		return
 	}
-	device, token, err := d.Registry.CompleteDevicePairing(request.Secret, request.Name)
+	device, token, err := d.Registry.CompleteDevicePairing(request.Secret, request.Name, request.HostID)
 	if errors.Is(err, registry.ErrPairingExpired) {
 		writeAPIError(w, http.StatusGone, "pairing_expired", err.Error())
 		return

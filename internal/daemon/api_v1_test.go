@@ -157,7 +157,7 @@ func TestAPIV1EventStreamResumesFromLastEventID(t *testing.T) {
 
 func TestAPIV1RevocationClosesOpenDeviceEventStream(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
-	device, token, err := d.Registry.CompleteDevicePairing(mustCreatePairing(t, d), "Phone")
+	device, token, err := d.Registry.CompleteDevicePairing(mustCreatePairing(t, d), "Phone", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func TestAPIV1SessionAttachmentServesReferencedBytesAndRejectsOversize(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, controlToken, err := registry.CompleteDevicePairing(pairing.Secret, "control-only")
+	_, controlToken, err := registry.CompleteDevicePairing(pairing.Secret, "control-only", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -588,7 +588,7 @@ func TestAPIV1RejectsMutationWithoutPublishingChange(t *testing.T) {
 
 func TestAPIV1DeviceCanRevokeItself(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
-	device, token, err := d.Registry.CompleteDevicePairing(mustCreatePairing(t, d), "Phone")
+	device, token, err := d.Registry.CompleteDevicePairing(mustCreatePairing(t, d), "Phone", "")
 	if err != nil {
 		t.Fatal(err)
 	}

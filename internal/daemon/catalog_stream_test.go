@@ -812,7 +812,7 @@ func TestCatalogStreamShowsDevicesTheSessionListAndHostsEveryRow(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, secret, err := store.CompleteDevicePairing(pairing.Secret, name)
+		_, secret, err := store.CompleteDevicePairing(pairing.Secret, name, "")
 		if err != nil {
 			t.Fatal(err)
 		}
