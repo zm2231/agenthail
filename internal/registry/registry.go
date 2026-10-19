@@ -1641,7 +1641,7 @@ func (r *Registry) RetryMessage(id int64) error {
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE message_queue SET status='pending',attempts=0,deferrals=0,last_error='',available_at_ms=0,inflight_at_ms=0,dead_at_ms=0,delivered=0,updated_at=datetime('now') WHERE id=? AND status='dead'`, id)
+	res, err := tx.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status='pending',attempts=0,deferrals=0,last_error='',available_at_ms=0,inflight_at_ms=0,dead_at_ms=0,delivered=0,updated_at=datetime('now') WHERE id=? AND status='dead'`, id)
 	if err != nil {
 		return err
 	}
@@ -1661,7 +1661,7 @@ func (r *Registry) RetryMessage(id int64) error {
 func (r *Registry) CancelMessage(id int64) error {
 	var sessionID, message string
 	_ = r.db.QueryRow(`SELECT session_id,message FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message)
-	res, err := r.db.Exec(`UPDATE message_queue SET status='canceled',updated_at=datetime('now') WHERE id=? AND status IN ('pending','dead')`, id)
+	res, err := r.db.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status='canceled',updated_at=datetime('now') WHERE id=? AND status IN ('pending','dead')`, id)
 	if err != nil {
 		return err
 	}
@@ -1695,7 +1695,7 @@ func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
 	if err := rows.Close(); err != nil {
 		return 0, err
 	}
-	res, err := tx.Exec(`UPDATE message_queue SET status='canceled',updated_at=datetime('now') WHERE session_id=? AND status='pending'`, sessionID)
+	res, err := tx.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status='canceled',updated_at=datetime('now') WHERE session_id=? AND status='pending'`, sessionID)
 	if err != nil {
 		return 0, err
 	}
@@ -1790,7 +1790,7 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 		if err := markQueuedDeliveryIntent(tx, item.ID, DeliveryIntentUnknown, surface.EvidenceUnknown, ""); err != nil {
 			return nil, err
 		}
-		if _, err := tx.Exec(`UPDATE message_queue SET status='dead',dead_at_ms=?,last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, now.UnixMilli(), uncertainDeliveryError, item.ID); err != nil {
+		if _, err := tx.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status='dead',dead_at_ms=?,last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, now.UnixMilli(), uncertainDeliveryError, item.ID); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -1816,7 +1816,7 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 }
 
 func (r *Registry) AckMessage(id int64) error {
-	res, err := r.db.Exec(`UPDATE message_queue SET status='delivered',evidence=?,delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, surface.EvidenceDelivered, id)
+	res, err := r.db.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status='delivered',evidence=?,delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, surface.EvidenceDelivered, id)
 	if err != nil {
 		return err
 	}
@@ -1839,7 +1839,7 @@ func (r *Registry) AckMessageWithEvidence(id int64, sessionID string, relayHops 
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE message_queue SET status='delivered',evidence=?,delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND session_id=? AND status='inflight'`, evidence, id, sessionID)
+	res, err := tx.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status='delivered',evidence=?,delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND session_id=? AND status='inflight'`, evidence, id, sessionID)
 	if err != nil {
 		return err
 	}
@@ -1890,7 +1890,7 @@ func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts
 	if status == "dead" {
 		deadAt = now.UnixMilli()
 	}
-	res, err := tx.Exec(`UPDATE message_queue SET status=?,dead_at_ms=?,last_error=?,available_at_ms=?,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, status, deadAt, message, available.UnixMilli(), id)
+	res, err := tx.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status=?,dead_at_ms=?,last_error=?,available_at_ms=?,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, status, deadAt, message, available.UnixMilli(), id)
 	if err != nil {
 		return err
 	}
@@ -1995,7 +1995,7 @@ func (r *Registry) DeadLetterMessage(id int64, cause error) (bool, error) {
 }
 
 func deadLetterInflight(tx *sql.Tx, id int64, message string, now time.Time) error {
-	res, err := tx.Exec(`UPDATE message_queue SET status='dead',dead_at_ms=?,last_error=?,available_at_ms=0,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, now.UnixMilli(), message, id)
+	res, err := tx.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status='dead',dead_at_ms=?,last_error=?,available_at_ms=0,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, now.UnixMilli(), message, id)
 	if err != nil {
 		return err
 	}
@@ -2014,7 +2014,7 @@ func (r *Registry) RecoverInflight(before time.Time) (int64, error) {
 	if _, err := tx.Exec(`UPDATE delivery_intents SET status=?,evidence=?,updated_at=datetime('now') WHERE status=? AND queue_id IN (SELECT id FROM message_queue WHERE status='inflight' AND inflight_at_ms<?)`, DeliveryIntentUnknown, surface.EvidenceUnknown, DeliveryIntentQueued, before.UnixMilli()); err != nil {
 		return 0, err
 	}
-	res, err := tx.Exec(`UPDATE message_queue SET status='dead',dead_at_ms=?,last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE status='inflight' AND inflight_at_ms<?`, r.now().UnixMilli(), uncertainDeliveryError, before.UnixMilli())
+	res, err := tx.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status='dead',dead_at_ms=?,last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE status='inflight' AND inflight_at_ms<?`, r.now().UnixMilli(), uncertainDeliveryError, before.UnixMilli())
 	if err != nil {
 		return 0, err
 	}
