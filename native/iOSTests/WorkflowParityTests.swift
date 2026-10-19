@@ -30,7 +30,7 @@ final class WorkflowParityTests: XCTestCase {
         let created = await model.createSession(surface: "claude", message: "Build", cwd: "/project", model: "sonnet", claude: settings)
         XCTAssertTrue(created)
         XCTAssertEqual(model.requestedSessionID, "native-claude")
-        XCTAssertEqual(model.deliveryStatus["native-claude"], "Background session registered. Waiting for activity.")
+        XCTAssertEqual(model.deliveryStatus["native-claude"], "Session started. Waiting for activity.")
         let sent = ParityProtocol.state.actions[0]
         for (key,value) in settings.fields { XCTAssertEqual(sent[key] as? String, value) }
         XCTAssertNil(sent["approvalPolicy"])

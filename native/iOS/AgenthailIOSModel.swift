@@ -172,7 +172,7 @@ final class AgenthailIOSModel: ObservableObject {
             creationWarning = receipt.warning
             if let id = receipt.id, !id.isEmpty {
                 let target = receipt.launcher ?? launcher?.id ?? surface
-                deliveryStatus[id] = receipt.status == "submitted" || receipt.unknown == true ? "Submitted to \(target)." : (surface == "claude" ? "Background session registered. Waiting for activity." : "Conversation started")
+                deliveryStatus[id] = receipt.status == "submitted" || receipt.unknown == true ? "Submitted to \(target)." : (surface == "claude" ? "Session started. Waiting for activity." : "Conversation started")
                 requestedSessionID = id
             }
             if receipt.id != nil { creationRequestIdentity = nil; creationRequestKey = nil }

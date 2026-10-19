@@ -3,6 +3,8 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -11,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
+	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -227,4 +230,33 @@ func TestAHostSessionIsOpenWhileTheHostListsIt(t *testing.T) {
 		c.host.listed = time.Time{}
 		return !c.OpenSessions(context.Background(), []surface.Session{*sess})[id]
 	})
+}
+
+func TestWithoutAHostOnlyARecordedProcessThatStillRunsCountsAsHosted(t *testing.T) {
+	home := t.TempDir()
+	c := NewClaude(nil, home)
+	live := os.Getpid()
+	started, err := claudepeer.ProcessStart(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := map[string]any{"sessions": map[string]any{
+		"running": map[string]any{"pid": live, "started": started},
+		"reused":  map[string]any{"pid": live, "started": "Thu Jan  1 00:00:00 1970"},
+		"exited":  map[string]any{"pid": 999999, "started": started},
+		"untimed": map[string]any{"pid": live, "started": ""},
+	}}
+	data, _ := json.Marshal(state)
+	if err := os.MkdirAll(claudehost.StateDir(home), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudehost.StateDir(home), "state.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for conversation, want := range map[string]bool{"running": true, "reused": false, "exited": false, "untimed": false} {
+		c.host.forget()
+		if got := c.host.runs(context.Background(), live, conversation) || c.host.runs(context.Background(), 999999, conversation); got != want {
+			t.Fatalf("%s hosted=%v, want %v", conversation, got, want)
+		}
+	}
 }

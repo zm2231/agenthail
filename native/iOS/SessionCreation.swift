@@ -30,7 +30,7 @@ struct NewSessionSheet: View {
                             Picker("Run with", selection: $selectedSurface) {
                                 ForEach(options.surfaces) { Text($0.id.capitalized).tag($0.id) }
                             }
-                            Text(selectedSurface == "claude" ? "Starts a native background Claude session on your Mac." : "Uses the runtime configured on your Mac.").font(.footnote).foregroundStyle(.secondary)
+                            Text(selectedSurface != "claude" ? "Uses the runtime configured on your Mac." : selectedLauncher?.id == "claude-bg" ? "Starts a Claude Code background job on your Mac." : "Starts a Claude session on your Mac, run by Agenthail.").font(.footnote).foregroundStyle(.secondary)
                         }
                         let launchers = launchers(for: selectedSurface, options: options)
                         if !launchers.isEmpty {

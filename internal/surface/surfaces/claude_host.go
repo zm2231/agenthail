@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost"
+	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -82,6 +83,9 @@ func (h *claudeHost) listing(ctx context.Context) map[string]int {
 	return h.sessions
 }
 
+// readState reads the processes the host recorded starting. One counts only
+// while it runs with the start time recorded for it, since its pid may since
+// belong to another process.
 func (h *claudeHost) readState() {
 	data, err := os.ReadFile(h.state)
 	if err != nil {
@@ -89,14 +93,20 @@ func (h *claudeHost) readState() {
 	}
 	var state struct {
 		Sessions map[string]struct {
-			PID int `json:"pid"`
+			PID     int    `json:"pid"`
+			Started string `json:"started"`
 		} `json:"sessions"`
 	}
 	if json.Unmarshal(data, &state) != nil {
 		return
 	}
 	for id, entry := range state.Sessions {
-		h.sessions[id] = entry.PID
+		if entry.Started == "" || !claudeProcessAlive(entry.PID) {
+			continue
+		}
+		if started, err := claudepeer.ProcessStart(entry.PID); err == nil && started == entry.Started {
+			h.sessions[id] = entry.PID
+		}
 	}
 }
 
