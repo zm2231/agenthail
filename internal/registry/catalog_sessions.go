@@ -35,6 +35,7 @@ type CatalogSnapshot struct {
 	CatalogSeq uint64
 	Sessions   []CatalogSessionState
 	Surfaces   []CatalogSurfaceState
+	Listing    CatalogListing
 }
 
 type CatalogSurfaceState struct {
@@ -712,6 +713,9 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		snapshot.Surfaces = append(snapshot.Surfaces, state)
 	}
 	if err := surfaceRows.Err(); err != nil {
+		return CatalogSnapshot{}, err
+	}
+	if snapshot.Listing, err = catalogListingTx(tx); err != nil {
 		return CatalogSnapshot{}, err
 	}
 	if err := tx.Commit(); err != nil {

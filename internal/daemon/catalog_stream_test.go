@@ -633,6 +633,7 @@ func TestDiscoveryProjectsSubagentIdentityAndRollup(t *testing.T) {
 	d, registry, fake, from, to := daemonFixture(t)
 	from.Subagents = &surface.SubagentRollup{Count: 3, Working: 1}
 	to.Subagent = &surface.Subagent{ParentID: from.ID, RootID: from.ID, Depth: 1, Nickname: "Ada", Role: "reviewer"}
+	to.Status = surface.StatusBusy
 	fake.sessions = map[string]surface.Session{from.ID: from, to.ID: to}
 	d.discoverCatalog(context.Background())
 
@@ -695,5 +696,72 @@ func TestDiscoveryNestsARowStoredWithoutItsParentOnceTheParentIsReported(t *test
 		if record.Session.ID == child.ID && (record.Session.Subagent == nil || record.Session.Subagent.ParentID != from.ID) {
 			t.Fatalf("catalog child=%+v, want nested under %s", record.Session, from.ID)
 		}
+	}
+}
+
+func TestSnapshotListsTopLevelSessionsAndOnlyActiveSubagents(t *testing.T) {
+	d, store, fake, lead, _ := daemonFixture(t)
+	lead.Subagents = &surface.SubagentRollup{Count: 2, Working: 1}
+	child := func(id, parent string, status surface.SessionStatus) surface.Session {
+		return surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: id, Status: status, Source: "subAgent", Transport: "desktop", Subagent: &surface.Subagent{ParentID: parent, RootID: lead.ID, Depth: 1}}
+	}
+	working := child("working-child", lead.ID, surface.StatusBusy)
+	resting := child("resting-child", lead.ID, surface.SessionStatus("notLoaded"))
+	grandchild := child("resting-grandchild", resting.ID, surface.SessionStatus("notLoaded"))
+	orphan := child("orphan-child", "parent-codex-never-listed", surface.StatusBusy)
+	fake.sessions = map[string]surface.Session{lead.ID: lead, working.ID: working, resting.ID: resting, grandchild.ID: grandchild, orphan.ID: orphan}
+	d.discoverCatalog(context.Background())
+	if err := store.RegisterSession(surface.Session{ID: "parentless-subagent", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "subAgent", Transport: "desktop"}); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := map[string]dashboardSession{}
+	for _, session := range state.Sessions {
+		listed[session.ID] = session
+	}
+	for _, hidden := range []string{resting.ID, grandchild.ID, orphan.ID, "parentless-subagent"} {
+		if _, found := listed[hidden]; found {
+			t.Fatalf("snapshot lists %s; it carries only top-level sessions and active subagents under a listed parent", hidden)
+		}
+	}
+	if _, found := listed[working.ID]; !found {
+		t.Fatal("snapshot dropped a working subagent")
+	}
+	if got := listed[lead.ID].Subagents; got == nil || *got != (surface.SubagentRollup{Count: 4, Working: 1}) {
+		t.Fatalf("lead rollup=%+v, want its own two plus the two resting descendants", got)
+	}
+
+	page, err := d.dashboardState(context.Background(), registry.CatalogPageRequest{Scope: "all", Limit: 50, Now: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paged := map[string]dashboardSession{}
+	for _, session := range page.Sessions {
+		paged[session.ID] = session
+	}
+	if _, found := paged[resting.ID]; found || page.TotalSessions != len(page.Sessions) {
+		t.Fatalf("page lists hidden subagents or miscounts: total=%d rows=%d", page.TotalSessions, len(page.Sessions))
+	}
+	if got := paged[lead.ID].Subagents; got == nil || got.Count != 4 {
+		t.Fatalf("paged lead rollup=%+v", got)
+	}
+
+	family, err := d.dashboardState(context.Background(), registry.CatalogPageRequest{ParentID: lead.ID, Limit: 50, Now: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	children := map[string]dashboardSession{}
+	for _, session := range family.Sessions {
+		children[session.ID] = session
+	}
+	if len(children) != 2 || children[resting.ID].ID == "" || children[working.ID].ID == "" || children[orphan.ID].ID != "" {
+		t.Fatalf("parent page=%v, want every direct subagent of the lead", children)
+	}
+	if got := children[resting.ID].Subagents; got == nil || got.Count != 1 {
+		t.Fatalf("resting child rollup=%+v, want its resting grandchild", got)
 	}
 }

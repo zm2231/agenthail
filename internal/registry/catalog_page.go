@@ -15,6 +15,9 @@ import (
 type CatalogPageRequest struct {
 	Scope     string
 	ProjectID string
+	// ParentID lists every subagent of one session, including the ones a
+	// session list hides.
+	ParentID string
 	Query     string
 	Offset    int
 	Limit     int
@@ -65,7 +68,14 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 		}
 		seq = uint64(latest.Int64)
 	}
-	from, where, args := catalogPageSQL(request)
+	listing, err := catalogListingTx(tx)
+	if err != nil {
+		return CatalogPage{}, err
+	}
+	from, where, args := catalogPageSQL(request, listing)
+	if request.ParentID != "" {
+		listing.Hidden, listing.Rollups = map[string]bool{}, listing.descendants
+	}
 	var total int
 	if err := tx.QueryRow(`SELECT COUNT(*) `+from+` WHERE `+where, args...).Scan(&total); err != nil {
 		return CatalogPage{}, err
@@ -104,16 +114,23 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 	if err := tx.Commit(); err != nil {
 		return CatalogPage{}, err
 	}
-	return CatalogPage{CatalogSnapshot: CatalogSnapshot{HostEpoch: epoch, CatalogSeq: seq, Sessions: sessions, Surfaces: surfaces}, TotalMatching: total, HasMore: hasMore, Offset: request.Offset, Limit: request.Limit}, nil
+	return CatalogPage{CatalogSnapshot: CatalogSnapshot{HostEpoch: epoch, CatalogSeq: seq, Sessions: sessions, Surfaces: surfaces, Listing: listing}, TotalMatching: total, HasMore: hasMore, Offset: request.Offset, Limit: request.Limit}, nil
 }
 
-func catalogPageSQL(request CatalogPageRequest) (string, string, []any) {
+func catalogPageSQL(request CatalogPageRequest, listing CatalogListing) (string, string, []any) {
 	from := `FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id
 		LEFT JOIN aliases a ON a.session_id=s.id
 		LEFT JOIN (SELECT session_id,COUNT(*) AS queue_count FROM message_queue WHERE status IN ('pending','inflight') GROUP BY session_id) qc ON qc.session_id=s.id
 		LEFT JOIN session_runtime sr ON sr.session_id=s.id`
 	args := []any{}
-	conditions := []string{"1=1"}
+	conditions := []string{}
+	if request.ParentID != "" {
+		conditions = append(conditions, "s.parent_session_id=?")
+		args = append(args, request.ParentID)
+	} else {
+		conditions = append(conditions, "s.id NOT IN (SELECT value FROM json_each(?))")
+		args = append(args, listing.hiddenJSON())
+	}
 	if request.ProjectID != "" {
 		conditions = append(conditions, "json_extract(cs.host_project,'$.id')=?")
 		args = append(args, request.ProjectID)

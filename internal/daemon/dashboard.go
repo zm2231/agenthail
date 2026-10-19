@@ -611,8 +611,9 @@ func catalogPageRequestFromHTTP(r *http.Request) (*registry.CatalogPageRequest, 
 		return nil, fmt.Errorf("use all, recent, current, or running")
 	}
 	projectID, query := r.URL.Query().Get("projectId"), strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
-	filter := scope + "\x00" + projectID + "\x00" + query
-	request := &registry.CatalogPageRequest{Scope: scope, ProjectID: projectID, Query: query, Limit: limit}
+	parentID := r.URL.Query().Get("parentId")
+	filter := scope + "\x00" + projectID + "\x00" + query + "\x00" + parentID
+	request := &registry.CatalogPageRequest{Scope: scope, ProjectID: projectID, ParentID: parentID, Query: query, Limit: limit}
 	if raw := r.URL.Query().Get("cursor"); raw != "" {
 		decoded, err := base64.RawURLEncoding.DecodeString(raw)
 		var cursor catalogPageCursor
@@ -777,7 +778,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Rekeyed: rekeyed}
 	if page != nil {
 		state.catalogPageApplied = true
-		state.catalogPageFilter = pageRequest[0].Scope + "\x00" + pageRequest[0].ProjectID + "\x00" + pageRequest[0].Query
+		state.catalogPageFilter = pageRequest[0].Scope + "\x00" + pageRequest[0].ProjectID + "\x00" + pageRequest[0].Query + "\x00" + pageRequest[0].ParentID
 		state.catalogPageOffset = page.Offset
 		state.catalogPageLimit = page.Limit
 		state.catalogPageHasMore = page.HasMore
@@ -828,6 +829,9 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	catalogSessions := map[string]registry.CatalogSessionState{}
 	sessions := make([]surface.Session, 0, len(catalogSnapshot.Sessions))
 	for _, record := range catalogSnapshot.Sessions {
+		if catalogSnapshot.Listing.Hidden[record.Session.ID] {
+			continue
+		}
 		catalogSessions[record.Session.ID] = record
 		sessions = append(sessions, record.Session)
 	}
@@ -846,6 +850,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			}
 			mirrored.ObservedAt = record.ObservedAt
 			mirrored.Freshness = &record.Freshness
+			mirrored.Subagents = catalogSnapshot.Listing.AddSubagents(session.ID, mirrored.Subagents)
 			state.Sessions = append(state.Sessions, mirrored)
 			continue
 		}
@@ -877,6 +882,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 				entry.Current, entry.CurrentReason = saved.Current, saved.CurrentReason
 			}
 		}
+		entry.Subagents = catalogSnapshot.Listing.AddSubagents(session.ID, entry.Subagents)
 		state.Sessions = append(state.Sessions, entry)
 	}
 	sort.Slice(state.Surfaces, func(i, j int) bool { return state.Surfaces[i].Name < state.Surfaces[j].Name })
