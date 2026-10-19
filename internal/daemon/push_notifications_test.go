@@ -122,7 +122,7 @@ func TestNotifyPairedDevicesRetiresOnlyTerminalTargets(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			device, _, err := reg.CompleteDevicePairing(pairing.Secret, "")
+			device, _, err := reg.CompleteDevicePairing(pairing.Secret, "", "")
 			if err != nil {
 				t.Fatal(err)
 			}

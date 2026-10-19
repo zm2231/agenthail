@@ -228,7 +228,7 @@ func TestPairRevokesTheDeviceWhenProtocolsDoNotOverlap(t *testing.T) {
 	roots.AddCert(server.Certificate())
 	port := server.Listener.Addr().(*net.TCPAddr).Port
 	link := PairingLink{Endpoint: "https://example.com:" + strconv.Itoa(port), Secret: "pair-secret"}
-	token, _, err := Pair(context.Background(), link, "127.0.0.1", "mac", ClientOptions{RootCAs: roots})
+	token, _, err := Pair(context.Background(), link, "127.0.0.1", "mac", "h00000000000a", ClientOptions{RootCAs: roots})
 	var mismatch ErrProtocolMismatch
 	if !errors.As(err, &mismatch) || token != "" {
 		t.Fatalf("token=%q err=%v, want protocol mismatch and no token", token, err)

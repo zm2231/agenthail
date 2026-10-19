@@ -158,7 +158,7 @@ func (d *Daemon) addHostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), hostPairTimeout)
 	defer cancel()
-	token, version, err := hosts.Pair(ctx, link, address, d.hostIdentity().Name, hosts.ClientOptions{RootCAs: d.federation.rootCAs})
+	token, version, err := hosts.Pair(ctx, link, address, d.hostIdentity().Name, d.hostIdentity().ID, hosts.ClientOptions{RootCAs: d.federation.rootCAs})
 	if err != nil {
 		var status hosts.StatusError
 		if errors.As(err, &status) {
