@@ -1535,6 +1535,32 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 		}
 		cleared(t, r, id)
 	})
+	t.Run("a relayed message gets no notice", func(t *testing.T) {
+		r := openTestRegistry(t)
+		for _, id := range []string{"sender", "target"} {
+			if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := r.SaveRuntimeState("target", surface.TurnObservation{Status: surface.StatusIdle}); err != nil {
+			t.Fatal(err)
+		}
+		id, _, err := r.QueueDeliveryWithIntent("target", "relayed", "", surface.SendOptions{SourceSessionID: "sender"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.db.Exec(`UPDATE delivery_intents SET relayed=1 WHERE queue_id=?`, id); err != nil {
+			t.Fatal(err)
+		}
+		claim(t, r, id, time.Now())
+		if announce, err := r.DeferMessage(id, refusal, time.Now()); err != nil || !announce {
+			t.Fatalf("announce=%v err=%v, want the user told", announce, err)
+		}
+		rows, err := r.ListQueue(false, nil)
+		if err != nil || len(rows) != 1 || rows[0].ID != id {
+			t.Fatalf("a relayed refusal queued a notice: rows=%+v err=%v", rows, err)
+		}
+	})
 	t.Run("no sender gets no notice", func(t *testing.T) {
 		r, id, _ := setup(t, surface.SendOptions{})
 		rows, err := r.ListQueue(false, nil)
