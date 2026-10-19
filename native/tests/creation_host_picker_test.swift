@@ -73,6 +73,7 @@ struct CreationHostPickerTest {
 
         expect(onForge.remoteHostID == forge.id && !onForge.canCallByVoice && onMac.canCallByVoice && onMac.remoteHostID == nil, "voice is offered only for this machine's sessions")
         expect(onForge.modelCatalogKey == "\(forge.id)/codex" && onMac.modelCatalogKey == "/codex", "model lists are cached per host")
+        expect(daemon.pairedHost(owning: "\(forge.id)::s9")?.name == "forge" && daemon.pairedHost(owning: "s9") == nil && daemon.pairedHost(owning: "h0000000000ff::s9") == nil, "an unlisted session takes the paired host its id names")
         print("creation host picker tests passed")
     }
 

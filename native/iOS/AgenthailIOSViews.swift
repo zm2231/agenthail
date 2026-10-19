@@ -175,10 +175,12 @@ struct SessionRouteView: View {
         if let value = model.snapshot?.sessions.first(where: { $0.id == sessionID }) { return value }
         if let value = model.searchResults.first(where: { $0.id == sessionID })?.session { return value }
         guard let detail = model.selectedDetail, detail.session.id == sessionID else { return nil }
-        return SessionState(id: sessionID, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
-                            status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: false,
-                            current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly,
-                            readOnlyReason: detail.readOnlyReason)
+        var unlisted = SessionState(id: sessionID, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
+                                    status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: false,
+                                    current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly,
+                                    readOnlyReason: detail.readOnlyReason)
+        unlisted.host = model.snapshot?.daemon.pairedHost(owning: sessionID)
+        return unlisted
     }
     var body: some View {
         Group {

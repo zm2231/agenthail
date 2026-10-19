@@ -567,6 +567,14 @@ struct DaemonState: Decodable, Equatable {
     let refreshError: String?
     var host: SessionHost? = nil
     var hosts: [HostHealth]? = nil
+
+    /// The paired host a host-qualified session id names, for a session the
+    /// snapshot has not listed yet.
+    func pairedHost(owning sessionID: String) -> SessionHost? {
+        guard let range = sessionID.range(of: "::") else { return nil }
+        let hostID = String(sessionID[..<range.lowerBound])
+        return hosts?.first { $0.id == hostID }.map { SessionHost(id: $0.id, name: $0.name, state: $0.state) }
+    }
 }
 
 struct DashboardSnapshot: Decodable {
