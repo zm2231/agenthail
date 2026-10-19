@@ -232,7 +232,7 @@ func emitCodexTranscriptItem(session *surface.Session, uuid string, record map[s
 	if item.Kind == "done" {
 		operation = "phase"
 	}
-	onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: operation, Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
+	onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: operation, Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Files: item.Files, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
 }
 
 func codexRecordTurnID(record map[string]any) string {
@@ -635,7 +635,7 @@ func codexTranscriptExchanges(records []transcriptRecord) ([]surface.Exchange, [
 	offsets := make([]int64, 0)
 	for _, record := range records {
 		for _, item := range record.items {
-			if item.Kind != "message" || item.Text == "" {
+			if item.Kind != "message" || (item.Text == "" && len(item.Files) == 0) {
 				continue
 			}
 			timestamp, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
@@ -902,12 +902,16 @@ func timelineToolResultText(value any) string {
 	return timelineValue(clean)
 }
 
-// claudeImageSourceCompanion reports Claude's meta record naming where it
-// saved a turn's pasted images ("[Image: source: <path>]"). The image block
-// already renders as an attachment, and the path is local to that machine.
+// claudeImageSourceCompanion reports Claude's meta records that only describe
+// an image shown elsewhere: where a pasted image was saved, or how a read
+// image was resized. The image renders as an attachment, and a saved path is
+// local to that machine.
 func claudeImageSourceCompanion(record, message map[string]any) bool {
 	if meta, _ := record["isMeta"].(bool); !meta {
 		return false
+	}
+	if text, ok := message["content"].(string); ok {
+		return claudeImageNote(text)
 	}
 	blocks, _ := message["content"].([]any)
 	if len(blocks) == 0 {
@@ -915,12 +919,18 @@ func claudeImageSourceCompanion(record, message map[string]any) bool {
 	}
 	for _, raw := range blocks {
 		block, _ := raw.(map[string]any)
-		text := strings.TrimSpace(str(block, "text"))
-		if str(block, "type") != "text" || !strings.HasPrefix(text, "[Image: source: ") || !strings.HasSuffix(text, "]") {
+		if str(block, "type") != "text" || !claudeImageNote(str(block, "text")) {
 			return false
 		}
 	}
 	return true
+}
+
+// claudeImageNote reports Claude Code's notes about an image it saved or
+// resized ("[Image: source: ...]", "[Image: original WxH, displayed at ...]").
+func claudeImageNote(text string) bool {
+	text = strings.TrimSpace(text)
+	return strings.HasPrefix(text, "[Image: ") && strings.HasSuffix(text, "]") && !strings.Contains(text, "\n")
 }
 
 // codexImageWrapper reports the text Codex puts around each image input

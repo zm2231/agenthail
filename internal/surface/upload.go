@@ -10,8 +10,11 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"net/http"
+	"path/filepath"
 	"strings"
 )
+
+const attachedFilePrefix = "Attached file: "
 
 // Upload is a file a person attached to a message. The daemon that owns the
 // target session stored it at Path, so Path is readable by that session's
@@ -71,7 +74,7 @@ func (u Uploads) Compose(message string, native bool) (string, Uploads) {
 			images = append(images, upload)
 			continue
 		}
-		lines = append(lines, "Attached file: "+upload.Path)
+		lines = append(lines, attachedFilePrefix+upload.Path)
 	}
 	if len(lines) == 0 {
 		return message, images
@@ -81,6 +84,31 @@ func (u Uploads) Compose(message string, native bool) (string, Uploads) {
 		text += "\n\n"
 	}
 	return text + strings.Join(lines, "\n"), images
+}
+
+// SplitAttachedFiles undoes Compose for display: it returns the typed text
+// and the files named by the trailing "Attached file:" lines. Text without
+// such a block, or with one that is not separated from the typed text by a
+// blank line, is returned unchanged.
+func SplitAttachedFiles(text string) (string, []AttachedFile) {
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	start := len(lines)
+	for start > 0 {
+		path, ok := strings.CutPrefix(lines[start-1], attachedFilePrefix)
+		if !ok || !filepath.IsAbs(path) {
+			break
+		}
+		start--
+	}
+	if start == len(lines) || (start > 0 && lines[start-1] != "") {
+		return text, nil
+	}
+	files := make([]AttachedFile, 0, len(lines)-start)
+	for _, line := range lines[start:] {
+		path := strings.TrimPrefix(line, attachedFilePrefix)
+		files = append(files, AttachedFile{Name: filepath.Base(path), Path: path})
+	}
+	return strings.TrimRight(strings.Join(lines[:start], "\n"), "\n"), files
 }
 
 func (u Uploads) Value() (driver.Value, error) {

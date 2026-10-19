@@ -466,27 +466,28 @@ type Exchange struct {
 }
 
 type StreamEvent struct {
-	Role             string        `json:"role,omitempty"`
-	Origin           string        `json:"origin,omitempty"`
-	Sender           string        `json:"sender,omitempty"`
-	Title            string        `json:"title,omitempty"`
-	Status           string        `json:"status,omitempty"`
-	CallID           string        `json:"callId,omitempty"`
-	Attachment       *Attachment   `json:"attachment,omitempty"`
-	Truncated        bool          `json:"truncated,omitempty"`
-	TruncationReason string        `json:"truncationReason,omitempty"`
-	ID               string        `json:"id,omitempty"`
-	ProviderKey      string        `json:"providerKey,omitempty"`
-	Cursor           uint64        `json:"cursor,omitempty"`
-	Version          uint64        `json:"version,omitempty"`
-	Operation        string        `json:"operation,omitempty"`
-	Final            bool          `json:"final,omitempty"`
-	TurnID           string        `json:"turnId,omitempty"`
-	Timestamp        time.Time     `json:"timestamp,omitempty"`
-	Kind             string        `json:"kind"`
-	Text             string        `json:"text"`
-	Context          *ContextUsage `json:"context,omitempty"`
-	Goal             *GoalState    `json:"goal,omitempty"`
+	Role             string         `json:"role,omitempty"`
+	Origin           string         `json:"origin,omitempty"`
+	Sender           string         `json:"sender,omitempty"`
+	Title            string         `json:"title,omitempty"`
+	Status           string         `json:"status,omitempty"`
+	CallID           string         `json:"callId,omitempty"`
+	Attachment       *Attachment    `json:"attachment,omitempty"`
+	Files            []AttachedFile `json:"files,omitempty"`
+	Truncated        bool           `json:"truncated,omitempty"`
+	TruncationReason string         `json:"truncationReason,omitempty"`
+	ID               string         `json:"id,omitempty"`
+	ProviderKey      string         `json:"providerKey,omitempty"`
+	Cursor           uint64         `json:"cursor,omitempty"`
+	Version          uint64         `json:"version,omitempty"`
+	Operation        string         `json:"operation,omitempty"`
+	Final            bool           `json:"final,omitempty"`
+	TurnID           string         `json:"turnId,omitempty"`
+	Timestamp        time.Time      `json:"timestamp,omitempty"`
+	Kind             string         `json:"kind"`
+	Text             string         `json:"text"`
+	Context          *ContextUsage  `json:"context,omitempty"`
+	Goal             *GoalState     `json:"goal,omitempty"`
 }
 
 type StreamEventClass string

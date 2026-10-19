@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -143,6 +144,13 @@ func TestSentImagesRenderAsAttachmentsWithoutRuntimePathNoise(t *testing.T) {
 			want: []string{"attachment:user:Image attachment", "message:user:what is this?"},
 		},
 		{
+			name:   "claude note about a resized image it read",
+			source: "claude",
+			transcript: `{"type":"user","uuid":"u4","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-read","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + testPNG + `"}}]}]}}
+{"type":"user","uuid":"u5","isMeta":true,"message":{"role":"user","content":"[Image: original 2016x1456, displayed at 2000x1444. Multiply coordinates by 1.01 to map to original image.]"}}`,
+			want: []string{"attachment:user:Image attachment"},
+		},
+		{
 			name:       "claude tool result that is only an image",
 			source:     "claude",
 			transcript: `{"type":"user","uuid":"u3","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-read","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + testPNG + `"}}]}]}}`,
@@ -169,6 +177,33 @@ func TestSentImagesRenderAsAttachmentsWithoutRuntimePathNoise(t *testing.T) {
 				if err != nil || len(data) == 0 {
 					t.Fatalf("attachment %s is not fetchable: %v", item.Attachment.ID, err)
 				}
+			}
+		})
+	}
+}
+
+func TestSentFilesRenderAsFilesBesideTheTypedText(t *testing.T) {
+	_, notes := storedUploads(t)
+	composed, _ := surface.Uploads{notes}.Compose("read this", true)
+	missing := "/daemon/uploads/swept/old.txt"
+	for _, test := range []struct {
+		source, transcript string
+	}{
+		{"codex", `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":` + strconv.Quote(composed+"\nAttached file: "+missing) + `}]}}`},
+		{"claude", `{"type":"user","uuid":"u1","message":{"role":"user","content":` + strconv.Quote(composed+"\nAttached file: "+missing) + `}}`},
+	} {
+		t.Run(test.source, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "session.jsonl")
+			if err := os.WriteFile(path, []byte(test.transcript+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			page, err := readTimeline(context.Background(), path, test.source, 0, 20)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []surface.AttachedFile{{Name: "notes.txt", Path: notes.Path, Bytes: 16}, {Name: "old.txt", Path: missing}}
+			if len(page.Items) != 1 || page.Items[0].Text != "read this" || !reflect.DeepEqual(page.Items[0].Files, want) {
+				t.Fatalf("items=%+v", page.Items)
 			}
 		})
 	}

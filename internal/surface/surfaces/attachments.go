@@ -316,6 +316,22 @@ func attachmentReferencesForSource(record map[string]any, source string) []attac
 	return codexAttachmentReferences(record)
 }
 func decorateTimelineAttachments(ctx context.Context, items []surface.TimelineItem, record map[string]any, source string, offset int64) error {
+	for itemIndex := range items {
+		item := &items[itemIndex]
+		if item.Kind != "message" || item.Role != "user" {
+			continue
+		}
+		text, files := surface.SplitAttachedFiles(item.Text)
+		if len(files) == 0 {
+			continue
+		}
+		for fileIndex := range files {
+			if info, err := os.Stat(files[fileIndex].Path); err == nil && info.Mode().IsRegular() {
+				files[fileIndex].Bytes = info.Size()
+			}
+		}
+		item.Text, item.Files = text, files
+	}
 	refs := attachmentReferencesForSource(record, source)
 	refIndex := 0
 	for itemIndex := range items {
