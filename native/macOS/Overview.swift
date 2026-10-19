@@ -4,6 +4,7 @@ struct SurfaceOverview: Identifiable, Equatable {
     enum Health: Equatable {
         case healthy
         case degraded
+        case notConfigured
         case unavailable
     }
 
@@ -24,6 +25,7 @@ struct SurfaceOverview: Identifiable, Equatable {
         switch health {
         case .healthy: return "Healthy"
         case .degraded: return "Needs attention"
+        case .notConfigured: return "Not set up"
         case .unavailable: return "Unavailable"
         }
     }
@@ -50,12 +52,17 @@ struct SurfaceOverview: Identifiable, Equatable {
         switch surface.health {
         case "healthy": return .healthy
         case "degraded": return .degraded
+        case "not_configured": return .notConfigured
         default: return .unavailable
         }
     }
 
     private static func detail(_ surface: SurfaceState) -> String {
         let raw = [surface.healthDetail, surface.error].compactMap { $0 }.first { !$0.isEmpty } ?? "Ready"
+        if surface.health == "not_configured" || raw.range(of: "choose a browser sign-in profile", options: .caseInsensitive) != nil {
+            let consumer = raw.hasPrefix("Claude Remote Control") ? "Claude sessions reached over Remote Control need" : "Notion needs"
+            return "\(consumer) a browser sign-in profile. Choose one in Settings > Browser Sign-in."
+        }
         if raw.range(of: "cookie bridge", options: .caseInsensitive) != nil {
             return "Claude Code needs to reconnect to your signed-in account."
         }

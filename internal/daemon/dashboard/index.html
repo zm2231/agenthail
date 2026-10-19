@@ -473,6 +473,21 @@
               </div>
               <div id="surface-health-list" class="surface-health-list"></div>
             </section>
+            <section class="settings-card signin-card" id="signin-card">
+              <div class="settings-card-heading">
+                <h2>Browser sign-in</h2>
+                <p>Notion and Claude sessions reached over Remote Control read your sign-in cookies from the browser profile you choose. Nothing else reads cookies.</p>
+              </div>
+              <div id="signin-consumers" class="signin-consumers"><div class="empty-card">Loading sign-in profiles.</div></div>
+              <div id="signin-profiles" class="operation-list compact-list"></div>
+              <form class="labeled-form signin-add" id="signin-add-form">
+                <label><span>Browser</span><select id="signin-browser" name="browser"></select></label>
+                <label><span>Profile</span><select id="signin-profile" name="profile"></select></label>
+                <label><span>Label <small>Optional</small></span><input id="signin-label" name="label" placeholder="Work Chrome" /></label>
+                <div class="form-action"><button class="primary-button" type="submit">Add profile</button></div>
+              </form>
+              <p class="signin-note" id="signin-unavailable" hidden></p>
+            </section>
             <section class="settings-card remote-access-card">
               <div class="settings-card-heading">
                 <h2>Open Agenthail on your phone</h2>
@@ -523,6 +538,6 @@
       </form>
     </dialog>
     <div class="toast" id="toast" role="status" hidden></div>
-    <script src="/app.js?v=13"></script>
+    <script src="/app.js?v=14"></script>
   </body>
 </html>
