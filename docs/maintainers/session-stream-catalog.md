@@ -55,8 +55,8 @@ The launcher is one of `cmux`, `tmux`, `claude-bg`, `codex-app-server`,
 tmux locations use `session` and `pane`. A location is focusable only after
 the authoritative launcher `Locate` path correlates the discovered Agenthail
 session. Persisted locations are revalidated before focus, so stale panes or
-reused process IDs are never focused. `claude-sdk` remains unavailable until
-its real transport is registered; no peer fallback is allowed.
+reused process IDs are never focused. `claude-sdk` sessions run in the Claude
+host and have no focusable location.
 
 `GET /api/v1/session-options` also returns `launchers` with `{id,label,agents,
 available,detail}`. Explicit `session-create` launcher requests return the

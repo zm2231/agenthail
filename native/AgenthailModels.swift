@@ -410,8 +410,20 @@ struct LauncherOption: Decodable, Identifiable, Hashable {
     let agents: [String]
     let available: Bool
     let detail: String?
+    /// Whether the launcher applies every creation setting. A terminal launcher
+    /// takes only the folder, message, model and name.
+    let sessionOptions: Bool
 
-    enum CodingKeys: String, CodingKey { case id, label, agents, available, detail }
+    enum CodingKeys: String, CodingKey { case id, label, agents, available, detail, sessionOptions }
+
+    init(id: String, label: String? = nil, agents: [String] = [], available: Bool = true, detail: String? = nil, sessionOptions: Bool = false) {
+        self.id = id
+        self.label = label ?? id
+        self.agents = agents
+        self.available = available
+        self.detail = detail
+        self.sessionOptions = sessionOptions
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -420,7 +432,10 @@ struct LauncherOption: Decodable, Identifiable, Hashable {
         agents = try container.decodeIfPresent([String].self, forKey: .agents) ?? []
         available = try container.decode(Bool.self, forKey: .available)
         detail = try container.decodeIfPresent(String.self, forKey: .detail)
+        sessionOptions = try container.decodeIfPresent(Bool.self, forKey: .sessionOptions) ?? false
     }
+
+    var isTerminal: Bool { !sessionOptions }
 }
 
 struct HostProjectIdentity: Codable, Hashable {

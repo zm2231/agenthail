@@ -30,7 +30,7 @@ func (c *Claude) ReadSession(ctx context.Context, session *surface.Session, requ
 	if path == "" {
 		path = c.transcriptPath(session)
 	}
-	page, err := readTranscriptPage(ctx, path, "claude", request.Before, request.Limit)
+	page, err := readTranscriptPage(ctx, path, "claude", request.Before, request.Limit, func(at time.Time) bool { return c.settledAfter(session, at) })
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func (c *Claude) ReadSession(ctx context.Context, session *surface.Session, requ
 // ReadSession uses the local transcript for Desktop content and the managed app-server for
 // managed exchanges; timeline items always come from the local transcript.
 func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
-	page, err := readTranscriptPage(ctx, codexTranscriptPath(session), "codex", request.Before, request.Limit)
+	page, err := readTranscriptPage(ctx, codexTranscriptPath(session), "codex", request.Before, request.Limit, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +324,9 @@ type transcriptRecord struct {
 // readTranscriptPage returns the newest page of the transcript ending at before. When limit is
 // positive the page holds at most that many exchanges plus the activity recorded alongside
 // them, and NextBefore always addresses the record preceding the oldest returned one.
-func readTranscriptPage(ctx context.Context, path, source string, before int64, limit int) (*surface.SessionReadResult, error) {
+// settled reports whether a Claude turn still closing at the end of the
+// transcript has ended, given the time of its end_turn block.
+func readTranscriptPage(ctx context.Context, path, source string, before int64, limit int, settled func(time.Time) bool) (*surface.SessionReadResult, error) {
 	result := &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}, Source: "local-transcript"}
 	if path == "" {
 		result.UnavailableReason = "Detailed activity is unavailable because this session has no local transcript."
@@ -520,7 +522,7 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 	slices.Reverse(records)
 	var exchangeOffsets []int64
 	if source == "claude" {
-		result.Exchanges, exchangeOffsets, result.Reply = claudeTranscriptExchanges(records, result.Source)
+		result.Exchanges, exchangeOffsets, result.Reply = claudeTranscriptExchanges(records, result.Source, settled)
 	} else {
 		result.Exchanges, exchangeOffsets = codexTranscriptExchanges(records)
 	}
@@ -588,7 +590,7 @@ func codexTranscriptItemKey(record map[string]any, item surface.TimelineItem, in
 	return codexDesktopStreamKey(turnID, kind, semanticID)
 }
 
-func claudeTranscriptExchanges(records []transcriptRecord, source string) ([]surface.Exchange, []int64, *surface.ReplyResult) {
+func claudeTranscriptExchanges(records []transcriptRecord, source string, settled func(time.Time) bool) ([]surface.Exchange, []int64, *surface.ReplyResult) {
 	var turns []claudeTurn
 	var turnOffsets []int64
 	for _, record := range records {
@@ -611,8 +613,9 @@ func claudeTranscriptExchanges(records []transcriptRecord, source string) ([]sur
 		exchanges = append(exchanges, surface.Exchange{User: turn.User, Assistant: turn.Assistant, Timestamp: turn.StartedAt})
 		offsets = append(offsets, turnOffsets[index])
 		if turn.Assistant != "" {
-			reply = &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: turn.Done, Source: source}
-			if turn.Interrupted && !turn.Done {
+			done := turn.Done || turn.Closing && settled != nil && settled(turn.TerminalAt)
+			reply = &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: done, Source: source}
+			if turn.Interrupted && !done {
 				reply.Error = "turn interrupted before completion"
 			}
 		}

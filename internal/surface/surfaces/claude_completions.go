@@ -38,6 +38,15 @@ func (c *Claude) ReadCompletions(ctx context.Context, sess *surface.Session, cur
 	}
 	state := &claudeObservationState{current: checkpoint.Current, hasCurrent: checkpoint.Current.UserID != "" || checkpoint.Current.MessageID != ""}
 	batch := surface.CompletionBatch{}
+	collect := func() {
+		if state.hasCompleted && state.completed.MessageID != checkpoint.CompletedID {
+			turn := state.completed
+			checkpoint.CompletedID = turn.MessageID
+			if cursor != "" && !turn.Interrupted {
+				batch.Events = append(batch.Events, surface.Completion{ID: turn.MessageID, InputID: turn.UserID, Text: turn.Assistant, User: turn.User, CompletedAt: turn.TerminalAt})
+			}
+		}
+	}
 	apply := func(line []byte) error {
 		var record claudeRecord
 		if err := json.Unmarshal(line, &record); err != nil {
@@ -46,13 +55,7 @@ func (c *Claude) ReadCompletions(ctx context.Context, sess *surface.Session, cur
 		if err := state.apply(line); err != nil {
 			return err
 		}
-		if state.hasCompleted && state.completed.MessageID != checkpoint.CompletedID {
-			turn := state.completed
-			checkpoint.CompletedID = turn.MessageID
-			if cursor != "" && !turn.Interrupted {
-				batch.Events = append(batch.Events, surface.Completion{ID: turn.MessageID, InputID: turn.UserID, Text: turn.Assistant, User: turn.User, CompletedAt: turn.TerminalAt})
-			}
-		}
+		collect()
 		return nil
 	}
 	// Baseline once from the bounded tail; subsequent reads resume the durable
@@ -74,6 +77,10 @@ func (c *Claude) ReadCompletions(ctx context.Context, sess *surface.Session, cur
 			return surface.CompletionBatch{}, err
 		}
 		checkpoint.Offset = offset
+	}
+	if state.hasCurrent && state.current.Closing && c.settledAfter(sess, state.current.TerminalAt) {
+		state.settle()
+		collect()
 	}
 	checkpoint.Current = state.current
 	anchor, err := completionAnchor(path, checkpoint.Offset)

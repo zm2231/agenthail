@@ -171,13 +171,13 @@ final class AgenthailIOSModel: ObservableObject {
         creationRequestIdentity = nil
         creationRequestKey = nil
     }
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) async -> Bool {
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil) async -> Bool {
         guard !creatingSession, let api, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         creatingSession = true; creationError = nil; creationWarning = nil
         defer { creatingSession = false }
         let identity = CreationRequestIdentity(surface: surface, message: message, cwd: cwd, model: model,
                                                turnSettings: surface == "codex" ? turnSettings : .init(),
-                                               claudeFields: claude.fields, launcher: launcher)
+                                               claudeFields: claude.fields, launcher: launcher?.id)
         if creationRequestIdentity != identity || creationRequestKey == nil {
             creationRequestIdentity = identity
             creationRequestKey = UUID().uuidString
@@ -186,13 +186,13 @@ final class AgenthailIOSModel: ObservableObject {
             let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher, idempotencyKey: creationRequestKey)
             guard receipt.ok || receipt.unknown == true || receipt.accepted == true else { throw AgenthailAPIError.invalidResponse }
             if receipt.status == "submitted" && receipt.id == nil {
-                creationWarning = "Submitted to \(receipt.launcher ?? launcher ?? surface)."
+                creationWarning = "Submitted to \(receipt.launcher ?? launcher?.id ?? surface)."
                 return false
             }
             creationWarning = receipt.warning
             if let id = receipt.id, !id.isEmpty {
-                let target = receipt.launcher ?? launcher ?? surface
-                deliveryStatus[id] = receipt.status == "submitted" || receipt.unknown == true ? "Submitted to \(target)." : (surface == "claude" ? "Background session registered. Waiting for activity." : "Conversation started")
+                let target = receipt.launcher ?? launcher?.id ?? surface
+                deliveryStatus[id] = receipt.status == "submitted" || receipt.unknown == true ? "Submitted to \(target)." : (surface == "claude" ? "Session started. Waiting for activity." : "Conversation started")
                 requestedSessionID = id
             }
             if receipt.id != nil { creationRequestIdentity = nil; creationRequestKey = nil }

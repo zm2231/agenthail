@@ -256,6 +256,17 @@ func migrateTx(tx *sql.Tx) error {
 			return err
 		}
 	}
+	if err := ensureColumn(tx, "delivery_intents", "uuid", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if version < 18 {
+		if err := backfillIntentUUIDs(tx); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS delivery_intents_uuid ON delivery_intents(uuid)`); err != nil {
+		return err
+	}
 	if version < 13 {
 		if _, err := tx.Exec(`UPDATE delivery_intents SET relayed=1 WHERE queue_id IN (SELECT id FROM message_queue WHERE relay_hops>0) OR provider_key LIKE 'relay:%'`); err != nil {
 			return err
@@ -304,6 +315,13 @@ func migrateTx(tx *sql.Tx) error {
 		return err
 	}
 	_, err = tx.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
+	return err
+}
+
+// backfillIntentUUIDs gives each delivery intent recorded before intents
+// carried a uuid its own, so the unique index can be built over them.
+func backfillIntentUUIDs(tx *sql.Tx) error {
+	_, err := tx.Exec(`UPDATE delivery_intents SET uuid=` + sqlRandomUUID + ` WHERE uuid=''`)
 	return err
 }
 
@@ -596,6 +614,7 @@ CREATE TABLE IF NOT EXISTS delivery_intents (
 	message TEXT NOT NULL DEFAULT '',
 	queue_id INTEGER NOT NULL DEFAULT 0,
 	relayed INTEGER NOT NULL DEFAULT 0,
+	uuid TEXT NOT NULL DEFAULT '',
 	status TEXT NOT NULL,
 	evidence TEXT NOT NULL,
 	failure TEXT NOT NULL DEFAULT '',

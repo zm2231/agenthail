@@ -155,7 +155,7 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 		return runReplyRelay(ctx, c, parent, ready)
 	}
 	pid := os.Getpid()
-	procStart, err := processStart(pid)
+	procStart, err := ProcessStart(pid)
 	if err != nil {
 		return fmt.Errorf("read process start: %w", err)
 	}
@@ -375,7 +375,7 @@ func ValidateSend(senderID, targetSocket, message string) error {
 
 func runReplyRelay(ctx context.Context, c Config, parent io.Reader, ready io.Writer) error {
 	pid := os.Getpid()
-	procStart, err := processStart(pid)
+	procStart, err := ProcessStart(pid)
 	if err != nil {
 		return fmt.Errorf("read relay process start: %w", err)
 	}
@@ -480,7 +480,9 @@ func status(s surface.Session) string {
 	return "waiting"
 }
 
-func processStart(pid int) (string, error) {
+// ProcessStart is the process's start time as ps reports it in UTC, which
+// tells a process from a later one that reuses its pid.
+func ProcessStart(pid int) (string, error) {
 	command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
 	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
 	out, err := command.Output()
@@ -723,7 +725,7 @@ func validManifest(root, socketDir, path string, manifest OwnershipManifest) boo
 }
 
 func processMatches(pid int, expected string) bool {
-	actual, err := processStart(pid)
+	actual, err := ProcessStart(pid)
 	return err == nil && actual == expected
 }
 

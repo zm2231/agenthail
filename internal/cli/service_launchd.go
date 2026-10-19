@@ -76,6 +76,8 @@ func (s launchdService) Restart() error {
 
 // daemonServicePlist runs the daemon at the Standard launchd process type.
 // Background makes macOS throttle the API server whenever the Mac is busy.
+// AbandonProcessGroup keeps launchd from killing what the daemon started, the
+// Claude host and its sessions, when the daemon exits or restarts.
 func daemonServicePlist(exe, envXML, logPath string) string {
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -87,6 +89,7 @@ func daemonServicePlist(exe, envXML, logPath string) string {
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ProcessType</key><string>Standard</string>
+  <key>AbandonProcessGroup</key><true/>
   <key>StandardOutPath</key><string>%s</string>
   <key>StandardErrorPath</key><string>%s</string>
 </dict></plist>

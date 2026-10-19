@@ -45,7 +45,12 @@ jobs:
           cache: npm
           cache-dependency-path: |
             push-relay/package-lock.json
+            claude-host/package-lock.json
             sidecar/package-lock.json
+      - name: Claude host tests
+        run: |
+          npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
+          npm test --prefix claude-host
       - name: Cookie bridge dependencies
         working-directory: sidecar
         run: npm ci --ignore-scripts
@@ -85,6 +90,7 @@ jobs:
         run: |
           find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n
           scripts/test-codesign-retry.sh
+          scripts/test-macos-app-resources-check.sh
           bash -n packaging/scripts/preinstall packaging/scripts/postinstall
           python3 -m py_compile sidecar/sidecar.py
 
@@ -107,8 +113,17 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: claude-host/package-lock.json
       - name: Vet
         run: go vet ./...
+      - name: Claude host tests
+        run: |
+          npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
+          npm test --prefix claude-host
       - name: Race tests
         run: go test ./... -race -count=1
       - name: Build Linux archives

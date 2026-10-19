@@ -23,9 +23,18 @@ func (c *Claude) Presence(sess surface.Session, input surface.PresenceInput) (bo
 	return true, "open"
 }
 
-func (c *Claude) OpenSessions(_ context.Context, sessions []surface.Session) map[string]bool {
+// OpenSessions reports the sessions the host lists and the CLI sessions whose
+// process still runs them.
+func (c *Claude) OpenSessions(ctx context.Context, sessions []surface.Session) map[string]bool {
 	open := map[string]bool{}
+	hosted := c.host.listing(ctx)
 	for _, session := range sessions {
+		if claudeHosted(&session) {
+			if _, ok := hosted[session.ID]; ok {
+				open[session.ID] = true
+			}
+			continue
+		}
 		if _, live := c.liveRecord(session); live {
 			open[session.ID] = true
 		}

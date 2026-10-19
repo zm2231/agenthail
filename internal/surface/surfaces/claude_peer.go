@@ -173,6 +173,40 @@ func (c *Claude) peerRecord(pid int) (map[string]any, bool) {
 	return record, true
 }
 
+// idleSince reports when the session's Claude process last recorded going
+// idle. Claude writes turn_duration only in its interactive CLI, so a final
+// end_turn block of a session run through the SDK stays closing until another
+// record follows; the process records idle once it has written every block of
+// that message.
+func (c *Claude) idleSince(sess *surface.Session) (time.Time, bool) {
+	if sess == nil || sess.ID == "" {
+		return time.Time{}, false
+	}
+	var record map[string]any
+	if candidate, found := c.peerRecord(sess.PID); sess.PID > 0 && found && str(candidate, "sessionId") == sess.ID {
+		record = candidate
+	} else if records, err := c.records(); err == nil {
+		for _, candidate := range records {
+			if str(candidate, "sessionId") == sess.ID {
+				record = candidate
+				break
+			}
+		}
+	}
+	updated, _ := record["statusUpdatedAt"].(float64)
+	if str(record, "status") != "idle" || updated <= 0 {
+		return time.Time{}, false
+	}
+	return time.UnixMilli(int64(updated)), true
+}
+
+// settledAfter reports whether the session's process went idle no earlier
+// than at, the time a closing turn wrote its end_turn block.
+func (c *Claude) settledAfter(sess *surface.Session, at time.Time) bool {
+	idle, found := c.idleSince(sess)
+	return found && !at.IsZero() && !idle.Before(at)
+}
+
 func nativeClaudeOnly(session *surface.Session) bool {
 	return session.Transport == "uds" && session.Bridge == ""
 }
