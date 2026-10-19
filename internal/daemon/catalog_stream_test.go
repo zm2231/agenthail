@@ -673,3 +673,27 @@ func TestDiscoveryProjectsSubagentIdentityAndRollup(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoveryNestsARowStoredWithoutItsParentOnceTheParentIsReported(t *testing.T) {
+	d, registry, fake, from, _ := daemonFixture(t)
+	child := surface.Session{ID: "spawned-child", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "child", Status: surface.StatusIdle, Source: "subAgent", Transport: "desktop"}
+	if err := registry.RegisterSession(child); err != nil {
+		t.Fatal(err)
+	}
+	child.Subagent = &surface.Subagent{ParentID: from.ID, RootID: from.ID, Depth: 1}
+	fake.sessions[child.ID] = child
+	d.discoverCatalog(context.Background())
+	stored, err := registry.Session(child.ID)
+	if err != nil || stored.Subagent == nil || stored.Subagent.ParentID != from.ID {
+		t.Fatalf("stored child=%+v err=%v, want nested under %s", stored, err, from.ID)
+	}
+	state, err := registry.CatalogSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range state.Sessions {
+		if record.Session.ID == child.ID && (record.Session.Subagent == nil || record.Session.Subagent.ParentID != from.ID) {
+			t.Fatalf("catalog child=%+v, want nested under %s", record.Session, from.ID)
+		}
+	}
+}
