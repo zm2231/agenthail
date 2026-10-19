@@ -202,28 +202,23 @@ struct ConversationListView: View {
     @ObservedObject var model: AgenthailIOSModel
     var selectedID: String? = nil
     let openSession: (String) -> Void
-    @State private var scope = SessionScope.recent
+    @State private var scope = SessionFilter.recent
     @State private var showingNewSession = false
     @State private var search = ""
-    @State private var collapsedWorkspaces: Set<String> = []
+    @State private var collapsedProjects: Set<String> = []
     @State private var expandedFamilies: Set<String> = []
 
-    private enum SessionScope: String, CaseIterable {
-        case running = "Running", recent = "Recent", all = "All"
+    private var tree: SessionTree {
+        let sessions = SessionFamilies.build(model.snapshot?.sessions ?? []).filter { family in
+            search.isEmpty || family.sessions.contains { session in
+                session.displayName.localizedCaseInsensitiveContains(search) || SessionFamilies.label(session).localizedCaseInsensitiveContains(search) || session.surface.localizedCaseInsensitiveContains(search) || (session.project?.displayName.localizedCaseInsensitiveContains(search) ?? false) || (session.cwd?.localizedCaseInsensitiveContains(search) ?? false)
+            }
+        }.flatMap(\.sessions)
+        return SessionTree.build(sessions, filter: scope, attentionSessionIDs: Set(model.snapshot?.attention.map(\.sessionId) ?? []))
     }
 
     private var families: [SessionFamily] {
-        SessionFamilies.build(model.snapshot?.sessions ?? []).filter { family in
-            let matchesScope = scope == .all || (scope == .running ? family.isWorking : family.isCurrent)
-            let matchesSearch = search.isEmpty || family.sessions.contains { session in
-                session.displayName.localizedCaseInsensitiveContains(search) || SessionFamilies.label(session).localizedCaseInsensitiveContains(search) || session.surface.localizedCaseInsensitiveContains(search) || (session.cwd?.localizedCaseInsensitiveContains(search) ?? false)
-            }
-            return matchesScope && matchesSearch
-        }
-    }
-
-    private var workspaces: [WorkspaceGroup] {
-        WorkspaceHierarchy.groups(for: families.map { $0.root.cwd ?? "" })
+        tree.projects.flatMap { $0.checkouts.flatMap(\.families) }
     }
 
     var body: some View {
@@ -234,7 +229,7 @@ struct ConversationListView: View {
             Label(model.reconnecting ? "Reconnecting to your Mac" : "Work on your Mac", systemImage: "desktopcomputer")
                 .font(.subheadline).foregroundStyle(.secondary).listRowSeparator(.hidden)
             Picker("Sessions to show", selection: $scope) {
-                ForEach(SessionScope.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                ForEach(SessionFilter.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             .listRowSeparator(.hidden)
@@ -242,44 +237,48 @@ struct ConversationListView: View {
                 VoiceOperatorEntry(model: model)
                     .listRowSeparator(.hidden)
             }
-            ForEach(workspaces) { group in
-                let workspace = group.path
+            let tree = tree
+            ForEach(tree.projects) { project in
+                let collapsed = collapsedProjects.contains(project.id)
                 Section {
-                    if !collapsedWorkspaces.contains(workspace) {
-                        ForEach(families.filter { WorkspaceHierarchy.normalize($0.root.cwd ?? "") == workspace }) { family in familyRows(family) }
-                    }
+                    ForEach(project.checkouts.flatMap(\.families).filter { !collapsed || project.pinned.contains($0.id) }) { family in familyRows(family) }
                 } header: {
                     Button {
-                        if !collapsedWorkspaces.insert(workspace).inserted { collapsedWorkspaces.remove(workspace) }
+                        if !collapsedProjects.insert(project.id).inserted { collapsedProjects.remove(project.id) }
                     } label: {
                         HStack(spacing: 8) {
-                            Image(systemName: "folder")
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(workspace.isEmpty ? "Other locations" : URL(fileURLWithPath: workspace).lastPathComponent)
-                                    .font(.subheadline.weight(.semibold))
-                                if !workspace.isEmpty {
-                                    Text(workspace).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                                }
+                            Image(systemName: project.identity == nil ? "tray" : project.archived ? "archivebox" : "folder")
+                            Text(project.name)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                            if let host = project.host {
+                                IOSHostBadge(name: host)
                             }
                             Spacer(minLength: 0)
-                            Image(systemName: collapsedWorkspaces.contains(workspace) ? "chevron.right" : "chevron.down")
+                            Image(systemName: collapsed ? "chevron.right" : "chevron.down")
                                 .font(.caption.weight(.semibold))
                         }
-                        .padding(.leading, CGFloat(group.depth) * 16)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.primary)
                     .textCase(nil)
-                    .accessibilityLabel("Workspace \(workspace.isEmpty ? "Other locations" : workspace)")
-                    .accessibilityValue(collapsedWorkspaces.contains(workspace) ? "Collapsed" : "Expanded")
-                    .accessibilityIdentifier("workspace-" + workspace)
+                    .contextMenu {
+                        if let identity = project.identity {
+                            Button(project.archived ? "Unarchive Project" : "Archive Project", systemImage: "archivebox") {
+                                Task { await model.setProjectArchived(identity.id, !project.archived) }
+                            }
+                        }
+                    }
+                    .accessibilityLabel(project.host.map { "Project \(project.name) on \($0)" } ?? "Project \(project.name)")
+                    .accessibilityValue(collapsed ? "Collapsed" : "Expanded")
+                    .accessibilityIdentifier("project-" + project.id)
                 }
             }
             if families.isEmpty && !model.searching {
                 ContentUnavailableView {
-                    Label(scope == .running ? "No agents working" : "No sessions here", systemImage: "bubble.left.and.bubble.right")
+                    Label(scope == .running ? "No agents working" : scope == .archived ? "Nothing archived" : "No sessions here", systemImage: "bubble.left.and.bubble.right")
                 } description: {
                     Text(search.isEmpty ? "Start a session, or browse All to continue earlier work." : "Try another title or search All sessions.")
                 } actions: {
@@ -357,54 +356,14 @@ struct ConversationListView: View {
         }
         .buttonStyle(.plain)
         .listRowBackground(selectedID == session.id ? SessionStyle.surface : Color.clear)
+        .swipeActions(edge: .trailing) {
+            if snippet == nil {
+                Button(session.archived == true ? "Unarchive" : "Archive", systemImage: "archivebox") {
+                    Task { await model.setArchived(sessionID: session.id, session.archived != true) }
+                }
+            }
+        }
         .accessibilityIdentifier("session-" + session.id)
-    }
-}
-
-struct WorkspaceGroup: Identifiable, Equatable {
-    let path: String
-    let depth: Int
-    var id: String { path }
-}
-
-enum WorkspaceHierarchy {
-    static func groups(for paths: [String]) -> [WorkspaceGroup] {
-        var seen = Set<String>()
-        let unique = paths.map(normalize).filter { seen.insert($0).inserted }
-        let indexed = Dictionary(uniqueKeysWithValues: unique.enumerated().map { ($0.element, $0.offset) })
-        var children: [String?: [String]] = [:]
-        for path in unique {
-            let parent = unique
-                .filter { $0 != path && isAncestor($0, of: path) }
-                .max { components($0).count < components($1).count }
-            children[parent, default: []].append(path)
-        }
-        for key in children.keys {
-            children[key]?.sort { indexed[$0, default: 0] < indexed[$1, default: 0] }
-        }
-        var result: [WorkspaceGroup] = []
-        func append(_ path: String, depth: Int) {
-            result.append(WorkspaceGroup(path: path, depth: depth))
-            for child in children[path] ?? [] { append(child, depth: depth + 1) }
-        }
-        for root in children[nil] ?? [] { append(root, depth: 0) }
-        return result
-    }
-
-    static func normalize(_ path: String) -> String {
-        guard !path.isEmpty else { return "" }
-        return URL(fileURLWithPath: path).standardizedFileURL.path
-    }
-
-    private static func components(_ path: String) -> [String] {
-        guard !path.isEmpty else { return [] }
-        return URL(fileURLWithPath: path).standardizedFileURL.pathComponents
-    }
-
-    private static func isAncestor(_ candidate: String, of path: String) -> Bool {
-        let parent = components(candidate)
-        let child = components(path)
-        return !parent.isEmpty && parent.count < child.count && child.starts(with: parent)
     }
 }
 
@@ -1221,20 +1180,34 @@ struct IOSSessionRow: View {
             let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
             layout {
                 Text(SessionStyle.agentName(session.surface)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                if let host = session.remoteHostName {
-                    Label(host, systemImage: session.isUnavailable ? "wifi.slash" : "server.rack")
-                        .font(.caption)
-                        .foregroundStyle(session.isUnavailable ? Color.orange : Color.secondary)
+                    .lineLimit(1).fixedSize()
+                if let host = session.shortRemoteHostName {
+                    IOSHostBadge(name: host, unavailable: session.isUnavailable)
                         .accessibilityLabel(session.isUnavailable ? "Unavailable on \(host)" : "On \(host)")
                 }
                 if session.isWaitingOnYou {
-                    Label("Waiting on you", systemImage: "questionmark.bubble").font(.caption).foregroundStyle(SessionStyle.accent)
+                    HStack(spacing: 4) {
+                        Image(systemName: "questionmark.bubble")
+                        Text("Waiting on you")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(SessionStyle.accent)
+                    .lineLimit(1)
+                    .fixedSize()
                 } else if session.isWorking {
-                    Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(SessionStyle.accent)
+                    HStack(spacing: 4) {
+                        Image(systemName: "waveform")
+                        Text("Working")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(SessionStyle.accent)
+                    .lineLimit(1)
+                    .fixedSize()
                 }
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
                 if let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
                     Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).fixedSize()
                 }
             }
             if session.isUnavailable, let reason = session.unavailableReason {
@@ -1254,6 +1227,25 @@ struct IOSSessionRow: View {
         }
         .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A one-line host label for remote sessions and projects. It truncates
+/// rather than wrapping so it never squeezes the row's status.
+struct IOSHostBadge: View {
+    let name: String
+    var unavailable = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: unavailable ? "wifi.slash" : "server.rack").imageScale(.small)
+            Text(name).lineLimit(1).truncationMode(.tail)
+        }
+        .font(.caption)
+        .foregroundStyle(unavailable ? Color.orange : Color.secondary)
+        .frame(maxWidth: 110, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .layoutPriority(-1)
     }
 }
 

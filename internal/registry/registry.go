@@ -708,6 +708,18 @@ CREATE TABLE IF NOT EXISTS catalog_surfaces (
 	detail TEXT NOT NULL DEFAULT '',
 	observed_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS projects (
+	id TEXT PRIMARY KEY,
+	kind TEXT NOT NULL,
+	root_path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	registered INTEGER NOT NULL DEFAULT 0,
+	archived_at_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS session_archive (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	archived_at_ms INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	host_epoch TEXT NOT NULL

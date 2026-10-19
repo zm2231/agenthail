@@ -24,6 +24,7 @@ type fakeDaemonAPI struct {
 	response  string
 	responses map[string]string
 	gets      []string
+	snapshot  string
 }
 
 func (f *fakeDaemonAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +53,8 @@ func (f *fakeDaemonAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, _ = io.WriteString(w, f.response)
+	case "/api/v1/snapshot":
+		_, _ = io.WriteString(w, f.snapshot)
 	case "/api/v1/session-metadata":
 		f.gets = append(f.gets, r.URL.RequestURI())
 		_, _ = io.WriteString(w, `{"sessionId":"`+r.URL.Query().Get("id")+`","model":"gpt-remote","goal":{"objective":"ship the remote picker","status":"active"}}`)
@@ -342,11 +345,11 @@ func TestThreadCreateOnHostKeepsRemoteCwd(t *testing.T) {
 
 func TestListShowsRemoteRowsWithHostAndUnavailableState(t *testing.T) {
 	app, _, _, _ := federatedCLIFixture(t, true)
-	output, err := captureStdout(t, func() error { return app.Run([]string{"list"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
 	if err != nil || !strings.Contains(output, "HOST") || !strings.Contains(output, "forge") || !strings.Contains(output, "down") || !strings.Contains(output, "@builder") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
-	output, err = captureStdout(t, func() error { return app.Run([]string{"list", "--json"}) })
+	output, err = captureStdout(t, func() error { return app.Run([]string{"list", "--all", "--json"}) })
 	if err != nil {
 		t.Fatal(err)
 	}

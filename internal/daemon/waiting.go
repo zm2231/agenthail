@@ -35,10 +35,7 @@ func (d *Daemon) observeTurn(ctx context.Context, adapter surface.Surface, sessi
 	defer d.lockWaiting(session.ID)()
 	observation, changed, err := d.observeTurnLocked(ctx, adapter, session)
 	if changed {
-		select {
-		case d.catalogNudge <- struct{}{}:
-		default:
-		}
+		d.requestCatalogDiscovery()
 	}
 	return observation, err
 }

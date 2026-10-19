@@ -215,11 +215,12 @@ struct SessionState: Codable, Identifiable, Hashable {
     let open: Bool
     var current: Bool
     var currentReason: String?
+    var archived: Bool? = nil
     let capabilities: Capabilities
     let readOnly: Bool?
     let readOnlyReason: String?
     var cwd: String? = nil
-    var hostProject: HostProjectIdentity? = nil
+    var project: ProjectIdentity? = nil
     var checkout: CheckoutIdentity? = nil
     var runtime: SessionRuntime? = nil
     var subagent: SubagentIdentity? = nil
@@ -242,6 +243,10 @@ struct SessionState: Codable, Identifiable, Hashable {
     var remoteHostName: String? {
         guard let host, host.state != "local" else { return nil }
         return host.name
+    }
+    /// The remote host's name without a DNS domain, for a one-line badge.
+    var shortRemoteHostName: String? {
+        remoteHostName.map { name in String(name.split(separator: ".", maxSplits: 1).first ?? Substring(name)) }
     }
     var isUnavailable: Bool { remoteHostName != nil && !(unavailableReason ?? "").isEmpty }
     /// The paired host that owns this session, or nil for this machine.
@@ -545,11 +550,12 @@ struct LauncherOption: Decodable, Identifiable, Hashable {
     var isTerminal: Bool { !sessionOptions }
 }
 
-struct HostProjectIdentity: Codable, Hashable {
-    let id: String?
-    let displayName: String?
-    let commonDir: String?
-    let path: String?
+struct ProjectIdentity: Codable, Hashable {
+    let id: String
+    let displayName: String
+    let rootPath: String
+    let kind: String
+    var archived: Bool? = nil
 }
 
 struct CheckoutIdentity: Codable, Hashable {

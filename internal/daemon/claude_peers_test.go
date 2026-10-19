@@ -30,7 +30,7 @@ func TestRecentPeerRegistrationReadsFreshCatalogRowsOnly(t *testing.T) {
 		{ID: "native", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, LastActive: now},
 		{ID: "unconfigured", Surface: surface.SurfaceKind("other"), RuntimeKind: surface.RuntimeKind("other"), Status: surface.StatusBusy, LastActive: now},
 	} {
-		if _, _, err := reg.RecordCatalogSession(registry.CatalogSessionState{Session: session, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: now.UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:" + session.ID, Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
+		if _, _, err := reg.RecordCatalogSession(registry.CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: now.UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:" + session.ID, Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -125,7 +125,7 @@ func TestPeerRegistrationFollowsDiscoveryWithoutWaitingForTheTicker(t *testing.T
 	default:
 	}
 	session := surface.Session{ID: "discovered", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy, LastActive: time.Now()}
-	if _, _, err := d.catalog.publishSession(registry.CatalogSessionState{Session: session, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:discovered", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
+	if _, _, err := d.catalog.publishSession(registry.CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:discovered", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 	select {

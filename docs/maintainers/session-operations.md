@@ -11,11 +11,28 @@ rows take the local transcript's latest task lifecycle when it is known and the
 shared database state otherwise. Claude peer `idle` is trusted only from peers advertising idle
 notifications or from a readable transcript; otherwise the state is unknown.
 
+With the daemon running, `agenthail list` reads the daemon catalog and applies
+the daemon's scopes: current by default, or `--all` or `--archived`.
+The scopes count session families, so a subagent appears with its root. The
+table's PROJECT column and the JSON `project` field are the daemon's project for
+the session, and `--project <name|id>` keeps one project; a name shared by several projects
+is an error that lists their ids. See
+[projects](projects.md) for the identity and archive rules. Without the daemon,
+`list` discovers sessions directly and prints the working directory in place
+of the project. It shows the 15 most recently active session families and
+leaves out Notion threads idle for more than seven days; `--all` lists every
+saved session; `--project` and `--archived` need
+the daemon.
+
+`agenthail project list [--all]`, `project add <path>`, and
+`project <archive|unarchive> <name|id>` manage projects.
+`agenthail thread <archive|unarchive> <target>` archives one session. Both route
+to the host that owns the project or session.
+
 `agenthail list --cwd <path>` retains sessions whose normalized workspace is that
 directory or a descendant. Existing symlinks resolve before comparison, and path
-components, not string prefixes, define ancestry. `--wide` prints each full normalized
-workspace; ordinary table output also uses the full path when multiple sessions share
-a workspace basename. JSON always retains the complete `cwd` field. CWD narrows
+components, not string prefixes, define ancestry. `--wide` prints each full
+normalized workspace. JSON always retains the complete `cwd` field. CWD narrows
 discovery; it never selects a caller identity.
 
 `agenthail last <target> [count] --timeout 30s` and

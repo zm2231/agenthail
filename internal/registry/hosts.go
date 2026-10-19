@@ -281,7 +281,7 @@ type HostCatalogRow struct {
 	Session           surface.Session
 	EntityID          string
 	Projection        json.RawMessage
-	HostProject       json.RawMessage
+	Project           json.RawMessage
 	Checkout          json.RawMessage
 	UnavailableReason string
 	ObservedAt        time.Time
@@ -317,8 +317,8 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 		}
 		waitingOn = encoded
 	}
-	if len(row.HostProject) == 0 {
-		row.HostProject = json.RawMessage(`{}`)
+	if len(row.Project) == 0 {
+		row.Project = json.RawMessage(`null`)
 	}
 	if len(row.Checkout) == 0 {
 		row.Checkout = json.RawMessage(`{}`)
@@ -394,7 +394,7 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 		VALUES(?,?,?,?,?,?,?,0,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,checkout=excluded.checkout,
 		unavailable_reason=excluded.unavailable_reason,observed_at=excluded.observed_at,misses=0,projection_fingerprint=excluded.projection_fingerprint,
 		projection_generation=excluded.projection_generation,discovery_failures=0,host_queue_count=excluded.host_queue_count,waiting_on=excluded.waiting_on`,
-		session.ID, []byte(row.HostProject), []byte(row.Checkout), row.UnavailableReason, observedAt.Format(time.RFC3339Nano), fingerprint, generation, row.QueueCount, waitingOn); err != nil {
+		session.ID, []byte(row.Project), []byte(row.Checkout), row.UnavailableReason, observedAt.Format(time.RFC3339Nano), fingerprint, generation, row.QueueCount, waitingOn); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	event, created, err := appendHostUpsertTx(tx, row.EntityID, projection, generation, observedAt, row.UnavailableReason)
@@ -515,7 +515,7 @@ func (r *Registry) HostCatalogRows(hostID string) ([]CatalogSessionState, error)
 		var lastActiveMS int64
 		var subagent subagentColumns
 		targets := append([]any{&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &status, &state.Session.Source, &state.Session.Transport, &state.Session.RuntimeKind, &state.Session.ConfiguredModel, &lastActiveMS}, subagent.targets()...)
-		targets = append(targets, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &state.HostQueueCount)
+		targets = append(targets, &state.Project, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &state.HostQueueCount)
 		if err := rows.Scan(targets...); err != nil {
 			return nil, err
 		}

@@ -72,7 +72,8 @@ enum SessionFacts {
         switch filter {
         case .running: return "Sessions working now"
         case .recent: return "Working sessions, open Claude sessions, queued work, Codex sessions from the last \(codexRecentHours) hours, and anything active in the last 24 hours"
-        case .all: return "Every known session"
+        case .all: return "Every session that is not archived"
+        case .archived: return "Archived sessions and projects. New activity brings them back"
         }
     }
 }

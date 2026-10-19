@@ -42,6 +42,7 @@ type threadCreateRequest struct {
 const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree <name>] [--agent <name>] [--permission-mode <mode>] [--host <host>] [--timeout <duration>] [--json]
        agenthail thread fork <target> [--model <model>] [--last-turn <id>] [--alias <name>] [--json]
        agenthail thread <status|stop|resume|logs> <target> [--json]
+       agenthail thread <archive|unarchive> <target> [--json]
        agenthail thread queue <target> <list|add|update|delete|reorder|start> [message] [--id <id>] [--ids <id,id>] [--client-id <stable-id>] [--cursor <cursor>] [--json]
 
 Codex threads start on Codex Desktop when its bridge is reachable and on Codex's app-server daemon otherwise.
@@ -51,6 +52,9 @@ func (a *App) cmdThread(args []string) error {
 	if hasFlag(args, "--help") {
 		fmt.Println(threadUsage)
 		return nil
+	}
+	if len(args) > 0 && (args[0] == "archive" || args[0] == "unarchive") {
+		return a.cmdThreadArchive(args)
 	}
 	if len(args) > 0 && args[0] != "create" {
 		return a.cmdThreadOperation(args)

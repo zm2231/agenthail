@@ -51,18 +51,20 @@ type Daemon struct {
 	catalog           *catalogHub
 	catalogLive       map[string]*catalogLiveSession
 	catalogIdentities *catalogIdentityCache
-	sources           *sessionSourceManager
-	sourceHoldMu      sync.Mutex
-	surfaceHealthMu   sync.Mutex
-	surfaceHealth     map[surface.SurfaceKind]dashboardSurface
-	sourceHolds       map[string]map[string]func()
-	dashboard         *dashboardServer
-	transportResolver *SessionTransportResolver
-	claudeHost        *claudehost.Manager
-	identityMu        sync.RWMutex
-	identity          registry.HostIdentity
-	federation        *federation
-	uploads           *uploads.Store
+	// catalogProjectUnarchived is set and cleared by the catalog goroutine.
+	catalogProjectUnarchived bool
+	sources                  *sessionSourceManager
+	sourceHoldMu             sync.Mutex
+	surfaceHealthMu          sync.Mutex
+	surfaceHealth            map[surface.SurfaceKind]dashboardSurface
+	sourceHolds              map[string]map[string]func()
+	dashboard                *dashboardServer
+	transportResolver        *SessionTransportResolver
+	claudeHost               *claudehost.Manager
+	identityMu               sync.RWMutex
+	identity                 registry.HostIdentity
+	federation               *federation
+	uploads                  *uploads.Store
 }
 
 func (d *Daemon) SetLaunchers(launchers []surface.Launcher) {

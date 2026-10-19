@@ -83,6 +83,7 @@ extension SessionFilter {
         case .running: return .showRunning
         case .recent: return .showRecent
         case .all: return .showAll
+        case .archived: return .showArchived
         }
     }
 }

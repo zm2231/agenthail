@@ -40,7 +40,7 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 		return CatalogPage{}, fmt.Errorf("catalog page offset must not be negative")
 	}
 	switch request.Scope {
-	case "", "all", "recent", "current", "running":
+	case "", "all", "recent", "current", "running", "archived":
 	default:
 		return CatalogPage{}, fmt.Errorf("invalid catalog page scope %q", request.Scope)
 	}
@@ -139,11 +139,17 @@ func catalogPageSQL(request CatalogPageRequest, listing CatalogListing) (string,
 		conditions = append(conditions, "instr(lower(s.name||' '||s.cwd||' '||coalesce(a.name,json_extract(cs.projection_fingerprint,'$.alias'),'')),?)>0")
 		args = append(args, query)
 	}
-	if request.Scope == "running" {
-		conditions = append(conditions, "s.status=?")
+	archived := "COALESCE(json_extract(cs.projection_fingerprint,'$.archived'),0)=1"
+	switch request.Scope {
+	case "running":
+		conditions = append(conditions, "NOT "+archived, "(s.status=? OR COALESCE(json_extract(cs.projection_fingerprint,'$.subagents.working'),0)>0)")
 		args = append(args, string(surface.StatusBusy))
-	} else if request.Scope == "recent" || request.Scope == "current" {
-		conditions = append(conditions, "(COALESCE(qc.queue_count,0)>0 OR (COALESCE(json_extract(cs.projection_fingerprint,'$.current'),0)=1 AND COALESCE(json_extract(cs.projection_fingerprint,'$.currentReason'),'')!='queued'))")
+	case "current", "recent":
+		conditions = append(conditions, "NOT "+archived, "(COALESCE(qc.queue_count,0)>0 OR (COALESCE(json_extract(cs.projection_fingerprint,'$.current'),0)=1 AND COALESCE(json_extract(cs.projection_fingerprint,'$.currentReason'),'')!='queued'))")
+	case "all":
+		conditions = append(conditions, "NOT "+archived)
+	case "archived":
+		conditions = append(conditions, archived)
 	}
 	return from, strings.Join(conditions, " AND "), args
 }
@@ -156,7 +162,7 @@ func scanCatalogSession(scanner interface{ Scan(...any) error }) (CatalogSession
 	var launcher string
 	var location, waitingOn []byte
 	var subagent subagentColumns
-	if err := scanner.Scan(append([]any{&state.Session.ID, &state.HostID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.RuntimeKind, &state.Session.ConfiguredModel, &state.Session.Bridge, &state.Session.ForkedFrom, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &waitingOn, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
+	if err := scanner.Scan(append([]any{&state.Session.ID, &state.HostID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.RuntimeKind, &state.Session.ConfiguredModel, &state.Session.Bridge, &state.Session.ForkedFrom, &lastActiveMS, &state.Project, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &waitingOn, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 		return CatalogSessionState{}, err
 	}
 	if len(waitingOn) > 0 {

@@ -10,7 +10,7 @@
     <title>Agenthail</title>
     <link rel="icon" href="/favicon.png" type="image/png" />
     <link rel="apple-touch-icon" href="/logo.png" />
-    <link rel="stylesheet" href="/tokens.css?v=12" />
+    <link rel="stylesheet" href="/tokens.css?v=15" />
   </head>
   <body>
     <main class="shell">
@@ -171,17 +171,10 @@
               </label>
               <button class="primary-button" type="submit">Start conversation</button>
             </form>
-            <div class="segmented two" aria-label="Conversation scope">
-              <button
-                class="active"
-                aria-pressed="true"
-                type="button"
-                data-inbox-mode="current"
-              >
-                Current</button
-              ><button aria-pressed="false" type="button" data-inbox-mode="all">
-                History
-              </button>
+            <div class="segmented" aria-label="Conversation scope">
+              <button class="active" aria-pressed="true" type="button" data-inbox-mode="current">Current<span data-inbox-count="current"></span></button
+              ><button aria-pressed="false" type="button" data-inbox-mode="projects">Projects<span data-inbox-count="projects"></span></button
+              ><button aria-pressed="false" type="button" data-inbox-mode="all">All<span data-inbox-count="all"></span></button>
             </div>
             <div class="session-tools" id="session-tools">
               <label class="search"
@@ -191,7 +184,7 @@
                   type="search"
                   placeholder="Search conversations"
               /></label>
-              <div class="filter-row">
+              <div class="filter-row" id="session-filters">
                 <label
                   ><span>Surface</span
                   ><select id="session-surface-filter">
@@ -208,6 +201,7 @@
                   </select></label
                 >
               </div>
+              <label class="show-archived" id="show-archived-row"><input id="show-archived" type="checkbox" /> Show archived</label>
             </div>
             <div class="filter-summary" id="filter-summary"></div>
             <div class="session-list" id="session-list"></div>
@@ -543,6 +537,6 @@
       </form>
     </dialog>
     <div class="toast" id="toast" role="status" hidden></div>
-    <script src="/app.js?v=14"></script>
+    <script src="/app.js?v=16"></script>
   </body>
 </html>

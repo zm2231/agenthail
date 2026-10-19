@@ -1127,7 +1127,7 @@ func TestDashboardStateReadsPersistedCatalogStatus(t *testing.T) {
 	}
 	from.Status = surface.StatusBusy
 	from.LastActive = time.Now()
-	if _, _, err := registry.RecordCatalogSession(registrypkg.CatalogSessionState{Session: from, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registrypkg.CatalogEvent{DedupeKey: "session.upserted:" + from.ID, Type: "session.upserted", EntityID: from.ID, Payload: []byte(`{}`)}); err != nil {
+	if _, _, err := registry.RecordCatalogSession(registrypkg.CatalogSessionState{Session: from, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registrypkg.CatalogEvent{DedupeKey: "session.upserted:" + from.ID, Type: "session.upserted", EntityID: from.ID, Payload: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1155,7 +1155,7 @@ func TestChangingTheCodexWindowRepublishesPresence(t *testing.T) {
 	t.Cleanup(func() { r.Close() })
 	session := surface.Session{ID: "019f004a-0000-7000-8000-0000000000c1", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", LastActive: time.Now().Add(-3 * time.Hour)}
 	projection := `{"id":"` + session.ID + `","surface":"codex","status":"idle","current":true,"currentReason":"recent"}`
-	if _, _, err := r.RecordCatalogSession(registrypkg.CatalogSessionState{Session: session, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: projection}, registrypkg.CatalogEvent{DedupeKey: "session.upserted:" + session.ID, Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
+	if _, _, err := r.RecordCatalogSession(registrypkg.CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: projection}, registrypkg.CatalogEvent{DedupeKey: "session.upserted:" + session.ID, Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
 		t.Fatal(err)
 	}
 	d := New(r, []surface.Surface{&surfaces.Codex{}})
