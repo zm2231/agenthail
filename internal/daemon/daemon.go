@@ -40,7 +40,10 @@ type Daemon struct {
 	catalogNudge      chan struct{}
 	// catalogSelected, when set, runs after a catalog publication has chosen
 	// what a session waits on and before its row commits.
-	catalogSelected   func(sessionID string)
+	catalogSelected func(sessionID string)
+	// waitingContended, when set, runs when a session's waiting lock is held
+	// by another caller and this one is about to wait for it.
+	waitingContended  func(sessionID string)
 	queueWorkers      sync.WaitGroup
 	events            *eventHub
 	catalog           *catalogHub

@@ -446,8 +446,16 @@ func TestQuestionAnnouncedAgainAfterAStopMidDeliveryCollapsesIntoOne(t *testing.
 func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) {
 	q := newClaudeQuestion(t)
 	var armed atomic.Bool
-	selected, release := make(chan *surface.Waiting, 1), make(chan struct{})
+	selected, release, contended := make(chan *surface.Waiting, 1), make(chan struct{}), make(chan struct{}, 1)
 	h, _ := runDaemonWith(t, q.store, func(d *Daemon) {
+		d.waitingContended = func(id string) {
+			if id == q.session.ID {
+				select {
+				case contended <- struct{}{}:
+				default:
+				}
+			}
+		}
 		d.catalogSelected = func(id string) {
 			if id == q.session.ID && armed.CompareAndSwap(true, false) {
 				waiting, _, _ := q.store.WaitingState(id)
@@ -472,7 +480,6 @@ func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) 
 	case <-time.After(5 * time.Second):
 		t.Fatal("no catalog publication reached the session")
 	}
-	q.answer(t)
 	answered := q.session
 	observed := make(chan error, 1)
 	go func() {
@@ -482,15 +489,15 @@ func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) 
 		}
 		observed <- err
 	}()
-	// The answer must not be recorded while a row carrying the question is
-	// still to be written. The bound only limits how long a broken lock takes
-	// to show; a correct one blocks the observation until release.
+	// The observation must wait for the paused row to commit, not read the
+	// turn while a row carrying the question is still to be written.
 	select {
+	case <-contended:
 	case <-observed:
 		close(release)
-		t.Fatal("the answer was recorded while a catalog row with the question was still to be written")
-	case <-time.After(200 * time.Millisecond):
+		t.Fatal("the turn was observed while a catalog row with the question was still to be written")
 	}
+	q.answer(t)
 	close(release)
 	if err := <-observed; err != nil {
 		t.Fatal(err)
