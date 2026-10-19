@@ -72,7 +72,7 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 	if options.Effort != "" && !slices.Contains([]string{"low", "medium", "high", "xhigh", "max"}, options.Effort) {
 		return nil, nil, fmt.Errorf("invalid Claude effort")
 	}
-	if options.PermissionMode != "" && !slices.Contains([]string{"acceptEdits", "auto", "manual", "dontAsk", "plan"}, options.PermissionMode) {
+	if options.PermissionMode != "" && !slices.Contains([]string{"acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"}, options.PermissionMode) {
 		return nil, nil, fmt.Errorf("invalid Claude permission mode")
 	}
 	if options.Cwd == "" || !filepath.IsAbs(options.Cwd) {
