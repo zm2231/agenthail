@@ -31,7 +31,7 @@ struct DashboardSnapshotTest {
         precondition(current.hasSamePresentation(as: transportOnlyChange))
         precondition(!current.hasSamePresentation(as: visibleChange))
         var problemChange = transportOnlyChange
-        problemChange.deliveryProblems = [DeliveryProblem(deliveryId: 7, sessionId: "s1", sourceSessionId: "s2", message: "Run the tests", reason: "target_not_writable", status: nil, at: "2026-10-04 12:00:00")]
+        problemChange.deliveryProblems = [DeliveryProblem(deliveryId: 7, sessionId: "s1", sourceSessionId: "s2", attentionSessionId: "s2", message: "Run the tests", reason: "target_not_writable", status: nil, at: "2026-10-04 12:00:00")]
         precondition(!current.hasSamePresentation(as: problemChange))
 
         let child = try! JSONDecoder().decode(SessionState.self, from: Data(#"{"id":"child","surface":"codex","name":"Review","status":"busy","queueCount":0,"open":false,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"compact":true,"model":true,"interrupt":true,"steer":true},"subagent":{"parentId":"root","rootId":"root","depth":2,"nickname":"Euclid","role":"reviewer"}}"#.utf8))

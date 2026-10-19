@@ -95,6 +95,36 @@ final class AgenthailAPI: @unchecked Sendable {
         try await get("/api/v1/snapshot" + (fresh ? "?fresh=1" : ""))
     }
 
+    /// Every direct subagent of a session, including the ones the session list
+    /// only counts. A page cursor dies when the catalog changes, so a changed
+    /// catalog restarts from the first page.
+    func subagents(of parentID: String) async throws -> [SessionState] {
+        for _ in 0..<3 {
+            do {
+                return try await subagentPages(of: parentID)
+            } catch AgenthailAPIError.request(409, _) {
+                continue
+            }
+        }
+        throw AgenthailAPIError.request(409, "The session list kept changing. Try again.")
+    }
+
+    private func subagentPages(of parentID: String) async throws -> [SessionState] {
+        var sessions: [SessionState] = []
+        var cursor: String?
+        repeat {
+            var components = URLComponents()
+            components.path = "/api/v1/snapshot"
+            components.queryItems = [URLQueryItem(name: "parentId", value: parentID), URLQueryItem(name: "limit", value: "200")]
+            if let cursor { components.queryItems?.append(URLQueryItem(name: "cursor", value: cursor)) }
+            guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+            let page: DashboardSnapshot = try await get(path)
+            sessions += page.sessions
+            cursor = page.nextCursor
+        } while cursor != nil
+        return sessions
+    }
+
     func sessionDetail(id: String, includeTimeline: Bool = false, timelineBefore: Int64? = nil) async throws -> SessionDetail {
         var components = URLComponents()
         components.path = "/api/v1/session"

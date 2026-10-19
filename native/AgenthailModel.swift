@@ -45,6 +45,7 @@ final class AgenthailModel: ObservableObject {
     @Published var sessionRefinement = SessionRefinement()
     @Published private(set) var localSends: [String: [LocalSend]] = [:]
     @Published private var turnSettingsDrafts: [String: TurnSettings] = [:]
+    @Published private(set) var fetchedSubagents = SubagentPageCache()
 
     private(set) var api: AgenthailAPI?
     let actionKeys = ActionRetryKeys()
@@ -78,7 +79,7 @@ final class AgenthailModel: ObservableObject {
         return listed + pinnedSessions.filter { !listedIDs.contains($0.id) }
     }
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
-    var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.map(\.sessionId)) }
+    var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.compactMap(\.attentionSessionId)) }
     var sessionTree: SessionTree {
         SessionTree.build(knownSessions, filter: sessionFilter, refinement: sessionRefinement, attentionSessionIDs: attentionSessionIDs, now: Date())
     }
@@ -151,6 +152,26 @@ final class AgenthailModel: ObservableObject {
                 try? await Task.sleep(for: .seconds(delay))
             }
         }
+    }
+
+    /// Fetches the direct subagents a session list only counts, so they can
+    /// be shown and opened.
+    func loadSubagents(of session: SessionState) async {
+        guard let api else { return }
+        guard (session.hiddenSubagents?.count ?? 0) > 0 else {
+            fetchedSubagents.drop(session.id)
+            return
+        }
+        do {
+            let loaded = try await api.subagents(of: session.id)
+            if !Task.isCancelled { fetchedSubagents.store(loaded, for: session.id) }
+        } catch {
+            if !Task.isCancelled { fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id) }
+        }
+    }
+
+    func subagents(of sessionID: String) -> [SessionState] {
+        SessionFamilies.children(of: sessionID, listed: knownSessions, fetched: fetchedSubagents.children(of: sessionID))
     }
 
     @discardableResult
@@ -385,6 +406,11 @@ final class AgenthailModel: ObservableObject {
     func openSearchResult(_ session: SessionState) {
         pin(session)
         mainPane.select(session.id)
+    }
+
+    func openSubagent(_ session: SessionState, in pane: SessionPane) {
+        pin(session)
+        pane.select(session.id)
     }
 
     private func pin(_ session: SessionState) {
@@ -820,10 +846,11 @@ final class AgenthailModel: ObservableObject {
         case "session.removed":
             guard let id = event.data.sessionId else { return }
             current.sessions.removeAll { $0.id == id }
+            fetchedSubagents.sessionRemoved(id, unlisted: event.data.reason == "unlisted")
             if let next = event.data.rekeyedTo { rekeys.record([id: next]) }
         case "delivery.problem":
             guard let deliveryID = event.data.deliveryId, let sessionID = event.data.sessionId else { return }
-            let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", status: event.data.status, at: event.data.at ?? "")
+            let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, attentionSessionId: event.data.attentionSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", status: event.data.status, at: event.data.at ?? "")
             var problems = current.deliveryProblems ?? []
             problems.removeAll { $0.deliveryId == deliveryID }
             problems.insert(problem, at: 0)

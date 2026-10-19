@@ -432,7 +432,7 @@ func (a *App) cmdHosts(args []string) error {
 			PairingURL string    `json:"pairingURL"`
 			ExpiresAt  time.Time `json:"expiresAt"`
 		}
-		data, _, err := client.call(ctx, http.MethodPost, "/api/v1/pairings", nil, map[string]any{"name": "Agenthail host", "scopes": []string{"read", "control"}}, nil)
+		data, _, err := client.call(ctx, http.MethodPost, "/api/v1/pairings", nil, map[string]any{"name": "Agenthail host", "scopes": []string{"read", "control", registry.HostScope}}, nil)
 		if err != nil {
 			return fmt.Errorf("create host invite: %w", err)
 		}

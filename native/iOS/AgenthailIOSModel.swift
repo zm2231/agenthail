@@ -66,6 +66,7 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var creationWarning: String?
     @Published var pendingControls: Set<String> = []
     @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
+    @Published private(set) var fetchedSubagents = SubagentPageCache()
 
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
 
@@ -105,6 +106,26 @@ final class AgenthailIOSModel: ObservableObject {
 
     func clearTurnSettings(for sessionID: String) {
         turnSettingsDrafts.removeValue(forKey: sessionID)
+    }
+
+    /// Fetches the direct subagents a session list only counts, so they can
+    /// be shown and opened.
+    func loadSubagents(of session: SessionState) async {
+        guard let api else { return }
+        guard (session.hiddenSubagents?.count ?? 0) > 0 else {
+            fetchedSubagents.drop(session.id)
+            return
+        }
+        do {
+            let loaded = try await api.subagents(of: session.id)
+            if !Task.isCancelled { fetchedSubagents.store(loaded, for: session.id) }
+        } catch {
+            if !Task.isCancelled { fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id) }
+        }
+    }
+
+    func subagents(of sessionID: String) -> [SessionState] {
+        SessionFamilies.children(of: sessionID, listed: snapshot?.sessions ?? [], fetched: fetchedSubagents.children(of: sessionID))
     }
 
     func queuedInstructions() async throws -> [QueueState] {
@@ -857,13 +878,14 @@ final class AgenthailIOSModel: ObservableObject {
         case "session.queue":
             guard let id = event.data.sessionId, let count = event.data.queueCount,
                   let index = current.sessions.firstIndex(where: { $0.id == id }) else { return }
-            current.sessions[index] = Self.applyingQueueCount(count, to: current.sessions[index], codexRecentHours: current.codexRecentHours, now: Date())
+            current.sessions[index].queueCount = count
             snapshot = current
         case "session.removed":
             guard let id = event.data.sessionId else { _ = await refresh(); return }
             current.sessions.removeAll { $0.id == id }
             current.totalSessions = current.sessions.count
             snapshot = current
+            fetchedSubagents.sessionRemoved(id, unlisted: event.data.reason == "unlisted")
             if let next = event.data.rekeyedTo { followRekeys([id: next]) }
         case "surface.health":
             guard let name = event.data.surface, let health = event.data.health,
@@ -881,7 +903,7 @@ final class AgenthailIOSModel: ObservableObject {
                   let reason = event.data.reason,
                   let at = event.data.at else { return }
             var problems = current.deliveryProblems ?? []
-            let problem = DeliveryProblem(deliveryId: deliveryId, sessionId: sessionId, sourceSessionId: event.data.sourceSessionId, message: message, reason: reason, status: event.data.status, at: at)
+            let problem = DeliveryProblem(deliveryId: deliveryId, sessionId: sessionId, sourceSessionId: event.data.sourceSessionId, attentionSessionId: event.data.attentionSessionId, message: message, reason: reason, status: event.data.status, at: at)
             problems.removeAll { $0.deliveryId == deliveryId }
             problems.insert(problem, at: 0)
             current.deliveryProblems = Array(problems.prefix(50))
@@ -893,32 +915,6 @@ final class AgenthailIOSModel: ObservableObject {
         default:
             return
         }
-    }
-
-    static func applyingQueueCount(_ count: Int, to session: SessionState, codexRecentHours: Int, now: Date) -> SessionState {
-        var updated = session
-        updated.queueCount = count
-        func activeWithin(hours: Int) -> Bool {
-            guard let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) else { return false }
-            return now.timeIntervalSince(date) <= TimeInterval(hours) * 3600
-        }
-        switch session.surface {
-        case "claude":
-            if count > 0 { (updated.current, updated.currentReason) = (true, "queued") }
-            else if !session.open { (updated.current, updated.currentReason) = (false, nil) }
-            else { (updated.current, updated.currentReason) = (true, session.isWorking ? "working" : "open") }
-        case "codex":
-            if session.isWorking { (updated.current, updated.currentReason) = (true, "working") }
-            else if count > 0 { (updated.current, updated.currentReason) = (true, "queued") }
-            else if session.status != "notLoaded" && activeWithin(hours: codexRecentHours) { (updated.current, updated.currentReason) = (true, "recent") }
-            else { (updated.current, updated.currentReason) = (false, nil) }
-        default:
-            if session.isWorking { (updated.current, updated.currentReason) = (true, "working") }
-            else if count > 0 { (updated.current, updated.currentReason) = (true, "queued") }
-            else if activeWithin(hours: 24) { (updated.current, updated.currentReason) = (true, "recent") }
-            else { (updated.current, updated.currentReason) = (false, nil) }
-        }
-        return updated
     }
 
     private func startSessionStream(_ id: String) {

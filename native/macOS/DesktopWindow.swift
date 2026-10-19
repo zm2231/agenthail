@@ -1889,6 +1889,7 @@ struct DetailsTab: View {
         .task(id: catalogNeeded) {
             if catalogNeeded != nil { await model.loadModelCatalog(for: session) }
         }
+        .task(id: SubagentFetchKey(session, revision: model.fetchedSubagents.revision(session.id))) { await model.loadSubagents(of: session) }
     }
 
     private var canControl: Bool { !session.isReadOnly && pane.removedSession == nil }

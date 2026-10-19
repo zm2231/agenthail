@@ -632,10 +632,11 @@ type LocalStatusSource interface {
 	LocalStatus(ctx context.Context, session Session) (Session, error)
 }
 
-// CatalogListCompleteness declares whether a successful List result is a
-// complete enumeration suitable for omission reconciliation.
-type CatalogListCompleteness interface {
-	CatalogListComplete() bool
+// CatalogLister lists sessions for the daemon catalog and reports whether the
+// result enumerates every session the runtime holds. Only a complete result
+// retires the sessions it omits. Adapters without it list completely.
+type CatalogLister interface {
+	CatalogList(ctx context.Context) ([]Session, bool, error)
 }
 
 func DeriveName(explicit, preview string, maxLen int) string {

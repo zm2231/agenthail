@@ -25,6 +25,7 @@ func (c *Codex) reconcileLocalStatus(session *surface.Session) {
 	}
 	info, err := os.Stat(path)
 	if err != nil {
+		session.Transcript = ""
 		return
 	}
 	session.Transcript = path

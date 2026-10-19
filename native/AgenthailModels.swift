@@ -205,6 +205,8 @@ struct SessionState: Codable, Identifiable, Hashable {
     var runtime: SessionRuntime? = nil
     var subagent: SubagentIdentity? = nil
     var subagents: SubagentRollup? = nil
+    var hiddenSubagents: SubagentRollup? = nil
+    var listed: Bool? = nil
     var host: SessionHost? = nil
     var unavailableReason: String? = nil
     var transport: String? = nil
@@ -301,6 +303,78 @@ struct SessionFamily: Identifiable, Equatable {
     }
 }
 
+/// Refetches a session's subagents when it changes, its subagent counts do,
+/// or the catalog reports a change among its hidden subagents.
+struct SubagentFetchKey: Hashable {
+    let sessionID: String
+    let subagents: SubagentRollup?
+    let hidden: SubagentRollup?
+    let revision: Int
+
+    init(_ session: SessionState, revision: Int) {
+        sessionID = session.id
+        subagents = session.subagents
+        hidden = session.hiddenSubagents
+        self.revision = revision
+    }
+}
+
+/// The fetched subagent pages of the few sessions most recently shown; a
+/// parent's page can run to hundreds of kilobytes.
+struct SubagentPageCache {
+    static let capacity = 4
+    private(set) var errors: [String: String] = [:]
+    private var rows: [String: [SessionState]] = [:]
+    private var order: [String] = []
+    private var revisions: [String: Int] = [:]
+
+    func children(of parentID: String) -> [SessionState] { rows[parentID] ?? [] }
+    func revision(_ parentID: String) -> Int { revisions[parentID] ?? 0 }
+    func loading(_ parent: SessionState) -> Bool { (parent.hiddenSubagents?.count ?? 0) > 0 && rows[parent.id] == nil && errors[parent.id] == nil }
+    func session(_ id: String) -> SessionState? { rows.values.lazy.flatMap { $0 }.first { $0.id == id } }
+
+    mutating func store(_ sessions: [SessionState], for parentID: String) {
+        rows[parentID] = sessions
+        errors[parentID] = nil
+        touch(parentID)
+    }
+
+    mutating func fail(_ message: String, for parentID: String) {
+        errors[parentID] = message
+        touch(parentID)
+    }
+
+    mutating func drop(_ parentID: String) {
+        rows[parentID] = nil
+        errors[parentID] = nil
+        revisions[parentID] = nil
+        order.removeAll { $0 == parentID }
+    }
+
+    /// A device's catalog stream reports a hidden subagent's arrival or change
+    /// only as an unlisted removal without its parent, so an unknown one
+    /// refetches every cached page.
+    mutating func sessionRemoved(_ id: String, unlisted: Bool) {
+        drop(id)
+        let parents = rows.filter { $0.value.contains { $0.id == id } }.map(\.key)
+        for parent in parents { rows[parent]?.removeAll { $0.id == id } }
+        for parent in parents.isEmpty && unlisted ? Array(rows.keys) : parents {
+            revisions[parent, default: 0] += 1
+        }
+    }
+
+    private mutating func touch(_ parentID: String) {
+        order.removeAll { $0 == parentID }
+        order.append(parentID)
+        while order.count > Self.capacity {
+            let evicted = order.removeFirst()
+            rows[evicted] = nil
+            errors[evicted] = nil
+            revisions[evicted] = nil
+        }
+    }
+}
+
 enum SessionFamilies {
     static func build(_ sessions: [SessionState]) -> [SessionFamily] {
         let ids = Set(sessions.map(\.id))
@@ -326,13 +400,22 @@ enum SessionFamilies {
             }
             walk(root.id, depth: 1)
             let observed = root.subagents ?? SubagentRollup(count: 0, working: 0)
+            let counted = members.filter { $0.session.listed != false }
             return SessionFamily(
                 root: root,
                 members: members,
-                subagentCount: members.count + observed.count,
-                workingSubagents: members.filter { $0.session.isWorking }.count + observed.working
+                subagentCount: counted.count + observed.count,
+                workingSubagents: counted.filter { $0.session.isWorking }.count + observed.working
             )
         }
+    }
+
+    /// The direct subagents of a session: the fetched page, with any row the
+    /// live session list holds taking the place of its fetched copy.
+    static func children(of parentID: String, listed: [SessionState], fetched: [SessionState]) -> [SessionState] {
+        let live = listed.filter { $0.subagent?.parentId == parentID }
+        let liveIDs = Set(live.map(\.id))
+        return fetched.filter { $0.subagent?.parentId == parentID && !liveIDs.contains($0.id) } + live
     }
 
     static func subagentSummary(_ family: SessionFamily) -> String {
@@ -562,6 +645,7 @@ struct DeliveryProblem: Decodable, Identifiable, Equatable {
     let deliveryId: Int64
     let sessionId: String
     let sourceSessionId: String?
+    let attentionSessionId: String?
     let message: String
     let reason: String
     let status: String?
@@ -643,6 +727,7 @@ struct DashboardSnapshot: Decodable {
     var surfaces: [SurfaceState]
     var sessions: [SessionState]
     var totalSessions: Int
+    var nextCursor: String? = nil
     let queue: [QueueState]
     let channels: [ChannelState]
     let relays: [RelayState]
@@ -1031,6 +1116,7 @@ struct CatalogStreamData: Decodable {
     let deliveryId: Int64?
     let queueCount: Int?
     let sourceSessionId: String?
+    let attentionSessionId: String?
     let message: String?
     let reason: String?
     let status: String?

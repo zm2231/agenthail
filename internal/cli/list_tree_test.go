@@ -21,7 +21,7 @@ func TestListFamiliesNestsSubagentsAndCapsFamilies(t *testing.T) {
 	for _, row := range rows {
 		got = append(got, listRowName(row))
 	}
-	if want := []string{"Other root", "Lead", "Ada", "Cy", "Orphan task", "Claude lead"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"Other root", "Lead", "Ada", "Cy", "Claude lead"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %q, want %q", got, want)
 	}
 	if rows[3].depth != 2 || rows[2].depth != 1 || rows[1].depth != 0 {

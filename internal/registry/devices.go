@@ -279,7 +279,7 @@ func normalizeDeviceScopes(scopes []string) ([]string, error) {
 	set := map[string]bool{}
 	for _, scope := range scopes {
 		scope = strings.TrimSpace(scope)
-		if scope != "read" && scope != "control" && scope != "settings" {
+		if scope != "read" && scope != "control" && scope != "settings" && scope != HostScope {
 			return nil, fmt.Errorf("unsupported device scope %q", scope)
 		}
 		set[scope] = true
@@ -297,6 +297,20 @@ func splitDeviceScopes(value string) []string {
 		return []string{}
 	}
 	return strings.Split(value, ",")
+}
+
+// HostScope marks a token a paired Agenthail host uses to mirror this host's
+// catalog. It grants nothing by itself; it only gives the catalog stream every
+// row instead of the session list.
+const HostScope = "host"
+
+func (d Device) IsHost() bool {
+	for _, scope := range d.Scopes {
+		if scope == HostScope {
+			return true
+		}
+	}
+	return false
 }
 
 func deviceHasScope(scopes []string, required string) bool {

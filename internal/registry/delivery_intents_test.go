@@ -424,6 +424,64 @@ func TestFailedPersistedRelayCompletionDoesNotNotifyTheRelaySource(t *testing.T)
 	}
 }
 
+func TestDeliveryProblemFlagsTheSenderUntilItIsTold(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "sender", "target")
+	if err := r.EnsureOperatorSession(); err != nil {
+		t.Fatal(err)
+	}
+	attention := func(id int64) (string, bool) {
+		t.Helper()
+		problems, err := r.ListDeliveryProblems()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, problem := range problems {
+			if problem.DeliveryID == id {
+				return problem.AttentionSessionID, true
+			}
+		}
+		return "", false
+	}
+	agent, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: "target", Status: DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.FailDeliveryIntent(agent.ID, "transport failed"); err != nil {
+		t.Fatal(err)
+	}
+	if flagged, listed := attention(agent.ID); !listed || flagged != "sender" {
+		t.Fatalf("failed agent send flagged %q listed=%v, want the sender", flagged, listed)
+	}
+	noticeID, _, err := r.QueueDeliveryFailureNotice(agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := r.ClaimNextMessage("sender", time.Now())
+	if err != nil || claimed == nil || claimed.ID != noticeID {
+		t.Fatalf("claimed=%+v notice=%d err=%v", claimed, noticeID, err)
+	}
+	if flagged, _ := attention(agent.ID); flagged != "sender" {
+		t.Fatalf("sender flag cleared before the notice landed: %q", flagged)
+	}
+	if err := r.AckMessage(noticeID); err != nil {
+		t.Fatal(err)
+	}
+	if flagged, listed := attention(agent.ID); !listed || flagged != "" {
+		t.Fatalf("told sender still flagged %q listed=%v", flagged, listed)
+	}
+	person, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: OperatorSessionID, TargetSessionID: "target", Status: DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.FailDeliveryIntent(person.ID, "transport failed"); err != nil {
+		t.Fatal(err)
+	}
+	if flagged, listed := attention(person.ID); !listed || flagged != "" {
+		t.Fatalf("person's failed send flagged %q listed=%v, want listed without a session", flagged, listed)
+	}
+}
+
 func TestRetriedFailedDeliveryIsANewAttempt(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "sender", "target")
