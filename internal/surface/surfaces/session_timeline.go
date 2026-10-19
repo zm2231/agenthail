@@ -294,6 +294,13 @@ func codexOpaqueTimelineItem(record map[string]any) *surface.TimelineItem {
 	switch typ {
 	case "message", "agent_message", "reasoning", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "web_search_call", "user_message", "token_count":
 		return nil
+	case "item_started", "item_completed":
+		// These mirror response_item records that already render as messages.
+		item, _ := payload["item"].(map[string]any)
+		switch str(item, "type") {
+		case "UserMessage", "AgentMessage", "Reasoning":
+			return nil
+		}
 	}
 	text := typ + ": " + timelineValue(payload)
 	truncated := false

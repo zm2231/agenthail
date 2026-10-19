@@ -121,6 +121,15 @@ func TestSentImagesRenderAsAttachmentsWithoutRuntimePathNoise(t *testing.T) {
 			want:       []string{"message:user:what is this?", "attachment:user:Image attachment"},
 		},
 		{
+			name:   "codex item records that mirror the sent turn",
+			source: "codex",
+			transcript: `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"what is this?"},{"type":"input_image","image_url":"data:image/png;base64,` + testPNG + `"}]}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","content":[{"type":"text","text":"what is this?"},{"type":"local_image","path":"/daemon/uploads/shot.png"}]}}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"A red square."}]}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","content":[{"type":"Text","text":"A red square."}]}}}`,
+			want: []string{"message:user:what is this?", "attachment:user:Image attachment", "message:assistant:A red square."},
+		},
+		{
 			name:       "codex image without text",
 			source:     "codex",
 			transcript: `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<image name=[Image #1]>"},{"type":"input_image","image_url":"data:image/png;base64,` + testPNG + `"},{"type":"input_text","text":"</image>"}]}}`,
