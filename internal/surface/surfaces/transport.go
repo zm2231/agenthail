@@ -166,7 +166,7 @@ func processGroupCommand(ctx context.Context, path string, args ...string) *exec
 
 func loadCookieHeader(parent context.Context, source CookieSource) (string, error) {
 	if source.Bridge == "" {
-		return "", nil
+		return "", fmt.Errorf("cookie bridge not found (set AGENTHAIL_COOKIE_BRIDGE or install cookie.mjs alongside agenthail)")
 	}
 	if source.Signin.Browser == "" {
 		return "", fmt.Errorf("cookie bridge: no browser profile resolved")

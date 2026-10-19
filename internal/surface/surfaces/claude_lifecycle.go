@@ -144,6 +144,10 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 		}
 		output, err := c.backgroundCommand(ctx, record.Cwd, action, record.ID)
 		if err != nil {
+			var path *fs.PathError
+			if surface.IsDeliveryUnavailable(err) || errors.As(err, &path) {
+				return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude %s: %w", action, err))
+			}
 			if action != "logs" {
 				return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude %s: %w: %s", action, err, string(output)))
 			}

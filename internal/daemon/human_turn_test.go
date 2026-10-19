@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -301,19 +302,53 @@ func (f *humanTurnFixture) withoutWebBridgeSidecar(t *testing.T) {
 	f.d.Surfaces = []surface.Surface{f.claude}
 }
 
+// withoutCookieBridge installs a sidecar that records any request it receives
+// but no cookie bridge, so the request has no credentials to send.
+func (f *humanTurnFixture) withoutCookieBridge(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	sent := filepath.Join(dir, "sent")
+	sidecar := filepath.Join(dir, "sidecar.py")
+	if err := os.WriteFile(sidecar, []byte("open("+strconv.Quote(sent)+", \"a\").write(\"request\\n\")\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_SIDECAR", sidecar)
+	t.Setenv("AGENTHAIL_COOKIE_BRIDGE", "")
+	t.Setenv("PATH", "/usr/bin:/bin")
+	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, f.home)}
+	f.d.Surfaces = []surface.Surface{f.claude}
+	return sent
+}
+
 func TestPersonSendThatCannotStartFailsVisiblyWithoutAPeerCopy(t *testing.T) {
-	f := newHumanTurnFixture(t)
-	f.withoutWebBridgeSidecar(t)
-	response := serveDashboardRequest(dashboardRouter(f.d), http.MethodPost, "/api/action", `{"action":"send","author":"person","sessionId":"conversation-bridge","message":"never sent"}`)
-	if response.Code == http.StatusOK || !strings.Contains(response.Body.String(), "sidecar not found") || strings.Contains(response.Body.String(), string(surface.EvidenceSubmitted)) {
-		t.Fatalf("status=%d body=%s", response.Code, response.Body)
-	}
-	if len(f.claude.native) != 0 {
-		t.Fatalf("a person's message was copied to the peer socket: %q", f.claude.native)
-	}
-	history, err := f.r.ListHistory(5, f.bridged.ID)
-	if err != nil || len(history) == 0 || history[0].Kind != "failed" {
-		t.Fatalf("history=%+v err=%v", history, err)
+	for _, tc := range []struct {
+		name    string
+		missing string
+		setup   func(*humanTurnFixture, *testing.T) string
+	}{
+		{"no sidecar", "sidecar not found", func(f *humanTurnFixture, t *testing.T) string { f.withoutWebBridgeSidecar(t); return "" }},
+		{"no cookie bridge", "cookie bridge not found", (*humanTurnFixture).withoutCookieBridge},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newHumanTurnFixture(t)
+			sent := tc.setup(f, t)
+			response := serveDashboardRequest(dashboardRouter(f.d), http.MethodPost, "/api/action", `{"action":"send","author":"person","sessionId":"conversation-bridge","message":"never sent"}`)
+			if response.Code == http.StatusOK || !strings.Contains(response.Body.String(), tc.missing) || strings.Contains(response.Body.String(), string(surface.EvidenceSubmitted)) {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body)
+			}
+			if len(f.claude.native) != 0 {
+				t.Fatalf("a person's message was copied to the peer socket: %q", f.claude.native)
+			}
+			if sent != "" {
+				if _, err := os.Stat(sent); !os.IsNotExist(err) {
+					t.Fatalf("a request went out without credentials: %v", err)
+				}
+			}
+			history, err := f.r.ListHistory(5, f.bridged.ID)
+			if err != nil || len(history) == 0 || history[0].Kind != "failed" {
+				t.Fatalf("history=%+v err=%v", history, err)
+			}
+		})
 	}
 }
 
