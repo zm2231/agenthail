@@ -57,7 +57,10 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 			d.log.Printf("watched session %s: %s", d.resolveDisplay(session.ID), adapterErr)
 			continue
 		}
-		if relayTargetInactive(session) || (queueCounts[session.ID] == 0 && claudeProcessExited(session)) {
+		// An exited Claude session stays a delivery target whatever its stored
+		// status, since a send resumes it; it is observed only to drain its queue.
+		exited := claudeProcessExited(session)
+		if (exited && queueCounts[session.ID] == 0) || (!exited && relayTargetInactive(session)) {
 			d.syncRelays(ctx, adapter, session)
 			continue
 		}

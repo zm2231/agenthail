@@ -1232,6 +1232,15 @@ func TestRecordWaitingAnnouncesEachQuestionUntilMarked(t *testing.T) {
 	}
 }
 
+// registerCatalogSession registers session as discovery does, with the
+// catalog row that marks it a running session.
+func registerCatalogSession(t *testing.T, r *Registry, session surface.Session) {
+	t.Helper()
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, CatalogEvent{DedupeKey: "session.upserted:" + session.ID, Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // holdAdapter serves one runtime kind and declares only whether it steers.
 type holdAdapter struct {
 	surface.Surface
@@ -1245,9 +1254,7 @@ func (a holdAdapter) Capabilities() surface.Capabilities  { return surface.Capab
 
 func TestQueueHoldFollowsTheDrainRules(t *testing.T) {
 	r := openTestRegistry(t)
-	if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindCodex, Transport: "app-server", RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
-		t.Fatal(err)
-	}
+	registerCatalogSession(t, r, surface.Session{ID: "target", Surface: surface.KindCodex, Transport: "app-server", RuntimeKind: surface.RuntimeCodexAppServer})
 	steers := surface.Adapters{holdAdapter{kind: surface.RuntimeCodexAppServer, steer: true}, holdAdapter{kind: surface.RuntimeCodexDesktop, steer: true}}
 	if err := r.SaveRuntimeState("target", surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}); err != nil {
 		t.Fatal(err)
@@ -1324,9 +1331,7 @@ func TestQueueHoldFollowsTheDrainRules(t *testing.T) {
 		want      QueueHold
 	}{{"desktop", surface.RuntimeCodexDesktop, ""}, {"managed", surface.RuntimeCodexAppServer, QueueHeldUnloaded}} {
 		id := "unloaded-" + unloaded.transport
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, Transport: unloaded.transport, RuntimeKind: unloaded.runtime}); err != nil {
-			t.Fatal(err)
-		}
+		registerCatalogSession(t, r, surface.Session{ID: id, Surface: surface.KindCodex, Transport: unloaded.transport, RuntimeKind: unloaded.runtime})
 		if err := r.SaveRuntimeState(id, surface.TurnObservation{Status: surface.SessionStatus("notLoaded")}); err != nil {
 			t.Fatal(err)
 		}
@@ -1340,10 +1345,36 @@ func TestQueueHoldFollowsTheDrainRules(t *testing.T) {
 	}
 }
 
+func TestQueueHoldReadsADepartedTargetOffline(t *testing.T) {
+	r := openTestRegistry(t)
+	targets := []struct {
+		session surface.Session
+		want    QueueHold
+	}{
+		{surface.Session{ID: "departed-codex", Surface: surface.KindCodex, Transport: "app-server", RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.StatusBusy}, QueueHeldOffline},
+		{surface.Session{ID: "departed-claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", PID: 4242, Status: surface.StatusBusy}, ""},
+	}
+	for _, target := range targets {
+		if err := r.RegisterSession(target.session); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.SaveRuntimeState(target.session.ID, surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}); err != nil {
+			t.Fatal(err)
+		}
+		id, err := r.QueueMessageWithOptions(target.session.ID, "hello", "", surface.SendOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if item, err := r.QueueItem(id, nil); err != nil || item.HeldBy != target.want {
+			t.Fatalf("%s: item=%+v err=%v, want held by %q", target.session.ID, item, err, target.want)
+		}
+	}
+}
+
 func TestRefusedDeferralHoldsTheMessageAndAnnouncesOncePerRefusal(t *testing.T) {
 	r := openTestRegistry(t)
 	for _, id := range []string{"sender", "target"} {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: 4242}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1447,7 +1478,7 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 		t.Helper()
 		r := openTestRegistry(t)
 		for _, id := range []string{"sender", "target"} {
-			if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+			if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: 4242}); err != nil {
 				t.Fatal(err)
 			}
 		}

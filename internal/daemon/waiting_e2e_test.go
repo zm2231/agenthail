@@ -558,7 +558,8 @@ func TestQueuedSteerToAClaudeSessionWithoutABridgeWaitsForTheTurn(t *testing.T) 
 		want   registry.QueueHold
 	}{{"", registry.QueueHeldBusy}, {"session_steerable", ""}} {
 		id := "conversation-bridge-" + test.bridge
-		if err := store.RegisterSession(surface.Session{ID: id, Bridge: test.bridge, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", Status: surface.StatusBusy}); err != nil {
+		session := surface.Session{ID: id, Bridge: test.bridge, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", Status: surface.StatusBusy}
+		if _, _, err := store.RecordCatalogSession(registry.CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:" + id, Type: "session.upserted", EntityID: id, Payload: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
 		if err := store.SaveRuntimeState(id, surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}); err != nil {

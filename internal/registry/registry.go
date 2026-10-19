@@ -1612,8 +1612,11 @@ const (
 )
 
 // queueTargetStatus is the target's last observed status, as the daemon
-// drains by it.
-const queueTargetStatus = `COALESCE(CASE WHEN sr.turn_observed=1 THEN sr.last_status END,s.status,'unknown')`
+// drains by it. A target the catalog no longer holds, or that discovery
+// retired, is offline: its stored status and turn are the last observation,
+// not a running process. A departed Claude session with a process id is the
+// exception, since the daemon resumes it to drain its queue.
+const queueTargetStatus = `CASE WHEN s.id IS NOT NULL AND (s.status='offline' OR NOT EXISTS (SELECT 1 FROM catalog_sessions cs WHERE cs.session_id=s.id)) THEN CASE WHEN s.surface='claude' AND s.pid>0 THEN 'idle' ELSE 'offline' END ELSE COALESCE(CASE WHEN sr.turn_observed=1 THEN sr.last_status END,s.status,'unknown') END`
 
 // queueSteerRow matches a message a busy turn can take as a steer.
 const queueSteerRow = `%[1]s.busy_delivery='steer' AND %[1]s.model='' AND (%[1]s.turn_options='' OR %[1]s.turn_options='{}')`
