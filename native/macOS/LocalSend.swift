@@ -5,6 +5,9 @@ struct LocalSend: Identifiable, Equatable {
     let text: String
     let sentAt: Date
     var status: String?
+    var busyDelivery: String? = nil
+    var turnSettings = TurnSettings()
+    var failure: String? = nil
 
     static let clockSkew: TimeInterval = 5
 

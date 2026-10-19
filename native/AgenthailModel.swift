@@ -637,7 +637,7 @@ final class AgenthailModel: ObservableObject {
             idempotencyKey = UUID().uuidString
             pendingSendRequests[sessionID] = PendingSendRequest(busyDelivery: busyDelivery, turnSettings: turnSettings, message: text, idempotencyKey: idempotencyKey)
         }
-        let pending = LocalSend(text: text, sentAt: Date(), status: nil)
+        let pending = LocalSend(text: text, sentAt: Date(), status: nil, busyDelivery: busyDelivery, turnSettings: turnSettings)
         localSends[sessionID, default: []].append(pending)
         Task {
             do {
@@ -648,12 +648,21 @@ final class AgenthailModel: ObservableObject {
                 operationError = nil
                 completion?(true)
             } catch {
-                localSends[sessionID]?.removeAll { $0.id == pending.id }
-                restoreToComposer(message.trimmingCharacters(in: .whitespacesAndNewlines), attachments: attachments, sessionID: sessionID)
-                operationError = AgenthailAPIError.userMessage(error)
+                if let index = localSends[sessionID]?.firstIndex(where: { $0.id == pending.id }) {
+                    localSends[sessionID]?[index].failure = AgenthailAPIError.userMessage(error)
+                }
                 completion?(false)
             }
         }
+    }
+
+    func retrySend(_ send: LocalSend, in sessionID: String) {
+        discardSend(send, in: sessionID)
+        self.send(send.text, to: sessionID, busyDelivery: send.busyDelivery, turnSettings: send.turnSettings)
+    }
+
+    func discardSend(_ send: LocalSend, in sessionID: String) {
+        localSends[sessionID]?.removeAll { $0.id == send.id }
     }
 
     @Published private(set) var modelCatalog: [String: [ModelOption]] = [:]

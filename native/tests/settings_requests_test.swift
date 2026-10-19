@@ -40,6 +40,18 @@ struct SettingsRequestsTest {
         model.send("typed by a person", to: "claude-target")
         let composed = await waitFor { $0.path == "/api/v1/actions" && $0.body["action"] as? String == "send" }
         check(composed?.body["author"] as? String == "person" && composed?.body["message"] as? String == "typed by a person", "the composer declares a person's message: \(String(describing: composed?.body))")
+        RecordingProtocol.reset(failing: "/api/v1/actions")
+        model.send("synthetic send that fails once", to: "claude-target", busyDelivery: "queue")
+        let rejected = await waitFor { $0.path == "/api/v1/actions" && $0.body["message"] as? String == "synthetic send that fails once" }
+        let failedSend = await waitForSend(model) { $0.failure != nil }
+        check(failedSend?.text == "synthetic send that fails once" && failedSend?.failure == "codex launch failed", "a failed send stays in the transcript with the daemon's reason: \(String(describing: failedSend))")
+        check(model.draft(for: "claude-target").text.isEmpty, "a failed send is retried from the transcript, not restored to the composer")
+        RecordingProtocol.reset()
+        if let failedSend { model.retrySend(failedSend, in: "claude-target") }
+        let retried = await waitFor { $0.path == "/api/v1/actions" && $0.body["message"] as? String == "synthetic send that fails once" }
+        check(retried?.idempotencyKey != nil && retried?.idempotencyKey == rejected?.idempotencyKey && retried?.body["busyDelivery"] as? String == "queue", "a retry repeats the same request under the same idempotency key: \(String(describing: retried?.body))")
+        let delivered = await waitForSend(model) { $0.text == "synthetic send that fails once" && $0.status != nil }
+        check(delivered?.failure == nil && model.localSends["claude-target"]?.filter({ $0.text == "synthetic send that fails once" }).count == 1, "a successful retry replaces the failed send: \(String(describing: model.localSends["claude-target"]))")
         RecordingProtocol.reset()
         _ = await model.reply("notification reply", to: "claude-target", connectionTimeout: .seconds(1))
         let replied = await waitFor { $0.path == "/api/v1/actions" && $0.body["message"] as? String == "notification reply" }
@@ -91,6 +103,15 @@ struct SettingsRequestsTest {
     private static func waitFor(_ match: (RecordingProtocol.Request) -> Bool) async -> RecordingProtocol.Request? {
         for _ in 0..<40 {
             if let found = RecordingProtocol.requests.first(where: match) { return found }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return nil
+    }
+
+    @MainActor
+    private static func waitForSend(_ model: AgenthailModel, _ match: (LocalSend) -> Bool) async -> LocalSend? {
+        for _ in 0..<40 {
+            if let found = model.localSends["claude-target"]?.first(where: match) { return found }
             try? await Task.sleep(for: .milliseconds(50))
         }
         return nil
