@@ -41,18 +41,14 @@ func TestPresenceUsesEachRuntimesTruth(t *testing.T) {
 
 func testProcessStart(t *testing.T) string {
 	t.Helper()
-	if raw, err := os.ReadFile("/proc/self/stat"); err == nil {
-		ticks, ok := linuxProcessStartTicks(string(raw))
-		if !ok {
-			t.Fatal("unreadable /proc/self/stat")
-		}
+	if ticks, err := procStartTicks(os.Getpid()); err == nil {
 		return ticks
 	}
-	start, ok := claudeProcessStart(os.Getpid(), "lstart")
-	if !ok {
-		t.Fatal("ps lstart unavailable")
+	start, err := processStartTime(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
 	}
-	return start
+	return start.UTC().Format(claudeProcessStartLayout)
 }
 
 func TestClaudeOpenSessionsFollowTheSessionRecord(t *testing.T) {
@@ -104,5 +100,18 @@ func TestClaudeObserveTakesIdleFromTheSessionRecord(t *testing.T) {
 		if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "resumed" {
 			t.Fatalf("%s record observation=%+v err=%v", status, observation, err)
 		}
+	}
+	writePeerRecord(t, home, pid, map[string]any{"pid": pid, "sessionId": "conversation-1", "status": "waiting", "waitingFor": "input needed", "procStart": "1", "peerFeatures": []any{"notify_idle"}})
+	session.Status = surface.StatusBusy
+	observation, err = claude.Observe(context.Background(), session)
+	if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "resumed" || observation.WaitingOn != nil {
+		t.Fatalf("record from a reused pid observation=%+v err=%v", observation, err)
+	}
+	writePeerRecord(t, home, pid, map[string]any{"pid": pid, "sessionId": "conversation-1", "status": "idle", "procStart": "1", "peerFeatures": []any{"notify_idle"}})
+	if observation, err = claude.Observe(context.Background(), session); err != nil || observation.Status != surface.StatusBusy {
+		t.Fatalf("idle record from a reused pid observation=%+v err=%v", observation, err)
+	}
+	if _, err := claude.LocalStatus(context.Background(), *session); err == nil {
+		t.Fatal("LocalStatus applied a record from a reused pid")
 	}
 }

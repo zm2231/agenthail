@@ -534,12 +534,9 @@ func (c *Claude) LocalStatus(ctx context.Context, session surface.Session) (surf
 	if session.PID <= 0 {
 		return session, fmt.Errorf("claude session %s has no peer process", session.ID)
 	}
-	record, err := c.readPeerRecord(session.PID)
-	if err != nil {
-		return session, err
-	}
-	if str(record, "sessionId") != session.ID {
-		return session, fmt.Errorf("claude peer record for pid %d belongs to another session", session.PID)
+	record, live := c.liveRecord(session)
+	if !live {
+		return session, fmt.Errorf("claude pid %d no longer runs session %s", session.PID, session.ID)
 	}
 	c.applyRecordStatus(ctx, &session, record)
 	return session, nil
@@ -662,11 +659,8 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 // busy or idle; the transcript still supplies turn and reply evidence, and
 // observe supplies what a waiting record waits on.
 func (c *Claude) applyRecordObservation(sess *surface.Session, observation *surface.TurnObservation) {
-	if sess.PID <= 0 {
-		return
-	}
-	record, err := c.readPeerRecord(sess.PID)
-	if err != nil || str(record, "sessionId") != sess.ID {
+	record, live := c.liveRecord(*sess)
+	if !live {
 		return
 	}
 	status := claudePeerStatus(record)
@@ -701,18 +695,8 @@ func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.T
 // and "permission prompt" for a plan approval or a tool permission.
 // statusUpdatedAt is when it started waiting, so it names one question.
 func (c *Claude) recordWaiting(sess *surface.Session) *surface.Waiting {
-	if sess.PID <= 0 {
-		return nil
-	}
-	raw, err := os.ReadFile(c.peerRecordPath(sess.PID))
-	if err != nil {
-		return nil
-	}
-	var record map[string]any
-	if json.Unmarshal(raw, &record) != nil || str(record, "status") != "waiting" {
-		return nil
-	}
-	if str(record, "sessionId") != sess.ID {
+	record, live := c.liveRecord(*sess)
+	if !live || str(record, "status") != "waiting" {
 		return nil
 	}
 	kind := surface.WaitingApproval

@@ -4,9 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
-	"strconv"
-	"strings"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -29,11 +26,7 @@ func (c *Claude) Presence(sess surface.Session, input surface.PresenceInput) (bo
 func (c *Claude) OpenSessions(_ context.Context, sessions []surface.Session) map[string]bool {
 	open := map[string]bool{}
 	for _, session := range sessions {
-		if session.PID <= 0 {
-			continue
-		}
-		record, err := c.readPeerRecord(session.PID)
-		if err == nil && str(record, "sessionId") == session.ID && claudeRecordLive(record) {
+		if _, live := c.liveRecord(session); live {
 			open[session.ID] = true
 		}
 	}
@@ -52,47 +45,35 @@ func (c *Claude) readPeerRecord(pid int) (map[string]any, error) {
 	return record, nil
 }
 
-// Claude writes procStart as Linux start ticks from /proc/<pid>/stat, or as
-// UTC "ps -o lstart" text elsewhere.
+// liveRecord reads the session record of sess's process while that process
+// is still the one that wrote it for sess.
+func (c *Claude) liveRecord(sess surface.Session) (map[string]any, bool) {
+	if sess.PID <= 0 {
+		return nil, false
+	}
+	record, err := c.readPeerRecord(sess.PID)
+	if err != nil || str(record, "sessionId") != sess.ID || !claudeRecordLive(record) {
+		return nil, false
+	}
+	return record, true
+}
+
+// claudeRecordLive reports whether the record's process is running and is the
+// one that wrote it. Claude writes procStart as Linux start ticks from
+// /proc/<pid>/stat, or as "ps -o lstart" text elsewhere.
 func claudeRecordLive(record map[string]any) bool {
 	pid, _ := record["pid"].(float64)
 	if pid <= 0 || !claudeProcessAlive(int(pid)) {
 		return false
 	}
-	recorded := str(record, "procStart")
-	if recorded == "" {
+	started := str(record, "procStart")
+	if started == "" {
 		return true
 	}
-	actual, ok := claudeProcessStart(int(pid), recorded)
-	return ok && actual == strings.Join(strings.Fields(recorded), " ")
-}
-
-func claudeProcessStart(pid int, recorded string) (string, bool) {
-	if _, err := strconv.ParseUint(recorded, 10, 64); err == nil {
-		raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
-		if err != nil {
-			return "", false
-		}
-		return linuxProcessStartTicks(string(raw))
+	if isClockTicks(started) {
+		actual, err := procStartTicks(int(pid))
+		return err == nil && actual == started
 	}
-	command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
-	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
-	output, err := command.Output()
-	if err != nil {
-		return "", false
-	}
-	return strings.Join(strings.Fields(string(output)), " "), true
-}
-
-// The command name in /proc/<pid>/stat may contain spaces and parentheses.
-func linuxProcessStartTicks(stat string) (string, bool) {
-	end := strings.LastIndexByte(stat, ')')
-	if end < 0 {
-		return "", false
-	}
-	fields := strings.Fields(stat[end+1:])
-	if len(fields) < 20 {
-		return "", false
-	}
-	return fields[19], true
+	actual, err := processStartTime(int(pid))
+	return err == nil && sameClaudeProcessStart(str(record, "version"), started, actual.UTC().Format(claudeProcessStartLayout))
 }
