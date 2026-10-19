@@ -138,6 +138,10 @@ struct SessionState: Codable, Identifiable, Hashable {
         guard let host, host.state != "local" else { return nil }
         return host.name
     }
+    /// The remote host's name without a DNS domain, for a one-line badge.
+    var shortRemoteHostName: String? {
+        remoteHostName.map { name in String(name.split(separator: ".", maxSplits: 1).first ?? Substring(name)) }
+    }
     var isUnavailable: Bool { remoteHostName != nil && !(unavailableReason ?? "").isEmpty }
 }
 

@@ -156,7 +156,7 @@ struct SessionSidebar: View {
                         let shown = expanded ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: pane.selectedSessionID)
                         let single = project.checkouts.count == 1 ? project.checkouts.first : nil
                         VStack(alignment: .leading, spacing: 1) {
-                            ProjectHeaderView(name: project.name, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived)
+                            ProjectHeaderView(name: project.name, host: project.host, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived)
                                 .contextMenu {
                                     if let identity = project.identity {
                                         Button(project.archived ? "Unarchive Project" : "Archive Project") { model.setProjectArchived(identity.id, !project.archived) }
@@ -384,6 +384,7 @@ struct SidebarCaption: View {
 
 struct ProjectHeaderView: View {
     let name: String
+    var host: String? = nil
     var branch: String? = nil
     var dirty = false
     var archived = false
@@ -400,6 +401,9 @@ struct ProjectHeaderView: View {
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(DesktopPalette.text)
                 .lineLimit(1)
+            if let host {
+                HostBadge(name: host)
+            }
             if let branch {
                 Text(branch)
                     .font(.system(size: 11, design: .monospaced))
@@ -414,6 +418,26 @@ struct ProjectHeaderView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
+    }
+}
+
+/// A one-line host label for remote sessions and projects. It truncates
+/// rather than wrapping so it never squeezes the row's status.
+struct HostBadge: View {
+    let name: String
+    var unavailable = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: unavailable ? "wifi.slash" : "server.rack")
+            Text(name)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .font(.system(size: 10.5))
+        .foregroundStyle(unavailable ? DesktopPalette.amber : DesktopPalette.text2)
+        .frame(maxWidth: 96, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -454,14 +478,9 @@ struct SessionRowView: View {
             Text(title ?? session.title)
                 .lineLimit(1)
                 .foregroundStyle(!session.isUnavailable && (session.open || session.isWorking) ? DesktopPalette.text : DesktopPalette.text2)
-            if let host = session.remoteHostName {
-                HStack(spacing: 3) {
-                    Image(systemName: session.isUnavailable ? "wifi.slash" : "server.rack")
-                    Text(host)
-                }
-                .font(.system(size: 10.5))
-                .foregroundStyle(session.isUnavailable ? DesktopPalette.amber : DesktopPalette.text2)
-                .help(session.unavailableReason ?? "On \(host)")
+            if let host = session.shortRemoteHostName {
+                HostBadge(name: host, unavailable: session.isUnavailable)
+                    .help(session.unavailableReason ?? "On \(session.remoteHostName ?? host)")
             }
             Spacer(minLength: 4)
             if let family, family.subagentCount > 0 {

@@ -247,12 +247,11 @@ struct ConversationListView: View {
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: project.identity == nil ? "tray" : project.archived ? "archivebox" : "folder")
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(project.name)
-                                    .font(.subheadline.weight(.semibold))
-                                if let root = project.identity?.rootPath {
-                                    Text(root).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                                }
+                            Text(project.name)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                            if let host = project.host {
+                                IOSHostBadge(name: host)
                             }
                             Spacer(minLength: 0)
                             Image(systemName: collapsed ? "chevron.right" : "chevron.down")
@@ -271,7 +270,7 @@ struct ConversationListView: View {
                             }
                         }
                     }
-                    .accessibilityLabel("Project \(project.name)")
+                    .accessibilityLabel(project.host.map { "Project \(project.name) on \($0)" } ?? "Project \(project.name)")
                     .accessibilityValue(collapsed ? "Collapsed" : "Expanded")
                     .accessibilityIdentifier("project-" + project.id)
                 }
@@ -1089,18 +1088,25 @@ struct IOSSessionRow: View {
             let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
             layout {
                 Text(SessionStyle.agentName(session.surface)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                if let host = session.remoteHostName {
-                    Label(host, systemImage: session.isUnavailable ? "wifi.slash" : "server.rack")
-                        .font(.caption)
-                        .foregroundStyle(session.isUnavailable ? Color.orange : Color.secondary)
+                    .lineLimit(1).fixedSize()
+                if let host = session.shortRemoteHostName {
+                    IOSHostBadge(name: host, unavailable: session.isUnavailable)
                         .accessibilityLabel(session.isUnavailable ? "Unavailable on \(host)" : "On \(host)")
                 }
                 if session.isWorking {
-                    Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(SessionStyle.accent)
+                    HStack(spacing: 4) {
+                        Image(systemName: "waveform")
+                        Text("Working")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(SessionStyle.accent)
+                    .lineLimit(1)
+                    .fixedSize()
                 }
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
                 if let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
                     Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).fixedSize()
                 }
             }
             if session.isUnavailable, let reason = session.unavailableReason {
@@ -1120,6 +1126,25 @@ struct IOSSessionRow: View {
         }
         .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A one-line host label for remote sessions and projects. It truncates
+/// rather than wrapping so it never squeezes the row's status.
+struct IOSHostBadge: View {
+    let name: String
+    var unavailable = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: unavailable ? "wifi.slash" : "server.rack").imageScale(.small)
+            Text(name).lineLimit(1).truncationMode(.tail)
+        }
+        .font(.caption)
+        .foregroundStyle(unavailable ? Color.orange : Color.secondary)
+        .frame(maxWidth: 110, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .layoutPriority(-1)
     }
 }
 

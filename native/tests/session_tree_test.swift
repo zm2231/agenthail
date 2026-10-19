@@ -102,8 +102,17 @@ struct SessionTreeTest {
         let archiveTree = SessionTree.build(sessions + [hidden, loose], filter: .all, attentionSessionIDs: [])
         expect(archiveTree.counts == [.running: 1, .recent: 4, .all: 5, .archived: 1], "archived sessions leave every scope but Archived: \(archiveTree.counts)")
         expect(!ids(archiveTree).contains("hidden"), "All hides archived sessions")
-        expect(archiveTree.projects.last?.id == SessionTree.noProjectID && archiveTree.projects.last?.name == "No project", "sessions without a project group last")
+        expect(archiveTree.projects.last?.identity == nil && archiveTree.projects.last?.name == "No project", "sessions without a project group last")
         expect(ids(SessionTree.build(sessions + [hidden], filter: .archived, attentionSessionIDs: [])) == ["hidden"], "Archived lists archived sessions")
+
+        var remote = session("h1::remote", status: "idle", lastActive: "2026-10-04T11:58:00Z", project: "h1::agenthail", checkout: "wt", branch: "history-truth")
+        remote.host = SessionHost(id: "h1", name: "forge-agents.tail0000.ts.net", state: "connected")
+        var remoteLoose = SessionState(id: "h1::loose", surface: "codex", name: "remote loose", alias: nil, status: "idle", lastActive: "2026-10-04T11:57:00Z", queueCount: 0, open: true, current: false, currentReason: nil, recent: true, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: "/home/demo")
+        remoteLoose.host = remote.host
+        let hosted = SessionTree.build(sessions + [remote, loose, remoteLoose], filter: .all, attentionSessionIDs: [])
+        expect(hosted.projects.first { $0.id == "h1::agenthail" }?.host == "forge-agents", "a remote project names its host without the domain")
+        expect(hosted.projects.first { $0.id == "agenthail" }?.host == nil, "a project on this host carries no host")
+        expect(Set(hosted.projects.suffix(2).map(\.host)) == [nil, "forge-agents"] && hosted.projects.suffix(2).allSatisfy { $0.identity == nil }, "sessions without a project group per host, last: \(hosted.projects.map(\.id))")
 
         var queued = session("queued", status: "idle", lastActive: "2026-09-01T00:00:00Z", project: "agenthail", checkout: "main", branch: "main")
         queued.queueCount = 1

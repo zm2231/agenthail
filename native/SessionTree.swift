@@ -63,6 +63,8 @@ struct SessionTree: Equatable {
         let name: String
         /// The daemon's project, or nil for the group of sessions without one.
         let identity: ProjectIdentity?
+        /// The short name of the host that owns the project, nil on this host.
+        let host: String?
         var checkouts: [Checkout]
         /// Families that are working, queued or need attention. Collapsing a
         /// project never hides them.
@@ -114,9 +116,9 @@ struct SessionTree: Equatable {
         var projects: [Project] = []
         for family in visible {
             let session = family.root
-            let projectID = session.project?.id ?? noProjectID
+            let projectID = session.project?.id ?? noProjectID + (session.remoteHostName.map { "@" + $0 } ?? "")
             if !projects.contains(where: { $0.id == projectID }) {
-                projects.append(Project(id: projectID, name: session.project?.displayName ?? "No project", identity: session.project, checkouts: []))
+                projects.append(Project(id: projectID, name: session.project?.displayName ?? "No project", identity: session.project, host: session.shortRemoteHostName, checkouts: []))
             }
             let projectIndex = projects.firstIndex { $0.id == projectID }!
             if family.sessions.contains(where: { $0.isWorking || $0.queueCount > 0 || attentionSessionIDs.contains($0.id) }) {
@@ -129,9 +131,7 @@ struct SessionTree: Equatable {
             let checkoutIndex = projects[projectIndex].checkouts.firstIndex { $0.id == checkoutID }!
             projects[projectIndex].checkouts[checkoutIndex].families.append(family)
         }
-        if let index = projects.firstIndex(where: { $0.id == noProjectID }) {
-            projects.append(projects.remove(at: index))
-        }
+        projects = projects.filter { $0.identity != nil } + projects.filter { $0.identity == nil }
         return SessionTree(projects: projects, needsYou: needsYou(sessions, attentionSessionIDs: attentionSessionIDs), counts: counts)
     }
 
