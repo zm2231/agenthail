@@ -1957,7 +1957,7 @@ struct DetailsTab: View {
                 }
                 detailRow("Surface", session.surface.capitalized)
                 if let detail = pane.detail {
-                    detailRow("Exchanges", SessionFacts.exchangeLabel(detail.timeline.map { SessionFacts.exchangeCount($0.items) } ?? detail.exchanges.count))
+                    detailRow("Exchanges", SessionFacts.exchangeLabel(detail.exchanges.count))
                 }
                 let modelName = pane.detail?.model
                 if canControl && session.capabilities.model, case let options = modelOptions, !options.isEmpty {
