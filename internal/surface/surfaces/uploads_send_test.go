@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -206,5 +208,33 @@ func TestSentFilesRenderAsFilesBesideTheTypedText(t *testing.T) {
 				t.Fatalf("items=%+v", page.Items)
 			}
 		})
+	}
+}
+
+func TestAPersonsImageToAHostSessionArrivesAsAnImageBlock(t *testing.T) {
+	picture, notes := storedUploads(t)
+	c, fixture := hostedClaude(t)
+	c.localOnly = true
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	sess := listedSession(t, c, id)
+	message := uuid.NewString()
+	ctx := surface.WithMessageUUID(context.Background(), message)
+	route := surface.RouteFor(c, sess, surface.AuthorPerson)
+	result, err := route.Send(ctx, c, sess, "what is this?", surface.SendOptions{Author: surface.AuthorPerson, Uploads: surface.Uploads{picture, notes}})
+	if err != nil || result == nil || !result.Accepted {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	claudehosttest.WaitFor(t, "the turn", func() bool { return len(fixture.Turns(t, id)) == 1 })
+	data, _ := os.ReadFile(picture.Path)
+	want := []any{
+		map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": "image/png", "data": base64.StdEncoding.EncodeToString(data)}},
+		map[string]any{"type": "text", "text": "what is this?\n\nAttached file: " + notes.Path},
+	}
+	turn := fixture.Turns(t, id)[0]
+	var got any
+	if err := json.Unmarshal([]byte(turn.Text), &got); err != nil || turn.UUID != message || !reflect.DeepEqual(got, want) {
+		t.Fatalf("turn=%+v err=%v", turn, err)
 	}
 }

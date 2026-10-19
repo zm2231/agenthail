@@ -19,6 +19,8 @@ const LOCK_FD = 3;
 const MAX_EVENTS = 4096;
 const MAX_LINE = 1 << 20;
 const MAX_SUBSCRIBER_BUFFER = 8 << 20;
+const MAX_IMAGE_BYTES = 5 << 20;
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif']);
 const OPEN_TIMEOUT_MS = 60_000;
 const TAKE_TIMEOUT_MS = 10_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -208,14 +210,16 @@ async function send(params) {
   const s = session(params.sessionId);
   if (draining) throw new HostError('draining', 'the Claude host is shutting down; the message is delivered on the next host');
   if (typeof params.uuid !== 'string' || !UUID.test(params.uuid)) throw new HostError('invalid', 'uuid must be a uuid');
-  if (typeof params.text !== 'string' || params.text.trim() === '') throw new HostError('invalid', 'text is required');
+  const images = params.images ?? [];
+  if (!Array.isArray(images)) throw new HostError('invalid', 'images must be a list');
+  if (typeof params.text !== 'string' || (params.text.trim() === '' && images.length === 0)) throw new HostError('invalid', 'text is required');
   if (s.accepted.has(params.uuid)) return { accepted: true, duplicate: true };
   const message = {
     type: 'user',
     uuid: params.uuid,
     session_id: s.id,
     parent_tool_use_id: null,
-    message: { role: 'user', content: params.text },
+    message: { role: 'user', content: images.length === 0 ? params.text : userContent(params.text, images) },
   };
   if (params.priority) {
     if (!['now', 'next', 'later'].includes(params.priority)) throw new HostError('invalid', `unknown priority: ${params.priority}`);
@@ -231,6 +235,24 @@ async function send(params) {
     throw new HostError('unknown', `${error.message}; it is delivered if Claude takes it later`);
   }
   return { accepted: true, duplicate: false };
+}
+
+// Images come first, as Claude Code records a pasted image before the text.
+function userContent(text, images) {
+  const blocks = images.map((image) => {
+    if (!IMAGE_TYPES.has(image?.mediaType)) throw new HostError('invalid', `unsupported image type: ${image?.mediaType}`);
+    if (typeof image.path !== 'string' || !path.isAbsolute(image.path)) throw new HostError('invalid', 'image path must be absolute');
+    let data;
+    try {
+      data = fs.readFileSync(image.path);
+    } catch (error) {
+      throw new HostError('invalid', `read attached image: ${error.message}`);
+    }
+    if (data.length > MAX_IMAGE_BYTES) throw new HostError('invalid', 'attached image is larger than 5 MB');
+    return { type: 'image', source: { type: 'base64', media_type: image.mediaType, data: data.toString('base64') } };
+  });
+  if (text !== '') blocks.push({ type: 'text', text });
+  return blocks;
 }
 
 function origin(value) {

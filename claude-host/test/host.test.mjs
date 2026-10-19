@@ -383,3 +383,31 @@ test('open rejects a bad request', async () => {
   await assert.rejects(c.call('nope'), { code: 'invalid' });
   c.close();
 });
+
+test('a send with images gives Claude image blocks before the text', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+  const image = path.join(f.cwd, 'shot.png');
+  fs.writeFileSync(image, png);
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'what is this?', images: [{ path: image, mediaType: 'image/png' }], origin: { kind: 'human' } });
+  await c.event(turnResult(id, uuid));
+  const blocks = [
+    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png.toString('base64') } },
+    { type: 'text', text: 'what is this?' },
+  ];
+  assert.equal(transcript(f, id)[0].reply, `echo:${JSON.stringify(blocks)}`);
+  const imageOnly = randomUUID();
+  await c.call('send', { sessionId: id, uuid: imageOnly, text: '', images: [{ path: image, mediaType: 'image/png' }] });
+  await c.event(turnResult(id, imageOnly));
+  assert.equal(transcript(f, id)[1].reply, `echo:${JSON.stringify(blocks.slice(0, 1))}`);
+  await assert.rejects(c.call('send', { sessionId: id, uuid: randomUUID(), text: 'x', images: [{ path: 'shot.png', mediaType: 'image/png' }] }), { code: 'invalid' });
+  await assert.rejects(c.call('send', { sessionId: id, uuid: randomUUID(), text: 'x', images: [{ path: image, mediaType: 'image/webp' }] }), { code: 'invalid' });
+  await assert.rejects(c.call('send', { sessionId: id, uuid: randomUUID(), text: '' }), { code: 'invalid' });
+  c.close();
+});

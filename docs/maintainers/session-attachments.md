@@ -18,7 +18,7 @@ A person's attached files reach a session in two steps, both routed to the daemo
 The daemon resolves the ids to stored files and gives them to the runtime in the form it accepts:
 
 - Codex, on every transport, receives each image as a `localImage` turn input.
-- Claude receives each image as a base64 `image` content block when the person's turn goes through its Remote Control bridge.
+- Claude receives each image as a base64 `image` content block before the text when the person's turn goes through the Claude session host or its Remote Control bridge. The host is sent the stored paths and reads the files itself, since its request lines are limited to 1 MiB.
 - Every other file, and every image on a route without image input (the Claude peer socket), is named in the message as `Attached file: <stored path>`. The path is on the owning daemon's machine, which is where the agent runs, so clients never compose paths themselves.
 
 A busy session never steers a message with attachments into the running turn; it waits in the queue with its attachments for a turn of its own.

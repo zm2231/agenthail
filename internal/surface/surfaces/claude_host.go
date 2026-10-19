@@ -112,15 +112,20 @@ func (h *claudeHost) readState() {
 
 // The intent uuid becomes the transcript record's uuid: the turn is followed
 // by it, and a resend of the same message runs once.
-func (c *Claude) sendHostTurn(ctx context.Context, sess *surface.Session, message, priority string) (*surface.SendResult, error) {
+func (c *Claude) sendHostTurn(ctx context.Context, sess *surface.Session, message, priority string, images surface.Uploads) (*surface.SendResult, error) {
 	id := surface.MessageUUID(ctx)
 	if id == "" {
 		id = uuid.NewString()
+	}
+	var attached []claudehost.Image
+	for _, image := range images {
+		attached = append(attached, claudehost.Image{Path: image.Path, MediaType: image.MediaType})
 	}
 	_, err := c.host.client.Send(ctx, claudehost.SendRequest{
 		SessionID: sess.ID,
 		UUID:      id,
 		Text:      message,
+		Images:    attached,
 		Priority:  priority,
 		Origin:    &claudehost.Origin{Kind: "human"},
 	})
@@ -131,7 +136,7 @@ func (c *Claude) sendHostTurn(ctx context.Context, sess *surface.Session, messag
 }
 
 func (c *Claude) steerHost(ctx context.Context, sess *surface.Session, message string) error {
-	_, err := c.sendHostTurn(ctx, sess, message, "now")
+	_, err := c.sendHostTurn(ctx, sess, message, "now", nil)
 	return err
 }
 

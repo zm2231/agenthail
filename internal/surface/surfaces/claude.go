@@ -875,7 +875,7 @@ func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, messa
 		return nil, err
 	}
 	if claudeHosted(sess) {
-		return c.sendHostTurn(ctx, sess, message, "")
+		return c.sendHostTurn(ctx, sess, message, "", images)
 	}
 	if !c.canSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude resumed without its web bridge; the message is routed again on retry"))
