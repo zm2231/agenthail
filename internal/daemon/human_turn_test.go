@@ -45,6 +45,7 @@ type humanTurnFixture struct {
 	postErr error
 	bridged surface.Session
 	native  surface.Session
+	process *claudetest.Fixture
 }
 
 func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
@@ -54,8 +55,8 @@ func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	f := &humanTurnFixture{r: r}
 	process := claudetest.New(t)
+	f := &humanTurnFixture{r: r, process: process}
 	process.Listen()
 	process.Record("conversation-bridge", process.Home, "session_bridge")
 	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
@@ -87,6 +88,13 @@ func (f *humanTurnFixture) transcript(t *testing.T, session surface.Session, con
 	t.Helper()
 	if err := os.WriteFile(session.Transcript, []byte(content), 0600); err != nil {
 		t.Fatal(err)
+	}
+	if session.ID == f.bridged.ID {
+		status := "idle"
+		if strings.HasSuffix(content, busyClaudeTranscript) {
+			status = "busy"
+		}
+		f.process.RecordStatus(status)
 	}
 }
 

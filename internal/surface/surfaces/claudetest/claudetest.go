@@ -136,6 +136,24 @@ func (f *Fixture) JobState(id, state, detail string, updated time.Time) {
 	f.write(filepath.Join(".claude", "jobs", id, "state.json"), string(data))
 }
 
+// RecordStatus rewrites the status Claude reports in the live process's
+// session record.
+func (f *Fixture) RecordStatus(status string) {
+	f.t.Helper()
+	path := filepath.Join(f.Home, ".claude", "sessions", fmt.Sprint(f.PID)+".json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(raw, &record); err != nil {
+		f.t.Fatal(err)
+	}
+	record["status"] = status
+	data, _ := json.Marshal(record)
+	f.write(filepath.Join(".claude", "sessions", fmt.Sprint(f.PID)+".json"), string(data))
+}
+
 func (f *Fixture) RemoveRecord() {
 	f.t.Helper()
 	if err := os.Remove(filepath.Join(f.Home, ".claude", "sessions", fmt.Sprint(f.PID)+".json")); err != nil && !os.IsNotExist(err) {
