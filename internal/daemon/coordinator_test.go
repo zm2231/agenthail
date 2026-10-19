@@ -134,13 +134,21 @@ func TestAPISendToACoordinatorClaudeCannotReportOnWaitsInTheQueue(t *testing.T) 
 
 func TestSendsToAConversationARestartReplacedReachTheCoordinator(t *testing.T) {
 	f := newCoordinatorFixture(t)
+	if err := f.r.RegisterSession(surface.Session{ID: "fixture-sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	_, pending, err := f.r.QueueDeliveryWithIntent(goneCoordinator, "queued before the restart", "", surface.SendOptions{SourceSessionID: "fixture-sender"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if code, body := f.send(t, "lead-first", goneCoordinator, "first"); code != http.StatusOK {
 		t.Fatalf("status=%d body=%v", code, body)
 	}
 	if code, body := f.send(t, "lead-reply", goneCoordinator, "reply to an old notification"); code != http.StatusOK {
 		t.Fatalf("status=%d body=%v", code, body)
 	}
-	if err := f.r.QueueMessage(goneCoordinator, "queued by an old client"); err != nil {
+	_, claimed, err := f.r.QueueDeliveryWithIntent(goneCoordinator, "queued by an old client", "", surface.SendOptions{SourceSessionID: "fixture-sender"})
+	if err != nil {
 		t.Fatal(err)
 	}
 	f.daemon.scanAndRelay(context.Background())
@@ -149,5 +157,11 @@ func TestSendsToAConversationARestartReplacedReachTheCoordinator(t *testing.T) {
 	}
 	if f.r.QueueCount(goneCoordinator) != 0 {
 		t.Fatalf("queued for the replaced conversation=%d", f.r.QueueCount(goneCoordinator))
+	}
+	for _, id := range []int64{pending, claimed} {
+		intent, err := f.r.DeliveryIntent(id)
+		if err != nil || intent.TargetSessionID != freshCoordinator {
+			t.Fatalf("intent %d=%+v err=%v", id, intent, err)
+		}
 	}
 }

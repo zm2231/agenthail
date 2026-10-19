@@ -152,6 +152,9 @@ func (r *Registry) HandOverCoordinator(name, previous, next string) error {
 		return err
 	}
 	if previous != "" {
+		if _, err := tx.Exec(`UPDATE delivery_intents SET target_session_id=?,updated_at=datetime('now') WHERE queue_id IN (SELECT id FROM message_queue WHERE session_id=? AND status='pending')`, next, previous); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(`UPDATE message_queue SET session_id=?,updated_at=datetime('now') WHERE session_id=? AND status='pending'`, next, previous); err != nil {
 			return err
 		}
@@ -163,14 +166,23 @@ func (r *Registry) HandOverCoordinator(name, previous, next string) error {
 }
 
 // MoveClaimedMessage returns a claimed queue item to the queue for sessionID,
-// for a message whose target was replaced while it was in flight.
+// with its delivery intent, for a message whose target was replaced while it
+// was in flight.
 func (r *Registry) MoveClaimedMessage(id int64, sessionID string) error {
-	res, err := r.db.Exec(`UPDATE message_queue SET session_id=?,status='pending',attempts=MAX(attempts-1,0),available_at_ms=0,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, sessionID, id)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE message_queue SET session_id=?,status='pending',attempts=MAX(attempts-1,0),available_at_ms=0,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, sessionID, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
 		return fmt.Errorf("queue item %d is not inflight", id)
 	}
-	return nil
+	if _, err := tx.Exec(`UPDATE delivery_intents SET target_session_id=?,updated_at=datetime('now') WHERE queue_id=?`, sessionID, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
