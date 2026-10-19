@@ -96,9 +96,15 @@ already shown rather than adding a second. While a target waits, nothing is
 steered into it: `send` under the `steer` policy and `steer` both queue a steer,
 with a receipt that names the wait. The daemon steers queued steers once the
 question is answered and delivers other messages when the turn ends. Queue rows
-report `heldBy`: `waiting`, `busy`, `offline`, `unknown`, `retrying`,
-`notLoaded` (an unloaded conversation that only Codex Desktop can load), `hostUnreachable` (a send a paired host has not received), or
-`behind` when an earlier message to the same session is still open. Empty means
+report `heldBy`: `waiting`, `busy`, `offline`, `unknown`, `refused`,
+`retrying`, `notLoaded` (an unloaded conversation that only Codex Desktop can
+load), `hostUnreachable` (a send a paired host has not received), or `behind`
+when an earlier message to the same session is still open. `refused` means the
+target refused to start, such as Claude failing to resume the conversation in
+the Claude host. The row's last error carries Claude's message, the row raises
+an attention item, and the refusal is announced once on the desktop and paired
+devices; an agent sender gets a notice with the reason. The message stays
+queued and is delivered on the first attempt after the cause is fixed. Empty means
 the next scan claims that message: a drain takes only a session's earliest open
 message, or its earliest steer while a turn runs and the target can steer.
 
@@ -144,7 +150,7 @@ A Claude conversation is identified by its session ID, the name of its transcrip
 - A live process for the conversation without either, or a background job that is still starting and has no record yet: the delivery is held. A send queues it, and the queue retries it until the process can take messages, or until it exits and the conversation is resumed. No second process is started.
 - No process: the Claude host opens the conversation with `resume` in its working directory (the job's, else the session's, else the transcript's), without a prompt, so only the sender's message reaches the conversation. A terminal or background session resumes this way too and becomes a host session without Remote Control. The send then waits up to 10 seconds for the host's process to be listed. An agent message to it takes the native socket, so `send --reply` and `--stream` deliver it and say that its reply is read with `agenthail last`. Without a running host the delivery is held.
 
-Resumes of one conversation are serialized across Agenthail processes by `~/.agenthail/claude-resume/<session-id>.lock`, held from the liveness check through the wait, so concurrent senders resume once and each message is delivered once. The host opens a conversation by its id, so it cannot start a copy. A process from an earlier host that still runs the conversation holds the delivery. A Claude that exits before it starts has refused the resume: the delivery fails with `Claude refused to resume <id>: <Claude's output>` and nothing was sent. A resume whose answer from the host is lost, or that the host opened but did not list in time, is unknown: the delivery stays `submitted`, a queued item is dead-lettered as unknown, and nothing is retried.
+Resumes of one conversation are serialized across Agenthail processes by `~/.agenthail/claude-resume/<session-id>.lock`, held from the liveness check through the wait, so concurrent senders resume once and each message is delivered once. The host opens a conversation by its id, so it cannot start a copy. A process from an earlier host that still runs the conversation holds the delivery. A Claude that exits with an error before it starts has refused the resume: the delivery fails with `Claude refused to resume <id>: <Claude's output>` and nothing was sent. A Claude that cannot be spawned or does not start in time is unavailable and retried. A resume whose answer from the host is lost, or that the host opened but did not list in time, is unknown: the delivery stays `submitted`, a queued item is dead-lettered as unknown, and nothing is retried.
 
 Observation reads a session whose process exited as idle when no other process holds its conversation, so its queue drains into a resume, and as offline while another process, including a starting job, holds it. A target resolves to a registered session that discovery no longer lists only when it names that session exactly: an alias, a session ID, or `surface:<id>`. Name and folder fragments never resolve to historical sessions. `agenthail thread resume` uses the same path without sending a message. For a host session, `thread status` reads the host's listing, `thread stop` closes the session in the host, and `thread logs` is refused: the host keeps no background log, so read the transcript with `agenthail last`.
 
