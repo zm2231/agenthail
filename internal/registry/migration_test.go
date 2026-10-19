@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,16 +79,132 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 				t.Fatalf("user_version=%d err=%v, want %d", version, err, fixture.wantVersion)
 			}
 			assertMigratedSessionsAndRoutes(t, r)
+			if exists, err := queueHasExpiry(r); fixture.stampVersion == 0 && (err != nil || exists) {
+				t.Fatalf("expires_at_ms exists=%v err=%v", exists, err)
+			}
 			assertMigratedQueue(t, r, fixture.source)
 			if fixture.check != nil {
 				fixture.check(t, r)
 			}
 			assertMigratedRegistryAcceptsCurrentWrites(t, r)
+			if fixture.stampVersion == 0 {
+				assertSchemaMatchesFreshRegistry(t, r)
+			}
 			if identity, err := r.HostIdentity(); err != nil || !ValidHostID(identity.ID) || !ValidHostName(identity.Name) {
 				t.Fatalf("host identity=%+v err=%v", identity, err)
 			}
 		})
 	}
+}
+
+func assertSchemaMatchesFreshRegistry(t *testing.T, migrated *Registry) {
+	t.Helper()
+	fresh := openTestRegistry(t)
+	assertSameColumns(t, schemaColumns(t, fresh.db), schemaColumns(t, migrated.db))
+	want, got := schemaIndexes(t, fresh.db), schemaIndexes(t, migrated.db)
+	for name, definition := range want {
+		if got[name] != definition {
+			t.Errorf("index %s migrated=%q fresh=%q", name, got[name], definition)
+		}
+	}
+	for name := range got {
+		if _, ok := want[name]; !ok {
+			t.Errorf("index %s exists only in the migrated registry", name)
+		}
+	}
+}
+
+func TestSchemaDeclaresEveryColumn(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "schema.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatal(err)
+	}
+	assertSameColumns(t, schemaColumns(t, openTestRegistry(t).db), schemaColumns(t, db))
+}
+
+func assertSameColumns(t *testing.T, want, got map[string]map[string]string) {
+	t.Helper()
+	for table, columns := range want {
+		if got[table] == nil {
+			t.Errorf("missing table %s", table)
+			continue
+		}
+		for name, declaration := range columns {
+			migrated := got[table][name]
+			if strings.HasSuffix(declaration, " default=expression") {
+				migrated = migrated[:max(strings.LastIndex(migrated, " default="), 0)] + " default=expression"
+			}
+			if migrated != declaration {
+				t.Errorf("%s.%s got=%q want=%q", table, name, migrated, declaration)
+			}
+		}
+		for name := range got[table] {
+			if _, ok := columns[name]; !ok {
+				t.Errorf("%s.%s is unexpected", table, name)
+			}
+		}
+	}
+	for table := range got {
+		if want[table] == nil {
+			t.Errorf("table %s is unexpected", table)
+		}
+	}
+}
+
+func schemaIndexes(t *testing.T, db *sql.DB) map[string]string {
+	t.Helper()
+	rows, err := db.Query(`SELECT name, sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	indexes := map[string]string{}
+	for rows.Next() {
+		var name, definition string
+		if err := rows.Scan(&name, &definition); err != nil {
+			t.Fatal(err)
+		}
+		indexes[name] = strings.Join(strings.Fields(definition), " ")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return indexes
+}
+
+// schemaColumns reports each column's declaration. ALTER TABLE cannot add a
+// column whose default is an expression, so upgraded rows carry a constant
+// default there; every writer sets those columns explicitly.
+func schemaColumns(t *testing.T, db *sql.DB) map[string]map[string]string {
+	t.Helper()
+	rows, err := db.Query(`SELECT m.name, p.name, p.type, p."notnull", COALESCE(p.dflt_value, '') FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type='table' AND m.name NOT LIKE 'sqlite_%'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	tables := map[string]map[string]string{}
+	for rows.Next() {
+		var table, name, kind, fallback string
+		var notNull int
+		if err := rows.Scan(&table, &name, &kind, &notNull, &fallback); err != nil {
+			t.Fatal(err)
+		}
+		if tables[table] == nil {
+			tables[table] = map[string]string{}
+		}
+		if strings.HasPrefix(fallback, "datetime(") {
+			fallback = "expression"
+		}
+		tables[table][name] = fmt.Sprintf("%s notnull=%d default=%s", kind, notNull, fallback)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return tables
 }
 
 func assertMigratedSessionsAndRoutes(t *testing.T, r *Registry) {
@@ -113,7 +230,7 @@ func assertMigratedSessionsAndRoutes(t *testing.T, r *Registry) {
 
 func assertMigratedQueue(t *testing.T, r *Registry, source string) {
 	t.Helper()
-	rows, err := r.ListQueue(true)
+	rows, err := r.ListQueue(true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +262,7 @@ func assertMigratedRegistryAcceptsCurrentWrites(t *testing.T, r *Registry) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows, err := r.ListQueue(false)
+	rows, err := r.ListQueue(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +275,7 @@ func assertMigratedRegistryAcceptsCurrentWrites(t *testing.T, r *Registry) {
 	if listed == nil {
 		t.Fatalf("queued row missing from %+v", rows)
 	}
-	row, err := r.QueueItem(id)
+	row, err := r.QueueItem(id, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,9 +300,7 @@ func assertMigratedRegistryAcceptsCurrentWrites(t *testing.T, r *Registry) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if expired, err := r.ExpireMessages(time.Now().Add(2 * queueMessageTTL)); err != nil || expired == 0 {
-		t.Fatalf("expired=%d err=%v", expired, err)
-	}
+	failQueued(t, r, relayID)
 	problems, err := r.ListDeliveryProblems()
 	if err != nil {
 		t.Fatal(err)
@@ -228,9 +343,7 @@ func assertMigratedRouteRelaysDurably(t *testing.T, r *Registry) {
 		t.Fatalf("queueID=%d err=%v", queueID, err)
 	}
 	before := r.QueueCount("sender")
-	if _, err := r.ExpireMessages(time.Now().Add(2 * queueMessageTTL)); err != nil {
-		t.Fatal(err)
-	}
+	failQueued(t, r, queueID)
 	if after := r.QueueCount("sender"); after != before {
 		t.Fatalf("relay source notices before=%d after=%d", before, after)
 	}
@@ -242,7 +355,7 @@ func assertMigratedRouteRelaysDurably(t *testing.T, r *Registry) {
 
 func assertLegacyStatusNotNormalized(t *testing.T, r *Registry) {
 	t.Helper()
-	rows, err := r.ListQueue(true)
+	rows, err := r.ListQueue(true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,6 +413,62 @@ func assertV11SeedCheckpointMigrated(t *testing.T, r *Registry) {
 	}
 }
 
+func TestOpenRetiresQueueExpiry(t *testing.T) {
+	dump, err := os.ReadFile(filepath.Join("testdata", "migrations", "v11.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "registry.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		string(dump),
+		`INSERT INTO message_queue(id,session_id,message,queued_at,status,evidence,last_error,source_session_id,expires_at_ms,updated_at) VALUES(50,'target','old report','2026-10-18 08:08:00','expired','expired','message expired after 1 hour','sender',1,'2026-10-18 09:08:00')`,
+		`INSERT INTO delivery_intents(id,sender_session_id,target_session_id,message,queue_id,status,evidence,failure) VALUES(50,'sender','target','old report',50,'expired','expired','message expired after 1 hour')`,
+		`INSERT INTO message_queue(id,session_id,message,queued_at,status,last_error,expires_at_ms,updated_at) VALUES(51,'target','failed earlier','2026-10-18 07:00:00','dead','delivery failed',1,'2026-10-18 08:00:00')`,
+		`INSERT INTO delivery_history(kind,session_id,queue_id,message,result) VALUES('expired','target',50,'old report','removed after 1 hour without delivery')`,
+	} {
+		if _, err := db.Exec(statement); err != nil {
+			db.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if exists, err := queueHasExpiry(r); err != nil || exists {
+		t.Fatalf("expires_at_ms exists=%v err=%v", exists, err)
+	}
+	if row, err := r.QueueItem(50, nil); err != nil || row.Status != "canceled" || row.Evidence != surface.EvidenceCanceled || row.LastError != "expired before delivery" || !row.Historical {
+		t.Fatalf("expired row=%+v err=%v", row, err)
+	}
+	if row, err := r.QueueItem(2, nil); err != nil || row.Status != "pending" {
+		t.Fatalf("pending row=%+v err=%v", row, err)
+	}
+	if row, err := r.QueueItem(51, nil); err != nil || row.DeadAt != time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC).UnixMilli() {
+		t.Fatalf("dead row=%+v err=%v", row, err)
+	}
+	if intent, err := r.DeliveryIntent(50); err != nil || intent.Status != DeliveryIntentFailed || intent.Evidence != surface.EvidenceFailed || intent.Failure != "expired before delivery" {
+		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
+	history, err := r.ListHistory(50, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range history {
+		if entry.Kind == "expired" {
+			t.Fatalf("history kept expired entry %+v", entry)
+		}
+	}
+}
+
 func TestRuntimeKindStepDerivesEachRowsKindFromItsSurfaceAndTransport(t *testing.T) {
 	r := openTestRegistry(t)
 	if _, err := r.db.Exec(`ALTER TABLE sessions DROP COLUMN runtime_kind`); err != nil {
@@ -329,14 +498,14 @@ func TestRuntimeKindStepDerivesEachRowsKindFromItsSurfaceAndTransport(t *testing
 			t.Fatal(err)
 		}
 	}
-	if err := r.recordRuntimeKinds(); err != nil {
+	if err := r.migrate(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.db.Exec(`INSERT INTO sessions(id,surface,name,transport,runtime_kind) VALUES('recorded','codex','recorded','managed','codex-desktop')`); err != nil {
 		t.Fatal(err)
 	}
 	want["recorded"] = surface.RuntimeCodexDesktop
-	if err := r.recordRuntimeKinds(); err != nil {
+	if err := r.migrate(); err != nil {
 		t.Fatal(err)
 	}
 	for id, kind := range want {
@@ -345,4 +514,49 @@ func TestRuntimeKindStepDerivesEachRowsKindFromItsSurfaceAndTransport(t *testing
 			t.Fatalf("%s runtime_kind=%q err=%v, want %q", id, got, err, kind)
 		}
 	}
+}
+
+func TestOpenRetiresQueueExpiryLeftOnARegistryAtTheVersionBefore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, r, "target")
+	for _, statement := range []string{
+		`ALTER TABLE message_queue ADD COLUMN expires_at_ms INTEGER NOT NULL DEFAULT 0`,
+		`INSERT INTO message_queue(id,session_id,message,queued_at,status,evidence,last_error,expires_at_ms,updated_at) VALUES(60,'target','old report','2026-10-18 08:08:00','expired','expired','message expired after 1 hour',1,'2026-10-18 09:08:00')`,
+		`PRAGMA user_version=16`,
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var version int
+	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("user_version=%d err=%v", version, err)
+	}
+	if exists, err := queueHasExpiry(r); err != nil || exists {
+		t.Fatalf("expires_at_ms exists=%v err=%v", exists, err)
+	}
+	if row, err := r.QueueItem(60, nil); err != nil || row.Status != "canceled" || row.LastError != "expired before delivery" {
+		t.Fatalf("expired row=%+v err=%v", row, err)
+	}
+}
+
+func queueHasExpiry(r *Registry) (bool, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	return columnExists(tx, "message_queue", "expires_at_ms")
 }

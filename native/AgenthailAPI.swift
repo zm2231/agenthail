@@ -95,6 +95,36 @@ final class AgenthailAPI: @unchecked Sendable {
         try await get("/api/v1/snapshot" + (fresh ? "?fresh=1" : ""))
     }
 
+    /// Every direct subagent of a session, including the ones the session list
+    /// only counts. A page cursor dies when the catalog changes, so a changed
+    /// catalog restarts from the first page.
+    func subagents(of parentID: String) async throws -> [SessionState] {
+        for _ in 0..<3 {
+            do {
+                return try await subagentPages(of: parentID)
+            } catch AgenthailAPIError.request(409, _) {
+                continue
+            }
+        }
+        throw AgenthailAPIError.request(409, "The session list kept changing. Try again.")
+    }
+
+    private func subagentPages(of parentID: String) async throws -> [SessionState] {
+        var sessions: [SessionState] = []
+        var cursor: String?
+        repeat {
+            var components = URLComponents()
+            components.path = "/api/v1/snapshot"
+            components.queryItems = [URLQueryItem(name: "parentId", value: parentID), URLQueryItem(name: "limit", value: "200")]
+            if let cursor { components.queryItems?.append(URLQueryItem(name: "cursor", value: cursor)) }
+            guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+            let page: DashboardSnapshot = try await get(path)
+            sessions += page.sessions
+            cursor = page.nextCursor
+        } while cursor != nil
+        return sessions
+    }
+
     func sessionDetail(id: String, includeTimeline: Bool = false, timelineBefore: Int64? = nil) async throws -> SessionDetail {
         var components = URLComponents()
         components.path = "/api/v1/session"
@@ -160,12 +190,12 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.models
     }
 
-    static func creationBody(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) throws -> Data {
-        if launcher != nil && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
+    static func creationBody(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil) throws -> Data {
+        if launcher?.isTerminal == true && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
             throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
         }
         var body: [String: Any] = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
-        if let launcher { body["launcher"] = launcher }
+        if let launcher { body["launcher"] = launcher.id }
         if surface == "codex" {
             if let effort = turnSettings.effort { body["effort"] = effort }
             if let mode = turnSettings.mode { body["mode"] = mode.rawValue }
@@ -175,7 +205,7 @@ final class AgenthailAPI: @unchecked Sendable {
         return try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
     }
 
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
         try await createSession(body: Self.creationBody(surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings, claude: claude, launcher: launcher), idempotencyKey: idempotencyKey, failureReceipts: failureReceipts)
     }
 
@@ -550,4 +580,5 @@ struct DeliveryReceipt: Decodable {
     let status: String?
     let queueId: Int64?
     let detail: String?
+    var waitingOn: WaitingState? = nil
 }

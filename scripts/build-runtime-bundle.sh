@@ -51,6 +51,7 @@ mv "$node_stage/node-v22.23.1-darwin-arm64" "$OUTPUT/runtime/node"
 
 cp "$ROOT/sidecar/package.json" "$ROOT/sidecar/package-lock.json" "$OUTPUT/"
 PATH="$OUTPUT/runtime/node/bin:/usr/bin:/bin" "$OUTPUT/runtime/node/bin/npm" ci --omit=dev --prefix "$OUTPUT"
+PATH="$OUTPUT/runtime/node/bin:/usr/bin:/bin" NPM="$OUTPUT/runtime/node/bin/npm" "$ROOT/scripts/stage-claude-host.sh" "$OUTPUT/claude-host"
 rm -rf "$OUTPUT/runtime/python/include" "$OUTPUT/runtime/python/share"
 rm -rf "$OUTPUT/runtime/python/lib/python3.13/ensurepip" "$OUTPUT/runtime/python/lib/python3.13/site-packages/pip" "$OUTPUT/runtime/python/lib/python3.13/site-packages/pip-"*.dist-info
 rm -rf "$OUTPUT/runtime/python/lib/tcl9" "$OUTPUT/runtime/python/lib/tcl9.0" "$OUTPUT/runtime/python/lib/tk9.0" "$OUTPUT/runtime/python/lib/itcl4.3.5" "$OUTPUT/runtime/python/lib/thread3.0.4"
@@ -66,4 +67,5 @@ find "$OUTPUT" -name .DS_Store -delete
 "$OUTPUT/runtime/node/bin/node" --version
 PYTHONPATH="$OUTPUT/pydeps" "$OUTPUT/runtime/python/bin/python3" -c 'from curl_cffi import requests; print(requests.__name__)'
 (cd "$OUTPUT" && PATH="$OUTPUT/runtime/node/bin:/usr/bin:/bin" "$OUTPUT/runtime/node/bin/node" -e "import('@steipete/sweet-cookie').then(() => console.log('sweet-cookie'))")
+(cd "$OUTPUT/claude-host" && "$OUTPUT/runtime/node/bin/node" -e "import('@anthropic-ai/claude-agent-sdk').then(() => console.log('claude-agent-sdk'))")
 du -sh "$OUTPUT"

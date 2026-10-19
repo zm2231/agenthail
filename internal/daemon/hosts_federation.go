@@ -705,7 +705,7 @@ func (d *Daemon) replayHostDelivery(ctx context.Context, host *pairedHost, item 
 	if err != nil {
 		var notSent hosts.NotSentError
 		if errors.As(err, &notSent) && item.Status == "pending" {
-			if releaseErr := d.Registry.ReleaseHostDelivery(item.ID, item.ExpiresAt); releaseErr != nil {
+			if releaseErr := d.Registry.ReleaseHostDelivery(item.ID); releaseErr != nil {
 				d.logRuntimeError("host "+host.record.Name+" delivery", releaseErr)
 			}
 		}

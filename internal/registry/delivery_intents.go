@@ -7,8 +7,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/surface"
 )
+
+// sqlRandomUUID is a version 4 uuid in SQL, for intents recorded before
+// intents carried one.
+const sqlRandomUUID = `lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + abs(random()) % 4, 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))`
 
 type DeliveryIntentStatus string
 
@@ -30,10 +35,12 @@ const (
 	DeliveryIntentDelivered DeliveryIntentStatus = "delivered"
 	DeliveryIntentUnknown   DeliveryIntentStatus = "unknown"
 	DeliveryIntentFailed    DeliveryIntentStatus = "failed"
-	DeliveryIntentExpired   DeliveryIntentStatus = "expired"
 )
 
 type DeliveryIntentInput struct {
+	// UUID is the message's provider identity when the caller already sent
+	// under one; otherwise the intent gets a new one.
+	UUID            string
 	SenderSessionID string
 	TargetSessionID string
 	ProviderKey     string
@@ -42,8 +49,13 @@ type DeliveryIntentInput struct {
 	Evidence        surface.DeliveryEvidence
 }
 
+// DeliveryIntent is one message on its way to a session. UUID is the
+// message's identity at the provider: a Claude session records it as the
+// transcript record's uuid and runs a given uuid once, so a resend after an
+// uncertain outcome cannot run the turn twice.
 type DeliveryIntent struct {
 	ID                  int64
+	UUID                string
 	SenderSessionID     string
 	TargetSessionID     string
 	ProviderKey         string
@@ -54,27 +66,33 @@ type DeliveryIntent struct {
 	Evidence            surface.DeliveryEvidence
 	Failure             string
 	NotificationQueueID int64
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	// Retries counts explicit resends; each one is a new attempt whose
+	// failure is reported on its own.
+	Retries   int
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type DeliveryProblem struct {
-	DeliveryID      int64                `json:"deliveryId"`
-	SessionID       string               `json:"sessionId"`
-	SourceSessionID string               `json:"sourceSessionId"`
-	Message         string               `json:"message"`
-	Reason          string               `json:"reason"`
-	Status          DeliveryIntentStatus `json:"status"`
-	At              time.Time            `json:"at"`
+	DeliveryID      int64  `json:"deliveryId"`
+	SessionID       string `json:"sessionId"`
+	SourceSessionID string `json:"sourceSessionId"`
+	// AttentionSessionID is the session that needs a person because of this
+	// problem: the agent that sent the message, until it has been told.
+	AttentionSessionID string               `json:"attentionSessionId,omitempty"`
+	Message            string               `json:"message"`
+	Reason             string               `json:"reason"`
+	Status             DeliveryIntentStatus `json:"status"`
+	At                 time.Time            `json:"at"`
 }
 
 func (r *Registry) ListDeliveryProblems() ([]DeliveryProblem, error) {
 	rows, err := r.read.Query(`
-		SELECT id,target_session_id,sender_session_id,message,failure,status,updated_at
-		FROM delivery_intents
-		WHERE status IN (?,?) AND COALESCE(dismissed_at,'')=''
-		ORDER BY updated_at DESC, id DESC
-		LIMIT 50`, DeliveryIntentFailed, DeliveryIntentExpired)
+		SELECT di.id,di.target_session_id,di.sender_session_id,di.message,di.failure,di.status,di.updated_at,COALESCE(mq.status,'')='delivered'
+		FROM delivery_intents di LEFT JOIN message_queue mq ON mq.id=di.notification_queue_id
+		WHERE di.status=? AND COALESCE(di.dismissed_at,'')=''
+		ORDER BY di.updated_at DESC, di.id DESC
+		LIMIT 50`, DeliveryIntentFailed)
 	if err != nil {
 		return nil, err
 	}
@@ -83,9 +101,11 @@ func (r *Registry) ListDeliveryProblems() ([]DeliveryProblem, error) {
 	for rows.Next() {
 		var problem DeliveryProblem
 		var status, updatedAt string
-		if err := rows.Scan(&problem.DeliveryID, &problem.SessionID, &problem.SourceSessionID, &problem.Message, &problem.Reason, &status, &updatedAt); err != nil {
+		var notified bool
+		if err := rows.Scan(&problem.DeliveryID, &problem.SessionID, &problem.SourceSessionID, &problem.Message, &problem.Reason, &status, &updatedAt, &notified); err != nil {
 			return nil, err
 		}
+		problem.AttentionSessionID = deliveryAttentionSession(problem.SourceSessionID, notified)
 		problem.Message = boundedIntentMessage(problem.Message)
 		problem.Status = DeliveryIntentStatus(status)
 		problem.At, err = time.ParseInLocation("2006-01-02 15:04:05", updatedAt, time.UTC)
@@ -100,6 +120,16 @@ func (r *Registry) ListDeliveryProblems() ([]DeliveryProblem, error) {
 	return problems, nil
 }
 
+// deliveryAttentionSession flags the sender of a failed message, never its
+// target. A person's own send has no session to flag; it stays in the problem
+// list. An agent stops being flagged once its failure notice reached it.
+func deliveryAttentionSession(senderSessionID string, notified bool) string {
+	if senderSessionID == OperatorSessionID || notified {
+		return ""
+	}
+	return senderSessionID
+}
+
 func (r *Registry) DismissDeliveryProblem(id int64) (bool, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -107,20 +137,21 @@ func (r *Registry) DismissDeliveryProblem(id int64) (bool, error) {
 	}
 	defer tx.Rollback()
 	var targetSessionID, status string
+	var retries int
 	var dismissedAt sql.NullString
-	if err := tx.QueryRow(`SELECT target_session_id,status,dismissed_at FROM delivery_intents WHERE id=?`, id).Scan(&targetSessionID, &status, &dismissedAt); err != nil {
+	if err := tx.QueryRow(`SELECT target_session_id,status,retries,dismissed_at FROM delivery_intents WHERE id=?`, id).Scan(&targetSessionID, &status, &retries, &dismissedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return false, sql.ErrNoRows
 		}
 		return false, err
 	}
-	if status != string(DeliveryIntentFailed) && status != string(DeliveryIntentExpired) {
+	if status != string(DeliveryIntentFailed) {
 		return false, fmt.Errorf("delivery %d is not a failure", id)
 	}
 	if dismissedAt.Valid && dismissedAt.String != "" {
 		return false, tx.Commit()
 	}
-	if _, err := tx.Exec(`UPDATE delivery_intents SET dismissed_at=datetime('now') WHERE id=? AND status IN (?,?) AND COALESCE(dismissed_at,'')=''`, id, DeliveryIntentFailed, DeliveryIntentExpired); err != nil {
+	if _, err := tx.Exec(`UPDATE delivery_intents SET dismissed_at=datetime('now') WHERE id=? AND status=? AND COALESCE(dismissed_at,'')=''`, id, DeliveryIntentFailed); err != nil {
 		return false, err
 	}
 	payload, err := json.Marshal(map[string]any{"deliveryId": id})
@@ -128,7 +159,7 @@ func (r *Registry) DismissDeliveryProblem(id int64) (bool, error) {
 		return false, err
 	}
 	if _, _, err := appendCatalogEventTx(tx, CatalogEvent{
-		DedupeKey: fmt.Sprintf("delivery.dismissed:%d", id),
+		DedupeKey: fmt.Sprintf("delivery.dismissed:%d:%d", id, retries),
 		Type:      "delivery.dismissed",
 		EntityID:  targetSessionID,
 		Payload:   payload,
@@ -160,26 +191,33 @@ func (r *Registry) RecordDeliveryIntent(input DeliveryIntentInput) (*DeliveryInt
 			return intent, tx.Commit()
 		}
 	}
-	res, err := tx.Exec(`INSERT INTO delivery_intents(sender_session_id,target_session_id,provider_key,message,status,evidence) VALUES(?,?,?,?,?,?)`, input.SenderSessionID, input.TargetSessionID, input.ProviderKey, boundedIntentMessage(input.Message), input.Status, input.Evidence)
+	id := input.UUID
+	if id == "" {
+		id = uuid.NewString()
+	}
+	res, err := tx.Exec(`INSERT INTO delivery_intents(uuid,sender_session_id,target_session_id,provider_key,message,status,evidence) VALUES(?,?,?,?,?,?,?)`, id, input.SenderSessionID, input.TargetSessionID, input.ProviderKey, boundedIntentMessage(input.Message), input.Status, input.Evidence)
 	if err != nil {
 		return nil, err
 	}
-	id, err := res.LastInsertId()
+	row, err := res.LastInsertId()
 	if err != nil {
 		return nil, err
 	}
-	intent, err := deliveryIntentByID(tx, id)
+	intent, err := deliveryIntentByID(tx, row)
 	if err != nil {
 		return nil, err
 	}
 	return intent, tx.Commit()
 }
 
-func (r *Registry) RecordSessionCreationIntent(sessionID, message string) (*DeliveryIntent, error) {
+// RecordSessionCreationIntent records a new session's first message under the
+// uuid it was sent with, so the intent names the turn it may have started.
+func (r *Registry) RecordSessionCreationIntent(sessionID, messageUUID, message string) (*DeliveryIntent, error) {
 	if err := r.EnsureOperatorSession(); err != nil {
 		return nil, err
 	}
 	return r.RecordDeliveryIntent(DeliveryIntentInput{
+		UUID:            messageUUID,
 		SenderSessionID: OperatorSessionID,
 		TargetSessionID: sessionID,
 		Message:         message,
@@ -191,6 +229,11 @@ func (r *Registry) RecordSessionCreationIntent(sessionID, message string) (*Deli
 func (input DeliveryIntentInput) validate() error {
 	if strings.TrimSpace(input.SenderSessionID) == "" || strings.TrimSpace(input.TargetSessionID) == "" {
 		return fmt.Errorf("delivery intent requires sender and target sessions")
+	}
+	if input.UUID != "" {
+		if _, err := uuid.Parse(input.UUID); err != nil {
+			return fmt.Errorf("delivery intent uuid: %w", err)
+		}
 	}
 	if input.Status != DeliveryIntentSubmitted && input.Status != DeliveryIntentSent && input.Status != DeliveryIntentQueued && input.Status != DeliveryIntentUnknown {
 		return fmt.Errorf("delivery intent cannot start as %q", input.Status)
@@ -205,6 +248,17 @@ func (r *Registry) DeliveryIntent(id int64) (*DeliveryIntent, error) {
 	return deliveryIntentByID(r.db, id)
 }
 
+// DeliveryIntentUUIDForQueue returns the uuid of the intent a queued message
+// belongs to, or "" when it has none.
+func (r *Registry) DeliveryIntentUUIDForQueue(queueID int64) (string, error) {
+	var id string
+	err := r.db.QueryRow(`SELECT uuid FROM delivery_intents WHERE queue_id=? ORDER BY id DESC LIMIT 1`, queueID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return id, err
+}
+
 func (r *Registry) ReconcileDeliveryIntent(targetSessionID, providerKey string) (bool, error) {
 	if strings.TrimSpace(targetSessionID) == "" || strings.TrimSpace(providerKey) == "" {
 		return false, fmt.Errorf("delivery reconciliation requires target and provider key")
@@ -217,8 +271,8 @@ func (r *Registry) ReconcileDeliveryIntent(targetSessionID, providerKey string) 
 	return n == 1, err
 }
 
-func (r *Registry) FailDeliveryIntent(id int64, status DeliveryIntentStatus, failure string) (bool, error) {
-	return failDeliveryIntent(r.db, id, status, failure)
+func (r *Registry) FailDeliveryIntent(id int64, failure string) (bool, error) {
+	return failDeliveryIntent(r.db, id, failure)
 }
 
 // MarkDeliveryIntentSent completes the same logical intent created before a
@@ -265,8 +319,7 @@ func (r *Registry) QueueDeliveryUsingIntent(intentID int64, message, deliveryKey
 	if status != string(DeliveryIntentSubmitted) {
 		return 0, 0, fmt.Errorf("delivery intent %d is not submitted", intentID)
 	}
-	expiresAt := r.now().Add(queueMessageTTL).UnixMilli()
-	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,expires_at_ms,busy_delivery,author,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, targetSessionID, message, QueueOperationMessage, deliveryKey, options.Model, senderSessionID, options.TurnOptions, 0, expiresAt, options.BusyDelivery, options.Author)
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, targetSessionID, message, QueueOperationMessage, deliveryKey, options.Model, senderSessionID, options.TurnOptions, 0, options.BusyDelivery, options.Author)
 	if err != nil {
 		if deliveryKey == "" || !strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return 0, 0, err
@@ -316,7 +369,7 @@ func (r *Registry) FailDeliveryIntentWithNotice(id int64, failure string) (bool,
 	if err != nil {
 		return false, err
 	}
-	changed, err := failDeliveryIntent(tx, id, DeliveryIntentFailed, failure)
+	changed, err := failDeliveryIntent(tx, id, failure)
 	if err != nil || !changed {
 		_ = tx.Rollback()
 		return changed, err
@@ -334,18 +387,11 @@ type deliveryIntentExecutor interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
-func failDeliveryIntent(q deliveryIntentExecutor, id int64, status DeliveryIntentStatus, failure string) (bool, error) {
-	if status != DeliveryIntentFailed && status != DeliveryIntentExpired {
-		return false, fmt.Errorf("delivery failure status must be failed or expired")
-	}
+func failDeliveryIntent(q deliveryIntentExecutor, id int64, failure string) (bool, error) {
 	if strings.TrimSpace(failure) == "" {
 		return false, fmt.Errorf("delivery failure reason is required")
 	}
-	evidence := surface.EvidenceFailed
-	if status == DeliveryIntentExpired {
-		evidence = surface.EvidenceExpired
-	}
-	res, err := q.Exec(`UPDATE delivery_intents SET status=?,evidence=?,failure=?,updated_at=datetime('now') WHERE id=? AND status IN (?,?,?,?)`, status, evidence, failure, id, DeliveryIntentSubmitted, DeliveryIntentSent, DeliveryIntentQueued, DeliveryIntentUnknown)
+	res, err := q.Exec(`UPDATE delivery_intents SET status=?,evidence=?,failure=?,updated_at=datetime('now') WHERE id=? AND status IN (?,?,?,?)`, DeliveryIntentFailed, surface.EvidenceFailed, failure, id, DeliveryIntentSubmitted, DeliveryIntentSent, DeliveryIntentQueued, DeliveryIntentUnknown)
 	if err != nil {
 		return false, err
 	}
@@ -354,7 +400,7 @@ func failDeliveryIntent(q deliveryIntentExecutor, id int64, status DeliveryInten
 }
 
 func insertQueuedDeliveryIntent(tx *sql.Tx, senderSessionID, targetSessionID, message string, queueID int64, relayed bool) (int64, error) {
-	res, err := tx.Exec(`INSERT INTO delivery_intents(sender_session_id,target_session_id,message,queue_id,relayed,status,evidence) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM sessions WHERE id=?) AND EXISTS(SELECT 1 FROM sessions WHERE id=?)`, senderSessionID, targetSessionID, boundedIntentMessage(message), queueID, relayed, DeliveryIntentQueued, surface.EvidenceQueued, senderSessionID, targetSessionID)
+	res, err := tx.Exec(`INSERT INTO delivery_intents(uuid,sender_session_id,target_session_id,message,queue_id,relayed,status,evidence) SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM sessions WHERE id=?) AND EXISTS(SELECT 1 FROM sessions WHERE id=?)`, uuid.NewString(), senderSessionID, targetSessionID, boundedIntentMessage(message), queueID, relayed, DeliveryIntentQueued, surface.EvidenceQueued, senderSessionID, targetSessionID)
 	if err != nil {
 		return 0, err
 	}
@@ -378,12 +424,40 @@ func markQueuedDeliveryIntent(tx *sql.Tx, queueID int64, status DeliveryIntentSt
 	return err
 }
 
-func finishQueuedDeliveryIntent(tx *sql.Tx, queueID int64, status DeliveryIntentStatus, failure string) (bool, error) {
+// retryQueuedDeliveryIntent returns the intent of a resent queue row to
+// queued. A failure still on the problem list is withdrawn.
+func retryQueuedDeliveryIntent(tx *sql.Tx, queueID int64) error {
+	var id int64
+	var targetSessionID, status string
+	var retries int
+	var dismissedAt sql.NullString
+	err := tx.QueryRow(`SELECT id,target_session_id,status,retries,dismissed_at FROM delivery_intents WHERE queue_id=? AND status IN (?,?)`, queueID, DeliveryIntentFailed, DeliveryIntentUnknown).Scan(&id, &targetSessionID, &status, &retries, &dismissedAt)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE delivery_intents SET status=?,evidence=?,failure='',dismissed_at=NULL,notification_queue_id=NULL,retries=retries+1,updated_at=datetime('now') WHERE id=?`, DeliveryIntentQueued, surface.EvidenceQueued, id); err != nil {
+		return err
+	}
+	if status != string(DeliveryIntentFailed) || dismissedAt.Valid && dismissedAt.String != "" {
+		return nil
+	}
+	payload, err := json.Marshal(map[string]any{"deliveryId": id})
+	if err != nil {
+		return err
+	}
+	_, _, err = appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("delivery.retried:%d:%d", id, retries), Type: "delivery.dismissed", EntityID: targetSessionID, Payload: payload, CreatedAt: time.Now().UTC()})
+	return err
+}
+
+func finishQueuedDeliveryIntent(tx *sql.Tx, queueID int64, failure string) (bool, error) {
 	id, err := queuedDeliveryIntentID(tx, queueID)
 	if err != nil || id == 0 {
 		return false, err
 	}
-	changed, err := failDeliveryIntent(tx, id, status, failure)
+	changed, err := failDeliveryIntent(tx, id, failure)
 	if err != nil || !changed {
 		return false, err
 	}
@@ -418,7 +492,7 @@ func (r *Registry) RecordReplyForwardFailure(senderSessionID, targetSessionID, p
 	} else if found {
 		return false, tx.Commit()
 	}
-	result, err := tx.Exec(`INSERT INTO delivery_intents(sender_session_id,target_session_id,provider_key,message,relayed,status,evidence) VALUES(?,?,?,?,1,?,?)`, senderSessionID, targetSessionID, providerKey, boundedIntentMessage(message), DeliveryIntentSubmitted, surface.EvidenceSubmitted)
+	result, err := tx.Exec(`INSERT INTO delivery_intents(uuid,sender_session_id,target_session_id,provider_key,message,relayed,status,evidence) VALUES(?,?,?,?,?,1,?,?)`, uuid.NewString(), senderSessionID, targetSessionID, providerKey, boundedIntentMessage(message), DeliveryIntentSubmitted, surface.EvidenceSubmitted)
 	if err != nil {
 		return false, err
 	}
@@ -426,7 +500,7 @@ func (r *Registry) RecordReplyForwardFailure(senderSessionID, targetSessionID, p
 	if err != nil {
 		return false, err
 	}
-	if changed, err := failDeliveryIntent(tx, id, DeliveryIntentFailed, failure); err != nil || !changed {
+	if changed, err := failDeliveryIntent(tx, id, failure); err != nil || !changed {
 		return false, err
 	}
 	_, queued, err := queueDeliveryFailureNotice(tx, id)
@@ -441,7 +515,7 @@ func queueDeliveryFailureNotice(tx *sql.Tx, id int64) (int64, bool, error) {
 	if err != nil {
 		return 0, false, err
 	}
-	if intent.Status != DeliveryIntentFailed && intent.Status != DeliveryIntentExpired {
+	if intent.Status != DeliveryIntentFailed {
 		return 0, false, nil
 	}
 	if intent.NotificationQueueID != 0 {
@@ -454,9 +528,8 @@ func queueDeliveryFailureNotice(tx *sql.Tx, id int64) (int64, bool, error) {
 		return 0, appended, err
 	}
 	notice := fmt.Sprintf("[agenthail delivery failure id=%d target=%s] %s", intent.ID, intent.TargetSessionID, intent.Failure)
-	key := fmt.Sprintf("delivery-intent-notice:%d", intent.ID)
-	expiresAt := time.Now().Add(queueMessageTTL).UnixMilli()
-	res, err := tx.Exec(`INSERT INTO message_queue(session_id,message,operation,delivery_key,expires_at_ms,status,updated_at) VALUES(?,?,?,?,?,'pending',datetime('now'))`, intent.SenderSessionID, notice, QueueOperationMessage, key, expiresAt)
+	key := fmt.Sprintf("delivery-intent-notice:%d:%d", intent.ID, intent.Retries)
+	res, err := tx.Exec(`INSERT INTO message_queue(session_id,message,operation,delivery_key,status,updated_at) VALUES(?,?,?,?,'pending',datetime('now'))`, intent.SenderSessionID, notice, QueueOperationMessage, key)
 	if err != nil {
 		return 0, false, err
 	}
@@ -475,11 +548,11 @@ func queueDeliveryFailureNotice(tx *sql.Tx, id int64) (int64, bool, error) {
 
 func appendDeliveryProblemEvent(tx *sql.Tx, intent *DeliveryIntent) (bool, error) {
 	at := time.Now().UTC()
-	payload, err := json.Marshal(map[string]any{"deliveryId": intent.ID, "sessionId": intent.TargetSessionID, "sourceSessionId": intent.SenderSessionID, "message": boundedIntentMessage(intent.Message), "reason": intent.Failure, "at": at.Format(time.RFC3339Nano)})
+	payload, err := json.Marshal(map[string]any{"deliveryId": intent.ID, "sessionId": intent.TargetSessionID, "sourceSessionId": intent.SenderSessionID, "attentionSessionId": deliveryAttentionSession(intent.SenderSessionID, false), "message": boundedIntentMessage(intent.Message), "reason": intent.Failure, "at": at.Format(time.RFC3339Nano)})
 	if err != nil {
 		return false, err
 	}
-	_, appended, err := appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("delivery.problem:%d", intent.ID), Type: "delivery.problem", EntityID: intent.TargetSessionID, Payload: payload, CreatedAt: at})
+	_, appended, err := appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("delivery.problem:%d:%d", intent.ID, intent.Retries), Type: "delivery.problem", EntityID: intent.TargetSessionID, Payload: payload, CreatedAt: at})
 	return appended, err
 }
 
@@ -488,11 +561,11 @@ type deliveryIntentQuerier interface {
 }
 
 func deliveryIntentByID(q deliveryIntentQuerier, id int64) (*DeliveryIntent, error) {
-	return scanDeliveryIntent(q.QueryRow(`SELECT id,sender_session_id,target_session_id,provider_key,message,queue_id,relayed,status,evidence,failure,COALESCE(notification_queue_id,0),created_at,updated_at FROM delivery_intents WHERE id=?`, id))
+	return scanDeliveryIntent(q.QueryRow(`SELECT id,uuid,sender_session_id,target_session_id,provider_key,message,queue_id,relayed,status,evidence,failure,COALESCE(notification_queue_id,0),retries,created_at,updated_at FROM delivery_intents WHERE id=?`, id))
 }
 
 func deliveryIntentByProviderKey(q deliveryIntentQuerier, targetSessionID, providerKey string) (*DeliveryIntent, bool, error) {
-	intent, err := scanDeliveryIntent(q.QueryRow(`SELECT id,sender_session_id,target_session_id,provider_key,message,queue_id,relayed,status,evidence,failure,COALESCE(notification_queue_id,0),created_at,updated_at FROM delivery_intents WHERE target_session_id=? AND provider_key=?`, targetSessionID, providerKey))
+	intent, err := scanDeliveryIntent(q.QueryRow(`SELECT id,uuid,sender_session_id,target_session_id,provider_key,message,queue_id,relayed,status,evidence,failure,COALESCE(notification_queue_id,0),retries,created_at,updated_at FROM delivery_intents WHERE target_session_id=? AND provider_key=?`, targetSessionID, providerKey))
 	if err == sql.ErrNoRows {
 		return nil, false, nil
 	}
@@ -502,7 +575,7 @@ func deliveryIntentByProviderKey(q deliveryIntentQuerier, targetSessionID, provi
 func scanDeliveryIntent(row *sql.Row) (*DeliveryIntent, error) {
 	var intent DeliveryIntent
 	var status, evidence, createdAt, updatedAt string
-	if err := row.Scan(&intent.ID, &intent.SenderSessionID, &intent.TargetSessionID, &intent.ProviderKey, &intent.Message, &intent.QueueID, &intent.Relayed, &status, &evidence, &intent.Failure, &intent.NotificationQueueID, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&intent.ID, &intent.UUID, &intent.SenderSessionID, &intent.TargetSessionID, &intent.ProviderKey, &intent.Message, &intent.QueueID, &intent.Relayed, &status, &evidence, &intent.Failure, &intent.NotificationQueueID, &intent.Retries, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	intent.Status = DeliveryIntentStatus(status)

@@ -20,13 +20,7 @@ import (
 // nowhere else and kept unchanged otherwise, so no alias, queued work or
 // history is left pointing at a missing session.
 // session_rekeys records each move so clients can follow ids they still hold.
-// An existing registry commits user_version 14 with the data.
-func (r *Registry) rekeyClaudeConversations(version int) error {
-	tx, err := r.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+func rekeyClaudeConversations(tx *sql.Tx) error {
 	rows, err := tx.Query(`SELECT id,transcript FROM sessions WHERE surface=? AND (id LIKE 'session\_%' ESCAPE '\' OR id LIKE 'cse\_%' ESCAPE '\') ORDER BY updated_at DESC,registered_at DESC,rowid DESC`, string(surface.KindClaude))
 	if err != nil {
 		return err
@@ -96,12 +90,7 @@ func (r *Registry) rekeyClaudeConversations(version int) error {
 			}
 		}
 	}
-	if version >= 1 {
-		if _, err := tx.Exec(`PRAGMA user_version=14`); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
+	return nil
 }
 
 // sessionReferencedTx reports whether id appears in any column that can hold

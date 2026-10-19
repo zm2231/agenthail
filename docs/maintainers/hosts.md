@@ -18,8 +18,11 @@ it paired with.
 Pairing reuses the device-token model the phone uses.
 
 1. On the remote: `agenthail hosts invite` creates a five-minute, single-use
-   pairing link with the `read` and `control` scopes. It needs remote access
-   (Tailscale Serve), which is what gives the link an HTTPS endpoint.
+   pairing link with the `read`, `control` and `host` scopes. It needs remote
+   access (Tailscale Serve), which is what gives the link an HTTPS endpoint.
+   The `host` scope gives the catalog stream every row, so the pairing mirrors
+   subagents the session list hides; a device token without it streams the
+   session list. A host paired without it must be paired again.
 2. On the Mac: `agenthail hosts add '<link>' [--address <tailnet-ip>]`. The
    daemon redeems the secret, receives an `ahd_` device token, checks the
    protocol version and host id, and stores the pairing in `hosts`.
@@ -99,16 +102,16 @@ A send to a remote session carries an idempotency key (the CLI and native
 clients send one; the daemon generates one otherwise):
 
 - If no byte reached the remote, the daemon holds the exact request as a
-  pending queue row with the normal one-hour queue TTL and reports `queued`.
-  A row the host does not take within the hour expires into delivery history
-  as `expired`.
+  pending queue row and reports `queued`. The row never expires: `queue list`,
+  the dashboard and the apps show it held by `hostUnreachable` until the host
+  takes it or you cancel it.
 - If the request was written but no complete answer came back (no response,
   a body cut off mid-read, or an answer from something in front of the daemon
   such as Tailscale Serve without the `Agenthail-Host` header), the row is
   inflight with evidence `unknown`, and the CLI reports `delivery submitted`.
 - While the host is connected the daemon replays held rows with the same key.
-  Each row is claimed inflight before it is sent, and a pending row past its
-  deadline is never claimed, so an expired message is not delivered late.
+  Each row is claimed inflight before it is sent, so a canceled message or
+  one another drain already took is never sent.
   The remote's action receipts make a replay return the first result instead
   of starting a second turn. A replay the remote still reports as in progress
   stays unknown, then becomes a dead letter marked unknown 15 minutes after
@@ -153,7 +156,7 @@ Every place that treats `host_id = ''` as "this daemon's session":
 - `Dispatcher.RegisterReached`: a send, queued send or compact whose provider
   reports the session under an id a paired host owns ends as an unknown
   outcome naming that host, recorded only under the addressed session.
-- `dashboardState` and `publishCatalogQueueCounts` render mirrored rows from
+- `dashboardState` and `publishCatalogPresence` render mirrored rows from
   their stored projection; `RefreshHostQueueCounts` keeps its queue count.
 - `registerRecentClaudePeers` never advertises a mirrored session as a local
   Claude peer.

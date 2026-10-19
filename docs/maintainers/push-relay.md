@@ -17,7 +17,7 @@ The iOS App ID must have App Attest enabled before Xcode creates its provisionin
 
 ## Security boundary
 
-The Worker stores an opaque APNs device token, its environment, and the hash of a random per-installation capability. It forwards notification payloads to Apple and does not persist them.
+The Worker stores an opaque APNs device token, its environment, and the hash of a random per-installation capability. It forwards notification payloads to Apple and does not persist them. A send may carry a `collapseId` of at most 64 bytes, which the Worker passes to Apple as `apns-collapse-id` so a repeated notification replaces the one the device already shows.
 
 Registration requires an App Attest statement bound to a fresh, five-minute, single-use challenge stored in a Durable Object. Verification covers the Apple certificate chain, dates, nonce, key and credential identifiers, app identifier, counter, and production environment before a relay credential is issued.
 

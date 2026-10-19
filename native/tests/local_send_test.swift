@@ -1,3 +1,4 @@
+@testable import AgenthailHelpers
 import Foundation
 
 @main
@@ -28,6 +29,7 @@ struct LocalSendTest {
         expect(LocalSend.reconcile([first], with: assistant) == [first], "assistant text never absorbs a user send")
 
         expect(LocalSend.label(for: "queued") == "Queued" && LocalSend.label(for: "submitted") == "Submitted" && LocalSend.label(for: "sent") == "Sent", "receipt labels use the public vocabulary")
+        expect(LocalSend.label(for: "queued", waitingOnYou: true) == "Queued · Waiting on you" && LocalSend.label(for: "sent", waitingOnYou: true) == "Sent", "a queued receipt to a session waiting on you says so")
         print("local send tests passed")
     }
 

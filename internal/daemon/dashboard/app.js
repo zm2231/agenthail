@@ -25,7 +25,6 @@ const app = {
   slashCommands: [],
   drafts: new Map(),
   pendingIdempotency: new Map(),
-  expandedTurns: new Set(),
   transcriptSignature: null,
   pendingEntryScroll: false,
   liveSource: null,
@@ -193,9 +192,9 @@ function handoffMessage(value) {
 }
 function renderMessage(text, kind, label, turnKey) {
   const safeText = String(text || "");
-  const isLong = safeText.length > 2400;
-  const expanded = isLong && app.expandedTurns.has(turnKey);
-  return `<article class="turn ${kind}${isLong ? " long" : ""}${expanded ? " expanded" : ""}" data-turn-key="${escape(turnKey)}"><header class="turn-header"><span class="turn-label">${escape(label)}</span></header><div class="turn-content${isLong ? " turn-crop" : ""}">${markdown(safeText)}</div>${isLong ? `<button class="expand-turn" type="button" data-expand-turn>${expanded ? "Show less" : "Show full message"}</button>` : ""}</article>`;
+  const editable = kind === "user" && label === "Conversation input";
+  const edit = editable ? `<button class="turn-action" type="button" data-edit-message="${escape(safeText)}">Edit</button>` : "";
+  return `<article class="turn ${kind}" data-turn-key="${escape(turnKey)}"><header class="turn-header"><span class="turn-label">${escape(label)}</span></header><div class="turn-content">${markdown(safeText)}</div><div class="turn-actions"><button class="turn-action" type="button" data-copy-text="${escape(safeText)}">Copy</button>${edit}</div></article>`;
 }
 function stopLiveStream(clear = false) {
   if (app.liveSource) app.liveSource.close();
@@ -311,12 +310,14 @@ function syncComposerAction() {
   sendButton.querySelector("span:first-child").textContent = stopping ? "Stop" : "Send";
   sendButton.querySelector("span:last-child").textContent = stopping ? "■" : "↑";
   sendButton.disabled = readOnly || (!hasMessage && !stopping);
-  steerButton.hidden = !(busy && capabilities.steer && hasMessage && !readOnly);
+  steerButton.hidden = !(busy && !app.selected?.waitingOn && capabilities.steer && hasMessage && !readOnly);
   steerButton.disabled = steerButton.hidden;
   $("#composer").classList.toggle("is-stopping", stopping);
   $("#composer").classList.toggle("has-steer", !steerButton.hidden);
   if (readOnly) return;
-  $("#composer-note").textContent = busy
+  $("#composer-note").textContent = app.selected?.waitingOn
+    ? "This agent is waiting on you. Messages queue until you answer it."
+    : busy
     ? hasMessage
       ? "Send queues this for next. Steer now changes the turn in progress."
       : "This agent is working. Stop ends the current turn."
@@ -385,6 +386,7 @@ function statusLabel(status) {
   );
 }
 function presenceLabel(session) {
+  if (session.waitingOn) return "Waiting on you";
   return (
     {
       working: "Working",
@@ -401,7 +403,7 @@ function presenceTone(session) {
   return session.status;
 }
 function conversationMeta(session, model = "") {
-  const parts = [statusLabel(session.status), `${session.queueCount || 0} queued`];
+  const parts = [session.waitingOn ? "Waiting on you" : statusLabel(session.status), `${session.queueCount || 0} queued`];
   if (session.status !== "busy") parts.push(`last active ${timeAgo(session.lastActive)}`);
   if (model) parts.push(model);
   return parts.join(" · ");
@@ -675,6 +677,8 @@ function queueReason(item) {
 	if (item.evidence === "unknown") return "Delivery outcome is unknown";
 	if (item.evidence === "failed") return "Delivery failed";
 	if (item.status !== "pending") return statusLabel(item.status);
+  if (item.heldBy === "hostUnreachable")
+    return "Held: this agent's host is unreachable";
   const target = app.state.sessions.find(
     (session) => session.id === item.sessionId,
   );
@@ -684,9 +688,18 @@ function queueReason(item) {
       ? "Loading this Codex conversation before delivery"
       : "Codex conversation is not available to load";
   }
-  return target?.status === "busy"
-    ? "Waiting for this agent to finish"
-    : "Waiting for delivery";
+  return (
+    {
+      waiting: "Held: this agent is waiting on you",
+      busy: "Held: this agent is working",
+      offline: "Held: this agent is offline",
+      unknown: "Held: this agent's state is unknown",
+      retrying: "Held: waiting to retry",
+      behind: "Held: behind an earlier message",
+      notLoaded: "Held: this conversation is not loaded",
+      hostUnreachable: "Held: this agent's host is unreachable",
+    }[item.heldBy] || "Delivers on the next scan"
+  );
 }
 function renderOperations() {
   const { queue, channels, relays, history = [] } = app.state;
@@ -715,7 +728,6 @@ function renderOperations() {
           reply_observed: "Reply observed",
           failed: "Failed",
           unknown: "Delivery uncertain",
-          expired: "Expired",
           canceled: "Canceled",
         }[entry.evidence] || auditKindLabel(entry.kind);
         const detail = entry.error || entry.message || entry.result || "No details recorded";
@@ -1182,7 +1194,7 @@ function renderChat() {
   const controls = [];
   if (session.runtime?.focusable)
     controls.push('<button data-action="session-focus" type="button">Open session</button>');
-  if (session.status === "busy" && capabilities.steer)
+  if (session.status === "busy" && !session.waitingOn && capabilities.steer)
     controls.push('<button data-action="steer" type="button">Steer</button>');
   if (session.status === "busy" && capabilities.interrupt)
     controls.push(
@@ -1202,7 +1214,7 @@ function renderChat() {
     ["/name", "Name this conversation"],
     capabilities.compact && ["/compact", "Compact this conversation"],
     session.status === "busy" && capabilities.interrupt && ["/stop", "Stop the current turn"],
-    session.status === "busy" && capabilities.steer && ["/steer", "Redirect the current turn"],
+    session.status === "busy" && !session.waitingOn && capabilities.steer && ["/steer", "Redirect the current turn"],
     capabilities.model && ["/model", "Choose the active model"],
     capabilities.goal && ["/goal", "Set the session goal"],
   ].filter(Boolean);
@@ -1607,7 +1619,9 @@ async function send(requestedAction = "send") {
     const status = deliveryStatusLabel(result);
     const target = sessionTarget(app.selected);
     toast(
-      composerAction === "steer"
+      result?.result?.waitingOn
+        ? result.result.detail
+        : composerAction === "steer"
         ? "Current turn redirected."
         : commandAction
         ? `${command} requested.`
@@ -1644,10 +1658,24 @@ document.addEventListener("click", async (event) => {
   if (copyOutput) {
     try {
       await navigator.clipboard.writeText(copyOutput.dataset.copyText);
-      toast("Output copied.");
+      toast("Copied.");
     } catch (error) {
-      toast("Couldn't copy the output.");
+      toast("Couldn't copy.");
     }
+    return;
+  }
+  const editMessage = event.target.closest("[data-edit-message]");
+  if (editMessage) {
+    const composer = $("#message");
+    if (composer.disabled) {
+      toast("This session is read only.");
+      return;
+    }
+    composer.value = composer.value.trim() ? `${editMessage.dataset.editMessage}\n\n${composer.value}` : editMessage.dataset.editMessage;
+    renderSlashMenu();
+    resizeComposer();
+    syncComposerAction();
+    composer.focus();
     return;
   }
   const modelOption = event.target.closest("[data-model-option]");
@@ -1671,16 +1699,6 @@ document.addEventListener("click", async (event) => {
   if (viewLink?.dataset.view === "conversations" && mobileConversationView()) {
     app.mobileChatOpen = false;
     syncConversationLayout();
-  }
-  const expand = event.target.closest("[data-expand-turn]");
-  if (expand) {
-    const turn = expand.closest(".turn");
-    turn.classList.toggle("expanded");
-    const expanded = turn.classList.contains("expanded");
-    if (expanded) app.expandedTurns.add(turn.dataset.turnKey);
-    else app.expandedTurns.delete(turn.dataset.turnKey);
-    expand.textContent = expanded ? "Show less" : "Show full message";
-    return;
   }
   const mode = event.target.closest("[data-inbox-mode]");
   if (mode) {
@@ -1960,6 +1978,9 @@ function renderStartLaunchers() {
   select.value = options.some(item => item.id === current && item.available) ? current : "";
   const launcher = options.find(item => item.id === select.value);
   $("#new-conversation-launcher-detail").textContent = launcher?.detail || "";
+  if (launcher && !launcher.sessionOptions) {
+    document.querySelectorAll("[data-launch-option]").forEach(field => { field.hidden = true; field.querySelectorAll("input,select,textarea").forEach(input => input.disabled = true); });
+  }
 }
 async function loadStartLaunchers() {
   const response = await fetch("/api/v1/session-options");
@@ -2006,7 +2027,7 @@ $("#new-conversation-surface").addEventListener("change", () => {
   syncStartForm();
   loadStartModels().catch((error) => toast(friendlyError(error)));
 });
-$("#new-conversation-launcher").addEventListener("change", renderStartLaunchers);
+$("#new-conversation-launcher").addEventListener("change", syncStartForm);
 $("#new-conversation-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;

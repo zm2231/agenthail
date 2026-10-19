@@ -30,7 +30,7 @@ final class WorkflowParityTests: XCTestCase {
         let created = await model.createSession(surface: "claude", message: "Build", cwd: "/project", model: "sonnet", claude: settings)
         XCTAssertTrue(created)
         XCTAssertEqual(model.requestedSessionID, "native-claude")
-        XCTAssertEqual(model.deliveryStatus["native-claude"], "Background session registered. Waiting for activity.")
+        XCTAssertEqual(model.deliveryStatus["native-claude"], "Session started. Waiting for activity.")
         let sent = ParityProtocol.state.actions[0]
         for (key,value) in settings.fields { XCTAssertEqual(sent[key] as? String, value) }
         XCTAssertNil(sent["approvalPolicy"])
@@ -66,7 +66,7 @@ final class WorkflowParityTests: XCTestCase {
     func testAcceptedTerminalCreationShowsWarningWithoutConversationClaimOrRetry() async throws {
         ParityProtocol.state.reset(accepted: true)
         let model = makeModel()
-        let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", launcher: "tmux")
+        let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", launcher: LauncherOption(id: "tmux"))
         XCTAssertFalse(created)
         XCTAssertNil(model.requestedSessionID)
         XCTAssertEqual(model.creationWarning, "Submitted to tmux.")
@@ -77,14 +77,14 @@ final class WorkflowParityTests: XCTestCase {
     func testTerminalLauncherBodyOmitsAdvancedDefaultsAndRejectsUnsupportedSettings() async throws {
         ParityProtocol.state.reset()
         let model = makeModel()
-        let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", launcher: "tmux")
+        let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", launcher: LauncherOption(id: "tmux"))
         XCTAssertTrue(created)
         XCTAssertEqual(ParityProtocol.state.actions[0]["launcher"] as? String, "tmux")
         XCTAssertNil(ParityProtocol.state.actions[0]["effort"])
         XCTAssertNil(ParityProtocol.state.actions[0]["mode"])
 
         let settings = TurnSettings(effort: "high", mode: .plan)
-        let rejected = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", turnSettings: settings, launcher: "tmux")
+        let rejected = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", turnSettings: settings, launcher: LauncherOption(id: "tmux"))
         XCTAssertFalse(rejected)
         XCTAssertEqual(ParityProtocol.state.actions.count, 1)
         XCTAssertTrue(model.creationError?.contains("do not support advanced") == true)
@@ -94,14 +94,14 @@ final class WorkflowParityTests: XCTestCase {
     func testCmuxLauncherUsesTerminalContractForAdvancedSettings() async throws {
         ParityProtocol.state.reset()
         let model = makeModel()
-        let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", launcher: "cmux")
+        let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", launcher: LauncherOption(id: "cmux"))
         XCTAssertTrue(created)
         XCTAssertEqual(ParityProtocol.state.actions[0]["launcher"] as? String, "cmux")
         XCTAssertNil(ParityProtocol.state.actions[0]["effort"])
         XCTAssertNil(ParityProtocol.state.actions[0]["mode"])
 
         let settings = TurnSettings(effort: "high", mode: .plan)
-        let rejected = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", turnSettings: settings, launcher: "cmux")
+        let rejected = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", turnSettings: settings, launcher: LauncherOption(id: "cmux"))
         XCTAssertFalse(rejected)
         XCTAssertEqual(ParityProtocol.state.actions.count, 1)
         XCTAssertTrue(model.creationError?.contains("do not support advanced") == true)
@@ -121,16 +121,15 @@ final class WorkflowParityTests: XCTestCase {
         func entry(_ status: String) throws -> QueueState {
             try JSONDecoder().decode(QueueState.self, from: Data(#"{"id":9,"sessionId":"demo","target":"demo","message":"m","status":"\#(status)","evidence":"queued","attempts":0,"queuedAt":"now"}"#.utf8))
         }
-        for status in ["expired", "delivered", "canceled"] { XCTAssertTrue(try entry(status).isHistorical, status) }
+        for status in ["delivered", "canceled"] { XCTAssertTrue(try entry(status).isHistorical, status) }
         for status in ["pending", "inflight", "dead"] { XCTAssertFalse(try entry(status).isHistorical, status) }
     }
 
-    func testQueuePreservesExpiredUnknownOutcomeAsHistory() throws {
-        let data = Data(#"{"id":8,"sessionId":"demo","target":"demo","message":"uncertain","status":"dead","evidence":"unknown","attempts":1,"queuedAt":"now","expiresAt":1,"historical":true}"#.utf8)
+    func testQueuePreservesHistoricalUnknownOutcome() throws {
+        let data = Data(#"{"id":8,"sessionId":"demo","target":"demo","message":"uncertain","status":"dead","evidence":"unknown","attempts":1,"queuedAt":"now","historical":true}"#.utf8)
         let queue = try JSONDecoder().decode(QueueState.self, from: data)
         XCTAssertTrue(queue.isHistorical)
         XCTAssertEqual(queue.evidence, "unknown")
-        XCTAssertEqual(queue.expiresAt, 1)
     }
 
     func testCompactGroupingPreservesOrderErrorsAndStableAnchor() throws {

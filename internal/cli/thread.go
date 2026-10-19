@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -95,6 +96,8 @@ func (a *App) cmdThread(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	messageUUID := uuid.NewString()
+	ctx = surface.WithMessageUUID(ctx, messageUUID)
 
 	session, deliveryResult, startErr := starter.StartSession(ctx, request.options)
 	if session != nil {
@@ -111,7 +114,7 @@ func (a *App) cmdThread(args []string) error {
 	output := threadCreateOutput{OK: startErr == nil, Session: session, Delivery: deliveryResult, Alias: request.alias}
 	if startErr != nil {
 		if session != nil {
-			intent, intentErr := a.Registry.RecordSessionCreationIntent(session.ID, request.message)
+			intent, intentErr := a.Registry.RecordSessionCreationIntent(session.ID, messageUUID, request.message)
 			if intentErr != nil {
 				output.Status = "storage_failed"
 				output.Retryable = false

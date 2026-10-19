@@ -174,6 +174,7 @@ struct SessionRouteView: View {
     private var session: SessionState? {
         if let value = model.snapshot?.sessions.first(where: { $0.id == sessionID }) { return value }
         if let value = model.searchResults.first(where: { $0.id == sessionID })?.session { return value }
+        if let value = model.fetchedSubagents.session(sessionID) { return value }
         guard let detail = model.selectedDetail, detail.session.id == sessionID else { return nil }
         return SessionState(id: sessionID, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
                             status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: false,
@@ -453,6 +454,7 @@ struct SessionScreen: View {
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
+                .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
                 .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
@@ -587,7 +589,7 @@ struct IOSComposer: View {
     @State private var showingTurnSettings = false
     @State private var loadedModels: [ModelOption]?
 
-    private var steering: Bool { detail.session.status == "busy" && detail.capabilities.steer && model.snapshot?.busyDelivery == "steer" }
+    private var steering: Bool { detail.session.status == "busy" && detail.session.waitingOn == nil && detail.capabilities.steer && model.snapshot?.busyDelivery == "steer" }
     private var sending: Bool { model.sendingSessionIDs.contains(session.id) }
 
     private var canSend: Bool {
@@ -704,12 +706,17 @@ struct IOSComposer: View {
 
 }
 
+extension EnvironmentValues {
+    @Entry var editMessage: ((String) -> Void)? = nil
+}
+
 struct IOSMessage: View {
     let label: String
     let text: String
     let color: Color
     var timestamp: String? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.editMessage) private var editMessage
     @State private var showingFullMessage = false
     private var isUser: Bool { label == "You" }
     private var isLongMessage: Bool { isUser && (text.count > 700 || text.components(separatedBy: .newlines).count > 10) }
@@ -742,6 +749,9 @@ struct IOSMessage: View {
         .padding(.vertical, 4)
         .contextMenu {
             Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = text }
+            if isUser, let editMessage {
+                Button("Edit and resend", systemImage: "pencil") { editMessage(text) }
+            }
             ShareLink(item: text) { Label("Share text", systemImage: "square.and.arrow.up") }
         }
         .sheet(isPresented: $showingFullMessage) {
@@ -906,8 +916,8 @@ struct SessionSummary: View {
         .accessibilityHint("Open session details, context, model and controls")
     }
     private var status: some View {
-        Label(detail.session.status == "busy" ? "Working" : detail.session.status.capitalized,
-              systemImage: detail.session.status == "busy" ? "waveform" : "circle")
+        Label(detail.session.waitingOn != nil ? "Waiting on you" : detail.session.status == "busy" ? "Working" : detail.session.status.capitalized,
+              systemImage: detail.session.waitingOn != nil ? "questionmark.bubble" : detail.session.status == "busy" ? "waveform" : "circle")
         .font(.subheadline)
         .foregroundStyle(detail.session.status == "busy" ? SessionStyle.accent : .secondary)
     }
@@ -932,12 +942,13 @@ struct SessionInspector: View {
         guard let liveDetail = model.selectedDetail, liveDetail.session.id == session.id else { return initialDetail }
         return liveDetail
     }
+    private var liveSession: SessionState { model.snapshot?.sessions.first { $0.id == session.id } ?? session }
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     LabeledContent("Agent", value: detail.session.surface.capitalized)
-                    LabeledContent("Status", value: detail.session.status.capitalized)
+                    LabeledContent("Status", value: detail.session.waitingOn != nil ? "Waiting on you" : detail.session.status.capitalized)
                     if let value = detail.model { LabeledContent("Model", value: value) }
                     if let value = detail.session.cwd, !value.isEmpty { LabeledContent("Workspace", value: value).textSelection(.enabled) }
                     if let value = detail.session.source { LabeledContent("Source", value: value) }
@@ -996,6 +1007,29 @@ struct SessionInspector: View {
                         }
                     }
                 }
+                let children = model.subagents(of: session.id)
+                let subagentsLoading = model.fetchedSubagents.loading(liveSession)
+                let subagentsError = model.fetchedSubagents.errors[session.id]
+                if !children.isEmpty || subagentsLoading || subagentsError != nil {
+                    Section("Subagents") {
+                        if subagentsLoading || subagentsError != nil {
+                            Text(subagentsError ?? "Loading subagents").foregroundStyle(.secondary)
+                        }
+                        ForEach(children) { child in
+                            Button {
+                                dismiss()
+                                model.openSession(child.id)
+                            } label: {
+                                HStack {
+                                    Text(SessionFamilies.label(child)).lineLimit(1)
+                                    Spacer(minLength: 0)
+                                    if child.isWorking { Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(SessionStyle.accent) }
+                                }
+                            }
+                            .accessibilityIdentifier("subagent-" + child.id)
+                        }
+                    }
+                }
                 if let links = detail.claudeSubagents, !links.isEmpty {
                     Section("Claude subagents") {
                         ForEach(links) { link in
@@ -1039,6 +1073,7 @@ struct SessionInspector: View {
             }
             .navigationTitle("Session details").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .task(id: SubagentFetchKey(liveSession, revision: model.fetchedSubagents.revision(session.id))) { await model.loadSubagents(of: liveSession) }
             .sheet(isPresented: $showingModels) {
                 SearchableModelSelectionSheet(initialOptions: detail.models ?? [], currentSelectedID: detail.model, allowsDefault: false, onSelect: { value in
                     if let value {
@@ -1091,7 +1126,16 @@ struct IOSSessionRow: View {
                     IOSHostBadge(name: host, unavailable: session.isUnavailable)
                         .accessibilityLabel(session.isUnavailable ? "Unavailable on \(host)" : "On \(host)")
                 }
-                if session.isWorking {
+                if session.isWaitingOnYou {
+                    HStack(spacing: 4) {
+                        Image(systemName: "questionmark.bubble")
+                        Text("Waiting on you")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(SessionStyle.accent)
+                    .lineLimit(1)
+                    .fixedSize()
+                } else if session.isWorking {
                     HStack(spacing: 4) {
                         Image(systemName: "waveform")
                         Text("Working")

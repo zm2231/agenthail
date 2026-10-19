@@ -122,9 +122,12 @@ struct SessionState: Codable, Identifiable, Hashable {
     var runtime: SessionRuntime? = nil
     var subagent: SubagentIdentity? = nil
     var subagents: SubagentRollup? = nil
+    var hiddenSubagents: SubagentRollup? = nil
+    var listed: Bool? = nil
     var host: SessionHost? = nil
     var unavailableReason: String? = nil
     var transport: String? = nil
+    var waitingOn: WaitingState? = nil
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }
@@ -132,6 +135,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     }
 
     var isWorking: Bool { status == "busy" }
+    var isWaitingOnYou: Bool { waitingOn != nil }
     var isReadOnly: Bool { readOnly == true }
     var remoteHostName: String? {
         guard let host, host.state != "local" else { return nil }
@@ -170,6 +174,13 @@ struct HostHealth: Decodable, Hashable, Identifiable {
     var isHealthy: Bool { state == "connected" }
 }
 
+/// A question, plan or approval the session is waiting on its user to answer.
+struct WaitingState: Codable, Hashable {
+    let kind: String
+    let id: String
+    var since: String? = nil
+}
+
 struct SubagentIdentity: Codable, Hashable {
     let parentId: String
     let rootId: String
@@ -206,6 +217,78 @@ struct SessionFamily: Identifiable, Equatable {
     }
 }
 
+/// Refetches a session's subagents when it changes, its subagent counts do,
+/// or the catalog reports a change among its hidden subagents.
+struct SubagentFetchKey: Hashable {
+    let sessionID: String
+    let subagents: SubagentRollup?
+    let hidden: SubagentRollup?
+    let revision: Int
+
+    init(_ session: SessionState, revision: Int) {
+        sessionID = session.id
+        subagents = session.subagents
+        hidden = session.hiddenSubagents
+        self.revision = revision
+    }
+}
+
+/// The fetched subagent pages of the few sessions most recently shown; a
+/// parent's page can run to hundreds of kilobytes.
+struct SubagentPageCache {
+    static let capacity = 4
+    private(set) var errors: [String: String] = [:]
+    private var rows: [String: [SessionState]] = [:]
+    private var order: [String] = []
+    private var revisions: [String: Int] = [:]
+
+    func children(of parentID: String) -> [SessionState] { rows[parentID] ?? [] }
+    func revision(_ parentID: String) -> Int { revisions[parentID] ?? 0 }
+    func loading(_ parent: SessionState) -> Bool { (parent.hiddenSubagents?.count ?? 0) > 0 && rows[parent.id] == nil && errors[parent.id] == nil }
+    func session(_ id: String) -> SessionState? { rows.values.lazy.flatMap { $0 }.first { $0.id == id } }
+
+    mutating func store(_ sessions: [SessionState], for parentID: String) {
+        rows[parentID] = sessions
+        errors[parentID] = nil
+        touch(parentID)
+    }
+
+    mutating func fail(_ message: String, for parentID: String) {
+        errors[parentID] = message
+        touch(parentID)
+    }
+
+    mutating func drop(_ parentID: String) {
+        rows[parentID] = nil
+        errors[parentID] = nil
+        revisions[parentID] = nil
+        order.removeAll { $0 == parentID }
+    }
+
+    /// A device's catalog stream reports a hidden subagent's arrival or change
+    /// only as an unlisted removal without its parent, so an unknown one
+    /// refetches every cached page.
+    mutating func sessionRemoved(_ id: String, unlisted: Bool) {
+        drop(id)
+        let parents = rows.filter { $0.value.contains { $0.id == id } }.map(\.key)
+        for parent in parents { rows[parent]?.removeAll { $0.id == id } }
+        for parent in parents.isEmpty && unlisted ? Array(rows.keys) : parents {
+            revisions[parent, default: 0] += 1
+        }
+    }
+
+    private mutating func touch(_ parentID: String) {
+        order.removeAll { $0 == parentID }
+        order.append(parentID)
+        while order.count > Self.capacity {
+            let evicted = order.removeFirst()
+            rows[evicted] = nil
+            errors[evicted] = nil
+            revisions[evicted] = nil
+        }
+    }
+}
+
 enum SessionFamilies {
     static func build(_ sessions: [SessionState]) -> [SessionFamily] {
         let ids = Set(sessions.map(\.id))
@@ -231,13 +314,22 @@ enum SessionFamilies {
             }
             walk(root.id, depth: 1)
             let observed = root.subagents ?? SubagentRollup(count: 0, working: 0)
+            let counted = members.filter { $0.session.listed != false }
             return SessionFamily(
                 root: root,
                 members: members,
-                subagentCount: members.count + observed.count,
-                workingSubagents: members.filter { $0.session.isWorking }.count + observed.working
+                subagentCount: counted.count + observed.count,
+                workingSubagents: counted.filter { $0.session.isWorking }.count + observed.working
             )
         }
+    }
+
+    /// The direct subagents of a session: the fetched page, with any row the
+    /// live session list holds taking the place of its fetched copy.
+    static func children(of parentID: String, listed: [SessionState], fetched: [SessionState]) -> [SessionState] {
+        let live = listed.filter { $0.subagent?.parentId == parentID }
+        let liveIDs = Set(live.map(\.id))
+        return fetched.filter { $0.subagent?.parentId == parentID && !liveIDs.contains($0.id) } + live
     }
 
     static func subagentSummary(_ family: SessionFamily) -> String {
@@ -323,8 +415,20 @@ struct LauncherOption: Decodable, Identifiable, Hashable {
     let agents: [String]
     let available: Bool
     let detail: String?
+    /// Whether the launcher applies every creation setting. A terminal launcher
+    /// takes only the folder, message, model and name.
+    let sessionOptions: Bool
 
-    enum CodingKeys: String, CodingKey { case id, label, agents, available, detail }
+    enum CodingKeys: String, CodingKey { case id, label, agents, available, detail, sessionOptions }
+
+    init(id: String, label: String? = nil, agents: [String] = [], available: Bool = true, detail: String? = nil, sessionOptions: Bool = false) {
+        self.id = id
+        self.label = label ?? id
+        self.agents = agents
+        self.available = available
+        self.detail = detail
+        self.sessionOptions = sessionOptions
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -333,7 +437,10 @@ struct LauncherOption: Decodable, Identifiable, Hashable {
         agents = try container.decodeIfPresent([String].self, forKey: .agents) ?? []
         available = try container.decode(Bool.self, forKey: .available)
         detail = try container.decodeIfPresent(String.self, forKey: .detail)
+        sessionOptions = try container.decodeIfPresent(Bool.self, forKey: .sessionOptions) ?? false
     }
+
+    var isTerminal: Bool { !sessionOptions }
 }
 
 struct ProjectIdentity: Codable, Hashable {
@@ -369,12 +476,45 @@ struct QueueState: Decodable, Identifiable, Equatable {
     let attempts: Int
     let lastError: String?
     let queuedAt: String
-    let expiresAt: Int64?
+    var heldBy: String? = nil
     let historical: Bool?
     let evidence: String
 
     var isHistorical: Bool {
-        historical == true || status == "expired" || status == "delivered" || status == "canceled"
+        historical == true || status == "delivered" || status == "canceled"
+    }
+
+    /// The queue stores queuedAt as SQLite's UTC "yyyy-MM-dd HH:mm:ss".
+    var queuedDate: Date? { QueueState.queuedAtFormat.date(from: queuedAt) }
+
+    private static let queuedAtFormat: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+
+    /// The send receipt for a queued message, worded as the daemon words it.
+    var queuedReceipt: String {
+        heldBy == "waiting"
+            ? "Queued for \(target), which is waiting on you; sends after you answer."
+            : "Queued for \(target); sends when current turn ends."
+    }
+
+    /// Why a pending message has not been delivered yet.
+    var holdLabel: String {
+        switch heldBy {
+        case "waiting": return "Held: this agent is waiting on you"
+        case "busy": return "Held: this agent is working"
+        case "offline": return "Held: this agent is offline"
+        case "unknown": return "Held: this agent's state is unknown"
+        case "retrying": return "Held: waiting to retry"
+        case "behind": return "Held: behind an earlier message"
+        case "notLoaded": return "Held: this conversation is not loaded"
+        case "hostUnreachable": return "Held: this agent's host is unreachable"
+        default: return "Delivers on the next scan"
+        }
     }
 }
 
@@ -420,6 +560,7 @@ struct DeliveryProblem: Decodable, Identifiable, Equatable {
     let deliveryId: Int64
     let sessionId: String
     let sourceSessionId: String?
+    let attentionSessionId: String?
     let message: String
     let reason: String
     let status: String?
@@ -493,6 +634,7 @@ struct DashboardSnapshot: Decodable {
     var surfaces: [SurfaceState]
     var sessions: [SessionState]
     var totalSessions: Int
+    var nextCursor: String? = nil
     let queue: [QueueState]
     let channels: [ChannelState]
     let relays: [RelayState]
@@ -632,6 +774,7 @@ struct RawSession: Decodable {
     let transport: String?
     let cwd: String?
     let runtime: SessionRuntime?
+    var waitingOn: WaitingState? = nil
 }
 
 struct GoalState: Decodable {
@@ -880,6 +1023,7 @@ struct CatalogStreamData: Decodable {
     let deliveryId: Int64?
     let queueCount: Int?
     let sourceSessionId: String?
+    let attentionSessionId: String?
     let message: String?
     let reason: String?
     let status: String?

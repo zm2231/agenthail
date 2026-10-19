@@ -213,7 +213,7 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 
 func (d *Daemon) requestCatalogDiscovery() {
 	select {
-	case d.catalogRediscover <- struct{}{}:
+	case d.catalogNudge <- struct{}{}:
 	default:
 	}
 }
@@ -255,7 +255,7 @@ func (d *Daemon) projectAction(ctx context.Context, w http.ResponseWriter, actio
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	d.publishCatalogViewState()
+	d.publishCatalogPresence()
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "projectId": projectID, "archived": action == "project-archive"})
 }
 
@@ -274,7 +274,7 @@ func (d *Daemon) sessionArchiveAction(w http.ResponseWriter, action, sessionID s
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	d.publishCatalogViewState()
+	d.publishCatalogPresence()
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "sessionId": sessionID, "archived": action == "session-archive"})
 }
 

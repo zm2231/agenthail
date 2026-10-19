@@ -65,6 +65,7 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var creationWarning: String?
     @Published var pendingControls: Set<String> = []
     @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
+    @Published private(set) var fetchedSubagents = SubagentPageCache()
 
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
 
@@ -88,7 +89,6 @@ final class AgenthailIOSModel: ObservableObject {
         case "failed": return "Delivery failed"
         case "unknown", nil: return "Submitted"
         case "held": return "Delivery held. Review it in Inbox before retrying."
-        case "expired": return "Instruction expired. Review it in Inbox history."
         case "canceled": return "Instruction canceled."
         default: return "Delivery status: \(evidence ?? "unknown")"
         }
@@ -105,6 +105,26 @@ final class AgenthailIOSModel: ObservableObject {
 
     func clearTurnSettings(for sessionID: String) {
         turnSettingsDrafts.removeValue(forKey: sessionID)
+    }
+
+    /// Fetches the direct subagents a session list only counts, so they can
+    /// be shown and opened.
+    func loadSubagents(of session: SessionState) async {
+        guard let api else { return }
+        guard (session.hiddenSubagents?.count ?? 0) > 0 else {
+            fetchedSubagents.drop(session.id)
+            return
+        }
+        do {
+            let loaded = try await api.subagents(of: session.id)
+            if !Task.isCancelled { fetchedSubagents.store(loaded, for: session.id) }
+        } catch {
+            if !Task.isCancelled { fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id) }
+        }
+    }
+
+    func subagents(of sessionID: String) -> [SessionState] {
+        SessionFamilies.children(of: sessionID, listed: snapshot?.sessions ?? [], fetched: fetchedSubagents.children(of: sessionID))
     }
 
     func queuedInstructions() async throws -> [QueueState] {
@@ -151,13 +171,13 @@ final class AgenthailIOSModel: ObservableObject {
         creationRequestIdentity = nil
         creationRequestKey = nil
     }
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) async -> Bool {
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil) async -> Bool {
         guard !creatingSession, let api, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         creatingSession = true; creationError = nil; creationWarning = nil
         defer { creatingSession = false }
         let identity = CreationRequestIdentity(surface: surface, message: message, cwd: cwd, model: model,
                                                turnSettings: surface == "codex" ? turnSettings : .init(),
-                                               claudeFields: claude.fields, launcher: launcher)
+                                               claudeFields: claude.fields, launcher: launcher?.id)
         if creationRequestIdentity != identity || creationRequestKey == nil {
             creationRequestIdentity = identity
             creationRequestKey = UUID().uuidString
@@ -166,13 +186,13 @@ final class AgenthailIOSModel: ObservableObject {
             let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher, idempotencyKey: creationRequestKey)
             guard receipt.ok || receipt.unknown == true || receipt.accepted == true else { throw AgenthailAPIError.invalidResponse }
             if receipt.status == "submitted" && receipt.id == nil {
-                creationWarning = "Submitted to \(receipt.launcher ?? launcher ?? surface)."
+                creationWarning = "Submitted to \(receipt.launcher ?? launcher?.id ?? surface)."
                 return false
             }
             creationWarning = receipt.warning
             if let id = receipt.id, !id.isEmpty {
-                let target = receipt.launcher ?? launcher ?? surface
-                deliveryStatus[id] = receipt.status == "submitted" || receipt.unknown == true ? "Submitted to \(target)." : (surface == "claude" ? "Background session registered. Waiting for activity." : "Conversation started")
+                let target = receipt.launcher ?? launcher?.id ?? surface
+                deliveryStatus[id] = receipt.status == "submitted" || receipt.unknown == true ? "Submitted to \(target)." : (surface == "claude" ? "Session started. Waiting for activity." : "Conversation started")
                 requestedSessionID = id
             }
             if receipt.id != nil { creationRequestIdentity = nil; creationRequestKey = nil }
@@ -471,14 +491,13 @@ final class AgenthailIOSModel: ObservableObject {
                 guard let item = items.first(where: { $0.id == queueID && $0.sessionId == sessionID }) else {
                     continue
                 }
-                switch item.isHistorical && item.evidence == "unknown" ? "unknown-expired" : item.isHistorical && item.evidence == "failed" ? "failed-expired" : item.evidence {
+                switch item.isHistorical && item.evidence == "unknown" ? "unknown-history" : item.isHistorical && item.evidence == "failed" ? "failed-history" : item.evidence {
                 case "submitted": deliveryStatus[sessionID] = "Submitted to \(item.target)."
-                case "queued": deliveryStatus[sessionID] = "Queued for \(item.target); sends when current turn ends."
+                case "queued": deliveryStatus[sessionID] = item.queuedReceipt
                 case "unknown": deliveryStatus[sessionID] = "Submitted to \(item.target)."
                 case "failed": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox before retrying."
-                case "unknown-expired": deliveryStatus[sessionID] = "Instruction expired. You can review it in Inbox history."
-                case "failed-expired": deliveryStatus[sessionID] = "Delivery failed; the queue entry has expired. Review it in Inbox history."
-                case "expired": deliveryStatus[sessionID] = "Instruction expired. You can review it in Inbox history."
+                case "unknown-history": deliveryStatus[sessionID] = "Delivery was never confirmed. Review it in Inbox history."
+                case "failed-history": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox history."
                 case "transport_accepted", "delivered": deliveryStatus[sessionID] = "Sent to \(item.target)."
                 case "held": deliveryStatus[sessionID] = "Delivery held. Review it in Inbox before retrying."
                 case "canceled": deliveryStatus[sessionID] = "Instruction canceled."
@@ -584,6 +603,11 @@ final class AgenthailIOSModel: ObservableObject {
         } else if let selected = selectedSessionID, rekeys.resolve(selected) != selected {
             requestedSessionID = rekeys.resolve(selected)
         }
+    }
+
+    func editAndResend(_ text: String) {
+        let edited = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        composer = composer.isEmpty ? edited : edited + "\n\n" + composer
     }
 
     func send(to session: SessionState) {
@@ -875,13 +899,14 @@ final class AgenthailIOSModel: ObservableObject {
         case "session.queue":
             guard let id = event.data.sessionId, let count = event.data.queueCount,
                   let index = current.sessions.firstIndex(where: { $0.id == id }) else { return }
-            current.sessions[index] = Self.applyingQueueCount(count, to: current.sessions[index], codexRecentHours: current.codexRecentHours, now: Date())
+            current.sessions[index].queueCount = count
             snapshot = current
         case "session.removed":
             guard let id = event.data.sessionId else { _ = await refresh(); return }
             current.sessions.removeAll { $0.id == id }
             current.totalSessions = current.sessions.count
             snapshot = current
+            fetchedSubagents.sessionRemoved(id, unlisted: event.data.reason == "unlisted")
             if let next = event.data.rekeyedTo { followRekeys([id: next]) }
         case "surface.health":
             guard let name = event.data.surface, let health = event.data.health,
@@ -899,7 +924,7 @@ final class AgenthailIOSModel: ObservableObject {
                   let reason = event.data.reason,
                   let at = event.data.at else { return }
             var problems = current.deliveryProblems ?? []
-            let problem = DeliveryProblem(deliveryId: deliveryId, sessionId: sessionId, sourceSessionId: event.data.sourceSessionId, message: message, reason: reason, status: event.data.status, at: at)
+            let problem = DeliveryProblem(deliveryId: deliveryId, sessionId: sessionId, sourceSessionId: event.data.sourceSessionId, attentionSessionId: event.data.attentionSessionId, message: message, reason: reason, status: event.data.status, at: at)
             problems.removeAll { $0.deliveryId == deliveryId }
             problems.insert(problem, at: 0)
             current.deliveryProblems = Array(problems.prefix(50))
@@ -911,32 +936,6 @@ final class AgenthailIOSModel: ObservableObject {
         default:
             return
         }
-    }
-
-    static func applyingQueueCount(_ count: Int, to session: SessionState, codexRecentHours: Int, now: Date) -> SessionState {
-        var updated = session
-        updated.queueCount = count
-        func activeWithin(hours: Int) -> Bool {
-            guard let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) else { return false }
-            return now.timeIntervalSince(date) <= TimeInterval(hours) * 3600
-        }
-        switch session.surface {
-        case "claude":
-            if count > 0 { (updated.current, updated.currentReason) = (true, "queued") }
-            else if !session.open { (updated.current, updated.currentReason) = (false, nil) }
-            else { (updated.current, updated.currentReason) = (true, session.isWorking ? "working" : "open") }
-        case "codex":
-            if session.isWorking { (updated.current, updated.currentReason) = (true, "working") }
-            else if count > 0 { (updated.current, updated.currentReason) = (true, "queued") }
-            else if session.status != "notLoaded" && activeWithin(hours: codexRecentHours) { (updated.current, updated.currentReason) = (true, "recent") }
-            else { (updated.current, updated.currentReason) = (false, nil) }
-        default:
-            if session.isWorking { (updated.current, updated.currentReason) = (true, "working") }
-            else if count > 0 { (updated.current, updated.currentReason) = (true, "queued") }
-            else if activeWithin(hours: 24) { (updated.current, updated.currentReason) = (true, "recent") }
-            else { (updated.current, updated.currentReason) = (false, nil) }
-        }
-        return updated
     }
 
     private func startSessionStream(_ id: String) {

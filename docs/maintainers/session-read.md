@@ -64,8 +64,8 @@ per-viewer provider stream in the dashboard.
 Snapshot assembly reads saved catalog identity and batches aliases and queue
 counts. It does not call provider discovery or launch a process for each row.
 Background discovery reads configuration once and gathers Claude process
-presence in one process-list call. Queue counts exclude expired pending work
-without performing expiration writes.
+presence in one process-list call. Queue counts include every pending and
+in-flight message.
 
 Snapshots accept `scope=running|current|recent|all|archived` (defined in
 `projects.md`), `projectId`, and `q`.

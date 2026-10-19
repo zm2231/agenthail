@@ -138,7 +138,7 @@ func TestQueuedWorkUnarchivesTheSessionAndItsProject(t *testing.T) {
 	if _, err := r.QueueMessageWithOptions("to", "follow up", "", surface.SendOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	d.publishCatalogViewState()
+	d.publishCatalogPresence()
 	to, from := storedProjection(t, r, "to"), storedProjection(t, r, "from")
 	if to.Archived || to.Project.Archived || from.Archived {
 		t.Fatalf("queued work stayed hidden: to=%+v from=%+v", to, from)
@@ -198,7 +198,7 @@ func TestAddingAFolderProjectClaimsItsSessions(t *testing.T) {
 		t.Fatalf("added=%+v err=%v", added, err)
 	}
 	select {
-	case <-d.catalogRediscover:
+	case <-d.catalogNudge:
 	default:
 		t.Fatal("adding a project did not request discovery")
 	}

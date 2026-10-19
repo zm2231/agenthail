@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -34,12 +35,21 @@ type Daemon struct {
 	observeRetry      map[string]observeRetry
 	notificationMu    sync.Mutex
 	notificationArmed map[string]bool
+	waitingLocks      sync.Map
+	announceMu        sync.Mutex
+	announcing        map[string]string
+	catalogNudge      chan struct{}
+	// catalogSelected, when set, runs after a catalog publication has chosen
+	// what a session waits on and before its row commits.
+	catalogSelected func(sessionID string)
+	// waitingContended, when set, runs when a session's waiting lock is held
+	// by another caller and this one is about to wait for it.
+	waitingContended  func(sessionID string)
 	queueWorkers      sync.WaitGroup
 	events            *eventHub
 	catalog           *catalogHub
 	catalogLive       map[string]*catalogLiveSession
 	catalogIdentities *catalogIdentityCache
-	catalogRediscover chan struct{}
 	// catalogProjectUnarchived is set and cleared by the catalog goroutine.
 	catalogProjectUnarchived bool
 	sources                  *sessionSourceManager
@@ -49,6 +59,7 @@ type Daemon struct {
 	sourceHolds              map[string]map[string]func()
 	dashboard                *dashboardServer
 	transportResolver        *SessionTransportResolver
+	claudeHost               *claudehost.Manager
 	identityMu               sync.RWMutex
 	identity                 registry.HostIdentity
 	federation               *federation
@@ -97,7 +108,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		sourceHolds:       map[string]map[string]func(){},
 		catalogLive:       map[string]*catalogLiveSession{},
 		catalogIdentities: newCatalogIdentityCache(),
-		catalogRediscover: make(chan struct{}, 1),
+		catalogNudge:      make(chan struct{}, 1),
 		federation:        newFederation(),
 	}
 	identity, err := reg.HostIdentity()
@@ -106,9 +117,6 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 	}
 	d.identity = identity
 	d.transportResolver = NewSessionTransportResolver(surface.NewLaunchers(surfaces))
-	if err := reg.EnsureCatalogState(); err != nil {
-		d.log.Printf("catalog state: %s", err)
-	}
 	kinds := make([]surface.SurfaceKind, 0, len(surfaces))
 	for _, adapter := range surfaces {
 		kinds = append(kinds, adapter.Name())
@@ -216,6 +224,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		defer close(catalogDone)
 		d.runCatalog(ctx)
 	}()
+	go d.superviseClaudeHost(ctx)
 	observerTicker := time.NewTicker(d.pollInterval)
 	defer observerTicker.Stop()
 	d.scanAndRelay(ctx)
@@ -246,7 +255,7 @@ func (d *Daemon) runCatalog(ctx context.Context) {
 			return
 		case <-discoveryTicker.C:
 			d.discoverCatalog(ctx)
-		case <-d.catalogRediscover:
+		case <-d.catalogNudge:
 			d.discoverCatalog(ctx)
 		case <-statusTicker.C:
 			d.refreshCatalogStatus(ctx)

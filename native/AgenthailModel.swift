@@ -46,6 +46,7 @@ final class AgenthailModel: ObservableObject {
     @Published var sessionRefinement = SessionRefinement()
     @Published private(set) var localSends: [String: [LocalSend]] = [:]
     @Published private var turnSettingsDrafts: [String: TurnSettings] = [:]
+    @Published private(set) var fetchedSubagents = SubagentPageCache()
 
     private(set) var api: AgenthailAPI?
     let actionKeys = ActionRetryKeys()
@@ -70,13 +71,6 @@ final class AgenthailModel: ObservableObject {
         cache.countLimit = 100
         return cache
     }()
-    private struct PendingSendRequest {
-        let busyDelivery: String?
-        let turnSettings: TurnSettings
-        let message: String
-        let idempotencyKey: String
-    }
-    private var pendingSendRequests: [String: PendingSendRequest] = [:]
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
@@ -86,7 +80,7 @@ final class AgenthailModel: ObservableObject {
         return listed + pinnedSessions.filter { !listedIDs.contains($0.id) }
     }
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
-    var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.map(\.sessionId)) }
+    var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.compactMap(\.attentionSessionId)) }
     var sessionTree: SessionTree {
         SessionTree.build(knownSessions, filter: sessionFilter, refinement: sessionRefinement, attentionSessionIDs: attentionSessionIDs)
     }
@@ -159,6 +153,26 @@ final class AgenthailModel: ObservableObject {
                 try? await Task.sleep(for: .seconds(delay))
             }
         }
+    }
+
+    /// Fetches the direct subagents a session list only counts, so they can
+    /// be shown and opened.
+    func loadSubagents(of session: SessionState) async {
+        guard let api else { return }
+        guard (session.hiddenSubagents?.count ?? 0) > 0 else {
+            fetchedSubagents.drop(session.id)
+            return
+        }
+        do {
+            let loaded = try await api.subagents(of: session.id)
+            if !Task.isCancelled { fetchedSubagents.store(loaded, for: session.id) }
+        } catch {
+            if !Task.isCancelled { fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id) }
+        }
+    }
+
+    func subagents(of sessionID: String) -> [SessionState] {
+        SessionFamilies.children(of: sessionID, listed: knownSessions, fetched: fetchedSubagents.children(of: sessionID))
     }
 
     @discardableResult
@@ -303,7 +317,7 @@ final class AgenthailModel: ObservableObject {
         do {
             let body = try form.creationBody()
             let receipt = try await api.createSession(body: body, idempotencyKey: actionKeys.key(for: body, scope: .creation), failureReceipts: true)
-            let decision = SessionLaunchDecision(receipt, launcher: form.launcher, agent: form.agent)
+            let decision = SessionLaunchDecision(receipt, launcher: form.launcher?.id, agent: form.agent)
             switch decision {
             case .open(let id):
                 operationError = nil
@@ -395,6 +409,11 @@ final class AgenthailModel: ObservableObject {
     func openSearchResult(_ session: SessionState) {
         pin(session)
         mainPane.select(session.id)
+    }
+
+    func openSubagent(_ session: SessionState, in pane: SessionPane) {
+        pin(session)
+        pane.select(session.id)
     }
 
     private func pin(_ session: SessionState) {
@@ -630,30 +649,34 @@ final class AgenthailModel: ObservableObject {
             completion?(false)
             return
         }
-        let idempotencyKey: String
-        if let retry = pendingSendRequests[sessionID], retry.busyDelivery == busyDelivery, retry.turnSettings == turnSettings, retry.message == text {
-            idempotencyKey = retry.idempotencyKey
-        } else {
-            idempotencyKey = UUID().uuidString
-            pendingSendRequests[sessionID] = PendingSendRequest(busyDelivery: busyDelivery, turnSettings: turnSettings, message: text, idempotencyKey: idempotencyKey)
-        }
-        let pending = LocalSend(text: text, sentAt: Date(), status: nil)
+        let pending = LocalSend(text: text, sentAt: Date(), status: nil, busyDelivery: busyDelivery, turnSettings: turnSettings)
         localSends[sessionID, default: []].append(pending)
+        deliver(pending, to: sessionID, api: api, completion: completion)
+    }
+
+    func retrySend(_ send: LocalSend, in sessionID: String) {
+        guard let api, let index = localSends[sessionID]?.firstIndex(where: { $0.id == send.id }) else { return }
+        localSends[sessionID]?[index].failure = nil
+        deliver(send, to: sessionID, api: api)
+    }
+
+    private func deliver(_ send: LocalSend, to sessionID: String, api: AgenthailAPI, completion: ((Bool) -> Void)? = nil) {
         Task {
             do {
-                let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: text, turnSettings: turnSettings, busyDelivery: busyDelivery, author: "person", idempotencyKey: idempotencyKey)
-                if pendingSendRequests[sessionID]?.idempotencyKey == idempotencyKey { pendingSendRequests.removeValue(forKey: sessionID) }
-                if !turnSettings.isEmpty, turnSettingsDrafts[sessionID] == turnSettings { turnSettingsDrafts.removeValue(forKey: sessionID) }
-                updateLocalSend(pending.id, in: sessionID, status: LocalSend.label(for: receipt.result?.status))
+                let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: send.text, turnSettings: send.turnSettings, busyDelivery: send.busyDelivery, author: "person", idempotencyKey: send.idempotencyKey)
+                if !send.turnSettings.isEmpty, turnSettingsDrafts[sessionID] == send.turnSettings { turnSettingsDrafts.removeValue(forKey: sessionID) }
+                updateLocalSend(send.id, in: sessionID) { $0.status = LocalSend.label(for: receipt.result?.status, waitingOnYou: receipt.result?.waitingOn != nil) }
                 operationError = nil
                 completion?(true)
             } catch {
-                localSends[sessionID]?.removeAll { $0.id == pending.id }
-                restoreToComposer(message.trimmingCharacters(in: .whitespacesAndNewlines), attachments: attachments, sessionID: sessionID)
-                operationError = AgenthailAPIError.userMessage(error)
+                updateLocalSend(send.id, in: sessionID) { $0.failure = AgenthailAPIError.userMessage(error) }
                 completion?(false)
             }
         }
+    }
+
+    func discardSend(_ send: LocalSend, in sessionID: String) {
+        localSends[sessionID]?.removeAll { $0.id == send.id }
     }
 
     @Published private(set) var modelCatalog: [String: [ModelOption]] = [:]
@@ -808,9 +831,10 @@ final class AgenthailModel: ObservableObject {
         draft(for: sessionID).restore(text, attachments: attachments)
     }
 
-    private func updateLocalSend(_ id: UUID, in sessionID: String, status: String) {
+    private func updateLocalSend(_ id: UUID, in sessionID: String, _ change: (inout LocalSend) -> Void) {
+        let sessionID = rekeys.resolve(sessionID)
         guard let index = localSends[sessionID]?.firstIndex(where: { $0.id == id }) else { return }
-        localSends[sessionID]?[index].status = status
+        change(&localSends[sessionID]![index])
     }
 
     private func startCatalogStream() {
@@ -849,10 +873,11 @@ final class AgenthailModel: ObservableObject {
         case "session.removed":
             guard let id = event.data.sessionId else { return }
             current.sessions.removeAll { $0.id == id }
+            fetchedSubagents.sessionRemoved(id, unlisted: event.data.reason == "unlisted")
             if let next = event.data.rekeyedTo { rekeys.record([id: next]) }
         case "delivery.problem":
             guard let deliveryID = event.data.deliveryId, let sessionID = event.data.sessionId else { return }
-            let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", status: event.data.status, at: event.data.at ?? "")
+            let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, attentionSessionId: event.data.attentionSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", status: event.data.status, at: event.data.at ?? "")
             var problems = current.deliveryProblems ?? []
             problems.removeAll { $0.deliveryId == deliveryID }
             problems.insert(problem, at: 0)
@@ -958,7 +983,6 @@ final class AgenthailModel: ObservableObject {
     private func reconcilePanes() {
         if !rekeys.isEmpty {
             _ = rekeys.carry(&drafts)
-            _ = rekeys.carry(&pendingSendRequests)
             var sends = localSends
             if rekeys.carry(&sends) { localSends = sends }
             var settings = turnSettingsDrafts

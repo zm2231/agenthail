@@ -3,18 +3,21 @@ package surfaces
 import (
 	"bufio"
 	"context"
-	"encoding/json"
-	"fmt"
-	"github.com/zm2231/agenthail/internal/signin"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/signin"
+
+	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
@@ -51,22 +54,29 @@ func exitedSession(fixture *claudetest.Fixture) surface.Session {
 	return surface.Session{ID: fixtureConversation, Bridge: "session_fixture", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: exitedPID, Status: surface.StatusBusy, Cwd: fixture.Home, Transcript: fixture.Transcript(fixtureConversation, fixture.Home)}
 }
 
-func TestClaudeConcurrentSendsToExitedSessionResumeItOnce(t *testing.T) {
+// hostResume is an exited conversation and a running Claude host that can
+// resume it.
+func hostResume(t *testing.T) (*claudetest.Fixture, *claudehosttest.Fixture, *Claude) {
+	t.Helper()
 	fixture := claudetest.New(t)
-	fixture.Job("fe758937", fixtureConversation, fixture.Home, "done", 0)
-	fixture.ResumeBridge("session_fixture")
-	fixture.ResumeDelay(300 * time.Millisecond)
-	posts := &claudePosts{}
+	host := claudehosttest.New(t, fixture.Home)
+	host.Start(t)
+	return fixture, host, NewClaude(nil, fixture.Home)
+}
+
+func TestClaudeConcurrentTurnsToAnExitedSessionResumeItOnceInTheHost(t *testing.T) {
+	fixture, host, c := hostResume(t)
 	var wait sync.WaitGroup
 	errs := make([]error, 2)
+	ids := []string{uuid.NewString(), uuid.NewString()}
 	for index, message := range []string{"first", "second"} {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
 			session := exitedSession(fixture)
-			result, err := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, posts.request).Send(context.Background(), &session, message)
-			if err == nil && (!result.Accepted || session.PID != fixture.PID || session.ID != fixtureConversation || session.Bridge != "session_fixture") {
-				t.Errorf("result=%+v session=%+v", result, session)
+			_, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), ids[index]), &session, message)
+			if err == nil && (session.RuntimeKind != surface.RuntimeClaudeHost || session.ID != fixtureConversation || session.Bridge != "") {
+				t.Errorf("session=%+v", session)
 			}
 			errs[index] = err
 		}()
@@ -75,16 +85,20 @@ func TestClaudeConcurrentSendsToExitedSessionResumeItOnce(t *testing.T) {
 	if errs[0] != nil || errs[1] != nil {
 		t.Fatalf("errs=%v", errs)
 	}
-	if resumes := fixture.Invocations("--bg", "--resume", fixtureConversation); resumes != 1 || posts.count("first") != 1 || posts.count("second") != 1 {
-		t.Fatalf("resumes=%d first=%d second=%d", resumes, posts.count("first"), posts.count("second"))
+	if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 1 || !slices.Contains(spawns[0].Argv, "--resume") && !slices.Contains(spawns[0].Argv, "--resume="+fixtureConversation) {
+		t.Fatalf("spawns=%+v, want one resume", spawns)
+	}
+	claudehosttest.WaitFor(t, "both turns", func() bool { return len(host.Turns(t, fixtureConversation)) == 2 })
+	for _, turn := range host.Turns(t, fixtureConversation) {
+		if !slices.Contains(ids, turn.UUID) || string(turn.Origin) != `{"kind":"human"}` {
+			t.Fatalf("turn=%+v, want a person's turn under its intent uuid", turn)
+		}
 	}
 }
 
 func TestClaudeSendHoldsWhileResumedJobIsStartingWithoutRecord(t *testing.T) {
-	fixture := claudetest.New(t)
+	fixture, host, c := hostResume(t)
 	fixture.Job("fe758937", fixtureConversation, fixture.Home, "starting", 0)
-	posts := &claudePosts{}
-	c := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, posts.request)
 	session := exitedSession(fixture)
 	observation, err := c.Observe(context.Background(), &session)
 	if err != nil || observation.Status != surface.StatusOffline {
@@ -93,21 +107,20 @@ func TestClaudeSendHoldsWhileResumedJobIsStartingWithoutRecord(t *testing.T) {
 	if _, err := c.Send(context.Background(), &session, "hello"); !surface.IsDeliveryHeld(err) {
 		t.Fatalf("err=%v", err)
 	}
-	if fixture.Invocations("--bg", "--resume", fixtureConversation) != 0 || posts.count("hello") != 0 {
-		t.Fatalf("resumed or delivered while the job was starting")
+	if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 0 {
+		t.Fatalf("resumed while the job was starting: %+v", spawns)
 	}
 }
 
 func TestClaudeSendHoldsForLiveProcessWithoutMessaging(t *testing.T) {
-	fixture := claudetest.New(t)
+	fixture, host, c := hostResume(t)
 	fixture.Record(fixtureConversation, fixture.Home, "")
-	posts := &claudePosts{}
 	session := exitedSession(fixture)
-	if _, err := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, posts.request).Send(context.Background(), &session, "hello"); !surface.IsDeliveryHeld(err) {
+	if _, err := c.Send(context.Background(), &session, "hello"); !surface.IsDeliveryHeld(err) {
 		t.Fatalf("err=%v", err)
 	}
-	if fixture.Invocations("agents", "--json", "--all") != 0 || fixture.Invocations("--bg", "--resume", fixtureConversation) != 0 || posts.count("hello") != 0 {
-		t.Fatal("a held conversation was resumed or delivered")
+	if fixture.Invocations("agents", "--json", "--all") != 0 || len(host.Spawns(t, fixtureConversation)) != 0 {
+		t.Fatal("a held conversation was resumed")
 	}
 }
 
@@ -126,73 +139,41 @@ func TestClaudeObserveExitedSessionIsAtRestOnlyWithoutLiveProcess(t *testing.T) 
 	}
 }
 
-func TestClaudeResumeThatStartsACopyStopsItAndIsUnknown(t *testing.T) {
-	fixture := claudetest.New(t)
-	fixture.Job("fe758937", fixtureConversation, fixture.Home, "done", 0)
-	fixture.ResumeCopy("90b6ce14")
-	posts := &claudePosts{}
+func TestClaudeResumeThatClaudeRefusesSaysWhy(t *testing.T) {
+	fixture, host, c := hostResume(t)
+	host.Refuse(t, fixtureConversation, "Error: Settings file not found: /fixture/settings.json")
 	session := exitedSession(fixture)
-	_, err := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, posts.request).Send(context.Background(), &session, "hello")
-	if !surface.IsDeliveryOutcomeUnknown(err) || !strings.Contains(err.Error(), "copy 90b6ce14") {
+	_, err := c.Send(context.Background(), &session, "hello")
+	if err == nil || surface.IsDeliveryOutcomeUnknown(err) || surface.IsDeliveryHeld(err) || !strings.Contains(err.Error(), "Claude refused to resume "+fixtureConversation) || !strings.Contains(err.Error(), "Settings file not found") {
 		t.Fatalf("err=%v", err)
-	}
-	if fixture.Invocations("stop", "90b6ce14") != 1 || posts.count("hello") != 0 {
-		t.Fatalf("stops=%d posts=%d", fixture.Invocations("stop", "90b6ce14"), posts.count("hello"))
 	}
 }
 
-func TestClaudeResumeThatNeverBecomesReachableIsUnknown(t *testing.T) {
-	shortResumeSettle(t)
+func TestClaudeResumeWithoutTheHostIsHeld(t *testing.T) {
 	fixture := claudetest.New(t)
-	fixture.ResumeNeverReady()
-	posts := &claudePosts{}
 	session := exitedSession(fixture)
-	_, err := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, posts.request).Send(context.Background(), &session, "hello")
-	if !surface.IsDeliveryOutcomeUnknown(err) || posts.count("hello") != 0 {
-		t.Fatalf("err=%v posts=%d", err, posts.count("hello"))
+	_, err := NewClaude(nil, fixture.Home).Send(context.Background(), &session, "hello")
+	if !surface.IsDeliveryHeld(err) {
+		t.Fatalf("err=%v, want held until the host runs", err)
 	}
 }
 
 func TestClaudeSendResumesTerminalSessionInItsTranscriptCwd(t *testing.T) {
-	fixture := claudetest.New(t)
-	fixture.ResumeBridge("session_resumed")
-	posts := &claudePosts{}
+	fixture, host, c := hostResume(t)
 	session := exitedSession(fixture)
 	session.Cwd = ""
-	result, err := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, posts.request).Send(context.Background(), &session, "hello")
-	if err != nil || !result.Accepted || session.ID != fixtureConversation || session.Bridge != "session_resumed" || !samePath(t, session.Cwd, fixture.Home) || posts.count("hello") != 1 {
+	result, err := c.SendHumanTurn(context.Background(), &session, "hello")
+	if err != nil || !result.Accepted || session.ID != fixtureConversation || session.RuntimeKind != surface.RuntimeClaudeHost || session.Transport != "uds" {
 		t.Fatalf("result=%+v session=%+v err=%v", result, session, err)
 	}
-	if fixture.Invocations("--bg", "--resume", fixtureConversation) != 1 {
-		t.Fatal("terminal session was not resumed by its session id")
+	spawns := host.Spawns(t, fixtureConversation)
+	if len(spawns) != 1 || !samePath(t, spawns[0].Cwd, fixture.Home) {
+		t.Fatalf("spawns=%+v, want one resume in %s", spawns, fixture.Home)
 	}
-}
-
-func TestClaudeResumeOfBridgedSessionWaitsForRemoteControl(t *testing.T) {
-	fixture := claudetest.New(t)
-	fixture.Listen()
-	fixture.Job("fe758937", fixtureConversation, fixture.Home, "done", 0)
-	posts := &claudePosts{}
-	session := exitedSession(fixture)
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		fixture.Record(fixtureConversation, fixture.Home, "session_fixture")
-	}()
-	result, err := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, posts.request).Send(context.Background(), &session, "hello")
-	if err != nil || !result.Accepted || session.ID != fixtureConversation || session.Bridge != "session_fixture" || session.Transport != "" || posts.count("hello") != 1 {
-		t.Fatalf("result=%+v session=%+v err=%v", result, session, err)
-	}
-}
-
-func TestClaudeResumeOfBridgedSessionUsesSocketWhenRemoteControlNeverReturns(t *testing.T) {
-	shortResumeSettle(t)
-	fixture := claudetest.New(t)
-	fixture.Listen()
-	fixture.Job("fe758937", fixtureConversation, fixture.Home, "done", 0)
-	session := exitedSession(fixture)
-	if _, err := NewClaude(nil, fixture.Home).reach(context.Background(), &session); err != nil || session.ID != fixtureConversation || session.Transport != "uds" {
-		t.Fatalf("session=%+v err=%v", session, err)
-	}
+	claudehosttest.WaitFor(t, "the turn", func() bool {
+		turns := host.Turns(t, fixtureConversation)
+		return len(turns) == 1 && turns[0].Text == "hello" && turns[0].UUID == result.UUID
+	})
 }
 
 func samePath(t *testing.T, a, b string) bool {
@@ -247,36 +228,17 @@ func TestClaudeResumeLockExcludesAnotherProcess(t *testing.T) {
 	unlock()
 }
 
-func TestClaudeCompactOfExitedSessionResumesItFirst(t *testing.T) {
-	fixture := claudetest.New(t)
-	fixture.Job("fe758937", fixtureConversation, fixture.Home, "done", 0)
-	fixture.ResumeBridge("session_fixture")
+func TestClaudeCompactOfExitedSessionDoesNotResumeIt(t *testing.T) {
+	fixture, host, _ := hostResume(t)
 	session := exitedSession(fixture)
-	compacts := 0
-	c := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, func(_ context.Context, _, _ string, _ map[string]string, body string, _ CookieSource, _ time.Duration) (int, string, error) {
-		var envelope struct {
-			Events []struct {
-				Payload struct {
-					UUID string `json:"uuid"`
-				} `json:"payload"`
-			} `json:"events"`
-		}
-		if err := json.Unmarshal([]byte(body), &envelope); err != nil || len(envelope.Events) != 1 {
-			t.Fatalf("body=%s err=%v", body, err)
-		}
-		compacts++
-		f, err := os.OpenFile(session.Transcript, os.O_APPEND|os.O_WRONLY, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer f.Close()
-		fmt.Fprintf(f, "{\"type\":\"user\",\"uuid\":%q,\"message\":{\"content\":\"/compact\"}}\n{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"content\":\"done\"}\n", envelope.Events[0].Payload.UUID)
-		return 200, `{}`, nil
+	c := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+		t.Fatal("compact was posted to a session without Remote Control")
+		return 0, "", nil
 	})
-	if err := c.Compact(context.Background(), &session); err != nil {
-		t.Fatal(err)
+	if err := c.Compact(context.Background(), &session); !errors.Is(err, surface.ErrUnsupported) {
+		t.Fatalf("err=%v, want unsupported", err)
 	}
-	if fixture.Invocations("--bg", "--resume", fixtureConversation) != 1 || compacts != 1 || session.PID != fixture.PID {
-		t.Fatalf("resumes=%d compacts=%d session=%+v", fixture.Invocations("--bg", "--resume", fixtureConversation), compacts, session)
+	if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 0 {
+		t.Fatalf("compact resumed the conversation: %+v", spawns)
 	}
 }

@@ -2,15 +2,19 @@ import Foundation
 
 struct LocalSend: Identifiable, Equatable {
     let id = UUID()
+    let idempotencyKey = UUID().uuidString
     let text: String
     let sentAt: Date
     var status: String?
+    var busyDelivery: String? = nil
+    var turnSettings = TurnSettings()
+    var failure: String? = nil
 
     static let clockSkew: TimeInterval = 5
 
-    static func label(for status: String?) -> String {
+    static func label(for status: String?, waitingOnYou: Bool = false) -> String {
         switch status {
-        case "queued": return "Queued"
+        case "queued": return waitingOnYou ? "Queued · Waiting on you" : "Queued"
         case "submitted": return "Submitted"
         default: return "Sent"
         }

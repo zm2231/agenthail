@@ -78,14 +78,6 @@ func stripImageMarkers(_ text: String) -> (text: String, images: Int) {
     return (kept.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines), images)
 }
 
-enum LongReply {
-    static let characters = 2400
-
-    static func isLong(_ text: String) -> Bool {
-        text.utf16.count > characters
-    }
-}
-
 enum TimelineMetadata {
     static func fields(_ item: TimelineItem) -> [String] {
         var fields: [String] = []

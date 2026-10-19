@@ -38,6 +38,7 @@ type Claude struct {
 	modelsFlight *claudeModelsFlight
 	subagents    *claudeSubagentObserver
 	transcripts  *claudeTranscriptIndex
+	host         *claudeHost
 	request      ClaudeRequest
 	localOnly    bool
 }
@@ -52,13 +53,13 @@ func NewClaudeWithRequest(signins signin.Resolver, home string, request ClaudeRe
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(home)}
+	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(home), host: newClaudeHost(home)}
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
 
 func (c *Claude) RuntimeKinds() []surface.RuntimeKind {
-	return []surface.RuntimeKind{surface.RuntimeClaudeCLI}
+	return []surface.RuntimeKind{surface.RuntimeClaudeCLI, surface.RuntimeClaudeHost}
 }
 
 func (c *Claude) ObserveClaudeRuns(ctx context.Context) ([]surface.ClaudeRunObservation, error) {
@@ -80,11 +81,18 @@ func (c *Claude) Capabilities() surface.Capabilities {
 	}
 }
 
-// SessionCapabilities narrows Capabilities for a session reached over its native
-// peer socket: it streams only from a local transcript, and steer, compact,
-// model and interrupt need its Remote Control bridge.
+// SessionCapabilities narrows Capabilities for a session the host runs, which
+// takes steer and interrupt but no slash commands, and for a CLI session reached
+// over its native peer socket, where steer, compact, model and interrupt need
+// its Remote Control bridge. Both stream only from a local transcript.
 func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities {
 	capabilities := c.Capabilities()
+	if claudeHosted(sess) {
+		capabilities.Stream = sess.HasLocal && sess.Transcript != ""
+		capabilities.Compact = false
+		capabilities.Model = false
+		return capabilities
+	}
 	if sess == nil || sess.Transport != "uds" {
 		return capabilities
 	}
@@ -415,7 +423,7 @@ func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
 }
 
 // records returns the session records of Claude processes that are alive,
-// excluding Agenthail's own peer workers.
+// excluding the records Agenthail writes for its own peer workers and relays.
 func (c *Claude) records() ([]map[string]any, error) {
 	sessionsDir := filepath.Join(surface.ClaudeConfigDir(c.home), "sessions")
 	entries, err := os.ReadDir(sessionsDir)
@@ -435,10 +443,10 @@ func (c *Claude) records() ([]map[string]any, error) {
 			continue
 		}
 		var m map[string]any
-		if json.Unmarshal(raw, &m) != nil || str(m, "agenthail") == "peer-worker" {
+		if json.Unmarshal(raw, &m) != nil || str(m, "agenthail") != "" {
 			continue
 		}
-		if pid, ok := m["pid"].(float64); ok && pid > 0 && !claudeProcessAlive(int(pid)) {
+		if pid, ok := m["pid"].(float64); ok && pid > 0 && !claudeRecordLive(m) {
 			continue
 		}
 		out = append(out, m)
@@ -456,7 +464,9 @@ func (c *Claude) process(ctx context.Context, m map[string]any, transcript func(
 		bridge = str(m, "bridgeSessionId")
 	}
 	socket := c.peerSocket(ctx, m)
-	if conversation == "" || (bridge == "" && socket == "") {
+	pid, _ := m["pid"].(float64)
+	hosted := c.host.runs(ctx, int(pid), conversation)
+	if conversation == "" || (bridge == "" && socket == "" && !hosted) {
 		return claudeProcess{}, false
 	}
 	sess := surface.Session{
@@ -467,11 +477,12 @@ func (c *Claude) process(ctx context.Context, m map[string]any, transcript func(
 		Cwd:         str(m, "cwd"),
 		Status:      surface.SessionStatus(str(m, "status")),
 	}
-	if pid, ok := m["pid"].(float64); ok {
-		sess.PID = int(pid)
-	}
+	sess.PID = int(pid)
 	if socket != "" {
 		sess.Transport = "uds"
+	}
+	if hosted {
+		sess.RuntimeKind = surface.RuntimeClaudeHost
 	}
 	if n, ok := m["name"].(string); ok {
 		sess.Name = n
@@ -499,16 +510,18 @@ func (c *Claude) process(ctx context.Context, m map[string]any, transcript func(
 	return claudeProcess{session: sess, startedAt: startedAt}, true
 }
 
-// applyRecordStatus derives status and last activity from the peer record,
-// then lets readable transcript evidence override the peer status.
+// applyRecordStatus takes status and last activity from Claude's session
+// record. The transcript decides only when the record does not report status.
 func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, record map[string]any) {
 	if ts, ok := record["updatedAt"].(float64); ok && ts > 0 {
 		sess.LastActive = time.UnixMilli(int64(ts))
 	}
 	sess.Status = claudePeerStatus(record)
+	sess.WaitingOn = nil
 	if sess.HasLocal {
 		if observation, observeErr := c.Observe(ctx, sess); observeErr == nil && observation.Status != surface.StatusUnknown {
 			sess.Status = observation.Status
+			sess.WaitingOn = observation.WaitingOn
 		}
 	}
 }
@@ -532,16 +545,9 @@ func (c *Claude) LocalStatus(ctx context.Context, session surface.Session) (surf
 	if session.PID <= 0 {
 		return session, fmt.Errorf("claude session %s has no peer process", session.ID)
 	}
-	raw, err := os.ReadFile(c.peerRecordPath(session.PID))
-	if err != nil {
-		return session, err
-	}
-	var record map[string]any
-	if err := json.Unmarshal(raw, &record); err != nil {
-		return session, err
-	}
-	if str(record, "sessionId") != session.ID {
-		return session, fmt.Errorf("claude peer record for pid %d belongs to another session", session.PID)
+	record, live := c.liveRecord(session)
+	if !live {
+		return session, fmt.Errorf("claude pid %d no longer runs session %s", session.PID, session.ID)
 	}
 	c.applyRecordStatus(ctx, &session, record)
 	return session, nil
@@ -551,7 +557,7 @@ func claudeStatus(status surface.SessionStatus) surface.SessionStatus {
 	switch strings.ToLower(string(status)) {
 	case "idle", "shell":
 		return surface.StatusIdle
-	case "busy", "running", "active", "in_progress", "inprogress":
+	case "busy", "running", "active", "in_progress", "inprogress", "waiting":
 		return surface.StatusBusy
 	case "offline":
 		return surface.StatusOffline
@@ -560,15 +566,21 @@ func claudeStatus(status surface.SessionStatus) surface.SessionStatus {
 	}
 }
 
+// claudePeerStatus reads a Claude session record's status. Claude writes
+// "shell" when its prompt is ready but a background shell is still running,
+// and "waiting" while the turn is blocked on the user.
 func claudePeerStatus(record map[string]any) surface.SessionStatus {
-	status := claudeStatus(surface.SessionStatus(str(record, "status")))
-	if status != surface.StatusIdle {
-		return status
+	switch str(record, "status") {
+	case "busy", "waiting":
+		return surface.StatusBusy
+	case "idle", "shell":
+	default:
+		return surface.StatusUnknown
 	}
 	features, _ := record["peerFeatures"].([]any)
 	for _, feature := range features {
 		if feature == "notify_idle" {
-			return status
+			return surface.StatusIdle
 		}
 	}
 	return surface.StatusUnknown
@@ -638,7 +650,11 @@ func (c *Claude) processByPID(ctx context.Context, target string) (*surface.Sess
 // process holds its conversation: then it is at rest, and a message resumes it.
 func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
 	if sess.PID <= 0 || claudeProcessAlive(sess.PID) {
-		return c.observe(ctx, sess)
+		observation, err := c.observe(ctx, sess)
+		if err == nil {
+			c.applyRecordObservation(sess, observation)
+		}
+		return observation, err
 	}
 	exited := *sess
 	exited.Status = surface.StatusOffline
@@ -650,7 +666,63 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 	return observation, err
 }
 
+// applyRecordObservation makes the live process's own session record decide
+// busy or idle; the transcript still supplies turn and reply evidence, and
+// observe supplies what a waiting record waits on.
+func (c *Claude) applyRecordObservation(sess *surface.Session, observation *surface.TurnObservation) {
+	record, live := c.liveRecord(*sess)
+	if !live {
+		return
+	}
+	status := claudePeerStatus(record)
+	if status == surface.StatusUnknown {
+		return
+	}
+	observation.Status = status
+	if status != surface.StatusBusy {
+		observation.ActiveTurnID = ""
+		observation.WaitingOn = nil
+	}
+}
+
+// observe reads the turn from the transcript and what it waits on from the
+// process record. Claude writes a pending tool call to the transcript only
+// once it resolves, so the record is the one place a question, a plan
+// approval or a permission prompt shows while it is open.
 func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
+	observation, err := c.observeTurn(ctx, sess)
+	if err != nil {
+		return nil, err
+	}
+	if waiting := c.recordWaiting(sess); waiting != nil && observation.Status != surface.StatusOffline {
+		observation.Status = surface.StatusBusy
+		observation.WaitingOn = waiting
+	}
+	return observation, nil
+}
+
+// recordWaiting reads what the session's live process reports it is waiting
+// on: "status":"waiting" with waitingFor "input needed" for AskUserQuestion,
+// and "permission prompt" for a plan approval or a tool permission.
+// statusUpdatedAt is when it started waiting, so it names one question.
+func (c *Claude) recordWaiting(sess *surface.Session) *surface.Waiting {
+	record, live := c.liveRecord(*sess)
+	if !live || str(record, "status") != "waiting" {
+		return nil
+	}
+	kind := surface.WaitingApproval
+	if str(record, "waitingFor") == "input needed" {
+		kind = surface.WaitingQuestion
+	}
+	since, _ := record["statusUpdatedAt"].(float64)
+	waiting := &surface.Waiting{Kind: kind, ID: fmt.Sprintf("%s:%s:%d", sess.ID, kind, int64(since))}
+	if since > 0 {
+		waiting.Since = time.UnixMilli(int64(since)).UTC()
+	}
+	return waiting
+}
+
+func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -667,7 +739,7 @@ func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.T
 		}
 		return observation, nil
 	}
-	state, err := c.observeTranscript(ctx, path)
+	state, err := c.observeTranscript(ctx, path, sess)
 	if err != nil {
 		return nil, err
 	}
@@ -739,9 +811,11 @@ func (c *Claude) postWhenIdle(ctx context.Context, sess *surface.Session, messag
 	return c.postMessage(ctx, sess, message)
 }
 
-// Route sends a person's message as their own turn when the session has a web
-// bridge identity, the only route that records it as the user's turn. Other
-// messages to a session with a native peer socket take that socket.
+// Route sends a person's message as their own turn through the session host or the
+// session's web bridge identity, the routes that record it as the user's turn. A
+// session with no live process resumes in the host, so a person's message to it
+// is a turn too. Other messages to a session with a native peer socket take that
+// socket.
 func (c *Claude) Route(sess *surface.Session, author surface.Author) surface.Route {
 	if author == surface.AuthorPerson && c.canSendHumanTurn(sess) {
 		return surface.RouteHumanTurn
@@ -753,7 +827,7 @@ func (c *Claude) Route(sess *surface.Session, author surface.Author) surface.Rou
 }
 
 func (c *Claude) canSendHumanTurn(sess *surface.Session) bool {
-	return sess != nil && sess.Surface == surface.KindClaude && !c.localOnly && !nativeClaudeOnly(sess)
+	return sess != nil && sess.Surface == surface.KindClaude && (claudeHosted(sess) || !claudeProcessAlive(sess.PID) || !c.localOnly && !nativeClaudeOnly(sess))
 }
 
 // SendHumanTurn submits a message through Claude's authenticated web bridge as
@@ -767,6 +841,9 @@ func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, messa
 	}
 	if _, err := c.reach(ctx, sess); err != nil {
 		return nil, err
+	}
+	if claudeHosted(sess) {
+		return c.sendHostTurn(ctx, sess, message, "")
 	}
 	if !c.canSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude resumed without its web bridge; the message is routed again on retry"))
@@ -887,7 +964,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 	if path == "" || !fileExists(path) {
 		return fmt.Errorf("no local transcript for streaming")
 	}
-	state, err := c.observeTranscript(ctx, path)
+	state, err := c.observeTranscript(ctx, path, sess)
 	if err != nil {
 		return err
 	}
@@ -1011,7 +1088,8 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			}
 			key := stableTimelineItemID(recordOffset, line, len(items))
 			if ending {
-				closing = surface.ClaudeClosingTurn{TurnID: turnID, MessageID: messageID, Key: key}
+				at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
+				closing = surface.ClaudeClosingTurn{TurnID: turnID, MessageID: messageID, Key: key, At: at}
 			} else if done {
 				finish(turnID, key)
 			}
@@ -1021,6 +1099,10 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			return scanErr
 		}
 		offset = next
+		if closing.TurnID != "" && c.settledAfter(sess, closing.At) {
+			finish(closing.TurnID, closing.Key)
+			closing = surface.ClaudeClosingTurn{}
+		}
 		if closing.TurnID != "" {
 			closing.Anchor = anchorOf(tail)
 		}
@@ -1123,7 +1205,7 @@ func (c *Claude) Compact(ctx context.Context, sess *surface.Session) error {
 	if nativeClaudeOnly(sess) {
 		return surface.ErrUnsupported
 	}
-	if _, err := c.reach(ctx, sess); err != nil {
+	if err := c.reachRunning(ctx, sess); err != nil {
 		return err
 	}
 	path := sess.Transcript
@@ -1176,7 +1258,7 @@ func (c *Claude) Model(ctx context.Context, sess *surface.Session, name string) 
 }
 
 func (c *Claude) confirmedCommand(ctx context.Context, sess *surface.Session, commandName, args string, timeout time.Duration) (string, error) {
-	if _, err := c.reach(ctx, sess); err != nil {
+	if err := c.reachRunning(ctx, sess); err != nil {
 		return "", err
 	}
 	path := sess.Transcript
@@ -1224,6 +1306,9 @@ func (c *Claude) confirmedCommand(ctx context.Context, sess *surface.Session, co
 }
 
 func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
+	if claudeHosted(sess) {
+		return c.interruptHost(ctx, sess)
+	}
 	if c.localOnly || nativeClaudeOnly(sess) {
 		return surface.ErrUnsupported
 	}
@@ -1270,6 +1355,9 @@ func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
 }
 
 func (c *Claude) Steer(ctx context.Context, sess *surface.Session, message string) error {
+	if claudeHosted(sess) {
+		return c.steerHost(ctx, sess, message)
+	}
 	if nativeClaudeOnly(sess) {
 		return surface.ErrUnsupported
 	}

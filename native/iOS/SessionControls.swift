@@ -108,12 +108,12 @@ struct QueueListView: View {
                     Section("Waiting to deliver") { ForEach(pending) { item in queueRow(item) } }
                 }
                 if !loading && error == nil && model.connectionError == nil && current.isEmpty {
-                    ContentUnavailableView("No pending deliveries", systemImage: "tray", description: Text("Instructions waiting to send or needing a delivery decision appear here. Expired instructions are in History."))
+                    ContentUnavailableView("No pending deliveries", systemImage: "tray", description: Text("Instructions waiting to send or needing a delivery decision appear here. Older outcomes are in History."))
                         .listRowSeparator(.hidden)
                 }
             } else {
                 if history.isEmpty && !loading {
-                    ContentUnavailableView("No delivery history", systemImage: "clock", description: Text("Expired and completed instructions appear here."))
+                    ContentUnavailableView("No delivery history", systemImage: "clock", description: Text("Completed, canceled and older failed instructions appear here."))
                         .listRowSeparator(.hidden)
                 }
                 ForEach(history.reversed()) { item in queueRow(item) }
@@ -130,17 +130,24 @@ struct QueueListView: View {
                 Button("Cancel", role: .cancel) { retryCandidate = nil }
             }
         } message: {
-            Text(retryCandidate?.evidence == "unknown" && retryCandidate?.isHistorical == true ? "This delivery outcome was never confirmed and the queue entry later expired. Check the session before sending again." : retryCandidate?.status == "expired" ? "This instruction expired without being sent. Sending again creates a new delivery attempt." : "The previous attempt may already have reached the agent. Send again only after checking the session.")
+            Text(retryCandidate?.evidence == "unknown" && retryCandidate?.isHistorical == true ? "This delivery outcome was never confirmed. Check the session before sending again." : "The previous attempt may already have reached the agent. Send again only after checking the session.")
         }
     }
 
     private func queueRow(_ item: QueueState) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text(item.isHistorical && item.evidence == "unknown" ? "Outcome unknown · expired" : item.isHistorical && item.evidence == "failed" ? "Delivery failed · expired" : item.evidence == "transport_accepted" ? "Transport accepted" : item.status == "dead" ? "Delivery needs review" : item.status == "expired" ? "Expired" : item.status == "inflight" ? "Sending" : item.status.capitalized)
+                Text(item.isHistorical && item.evidence == "unknown" ? "Outcome unknown" : item.isHistorical && item.evidence == "failed" ? "Delivery failed" : item.evidence == "transport_accepted" ? "Transport accepted" : item.status == "dead" ? "Delivery needs review" : item.status == "inflight" ? "Sending" : item.status.capitalized)
                     .font(.subheadline.weight(.semibold)).foregroundStyle(item.status == "dead" && !item.isHistorical ? .orange : .secondary)
                 Spacer()
-                Text(item.queuedAt).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                if let date = item.queuedDate {
+                    Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    Text(item.queuedAt).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
+            }
+            if item.status == "pending" {
+                Text(item.holdLabel).font(.footnote).foregroundStyle(.secondary)
             }
             Button {
                 if let onOpenSession { onOpenSession(item.sessionId) }
@@ -165,7 +172,7 @@ struct QueueListView: View {
                 if let value = item.sourceSessionId { LabeledContent("From session", value: value).font(.footnote).textSelection(.enabled) }
             }.font(.footnote)
             HStack {
-                if item.status == "dead" || item.status == "expired" {
+                if item.status == "dead" {
                     Button("Send again") { retryCandidate = item }.buttonStyle(.bordered)
                 }
                 if item.status == "pending" || (item.status == "dead" && !item.isHistorical) {

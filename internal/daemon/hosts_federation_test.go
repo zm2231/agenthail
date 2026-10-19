@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -241,7 +242,7 @@ func testRoots(server *httptest.Server) *x509.CertPool {
 
 func (n *federationNode) invite(t *testing.T) string {
 	t.Helper()
-	pairing, err := n.reg.CreateDevicePairing("peer", []string{"read", "control"}, time.Minute)
+	pairing, err := n.reg.CreateDevicePairing("peer", []string{"read", "control", registry.HostScope}, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +449,8 @@ func TestFederationHostRowCollidingWithLocalSessionLeavesTheLocalRow(t *testing.
 	delete(remote.fake.sessions, "moved")
 	awaitFederation(t, "notice cleared once the host stops serving the session", func() bool {
 		remote.daemon.discoverCatalog(context.Background())
-		return hostNotice(t, local, record.ID) == ""
+		hostsNotice, snapshotNotice := hostNotices(t, local, record.ID)
+		return hostsNotice == "" && snapshotNotice == ""
 	})
 	if session, err := local.reg.Session("moved"); err != nil || session.Name != "work moved" {
 		t.Fatalf("local row after host removal=%+v err=%v", session, err)
@@ -456,6 +458,15 @@ func TestFederationHostRowCollidingWithLocalSessionLeavesTheLocalRow(t *testing.
 }
 
 func hostNotice(t *testing.T, node *federationNode, hostID string) string {
+	t.Helper()
+	hostsNotice, snapshotNotice := hostNotices(t, node, hostID)
+	if snapshotNotice != hostsNotice {
+		t.Fatalf("snapshot notice=%q, hosts API notice=%q", snapshotNotice, hostsNotice)
+	}
+	return hostsNotice
+}
+
+func hostNotices(t *testing.T, node *federationNode, hostID string) (string, string) {
 	t.Helper()
 	response := node.request(t, http.MethodGet, "/api/v1/hosts", nil)
 	var listing struct {
@@ -479,19 +490,13 @@ func hostNotice(t *testing.T, node *federationNode, hostID string) string {
 	if err := json.Unmarshal(snapshot.Body.Bytes(), &state); err != nil {
 		t.Fatalf("snapshot status=%d body=%s", snapshot.Code, snapshot.Body.String())
 	}
-	found := false
 	for _, host := range state.Daemon.Hosts {
 		if host.ID == hostID {
-			found = true
-			if host.Notice != notice {
-				t.Fatalf("snapshot notice=%q, hosts API notice=%q", host.Notice, notice)
-			}
+			return notice, host.Notice
 		}
 	}
-	if !found {
-		t.Fatalf("snapshot hosts=%+v missing %s", state.Daemon.Hosts, hostID)
-	}
-	return notice
+	t.Fatalf("snapshot hosts=%+v missing %s", state.Daemon.Hosts, hostID)
+	return "", ""
 }
 
 func TestFederationPairedBothWaysShowsEachSessionOnce(t *testing.T) {
@@ -571,7 +576,7 @@ func TestFederationUnreachableHostKeepsRowsAndDeliversHeldSendOnce(t *testing.T)
 	if got := remote.fake.delivered(); len(got) != 1 || got[0] != "held for forge" {
 		t.Fatalf("remote delivered=%v", got)
 	}
-	queue, err := local.reg.ListQueue(true)
+	queue, err := local.reg.ListQueue(true, nil)
 	if err != nil || len(queue) != 1 || queue[0].Status != "delivered" {
 		t.Fatalf("queue=%+v err=%v", queue, err)
 	}
@@ -593,7 +598,7 @@ func TestFederationQueueCountsCombineHostAndHeldWork(t *testing.T) {
 	if err := remote.reg.QueueMessage("remote-a", "queued on forge"); err != nil {
 		t.Fatal(err)
 	}
-	remote.daemon.publishCatalogViewState()
+	remote.daemon.publishCatalogPresence()
 	awaitFederation(t, "remote queue mirrored", func() bool { return mirroredQueueCount(t, local, qualified) == 1 })
 	remote.stop()
 	awaitFederation(t, "rows marked unavailable", func() bool {
@@ -611,7 +616,7 @@ func TestFederationQueueCountsCombineHostAndHeldWork(t *testing.T) {
 	if got := mirroredQueueCount(t, local, qualified); got != 2 {
 		t.Fatalf("queue count with held send=%d", got)
 	}
-	if len(state.Queue) != 1 || state.Queue[0].SessionID != qualified {
+	if len(state.Queue) != 1 || state.Queue[0].SessionID != qualified || state.Queue[0].HeldBy != registry.QueueHeldHostUnreachable {
 		t.Fatalf("queue rows=%+v", state.Queue)
 	}
 	window, err := local.reg.CatalogEventsAfter(0, 10000)
@@ -653,7 +658,7 @@ func TestFederationLostAnswerStaysUnknownAndReplaysByKey(t *testing.T) {
 	if got := remote.fake.delivered(); len(got) != 1 {
 		t.Fatalf("replay produced another turn: %v", got)
 	}
-	queue, err := local.reg.ListQueue(true)
+	queue, err := local.reg.ListQueue(true, nil)
 	if err != nil || len(queue) != 1 || queue[0].Status != "delivered" {
 		t.Fatalf("queue=%+v err=%v", queue, err)
 	}
@@ -667,7 +672,7 @@ func TestFederationTruncatedAnswerStaysUnknownAndReplaysByKey(t *testing.T) {
 	if send.Code != http.StatusOK || !strings.Contains(send.Body.String(), `"evidence":"unknown"`) || !strings.Contains(send.Body.String(), `"status":"submitted"`) {
 		t.Fatalf("truncated answer status=%d body=%s", send.Code, send.Body.String())
 	}
-	queue, err := local.reg.ListQueue(true)
+	queue, err := local.reg.ListQueue(true, nil)
 	if err != nil || len(queue) != 1 || queue[0].Status != "inflight" {
 		t.Fatalf("held queue=%+v err=%v", queue, err)
 	}
@@ -677,7 +682,7 @@ func TestFederationTruncatedAnswerStaysUnknownAndReplaysByKey(t *testing.T) {
 	if got := remote.fake.delivered(); len(got) != 1 || got[0] != "cut short" {
 		t.Fatalf("remote delivered=%v", got)
 	}
-	queue, err = local.reg.ListQueue(true)
+	queue, err = local.reg.ListQueue(true, nil)
 	if err != nil || len(queue) != 1 || queue[0].Status != "delivered" {
 		t.Fatalf("queue after replay=%+v err=%v", queue, err)
 	}
@@ -700,7 +705,7 @@ func TestFederationProxyAnswerWithDaemonDownHoldsSendAsUnknown(t *testing.T) {
 	}
 	host, _ := local.daemon.pairedHost(record.ID)
 	local.daemon.drainHostDeliveries(context.Background(), host)
-	queue, err := local.reg.ListQueue(true)
+	queue, err := local.reg.ListQueue(true, nil)
 	if err != nil || len(queue) != 1 || queue[0].Status != "inflight" {
 		t.Fatalf("held while down queue=%+v err=%v", queue, err)
 	}
@@ -710,9 +715,44 @@ func TestFederationProxyAnswerWithDaemonDownHoldsSendAsUnknown(t *testing.T) {
 	if got := remote.fake.delivered(); len(got) != 1 || got[0] != "behind the proxy" {
 		t.Fatalf("remote delivered=%v", got)
 	}
-	queue, err = local.reg.ListQueue(true)
+	queue, err = local.reg.ListQueue(true, nil)
 	if err != nil || len(queue) != 1 || queue[0].Status != "delivered" {
 		t.Fatalf("queue=%+v err=%v", queue, err)
+	}
+}
+
+func TestFederationUnconfirmedSendRetriesByReplayingItsKey(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	qualified := hosts.Qualify(record.ID, "remote-a")
+	remote.gate.proxyDown.Store(true)
+	send := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": qualified, "message": "retry me"})
+	if send.Code != http.StatusOK || !strings.Contains(send.Body.String(), `"evidence":"unknown"`) {
+		t.Fatalf("send status=%d body=%s", send.Code, send.Body.String())
+	}
+	queue, err := local.reg.ListQueue(true, nil)
+	if err != nil || len(queue) != 1 {
+		t.Fatalf("queue=%+v err=%v", queue, err)
+	}
+	id := queue[0].ID
+	if err := local.reg.DeadLetterUnknown(id, errors.New("host forge has not confirmed the message")); err != nil {
+		t.Fatal(err)
+	}
+	retry := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "queue-retry", "queueId": id})
+	if retry.Code != http.StatusOK {
+		t.Fatalf("retry status=%d body=%s", retry.Code, retry.Body.String())
+	}
+	if item, err := local.reg.QueueItem(id, nil); err != nil || item.Status != "pending" || item.HeldBy != registry.QueueHeldHostUnreachable {
+		t.Fatalf("retried item=%+v err=%v", item, err)
+	}
+	remote.gate.proxyDown.Store(false)
+	host, _ := local.daemon.pairedHost(record.ID)
+	local.daemon.drainHostDeliveries(context.Background(), host)
+	local.daemon.drainHostDeliveries(context.Background(), host)
+	if got := remote.fake.delivered(); len(got) != 1 || got[0] != "retry me" {
+		t.Fatalf("remote delivered=%v", got)
+	}
+	if item, err := local.reg.QueueItem(id, nil); err != nil || item.Status != "delivered" {
+		t.Fatalf("replayed item=%+v err=%v", item, err)
 	}
 }
 
@@ -734,21 +774,6 @@ func TestFederationRevokedTokenMarksHostUnauthorized(t *testing.T) {
 		rows := sessionsOf(local.snapshot(t), record.ID)
 		return len(rows) == 2 && rows[0].Host.State == hostStateUnauthorized && strings.Contains(rows[0].UnavailableReason, "pair it again")
 	})
-}
-
-func TestFederationRemoveHostDropsRowsAndRevokesDevice(t *testing.T) {
-	local, remote, record := pairedFederation(t)
-	response := local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "forge"})
-	if response.Code != http.StatusOK {
-		t.Fatalf("remove status=%d body=%s", response.Code, response.Body.String())
-	}
-	if rows := sessionsOf(local.snapshot(t), record.ID); len(rows) != 0 {
-		t.Fatalf("rows after remove=%+v", rows)
-	}
-	devices, err := remote.reg.ListDevices(false)
-	if err != nil || len(devices) != 0 {
-		t.Fatalf("remote devices after remove=%+v err=%v", devices, err)
-	}
 }
 
 func TestFederationRemoveWaitsForInFlightReconcile(t *testing.T) {

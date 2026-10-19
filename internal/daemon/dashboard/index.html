@@ -153,13 +153,13 @@
                 </select>
               </label>
               <label data-claude-start><span>Claude model (optional)</span><input name="model" placeholder="Use Claude default" /></label>
-              <label data-claude-start><span>Claude agent (optional)</span><input name="agent" /></label>
-              <label data-claude-start><span>Worktree name (optional)</span><input name="worktree" /></label>
-              <label data-claude-start><span>Permission mode</span><select name="permissionMode"><option value="">Use Claude default</option><option>plan</option><option>auto</option><option>manual</option><option>acceptEdits</option><option>dontAsk</option><option>bypassPermissions</option></select></label>
-              <label data-code-start><span>Effort (optional)</span><input name="effort" placeholder="high" /></label>
-              <label data-codex-start><span>Mode</span><select name="mode"><option value="">Use session default</option><option value="plan">Plan</option><option value="default">Default</option></select></label>
-              <label data-codex-start><span>Service tier</span><select name="serviceTier"><option value="">Use default</option><option>default</option><option>fast</option><option>flex</option></select></label>
-              <label data-codex-start><span>Output JSON schema (optional)</span><textarea name="outputSchema" rows="3"></textarea></label>
+              <label data-claude-start data-launch-option><span>Claude agent (optional)</span><input name="agent" /></label>
+              <label data-claude-start data-launch-option><span>Worktree name (optional)</span><input name="worktree" /></label>
+              <label data-claude-start data-launch-option><span>Permission mode</span><select name="permissionMode"><option value="">Use Claude default</option><option>plan</option><option>auto</option><option>manual</option><option>acceptEdits</option><option>dontAsk</option><option>bypassPermissions</option></select></label>
+              <label data-code-start data-launch-option><span>Effort (optional)</span><input name="effort" placeholder="high" /></label>
+              <label data-codex-start data-launch-option><span>Mode</span><select name="mode"><option value="">Use session default</option><option value="plan">Plan</option><option value="default">Default</option></select></label>
+              <label data-codex-start data-launch-option><span>Service tier</span><select name="serviceTier"><option value="">Use default</option><option>default</option><option>fast</option><option>flex</option></select></label>
+              <label data-codex-start data-launch-option><span>Output JSON schema (optional)</span><textarea name="outputSchema" rows="3"></textarea></label>
               <label>
                 <span>First message</span>
                 <textarea name="message" maxlength="120000" rows="4" required placeholder="What should this thread work on?"></textarea>
