@@ -1504,8 +1504,11 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 		}
 		cleared(t, r, id)
 		claim(t, r, id, tick())
-		if announce, err := r.DeferMessage(id, refusal, time.Now()); err != nil || announce == 0 {
-			t.Fatalf("a refusal after a retry announce=%d err=%v, want a new announcement", announce, err)
+		if announce, err := r.DeferMessage(id, refusal, time.Now()); err != nil || announce != 2 {
+			t.Fatalf("a refusal after a retry announce=%d err=%v, want the message's second refusal", announce, err)
+		}
+		if got := senderNotices(t, r); got != 2 {
+			t.Fatalf("sender notices=%d, want one per refusal", got)
 		}
 	})
 	t.Run("cancel", func(t *testing.T) {
@@ -1556,6 +1559,21 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 			}
 		}
 	})
+}
+
+func senderNotices(t *testing.T, r *Registry) int {
+	t.Helper()
+	rows, err := r.ListQueue(false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, row := range rows {
+		if row.SessionID == "sender" && strings.Contains(row.Message, "[agenthail delivery held") {
+			count++
+		}
+	}
+	return count
 }
 
 func claim(t *testing.T, r *Registry, id int64, now time.Time) {

@@ -567,7 +567,7 @@ func queueDeliveryFailureNotice(tx *sql.Tx, id int64) (int64, bool, error) {
 
 // queueDeliveryRefusalNotice tells the agent that sent a queued message that
 // its target refused to start and why. The message stays queued.
-func queueDeliveryRefusalNotice(tx *sql.Tx, queueID int64, reason string) error {
+func queueDeliveryRefusalNotice(tx *sql.Tx, queueID, refusal int64, reason string) error {
 	id, err := queuedDeliveryIntentID(tx, queueID)
 	if err != nil || id == 0 {
 		return err
@@ -579,12 +579,8 @@ func queueDeliveryRefusalNotice(tx *sql.Tx, queueID int64, reason string) error 
 	if intent.Relayed || intent.SenderSessionID == "" {
 		return nil
 	}
-	var deferrals int
-	if err := tx.QueryRow(`SELECT deferrals FROM message_queue WHERE id=?`, queueID).Scan(&deferrals); err != nil {
-		return err
-	}
 	notice := fmt.Sprintf("[agenthail delivery held id=%d target=%s] %s. The message stays queued and is delivered once the target starts.", intent.ID, intent.TargetSessionID, reason)
-	key := fmt.Sprintf("delivery-intent-refusal:%d:%d", intent.ID, deferrals)
+	key := fmt.Sprintf("delivery-intent-refusal:%d:%d", intent.ID, refusal)
 	_, err = tx.Exec(`INSERT INTO message_queue(session_id,message,operation,delivery_key,status,updated_at) VALUES(?,?,?,?,'pending',datetime('now')) ON CONFLICT DO NOTHING`, intent.SenderSessionID, notice, QueueOperationMessage, key)
 	return err
 }
