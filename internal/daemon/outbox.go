@@ -155,12 +155,12 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 		message = string(item.Operation)
 	}
 	if surface.IsDeliveryUnavailable(sendErr) {
-		announce, err := d.Registry.DeferMessage(item.ID, sendErr, now)
+		refusal, err := d.Registry.DeferMessage(item.ID, sendErr, now)
 		if err != nil {
 			d.log.Printf("defer queue item %d: %s", item.ID, err)
 		}
-		if announce {
-			d.announceRefusal(session.ID, item.ID)
+		if refusal != 0 {
+			d.announceRefusal(session.ID, item.ID, refusal)
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "deferred", SessionID: session.ID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
 		return
@@ -198,23 +198,25 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 // after both were attempted, so a daemon stopped in between announces it on
 // the next refused attempt rather than never; both carry a key per message, so
 // a repeat replaces the one already shown.
-func (d *Daemon) announceRefusal(sessionID string, queueID int64) {
+func (d *Daemon) announceRefusal(sessionID string, queueID, refusal int64) {
 	d.announceMu.Lock()
 	if d.announcingRefusal == nil {
-		d.announcingRefusal = map[int64]bool{}
+		d.announcingRefusal = map[int64]int64{}
 	}
-	if d.announcingRefusal[queueID] {
+	if d.announcingRefusal[queueID] == refusal {
 		d.announceMu.Unlock()
 		return
 	}
-	d.announcingRefusal[queueID] = true
+	d.announcingRefusal[queueID] = refusal
 	d.announceMu.Unlock()
 	desktopMessage := fmt.Sprintf("%s refused to start; a queued message is waiting", d.resolveDisplay(sessionID))
 	key := fmt.Sprintf("refused-%d", queueID)
 	go func() {
 		defer func() {
 			d.announceMu.Lock()
-			delete(d.announcingRefusal, queueID)
+			if d.announcingRefusal[queueID] == refusal {
+				delete(d.announcingRefusal, queueID)
+			}
 			d.announceMu.Unlock()
 		}()
 		if err := Notify("Agenthail", desktopMessage, sessionID, "agenthail-"+key); err != nil {
@@ -223,7 +225,7 @@ func (d *Daemon) announceRefusal(sessionID string, queueID int64) {
 		notificationCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		d.notifyPairedDevices(notificationCtx, mobileNotification{Title: "Agenthail", Message: "A session refused to start; a queued message is waiting", SessionID: sessionID, EventType: "delivery.refused", CollapseID: key})
-		if err := d.Registry.MarkRefusalAnnounced(queueID); err != nil {
+		if err := d.Registry.MarkRefusalAnnounced(queueID, refusal); err != nil {
 			d.log.Printf("mark refusal announced %d: %s", queueID, err)
 		}
 	}()

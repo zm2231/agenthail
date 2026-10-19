@@ -1356,18 +1356,18 @@ func TestRefusedDeferralHoldsTheMessageAndAnnouncesOncePerRefusal(t *testing.T) 
 	}
 	now := time.Now()
 	refusal := surface.DeliveryRefused(errors.New("Claude refused to resume target: Workspace not trusted"))
-	attempt := func(cause error) bool {
+	attempt := func(cause error) int64 {
 		t.Helper()
 		now = now.Add(time.Hour)
 		item, err := r.ClaimNextMessage("target", now)
 		if err != nil || item == nil || item.ID != id {
 			t.Fatalf("claim=%+v err=%v, want %d", item, err, id)
 		}
-		announce, err := r.DeferMessage(id, cause, now)
+		refusal, err := r.DeferMessage(id, cause, now)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return announce
+		return refusal
 	}
 	notices := func() int {
 		t.Helper()
@@ -1404,7 +1404,8 @@ func TestRefusedDeferralHoldsTheMessageAndAnnouncesOncePerRefusal(t *testing.T) 
 		}
 		return item
 	}
-	if !attempt(refusal) {
+	first := attempt(refusal)
+	if first == 0 {
 		t.Fatal("first refusal was not announced")
 	}
 	if row := held(); row.HeldBy != QueueHeldRefused || !strings.Contains(row.LastError, "Workspace not trusted") || row.Status != "pending" {
@@ -1413,23 +1414,30 @@ func TestRefusedDeferralHoldsTheMessageAndAnnouncesOncePerRefusal(t *testing.T) 
 	if notices() != 1 || !attention() {
 		t.Fatalf("notices=%d attention=%v after the first refusal", notices(), attention())
 	}
-	if !attempt(refusal) || notices() != 1 {
-		t.Fatalf("a refusal whose announcement never completed was not announced again, or the sender was told twice: notices=%d", notices())
+	if again := attempt(refusal); again != first || notices() != 1 {
+		t.Fatalf("a refusal whose announcement never completed: refusal=%d want %d, notices=%d", again, first, notices())
 	}
-	if err := r.MarkRefusalAnnounced(id); err != nil {
+	if err := r.MarkRefusalAnnounced(id, first); err != nil {
 		t.Fatal(err)
 	}
-	if attempt(refusal) || notices() != 1 || !attention() {
+	if attempt(refusal) != 0 || notices() != 1 || !attention() {
 		t.Fatalf("a repeated refusal announced again: notices=%d attention=%v", notices(), attention())
 	}
-	if attempt(surface.DeliveryUnavailable(errors.New("target offline"))) {
+	if attempt(surface.DeliveryUnavailable(errors.New("target offline"))) != 0 {
 		t.Fatal("an ordinary deferral was announced")
 	}
 	if row := held(); row.HeldBy != QueueHeldRetrying || attention() {
 		t.Fatalf("after an ordinary deferral heldBy=%q attention=%v", row.HeldBy, attention())
 	}
-	if !attempt(refusal) || notices() != 2 || !attention() {
-		t.Fatalf("a new refusal was not announced: notices=%d attention=%v", notices(), attention())
+	second := attempt(refusal)
+	if second == 0 || second == first || notices() != 2 || !attention() {
+		t.Fatalf("a new refusal was not announced as itself: refusal=%d first=%d notices=%d attention=%v", second, first, notices(), attention())
+	}
+	if err := r.MarkRefusalAnnounced(id, first); err != nil {
+		t.Fatal(err)
+	}
+	if again := attempt(refusal); again != second {
+		t.Fatalf("a late mark for the first refusal counted for the second: refusal=%d want %d", again, second)
 	}
 }
 
@@ -1496,8 +1504,8 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 		}
 		cleared(t, r, id)
 		claim(t, r, id, tick())
-		if announce, err := r.DeferMessage(id, refusal, time.Now()); err != nil || !announce {
-			t.Fatalf("a refusal after a retry announce=%v err=%v, want a new announcement", announce, err)
+		if announce, err := r.DeferMessage(id, refusal, time.Now()); err != nil || announce == 0 {
+			t.Fatalf("a refusal after a retry announce=%d err=%v, want a new announcement", announce, err)
 		}
 	})
 	t.Run("cancel", func(t *testing.T) {
@@ -1528,8 +1536,8 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 			t.Fatal(err)
 		}
 		claim(t, r, id, time.Now())
-		if announce, err := r.DeferMessage(id, refusal, time.Now()); err != nil || !announce {
-			t.Fatalf("announce=%v err=%v, want the user told", announce, err)
+		if announce, err := r.DeferMessage(id, refusal, time.Now()); err != nil || announce == 0 {
+			t.Fatalf("announce=%d err=%v, want the user told", announce, err)
 		}
 		rows, err := r.ListQueue(false, nil)
 		if err != nil || len(rows) != 1 || rows[0].ID != id {

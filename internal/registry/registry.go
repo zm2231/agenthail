@@ -156,7 +156,7 @@ func migrateTx(tx *sql.Tx) error {
 		{"author", `TEXT NOT NULL DEFAULT ''`},
 		{"host_request", `BLOB NOT NULL DEFAULT ''`},
 		{"uploads", `TEXT NOT NULL DEFAULT '[]'`},
-		{"refused", `INTEGER NOT NULL DEFAULT 0`},
+		{"refusal", `INTEGER NOT NULL DEFAULT 0`},
 		{"refusal_announced", `INTEGER NOT NULL DEFAULT 0`},
 	} {
 		if err := ensureColumn(tx, "message_queue", column.name, column.decl); err != nil {
@@ -480,7 +480,7 @@ CREATE TABLE IF NOT EXISTS message_queue (
 	author TEXT NOT NULL DEFAULT '',
 	host_request BLOB NOT NULL DEFAULT '',
 	uploads TEXT NOT NULL DEFAULT '[]',
-	refused INTEGER NOT NULL DEFAULT 0,
+	refusal INTEGER NOT NULL DEFAULT 0,
 	refusal_announced INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS session_runtime (
@@ -1624,7 +1624,7 @@ func queueHoldCase(canSteer bool) string {
 	steer := ""
 	if canSteer {
 		steer = `
-		WHEN ` + queueTargetStatus + `='busy' AND ` + fmt.Sprintf(queueSteerRow, "q") + ` THEN CASE WHEN q.id!=` + fmt.Sprintf(earliest, " AND "+fmt.Sprintf(queueSteerRow, "m")) + ` THEN 'behind' WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END`
+		WHEN ` + queueTargetStatus + `='busy' AND ` + fmt.Sprintf(queueSteerRow, "q") + ` THEN CASE WHEN q.id!=` + fmt.Sprintf(earliest, " AND "+fmt.Sprintf(queueSteerRow, "m")) + ` THEN 'behind' WHEN q.refusal>0 AND q.available_at_ms>?1 THEN 'refused' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END`
 	}
 	return `CASE WHEN q.status!='pending' THEN ''
 		WHEN q.host_request!='' THEN 'hostUnreachable'
@@ -1634,7 +1634,7 @@ func queueHoldCase(canSteer bool) string {
 		WHEN ` + queueTargetStatus + ` NOT IN ('idle','notLoaded') THEN 'unknown'
 		WHEN ` + queueTargetStatus + `='notLoaded' AND NOT (COALESCE(s.surface,'')='codex' AND COALESCE(s.transport,'')='desktop') THEN 'notLoaded'
 		WHEN q.id!=` + fmt.Sprintf(earliest, "") + ` THEN 'behind'
-		WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused'
+		WHEN q.refusal>0 AND q.available_at_ms>?1 THEN 'refused'
 		WHEN q.available_at_ms>?1 THEN 'retrying'
 		ELSE '' END`
 }
@@ -1760,7 +1760,7 @@ func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, er
 
 // queueRefusedRow matches an open message whose last attempt the target
 // refused to start.
-const queueRefusedRow = `refused=1 AND status IN ('pending','inflight')`
+const queueRefusedRow = `refusal>0 AND status IN ('pending','inflight')`
 
 // ReconcileAttentionItems materializes attention rows from queue state. It is
 // called by queue state writers and the background scan, never by snapshot reads.
@@ -1843,7 +1843,7 @@ func (r *Registry) RetryMessage(id int64) error {
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status='pending',attempts=0,deferrals=0,last_error='',available_at_ms=0,inflight_at_ms=0,dead_at_ms=0,delivered=0,updated_at=datetime('now') WHERE id=? AND status='dead'`, id)
+	res, err := tx.Exec(`UPDATE message_queue SET refusal=0,refusal_announced=0,status='pending',attempts=0,deferrals=0,last_error='',available_at_ms=0,inflight_at_ms=0,dead_at_ms=0,delivered=0,updated_at=datetime('now') WHERE id=? AND status='dead'`, id)
 	if err != nil {
 		return err
 	}
@@ -1863,7 +1863,7 @@ func (r *Registry) RetryMessage(id int64) error {
 func (r *Registry) CancelMessage(id int64) error {
 	var sessionID, message string
 	_ = r.db.QueryRow(`SELECT session_id,message FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message)
-	res, err := r.db.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status='canceled',updated_at=datetime('now') WHERE id=? AND status IN ('pending','dead')`, id)
+	res, err := r.db.Exec(`UPDATE message_queue SET refusal=0,refusal_announced=0,status='canceled',updated_at=datetime('now') WHERE id=? AND status IN ('pending','dead')`, id)
 	if err != nil {
 		return err
 	}
@@ -1897,7 +1897,7 @@ func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
 	if err := rows.Close(); err != nil {
 		return 0, err
 	}
-	res, err := tx.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status='canceled',updated_at=datetime('now') WHERE session_id=? AND status='pending'`, sessionID)
+	res, err := tx.Exec(`UPDATE message_queue SET refusal=0,refusal_announced=0,status='canceled',updated_at=datetime('now') WHERE session_id=? AND status='pending'`, sessionID)
 	if err != nil {
 		return 0, err
 	}
@@ -1992,7 +1992,7 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 		if err := markQueuedDeliveryIntent(tx, item.ID, DeliveryIntentUnknown, surface.EvidenceUnknown, ""); err != nil {
 			return nil, err
 		}
-		if _, err := tx.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status='dead',dead_at_ms=?,last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, now.UnixMilli(), uncertainDeliveryError, item.ID); err != nil {
+		if _, err := tx.Exec(`UPDATE message_queue SET refusal=0,refusal_announced=0,status='dead',dead_at_ms=?,last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, now.UnixMilli(), uncertainDeliveryError, item.ID); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -2018,7 +2018,7 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 }
 
 func (r *Registry) AckMessage(id int64) error {
-	res, err := r.db.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status='delivered',evidence=?,delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, surface.EvidenceDelivered, id)
+	res, err := r.db.Exec(`UPDATE message_queue SET refusal=0,refusal_announced=0,status='delivered',evidence=?,delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, surface.EvidenceDelivered, id)
 	if err != nil {
 		return err
 	}
@@ -2041,7 +2041,7 @@ func (r *Registry) AckMessageWithEvidence(id int64, sessionID string, relayHops 
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status='delivered',evidence=?,delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND session_id=? AND status='inflight'`, evidence, id, sessionID)
+	res, err := tx.Exec(`UPDATE message_queue SET refusal=0,refusal_announced=0,status='delivered',evidence=?,delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND session_id=? AND status='inflight'`, evidence, id, sessionID)
 	if err != nil {
 		return err
 	}
@@ -2092,7 +2092,7 @@ func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts
 	if status == "dead" {
 		deadAt = now.UnixMilli()
 	}
-	res, err := tx.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status=?,dead_at_ms=?,last_error=?,available_at_ms=?,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, status, deadAt, message, available.UnixMilli(), id)
+	res, err := tx.Exec(`UPDATE message_queue SET refusal=0,refusal_announced=0,status=?,dead_at_ms=?,last_error=?,available_at_ms=?,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, status, deadAt, message, available.UnixMilli(), id)
 	if err != nil {
 		return err
 	}
@@ -2110,48 +2110,62 @@ func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts
 // DeferMessage returns a claim that provably did not reach the target, such as
 // a busy refusal or an unavailable transport. The claim's attempt is given
 // back so only real delivery errors spend the retry budget; deferrals keep
-// their own count for backoff. A deferral the target refused marks the message
-// refused, and the first one since the message was last not refused tells an
-// agent sender why its message waits. It reports whether that refusal still
-// needs announcing to the user; MarkRefusalAnnounced records that it was.
-func (r *Registry) DeferMessage(id int64, cause error, now time.Time) (bool, error) {
+// their own count for backoff. A deferral the target refused starts a refusal,
+// or continues the one in progress, and the first deferral of a refusal tells
+// an agent sender why its message waits. A refusal is named by the deferral it
+// began on. DeferMessage returns that name while the refusal still needs
+// announcing to the user, and 0 otherwise; MarkRefusalAnnounced records that
+// it was.
+func (r *Registry) DeferMessage(id int64, cause error, now time.Time) (int64, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	defer tx.Rollback()
-	var deferrals int
-	var wasRefused, announced bool
-	if err := tx.QueryRow(`SELECT deferrals,refused,refusal_announced FROM message_queue WHERE id=?`, id).Scan(&deferrals, &wasRefused, &announced); err != nil {
-		return false, err
+	var deferrals, refusal int64
+	var announced bool
+	if err := tx.QueryRow(`SELECT deferrals,refusal,refusal_announced FROM message_queue WHERE id=?`, id).Scan(&deferrals, &refusal, &announced); err != nil {
+		return 0, err
 	}
 	shift := min(deferrals, 6)
 	message := "delivery did not start"
 	if cause != nil {
 		message = cause.Error()
 	}
-	refused := surface.IsDeliveryRefused(cause)
-	res, err := tx.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),deferrals=deferrals+1,last_error=?1,available_at_ms=?2,inflight_at_ms=0,refused=?3,refusal_announced=CASE WHEN ?3 THEN refusal_announced ELSE 0 END,updated_at=datetime('now') WHERE id=?4 AND status='inflight'`, message, now.Add(5*time.Second*time.Duration(1<<shift)).UnixMilli(), refused, id)
-	if err != nil {
-		return false, err
+	began := false
+	switch {
+	case !surface.IsDeliveryRefused(cause):
+		refusal, announced = 0, false
+	case refusal == 0:
+		refusal, announced, began = deferrals+1, false, true
 	}
-	n, _ := res.RowsAffected()
-	if n == 1 && refused && !wasRefused {
+	res, err := tx.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),deferrals=deferrals+1,last_error=?,available_at_ms=?,inflight_at_ms=0,refusal=?,refusal_announced=?,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(5*time.Second*time.Duration(1<<shift)).UnixMilli(), refusal, announced, id)
+	if err != nil {
+		return 0, err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return 0, tx.Commit()
+	}
+	if began {
 		if err := queueDeliveryRefusalNotice(tx, id, message); err != nil {
-			return false, err
+			return 0, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return false, err
+		return 0, err
 	}
-	return n == 1 && refused && !announced, r.ReconcileAttentionItems(now)
+	if announced {
+		refusal = 0
+	}
+	return refusal, r.ReconcileAttentionItems(now)
 }
 
-// MarkRefusalAnnounced records that the user was told a queued message waits
-// on a refusal, once both notifications were attempted, so a daemon stopped
-// before then announces it on the next refused attempt.
-func (r *Registry) MarkRefusalAnnounced(id int64) error {
-	_, err := r.db.Exec(`UPDATE message_queue SET refusal_announced=1 WHERE id=? AND refused=1`, id)
+// MarkRefusalAnnounced records that the user was told about refusal, once both
+// notifications were attempted, so a daemon stopped before then announces it
+// on the next refused attempt. A refusal that has since ended, or given way to
+// a later one, is left as it is.
+func (r *Registry) MarkRefusalAnnounced(id, refusal int64) error {
+	_, err := r.db.Exec(`UPDATE message_queue SET refusal_announced=1 WHERE id=? AND refusal=?`, id, refusal)
 	return err
 }
 
@@ -2204,7 +2218,7 @@ func (r *Registry) DeadLetterMessage(id int64, cause error) (bool, error) {
 }
 
 func deadLetterInflight(tx *sql.Tx, id int64, message string, now time.Time) error {
-	res, err := tx.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status='dead',dead_at_ms=?,last_error=?,available_at_ms=0,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, now.UnixMilli(), message, id)
+	res, err := tx.Exec(`UPDATE message_queue SET refusal=0,refusal_announced=0,status='dead',dead_at_ms=?,last_error=?,available_at_ms=0,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, now.UnixMilli(), message, id)
 	if err != nil {
 		return err
 	}
@@ -2223,7 +2237,7 @@ func (r *Registry) RecoverInflight(before time.Time) (int64, error) {
 	if _, err := tx.Exec(`UPDATE delivery_intents SET status=?,evidence=?,updated_at=datetime('now') WHERE status=? AND queue_id IN (SELECT id FROM message_queue WHERE status='inflight' AND inflight_at_ms<? AND host_request='')`, DeliveryIntentUnknown, surface.EvidenceUnknown, DeliveryIntentQueued, before.UnixMilli()); err != nil {
 		return 0, err
 	}
-	res, err := tx.Exec(`UPDATE message_queue SET refused=0,refusal_announced=0,status='dead',dead_at_ms=?,last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE status='inflight' AND inflight_at_ms<? AND host_request=''`, r.now().UnixMilli(), uncertainDeliveryError, before.UnixMilli())
+	res, err := tx.Exec(`UPDATE message_queue SET refusal=0,refusal_announced=0,status='dead',dead_at_ms=?,last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE status='inflight' AND inflight_at_ms<? AND host_request=''`, r.now().UnixMilli(), uncertainDeliveryError, before.UnixMilli())
 	if err != nil {
 		return 0, err
 	}
