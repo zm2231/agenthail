@@ -84,8 +84,8 @@ func (h *claudeHost) listing(ctx context.Context) map[string]int {
 }
 
 // readState reads the processes the host recorded starting. One counts only
-// while it runs with the start time recorded for it, since its pid may since
-// belong to another process.
+// while its pid runs with the recorded start time; a different start time means
+// another process reused the pid.
 func (h *claudeHost) readState() {
 	data, err := os.ReadFile(h.state)
 	if err != nil {
