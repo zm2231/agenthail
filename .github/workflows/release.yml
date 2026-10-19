@@ -362,7 +362,7 @@ jobs:
         run: |
           plist="$RUNNER_TEMP/Agenthail.xcarchive/Products/Applications/Agenthail.app/Info.plist"
           test "$(plutil -extract ITSAppUsesNonExemptEncryption raw -o - "$plist")" = "false"
-          test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your Mac."
+          test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your Mac, or take a photo to send to an agent."
           test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"
           test "$(plutil -extract CFBundleIdentifier raw -o - "$plist")" = "$IOS_BUNDLE_ID"
           mkdir -p "$RUNNER_TEMP/ipa-inspect"
