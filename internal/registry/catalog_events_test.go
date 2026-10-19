@@ -13,9 +13,6 @@ import (
 
 func TestCatalogEventsReplayDeduplicateAndPersistEpoch(t *testing.T) {
 	r := openTestRegistry(t)
-	if err := r.EnsureCatalogState(); err != nil {
-		t.Fatal(err)
-	}
 	epoch, latest, err := r.CatalogState()
 	if err != nil || epoch == "" || latest != 0 {
 		t.Fatalf("epoch=%q latest=%d err=%v", epoch, latest, err)

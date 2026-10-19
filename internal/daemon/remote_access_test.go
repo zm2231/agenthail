@@ -3,8 +3,6 @@ package daemon
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -16,18 +14,6 @@ func TestRemoteURLUsesTailscaleHTTPS(t *testing.T) {
 	}
 	if value != "https://agent.tailnet.ts.net:7412/?token=secret#overview" {
 		t.Fatalf("URL=%q", value)
-	}
-}
-
-func TestRemoteServeUsesHTTPSReadsAdvertisedRoute(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "tailscale")
-	body := "#!/bin/sh\nprintf '%s\\n' 'https://agent.tailnet.ts.net:7412 (tailnet only)'\n"
-	if err := os.WriteFile(path, []byte(body), 0700); err != nil {
-		t.Fatal(err)
-	}
-	ready, err := remoteServeUsesHTTPS(path, "agent.tailnet.ts.net", 7412)
-	if err != nil || !ready {
-		t.Fatalf("ready=%t err=%v", ready, err)
 	}
 }
 

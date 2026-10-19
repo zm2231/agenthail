@@ -968,6 +968,9 @@ func TestSnapshotKeepsTheSubagentCountStoredBeforeHiddenCounts(t *testing.T) {
 	if _, err := db.Exec(`UPDATE catalog_sessions SET projection_fingerprint=json_remove(projection_fingerprint,'$.observedSubagents','$.hiddenSubagents','$.listed') WHERE session_id=?`, lead.ID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`PRAGMA user_version=17`); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}

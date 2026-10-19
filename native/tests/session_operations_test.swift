@@ -1,3 +1,4 @@
+@testable import AgenthailHelpers
 import Foundation
 
 final class StubProtocol: URLProtocol, @unchecked Sendable {
