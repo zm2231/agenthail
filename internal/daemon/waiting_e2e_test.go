@@ -72,6 +72,16 @@ func (c *recordingClaude) Steer(_ context.Context, _ *surface.Session, message s
 	return nil
 }
 
+func (c *recordingClaude) Control(ctx context.Context, session *surface.Session, control surface.ControlRequest) (*surface.ControlResult, error) {
+	if control.Action != "steer" {
+		return c.Claude.Control(ctx, session, control)
+	}
+	if err := c.Steer(ctx, session, control.Value); err != nil {
+		return nil, err
+	}
+	return &surface.ControlResult{SessionID: session.ID, Action: "steer", Evidence: surface.EvidenceDelivered, Source: "recording"}, nil
+}
+
 func (c *recordingClaude) delivered() (sent, steered []string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

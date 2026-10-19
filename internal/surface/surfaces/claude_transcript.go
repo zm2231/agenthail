@@ -31,8 +31,13 @@ type claudeTurn struct {
 }
 
 type claudeRecord struct {
-	Type      string `json:"type"`
-	UUID      string `json:"uuid"`
+	Type       string `json:"type"`
+	UUID       string `json:"uuid"`
+	ParentUUID string `json:"parentUuid"`
+	CommandRun *struct {
+		Command string `json:"command"`
+		Args    string `json:"args"`
+	} `json:"commandRun"`
 	Subtype   string `json:"subtype"`
 	Content   string `json:"content"`
 	Timestamp string `json:"timestamp"`
@@ -217,42 +222,6 @@ func isClaudeInterruptMarker(text string) bool {
 	return strings.HasPrefix(text, "[Request interrupted") || strings.HasPrefix(text, "[Request to interrupt")
 }
 
-func readClaudeCommandResult(path string, offset int64, commandName, commandArgs string) (string, bool, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", false, err
-	}
-	defer f.Close()
-	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return "", false, err
-	}
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxClaudeTranscriptRecordBytes)
-	matchedCommand := false
-	for scanner.Scan() {
-		var record claudeRecord
-		if json.Unmarshal(scanner.Bytes(), &record) != nil {
-			continue
-		}
-		if record.Type == "user" {
-			content := transcriptText(record.Message.Content)
-			matchedCommand = strings.Contains(content, "<command-name>"+commandName+"</command-name>") && strings.Contains(content, "<command-args>"+commandArgs+"</command-args>")
-			continue
-		}
-		if !matchedCommand || record.Type != "system" || record.Subtype != "local_command" || record.Content == "" {
-			continue
-		}
-		result := strings.TrimSpace(record.Content)
-		result = strings.TrimPrefix(result, "<local-command-stdout>")
-		result = strings.TrimSuffix(result, "</local-command-stdout>")
-		return strings.TrimSpace(ansiEscapeRe.ReplaceAllString(result, "")), true, nil
-	}
-	if err := scanner.Err(); err != nil {
-		return "", false, err
-	}
-	return "", false, nil
-}
-
 func readClaudeCompactCompletion(path string, offset int64, requestUUID string) (bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -276,6 +245,9 @@ func readClaudeCompactCompletion(path string, offset int64, requestUUID string) 
 		}
 		if matchedRequest && record.Type == "system" && record.Subtype == "compact_boundary" {
 			return true, nil
+		}
+		if matchedRequest && record.Type == "user" && isHumanTranscriptText(transcriptText(record.Message.Content)) {
+			return false, fmt.Errorf("another prompt arrived before the compact boundary")
 		}
 	}
 	return false, scanner.Err()
@@ -308,8 +280,10 @@ func isHumanTranscriptText(text string) bool {
 		return false
 	}
 	// Claude writes slash commands as literal and tagged records; neither is an agent turn.
-	if text == "/compact" || text == "/model" || strings.HasPrefix(text, "/model ") {
-		return false
+	for _, command := range []string{"compact", "model", "context", "usage", "effort", "rename"} {
+		if text == "/"+command || strings.HasPrefix(text, "/"+command+" ") {
+			return false
+		}
 	}
 	for _, prefix := range []string{
 		"<local-command", "<command-", "<system", "[Request interrupted", "[Request to",

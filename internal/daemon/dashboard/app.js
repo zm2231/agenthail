@@ -1679,7 +1679,7 @@ async function send(requestedAction = "send") {
     const status = deliveryStatusLabel(result);
     const target = sessionTarget(app.selected);
     toast(
-      result?.result?.waitingOn
+      result?.result?.waitingOn || result?.result?.evidence === "transport_accepted"
         ? result.result.detail
         : composerAction === "steer"
         ? "Current turn redirected."

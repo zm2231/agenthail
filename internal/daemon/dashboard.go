@@ -1752,7 +1752,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "this session cannot be interrupted", http.StatusBadRequest)
 			return
 		}
-		err = adapter.Interrupt(ctx, session)
+		result, err = d.control(ctx, adapter, session, surface.ControlRequest{Action: "interrupt"})
 	case "compact":
 		if !effective.Compact {
 			http.Error(w, "this session cannot be compacted", http.StatusBadRequest)
@@ -1817,21 +1817,53 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "model is required", http.StatusBadRequest)
 			return
 		}
-		result, err = adapter.Model(ctx, session, request.Model)
+		result, err = d.control(ctx, adapter, session, surface.ControlRequest{Action: "model", Value: request.Model})
 		if err == nil && session.Surface == surface.KindClaude {
 			if persistErr := d.Registry.RegisterSession(*session); persistErr != nil {
 				err = fmt.Errorf("persist Claude model state: %w", persistErr)
 			}
 		}
+	case "context", "usage", "status", "effort", "rename":
+		if _, ok := adapter.(surface.Controller); !ok || !effective.Model {
+			http.Error(w, "this session does not support Claude Remote Control commands", http.StatusBadRequest)
+			return
+		}
+		result, err = d.control(ctx, adapter, session, surface.ControlRequest{Action: request.Action, Value: request.Message})
 	default:
 		http.Error(w, "unsupported dashboard action", http.StatusBadRequest)
 		return
 	}
 	if err != nil {
+		if control, ok := result.(*surface.ControlResult); ok && control != nil {
+			writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "result": control, "error": map[string]string{"code": "control_failed", "message": err.Error()}})
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
+}
+
+// control runs a model or interrupt change, or an allowlisted Claude command,
+// and records its request id. A surface without request-linked controls
+// confirms the change when its call returns.
+func (d *Daemon) control(ctx context.Context, adapter surface.Surface, session *surface.Session, request surface.ControlRequest) (*surface.ControlResult, error) {
+	if controller, ok := adapter.(surface.Controller); ok {
+		result, err := controller.Control(ctx, session, request)
+		d.dispatcher().RecordControl(result, err)
+		return result, err
+	}
+	result := &surface.ControlResult{SessionID: session.ID, Action: request.Action, Evidence: surface.EvidenceDelivered, Source: string(adapter.Name())}
+	var err error
+	if request.Action == "interrupt" {
+		err = adapter.Interrupt(ctx, session)
+	} else {
+		result.Output, err = adapter.Model(ctx, session, request.Value)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func dashboardStartCwd(value string) (string, error) {
