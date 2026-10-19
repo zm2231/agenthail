@@ -105,7 +105,7 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 		}
 		return nil, nil, fmt.Errorf("Claude creation: %w", err)
 	}
-	sent, err := c.sendHostTurn(ctx, session, options.Message, "")
+	sent, err := c.sendHostTurn(ctx, session, options.Message, "", nil)
 	return session, sent, err
 }
 

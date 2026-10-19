@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1361,5 +1362,19 @@ func TestClaudeSessionSourceJournalsInjectedPromptOrigins(t *testing.T) {
 			t.Fatalf("notifications=%v peer=%v window=%+v", notifications, peer, window)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestSessionJournalKeepsAttachedFilesForTheChatPage(t *testing.T) {
+	d, reg, fake, from, _ := daemonFixture(t)
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	files := []surface.AttachedFile{{Name: "notes.txt", Path: "/uploads/abc/notes.txt", Bytes: 16}}
+	source.append(surface.StreamEvent{ID: "user-1", ProviderKey: "user-1", Kind: "message", Role: "user", Title: "user", Text: "read this", Files: files})
+	page, err := d.readJournalPage(from.ID, 0, 10)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	if got := page.Items[0]; got.Text != "read this" || !reflect.DeepEqual(got.Files, files) {
+		t.Fatalf("item=%+v", got)
 	}
 }

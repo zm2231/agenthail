@@ -141,6 +141,25 @@ struct Capabilities: Codable, Hashable {
     var model = false
     var interrupt = false
     var steer = false
+    var attach = false
+
+    init(send: Bool = false, stream: Bool = false, reply: Bool = false, goal: Bool = false, compact: Bool = false, model: Bool = false, interrupt: Bool = false, steer: Bool = false, attach: Bool = false) {
+        (self.send, self.stream, self.reply, self.goal, self.compact, self.model, self.interrupt, self.steer, self.attach) = (send, stream, reply, goal, compact, model, interrupt, steer, attach)
+    }
+
+    // A paired host on an older release omits attach; it cannot store uploads.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        send = try container.decode(Bool.self, forKey: .send)
+        stream = try container.decode(Bool.self, forKey: .stream)
+        reply = try container.decode(Bool.self, forKey: .reply)
+        goal = try container.decode(Bool.self, forKey: .goal)
+        compact = try container.decode(Bool.self, forKey: .compact)
+        model = try container.decode(Bool.self, forKey: .model)
+        interrupt = try container.decode(Bool.self, forKey: .interrupt)
+        steer = try container.decode(Bool.self, forKey: .steer)
+        attach = try container.decodeIfPresent(Bool.self, forKey: .attach) ?? false
+    }
 }
 
 struct SurfaceState: Decodable, Identifiable, Equatable {
@@ -229,9 +248,6 @@ struct SessionState: Codable, Identifiable, Hashable {
     var remoteHostID: String? { remoteHostName == nil ? nil : host?.id }
     var modelCatalogKey: String { "\(remoteHostID ?? "")/\(surface)" }
     var canCallByVoice: Bool { remoteHostID == nil }
-    /// Attachments are sent as this machine's file paths, which mean nothing
-    /// to an agent on another host.
-    var acceptsLocalFiles: Bool { remoteHostID == nil }
 }
 
 struct SessionHost: Codable, Hashable {
@@ -1054,6 +1070,16 @@ struct SessionAttachment: Decodable, Equatable, Hashable {
     var isImage: Bool { mediaType.hasPrefix("image/") }
 }
 
+// A file sent with a message that the agent received as a stored path. The
+// path is on the host that owns the session.
+struct AttachedFile: Decodable, Equatable, Hashable {
+    let name: String
+    var path = ""
+    var bytes: Int64? = nil
+
+    var sizeLabel: String? { bytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } }
+}
+
 struct SessionStreamItem: Decodable {
     let itemId: String
     let version: UInt64
@@ -1074,6 +1100,7 @@ struct SessionStreamItem: Decodable {
     let bodyRef: String?
     let reason: String?
     let attachment: SessionAttachment?
+    let files: [AttachedFile]?
 }
 
 struct SessionStreamBody: Decodable {
@@ -1138,6 +1165,7 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     let bodyRef: String?
     var attachment: SessionAttachment? = nil
     var sender: String? = nil
+    var files: [AttachedFile]? = nil
 
     var isPeerMessage: Bool { kind == "message" && role == "peer" }
     var peerSender: String { sender.flatMap { $0.isEmpty ? nil : $0 } ?? "another agent" }
@@ -1152,4 +1180,11 @@ struct SessionSearchItem: Decodable, Identifiable {
     var id: String { session.id }
     let session: SessionState
     let snippet: String?
+}
+
+struct UploadedAttachment: Decodable, Equatable {
+    let id: String
+    let name: String
+    let mediaType: String
+    let bytes: Int64
 }

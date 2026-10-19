@@ -88,7 +88,7 @@ func TestAPersonsTurnToAHostSessionCarriesTheIntentUUIDAndRunsOnce(t *testing.T)
 	message := uuid.NewString()
 	ctx := surface.WithMessageUUID(context.Background(), message)
 	for range 2 {
-		result, err := c.SendHumanTurn(ctx, sess, "hello from a person")
+		result, err := c.SendHumanTurn(ctx, sess, "hello from a person", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -134,7 +134,7 @@ func TestSteerAndInterruptAHostSession(t *testing.T) {
 	fixture.Open(t, client, id)
 	sess := listedSession(t, c, id)
 	ctx := context.Background()
-	if _, err := c.SendHumanTurn(surface.WithMessageUUID(ctx, uuid.NewString()), sess, "SLOW 30000"); err != nil {
+	if _, err := c.SendHumanTurn(surface.WithMessageUUID(ctx, uuid.NewString()), sess, "SLOW 30000", nil); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(200 * time.Millisecond)
@@ -157,7 +157,7 @@ func TestAPersonsTurnWaitsForAnOrphanedSessionAndThenResumesItOnce(t *testing.T)
 	id := uuid.NewString()
 	opened := fixture.Open(t, client, id)
 	sess := listedSession(t, c, id)
-	if _, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), uuid.NewString()), sess, "SLOW 3000"); err != nil {
+	if _, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), uuid.NewString()), sess, "SLOW 3000", nil); err != nil {
 		t.Fatal(err)
 	}
 	fixture.KillHost(t)
@@ -170,7 +170,7 @@ func TestAPersonsTurnWaitsForAnOrphanedSessionAndThenResumesItOnce(t *testing.T)
 		if orphaned.PID != opened.PID || c.Route(orphaned, surface.AuthorPerson) != surface.RouteHumanTurn {
 			t.Fatalf("%s: session = %+v route = %v, want the orphaned process to keep the host route", when, orphaned, c.Route(orphaned, surface.AuthorPerson))
 		}
-		if _, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), uuid.NewString()), orphaned, "early"); !surface.IsDeliveryHeld(err) {
+		if _, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), uuid.NewString()), orphaned, "early", nil); !surface.IsDeliveryHeld(err) {
 			t.Fatalf("%s: send = %v, want held", when, err)
 		}
 	}
@@ -179,7 +179,7 @@ func TestAPersonsTurnWaitsForAnOrphanedSessionAndThenResumesItOnce(t *testing.T)
 	held("while a new host runs and the orphan still holds the session")
 	claudehosttest.WaitFor(t, "the orphaned CLI to finish its turn and exit", func() bool { return !claudehosttest.Alive(opened.PID) })
 	c.host.forget()
-	if _, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), uuid.NewString()), sess, "after"); err != nil {
+	if _, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), uuid.NewString()), sess, "after", nil); err != nil {
 		t.Fatal(err)
 	}
 	claudehosttest.WaitFor(t, "the resumed turn", func() bool { return len(fixture.Turns(t, id)) >= 2 })

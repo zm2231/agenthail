@@ -289,7 +289,7 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 	if target == "" {
 		target = session.ID
 	}
-	needsOptionSender := options.Model != "" || !options.TurnOptions.Empty()
+	needsOptionSender := options.HoldsForQueue()
 	steerable := busyMode == deliverypolicy.Steer && !needsOptionSender && surface.EffectiveCapabilities(adapter, session).Steer
 	if steerable && observation == nil {
 		observed, observeErr := adapter.Observe(ctx, session)

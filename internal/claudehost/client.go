@@ -81,8 +81,16 @@ type SendRequest struct {
 	SessionID string  `json:"sessionId"`
 	UUID      string  `json:"uuid"`
 	Text      string  `json:"text"`
+	Images    []Image `json:"images,omitempty"`
 	Priority  string  `json:"priority,omitempty"`
 	Origin    *Origin `json:"origin,omitempty"`
+}
+
+// Image is a stored image file the host reads and gives Claude as an image
+// block before the text. The host runs on the Mac that stores the upload.
+type Image struct {
+	Path      string `json:"path"`
+	MediaType string `json:"mediaType"`
 }
 
 type SendResult struct {
