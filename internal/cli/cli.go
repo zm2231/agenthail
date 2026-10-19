@@ -1097,6 +1097,22 @@ func queuedTime(value string) time.Time {
 	return t
 }
 
+// queueStatusLabel names the row's status, with its delivery evidence beside
+// it when the evidence says more. A delivered row to a paired host's session
+// carries the host's own receipt, so "delivered (remote queued)" means the
+// host accepted it into its queue.
+func queueStatusLabel(row registry.QueueRow, remote bool) string {
+	evidence := string(row.Evidence)
+	if evidence == "" || evidence == row.Status || (row.Status == "pending" && row.Evidence == surface.EvidenceQueued) {
+		return row.Status
+	}
+	evidence = strings.ReplaceAll(evidence, "_", " ")
+	if remote && row.Status == "delivered" {
+		evidence = "remote " + evidence
+	}
+	return row.Status + " (" + evidence + ")"
+}
+
 func queueHoldLabel(hold registry.QueueHold) string {
 	switch hold {
 	case registry.QueueHeldWaiting:
@@ -2190,7 +2206,8 @@ func (a *App) cmdQueue(args []string) error {
 			return nil
 		}
 		for _, row := range rows {
-			fmt.Printf("#%-4d %-18s attempts=%d target=%s %s\n", row.ID, row.Evidence, row.Attempts, a.resolveDisplay(row.SessionID), truncate(strings.ReplaceAll(row.Message, "\n", " "), 100))
+			hostID, _ := a.Registry.SessionHost(row.SessionID)
+			fmt.Printf("#%-4d %-26s attempts=%d target=%s %s\n", row.ID, queueStatusLabel(row, hostID != ""), row.Attempts, a.resolveDisplay(row.SessionID), truncate(strings.ReplaceAll(row.Message, "\n", " "), 100))
 			if row.Status == "pending" {
 				fmt.Printf("      queued %s; %s\n", relTime(queuedTime(row.QueuedAt)), queueHoldLabel(row.HeldBy))
 			}
