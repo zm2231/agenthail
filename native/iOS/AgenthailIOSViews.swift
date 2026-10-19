@@ -1273,6 +1273,23 @@ struct SettingsView: View {
                     }
                 }
             }
+            if let consumers = model.snapshot?.signin, !consumers.isEmpty {
+                Section {
+                    ForEach(consumers) { consumer in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(consumer.label).font(.headline)
+                            Text(consumer.resolvedLabel).font(.footnote)
+                            if let problem = consumer.problem {
+                                Text(problem).font(.footnote).foregroundStyle(.orange).textSelection(.enabled)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Browser sign-in")
+                } footer: {
+                    Text("Change it on the Mac in Settings > Browser Sign-in, or run agenthail signin use.")
+                }
+            }
             if let hosts = model.snapshot?.daemon.hosts, !hosts.isEmpty {
                 Section("Hosts") {
                     ForEach(hosts) { host in
