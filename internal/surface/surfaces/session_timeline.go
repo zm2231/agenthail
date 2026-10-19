@@ -787,6 +787,9 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 		return nil
 	}
 	message, _ := record["message"].(map[string]any)
+	if kind == "user" && claudeImageSourceCompanion(record, message) {
+		return nil
+	}
 	if kind == "user" {
 		origin, _ := record["origin"].(map[string]any)
 		if text := claudeMessageText(message["content"]); text != "" && str(message, "tool_use_id") == "" {
@@ -827,6 +830,12 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 			item.Text = timelineToolResultText(block["content"])
 			if failed, _ := block["is_error"].(bool); failed {
 				item.Status = "error"
+			}
+			if images := toolResultImageContent(block["content"]); item.Text == "" && item.Status == "" && len(images) > 0 {
+				for range images {
+					items = append(items, surface.TimelineItem{Kind: "attachment", Role: kind, Title: "Image", Text: "Image attachment", CallID: item.CallID})
+				}
+				continue
 			}
 		case "image":
 			item.Kind = "attachment"
@@ -880,10 +889,39 @@ func timelineToolResultText(value any) string {
 		}
 	}
 	clean := sanitizeToolResultValue(value)
-	if clean == nil {
+	if remaining, ok := clean.([]any); clean == nil || ok && len(remaining) == 0 {
 		return ""
 	}
 	return timelineValue(clean)
+}
+
+// claudeImageSourceCompanion reports Claude's meta record naming where it
+// saved a turn's pasted images ("[Image: source: <path>]"). The image block
+// already renders as an attachment, and the path is local to that machine.
+func claudeImageSourceCompanion(record, message map[string]any) bool {
+	if meta, _ := record["isMeta"].(bool); !meta {
+		return false
+	}
+	blocks, _ := message["content"].([]any)
+	if len(blocks) == 0 {
+		return false
+	}
+	for _, raw := range blocks {
+		block, _ := raw.(map[string]any)
+		text := strings.TrimSpace(str(block, "text"))
+		if str(block, "type") != "text" || !strings.HasPrefix(text, "[Image: source: ") || !strings.HasSuffix(text, "]") {
+			return false
+		}
+	}
+	return true
+}
+
+// codexImageWrapper reports the text Codex puts around each image input
+// ("<image name=[Image #1] path=...>" and "</image>"). The image renders as an
+// attachment item, and the path is local to that machine.
+func codexImageWrapper(text string) bool {
+	text = strings.TrimSpace(text)
+	return text == "</image>" || strings.HasPrefix(text, "<image name=[Image #") && strings.HasSuffix(text, ">") && !strings.Contains(text, "\n")
 }
 
 func sanitizeToolResultValue(value any) any {
@@ -962,11 +1000,12 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 		var parts []string
 		for _, raw := range blocks {
 			block, _ := raw.(map[string]any)
-			if text := str(block, "text"); text != "" {
+			if text := str(block, "text"); codexImageWrapper(text) {
+				continue
+			} else if text != "" {
 				parts = append(parts, text)
 			} else if strings.Contains(str(block, "type"), "image") {
 				messageAttachmentCount++
-				parts = append(parts, "[Image attachment: open the original agent app to view]")
 			}
 		}
 		item.Text = strings.Join(parts, "\n\n")
@@ -1015,6 +1054,9 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 		return nil
 	}
 	items := []surface.TimelineItem{item}
+	if item.Kind == "message" && item.Text == "" && messageAttachmentCount > 0 {
+		items = nil
+	}
 	for i := 0; i < messageAttachmentCount; i++ {
 		items = append(items, surface.TimelineItem{Kind: "attachment", Role: item.Role, Title: "Image", Text: "Image attachment"})
 	}

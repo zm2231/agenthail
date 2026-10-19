@@ -67,6 +67,7 @@ func (c *Codex) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
 		Send: true, Stream: true, Reply: true, Goal: true,
 		Compact: true, Model: true, Interrupt: true, Steer: true,
+		Attach: true,
 	}
 }
 
@@ -897,7 +898,7 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 	}
 	params := map[string]any{
 		"threadId": sess.ID,
-		"input":    []map[string]any{{"type": "text", "text": message}},
+		"input":    codexUserInput(message, options.Images),
 	}
 	if options.Model != "" {
 		params["model"] = options.Model
@@ -918,6 +919,21 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 		}
 	}
 	return &surface.SendResult{UUID: turnID, Accepted: true}, nil
+}
+
+// NativeImages is true on every route: each Codex transport speaks the
+// app-server protocol, whose turn input takes local image paths.
+func (c *Codex) NativeImages(*surface.Session, surface.Route) bool { return true }
+
+func codexUserInput(message string, images surface.Uploads) []map[string]any {
+	input := make([]map[string]any, 0, 1+len(images))
+	if message != "" || len(images) == 0 {
+		input = append(input, map[string]any{"type": "text", "text": message})
+	}
+	for _, image := range images {
+		input = append(input, map[string]any{"type": "localImage", "path": image.Path})
+	}
+	return input
 }
 
 func codexDirectInputAccepted(response map[string]any) bool {

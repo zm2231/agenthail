@@ -303,7 +303,7 @@ func (r *Registry) QueueDeliveryUsingIntent(intentID int64, message, deliveryKey
 	if intentID == 0 {
 		return 0, 0, fmt.Errorf("queued delivery requires an intent")
 	}
-	if options.BusyDelivery == "steer" && (options.Model != "" || !options.TurnOptions.Empty()) {
+	if options.BusyDelivery == "steer" && options.HoldsForQueue() {
 		options.BusyDelivery = "queue"
 	}
 	tx, err := r.db.Begin()
@@ -319,7 +319,7 @@ func (r *Registry) QueueDeliveryUsingIntent(intentID int64, message, deliveryKey
 	if status != string(DeliveryIntentSubmitted) {
 		return 0, 0, fmt.Errorf("delivery intent %d is not submitted", intentID)
 	}
-	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, targetSessionID, message, QueueOperationMessage, deliveryKey, options.Model, senderSessionID, options.TurnOptions, 0, options.BusyDelivery, options.Author)
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,uploads,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, targetSessionID, message, QueueOperationMessage, deliveryKey, options.Model, senderSessionID, options.TurnOptions, 0, options.BusyDelivery, options.Author, options.Uploads)
 	if err != nil {
 		if deliveryKey == "" || !strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return 0, 0, err

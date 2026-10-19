@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -78,6 +79,7 @@ func (c *Claude) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
 		Send: true, Stream: true, Reply: true, Goal: false,
 		Compact: true, Model: true, Interrupt: true, Steer: true,
+		Attach: true,
 	}
 }
 
@@ -787,7 +789,7 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 		}
 		return c.sendPeer(ctx, sess, message)
 	}
-	return c.postWhenIdle(ctx, sess, message)
+	return c.postWhenIdle(ctx, sess, message, nil)
 }
 
 // peerSlashCommand rejects a slash command for the peer socket, which cannot
@@ -800,7 +802,7 @@ func peerSlashCommand(sess *surface.Session, message string) error {
 	return nil
 }
 
-func (c *Claude) postWhenIdle(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
+func (c *Claude) postWhenIdle(ctx context.Context, sess *surface.Session, message string, images surface.Uploads) (*surface.SendResult, error) {
 	observation, err := c.Observe(ctx, sess)
 	if err != nil {
 		return nil, err
@@ -808,7 +810,37 @@ func (c *Claude) postWhenIdle(ctx context.Context, sess *surface.Session, messag
 	if observation.Status != surface.StatusIdle || observation.ActiveTurnID != "" {
 		return &surface.SendResult{UUID: sess.ID, Accepted: false}, nil
 	}
-	return c.postMessage(ctx, sess, message)
+	content, err := claudeUserContent(message, images)
+	if err != nil {
+		return nil, err
+	}
+	return c.postContent(ctx, sess, content)
+}
+
+// NativeImages is true only for a person's turn over the web bridge, which
+// carries Messages API content blocks. The peer socket carries text.
+func (c *Claude) NativeImages(_ *surface.Session, route surface.Route) bool {
+	return route == surface.RouteHumanTurn
+}
+
+// claudeUserContent is the user message content: plain text, or image
+// blocks followed by the text when the turn carries images.
+func claudeUserContent(message string, images surface.Uploads) (any, error) {
+	if len(images) == 0 {
+		return message, nil
+	}
+	blocks := make([]map[string]any, 0, len(images)+1)
+	for _, image := range images {
+		data, err := os.ReadFile(image.Path)
+		if err != nil {
+			return nil, surface.DeliveryTerminal(fmt.Errorf("read attached image %s: %w", image.Name, err), surface.DeliveryInvalidRequest)
+		}
+		blocks = append(blocks, map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": image.MediaType, "data": base64.StdEncoding.EncodeToString(data)}})
+	}
+	if message != "" {
+		blocks = append(blocks, map[string]any{"type": "text", "text": message})
+	}
+	return blocks, nil
 }
 
 // Route sends a person's message as their own turn through the session host or the
@@ -832,7 +864,7 @@ func (c *Claude) canSendHumanTurn(sess *surface.Session) bool {
 
 // SendHumanTurn submits a message through Claude's authenticated web bridge as
 // a user event, even when the session also has a native peer socket.
-func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
+func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, message string, images surface.Uploads) (*surface.SendResult, error) {
 	if sess == nil {
 		return nil, surface.DeliveryTerminal(errors.New("Claude session is required"), surface.DeliveryInvalidRequest)
 	}
@@ -848,7 +880,7 @@ func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, messa
 	if !c.canSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude resumed without its web bridge; the message is routed again on retry"))
 	}
-	return c.postWhenIdle(ctx, sess, message)
+	return c.postWhenIdle(ctx, sess, message, images)
 }
 
 func claudeProcessAlive(pid int) bool {
@@ -872,6 +904,10 @@ func claudeBridgeActivityAfterTerminal(sess *surface.Session, turn claudeTurn) b
 var claudeSendRequest = sidecarRequestWithCookies
 
 func (c *Claude) postMessage(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
+	return c.postContent(ctx, sess, message)
+}
+
+func (c *Claude) postContent(ctx context.Context, sess *surface.Session, content any) (*surface.SendResult, error) {
 	if c.localOnly {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude Remote Control is not available on this install; reach the session through its local Claude Code process"))
 	}
@@ -897,7 +933,7 @@ func (c *Claude) postMessage(ctx context.Context, sess *surface.Session, message
 			"payload": map[string]any{
 				"type": "user", "uuid": uuid, "session_id": sess.Bridge,
 				"parent_tool_use_id": nil,
-				"message":            map[string]any{"role": "user", "content": message},
+				"message":            map[string]any{"role": "user", "content": content},
 			},
 		}},
 	}

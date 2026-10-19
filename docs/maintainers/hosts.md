@@ -89,10 +89,12 @@ mirror writes the row or the held queue changes.
 
 `routeSession` in `internal/daemon/hosts_federation.go` is the one owner that
 decides which host a session belongs to. Session reads, streams, metadata,
-model lists, attachments and actions are wrapped so that a host-qualified id,
+model lists, attachments, uploads and actions are wrapped so that a host-qualified id,
 a `host` query field, or a raw id owned by a paired host is forwarded to that
-host with its raw id; the answer comes back with every session reference
-re-qualified. An action cannot span two hosts. Actions that are not yet
+host with its raw id, request body included; the answer comes back with every
+session reference re-qualified. An upload for a remote session is therefore
+stored on that host, and the upload id the client sends with the message is
+resolved there. An action cannot span two hosts. Actions that are not yet
 available across hosts (channels, relays, queue and delivery records, a
 message from one session to another, voice) are refused for remote sessions
 with a reason, and opening a session's terminal is refused because the
