@@ -62,7 +62,7 @@ struct SessionLaunchFormTest {
     }
 
     private static func checkOptions() throws {
-        let json = #"{"surfaces":[{"id":"claude","workspace":true},{"id":"notion","workspace":false}],"workspaces":[],"launchers":[{"id":"tmux","label":"tmux","agents":["claude"],"available":true,"detail":"synthetic"},{"id":"external","label":"external","agents":null,"available":false,"detail":"not configured"}]}"#
+        let json = #"{"surfaces":[{"id":"claude","workspace":true},{"id":"notion","workspace":false}],"projects":[],"launchers":[{"id":"tmux","label":"tmux","agents":["claude"],"available":true,"detail":"synthetic"},{"id":"external","label":"external","agents":null,"available":false,"detail":"not configured"}]}"#
         let options = try JSONDecoder().decode(SessionCreationOptions.self, from: Data(json.utf8))
         check(options.surfaces.map(\.id) == ["claude", "notion"], "session options list Notion")
         check(options.launchers?.map(\.agents) == [["claude"], []], "a launcher without agents decodes as serving none")
