@@ -23,7 +23,18 @@ jobs:
       - id: diff
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
+          STACK: ${{ toJSON(github.event.pull_request.stack) }}
+          STACK_BASE_REF: ${{ github.event.pull_request.stack.base.ref }}
         run: |
+          echo "stack: $STACK"
+          if [ "$STACK" != null ]; then
+            if [ -z "$STACK_BASE_REF" ]; then
+              echo "ios=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            git fetch --no-tags origin "+refs/heads/$STACK_BASE_REF:refs/remotes/origin/$STACK_BASE_REF"
+            BASE="$(git merge-base "origin/$STACK_BASE_REF" HEAD)"
+          fi
           yq '.targets[].sources[].path' native/project.yml > "$RUNNER_TEMP/sources"
           test -s "$RUNNER_TEMP/sources"
           git diff --name-only --no-renames "$BASE" HEAD > "$RUNNER_TEMP/changed"
@@ -39,7 +50,7 @@ jobs:
 
   ios:
     needs: changes
-    if: needs.changes.outputs.ios == 'true'
+    if: needs.changes.outputs.ios == 'true' && (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size)
     runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
     timeout-minutes: 30
     env:
@@ -74,7 +85,7 @@ jobs:
 
   ios-release:
     needs: changes
-    if: needs.changes.outputs.ios == 'true'
+    if: needs.changes.outputs.ios == 'true' && (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size)
     runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
     timeout-minutes: 20
     env:
