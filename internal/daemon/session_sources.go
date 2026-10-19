@@ -278,7 +278,7 @@ func (s *sessionSource) run() {
 		seedErr = s.seedJournal()
 		s.setSeedErr(seedErr)
 	}
-	if !surface.EffectiveCapabilities(&s.session, s.adapter.Capabilities()).Stream {
+	if !surface.EffectiveCapabilities(s.adapter, &s.session).Stream {
 		for s.wait(sessionSnapshotRefreshInterval) {
 			s.setSeedErr(s.seedJournal())
 		}
@@ -443,7 +443,7 @@ func (s *sessionSource) loadSeed() error {
 	if provider, ok := s.adapter.(surface.LocalTranscriptProvider); ok {
 		localTranscript = provider.RequiresLocalTranscript(&s.session)
 	}
-	streamable := surface.EffectiveCapabilities(&s.session, s.adapter.Capabilities()).Stream
+	streamable := surface.EffectiveCapabilities(s.adapter, &s.session).Stream
 	if statusErr == nil && seedStatus == registry.SessionJournalSeeded && !localTranscript && streamable {
 		return s.resumeClaudeTranscript(trustedIdentity)
 	}

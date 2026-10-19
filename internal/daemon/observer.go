@@ -149,7 +149,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.log.Printf("observe %s: empty observation", d.resolveDisplay(session.ID))
 		return
 	}
-	if observation.Status == surface.StatusBusy && observation.ActiveTurnID != "" && surface.EffectiveCapabilities(session, adapter.Capabilities()).Stream {
+	if observation.Status == surface.StatusBusy && observation.ActiveTurnID != "" && surface.EffectiveCapabilities(adapter, session).Stream {
 		d.holdSessionSource(session, adapter, "active-turn")
 	} else if observation.Status != surface.StatusBusy || observation.ActiveTurnID == "" {
 		d.releaseSessionSource(session.ID, "active-turn")
@@ -232,7 +232,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	if steerQueueErr != nil {
 		d.log.Printf("check steer queue %s: %s", d.resolveDisplay(session.ID), steerQueueErr)
 	}
-	canSteerQueued := steerQueued && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer
+	canSteerQueued := steerQueued && surface.EffectiveCapabilities(adapter, session).Steer
 	canDrainQueue := (observation.Status == surface.StatusIdle && observation.ActiveTurnID == "") || canLoadDesktopQueue
 	canDrainSteer := canSteerQueued && observation.Status == surface.StatusBusy
 	if canDrainQueue || canDrainSteer {
@@ -296,7 +296,7 @@ func (d *Daemon) setSessionSourceHold(session *surface.Session, active bool, hol
 		return
 	}
 	adapter, err := d.adapters().For(session)
-	if err != nil || !surface.EffectiveCapabilities(session, adapter.Capabilities()).Stream {
+	if err != nil || !surface.EffectiveCapabilities(adapter, session).Stream {
 		return
 	}
 	d.holdSessionSource(session, adapter, holder)

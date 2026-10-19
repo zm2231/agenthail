@@ -590,7 +590,7 @@ func (s *Service) delegate(ctx context.Context, a Action) error {
 	// reply only when the send kept that identity and transport and the route
 	// carries turns.
 	if receipt.Evidence == surface.EvidenceDelivered || receipt.Evidence == surface.EvidenceTransportAccepted {
-		if target.Session.ID != addressed.ID || target.Session.Transport != addressed.Transport || delivery.RouteFor(target.Adapter, target.Session, "").TransportOnly() {
+		if target.Session.ID != addressed.ID || target.Session.Transport != addressed.Transport || surface.RouteFor(target.Adapter, target.Session, "").TransportOnly() {
 			if streamSubscription.Cancel != nil {
 				streamSubscription.Cancel()
 			}
@@ -641,7 +641,7 @@ func (s *Service) interruptTarget(ctx context.Context, a Action) error {
 	if err := surface.EnsureWritableSession(ctx, target.Adapter, target.Session); err != nil {
 		return err
 	}
-	capabilities := surface.EffectiveCapabilities(target.Session, target.Adapter.Capabilities())
+	capabilities := surface.EffectiveCapabilities(target.Adapter, target.Session)
 	if capabilities.ReadOnly {
 		return errors.New(capabilities.ReadOnlyReason)
 	}

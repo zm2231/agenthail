@@ -38,6 +38,14 @@ func (f *fakeSurface) Name() surface.SurfaceKind {
 	return surface.KindCodex
 }
 
+// Route mirrors the Claude adapter: a session with a native socket takes it.
+func (f *fakeSurface) Route(session *surface.Session, _ surface.Author) surface.Route {
+	if session.Transport == "uds" {
+		return surface.RoutePeer
+	}
+	return surface.RouteSend
+}
+
 func (f *fakeSurface) RuntimeKinds() []surface.RuntimeKind {
 	return surfacetest.RuntimeKinds(f.Name())
 }

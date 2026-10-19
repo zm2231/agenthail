@@ -86,6 +86,24 @@ func (c *Claude) Capabilities() surface.Capabilities {
 	}
 }
 
+// SessionCapabilities narrows Capabilities for a session reached over its native
+// peer socket: it streams only from a local transcript, and steer, compact,
+// model and interrupt need its Remote Control bridge.
+func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities {
+	capabilities := c.Capabilities()
+	if sess == nil || sess.Transport != "uds" {
+		return capabilities
+	}
+	capabilities.Stream = sess.HasLocal && sess.Transcript != ""
+	if sess.Bridge == "" {
+		capabilities.Steer = false
+		capabilities.Compact = false
+		capabilities.Model = false
+		capabilities.Interrupt = false
+	}
+	return capabilities
+}
+
 // DisableRemoteControl limits the surface to local Claude Code sessions on an
 // install that ships no sidecar, so health no longer probes claude.ai.
 func (c *Claude) DisableRemoteControl() {
@@ -694,9 +712,20 @@ func (c *Claude) postWhenIdle(ctx context.Context, sess *surface.Session, messag
 	return c.postMessage(ctx, sess, message)
 }
 
-// CanSendHumanTurn reports whether the session has a web bridge identity, the
-// only route that records the message as the user's own turn.
-func (c *Claude) CanSendHumanTurn(sess *surface.Session) bool {
+// Route sends a person's message as their own turn when the session has a web
+// bridge identity, the only route that records it as the user's turn. Other
+// messages to a session with a native peer socket take that socket.
+func (c *Claude) Route(sess *surface.Session, author surface.Author) surface.Route {
+	if author == surface.AuthorPerson && c.canSendHumanTurn(sess) {
+		return surface.RouteHumanTurn
+	}
+	if sess != nil && sess.Transport == "uds" {
+		return surface.RoutePeer
+	}
+	return surface.RouteSend
+}
+
+func (c *Claude) canSendHumanTurn(sess *surface.Session) bool {
 	return sess != nil && sess.Surface == surface.KindClaude && !c.localOnly && !nativeClaudeOnly(sess)
 }
 
@@ -706,13 +735,13 @@ func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, messa
 	if sess == nil {
 		return nil, surface.DeliveryTerminal(errors.New("Claude session is required"), surface.DeliveryInvalidRequest)
 	}
-	if !c.CanSendHumanTurn(sess) {
+	if !c.canSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude web bridge session is unavailable"))
 	}
 	if _, err := c.reach(ctx, sess); err != nil {
 		return nil, err
 	}
-	if !c.CanSendHumanTurn(sess) {
+	if !c.canSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude resumed without its web bridge; the message is routed again on retry"))
 	}
 	return c.postWhenIdle(ctx, sess, message)

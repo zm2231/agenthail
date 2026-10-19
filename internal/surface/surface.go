@@ -268,7 +268,6 @@ const AuthorPerson Author = "person"
 // HumanTurnSender delivers a person's message as that session's own user
 // turn, separate from the peer transport agents use to message each other.
 type HumanTurnSender interface {
-	CanSendHumanTurn(sess *Session) bool
 	SendHumanTurn(ctx context.Context, sess *Session, message string) (*SendResult, error)
 }
 
@@ -530,20 +529,27 @@ type SessionCapabilities struct {
 	ReadOnlyReason string `json:"readOnlyReason,omitempty"`
 }
 
-func EffectiveCapabilities(session *Session, capabilities Capabilities) SessionCapabilities {
-	if session != nil && session.Surface == KindClaude && session.Transport == "uds" {
-		capabilities.Stream = capabilities.Stream && session.HasLocal && session.Transcript != ""
-		if session.Bridge == "" {
-			capabilities.Steer = false
-			capabilities.Compact = false
-			capabilities.Model = false
-			capabilities.Interrupt = false
-		}
+// SessionCapabilitySource is implemented by an adapter whose capabilities
+// differ by session. Every other adapter's sessions have its Capabilities.
+type SessionCapabilitySource interface {
+	SessionCapabilities(session *Session) Capabilities
+}
+
+// CapabilitiesFor is what the adapter can do for the session.
+func CapabilitiesFor(adapter Surface, session *Session) Capabilities {
+	if source, ok := adapter.(SessionCapabilitySource); ok {
+		return source.SessionCapabilities(session)
 	}
+	return adapter.Capabilities()
+}
+
+// EffectiveCapabilities is what may be done to the session: nothing when it is
+// read-only, otherwise what its adapter can do for it.
+func EffectiveCapabilities(adapter Surface, session *Session) SessionCapabilities {
 	if IsReadOnlySession(session) {
 		return SessionCapabilities{ReadOnly: true, ReadOnlyReason: ReadOnlySessionReason(session)}
 	}
-	return SessionCapabilities{Capabilities: capabilities}
+	return SessionCapabilities{Capabilities: CapabilitiesFor(adapter, session)}
 }
 
 type Surface interface {

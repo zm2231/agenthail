@@ -8,6 +8,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 func TestRecentPeerRegistrationReadsFreshCatalogRowsOnly(t *testing.T) {
@@ -73,14 +74,14 @@ func TestClaudePeerEligibilityKeepsBusyAndRecentOnly(t *testing.T) {
 }
 
 func TestNativeClaudeCapabilitiesMatchSocketContract(t *testing.T) {
-	caps := surface.EffectiveCapabilities(&surface.Session{ID: "local-uuid", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"}, surface.Capabilities{Send: true, Stream: true, Reply: true, Compact: true, Model: true, Interrupt: true, Steer: true})
+	caps := surface.EffectiveCapabilities(surfaces.NewClaude("", t.TempDir()), &surface.Session{ID: "local-uuid", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"})
 	if caps.ReadOnly || !caps.Send || !caps.Reply || caps.Stream || caps.Compact || caps.Model || caps.Interrupt || caps.Steer {
 		t.Fatalf("caps=%+v readOnly=%v", caps, caps.ReadOnly)
 	}
 }
 
 func TestBridgedClaudeCapabilitiesUseRemoteControlContract(t *testing.T) {
-	caps := surface.EffectiveCapabilities(&surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"}, surface.Capabilities{Send: true, Stream: true, Reply: true, Compact: true, Model: true, Interrupt: true, Steer: true})
+	caps := surface.EffectiveCapabilities(surfaces.NewClaude("", t.TempDir()), &surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"})
 	if caps.ReadOnly || !caps.Send || !caps.Reply || caps.Stream || !caps.Compact || !caps.Model || !caps.Interrupt || !caps.Steer {
 		t.Fatalf("caps=%+v readOnly=%v", caps, caps.ReadOnly)
 	}

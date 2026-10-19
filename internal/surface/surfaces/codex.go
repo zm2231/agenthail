@@ -70,6 +70,25 @@ func (c *Codex) Capabilities() surface.Capabilities {
 
 func (c *Codex) CatalogListComplete() bool { return false }
 
+// Presence counts a Codex session current while it works, has queued messages,
+// or was active within the dashboard's Codex recency window, unless Codex has
+// not loaded it.
+func (c *Codex) Presence(sess surface.Session, input surface.PresenceInput) (bool, string) {
+	if sess.Status == surface.StatusBusy {
+		return true, "working"
+	}
+	if input.QueueCount > 0 {
+		return true, "queued"
+	}
+	if sess.Status == surface.SessionStatus("notLoaded") || sess.LastActive.IsZero() {
+		return false, ""
+	}
+	if input.Now.Sub(sess.LastActive) <= time.Duration(input.CodexRecentHours)*time.Hour {
+		return true, "recent"
+	}
+	return false, ""
+}
+
 func (c *Codex) Health(ctx context.Context) error {
 	if err := c.Ready(ctx); err != nil {
 		return fmt.Errorf("Codex session discovery is unavailable: %w", err)

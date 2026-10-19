@@ -54,6 +54,14 @@ type targetFixture struct {
 
 func (f *targetFixture) Name() surface.SurfaceKind { return f.session.Surface }
 
+// Route mirrors the Claude adapter: a session with a native socket takes it.
+func (f *targetFixture) Route(session *surface.Session, _ surface.Author) surface.Route {
+	if session.Transport == "uds" {
+		return surface.RoutePeer
+	}
+	return surface.RouteSend
+}
+
 func (f *targetFixture) RuntimeKinds() []surface.RuntimeKind {
 	return surfacetest.RuntimeKinds(f.Name())
 }

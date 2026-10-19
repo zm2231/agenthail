@@ -1399,7 +1399,7 @@ func (a *App) cmdSend(args []string) error {
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
-	if delivery.RouteFor(surf, sess, "") == delivery.RoutePeer && (wantStream || wantReply) {
+	if surface.RouteFor(surf, sess, "") == surface.RoutePeer && (wantStream || wantReply) {
 		return fmt.Errorf("Claude peer message IDs cannot be correlated with transcript turns; use 'last' or native SendMessage replies")
 	}
 
@@ -1493,7 +1493,7 @@ func (a *App) cmdSend(args []string) error {
 		}
 	}
 
-	if (wantStream || wantReply) && sess.Surface == surface.KindClaude && (sess.ID != addressed.ID || delivery.RouteFor(surf, sess, options.Author).TransportOnly()) {
+	if (wantStream || wantReply) && sess.Surface == surface.KindClaude && (sess.ID != addressed.ID || surface.RouteFor(surf, sess, options.Author).TransportOnly()) {
 		fmt.Fprintf(os.Stderr, "the closed session was resumed as %s, whose turns this send cannot follow; read the reply with 'agenthail last %s'\n", sess.ID, target)
 		wantStream, wantReply = false, false
 	}
@@ -1622,7 +1622,7 @@ func (a *App) cmdReply(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surf.Capabilities().Reply {
+	if !surface.CapabilitiesFor(surf, sess).Reply {
 		return fmt.Errorf("%s does not support reply", surf.Name())
 	}
 	before, err := sessionReadBefore(args)
@@ -1811,7 +1811,7 @@ func (a *App) cmdStream(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surf.Capabilities().Stream {
+	if !surface.CapabilitiesFor(surf, sess).Stream {
 		return fmt.Errorf("%s does not support stream", surf.Name())
 	}
 	if a.daemonIsRunning() {
@@ -1872,7 +1872,7 @@ func (a *App) cmdCompact(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Compact {
+	if !surface.EffectiveCapabilities(surf, sess).Compact {
 		return fmt.Errorf("%s does not support compact", surf.Name())
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
@@ -1900,7 +1900,7 @@ func (a *App) cmdModel(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Model {
+	if !surface.EffectiveCapabilities(surf, sess).Model {
 		return fmt.Errorf("%s does not support model switching", surf.Name())
 	}
 	name := ""
@@ -1935,7 +1935,7 @@ func (a *App) cmdInterrupt(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Interrupt {
+	if !surface.EffectiveCapabilities(surf, sess).Interrupt {
 		return fmt.Errorf("%s does not support interrupt", surf.Name())
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
@@ -1954,7 +1954,7 @@ func (a *App) cmdSteer(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Steer {
+	if !surface.EffectiveCapabilities(surf, sess).Steer {
 		return fmt.Errorf("%s does not support steer", surf.Name())
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {

@@ -788,13 +788,11 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	for _, item := range attention {
 		state.Attention = append(state.Attention, dashboardAttention{ID: item.ID, SessionID: item.SessionID, Target: d.resolveDisplay(item.SessionID), QueueID: item.QueueID, Reason: item.Reason, RequestedAction: item.RequestedAction, CreatedAt: item.CreatedAt})
 	}
-	adapters := make(map[surface.SurfaceKind]surface.Surface, len(d.Surfaces))
 	catalogSurface := make(map[surface.SurfaceKind]registry.CatalogSurfaceState, len(catalogSnapshot.Surfaces))
 	for _, record := range catalogSnapshot.Surfaces {
 		catalogSurface[record.Surface] = record
 	}
 	for _, adapter := range d.Surfaces {
-		adapters[adapter.Name()] = adapter
 		entry := dashboardSurface{Name: string(adapter.Name()), Connected: false, Health: "unknown", Capabilities: adapter.Capabilities()}
 		if record, found := catalogSurface[adapter.Name()]; found {
 			entry.Health = record.Health
@@ -824,8 +822,8 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		}
 	}
 	for _, session := range sessions {
-		adapter := adapters[session.Surface]
-		if adapter == nil {
+		adapter, adapterErr := d.adapters().For(&session)
+		if adapterErr != nil {
 			continue
 		}
 		identity := catalogIdentity{}
@@ -851,7 +849,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			}
 		}
 		entry.QueueCount = counts[session.ID]
-		entry.Current, entry.CurrentReason = dashboardSessionPresence(session, entry.QueueCount, entry.Open, config.CodexRecentHours, now)
+		entry.Current, entry.CurrentReason = surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: entry.QueueCount, Open: entry.Open, Now: now, CodexRecentHours: config.CodexRecentHours})
 		state.Sessions = append(state.Sessions, entry)
 	}
 	sort.Slice(state.Surfaces, func(i, j int) bool { return state.Surfaces[i].Name < state.Surfaces[j].Name })
@@ -949,85 +947,6 @@ func (d *Daemon) ensureDashboardWritable(ctx context.Context, adapter surface.Su
 		return err
 	}
 	return nil
-}
-
-func dashboardSessionPresence(session surface.Session, queueCount int, open bool, codexRecentHours int, now time.Time) (bool, string) {
-	switch session.Surface {
-	case surface.KindClaude:
-		if queueCount > 0 {
-			return true, "queued"
-		}
-		if !open {
-			return false, ""
-		}
-		if session.Status == surface.StatusBusy {
-			return true, "working"
-		}
-		return true, "open"
-	case surface.KindCodex:
-		if session.Status == surface.StatusBusy {
-			return true, "working"
-		}
-		if queueCount > 0 {
-			return true, "queued"
-		}
-		if session.Status == surface.SessionStatus("notLoaded") || session.LastActive.IsZero() {
-			return false, ""
-		}
-		if now.Sub(session.LastActive) <= time.Duration(codexRecentHours)*time.Hour {
-			return true, "recent"
-		}
-		return false, ""
-	default:
-		if session.Status == surface.StatusBusy {
-			return true, "working"
-		}
-		if queueCount > 0 {
-			return true, "queued"
-		}
-		if !session.LastActive.IsZero() && now.Sub(session.LastActive) <= 24*time.Hour {
-			return true, "recent"
-		}
-		return false, ""
-	}
-}
-
-func claudeProcessOpen(ctx context.Context, pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	processCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-	output, err := exec.CommandContext(processCtx, "ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
-	if err != nil {
-		return false
-	}
-	return filepath.Base(strings.TrimSpace(string(output))) == "claude"
-}
-
-func claudeOpenProcesses(ctx context.Context) map[int]bool {
-	processCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-	output, err := exec.CommandContext(processCtx, "ps", "-axo", "pid=,comm=").Output()
-	if err != nil {
-		return map[int]bool{}
-	}
-	return parseClaudeOpenProcesses(string(output))
-}
-
-func parseClaudeOpenProcesses(output string) map[int]bool {
-	result := map[int]bool{}
-	for _, line := range strings.Split(output, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		pid, err := strconv.Atoi(fields[0])
-		if err == nil && pid > 0 && filepath.Base(strings.Join(fields[1:], " ")) == "claude" {
-			result[pid] = true
-		}
-	}
-	return result
 }
 
 func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) {
@@ -1625,7 +1544,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	effective := surface.EffectiveCapabilities(session, adapter.Capabilities())
+	effective := surface.EffectiveCapabilities(adapter, session)
 	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 	defer cancel()
 	var result any
@@ -1829,7 +1748,7 @@ func (d *Daemon) dashboardSearchHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		alias, _ := d.Registry.ReverseAlias(result.Session.ID)
-		effective := surface.EffectiveCapabilities(&result.Session, adapter.Capabilities())
+		effective := surface.EffectiveCapabilities(adapter, &result.Session)
 		payload = append(payload, map[string]any{
 			"session": dashboardSession{ID: result.Session.ID, Surface: result.Session.Surface, Name: result.Session.Name, Cwd: result.Session.Cwd, Alias: alias, Status: result.Session.Status, LastActive: result.Session.LastActive, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: result.Session.Source, Transport: result.Session.Transport},
 			"snippet": result.Snippet,
@@ -1890,7 +1809,7 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		}
 	}
 	alias, _ := d.Registry.ReverseAlias(session.ID)
-	effective := surface.EffectiveCapabilities(session, adapter.Capabilities())
+	effective := surface.EffectiveCapabilities(adapter, session)
 	var timelineBefore int64
 	if raw := r.URL.Query().Get("timelineBefore"); raw != "" {
 		var parseErr error
@@ -1964,7 +1883,7 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	effective := surface.EffectiveCapabilities(session, adapter.Capabilities())
+	effective := surface.EffectiveCapabilities(adapter, session)
 	requests := map[string]func() (any, error){}
 	if provider, ok := adapter.(surface.ContextUsageProvider); ok {
 		requests["context"] = func() (any, error) { return provider.ContextUsage(ctx, session) }

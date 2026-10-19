@@ -372,7 +372,7 @@ func TestClaudeWithoutRemoteControlIgnoresBridgeIDs(t *testing.T) {
 	if err != nil || len(sessions) != 1 || sessions[0].ID != "local-id" || sessions[0].Transport != "uds" {
 		t.Fatalf("mixed record sessions=%+v err=%v", sessions, err)
 	}
-	if adapter.CanSendHumanTurn(&sessions[0]) {
+	if adapter.Route(&sessions[0], surface.AuthorPerson) != surface.RoutePeer {
 		t.Fatal("person-authored send routed to Remote Control")
 	}
 	if _, err := adapter.postMessage(context.Background(), &surface.Session{ID: "local-id", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}, "hello"); !surface.IsDeliveryUnavailable(err) {
@@ -384,5 +384,41 @@ func TestClaudeWithoutRemoteControlIgnoresBridgeIDs(t *testing.T) {
 	sessions, err = adapter.List(context.Background())
 	if err != nil || len(sessions) != 0 {
 		t.Fatalf("bridge-only record listed=%+v err=%v", sessions, err)
+	}
+}
+
+func TestClaudeRouteDecidesByAuthorBridgeAndSocket(t *testing.T) {
+	adapter := NewClaude("", t.TempDir())
+	bridged := &surface.Session{ID: "local-id", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"}
+	socketOnly := &surface.Session{ID: "local-id", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"}
+	bridgeOnly := &surface.Session{ID: "local-id", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
+	for _, tc := range []struct {
+		name    string
+		session *surface.Session
+		author  surface.Author
+		want    surface.Route
+	}{
+		{"person with bridge", bridged, surface.AuthorPerson, surface.RouteHumanTurn},
+		{"unattributed with bridge and socket", bridged, "", surface.RoutePeer},
+		{"person with socket only", socketOnly, surface.AuthorPerson, surface.RoutePeer},
+		{"unattributed with bridge only", bridgeOnly, "", surface.RouteSend},
+	} {
+		if got := adapter.Route(tc.session, tc.author); got != tc.want {
+			t.Fatalf("%s: route=%v want %v", tc.name, got, tc.want)
+		}
+	}
+	adapter.DisableRemoteControl()
+	if got := adapter.Route(bridged, surface.AuthorPerson); got != surface.RoutePeer {
+		t.Fatalf("local-only install routed a person's message to Remote Control: %v", got)
+	}
+}
+
+func TestClaudeSocketSessionStreamsOnlyFromALocalTranscript(t *testing.T) {
+	adapter := NewClaude("", t.TempDir())
+	if got := surface.EffectiveCapabilities(adapter, &surface.Session{Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", Transcript: "/tmp/session.jsonl", HasLocal: true}); !got.Stream {
+		t.Fatal("reliable local Claude transcript should remain streamable")
+	}
+	if got := surface.EffectiveCapabilities(adapter, &surface.Session{Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", Transcript: "/tmp/session.jsonl"}); got.Stream {
+		t.Fatal("Claude UDS session without a local transcript should not claim stream support")
 	}
 }

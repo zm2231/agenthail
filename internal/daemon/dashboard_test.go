@@ -903,7 +903,7 @@ func TestDashboardShutdownCancelsActiveStreams(t *testing.T) {
 }
 
 func TestEffectiveCapabilitiesMakeUnloadedCodexReadOnly(t *testing.T) {
-	effective := surface.EffectiveCapabilities(&surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.SessionStatus("notLoaded")}, surface.Capabilities{Send: true, Model: true})
+	effective := surface.EffectiveCapabilities(&daemonSurface{kind: surface.KindCodex, caps: surface.Capabilities{Send: true, Model: true}}, &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.SessionStatus("notLoaded")})
 	if !effective.ReadOnly || effective.ReadOnlyReason == "" || effective.Send || effective.Model {
 		t.Fatalf("effective=%+v", effective)
 	}
@@ -911,7 +911,7 @@ func TestEffectiveCapabilitiesMakeUnloadedCodexReadOnly(t *testing.T) {
 
 func TestEffectiveCapabilitiesKeepUnloadedDesktopThreadWritable(t *testing.T) {
 	capabilities := surface.Capabilities{Send: true, Model: true}
-	effective := surface.EffectiveCapabilities(&surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"}, capabilities)
+	effective := surface.EffectiveCapabilities(&daemonSurface{kind: surface.KindCodex, caps: capabilities}, &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"})
 	if effective.ReadOnly || effective.ReadOnlyReason != "" || !effective.Send || !effective.Model {
 		t.Fatalf("effective=%+v", effective)
 	}
@@ -920,7 +920,7 @@ func TestEffectiveCapabilitiesKeepUnloadedDesktopThreadWritable(t *testing.T) {
 func TestEffectiveCapabilitiesKeepManagedDesktopThreadWritable(t *testing.T) {
 	capabilities := surface.Capabilities{Send: true, Steer: true, Compact: true, Model: true}
 	session := surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.StatusIdle, Source: "vscode", Transport: "managed"}
-	effective := surface.EffectiveCapabilities(&session, capabilities)
+	effective := surface.EffectiveCapabilities(&daemonSurface{kind: surface.KindCodex, caps: capabilities}, &session)
 	if effective.ReadOnly || effective.ReadOnlyReason != "" || !effective.Send || !effective.Steer || !effective.Compact || !effective.Model {
 		t.Fatalf("effective=%+v", effective)
 	}
@@ -928,14 +928,14 @@ func TestEffectiveCapabilitiesKeepManagedDesktopThreadWritable(t *testing.T) {
 
 func TestEffectiveCapabilitiesDisableUnbridgedDesktopThread(t *testing.T) {
 	capabilities := surface.Capabilities{Send: true, Model: true}
-	effective := surface.EffectiveCapabilities(&surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "readOnly"}, capabilities)
+	effective := surface.EffectiveCapabilities(&daemonSurface{kind: surface.KindCodex, caps: capabilities}, &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "readOnly"})
 	if !effective.ReadOnly || effective.Send || effective.Model || !strings.Contains(effective.ReadOnlyReason, "agenthail launch codex") {
 		t.Fatalf("effective=%+v", effective)
 	}
 }
 
 func TestEffectiveCapabilitiesMakePlainCodexTerminalReadOnly(t *testing.T) {
-	effective := surface.EffectiveCapabilities(&surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}, surface.Capabilities{Send: true, Steer: true, Compact: true})
+	effective := surface.EffectiveCapabilities(&daemonSurface{kind: surface.KindCodex, caps: surface.Capabilities{Send: true, Steer: true, Compact: true}}, &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"})
 	if !effective.ReadOnly || effective.ReadOnlyReason == "" || effective.Send || effective.Steer || effective.Compact {
 		t.Fatalf("effective=%+v", effective)
 	}
@@ -1155,41 +1155,4 @@ func TestDashboardStateReadsPersistedCatalogStatus(t *testing.T) {
 		}
 	}
 	t.Fatal("live session missing from dashboard state")
-}
-
-func TestDashboardSessionPresenceUsesSurfaceSpecificTruth(t *testing.T) {
-	now := time.Date(2026, 7, 12, 20, 0, 0, 0, time.UTC)
-	tests := []struct {
-		name        string
-		session     surface.Session
-		queueCount  int
-		open        bool
-		wantCurrent bool
-		wantReason  string
-	}{
-		{name: "open idle Claude", session: surface.Session{Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}, open: true, wantCurrent: true, wantReason: "open"},
-		{name: "closed busy Claude is stale", session: surface.Session{Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusBusy}, wantCurrent: false},
-		{name: "queued closed Claude", session: surface.Session{Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}, queueCount: 1, wantCurrent: true, wantReason: "queued"},
-		{name: "recent Codex", session: surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, LastActive: now.Add(-4 * time.Hour)}, wantCurrent: true, wantReason: "recent"},
-		{name: "old Codex", session: surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, LastActive: now.Add(-6 * time.Hour)}, wantCurrent: false},
-		{name: "historical Codex", session: surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.SessionStatus("notLoaded"), LastActive: now.Add(-time.Hour)}, wantCurrent: false},
-		{name: "busy Codex", session: surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy, LastActive: now.Add(-48 * time.Hour)}, wantCurrent: true, wantReason: "working"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			current, reason := dashboardSessionPresence(test.session, test.queueCount, test.open, 5, now)
-			if current != test.wantCurrent || reason != test.wantReason {
-				t.Fatalf("current=%v reason=%q, want current=%v reason=%q", current, reason, test.wantCurrent, test.wantReason)
-			}
-		})
-	}
-}
-
-func TestClaudeProcessOpenRejectsOtherProcesses(t *testing.T) {
-	if claudeProcessOpen(context.Background(), os.Getpid()) {
-		t.Fatal("non-Claude process was recognized as an open Claude session")
-	}
-	if claudeProcessOpen(context.Background(), 0) {
-		t.Fatal("zero PID was recognized as alive")
-	}
 }

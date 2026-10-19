@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -50,9 +49,9 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	var sendErr error
 	addressed := *session
 	steered := false
-	route := delivery.RouteFor(adapter, session, item.Author)
+	route := surface.RouteFor(adapter, session, item.Author)
 	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author}
-	if item.BusyDelivery == "steer" && item.Model == "" && item.TurnOptions.Empty() && session.Status == surface.StatusBusy && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer {
+	if item.BusyDelivery == "steer" && item.Model == "" && item.TurnOptions.Empty() && session.Status == surface.StatusBusy && surface.EffectiveCapabilities(adapter, session).Steer {
 		sendErr = adapter.Steer(operationCtx, session, item.Message)
 		if sendErr == nil {
 			result = &surface.SendResult{Accepted: true}
@@ -63,7 +62,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	}
 	cancel()
 	d.dispatcher().RegisterReached(&addressed, session)
-	peerTransport := delivery.RouteFor(adapter, session, item.Author).TransportOnly()
+	peerTransport := surface.RouteFor(adapter, session, item.Author).TransportOnly()
 	if sendErr != nil {
 		d.finishQueueFailure(item, session, sendErr, now)
 		return
