@@ -1,6 +1,6 @@
 # Registry migrations
 
-`registry.Open` brings `~/.agenthail/registry.db` to the current schema in one transaction (`migrate` in `internal/registry/registry.go`). The connection uses `_txlock=immediate`, so the migration holds the write lock from its first statement. `migrateTx` reads `PRAGMA user_version`, runs every step on that transaction, and writes `user_version` once at the end. If any step fails, the database keeps its previous schema and version.
+`registry.Open` brings `~/.agenthail/registry.db` to the current schema in one transaction (`migrate` in `internal/registry/registry.go`). The connection uses `_txlock=immediate`, so the migration holds the write lock from its first statement. `migrateTx` reads `PRAGMA user_version` and runs every step on that transaction. A database below `schemaVersion` gets `user_version=schemaVersion` written once, as the last statement; a database at or above it keeps its stamp. If any step fails, the database keeps its previous schema and version.
 
 A new database runs the same path with version 0. Because the `schema` constant declares every table and column, a new database needs no `ALTER TABLE`.
 
@@ -16,7 +16,7 @@ A new database runs the same path with version 0. Because the `schema` constant 
 
    The default must be a constant. `ALTER TABLE` cannot add a column whose default is an expression such as `datetime('now')`.
 
-4. **Index on a new column of an existing table.** Put `CREATE INDEX IF NOT EXISTS` in `migrateTx` after that column's `ensureColumn`, without a version gate. Do not put it in the `schema` constant. The constant runs before `ensureColumn`, so on an older database the column does not exist yet and the index would fail.
+4. **Index on a new column of an existing table.** Put `CREATE INDEX IF NOT EXISTS` in `migrateTx` after that column's `ensureColumn`, without a version gate. Do not put it in the `schema` constant. The constant runs before `ensureColumn`, so on an older database the column does not exist yet and the index would fail. If the index depends on values a data step fills in (a unique index over a backfilled column, for example), put it after that step: before the backfill, existing rows all hold the column's constant default and a unique index would fail.
 
 5. **Data step** (backfill, rewrite, dropping a column). Write a function that takes `tx *sql.Tx`. Call it from `migrateTx` inside `if version < N { ... }`, after any `ensureColumn` it depends on. The step:
    - runs only on `tx`: never `r.db`, never its own `Begin` or `Commit`, never `PRAGMA user_version`;
