@@ -39,7 +39,7 @@ struct SessionMarkdown: View {
             .textual.headingStyle(TranscriptHeadingStyle())
             .textual.paragraphStyle(TranscriptParagraphStyle())
             .textual.structuredTextStyle(.gitHub)
-            .textSelection(.enabled)
+            .textual.textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

@@ -584,6 +584,11 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
+    func editAndResend(_ text: String) {
+        let edited = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        composer = composer.isEmpty ? edited : edited + "\n\n" + composer
+    }
+
     func send(to session: SessionState) {
         let message = composer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty, let api,

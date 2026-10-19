@@ -286,6 +286,15 @@ final class SessionPane: ObservableObject, Identifiable {
         let attachments = composerDraft.attachments
         composer = ""
         composerDraft.attachments = []
+        send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery)
+    }
+
+    func resend(_ text: String) {
+        guard let sessionID = selectedSessionID, removedSession == nil else { return }
+        send(text, to: sessionID, busyDelivery: nil)
+    }
+
+    private func send(_ text: String, attachments: [URL] = [], to sessionID: String, busyDelivery: String?) {
         let settings = selectedSession?.surface == "codex" && busyDelivery != "steer" ? model.turnSettings(for: sessionID) : TurnSettings()
         model.send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery, turnSettings: settings)
     }
