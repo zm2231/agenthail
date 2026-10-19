@@ -19,7 +19,6 @@ struct ComposerAttachmentMenu: View {
                     .accessibilityIdentifier("attach-camera")
             }
             Button(action: pasteImage) { Label("Paste Image", systemImage: "doc.on.clipboard") }
-                .disabled(!UIPasteboard.general.hasImages)
                 .accessibilityIdentifier("attach-paste")
             Button { choosingFiles = true } label: { Label("Choose File", systemImage: "folder") }
                 .accessibilityIdentifier("attach-files")
