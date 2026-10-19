@@ -131,7 +131,11 @@ func (c *Claude) conversation(ctx context.Context, id string) (claudeConversatio
 	if alive {
 		return state, nil
 	}
-	jobs, err := c.backgroundSessions(ctx)
+	root, err := c.conversationRoot(id)
+	if err != nil {
+		return state, err
+	}
+	jobs, err := c.backgroundSessions(ctx, root)
 	if err != nil {
 		return state, err
 	}
@@ -151,22 +155,22 @@ func (c *Claude) conversation(ctx context.Context, id string) (claudeConversatio
 // conversationProcess returns the earliest started reachable process of a
 // conversation, and whether any live process holds it.
 func (c *Claude) conversationProcess(ctx context.Context, id string) (*surface.Session, bool, error) {
-	records, err := c.records()
+	roots, records, err := c.records()
 	if err != nil {
 		return nil, false, err
 	}
-	transcript := c.transcripts.pass()
+	transcripts := c.transcripts.pass(roots)
 	alive := false
 	var best *claudeProcess
 	for _, record := range records {
-		if str(record, "sessionId") != id {
+		if str(record.fields, "sessionId") != id {
 			continue
 		}
-		if pid, _ := record["pid"].(float64); pid <= 0 {
+		if pid, _ := record.fields["pid"].(float64); pid <= 0 {
 			continue
 		}
 		alive = true
-		if process, ok := c.process(ctx, record, transcript); ok && (best == nil || process.startedAt < best.startedAt) {
+		if process, ok := c.process(ctx, record, transcripts); ok && (best == nil || process.startedAt < best.startedAt) {
 			best = &process
 		}
 	}
@@ -176,11 +180,16 @@ func (c *Claude) conversationProcess(ctx context.Context, id string) (*surface.S
 	return &best.session, true, nil
 }
 
-// resume opens the conversation in the Claude host and waits until its
-// process is listed. A process from an earlier host that still runs holds the
-// conversation, and a Claude that fails to start has refused it.
+// resume opens the conversation in the Claude host, under the config root
+// that holds it, and waits until its process is listed. A process from an
+// earlier host that still runs holds the conversation, and a Claude that
+// fails to start has refused it.
 func (c *Claude) resume(ctx context.Context, conversation, cwd string) (*surface.Session, error) {
-	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd})
+	root, err := c.conversationRoot(conversation)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd, ConfigDir: root})
 	if err != nil {
 		return nil, claudeHostResumeError(conversation, err)
 	}

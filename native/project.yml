@@ -4,6 +4,9 @@ options:
   deploymentTarget:
     iOS: "18.0"
 packages:
+  WebRTC:
+    url: https://github.com/stasel/WebRTC
+    exactVersion: 154.0.0
   Textual:
     url: https://github.com/gonzalezreal/textual
     exactVersion: 0.5.0
@@ -17,6 +20,7 @@ targets:
     type: application
     platform: iOS
     dependencies:
+      - package: WebRTC
       - package: Textual
     sources:
       - path: AgenthailModels.swift
@@ -29,6 +33,7 @@ targets:
       - path: ToolPresentation.swift
       - path: VoiceAPI.swift
       - path: VoiceAudioBridge.swift
+      - path: VoiceCallDiagnostics.swift
       - path: VoiceOperatorModel.swift
       - path: iOS
     settings:
@@ -57,6 +62,8 @@ targets:
         NSMicrophoneUsageDescription: Talk directly to your Codex Voice orchestrator. Audio is sent to Codex, not transcribed on this device.
         UIBackgroundModes:
           - remote-notification
+          - audio
+          - voip
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleURLTypes:

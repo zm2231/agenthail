@@ -26,9 +26,9 @@ const timelineItemLimit = 200
 var transcriptPollInterval = 300 * time.Millisecond
 
 func (c *Claude) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
-	path := session.Transcript
-	if path == "" {
-		path = c.transcriptPath(session)
+	path, err := c.sessionTranscript(session)
+	if err != nil {
+		return nil, err
 	}
 	page, err := readTranscriptPage(ctx, path, "claude", request.Before, request.Limit, func(at time.Time) bool { return c.settledAfter(session, at) })
 	if err != nil {
