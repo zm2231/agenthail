@@ -1191,6 +1191,8 @@ func queueHoldLabel(hold registry.QueueHold) string {
 		return "held: target is offline"
 	case registry.QueueHeldUnknown:
 		return "held: target state is unknown"
+	case registry.QueueHeldRefused:
+		return "held: target refused to start; see the last error"
 	case registry.QueueHeldRetrying:
 		return "held: waiting to retry"
 	case registry.QueueHeldBehind:
@@ -1852,7 +1854,7 @@ func (a *App) cmdReply(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
+	sess, surf, remote, err := a.resolveReadTarget(ctx, positional[0])
 	if err != nil {
 		return err
 	}
@@ -1865,7 +1867,7 @@ func (a *App) cmdReply(args []string) error {
 	if err != nil {
 		return err
 	}
-	read, err := a.readSessionPage(ctx, surf, sess, surface.SessionReadRequest{Limit: 50, Before: before})
+	read, err := a.readSessionPage(ctx, surf, sess, surface.SessionReadRequest{Limit: 2, Before: before})
 	if err != nil {
 		return err
 	}
@@ -1905,7 +1907,7 @@ func (a *App) cmdLast(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
+	sess, surf, remote, err := a.resolveReadTarget(ctx, positional[0])
 	if err != nil {
 		return err
 	}
@@ -1928,9 +1930,17 @@ func (a *App) cmdLast(args []string) error {
 	if err != nil {
 		return err
 	}
-	exchanges := read.Exchanges
-	if exchanges == nil {
-		exchanges = []surface.Exchange{}
+	exchanges := append([]surface.Exchange{}, read.Exchanges...)
+	for pages := 1; len(exchanges) < n && read.NextBefore > 0 && pages < 10; pages++ {
+		older, olderErr := a.readSessionPage(ctx, surf, sess, surface.SessionReadRequest{Limit: n - len(exchanges), Before: read.NextBefore})
+		if olderErr != nil {
+			break
+		}
+		exchanges = append(append([]surface.Exchange{}, older.Exchanges...), exchanges...)
+		read.NextBefore = older.NextBefore
+	}
+	if len(exchanges) > n {
+		exchanges = exchanges[len(exchanges)-n:]
 	}
 	if read.UnavailableReason != "" && len(exchanges) == 0 {
 		return fmt.Errorf("session read unavailable from %s: %s", read.Source, read.UnavailableReason)
@@ -2004,6 +2014,9 @@ func readSessionWithContext(ctx context.Context, adapter surface.Surface, sessio
 	}
 }
 
+// offlineSessionPageItems is the provider page read without a daemon; provider pages count items.
+const offlineSessionPageItems = 40
+
 func (a *App) readSessionPage(ctx context.Context, adapter surface.Surface, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
 	if a.daemonIsRunning() {
 		var reader sessionPageReader
@@ -2028,6 +2041,7 @@ func (a *App) readSessionPage(ctx context.Context, adapter surface.Surface, sess
 		}
 		return surface.BoundSessionRead(session, read), nil
 	}
+	request.Limit = offlineSessionPageItems
 	read, err := readSessionWithContext(ctx, adapter, session, request)
 	if err != nil {
 		return nil, err
@@ -2557,7 +2571,7 @@ func (a *App) cmdDoctor(args []string) error {
 		WritePath    string                 `json:"writePath"`
 		OK           bool                   `json:"ok"`
 		Error        string                 `json:"error,omitempty"`
-		NotSetUp     string                 `json:"notSetUp,omitempty"`
+		SigninOff    string                 `json:"signinOff,omitempty"`
 		Runtime      *surface.RuntimeStatus `json:"runtime,omitempty"`
 	}
 	var results []doctorResult
@@ -2595,9 +2609,9 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		var sessions []surface.Session
 		var err error
-		notSetUp := ""
-		if signin.IsNotConfigured(healthErr) {
-			notSetUp = healthErr.Error()
+		signinOff := ""
+		if signin.IsOff(healthErr) {
+			signinOff = healthErr.Error()
 			healthErr = nil
 		}
 		if healthErr == nil {
@@ -2605,11 +2619,11 @@ func (a *App) cmdDoctor(args []string) error {
 		} else {
 			err = healthErr
 		}
-		if signin.IsNotConfigured(err) {
-			notSetUp = err.Error()
+		if signin.IsOff(err) {
+			signinOff = err.Error()
 			err = nil
 		}
-		result := doctorResult{Surface: e.Name, Capabilities: enabled, Sessions: len(sessions), WritePath: "checked immediately before delivery", OK: err == nil, NotSetUp: notSetUp}
+		result := doctorResult{Surface: e.Name, Capabilities: enabled, Sessions: len(sessions), WritePath: "checked immediately before delivery", OK: err == nil, SigninOff: signinOff}
 		if provider, ok := e.Surface.(surface.RuntimeStatusProvider); ok {
 			runtimeStatus := provider.RuntimeStatus(ctx)
 			if runtimeStatus.Name != "" {
@@ -2643,7 +2657,7 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		results = append(results, result)
 	}
-	signins := a.signinStatus()
+	signins := a.signinStatus(ctx)
 	home, _ := os.UserHomeDir()
 	claudeConfigDir := surface.ClaudeConfigDir(home)
 	service := a.service()
@@ -2666,13 +2680,11 @@ func (a *App) cmdDoctor(args []string) error {
 			}
 		}
 		for _, status := range signins {
-			if status.Profile != nil {
-				fmt.Printf("[sign-in] %s: %s (%s %q)\n", status.Consumer, status.Profile.Label, status.Profile.Browser.Label(), status.Profile.Profile)
-			} else if status.Error != "" {
-				fmt.Printf("[sign-in] %s: %s\n", status.Consumer, status.Error)
-			} else {
-				fmt.Printf("[sign-in] %s: not set up, needed only for %s\n  fix: %s\n", status.Consumer, status.Label, signin.SetupHint(status.Consumer))
+			fmt.Printf("[sign-in] %s: %s\n", status.ID, describeSignin(status))
+			if status.Problem != "" {
+				fmt.Printf("  problem: %s\n", status.Problem)
 			}
+			fmt.Printf("  change: agenthail signin use %s <profile|auto|none>, or Settings > Browser Sign-in\n", status.ID)
 		}
 		for _, result := range results {
 			fmt.Printf("[%s] capabilities: %s\n", result.Surface, strings.Join(result.Capabilities, ", "))
@@ -2701,8 +2713,8 @@ func (a *App) cmdDoctor(args []string) error {
 					}
 				}
 			}
-			if result.NotSetUp != "" {
-				fmt.Printf("  not set up: %s\n", result.NotSetUp)
+			if result.SigninOff != "" {
+				fmt.Printf("  sign-in off: %s\n", result.SigninOff)
 			}
 			if result.OK {
 				fmt.Printf("  sessions: %d\n", result.Sessions)

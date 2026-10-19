@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -140,5 +142,35 @@ func TestMobileQueuePreservesIntegratedTurnSettings(t *testing.T) {
 		if !strings.Contains(response.Body.String(), want) {
 			t.Fatal(response.Body.String())
 		}
+	}
+}
+
+func TestClaudeCreationThatNeverStartedIsAFailureNotUnknown(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		binary func(home string) string
+		want   string
+	}{
+		{name: "untrusted workspace", want: "Workspace not trusted", binary: func(home string) string {
+			executable := filepath.Join(home, "claude")
+			script := "#!/bin/sh\nprintf 'Workspace not trusted. Run `claude` in %s once and accept the trust prompt, then retry.\\n' \"$PWD\" >&2\nexit 1\n"
+			if err := os.WriteFile(executable, []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			return executable
+		}},
+		{name: "missing executable", want: "is not executable", binary: func(home string) string { return filepath.Join(home, "missing-claude") }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, registry, _, _, _ := daemonFixture(t)
+			home := t.TempDir()
+			t.Setenv("AGENTHAIL_CLAUDE_BIN", test.binary(home))
+			d := New(registry, []surface.Surface{surfaces.NewClaude(nil, home)})
+			body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "claude", "launcher": surface.LauncherClaudeBG, "message": "fixture instruction", "cwd": home})
+			response := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", string(body))
+			if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "delivery did not start") || !strings.Contains(response.Body.String(), test.want) {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
 	}
 }

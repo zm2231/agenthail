@@ -41,7 +41,8 @@ Everything else takes `RouteSend`. `Dispatcher.deliver` and
 the CLI and voice checks that reject reply correlation on a peer route. The
 route is derived each time a message is sent and never stored, so a queued
 message follows the target's bridge state at drain time. The choice is made
-before sending and is never revised after a failure.
+before sending and is never revised after a failure that may have reached the
+provider. A person's message never falls back to the native socket.
 
 Options never change authorship. On `RouteHumanTurn`, a per-message model or
 turn option is rejected as an invalid request: the bridge user event has no
@@ -61,7 +62,10 @@ and the drain replays a person's message through `SendHumanTurn` once the
 session is idle. `Claude.Send`'s bridge branch and `SendHumanTurn` share
 `postWhenIdle`, so both apply the same busy check. Outcome semantics are
 unchanged. An uncertain POST is `unknown` and becomes a submitted intent or a
-dead letter, and it is never retried.
+dead letter, and it is never retried. A failure before the request is sent
+(no sidecar, no usable Python, or a cookie bridge that fails or returns no
+cookies) means delivery did not start: a direct send returns that error and
+records it as failed, and a queued send is deferred and retried.
 
 The primitive does not authenticate the person behind a composer. The trust
 boundary is the dashboard's control authority (the dashboard token or a paired
@@ -79,10 +83,14 @@ authenticated POST through the composer path has not been run for this layer.
 A sign-in profile is `{id, label, browser, profile selector}` in the registry
 ([`signin_profiles`](../../internal/registry/registry.go)), the one owner shared
 by the CLI and the daemon under launchd. Each consumer (`notion`, and `claude`
-for Remote Control) has at most one binding in `signin_bindings`. Bindings and
-selectors are stored; cookies are not. Removing a profile clears the bindings
-that used it, so that consumer becomes unset. Nothing moves to another profile.
-There is no process-wide profile and no environment override.
+for Remote Control) is automatic, pinned to one profile through
+`signin_bindings`, or off through `signin_off`. Automatic means the system
+default browser (the LaunchServices https handler on macOS, Safari when none is
+set; `xdg-settings get default-web-browser` on Linux) and the profile that
+browser last used ([`default.go`](../../internal/signin/default.go)). Choices
+and selectors are stored; cookies are not. Removing a pinned profile returns
+its consumers to automatic. There is no process-wide profile and no
+environment override.
 
 Each request resolves one `signin.Source` through `signin.Resolver` with a
 `signin.Target{Consumer, SessionID}` before anything is sent
@@ -91,18 +99,24 @@ Each request resolves one `signin.Source` through `signin.Resolver` with a
 the per-key read lock and invalidation are keyed on that source
 ([`transport.go`](../../internal/surface/surfaces/transport.go)), and
 [`cookie.mjs`](../../sidecar/cookie.mjs) reads only the browser and profile
-directory it is given. An unset consumer returns `signin.NotConfiguredError`,
-which names `agenthail signin use <consumer> <profile>` and Settings > Browser
-Sign-in. Sends fail as terminal `signin_not_configured`, and doctor and health
-show "not set up" rather than a failure. Notion keeps the user and space it
+directory it is given. Resolution opens the profile's cookie store and closes
+it unread, so a missing store and a permission error (EPERM on a protected
+folder, which on macOS needs Full Disk Access for the daemon binary) are
+reported with their fix as `signin.ProblemError`, and sends fail as terminal
+`signin_unreadable` before anything is posted. A consumer that is off returns
+`signin.OffError`; sends fail as terminal `signin_off`, and doctor and health
+show "sign-in off" rather than a failure. Notion keeps the user and space it
 detected for one profile in an immutable account value, so a binding change
 never mixes two accounts within one operation.
 
-`GET /api/v1/signin` lists profiles, bindings and the browsers found on this
-computer. Each browser probe reads only profile metadata, is bounded by a
+`GET /api/v1/signin` lists profiles, each consumer's mode with the browser
+profile it resolves to and any problem, and the browsers found on this
+computer. The dashboard snapshot carries the same consumer status for clients
+without the settings scope. Each browser probe reads only profile metadata, is bounded by a
 timeout, and refuses special files. Profiles are added through
-`POST /api/v1/signin/profiles`, removed through `DELETE ?id=`, and bound
-through `PUT /api/v1/signin/bindings`. All of these require the settings
+`POST /api/v1/signin/profiles`, removed through `DELETE ?id=`, and chosen
+through `PUT /api/v1/signin/bindings` with a profile ID or label, `auto` or
+`none`. All of these require the settings
 scope. The CLI (`agenthail signin`), the web dashboard and the Mac app use
 these endpoints.
 

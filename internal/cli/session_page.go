@@ -53,13 +53,7 @@ func (c *daemonSessionPageClient) ReadSession(ctx context.Context, session *surf
 	if session == nil || session.ID == "" {
 		return nil, errors.New("session is required")
 	}
-	limit := request.Limit
-	if limit < 4 {
-		limit = 4
-	}
-	if limit > 40 {
-		limit = 40
-	}
+	limit := min(max(request.Limit, 1), 40)
 	query := url.Values{}
 	query.Set("id", session.ID)
 	query.Set("timeline", "1")

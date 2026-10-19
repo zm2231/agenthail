@@ -128,7 +128,7 @@ func (c *Claude) Health(ctx context.Context) error {
 		return err
 	}
 	cookies, signinErr := c.cookieSource("")
-	if signin.IsNotConfigured(signinErr) {
+	if signin.IsOff(signinErr) {
 		if bridged {
 			return signinErr
 		}
@@ -154,6 +154,17 @@ func (c *Claude) Health(ctx context.Context) error {
 		return fmt.Errorf("Claude authentication probe returned HTTP %d: %s", status, diagnosticExcerpt(body))
 	}
 	return nil
+}
+
+func signinTerminalKind(err error) surface.DeliveryTerminalKind {
+	var problem signin.ProblemError
+	switch {
+	case signin.IsOff(err):
+		return surface.DeliverySigninOff
+	case errors.As(err, &problem):
+		return surface.DeliverySigninUnreadable
+	}
+	return surface.DeliveryAuthenticationNeeded
 }
 
 // cookieSource resolves the browser profile for one claude.ai request. It runs
@@ -920,11 +931,8 @@ func (c *Claude) postContent(ctx context.Context, sess *surface.Session, content
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude conversation %s has no Remote Control attachment", sess.ID))
 	}
 	cookies, err := c.cookieSource(sess.ID)
-	if signin.IsNotConfigured(err) {
-		return nil, surface.DeliveryTerminal(err, surface.DeliverySigninNotConfigured)
-	}
 	if err != nil {
-		return nil, surface.DeliveryTerminal(err, surface.DeliveryAuthenticationNeeded)
+		return nil, surface.DeliveryTerminal(err, signinTerminalKind(err))
 	}
 	uuid := newUUID()
 	cse := toCse(sess.Bridge)
@@ -947,6 +955,9 @@ func (c *Claude) postContent(ctx context.Context, sess *surface.Session, content
 	status, respBody, err := request(ctx, "POST",
 		"https://claude.ai/v1/code/sessions/"+cse+"/events",
 		headers, string(bodyBytes), cookies, 30*time.Second)
+	if surface.IsDeliveryUnavailable(err) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(err)
 	}
@@ -1402,7 +1413,7 @@ func (c *Claude) Steer(ctx context.Context, sess *surface.Session, message strin
 		return err
 	}
 	if current.Status != surface.StatusBusy {
-		return surface.DeliveryUnavailable(errors.New("session idle; nothing to steer (use 'send' instead)"))
+		return surface.DeliveryUnavailable(fmt.Errorf("%w (use 'send' instead)", surface.ErrNothingToSteer))
 	}
 	_, err = c.postMessage(ctx, current, message)
 	return err

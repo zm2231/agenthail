@@ -320,8 +320,8 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.profile
     }
 
-    func bindSignin(consumer: String, profileID: String?) async throws {
-        let _: SigninProfileResponse = try await request("/api/v1/signin/bindings", method: "PUT", body: ["consumer": consumer, "profileId": profileID.map { $0 as Any } ?? NSNull()])
+    func bindSignin(consumer: String, choice: String) async throws -> SigninConsumerState {
+        try await request("/api/v1/signin/bindings", method: "PUT", body: ["consumer": consumer, "profileId": choice])
     }
 
     func removeSigninProfile(id: String) async throws {

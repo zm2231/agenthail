@@ -289,21 +289,12 @@ function startLiveStream() {
     app.history.transcriptWarning = "";
     const items = app.history.timeline?.items || [];
     const index = items.findIndex((value) => value.id === item.itemId);
-    const projected = { id: item.itemId, kind: item.kind, role: item.role, origin: item.origin, sender: item.sender, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, truncated: item.truncated, bodyRef: item.bodyRef, attachment: item.attachment, files: item.files, callId: item.callId };
+    const projected = { id: item.itemId, kind: item.kind, role: item.role, origin: item.origin, sender: item.sender, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, truncated: item.truncated, bodyRef: item.bodyRef, attachment: item.attachment, files: item.files, callId: item.callId, turnId: item.turnId };
     if (item.op === "remove") { if (index >= 0) items.splice(index, 1); }
     else if (index >= 0) items[index] = projected;
     else items.push(projected);
     app.history.timeline = { ...(app.history.timeline || {}), items };
-    const exchanges = [];
-    for (const value of items) {
-      if (!["message", "text", "assistant"].includes(value.kind)) continue;
-      if (value.role === "user") exchanges.push({ user: value.text });
-      else if (value.role === "assistant" || value.kind === "text") {
-        if (!exchanges.length || exchanges.at(-1).assistant) exchanges.push({});
-        exchanges.at(-1).assistant = value.text;
-      }
-    }
-    app.history.exchanges = exchanges;
+    app.history.exchanges = exchangesFromItems(items);
     renderChat();
   });
   source.addEventListener("error", () => {
@@ -311,6 +302,31 @@ function startLiveStream() {
     stopLiveStream();
     selectSession(session.id);
   });
+}
+function exchangesFromItems(items) {
+  const exchanges = [];
+  let turn = "";
+  let open = false;
+  for (const value of items) {
+    if (!value.text) continue;
+    const prompt = ["message", "text"].includes(value.kind) && ["user", "peer"].includes(value.role);
+    if (prompt) {
+      exchanges.push({ user: value.text, timestamp: value.timestamp });
+      turn = value.turnId || "";
+      open = true;
+      continue;
+    }
+    const reply = (["message", "assistant"].includes(value.kind) && value.role === "assistant") || (value.kind === "text" && (!value.role || value.role === "assistant"));
+    if (!reply) continue;
+    if (!open || (turn && value.turnId && value.turnId !== turn)) {
+      exchanges.push({ timestamp: value.timestamp });
+      turn = value.turnId || "";
+      open = true;
+    }
+    if (!turn) turn = value.turnId || "";
+    exchanges.at(-1).assistant = value.text;
+  }
+  return exchanges;
 }
 function resizeComposer() {
   const input = $("#message");
@@ -490,8 +506,8 @@ function renderOverview() {
             : `Past ${app.state.codexRecentHours || 5}h`;
         const healthLabel = surface.health === "degraded"
           ? "Needs attention"
-          : surface.health === "not_configured"
-            ? "Not set up"
+          : surface.health === "signin_off"
+            ? "Sign-in off"
             : surface.connected
             ? "Connected"
             : "Not connected";
@@ -718,6 +734,7 @@ function queueReason(item) {
       busy: "Held: this agent is working",
       offline: "Held: this agent is offline",
       unknown: "Held: this agent's state is unknown",
+      refused: "Held: this agent refused to start",
       retrying: "Held: waiting to retry",
       behind: "Held: behind an earlier message",
       notLoaded: "Held: this conversation is not loaded",
@@ -804,10 +821,18 @@ function renderOperations() {
 function auditKindLabel(kind) {
   return String(kind || "event").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
-function signinHint(detail) {
+function signinOffHint(detail) {
   const claude = /^Claude Remote Control/.test(detail);
-  const consumer = claude ? "Claude sessions reached over Remote Control need" : "Notion needs";
-  return `${consumer} a browser sign-in profile. Choose one in Settings > Browser Sign-in, or run agenthail signin use ${claude ? "claude" : "notion"} <profile>.`;
+  const consumer = claude ? "Claude sessions reached over Remote Control read" : "Notion reads";
+  return `Browser sign-in is off, so ${consumer} no cookies. Turn it on in Settings > Browser Sign-in, or run agenthail signin use ${claude ? "claude" : "notion"} auto.`;
+}
+function signinResolved(consumer) {
+  if (consumer.mode === "off") return "Off. Reads no cookies.";
+  if (!consumer.browserLabel) return "Uses the system default browser.";
+  const name = consumer.profileName && consumer.profileName !== consumer.profile ? ` (${consumer.profileName})` : "";
+  const where = consumer.browser === "safari" ? "Safari" : `${consumer.browserLabel} · ${consumer.profile}${name}`;
+  if (consumer.mode === "automatic") return `Automatic: ${where}, the system default browser.`;
+  return `${consumer.profileName}: ${consumer.browserLabel} · ${consumer.profile}.`;
 }
 async function signinRequest(path, options = {}) {
   const response = await fetch(path, { ...options, headers: { "content-type": "application/json", ...(options.headers || {}) } });
@@ -838,13 +863,18 @@ function renderSignin() {
   if (!signin) return;
   const profiles = signin.profiles || [];
   $("#signin-consumers").innerHTML = (signin.consumers || []).map((consumer) => {
-    const options = [`<option value="">Not set up</option>`, ...profiles.map((profile) => `<option value="${escape(profile.id)}"${consumer.profileId === profile.id ? " selected" : ""}>${escape(profile.label)}</option>`)].join("");
-    const state = consumer.profileId ? "" : '<span class="health-state not_configured">Not set up</span>';
-    return `<div class="signin-consumer"><div><strong>${escape(consumer.label)}</strong>${state}<p>${escape(consumer.purpose)}</p></div><label><span class="sr-only">Sign-in profile for ${escape(consumer.label)}</span><select data-signin-consumer="${escape(consumer.id)}">${options}</select></label></div>`;
+    const options = [
+      `<option value="auto"${consumer.mode === "automatic" ? " selected" : ""}>Automatic (system default browser)</option>`,
+      ...profiles.map((profile) => `<option value="${escape(profile.id)}"${consumer.profileId === profile.id ? " selected" : ""}>${escape(profile.label)}</option>`),
+      `<option value="none"${consumer.mode === "off" ? " selected" : ""}>Off</option>`,
+    ].join("");
+    const state = consumer.mode === "off" ? '<span class="health-state signin_off">Off</span>' : consumer.problem ? '<span class="health-state unavailable">Cannot read</span>' : "";
+    const problem = consumer.problem ? `<p class="signin-problem">${escape(consumer.problem)}</p>` : "";
+    return `<div class="signin-consumer"><div><strong>${escape(consumer.label)}</strong>${state}<p>${escape(consumer.purpose)}</p><p class="signin-resolved">${escape(signinResolved(consumer))}</p>${problem}</div><label><span class="sr-only">Sign-in profile for ${escape(consumer.label)}</span><select data-signin-consumer="${escape(consumer.id)}">${options}</select></label></div>`;
   }).join("");
   $("#signin-profiles").innerHTML = profiles.map((profile) =>
     `<article class="operation-item"><div class="operation-main"><div class="operation-title">${escape(profile.label)}</div><div class="operation-detail">${escape(signinProfileLabel(profile))}</div></div><button class="button quiet" data-signin-remove="${escape(profile.id)}" type="button">Remove</button></article>`,
-  ).join("") || '<div class="empty-card">No sign-in profiles yet. Add one from a browser below.</div>';
+  ).join("") || '<div class="empty-card">No pinned profiles. Add one below to use a profile other than the default browser\'s.</div>';
   const available = (signin.browsers || []).filter((browser) => browser.available && browser.profiles.some((profile) => !profile.profileId));
   const browserSelect = $("#signin-browser");
   const previous = browserSelect.value;
@@ -895,10 +925,10 @@ function renderSurfaceHealth() {
   $("#surface-health-list").innerHTML = surfaces.map((surface) => {
     const name = labels[surface.name] || surface.name;
     const health = surface.health || (surface.connected ? "healthy" : "unavailable");
-    const state = health === "healthy" ? "Healthy" : health === "degraded" ? "Needs attention" : health === "not_configured" ? "Not set up" : "Unavailable";
+    const state = health === "healthy" ? "Healthy" : health === "degraded" ? "Needs attention" : health === "signin_off" ? "Sign-in off" : "Unavailable";
     const rawDetail = surface.healthDetail || surface.error || "Ready";
-    const detail = health === "not_configured" || /choose a browser sign-in profile/i.test(rawDetail)
-      ? signinHint(rawDetail)
+    const detail = health === "signin_off"
+      ? signinOffHint(rawDetail)
       : /cookie bridge/i.test(rawDetail)
       ? "Claude Code needs to reconnect to your signed-in account."
       : /notion.*(?:401|context)/i.test(rawDetail)
@@ -2302,9 +2332,9 @@ $("#signin-card").addEventListener("change", async (event) => {
   if (!select) return;
   select.disabled = true;
   try {
-    const { profile } = await signinRequest("/api/v1/signin/bindings", { method: "PUT", body: JSON.stringify({ consumer: select.dataset.signinConsumer, profileId: select.value || null }) });
+    const consumer = await signinRequest("/api/v1/signin/bindings", { method: "PUT", body: JSON.stringify({ consumer: select.dataset.signinConsumer, profileId: select.value }) });
     await loadSignin();
-    toast(profile ? `Using ${profile.label}.` : "Not set up. No cookies will be read.");
+    toast(consumer.mode === "off" ? `${consumer.label} sign-in is off. No cookies will be read.` : `${consumer.label}: ${signinResolved(consumer)}`);
   } catch (error) {
     toast(error.message);
     await loadSignin();

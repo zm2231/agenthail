@@ -45,9 +45,10 @@ agenthail doctor --json
 ```
 
 AgentHail targets macOS and runs headless on Linux. Native Claude messages use local sockets and require
-the daemon. Claude Remote Control and Notion read cookies only from the browser sign-in profile
-bound with `agenthail signin use <notion|claude> <profile>` (list with
-`agenthail signin list`); unbound consumers report "not set up" and read nothing. Codex
+the daemon. Claude Remote Control and Notion read cookies from the system default browser's
+last used profile unless pinned with `agenthail signin use <notion|claude> <profile>`;
+`auto` returns to the default and `none` turns a consumer's sign-in off. `agenthail signin list`
+shows what each consumer resolves to and any problem with its fix. Codex
 Desktop uses AgentHail's loopback Desktop bridge (`agenthail launch codex`).
 Without Desktop, AgentHail uses Codex's app-server daemon and starts it when a
 conversation needs it. Codex 0.151 and older can only start that daemon from the
@@ -349,11 +350,16 @@ Repeated failures become dead letters. Uncertain external effects remain in
 audit history and are never automatically resent. Proven problems are reported
 by the daemon. Pending messages never expire; they leave the queue only when
 delivered, canceled, or failed. Each pending row reports `heldBy` (`waiting`,
-`busy`, `offline`, `unknown`, `retrying`, `notLoaded`, `hostUnreachable` (a send a paired host has not received), `behind` an earlier
+`busy`, `offline`, `unknown`, `refused`, `retrying`, `notLoaded`,
+`hostUnreachable` (a send a paired host has not received), `behind` an earlier
 message) and its age in text output. Text output shows each row's status, with
 its delivery evidence beside it when they differ: `delivered (remote queued)`
-is a send a paired host accepted into its own queue. A target whose turn is waiting on its user
-(a Claude question, plan approval or permission prompt, a Codex approval or
+is a send a paired host accepted into its own queue. `refused` means the target
+refused to start, for example Claude failing to resume the conversation; the
+row's last error says why, and the sender receives one
+`[agenthail delivery held ...]` notice. It needs a person, not a resend. A
+target whose turn is waiting on its user (a Claude question, plan approval or
+permission prompt, a Codex approval or
 input request) carries `waitingOn` and lists as `wait`; messages to it,
 including steers, are queued until the user answers. Do not interrupt it to get
 a message through. Finished items appear in history and remain available through

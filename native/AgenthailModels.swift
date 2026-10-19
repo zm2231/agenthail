@@ -631,6 +631,7 @@ struct QueueState: Decodable, Identifiable, Equatable {
         case "busy": return "Held: this agent is working"
         case "offline": return "Held: this agent is offline"
         case "unknown": return "Held: this agent's state is unknown"
+        case "refused": return "Held: this agent refused to start"
         case "retrying": return "Held: waiting to retry"
         case "behind": return "Held: behind an earlier message"
         case "notLoaded": return "Held: this conversation is not loaded"
@@ -774,6 +775,7 @@ struct DashboardSnapshot: Decodable {
     let codexRecentHours: Int
     let busyDelivery: String?
     var rekeyed: [String: String]? = nil
+    var signin: [SigninConsumerState]? = nil
 
     func hasSamePresentation(as other: DashboardSnapshot) -> Bool {
         daemon == other.daemon &&
@@ -787,7 +789,8 @@ struct DashboardSnapshot: Decodable {
             attention == other.attention &&
             deliveryProblems == other.deliveryProblems &&
             codexRecentHours == other.codexRecentHours &&
-            busyDelivery == other.busyDelivery
+            busyDelivery == other.busyDelivery &&
+            signin == other.signin
     }
 }
 
@@ -1012,6 +1015,30 @@ struct SigninConsumerState: Codable, Identifiable, Equatable {
     let label: String
     let purpose: String
     let profileId: String?
+    let mode: String
+    let browser: String?
+    let browserLabel: String?
+    let profile: String?
+    let profileName: String?
+    let problem: String?
+
+    var choice: String {
+        switch mode {
+        case "off": return "none"
+        case "profile": return profileId ?? "auto"
+        default: return "auto"
+        }
+    }
+
+    var resolvedLabel: String {
+        if mode == "off" { return "Off. Reads no cookies." }
+        guard let browserLabel, !browserLabel.isEmpty else { return "Uses the system default browser." }
+        let profile = profile ?? ""
+        if mode == "profile" { return "\(profileName ?? profile): \(browserLabel) · \(profile)." }
+        let named = profileName.map { $0 == profile ? "" : " (\($0))" } ?? ""
+        let place = browser == "safari" ? "Safari" : "\(browserLabel) · \(profile)\(named)"
+        return "Automatic: \(place), the system default browser."
+    }
 }
 
 struct SigninDetectedProfile: Codable, Identifiable, Equatable {
