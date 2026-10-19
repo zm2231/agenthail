@@ -25,7 +25,19 @@ func TestCodexCatalogSweepListsEveryStoredThreadAndSkipsInternalThreads(t *testi
 		ephemeralID = "019f004a-0000-7000-8000-0000000000a3"
 		reviewID    = "019f004a-0000-7000-8000-0000000000a4"
 		spawnedID   = "019f004a-0000-7000-8000-0000000000a5"
+		// Codex lists only interactive sources under the configured model
+		// provider unless asked for more.
+		otherProviderID = "019f004a-0000-7000-8000-0000000000a6"
 	)
+	requested := func(kinds any, kind string) bool {
+		values, _ := kinds.([]any)
+		for _, value := range values {
+			if value == kind {
+				return true
+			}
+		}
+		return false
+	}
 	thread := func(id string, status string, extra map[string]any) map[string]any {
 		value := map[string]any{"id": id, "name": id, "source": "vscode", "status": map[string]any{"type": status}, "recencyAt": float64(1792300000)}
 		for key, field := range extra {
@@ -46,10 +58,14 @@ func TestCodexCatalogSweepListsEveryStoredThreadAndSkipsInternalThreads(t *testi
 					thread(reviewID, "notLoaded", map[string]any{"source": map[string]any{"subAgent": "review"}}),
 				}, "nextCursor": "page-2"}
 			}
-			return map[string]any{"data": []any{
-				thread(olderID, "notLoaded", nil),
-				thread(spawnedID, "notLoaded", map[string]any{"source": map[string]any{"subAgent": map[string]any{"thread_spawn": map[string]any{"parent_thread_id": olderID, "depth": 1}}}}),
-			}}
+			page := []any{thread(olderID, "notLoaded", nil)}
+			if requested(params["sourceKinds"], "subAgentThreadSpawn") {
+				page = append(page, thread(spawnedID, "notLoaded", map[string]any{"source": map[string]any{"subAgent": map[string]any{"thread_spawn": map[string]any{"parent_thread_id": olderID, "depth": 1}}}}))
+			}
+			if providers, _ := params["modelProviders"].([]any); providers != nil && len(providers) == 0 {
+				page = append(page, thread(otherProviderID, "notLoaded", nil))
+			}
+			return map[string]any{"data": page}
 		}
 		return nil
 	})
@@ -62,7 +78,7 @@ func TestCodexCatalogSweepListsEveryStoredThreadAndSkipsInternalThreads(t *testi
 	for _, session := range sessions {
 		byID[session.ID] = session
 	}
-	if len(byID) != 3 || byID[loadedID].Status != surface.StatusBusy || byID[olderID].ID == "" || byID[spawnedID].Subagent == nil || byID[spawnedID].Subagent.ParentID != olderID {
+	if len(byID) != 4 || byID[otherProviderID].ID == "" || byID[loadedID].Status != surface.StatusBusy || byID[olderID].ID == "" || byID[spawnedID].Subagent == nil || byID[spawnedID].Subagent.ParentID != olderID {
 		t.Fatalf("swept sessions=%+v", byID)
 	}
 	if _, complete, err := codex.CatalogList(context.Background()); err != nil || complete {

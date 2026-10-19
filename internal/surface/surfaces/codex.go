@@ -349,7 +349,7 @@ func (c *Codex) listAll(ctx context.Context, conn codexClient, runtimes *codexRu
 		return nil, fmt.Errorf("read loaded Codex threads: %s", strings.Join(readErrors, "; "))
 	}
 	var all []surface.Session
-	params := map[string]any{"limit": codexSweepPageLimit, "sortKey": "recency_at", "sortDirection": "desc", "useStateDbOnly": true}
+	params := codexThreadListParams(codexSweepPageLimit)
 	for {
 		page, next, err := c.listPageCursor(ctx, conn, params, runtimes)
 		if err != nil {
@@ -446,12 +446,23 @@ func mergeCodexSessions(primary, secondary []surface.Session) []surface.Session 
 }
 
 func (c *Codex) listRecent(ctx context.Context, conn codexClient, runtimes *codexRuntimes) ([]surface.Session, error) {
-	return c.listPage(ctx, conn, map[string]any{
-		"limit":          codexRecentListLimit,
+	return c.listPage(ctx, conn, codexThreadListParams(codexRecentListLimit), runtimes)
+}
+
+// codexThreadListParams asks for every conversation a person or Agenthail can
+// address. thread/list defaults to interactive sources and filters by model
+// provider unless told otherwise, which would hide spawned subagents,
+// app-server threads and threads under other providers. Exec runs and Codex's
+// own review, compaction and memory subagents stay out.
+func codexThreadListParams(limit int) map[string]any {
+	return map[string]any{
+		"limit":          limit,
 		"sortKey":        "recency_at",
 		"sortDirection":  "desc",
 		"useStateDbOnly": true,
-	}, runtimes)
+		"sourceKinds":    []string{"cli", "vscode", "appServer", "subAgentThreadSpawn"},
+		"modelProviders": []string{},
+	}
 }
 
 func (c *Codex) listPage(ctx context.Context, conn codexClient, params map[string]any, runtimes *codexRuntimes) ([]surface.Session, error) {
