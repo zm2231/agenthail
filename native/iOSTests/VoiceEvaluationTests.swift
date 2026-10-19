@@ -25,9 +25,5 @@ final class VoiceEvaluationTests: XCTestCase {
         samples.forEach { append($0) }
         return data
     }
-
-    func testMissingRecordingRefusesTheCall() {
-        XCTAssertThrowsError(try VoiceEvaluation.samples(URL(fileURLWithPath: "/nonexistent/request-1.wav")))
-    }
 }
 #endif

@@ -6,11 +6,11 @@ import Foundation
 // Simulator evaluation: recorded user requests replace the microphone through a
 // WebRTC audio device, and both sides of the real call are saved for review.
 enum VoiceEvaluation {
-    static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("--voice-evaluation") }
-    static var directory: URL { URL.documentsDirectory.appendingPathComponent("VoiceEvaluation", isDirectory: true) }
+    @MainActor static var enabled = ProcessInfo.processInfo.arguments.contains("--voice-evaluation")
+    @MainActor static var directory = URL.documentsDirectory.appendingPathComponent("VoiceEvaluation", isDirectory: true)
     static let device = EvaluationAudioDevice()
 
-    static func prepare() throws {
+    @MainActor static func prepare() throws {
         let requests = try ["request-1.wav", "request-2.wav"].map { try samples(directory.appendingPathComponent($0)) }
         device.load(requests: requests, output: directory)
     }

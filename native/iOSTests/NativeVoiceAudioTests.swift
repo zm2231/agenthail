@@ -109,6 +109,7 @@ final class NativeVoiceAudioTests: XCTestCase {
         XCTAssertEqual(peer.activations, [true])
     }
 
+#if DEBUG && targetEnvironment(simulator)
     func testSimulatorCallActivatesVoiceAudioWithoutCallKitAndReleasesItOnHangup() async throws {
         let peer = VoicePeerFixture()
         let bridge = NativeVoiceAudio(makePeer: { peer }, permission: { true })
@@ -128,6 +129,47 @@ final class NativeVoiceAudioTests: XCTestCase {
         XCTAssertEqual(peer.starts, 2)
         bridge.end()
     }
+
+    func testSimulatorSystemCallActivatesOnceAndReleasesTheSessionOnEnd() async throws {
+        let system = SimulatorSystemCall()
+        var activations: [Bool] = []
+        var mutes: [Bool] = []
+        system.onActivation = { session, active in
+            XCTAssertEqual(session.category, .playAndRecord)
+            activations.append(active)
+        }
+        system.onMute = { mutes.append($0) }
+        try await system.start(id: UUID(), name: "Test session")
+        do { try await system.start(id: UUID(), name: "Second call"); XCTFail("second call started") } catch {}
+        system.mute(true)
+        system.end()
+        system.end()
+        system.mute(false)
+        XCTAssertEqual(activations, [true, false])
+        XCTAssertEqual(mutes, [true])
+        try await system.start(id: UUID(), name: "Next call")
+        system.end()
+        XCTAssertEqual(activations, [true, false, true, false])
+    }
+
+    func testEvaluationCallWithoutRecordingsStartsNoPeerOrSystemCall() async {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-evaluation-\(UUID().uuidString)", isDirectory: true)
+        let enabled = VoiceEvaluation.enabled, original = VoiceEvaluation.directory
+        VoiceEvaluation.enabled = true; VoiceEvaluation.directory = directory
+        defer { VoiceEvaluation.enabled = enabled; VoiceEvaluation.directory = original }
+        let system = SystemCallFixture(); let peer = VoicePeerFixture()
+        var asked = false
+        let bridge = NativeVoiceAudio(system: system, makePeer: { peer }, permission: { asked = true; return true })
+        bridge.load(URLRequest(url: URL(string: "https://paired.test/api/v1/voice")!))
+        let start = Task { try await bridge.start() }
+        for _ in 0..<1000 where system.pending == nil { await Task.yield() }
+        bridge.end()
+        do { try await start.value; XCTFail("evaluation call started without recordings") } catch {}
+        XCTAssertFalse(asked)
+        XCTAssertNil(system.callID)
+        XCTAssertEqual(peer.starts, 0)
+    }
+#endif
 
     func testNativeSDKProducesAudioAndDataOfferWithoutActivatingMicrophone() async throws {
         let peer = NativeVoicePeer()
