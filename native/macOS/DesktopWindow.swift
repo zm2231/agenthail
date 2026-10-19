@@ -765,7 +765,7 @@ struct TranscriptView: View {
                         .timelineDetails(block.source)
                 }
                 ForEach(sends) { send in
-                    UserBubble(text: send.displayText, receipt: send.status, failure: send.failure, onEdit: canResend ? { text in
+                    UserBubble(text: send.text, receipt: send.status, files: send.files, failure: send.failure, onEdit: canResend ? { text in
                         if send.failure != nil { model.discardSend(send, in: session.id) }
                         resend(text, attachments: send.failure != nil ? send.attachments : [])
                     } : nil, onRetry: send.failure == nil || !canResend ? nil : { model.retrySend(send, in: session.id) })
@@ -916,8 +916,8 @@ struct TranscriptBlockView: View {
 
     var body: some View {
         switch block.kind {
-        case .user(let text):
-            UserBubble(text: text, receipt: nil, onEdit: onEdit)
+        case .user(let text, let files):
+            UserBubble(text: text, receipt: nil, files: files, onEdit: onEdit)
         case .assistant(let text):
             AssistantReply(text: text)
         case .peer(let sender, let text):
@@ -1009,6 +1009,7 @@ struct AttachmentImageView: View {
 struct UserBubble: View {
     let text: String
     let receipt: String?
+    var files: [AttachedFile] = []
     var sender: String? = nil
     var failure: String? = nil
     var onEdit: ((String) -> Void)? = nil
@@ -1073,6 +1074,53 @@ struct UserBubble: View {
                 .foregroundStyle(DesktopPalette.text2)
         }
         MessageActions(text: message, emphasized: hovering, onEdit: onEdit == nil ? nil : { editing = true })
+    }
+}
+
+struct AttachedFileChip: View {
+    let file: AttachedFile
+    @State private var copied = false
+
+    var body: some View {
+        let local = !file.path.isEmpty && FileManager.default.fileExists(atPath: file.path)
+        Button {
+            if local {
+                NSWorkspace.shared.open(URL(fileURLWithPath: file.path))
+            } else {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(file.path, forType: .string)
+                copied = true
+            }
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "doc")
+                    .foregroundStyle(DesktopPalette.text2)
+                Text(file.name)
+                    .foregroundStyle(DesktopPalette.text)
+                if let size = file.sizeLabel {
+                    Text(size)
+                        .foregroundStyle(DesktopPalette.text2)
+                }
+                if copied {
+                    Text("Path copied")
+                        .foregroundStyle(DesktopPalette.text2)
+                }
+            }
+            .font(.system(size: 13))
+            .lineLimit(1)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .disabled(file.path.isEmpty)
+        .help(file.path.isEmpty ? file.name : (local ? "Open \(file.path)" : "Copy \(file.path)"))
+        .accessibilityLabel(local ? "Open \(file.name)" : "Copy the path of \(file.name)")
+        .task(id: copied) {
+            guard copied else { return }
+            try? await Task.sleep(for: .seconds(2))
+            copied = false
+        }
     }
 }
 

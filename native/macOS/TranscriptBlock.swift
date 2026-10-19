@@ -2,7 +2,7 @@ import Foundation
 
 struct TranscriptBlock: Identifiable, Equatable {
     enum Kind: Equatable {
-        case user(String)
+        case user(String, files: [AttachedFile])
         case assistant(String)
         case peer(sender: String, text: String)
         case tools([TimelineItem])
@@ -27,10 +27,11 @@ struct TranscriptBlock: Identifiable, Equatable {
             switch item.kind {
             case "message", "text":
                 flushTools()
-                guard !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                let files = item.files ?? []
+                guard !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty else { continue }
                 if item.role == "user" {
                     let (text, images) = stripImageMarkers(item.text)
-                    if !text.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .user(text), source: item)) }
+                    if !text.isEmpty || !files.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .user(text, files: files), source: item)) }
                     if images > 0 { blocks.append(TranscriptBlock(id: item.id + "#images", kind: .annotation(images == 1 ? "Image attached" : "\(images) images attached"), source: item)) }
                 } else if item.isPeerMessage {
                     blocks.append(TranscriptBlock(id: item.id, kind: .peer(sender: item.peerSender, text: item.text), source: item))

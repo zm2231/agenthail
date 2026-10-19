@@ -59,7 +59,7 @@ struct SessionPaneTest {
         check(!watched.draftIsEmpty, "edits from a pane sharing the draft are observed")
         watched.select("F")
         check(watched.draftIsEmpty, "a new session's empty draft is observed")
-        watched.composerDraft.attachments = [ComposerAttachment(name: "shot.png", data: Data("p".utf8), mediaType: "image/png")]
+        watched.composerDraft.attachments = [ComposerAttachment(name: "shot.png", data: Data("synthetic".utf8), mediaType: "image/png")]
         check(!watched.draftIsEmpty && !watched.composerDraft.isEmpty, "an attachment alone makes the draft sendable")
         watched.composerDraft.attachments = []
         check(watched.draftIsEmpty, "removing the last attachment empties the draft")
@@ -118,7 +118,7 @@ struct SessionPaneTest {
         check(offlinePane.detailLoadError != nil && offlinePane.detail == nil, "a failed first load is shown on the pane while it retries")
         check(offline.operationError == "An action failed.", "a failed session load leaves another operation's error alone")
         offline.closePane(offlinePane)
-        let picture = ComposerAttachment(name: "a picture.png", data: Data("p".utf8), mediaType: "image/png")
+        let picture = ComposerAttachment(name: "a picture.png", data: Data("synthetic picture".utf8), mediaType: "image/png")
         let sent = await withCheckedContinuation { done in
             offline.send(" look at this ", attachments: [picture], to: "X") { done.resume(returning: $0) }
         }

@@ -185,12 +185,12 @@ final class AgenthailAPI: @unchecked Sendable {
         return try JSONDecoder().decode(UploadResponse.self, from: data).upload
     }
 
-    func upload(_ attachments: [ComposerAttachment], sessionID: String) async throws -> [String] {
-        var ids: [String] = []
+    func upload(_ attachments: [ComposerAttachment], sessionID: String) async throws -> [UploadedAttachment] {
+        var uploaded: [UploadedAttachment] = []
         for attachment in attachments {
-            ids.append(try await upload(attachment, sessionID: sessionID).id)
+            uploaded.append(try await upload(attachment, sessionID: sessionID))
         }
-        return ids
+        return uploaded
     }
 
     func sessionOptions(host: String? = nil) async throws -> SessionCreationOptions {
@@ -586,13 +586,6 @@ private struct InstructionRequest: Encodable {
 }
 
 private struct EmptyResponse: Decodable {}
-
-struct UploadedAttachment: Decodable, Equatable {
-    let id: String
-    let name: String
-    let mediaType: String
-    let bytes: Int64
-}
 
 private struct UploadResponse: Decodable {
     let upload: UploadedAttachment

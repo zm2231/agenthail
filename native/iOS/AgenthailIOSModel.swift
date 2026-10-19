@@ -659,7 +659,7 @@ final class AgenthailIOSModel: ObservableObject {
         Task {
             defer { sendingSessionIDs.remove(session.id) }
             do {
-                let uploaded = try await api.upload(attachments, sessionID: session.id)
+                let uploaded = try await api.upload(attachments, sessionID: session.id).map(\.id)
                 let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings, author: "person", attachments: uploaded, idempotencyKey: idempotencyKey)
                 if let deliveryID = response.result?.deliveryId { deliveryIDs[session.id] = deliveryID }
                 deliveryStatus[session.id] = deliveryLabel(response.result?.evidence, detail: response.result?.detail)
@@ -989,7 +989,7 @@ final class AgenthailIOSModel: ObservableObject {
         }
         guard var timeline = detail.timeline else { return }
         guard !event.data.itemId.isEmpty else { return }
-        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? (event.data.kind == "attachment" ? "Image" : event.data.kind), text: event.data.body ?? (event.data.kind == "attachment" ? "Image attachment" : ""), timestamp: event.data.ts, callId: event.data.callId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.truncationReason, bodyRef: event.data.bodyRef, attachment: event.data.attachment, sender: event.data.sender)
+        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? (event.data.kind == "attachment" ? "Image" : event.data.kind), text: event.data.body ?? (event.data.kind == "attachment" ? "Image attachment" : ""), timestamp: event.data.ts, callId: event.data.callId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.truncationReason, bodyRef: event.data.bodyRef, attachment: event.data.attachment, sender: event.data.sender, files: event.data.files)
         if event.data.op == "remove" {
             timeline.items.removeAll { $0.id == event.data.itemId }
         } else if let index = timeline.items.firstIndex(where: { $0.id == event.data.itemId }) {
