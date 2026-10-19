@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/workspace"
@@ -233,4 +234,46 @@ func TestScopeCountsCountFamiliesNotSubagents(t *testing.T) {
 			t.Fatalf("counts=%v want=%v", counts, want)
 		}
 	}
+}
+
+func TestFederationProjectsStayOnTheirHostAndArchiveRoutesThere(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	cwd := remote.fake.sessions["remote-a"].Cwd
+	added := remote.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-add", "path": cwd})
+	var answer struct {
+		Project catalogProject `json:"project"`
+	}
+	if added.Code != http.StatusOK || json.Unmarshal(added.Body.Bytes(), &answer) != nil {
+		t.Fatalf("add status=%d body=%s", added.Code, added.Body.String())
+	}
+	remote.daemon.discoverCatalog(context.Background())
+	qualified := hosts.Qualify(record.ID, answer.Project.ID)
+	mirroredProject := func() *dashboardProject {
+		for _, project := range local.snapshot(t).Projects {
+			if project.ID == qualified {
+				return &project
+			}
+		}
+		return nil
+	}
+	awaitFederation(t, "remote project mirrored", func() bool {
+		project := mirroredProject()
+		return project != nil && project.SessionCount == 2 && project.Host != nil && project.Host.ID == record.ID
+	})
+
+	archived := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-archive", "projectId": qualified})
+	if archived.Code != http.StatusOK || !strings.Contains(archived.Body.String(), `"projectId":"`+qualified+`"`) {
+		t.Fatalf("archive status=%d body=%s", archived.Code, archived.Body.String())
+	}
+	if state, err := remote.reg.ArchiveState(); err != nil || state.Projects[answer.Project.ID].IsZero() {
+		t.Fatalf("the owning host did not record the archive: %+v err=%v", state, err)
+	}
+	if state, err := local.reg.ArchiveState(); err != nil || len(state.Projects) != 0 {
+		t.Fatalf("the archive was recorded on the wrong host: %+v err=%v", state, err)
+	}
+	awaitFederation(t, "mirrored rows archived", func() bool {
+		project := mirroredProject()
+		rows := sessionsOf(local.snapshot(t), record.ID)
+		return project != nil && project.Archived && len(rows) == 2 && rows[0].Archived && rows[1].Archived
+	})
 }
