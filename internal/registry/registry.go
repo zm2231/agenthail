@@ -2331,9 +2331,14 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 	return results, nil
 }
 
+// ListSessions reports a session the catalog no longer holds as offline: its
+// stored status is the last observation, not a running process.
 func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
-	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + ` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.host_id='' ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
-	args := []any{}
+	if err := r.EnsureCatalogState(); err != nil {
+		return nil, err
+	}
+	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,CASE WHEN EXISTS (SELECT 1 FROM catalog_sessions cs WHERE cs.session_id=s.id) THEN s.status ELSE ? END,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + ` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.host_id='' ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
+	args := []any{string(surface.StatusOffline)}
 	if limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, limit)

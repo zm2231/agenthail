@@ -1141,7 +1141,7 @@ func TestDashboardStateReadsPersistedCatalogStatus(t *testing.T) {
 	}
 	from.Status = surface.StatusBusy
 	from.LastActive = time.Now()
-	if err := registry.RegisterSession(from); err != nil {
+	if _, _, err := registry.RecordCatalogSession(registrypkg.CatalogSessionState{Session: from, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registrypkg.CatalogEvent{DedupeKey: "session.upserted:" + from.ID, Type: "session.upserted", EntityID: from.ID, Payload: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 
