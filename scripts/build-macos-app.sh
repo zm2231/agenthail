@@ -95,7 +95,8 @@ SWIFT_ARCH="$ARCH"
 # Dependencies must share the app's deployment target, or mismatched async specializations abort (swiftlang/swift#86204).
 # Swift Build reads it from --triple, the native build system from -Xswiftc -target.
 SWIFT_TARGET="$SWIFT_ARCH-apple-macosx15.0"
-SWIFT_BUILD=(swift build --package-path "$ROOT/native" -c release --triple "$SWIFT_TARGET" -Xswiftc -target -Xswiftc "$SWIFT_TARGET")
+# Only Swift Build's resource accessors look in Contents/Resources; the native build system's trap in a shipped app.
+SWIFT_BUILD=(swift build --package-path "$ROOT/native" -c release --build-system swiftbuild --triple "$SWIFT_TARGET" -Xswiftc -target -Xswiftc "$SWIFT_TARGET")
 SWIFT_BIN="$("${SWIFT_BUILD[@]}" --show-bin-path)"
 rm -rf "$SWIFT_BIN"/*.bundle
 if ! SWIFT_LOG="$("${SWIFT_BUILD[@]}" --product AgenthailMac 2>&1)"; then
@@ -109,4 +110,5 @@ done
 "$ROOT/scripts/codesign-with-retry.sh" --force --deep --options runtime --entitlements "$ROOT/packaging/macos-app-entitlements.plist" --sign "$IDENTITY" "$OUTPUT"
 codesign --verify --deep --strict --verbose=2 "$OUTPUT"
 "$ROOT/scripts/test-macos-app-voice.sh" "$OUTPUT"
+"$ROOT/scripts/test-macos-app-resources.sh" "$OUTPUT"
 echo "$OUTPUT"
