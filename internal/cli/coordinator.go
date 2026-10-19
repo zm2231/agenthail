@@ -21,11 +21,11 @@ const coordinatorUsage = `usage:
   agenthail coordinator clear`
 
 func (a *App) coordinator() coordinator.Service {
-	return coordinator.Service{Registry: a.Registry, Adapters: a.adapters(), Dispatcher: delivery.Dispatcher{Registry: a.Registry}}
+	return coordinator.Service{Registry: a.registry(), Adapters: a.adapters(), Dispatcher: delivery.Dispatcher{Registry: a.registry()}}
 }
 
 func (a *App) cmdCoordinator(args []string) error {
-	if a.Registry == nil {
+	if a.registry() == nil {
 		return fmt.Errorf("registry not available")
 	}
 	positional := stripFlags(args)
@@ -47,7 +47,7 @@ func (a *App) cmdCoordinator(args []string) error {
 		if len(positional) != 1 {
 			return errors.New(coordinatorUsage)
 		}
-		if err := a.Registry.ClearCoordinator(); err != nil {
+		if err := a.registry().ClearCoordinator(); err != nil {
 			return err
 		}
 		fmt.Println("cleared the coordinator; its session and name are unchanged")
@@ -57,11 +57,11 @@ func (a *App) cmdCoordinator(args []string) error {
 }
 
 func (a *App) coordinatorShow(jsonOut bool) error {
-	spec, err := a.Registry.Coordinator()
+	spec, err := a.registry().Coordinator()
 	if err != nil {
 		return err
 	}
-	current, err := a.Registry.CoordinatorSessionID(spec)
+	current, err := a.registry().CoordinatorSessionID(spec)
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func (a *App) coordinatorSet(target string, args []string) error {
 	}
 	name := coordinatorName(args)
 	if name == "" {
-		if alias, aliasErr := a.Registry.ReverseAlias(session.ID); aliasErr == nil && alias != "" {
+		if alias, aliasErr := a.registry().ReverseAlias(session.ID); aliasErr == nil && alias != "" {
 			name = alias
 		} else {
 			name = "coordinator"
@@ -108,7 +108,7 @@ func (a *App) coordinatorSet(target string, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := a.Registry.SetCoordinator(spec, session.ID); err != nil {
+	if err := a.registry().SetCoordinator(spec, session.ID); err != nil {
 		return coordinatorNameError(err)
 	}
 	fmt.Printf("@%s is the coordinator (%s)\n", spec.Name, session.ID)
@@ -131,14 +131,14 @@ func (a *App) coordinatorNew(agent string, args []string) error {
 	if name == "" {
 		name = "coordinator"
 	}
-	if err := a.Registry.EnsureAliasAvailable(name); err != nil {
+	if err := a.registry().EnsureAliasAvailable(name); err != nil {
 		return coordinatorNameError(err)
 	}
 	spec, err := a.coordinatorSpec(args, name, agent, cwd, flagVal(args, "--model"))
 	if err != nil {
 		return err
 	}
-	if err := a.Registry.SetCoordinator(spec, ""); err != nil {
+	if err := a.registry().SetCoordinator(spec, ""); err != nil {
 		return err
 	}
 	fmt.Printf("@%s is the coordinator; the first message to it starts its conversation in %s\n", spec.Name, cwd)
@@ -153,7 +153,7 @@ func (a *App) coordinatorSpec(args []string, name, agent, cwd, model string) (re
 	if spec.PermissionMode != "" && agent != string(surface.KindClaude) {
 		return spec, fmt.Errorf("--permission-mode applies to a claude coordinator only")
 	}
-	if previous, err := a.Registry.Coordinator(); err == nil {
+	if previous, err := a.registry().Coordinator(); err == nil {
 		spec.Instructions = previous.Instructions
 	}
 	if path := flagVal(args, "--instructions"); path != "" {

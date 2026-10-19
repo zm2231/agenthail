@@ -37,6 +37,7 @@ func newCoordinatorCLI(t *testing.T) *coordinatorCLI {
 	c.host.Start(t)
 	posts := &claudePosts{}
 	c.app, c.r = cliFixture(t, &cliSurface{kind: surface.KindClaude})
+	lazyRegistry(c.app)
 	c.app.Surfaces[0].Surface = surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, c.claude.Home, posts.request)
 	return c
 }
@@ -205,7 +206,7 @@ func TestCodexCoordinatorStartsOnItsFirstMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	app := &App{Registry: r, Surfaces: []SurfaceEntry{{Name: "codex", Surface: surfaces.NewCodex("1")}}, DefaultTimeout: 10 * time.Second, catalogDaemonRunning: func() bool { return false }}
+	app := &App{OpenRegistry: func() (*registry.Registry, error) { return r, nil }, Surfaces: []SurfaceEntry{{Name: "codex", Surface: surfaces.NewCodex("1")}}, DefaultTimeout: 10 * time.Second, catalogDaemonRunning: func() bool { return false }}
 	cwd := t.TempDir()
 	if err := app.Run([]string{"coordinator", "new", "codex", "--cwd", cwd, "--permission-mode", "plan"}); err == nil {
 		t.Fatal("a codex coordinator accepted a Claude permission mode")
@@ -238,6 +239,14 @@ func TestBareCoordinatorNameIsAFragmentNotTheCoordinator(t *testing.T) {
 	if _, err := c.run(t, "send", "@lead", "for the coordinator"); err != nil || c.started(t) != 1 {
 		t.Fatalf("err=%v started=%d", err, c.started(t))
 	}
+}
+
+// lazyRegistry makes app open its registry on first use, as the agenthail
+// binary does.
+func lazyRegistry(app *App) {
+	r := app.Registry
+	app.Registry = nil
+	app.OpenRegistry = func() (*registry.Registry, error) { return r, nil }
 }
 
 func mustEvalSymlinks(t *testing.T, path string) string {

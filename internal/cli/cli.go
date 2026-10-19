@@ -1294,7 +1294,7 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 		return session, adapter, nil
 	}
 	subagentPath := strings.HasPrefix(target, "@") && strings.Contains(target, "/")
-	named := strings.HasPrefix(target, "@") && !subagentPath && a.Registry != nil
+	named := strings.HasPrefix(target, "@") && !subagentPath && a.registry() != nil
 	if !subagentPath {
 		target = strings.TrimPrefix(target, "@")
 	}
