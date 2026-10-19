@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -96,5 +98,76 @@ func TestDefinedCoordinatorStartsOnItsFirstMessage(t *testing.T) {
 	}
 	if sid, err := r.LookupAlias("coordinator"); err != nil || sid != freshConversation {
 		t.Fatalf("alias=%q err=%v", sid, err)
+	}
+}
+
+func goneCoordinatorApp(t *testing.T) (*App, *registry.Registry, *claudetest.Fixture) {
+	t.Helper()
+	app, r, fixture, _ := coordinatorApp(t)
+	gone := surface.Session{ID: goneConversation, Bridge: "session_gone", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: exitedPID, Status: surface.StatusIdle, Cwd: fixture.Home}
+	if err := r.RegisterSession(gone); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetCoordinator(registry.CoordinatorSpec{Name: "lead", Surface: string(surface.KindClaude), Cwd: fixture.Home, Instructions: "You coordinate fixture workers."}, goneConversation); err != nil {
+		t.Fatal(err)
+	}
+	return app, r, fixture
+}
+
+func TestNoQueueSendToAGoneCoordinatorStillStartsIt(t *testing.T) {
+	app, r, fixture := goneCoordinatorApp(t)
+	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "@lead", "urgent task", "--no-queue"}) })
+	if err != nil || !strings.Contains(output, "Started a new conversation for coordinator @lead") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	if fixture.Starts() != 1 || fixture.Invocations("--bg", "--resume", goneConversation) != 0 || !strings.HasSuffix(fixture.Prompt(freshConversation), "urgent task") {
+		t.Fatalf("starts=%d resumes=%d", fixture.Starts(), fixture.Invocations("--bg", "--resume", goneConversation))
+	}
+	if sid, err := r.LookupAlias("lead"); err != nil || sid != freshConversation {
+		t.Fatalf("alias=%q err=%v", sid, err)
+	}
+}
+
+func TestSendToACoordinatorClaudeCannotReportOnWaitsInTheQueue(t *testing.T) {
+	app, r, fixture := goneCoordinatorApp(t)
+	fixture.AgentsUnreadable()
+	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "@lead", "keep this"}) })
+	if err != nil || !strings.Contains(output, "queued") || r.QueueCount(goneConversation) != 1 {
+		t.Fatalf("output=%q err=%v queued=%d", output, err, r.QueueCount(goneConversation))
+	}
+	if fixture.Starts() != 0 || fixture.Invocations("--bg", "--resume", goneConversation) != 0 {
+		t.Fatalf("starts=%d resumes=%d", fixture.Starts(), fixture.Invocations("--bg", "--resume", goneConversation))
+	}
+}
+
+func TestCodexCoordinatorStartsOnItsFirstMessage(t *testing.T) {
+	for _, key := range []string{"AGENTHAIL_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"} {
+		t.Setenv(key, "")
+	}
+	lifecycle := codextest.InstallLifecycle(t, codextest.Home(t), nil)
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	app := &App{Registry: r, Surfaces: []SurfaceEntry{{Name: "codex", Surface: surfaces.NewCodex("1")}}, DefaultTimeout: 10 * time.Second, catalogDaemonRunning: func() bool { return false }}
+	cwd := t.TempDir()
+	if err := app.Run([]string{"coordinator", "new", "codex", "--cwd", cwd, "--permission-mode", "plan"}); err == nil {
+		t.Fatal("a codex coordinator accepted a Claude permission mode")
+	}
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"coordinator", "new", "codex", "--cwd", cwd}) }); err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "@coordinator", "first task"}) })
+	if err != nil || !strings.Contains(output, "Started coordinator @coordinator") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	sid, err := r.LookupAlias("coordinator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, ok := lifecycle.Daemon().Thread(sid)
+	if !ok || len(thread.Turns) != 1 || !strings.HasSuffix(thread.Turns[0].User, "first task") || len(lifecycle.Daemon().Calls("thread/start")) != 1 {
+		t.Fatalf("thread=%+v ok=%v", thread, ok)
 	}
 }

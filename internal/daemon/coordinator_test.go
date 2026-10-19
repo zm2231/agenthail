@@ -119,3 +119,15 @@ func TestQueuedMessageForAGoneCoordinatorStartsItInsteadOfResumingBlank(t *testi
 		t.Fatalf("queue gone=%d fresh=%d", f.r.QueueCount(goneCoordinator), f.r.QueueCount(freshCoordinator))
 	}
 }
+
+func TestAPISendToACoordinatorClaudeCannotReportOnWaitsInTheQueue(t *testing.T) {
+	f := newCoordinatorFixture(t)
+	f.claude.AgentsUnreadable()
+	code, body := f.send(t, "lead-unreadable", goneCoordinator, "keep this")
+	if code != http.StatusOK || receiptField(body, "evidence") != string(surface.EvidenceQueued) || f.r.QueueCount(goneCoordinator) != 1 {
+		t.Fatalf("status=%d body=%v queued=%d", code, body, f.r.QueueCount(goneCoordinator))
+	}
+	if f.claude.Starts() != 0 || f.claude.Invocations("--bg", "--resume", goneCoordinator) != 0 {
+		t.Fatalf("starts=%d resumes=%d", f.claude.Starts(), f.claude.Invocations("--bg", "--resume", goneCoordinator))
+	}
+}

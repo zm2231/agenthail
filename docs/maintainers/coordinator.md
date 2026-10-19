@@ -15,10 +15,14 @@ The owning host keeps one row in the `coordinator` table of its registry: the na
 | Running and idle | Delivers. |
 | Running and busy | Steers the current turn when the session can be steered, otherwise queues. A sender that chooses a busy policy keeps it. |
 | Ended, conversation on disk | Delivers through the surface's own resume. For Claude this is `claude --bg --resume`. |
-| Resume failed for now | Queues the message. Agenthail never replaces a conversation because of a transient failure. |
+| Resume failed for now, or Agenthail cannot tell whether the conversation still exists | Queues the message. Agenthail never replaces a conversation because of a transient failure. |
 | Conversation gone, or the name points at no session | Starts a new conversation from the spec, points the alias at it, and moves pending queue items from the old session. The first turn is the instructions, a line saying why it started, and the message. The receipt says it started. |
 
 A Claude conversation is gone when it has no transcript and no process holds it. A process that holds it counts because a conversation that has just started has not written its transcript yet. Starting again holds `coordinator.lock` next to the registry, and the alias moves with a compare-and-swap, so concurrent senders in any Agenthail process start at most one conversation. A queued message to a coordinator whose conversation is gone becomes the first turn of the new conversation instead of resuming an empty one.
+
+`send --no-queue` refuses to wait for a busy or unavailable coordinator, but still starts one whose conversation is gone.
+
+A Codex coordinator starts without a name or permission mode, which Codex threads do not take; `--permission-mode` is refused for it. Agenthail cannot yet tell a gone Codex thread from an unreachable one, so a Codex coordinator starts again only when its name points at no session.
 
 Context growth is left to the agent's own compaction.
 

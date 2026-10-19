@@ -66,16 +66,26 @@ func (s Service) Named() bool {
 }
 
 func (s Service) Deliver(ctx context.Context, message string, options surface.SendOptions) (*Outcome, error) {
+	return s.deliver(ctx, message, options, true)
+}
+
+// DeliverWithoutQueue refuses to wait for a busy or unavailable coordinator,
+// but still starts one whose conversation is gone.
+func (s Service) DeliverWithoutQueue(ctx context.Context, message string, options surface.SendOptions) (*Outcome, error) {
+	return s.deliver(ctx, message, options, false)
+}
+
+func (s Service) deliver(ctx context.Context, message string, options surface.SendOptions, allowQueue bool) (*Outcome, error) {
 	spec, err := s.Registry.Coordinator()
 	if err != nil {
 		return nil, err
 	}
 	session, adapter, reason, err := s.current(ctx, spec)
 	if err != nil {
-		return nil, err
+		return s.queueUnavailable(session, message, options, allowQueue, err)
 	}
 	if reason == "" {
-		return s.deliverTo(ctx, adapter, session, message, options)
+		return s.deliverTo(ctx, adapter, session, message, options, allowQueue)
 	}
 	unlock, err := lock(ctx, s.Registry.CoordinatorLockPath())
 	if err != nil {
@@ -84,10 +94,10 @@ func (s Service) Deliver(ctx context.Context, message string, options surface.Se
 	defer unlock()
 	session, adapter, reason, err = s.current(ctx, spec)
 	if err != nil {
-		return nil, err
+		return s.queueUnavailable(session, message, options, allowQueue, err)
 	}
 	if reason == "" {
-		return s.deliverTo(ctx, adapter, session, message, options)
+		return s.deliverTo(ctx, adapter, session, message, options, allowQueue)
 	}
 	previous := ""
 	if session != nil {
@@ -128,7 +138,8 @@ func (s Service) Restart(ctx context.Context, session *surface.Session, message 
 }
 
 // current returns the coordinator's session and a reason it must start again,
-// "" when the session can take a message.
+// "" when the session can take a message. When the check fails it still
+// returns the session, so the message can wait for it.
 func (s Service) current(ctx context.Context, spec registry.CoordinatorSpec) (*surface.Session, surface.Surface, string, error) {
 	id, err := s.Registry.CoordinatorSessionID(spec)
 	if err != nil {
@@ -148,7 +159,7 @@ func (s Service) current(ctx context.Context, spec registry.CoordinatorSpec) (*s
 	if keeper, ok := adapter.(surface.ConversationKeeper); ok {
 		exists, err := keeper.ConversationExists(ctx, session)
 		if err != nil {
-			return nil, nil, "", surface.DeliveryUnavailable(fmt.Errorf("check coordinator conversation %s: %w", id, err))
+			return session, adapter, "", surface.DeliveryUnavailable(fmt.Errorf("check coordinator conversation %s: %w", id, err))
 		}
 		if !exists {
 			return session, adapter, fmt.Sprintf("conversation %s no longer exists", id), nil
@@ -157,29 +168,42 @@ func (s Service) current(ctx context.Context, spec registry.CoordinatorSpec) (*s
 	return session, adapter, "", nil
 }
 
-// deliverTo steers a busy coordinator unless the sender chose otherwise, and
-// queues a message the conversation cannot take yet instead of failing it, so
-// a resume that fails for now is retried rather than replaced.
-func (s Service) deliverTo(ctx context.Context, adapter surface.Surface, session *surface.Session, message string, options surface.SendOptions) (*Outcome, error) {
+// deliverTo steers a busy coordinator unless the sender chose otherwise.
+func (s Service) deliverTo(ctx context.Context, adapter surface.Surface, session *surface.Session, message string, options surface.SendOptions, allowQueue bool) (*Outcome, error) {
 	if options.BusyDelivery == "" {
 		options.BusyDelivery = string(deliverypolicy.Steer)
 	}
-	receipt, err := s.Dispatcher.DeliverWithOptions(ctx, adapter, session, message, "", options)
-	if err != nil && surface.IsDeliveryUnavailable(err) {
-		queueID, deliveryID, queueErr := s.Registry.QueueDeliveryWithIntent(session.ID, message, "", options)
-		if queueErr != nil {
-			return nil, errors.Join(err, queueErr)
-		}
-		target := session.Name
-		if target == "" {
-			target = session.ID
-		}
-		receipt = &delivery.Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, QueueID: queueID, DeliveryID: deliveryID, Detail: fmt.Sprintf("Queued for %s, which cannot take it yet: %s", target, err)}
-		err = nil
+	var receipt *delivery.Receipt
+	var err error
+	if allowQueue {
+		receipt, err = s.Dispatcher.DeliverWithOptions(ctx, adapter, session, message, "", options)
+	} else {
+		receipt, err = s.Dispatcher.DeliverWithoutQueue(ctx, adapter, session, message, "", options)
 	}
 	if err != nil {
-		return nil, err
+		return s.queueUnavailable(session, message, options, allowQueue, err)
 	}
+	return &Outcome{Receipt: receipt, Session: session}, nil
+}
+
+// queueUnavailable queues a message for a coordinator that cannot take it for
+// now, so it is retried rather than lost or replaced by a new conversation.
+func (s Service) queueUnavailable(session *surface.Session, message string, options surface.SendOptions, allowQueue bool, cause error) (*Outcome, error) {
+	if session == nil || !allowQueue || !surface.IsDeliveryUnavailable(cause) {
+		return nil, cause
+	}
+	if options.BusyDelivery == "" {
+		options.BusyDelivery = string(deliverypolicy.Steer)
+	}
+	queueID, deliveryID, err := s.Registry.QueueDeliveryWithIntent(session.ID, message, "", options)
+	if err != nil {
+		return nil, errors.Join(cause, err)
+	}
+	target := session.Name
+	if target == "" {
+		target = session.ID
+	}
+	receipt := &delivery.Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, QueueID: queueID, DeliveryID: deliveryID, Detail: fmt.Sprintf("Queued for %s, which cannot take it yet: %s", target, cause)}
 	return &Outcome{Receipt: receipt, Session: session}, nil
 }
 
@@ -190,7 +214,11 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 		return nil, surface.DeliveryTerminal(fmt.Errorf("%s cannot start a coordinator conversation", spec.Surface), surface.DeliveryInvalidRequest)
 	}
 	first := FirstTurn(spec, reason, message)
-	session, sent, startErr := starter.StartSession(ctx, surface.SessionStartOptions{Message: first, Cwd: spec.Cwd, Model: spec.Model, PermissionMode: spec.PermissionMode, Name: spec.Name})
+	options := surface.SessionStartOptions{Message: first, Cwd: spec.Cwd, Model: spec.Model}
+	if spec.Surface == string(surface.KindClaude) {
+		options.Name, options.PermissionMode = spec.Name, spec.PermissionMode
+	}
+	session, sent, startErr := starter.StartSession(ctx, options)
 	if session == nil {
 		if startErr == nil {
 			startErr = errors.New("session starter returned no session")

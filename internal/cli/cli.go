@@ -1536,7 +1536,7 @@ func (a *App) cmdSend(args []string) error {
 	}
 
 	coord := a.coordinator()
-	if coord.Names(target) && !coord.Named() && !hasFlag(args, "--no-queue") {
+	if coord.Names(target) && !coord.Named() {
 		return a.startCoordinator(ctx, coord, message, args)
 	}
 	sess, surf, remote, err := a.resolveAnyTarget(ctx, target)
@@ -1597,16 +1597,20 @@ func (a *App) cmdSend(args []string) error {
 	if syntheticNotion {
 		syntheticNotionName = sess.Name
 	}
-	if hasFlag(args, "--no-queue") || syntheticNotion {
-		receipt, err = dispatcher.DeliverWithoutQueue(ctx, surf, sess, message, "", options)
-	} else if coordinated {
+	if coordinated {
+		deliver := coord.Deliver
+		if hasFlag(args, "--no-queue") {
+			deliver = coord.DeliverWithoutQueue
+		}
 		var outcome *coordinator.Outcome
-		if outcome, err = coord.Deliver(ctx, message, options); err == nil {
+		if outcome, err = deliver(ctx, message, options); err == nil {
 			if outcome.Started {
 				return printCoordinatorStart(outcome, target, jsonOut)
 			}
 			receipt = outcome.Receipt
 		}
+	} else if hasFlag(args, "--no-queue") || syntheticNotion {
+		receipt, err = dispatcher.DeliverWithoutQueue(ctx, surf, sess, message, "", options)
 	} else {
 		receipt, err = dispatcher.DeliverWithOptions(ctx, surf, sess, message, "", options)
 	}

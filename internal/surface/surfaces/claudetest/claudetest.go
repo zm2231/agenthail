@@ -200,6 +200,9 @@ func (f *Fixture) ResumeCopy(id string) { f.write("resume-copy", id) }
 // ResumeNeverReady makes a resumed process never write its record.
 func (f *Fixture) ResumeNeverReady() { f.write("resume-never-ready", "") }
 
+// AgentsUnreadable makes claude agents print a catalog Agenthail cannot parse.
+func (f *Fixture) AgentsUnreadable() { f.write("agents.json", "{") }
+
 // StartAs makes claude start new conversations under conversation, held by
 // the live process with the Remote Control id ResumeBridge set.
 func (f *Fixture) StartAs(conversation string) { f.write("start-id", conversation) }

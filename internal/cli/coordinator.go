@@ -150,6 +150,9 @@ func (a *App) coordinatorSpec(args []string, name, agent, cwd, model string) (re
 		return registry.CoordinatorSpec{}, fmt.Errorf("name must be 1 to 80 characters without spaces, /, or #")
 	}
 	spec := registry.CoordinatorSpec{Name: name, Surface: agent, Cwd: cwd, Model: model, PermissionMode: flagVal(args, "--permission-mode")}
+	if spec.PermissionMode != "" && agent != string(surface.KindClaude) {
+		return spec, fmt.Errorf("--permission-mode applies to a claude coordinator only")
+	}
 	if previous, err := a.Registry.Coordinator(); err == nil {
 		spec.Instructions = previous.Instructions
 	}
@@ -182,9 +185,16 @@ func (a *App) startCoordinator(ctx context.Context, coord coordinator.Service, m
 		return fmt.Errorf("the coordinator has no conversation yet; send without --stream or --reply, then read it with 'agenthail last'")
 	}
 	options := surface.SendOptions{Model: flagVal(args, "--model")}
-	outcome, err := coord.Deliver(ctx, message, options)
+	deliver := coord.Deliver
+	if hasFlag(args, "--no-queue") {
+		deliver = coord.DeliverWithoutQueue
+	}
+	outcome, err := deliver(ctx, message, options)
 	if err != nil {
 		return err
+	}
+	if !outcome.Started {
+		return printCoordinatorReceipt(outcome, hasFlag(args, "--json"))
 	}
 	return printCoordinatorStart(outcome, "@"+outcome.Session.Name, hasFlag(args, "--json"))
 }
@@ -195,5 +205,13 @@ func printCoordinatorStart(outcome *coordinator.Outcome, target string, jsonOut 
 	}
 	fmt.Println(outcome.Receipt.Detail)
 	fmt.Printf("read its reply with 'agenthail last %s'\n", target)
+	return nil
+}
+
+func printCoordinatorReceipt(outcome *coordinator.Outcome, jsonOut bool) error {
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(outcome.Receipt)
+	}
+	fmt.Println(outcome.Receipt.Detail)
 	return nil
 }
