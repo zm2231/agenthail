@@ -256,6 +256,9 @@ func (d *Daemon) projectAction(ctx context.Context, w http.ResponseWriter, actio
 		return
 	}
 	d.publishCatalogPresence()
+	// A catalog pass that read the archive state before this change may still
+	// publish its rows; the pass this requests runs after it and settles them.
+	d.requestCatalogDiscovery()
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "projectId": projectID, "archived": action == "project-archive"})
 }
 
@@ -275,6 +278,9 @@ func (d *Daemon) sessionArchiveAction(w http.ResponseWriter, action, sessionID s
 		return
 	}
 	d.publishCatalogPresence()
+	// A catalog pass that read the archive state before this change may still
+	// publish its rows; the pass this requests runs after it and settles them.
+	d.requestCatalogDiscovery()
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "sessionId": sessionID, "archived": action == "session-archive"})
 }
 
