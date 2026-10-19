@@ -18,9 +18,55 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func TestCodexCatalogListIsNotComplete(t *testing.T) {
-	if NewCodex("").CatalogListComplete() {
-		t.Fatal("Codex List is bounded and must not reconcile omissions")
+func TestCodexCatalogSweepListsEveryStoredThreadAndSkipsInternalThreads(t *testing.T) {
+	const (
+		loadedID    = "019f004a-0000-7000-8000-0000000000a1"
+		olderID     = "019f004a-0000-7000-8000-0000000000a2"
+		ephemeralID = "019f004a-0000-7000-8000-0000000000a3"
+		reviewID    = "019f004a-0000-7000-8000-0000000000a4"
+		spawnedID   = "019f004a-0000-7000-8000-0000000000a5"
+	)
+	thread := func(id string, status string, extra map[string]any) map[string]any {
+		value := map[string]any{"id": id, "name": id, "source": "vscode", "status": map[string]any{"type": status}, "recencyAt": float64(1792300000)}
+		for key, field := range extra {
+			value[key] = field
+		}
+		return value
+	}
+	startManagedCodex(t, func(method string, params map[string]any) map[string]any {
+		switch method {
+		case "thread/loaded/list":
+			return map[string]any{"data": []any{loadedID}}
+		case "thread/read":
+			return map[string]any{"thread": thread(loadedID, "active", nil)}
+		case "thread/list":
+			if params["cursor"] == nil {
+				return map[string]any{"data": []any{
+					thread(ephemeralID, "notLoaded", map[string]any{"ephemeral": true}),
+					thread(reviewID, "notLoaded", map[string]any{"source": map[string]any{"subAgent": "review"}}),
+				}, "nextCursor": "page-2"}
+			}
+			return map[string]any{"data": []any{
+				thread(olderID, "notLoaded", nil),
+				thread(spawnedID, "notLoaded", map[string]any{"source": map[string]any{"subAgent": map[string]any{"thread_spawn": map[string]any{"parent_thread_id": olderID, "depth": 1}}}}),
+			}}
+		}
+		return nil
+	})
+	codex := isolatedManagedRuntime(t)
+	sessions, complete, err := codex.CatalogList(context.Background())
+	if err != nil || !complete {
+		t.Fatalf("sweep complete=%v err=%v", complete, err)
+	}
+	byID := map[string]surface.Session{}
+	for _, session := range sessions {
+		byID[session.ID] = session
+	}
+	if len(byID) != 3 || byID[loadedID].Status != surface.StatusBusy || byID[olderID].ID == "" || byID[spawnedID].Subagent == nil || byID[spawnedID].Subagent.ParentID != olderID {
+		t.Fatalf("swept sessions=%+v", byID)
+	}
+	if _, complete, err := codex.CatalogList(context.Background()); err != nil || complete {
+		t.Fatalf("pass between sweeps complete=%v err=%v", complete, err)
 	}
 }
 

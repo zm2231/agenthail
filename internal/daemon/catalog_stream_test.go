@@ -38,14 +38,12 @@ func (s *blockingObserveSurface) Observe(ctx context.Context, session *surface.S
 	return s.daemonSurface.Observe(ctx, session)
 }
 
-func (boundedCatalogSurface) CatalogListComplete() bool { return false }
-
-func (s *boundedCatalogSurface) List(ctx context.Context) ([]surface.Session, error) {
+func (s *boundedCatalogSurface) CatalogList(ctx context.Context) ([]surface.Session, bool, error) {
 	sessions, err := s.daemonSurface.List(ctx)
 	if len(sessions) > 50 {
 		sessions = sessions[:50]
 	}
-	return sessions, err
+	return sessions, false, err
 }
 
 func TestAPICatalogStreamReplaysPersistedEvent(t *testing.T) {

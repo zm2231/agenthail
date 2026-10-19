@@ -314,7 +314,14 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			}
 		}
 		operationCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
-		sessions, err := adapter.List(operationCtx)
+		complete := true
+		var sessions []surface.Session
+		var err error
+		if lister, ok := adapter.(surface.CatalogLister); ok {
+			sessions, complete, err = lister.CatalogList(operationCtx)
+		} else {
+			sessions, err = adapter.List(operationCtx)
+		}
 		cancel()
 		health := d.recordSurfaceHealth(ctx, adapter, err)
 		if err != nil {
@@ -375,10 +382,6 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			d.catalogLive[session.ID] = live
 		}
 		d.forgetCatalogLive(adapter.Name(), seen)
-		complete := true
-		if bounded, ok := adapter.(surface.CatalogListCompleteness); ok {
-			complete = bounded.CatalogListComplete()
-		}
 		if err := d.catalog.recordDiscovery(adapter.Name(), seen, observedAt, complete); err != nil {
 			d.log.Printf("catalog discovery %s: %s", adapter.Name(), err)
 		}
