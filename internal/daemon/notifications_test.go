@@ -18,7 +18,7 @@ func TestBoundedNotificationTextFlattensAndLimits(t *testing.T) {
 
 func TestDisabledNotificationsAreNoOp(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if err := Notify("Agenthail", strings.Repeat("x", 10), ""); err != nil {
+	if err := Notify("Agenthail", strings.Repeat("x", 10), "", ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -42,7 +42,7 @@ func TestNotifyPassesSessionToHelper(t *testing.T) {
 		sessionID string
 		want      bool
 	}{{"session-1", true}, {"", false}} {
-		if err := Notify("Agenthail", "done", test.sessionID); err != nil {
+		if err := Notify("Agenthail", "done", test.sessionID, ""); err != nil {
 			t.Fatal(err)
 		}
 		data, err := os.ReadFile(argsPath)
