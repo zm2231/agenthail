@@ -15,11 +15,11 @@ import (
 )
 
 func (a *App) resolveDisplay(sessionID string) string {
-	if a.Registry != nil {
-		if alias, err := a.Registry.ReverseAlias(sessionID); err == nil && alias != "" {
+	if a.registry() != nil {
+		if alias, err := a.registry().ReverseAlias(sessionID); err == nil && alias != "" {
 			return "@" + alias
 		}
-		if sfc, name, _, err := a.Registry.GetSession(sessionID); err == nil {
+		if sfc, name, _, err := a.registry().GetSession(sessionID); err == nil {
 			if name != "" {
 				return fmt.Sprintf("%s/%s", sfc, truncate(name, 20))
 			}
@@ -29,7 +29,7 @@ func (a *App) resolveDisplay(sessionID string) string {
 }
 
 func (a *App) cmdIdentify(args []string) error {
-	if a.Registry == nil {
+	if a.registry() == nil {
 		return fmt.Errorf("registry not available")
 	}
 	if len(args) == 0 {
@@ -46,7 +46,7 @@ func (a *App) cmdIdentify(args []string) error {
 			return fmt.Errorf("usage: agenthail identify rm <name>")
 		}
 		name := strings.TrimPrefix(args[1], "@")
-		if err := a.Registry.RemoveAlias(name); err != nil {
+		if err := a.registry().RemoveAlias(name); err != nil {
 			return err
 		}
 		fmt.Printf("removed @%s\n", name)
@@ -65,7 +65,7 @@ func (a *App) cmdIdentify(args []string) error {
 	if remote != nil {
 		return a.identifyRemote(ctx, remote, name)
 	}
-	if err := a.Registry.SetAlias(name, sess.ID); err != nil {
+	if err := a.registry().SetAlias(name, sess.ID); err != nil {
 		return err
 	}
 	fmt.Printf("@%s -> %s (%s)\n", name, truncate(sess.ID, 24), sess.Surface)
@@ -73,7 +73,7 @@ func (a *App) cmdIdentify(args []string) error {
 }
 
 func (a *App) identifyList() error {
-	rows, err := a.Registry.ListAliases()
+	rows, err := a.registry().ListAliases()
 	if err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func (a *App) identifyList() error {
 }
 
 func (a *App) cmdChannel(args []string) error {
-	if a.Registry == nil {
+	if a.registry() == nil {
 		return fmt.Errorf("registry not available")
 	}
 	if len(args) == 0 {
@@ -101,7 +101,7 @@ func (a *App) cmdChannel(args []string) error {
 		if len(args) != 2 {
 			return fmt.Errorf("usage: agenthail channel create <name>")
 		}
-		id, err := a.Registry.CreateChannel(args[1])
+		id, err := a.registry().CreateChannel(args[1])
 		if err != nil {
 			return err
 		}
@@ -119,7 +119,7 @@ func (a *App) cmdChannel(args []string) error {
 		if err := a.ensureWritableTarget(ctx, sess, adapter); err != nil {
 			return err
 		}
-		if err := a.Registry.AddToChannel(channelName, sess.ID); err != nil {
+		if err := a.registry().AddToChannel(channelName, sess.ID); err != nil {
 			return err
 		}
 		fmt.Printf("added %s to #%s\n", a.resolveDisplay(sess.ID), channelName)
@@ -130,7 +130,7 @@ func (a *App) cmdChannel(args []string) error {
 		}
 		channelName := strings.TrimPrefix(args[1], "#")
 		if args[2] == "--all" || args[2] == "-a" {
-			if err := a.Registry.DeleteChannel(channelName); err != nil {
+			if err := a.registry().DeleteChannel(channelName); err != nil {
 				return err
 			}
 			fmt.Printf("deleted channel #%s\n", channelName)
@@ -140,7 +140,7 @@ func (a *App) cmdChannel(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := a.Registry.RemoveFromChannel(channelName, sess.ID); err != nil {
+		if err := a.registry().RemoveFromChannel(channelName, sess.ID); err != nil {
 			return err
 		}
 		fmt.Printf("removed %s from #%s\n", a.resolveDisplay(sess.ID), channelName)
@@ -149,7 +149,7 @@ func (a *App) cmdChannel(args []string) error {
 		if len(args) != 1 {
 			return fmt.Errorf("usage: agenthail channel list")
 		}
-		channels, err := a.Registry.ListChannels()
+		channels, err := a.registry().ListChannels()
 		if err != nil {
 			return err
 		}
@@ -196,7 +196,7 @@ func (a *App) cmdChannel(args []string) error {
 			fromLabel = "hail"
 		}
 		payload := fmt.Sprintf("[from %s via #%s] %s", fromLabel, channelName, message)
-		members, err := a.Registry.ChannelMembers(channelName)
+		members, err := a.registry().ChannelMembers(channelName)
 		if err != nil {
 			return err
 		}
@@ -211,7 +211,7 @@ func (a *App) cmdChannel(args []string) error {
 				fmt.Printf("  [FAIL] %s: %s\n", a.resolveDisplay(mid), err)
 				continue
 			}
-			receipt, err := (delivery.Dispatcher{Registry: a.Registry}).DeliverWithOptions(ctx, surf, sess, payload, "", surface.SendOptions{SourceSessionID: sourceID})
+			receipt, err := (delivery.Dispatcher{Registry: a.registry()}).DeliverWithOptions(ctx, surf, sess, payload, "", surface.SendOptions{SourceSessionID: sourceID})
 			if err != nil {
 				failed++
 				fmt.Printf("  [FAIL] %s: %s\n", a.resolveDisplay(mid), err)
@@ -244,7 +244,7 @@ func (a *App) cmdChannel(args []string) error {
 }
 
 func (a *App) cmdRelay(args []string) error {
-	if a.Registry == nil {
+	if a.registry() == nil {
 		return fmt.Errorf("registry not available")
 	}
 	if len(args) == 0 {
@@ -277,10 +277,10 @@ func (a *App) cmdRelay(args []string) error {
 		if handoff == "" {
 			handoff = registry.HandoffTurnFinished
 		}
-		if err := a.Registry.PrepareRelaySource(ctx, fromAdapter, fromSess, handoff); err != nil {
+		if err := a.registry().PrepareRelaySource(ctx, fromAdapter, fromSess, handoff); err != nil {
 			return fmt.Errorf("relay source: %w", err)
 		}
-		id, err := a.Registry.AddRelayRoute(fromSess.ID, toSess.ID, pattern, once, handoff)
+		id, err := a.registry().AddRelayRoute(fromSess.ID, toSess.ID, pattern, once, handoff)
 		if err != nil {
 			return err
 		}
@@ -298,7 +298,7 @@ func (a *App) cmdRelay(args []string) error {
 		if len(stripFlags(args)) != 1 {
 			return fmt.Errorf("usage: agenthail relay list [--json]")
 		}
-		routes, err := a.Registry.ListRoutes()
+		routes, err := a.registry().ListRoutes()
 		if err != nil {
 			return err
 		}
@@ -337,7 +337,7 @@ func (a *App) cmdRelay(args []string) error {
 		if err != nil || id <= 0 {
 			return fmt.Errorf("invalid relay id %q", args[1])
 		}
-		if err := a.Registry.RemoveRoute(id); err != nil {
+		if err := a.registry().RemoveRoute(id); err != nil {
 			return err
 		}
 		fmt.Printf("removed relay #%d\n", id)

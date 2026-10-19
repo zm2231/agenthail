@@ -72,11 +72,11 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 // unqualified target across this host and every paired host. A target that
 // matches on more than one host is an error, never a pick.
 func (a *App) resolveAnyTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, *remoteTarget, error) {
-	if a.Registry == nil {
+	if a.registry() == nil {
 		session, adapter, err := a.resolveLocalTarget(ctx, target)
 		return session, adapter, nil, err
 	}
-	identity, err := a.Registry.HostIdentity()
+	identity, err := a.registry().HostIdentity()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("read host identity: %w", err)
 	}
@@ -85,7 +85,7 @@ func (a *App) resolveAnyTarget(ctx context.Context, target string) (*surface.Ses
 			session, adapter, err := a.resolveLocalTarget(ctx, rest)
 			return session, adapter, nil, err
 		}
-		host, err := a.Registry.Host(hostText)
+		host, err := a.registry().Host(hostText)
 		if errors.Is(err, registry.ErrHostNotFound) {
 			return nil, nil, nil, fmt.Errorf("no paired host is named %q; see 'agenthail hosts'", hostText)
 		}
@@ -104,7 +104,7 @@ func (a *App) resolveAnyTarget(ctx context.Context, target string) (*surface.Ses
 		}
 		return nil, nil, nil, ambiguousTargetError(target, nil, matches)
 	}
-	paired, err := a.Registry.ListHosts()
+	paired, err := a.registry().ListHosts()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("list paired hosts: %w", err)
 	}
@@ -170,11 +170,11 @@ func (a *App) remoteMatches(ctx context.Context, hostID, target string) ([]remot
 		}
 		return answer.Matches, nil
 	}
-	found, err := a.Registry.MatchHostSessions(hostID, target)
+	found, err := a.registry().MatchHostSessions(hostID, target)
 	if err != nil {
 		return nil, fmt.Errorf("match mirrored sessions: %w", err)
 	}
-	paired, err := a.Registry.ListHosts()
+	paired, err := a.registry().ListHosts()
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +323,7 @@ func (a *App) interruptRemote(ctx context.Context, remote *remoteTarget) error {
 }
 
 func (a *App) isLocalHost(ref string) (bool, error) {
-	identity, err := a.Registry.HostIdentity()
+	identity, err := a.registry().HostIdentity()
 	if err != nil {
 		return false, fmt.Errorf("read host identity: %w", err)
 	}

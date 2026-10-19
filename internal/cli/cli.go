@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -35,7 +36,13 @@ type SurfaceEntry struct {
 }
 
 type App struct {
+	// Registry is the open registry. When it is nil, the first command that
+	// needs it opens one with OpenRegistry, so help, version and argument
+	// errors never create or migrate a registry.
 	Registry                  *registry.Registry
+	OpenRegistry              func() (*registry.Registry, error)
+	registryMu                sync.Mutex
+	registryErr               error
 	Surfaces                  []SurfaceEntry
 	DefaultTimeout            time.Duration
 	Version                   string
@@ -49,7 +56,67 @@ type App struct {
 	daemonAPIOverride         func() (*daemonAPIClient, error)
 }
 
-func (a *App) Run(args []string) error {
+// registryUnavailable carries an open failure out of the command that needed
+// the registry; Run turns it back into that command's error.
+type registryUnavailable struct{ err error }
+
+// registry returns the registry, opening it on first use. A failure to open
+// ends the command with that error, since every caller needs the registry to
+// go on.
+func (a *App) registry() *registry.Registry {
+	r, err := a.openRegistry()
+	if err != nil {
+		panic(registryUnavailable{err})
+	}
+	return r
+}
+
+func (a *App) openRegistry() (*registry.Registry, error) {
+	a.registryMu.Lock()
+	defer a.registryMu.Unlock()
+	if a.Registry != nil || a.OpenRegistry == nil || a.registryErr != nil {
+		return a.Registry, a.registryErr
+	}
+	a.Registry, a.registryErr = a.OpenRegistry()
+	if a.registryErr != nil {
+		a.registryErr = fmt.Errorf("open registry: %w", a.registryErr)
+	}
+	return a.Registry, a.registryErr
+}
+
+// ResolveSignin lets surfaces built before the registry is open read sign-in
+// choices from it once they need them.
+func (a *App) ResolveSignin(target signin.Target) (signin.Source, error) {
+	r, err := a.openRegistry()
+	if err != nil {
+		return signin.Source{}, err
+	}
+	if r == nil {
+		return signin.Source{}, errors.New("the registry is not available")
+	}
+	return r.ResolveSignin(target)
+}
+
+// Close closes the registry if a command opened it.
+func (a *App) Close() error {
+	a.registryMu.Lock()
+	defer a.registryMu.Unlock()
+	if a.Registry == nil {
+		return nil
+	}
+	return a.Registry.Close()
+}
+
+func (a *App) Run(args []string) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			unavailable, ok := recovered.(registryUnavailable)
+			if !ok {
+				panic(recovered)
+			}
+			err = unavailable.err
+		}
+	}()
 	if len(args) == 0 {
 		a.usage()
 		return nil
@@ -690,8 +757,8 @@ func (a *App) cmdList(args []string) error {
 					surfaceErrors[string(s.Name())] = fmt.Sprintf("normalize session workspace: %s", normalizeErr)
 					continue
 				}
-				if a.Registry != nil {
-					if err := a.Registry.RegisterSession(sess); err != nil {
+				if a.registry() != nil {
+					if err := a.registry().RegisterSession(sess); err != nil {
 						surfaceErrors[string(s.Name())] = fmt.Sprintf("register session: %s", err)
 						continue
 					}
@@ -702,8 +769,8 @@ func (a *App) cmdList(args []string) error {
 	}
 
 	aliased := make(map[string]string)
-	if a.Registry != nil {
-		rows, _ := a.Registry.ListAliases()
+	if a.registry() != nil {
+		rows, _ := a.registry().ListAliases()
 		for _, r := range rows {
 			aliased[r.SessionID] = r.Name
 		}
@@ -715,13 +782,13 @@ func (a *App) cmdList(args []string) error {
 	}
 	var localHost *hostRef
 	pairedHosts := 0
-	if a.Registry != nil {
-		identity, err := a.Registry.HostIdentity()
+	if a.registry() != nil {
+		identity, err := a.registry().HostIdentity()
 		if err != nil {
 			return fmt.Errorf("read host identity: %w", err)
 		}
 		localHost = &hostRef{ID: identity.ID, Name: identity.Name, State: "local"}
-		paired, err := a.Registry.ListHosts()
+		paired, err := a.registry().ListHosts()
 		if err != nil {
 			return fmt.Errorf("list paired hosts: %w", err)
 		}
@@ -729,8 +796,8 @@ func (a *App) cmdList(args []string) error {
 	}
 
 	showAll := hasFlag(args, "--all")
-	if showAll && a.Registry != nil {
-		stored, err := a.Registry.ListSessions(0)
+	if showAll && a.registry() != nil {
+		stored, err := a.registry().ListSessions(0)
 		if err != nil {
 			return fmt.Errorf("list saved sessions: %w", err)
 		}
@@ -861,9 +928,9 @@ func (a *App) cmdList(args []string) error {
 	}
 	fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n", "-------", "-----", "--------------", "----------------------------", projectWidth, strings.Repeat("-", len(projectHeading)), "----------")
 	queueCounts := map[string]int{}
-	if a.Registry != nil {
+	if a.registry() != nil {
 		var err error
-		queueCounts, err = a.Registry.QueueCounts()
+		queueCounts, err = a.registry().QueueCounts()
 		if err != nil {
 			return fmt.Errorf("read queue counts: %w", err)
 		}
@@ -933,10 +1000,10 @@ type listCatalogFreshness struct {
 }
 
 func (a *App) listCatalogSnapshot() (registry.CatalogSnapshot, bool, error) {
-	if a.Registry == nil || !a.daemonIsRunning() {
+	if a.registry() == nil || !a.daemonIsRunning() {
 		return registry.CatalogSnapshot{}, false, nil
 	}
-	snapshot, err := a.Registry.CatalogSnapshot()
+	snapshot, err := a.registry().CatalogSnapshot()
 	if err != nil {
 		return registry.CatalogSnapshot{}, true, fmt.Errorf("read daemon catalog: %w", err)
 	}
@@ -1000,8 +1067,8 @@ func (a *App) cmdSearch(args []string) error {
 		return fmt.Errorf("Codex history search requires at least 3 characters")
 	}
 	results := make([]surface.SessionSearchResult, 0)
-	if a.Registry != nil {
-		stored, err := a.Registry.SearchSessions(surface.KindCodex, query, 20)
+	if a.registry() != nil {
+		stored, err := a.registry().SearchSessions(surface.KindCodex, query, 20)
 		if err != nil {
 			return fmt.Errorf("search saved Codex conversations: %w", err)
 		}
@@ -1021,8 +1088,8 @@ func (a *App) cmdSearch(args []string) error {
 		results = mergeSearchResults(results, remote)
 	}
 	for _, result := range results {
-		if a.Registry != nil {
-			if err := a.Registry.RegisterSession(result.Session); err != nil {
+		if a.registry() != nil {
+			if err := a.registry().RegisterSession(result.Session); err != nil {
 				return fmt.Errorf("register Codex search result: %w", err)
 			}
 		}
@@ -1149,28 +1216,28 @@ func relTime(t time.Time) string {
 // observation, so callers register only live sessions.
 func (a *App) resolveSession(ctx context.Context, kind surface.SurfaceKind, adapter surface.Surface, selector, target string) (session *surface.Session, live bool, err error) {
 	session, err = adapter.Resolve(ctx, selector)
-	if err == nil || a.Registry == nil {
+	if err == nil || a.registry() == nil {
 		return session, err == nil, err
 	}
 	if surface.IsDeliveryUnavailable(err) {
-		sid, lookupErr := a.Registry.ResolveSurfaceTarget(kind, selector)
+		sid, lookupErr := a.registry().ResolveSurfaceTarget(kind, selector)
 		if errors.Is(lookupErr, sql.ErrNoRows) {
 			return nil, false, err
 		}
 		if lookupErr != nil {
 			return nil, false, lookupErr
 		}
-		registered, lookupErr := a.Registry.Session(sid)
+		registered, lookupErr := a.registry().Session(sid)
 		return registered, false, lookupErr
 	}
 	if !errors.Is(err, surface.ErrSessionNotFound) {
 		return nil, false, err
 	}
-	sid, exactErr := a.Registry.ExactTarget(kind, target)
+	sid, exactErr := a.registry().ExactTarget(kind, target)
 	if exactErr != nil || (selector != target && sid != selector) {
 		return nil, false, err
 	}
-	registered, lookupErr := a.Registry.Session(sid)
+	registered, lookupErr := a.registry().Session(sid)
 	if lookupErr != nil || registered.Surface != kind {
 		return nil, false, err
 	}
@@ -1189,8 +1256,8 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 			return nil, nil, fmt.Errorf("%s target: %w", kind, err)
 		}
 		isSyntheticNotion := kind == surface.KindNotion && (session.ID == "new" || strings.HasPrefix(session.ID, "new:"))
-		if a.Registry != nil && live && !isSyntheticNotion {
-			if err := a.Registry.RegisterSession(*session); err != nil {
+		if a.registry() != nil && live && !isSyntheticNotion {
+			if err := a.registry().RegisterSession(*session); err != nil {
 				return nil, nil, fmt.Errorf("register %s session: %w", kind, err)
 			}
 		}
@@ -1200,16 +1267,16 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 	if !subagentPath {
 		target = strings.TrimPrefix(target, "@")
 	}
-	if subagentPath && a.Registry == nil {
+	if subagentPath && a.registry() == nil {
 		return nil, nil, fmt.Errorf("subagent target %q needs the session registry", target)
 	}
-	if a.Registry != nil {
-		sid, err := a.Registry.ResolveTarget(target)
+	if a.registry() != nil {
+		sid, err := a.registry().ResolveTarget(target)
 		if err != nil && subagentPath {
 			return nil, nil, err
 		}
 		if err == nil {
-			registered, lookupErr := a.Registry.Session(sid)
+			registered, lookupErr := a.registry().Session(sid)
 			if lookupErr == nil {
 				adapter, adapterErr := a.adapters().For(registered)
 				if adapterErr != nil {
@@ -1220,7 +1287,7 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 					return nil, nil, fmt.Errorf("resolve registered %s session: %w", adapter.Name(), resolveErr)
 				}
 				if live {
-					if err := a.Registry.RegisterSession(*session); err != nil {
+					if err := a.registry().RegisterSession(*session); err != nil {
 						return nil, nil, fmt.Errorf("register %s session: %w", adapter.Name(), err)
 					}
 				}
@@ -1257,8 +1324,8 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 	}
 	if len(matches) == 1 {
 		candidate := matches[0]
-		if a.Registry != nil {
-			if err := a.Registry.RegisterSession(*candidate.session); err != nil {
+		if a.registry() != nil {
+			if err := a.registry().RegisterSession(*candidate.session); err != nil {
 				return nil, nil, fmt.Errorf("register %s session: %w", candidate.adapter.Name(), err)
 			}
 		}
@@ -1275,8 +1342,8 @@ func (a *App) ensureWritableTarget(ctx context.Context, session *surface.Session
 		return err
 	}
 	isSyntheticNotion := session.Surface == surface.KindNotion && (session.ID == "new" || strings.HasPrefix(session.ID, "new:"))
-	if a.Registry != nil && !isSyntheticNotion {
-		if err := a.Registry.RegisterSession(*session); err != nil {
+	if a.registry() != nil && !isSyntheticNotion {
+		if err := a.registry().RegisterSession(*session); err != nil {
 			return fmt.Errorf("register %s session: %w", adapter.Name(), err)
 		}
 	}
@@ -1575,7 +1642,7 @@ func (a *App) cmdSend(args []string) error {
 		return err
 	}
 	addressed := *sess
-	dispatcher := delivery.Dispatcher{Registry: a.Registry}
+	dispatcher := delivery.Dispatcher{Registry: a.registry()}
 	var receipt *delivery.Receipt
 	syntheticNotion := surf.Name() == surface.KindNotion && (sess.ID == "new" || strings.HasPrefix(sess.ID, "new:"))
 	syntheticNotionName := ""
@@ -1624,12 +1691,12 @@ func (a *App) cmdSend(args []string) error {
 		sess.ID = receipt.TurnID
 		sess.Name = syntheticNotionName
 		receipt.SessionID = sess.ID
-		if a.Registry != nil {
-			if err := a.Registry.RegisterSession(*sess); err != nil {
+		if a.registry() != nil {
+			if err := a.registry().RegisterSession(*sess); err != nil {
 				return fmt.Errorf("Notion thread %s was created but could not be registered: %w", sess.ID, err)
 			}
 			if syntheticNotionName != "" {
-				if err := a.Registry.SetAlias(syntheticNotionName, sess.ID); err != nil {
+				if err := a.registry().SetAlias(syntheticNotionName, sess.ID); err != nil {
 					return fmt.Errorf("Notion thread %s was created but alias %q could not be registered: %w", sess.ID, syntheticNotionName, err)
 				}
 			}
@@ -1658,12 +1725,12 @@ func (a *App) cmdSend(args []string) error {
 			return err
 		}
 		receipt.Evidence = surface.EvidenceReplyObserved
-		if a.Registry != nil {
+		if a.registry() != nil {
 			text := ""
 			if reply != nil {
 				text = reply.Text
 			}
-			_ = a.Registry.RecordHistory(registry.HistoryEntry{Kind: "reply", SessionID: sess.ID, CompletionID: receipt.TurnID, Result: text})
+			_ = a.registry().RecordHistory(registry.HistoryEntry{Kind: "reply", SessionID: sess.ID, CompletionID: receipt.TurnID, Result: text})
 		}
 		if jsonOut {
 			return json.NewEncoder(os.Stdout).Encode(map[string]any{"delivery": receipt, "reply": reply})
@@ -2034,7 +2101,7 @@ func (a *App) cmdCompact(args []string) error {
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
-	receipt, err := (delivery.Dispatcher{Registry: a.Registry}).Compact(ctx, surf, sess)
+	receipt, err := (delivery.Dispatcher{Registry: a.registry()}).Compact(ctx, surf, sess)
 	if err != nil {
 		return err
 	}
@@ -2077,8 +2144,8 @@ func (a *App) cmdModel(args []string) error {
 	if err != nil {
 		return err
 	}
-	if name != "" && sess.Surface == surface.KindClaude && a.Registry != nil {
-		if err := a.Registry.RegisterSession(*sess); err != nil {
+	if name != "" && sess.Surface == surface.KindClaude && a.registry() != nil {
+		if err := a.registry().RegisterSession(*sess); err != nil {
 			return fmt.Errorf("persist Claude model state: %w", err)
 		}
 	}
@@ -2143,7 +2210,7 @@ func (a *App) cmdSteer(args []string) error {
 	if strings.TrimSpace(message) == "" {
 		return fmt.Errorf("message is empty")
 	}
-	receipt, err := (delivery.Dispatcher{Registry: a.Registry}).Steer(ctx, surf, sess, message)
+	receipt, err := (delivery.Dispatcher{Registry: a.registry()}).Steer(ctx, surf, sess, message)
 	if err != nil {
 		return err
 	}
@@ -2159,7 +2226,7 @@ func (a *App) cmdSteer(args []string) error {
 }
 
 func (a *App) cmdQueue(args []string) error {
-	if a.Registry == nil {
+	if a.registry() == nil {
 		return fmt.Errorf("queue requires the registry")
 	}
 	if len(args) > 0 && args[0] == "list" {
@@ -2174,7 +2241,7 @@ func (a *App) cmdQueue(args []string) error {
 		if len(stripFlags(args)) != 1 {
 			return fmt.Errorf("usage: agenthail queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]")
 		}
-		rows, err := a.Registry.ListQueue(hasFlag(args, "--all"), a.adapters())
+		rows, err := a.registry().ListQueue(hasFlag(args, "--all"), a.adapters())
 		if err != nil {
 			return err
 		}
@@ -2208,17 +2275,17 @@ func (a *App) cmdQueue(args []string) error {
 		if err != nil || id <= 0 {
 			return fmt.Errorf("invalid queue id %q", args[1])
 		}
-		item, err := a.Registry.QueueItem(id, a.adapters())
+		item, err := a.registry().QueueItem(id, a.adapters())
 		if err != nil {
 			return err
 		}
-		session, err := a.Registry.Session(item.SessionID)
+		session, err := a.registry().Session(item.SessionID)
 		if err != nil {
 			return err
 		}
 		// A paired host's session is retried by the daemon replaying the
 		// held request with its original key.
-		if owner, ownerErr := a.Registry.SessionHost(session.ID); ownerErr != nil || owner == "" {
+		if owner, ownerErr := a.registry().SessionHost(session.ID); ownerErr != nil || owner == "" {
 			adapter, adapterErr := a.adapters().For(session)
 			if adapterErr != nil {
 				return adapterErr
@@ -2227,7 +2294,7 @@ func (a *App) cmdQueue(args []string) error {
 				return err
 			}
 		}
-		if err := a.Registry.RetryMessage(id); err != nil {
+		if err := a.registry().RetryMessage(id); err != nil {
 			return err
 		}
 		fmt.Printf("queue item #%d scheduled for retry\n", id)
@@ -2241,7 +2308,7 @@ func (a *App) cmdQueue(args []string) error {
 		if err != nil || id <= 0 {
 			return fmt.Errorf("invalid queue id %q", args[1])
 		}
-		if err := a.Registry.CancelMessage(id); err != nil {
+		if err := a.registry().CancelMessage(id); err != nil {
 			return err
 		}
 		fmt.Printf("queue item #%d canceled\n", id)
@@ -2255,7 +2322,7 @@ func (a *App) cmdQueue(args []string) error {
 		if err != nil {
 			return err
 		}
-		count, err := a.Registry.CancelMessagesForSession(sessionID)
+		count, err := a.registry().CancelMessagesForSession(sessionID)
 		if err != nil {
 			return err
 		}
@@ -2281,7 +2348,7 @@ func (a *App) cmdQueue(args []string) error {
 		}
 		return a.queueRemote(ctx, remote, message)
 	}
-	if a.Registry == nil {
+	if a.registry() == nil {
 		return fmt.Errorf("queue requires the registry")
 	}
 	if surf.Name() == surface.KindNotion && (sess.ID == "new" || strings.HasPrefix(sess.ID, "new:")) {
@@ -2303,10 +2370,10 @@ func (a *App) cmdQueue(args []string) error {
 	if _, ok := daemon.IsRunning(); !ok {
 		fmt.Fprintf(os.Stderr, "warning: daemon is not running; queued message will not be delivered until you start it (agenthail daemon start)\n")
 	}
-	if err := a.Registry.QueueMessage(sess.ID, message); err != nil {
+	if err := a.registry().QueueMessage(sess.ID, message); err != nil {
 		return err
 	}
-	if waiting, err := a.Registry.SessionWaiting(sess.ID); err == nil && waiting != nil {
+	if waiting, err := a.registry().SessionWaiting(sess.ID); err == nil && waiting != nil {
 		fmt.Printf("queued for %s, which is waiting on you; it delivers after you answer\n", a.resolveDisplay(sess.ID))
 	} else {
 		fmt.Printf("queued for %s (delivered when the target is idle on a daemon scan)\n", a.resolveDisplay(sess.ID))
@@ -2355,7 +2422,7 @@ func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, tar
 			session := sessions[row.SessionID]
 			if session == nil {
 				var err error
-				session, err = a.Registry.Session(row.SessionID)
+				session, err = a.registry().Session(row.SessionID)
 				if err != nil {
 					return nil, fmt.Errorf("read queue target %s: %w", row.SessionID, err)
 				}
@@ -2375,7 +2442,7 @@ func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, tar
 }
 
 func (a *App) cmdHistory(args []string) error {
-	if a.Registry == nil {
+	if a.registry() == nil {
 		return fmt.Errorf("history requires the registry")
 	}
 	positional := stripFlags(args)
@@ -2414,7 +2481,7 @@ func (a *App) cmdHistory(args []string) error {
 		}
 		sessionID = session.ID
 	}
-	entries, err := a.Registry.ListHistory(limit, sessionID)
+	entries, err := a.registry().ListHistory(limit, sessionID)
 	if err != nil {
 		return err
 	}
