@@ -644,7 +644,7 @@ final class AgenthailModel: ObservableObject {
                 let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: text, turnSettings: turnSettings, busyDelivery: busyDelivery, author: "person", idempotencyKey: idempotencyKey)
                 if pendingSendRequests[sessionID]?.idempotencyKey == idempotencyKey { pendingSendRequests.removeValue(forKey: sessionID) }
                 if !turnSettings.isEmpty, turnSettingsDrafts[sessionID] == turnSettings { turnSettingsDrafts.removeValue(forKey: sessionID) }
-                updateLocalSend(pending.id, in: sessionID, status: LocalSend.label(for: receipt.result?.status))
+                updateLocalSend(pending.id, in: sessionID, status: LocalSend.label(for: receipt.result?.status, waitingOnYou: receipt.result?.waitingOn != nil))
                 operationError = nil
                 completion?(true)
             } catch {

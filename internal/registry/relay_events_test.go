@@ -24,7 +24,7 @@ func TestRelayProvenanceBindsQueueRecipientAndInputAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item, err := r.QueueItem(queueID)
+	item, err := r.QueueItem(queueID, nil)
 	if err != nil || item.Message != "[agenthail relay hops=1 id=1 turn=one source=@source] reply" {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}

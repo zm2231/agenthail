@@ -116,7 +116,9 @@ func OpenNotificationSettings() error {
 	return err
 }
 
-func Notify(title, message, sessionID string) error {
+// Notify shows a desktop notification. A non-empty identifier replaces an
+// earlier notification with the same identifier rather than adding one.
+func Notify(title, message, sessionID, identifier string) error {
 	config, err := LoadNotificationConfig()
 	if err != nil {
 		return err
@@ -127,11 +129,14 @@ func Notify(title, message, sessionID string) error {
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("desktop notifications currently support macOS only")
 	}
+	if identifier == "" {
+		identifier = fmt.Sprintf("agenthail-%d", time.Now().UnixNano())
+	}
 	args := []string{
 		"send",
 		"--title", boundedNotificationText(title, 120),
 		"--message", boundedNotificationText(message, 1200),
-		"--identifier", fmt.Sprintf("agenthail-%d", time.Now().UnixNano()),
+		"--identifier", identifier,
 	}
 	if sessionID != "" {
 		args = append(args, "--session", sessionID)

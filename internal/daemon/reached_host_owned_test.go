@@ -122,7 +122,7 @@ func TestQueuedSendResumingIntoHostOwnedSessionIsUnknownAndNotRetried(t *testing
 	for range 3 {
 		f.daemon.scanAndRelay(context.Background())
 	}
-	item, err := f.r.QueueItem(id)
+	item, err := f.r.QueueItem(id, nil)
 	if err != nil || item.Status != "dead" || !strings.Contains(item.LastError, "forge") {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}

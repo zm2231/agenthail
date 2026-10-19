@@ -60,7 +60,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	steered := false
 	route := surface.RouteFor(adapter, session, item.Author)
 	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author}
-	if item.BusyDelivery == "steer" && item.Model == "" && item.TurnOptions.Empty() && session.Status == surface.StatusBusy && surface.EffectiveCapabilities(adapter, session).Steer {
+	if item.BusyDelivery == "steer" && item.Model == "" && item.TurnOptions.Empty() && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer {
 		sendErr = adapter.Steer(operationCtx, session, item.Message)
 		if sendErr == nil {
 			result = &surface.SendResult{Accepted: true}
@@ -90,8 +90,8 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	}
 	if !result.Accepted {
 		busyErr := fmt.Errorf("target remained busy")
-		if err := d.Registry.NackMessage(item.ID, busyErr, now, maxDeliveryAttempts); err != nil {
-			d.log.Printf("nack queue item %d: %s", item.ID, err)
+		if err := d.Registry.DeferMessage(item.ID, busyErr, now); err != nil {
+			d.log.Printf("defer queue item %d: %s", item.ID, err)
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: busyErr.Error()})
 		return

@@ -275,7 +275,7 @@ AgentHail has four distinct completion behaviors:
 
 1. `send --reply` waits for one completed turn.
 2. `stream` or `send --stream` watches one live Claude or Codex turn.
-3. A relay durably subscribes to successful completions. Choose `--when turn_finished` (default) for each matching turn, or `--when goal_completed` for the latest pending result after an explicit completed goal and finished final turn. Goal handoffs require source goal support. A handoff to a closed Claude Code target resumes it. Active routes remain until removed; queued messages retain the one-hour expiry.
+3. A relay durably subscribes to successful completions. Choose `--when turn_finished` (default) for each matching turn, or `--when goal_completed` for the latest pending result after an explicit completed goal and finished final turn. Goal handoffs require source goal support. A handoff to a closed Claude Code target resumes it. Active routes remain until removed; queued messages wait until the target can take them.
 4. Daemon notifications alert the human through the AgentHail Mac app and,
    when paired, the optional iPhone app.
 
@@ -297,7 +297,7 @@ require the daemon. `relay list` derives per-route firing evidence from that
 enqueue ledger, reporting each rule's fire count and last-fired timestamp in
 both text and `--json` output. `--once` deactivates the rule after its first
 matching completion while retaining that firing evidence. A relay that cannot be
-delivered or expires is reported as a delivery problem to the human; the source
+delivered is reported as a delivery problem to the human; the source
 agent is not sent a failure notice, because its reply to that notice would be
 relayed again.
 
@@ -343,12 +343,17 @@ The daemon delivers queued work when a target becomes idle. Queue delivery is
 ordered per session. Known pre-dispatch failures retry with bounded backoff.
 Repeated failures become dead letters. Uncertain external effects remain in
 audit history and are never automatically resent. Proven problems are reported
-by the daemon. Pending
-messages expire after one hour. Expired items leave the active queue, appear in
-history, and remain available through `queue list --all`. `--target` filters by
-destination, `--mine` includes messages sent by or addressed to the caller
-session, and `--cwd` includes target sessions in that normalized workspace and
-its descendants.
+by the daemon. Pending messages never expire; they leave the queue only when
+delivered, canceled, or failed. Each pending row reports `heldBy` (`waiting`,
+`busy`, `offline`, `unknown`, `retrying`, `notLoaded`, `hostUnreachable` (a send a paired host has not received), `behind` an earlier
+message) and its age in text output. A target whose turn is waiting on its user
+(a Claude question, plan approval or permission prompt, a Codex approval or
+input request) carries `waitingOn` and lists as `wait`; messages to it,
+including steers, are queued until the user answers. Do not interrupt it to get
+a message through. Finished items appear in history and remain available through
+`queue list --all`. `--target` filters by destination, `--mine` includes
+messages sent by or addressed to the caller session, and `--cwd` includes target
+sessions in that normalized workspace and its descendants.
 
 ## Channels
 
@@ -384,9 +389,8 @@ An unqualified target that matches on two hosts is an error listing each
 `interrupt`, `reply`, `last`, `stream` and `thread create --host forge` reach
 paired hosts, and `--cwd` with `--host` is a path on that host. A session on an
 unreachable host stays listed as `down` with the host named. A send to it is
-held by the local daemon (`queued`) for up to an hour and delivered once if the
-host returns in that time; otherwise it expires and appears in delivery history
-as expired. `delivery submitted` means the outcome is unknown, so do not resend. Other
+held by the local daemon (`queued`, held by `hostUnreachable`) and delivered
+once when the host returns; it never expires. `delivery submitted` means the outcome is unknown, so do not resend. Other
 commands refuse remote sessions.
 
 ## Daemon
@@ -478,6 +482,6 @@ the user's request calls for them, then verify the resulting status or receipt.
 
 Relay completion capture and per-route consumption use durable SQLite cursors.
 Check `pendingCount`, `eventCursor`, and `lastError` in `relay list --json` when a handoff waits.
-Capture/enqueue failures retain retry state. Delivery failure/expiry records a human-visible
+Capture/enqueue failures retain retry state. Delivery failure records a human-visible
 problem without sending a failure notice into the relay source. Do not equate a queued
 receipt with destination consumption. See `docs/maintainers/durable-relays.md` for recovery.

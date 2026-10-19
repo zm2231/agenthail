@@ -35,6 +35,16 @@ type Daemon struct {
 	observeRetry      map[string]observeRetry
 	notificationMu    sync.Mutex
 	notificationArmed map[string]bool
+	waitingLocks      sync.Map
+	announceMu        sync.Mutex
+	announcing        map[string]string
+	catalogNudge      chan struct{}
+	// catalogSelected, when set, runs after a catalog publication has chosen
+	// what a session waits on and before its row commits.
+	catalogSelected func(sessionID string)
+	// waitingContended, when set, runs when a session's waiting lock is held
+	// by another caller and this one is about to wait for it.
+	waitingContended  func(sessionID string)
 	queueWorkers      sync.WaitGroup
 	events            *eventHub
 	catalog           *catalogHub
@@ -96,6 +106,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		sourceHolds:       map[string]map[string]func(){},
 		catalogLive:       map[string]*catalogLiveSession{},
 		catalogIdentities: newCatalogIdentityCache(),
+		catalogNudge:      make(chan struct{}, 1),
 		federation:        newFederation(),
 	}
 	identity, err := reg.HostIdentity()
@@ -244,6 +255,8 @@ func (d *Daemon) runCatalog(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-discoveryTicker.C:
+			d.discoverCatalog(ctx)
+		case <-d.catalogNudge:
 			d.discoverCatalog(ctx)
 		case <-statusTicker.C:
 			d.refreshCatalogStatus(ctx)

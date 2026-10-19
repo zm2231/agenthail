@@ -6,7 +6,6 @@ enum QueueFacts {
         case "pending": return "Waiting"
         case "dead": return "Needs a decision"
         case "delivered": return "Delivered"
-        case "expired": return "Expired"
         case "canceled": return "Canceled"
         default: return status.capitalized
         }
@@ -20,11 +19,12 @@ enum QueueFacts {
         default: break
         }
         guard item.status == "pending" else { return statusLabel(item.status) }
+        if item.heldBy == "hostUnreachable" { return item.holdLabel }
         if let target, target.isReadOnly { return target.readOnlyReason ?? "Target is not writable" }
         if target?.surface == "codex" && target?.status == "notLoaded" {
             return target?.transport == "desktop" ? "Loading this Codex conversation before delivery" : "Codex conversation is not available to load"
         }
-        return target?.status == "busy" ? "Waiting for this agent to finish" : "Waiting for delivery"
+        return item.holdLabel
     }
 
     static func canRetry(_ item: QueueState, target: SessionState?) -> Bool {
@@ -50,6 +50,12 @@ enum QueueFacts {
     static func detail(_ item: QueueState, target: SessionState?, attention: [AttentionState]) -> [String] {
         let reason = QueueFacts.attention(attention, forQueueItem: item.id).map { [$0.reason, $0.requestedAction] } ?? [reason(item, target: target)]
         return reason + [lastError(item)].compactMap { $0 }
+    }
+
+    /// One line for a queued message: why it is held, or its attention, and
+    /// how long it has been queued.
+    static func summary(_ item: QueueState, target: SessionState?, attention: [AttentionState], age: String) -> String {
+        (detail(item, target: target, attention: attention) + ["Queued \(age)"]).joined(separator: " · ")
     }
 
     static func undelivered(_ queue: [QueueState], for sessionID: String) -> [QueueState] {
