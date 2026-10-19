@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,7 +55,7 @@ func NewClaudeWithRequest(signins signin.Resolver, home string, request ClaudeRe
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(home), host: newClaudeHost(home)}
+	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(), host: newClaudeHost(home)}
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
@@ -227,19 +228,29 @@ func (c *Claude) transcriptPath(s *surface.Session) string {
 // resolveTranscript returns the transcript Claude Code wrote for a
 // conversation, or "" when none exists yet; callers resolve again later.
 func (c *Claude) resolveTranscript(conversationID string) string {
-	return c.transcripts.pass()(conversationID)
+	roots, err := surface.ClaudeConfigRoots(c.home)
+	if err != nil {
+		return ""
+	}
+	return onlyTranscript(c.transcripts.pass(roots)(conversationID))
+}
+
+func onlyTranscript(paths []string) string {
+	if len(paths) != 1 {
+		return ""
+	}
+	return paths[0]
 }
 
 // claudeTranscriptIndex maps conversation ids to transcripts. Claude Code
-// writes every conversation to projects/<project>/<id>.jsonl, so the index
-// is built from directory listings and never predicts project names. Each
-// pass re-lists only project directories whose modification time changed,
-// which is when Claude Code adds or removes a transcript.
+// writes every conversation to <root>/projects/<project>/<id>.jsonl, so the
+// index is built from directory listings and never predicts project names.
+// Each pass re-lists only project directories whose modification time
+// changed, which is when Claude Code adds or removes a transcript.
 type claudeTranscriptIndex struct {
-	mu       sync.Mutex
-	projects string
-	dirs     map[string]claudeProjectListing
-	byID     map[string]map[string]struct{}
+	mu   sync.Mutex
+	dirs map[string]claudeProjectListing
+	byID map[string]map[string]struct{}
 }
 
 type claudeProjectListing struct {
@@ -247,69 +258,67 @@ type claudeProjectListing struct {
 	ids      []string
 }
 
-func newClaudeTranscriptIndex(home string) *claudeTranscriptIndex {
-	return &claudeTranscriptIndex{projects: filepath.Join(surface.ClaudeConfigDir(home), "projects"), dirs: map[string]claudeProjectListing{}, byID: map[string]map[string]struct{}{}}
+func newClaudeTranscriptIndex() *claudeTranscriptIndex {
+	return &claudeTranscriptIndex{dirs: map[string]claudeProjectListing{}, byID: map[string]map[string]struct{}{}}
 }
 
-// pass brings the index up to date once and returns a lookup over that
-// state, so a discovery pass lists the projects directory one time however
-// many sessions it resolves. An id found in more than one project resolves
-// to "" rather than a guess.
-func (x *claudeTranscriptIndex) pass() func(conversationID string) string {
+// pass brings the index up to date across roots once and returns a lookup
+// over that state, so a discovery pass lists each projects directory one
+// time however many sessions it resolves. The lookup returns every
+// transcript of an id; one in more than one project resolves to none.
+func (x *claudeTranscriptIndex) pass(roots []string) func(conversationID string) []string {
 	x.mu.Lock()
-	x.refresh()
+	x.refresh(roots)
 	x.mu.Unlock()
-	return func(conversationID string) string {
+	return func(conversationID string) []string {
 		if conversationID == "" || strings.ContainsAny(conversationID, `/\`) {
-			return ""
+			return nil
 		}
 		x.mu.Lock()
 		defer x.mu.Unlock()
-		dirs := x.byID[conversationID]
-		if len(dirs) != 1 {
-			return ""
+		var paths []string
+		for dir := range x.byID[conversationID] {
+			paths = append(paths, filepath.Join(dir, conversationID+".jsonl"))
 		}
-		for dir := range dirs {
-			return filepath.Join(x.projects, dir, conversationID+".jsonl")
-		}
-		return ""
+		sort.Strings(paths)
+		return paths
 	}
 }
 
-func (x *claudeTranscriptIndex) refresh() {
-	entries, err := os.ReadDir(x.projects)
-	if err != nil {
-		for name := range x.dirs {
-			x.forget(name)
-		}
-		return
-	}
-	present := make(map[string]bool, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		present[name] = true
-		info, err := entry.Info()
+func (x *claudeTranscriptIndex) refresh(roots []string) {
+	present := map[string]bool{}
+	for _, root := range roots {
+		projects := filepath.Join(root, "projects")
+		entries, err := os.ReadDir(projects)
 		if err != nil {
 			continue
 		}
-		if listing, ok := x.dirs[name]; ok && listing.modified.Equal(info.ModTime()) {
-			continue
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			dir := filepath.Join(projects, entry.Name())
+			present[dir] = true
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			if listing, ok := x.dirs[dir]; ok && listing.modified.Equal(info.ModTime()) {
+				continue
+			}
+			x.forget(dir)
+			x.list(dir, info.ModTime())
 		}
-		x.forget(name)
-		x.list(name, info.ModTime())
 	}
-	for name := range x.dirs {
-		if !present[name] {
-			x.forget(name)
+	for dir := range x.dirs {
+		if !present[dir] {
+			x.forget(dir)
 		}
 	}
 }
 
-func (x *claudeTranscriptIndex) list(name string, modified time.Time) {
-	files, err := os.ReadDir(filepath.Join(x.projects, name))
+func (x *claudeTranscriptIndex) list(dir string, modified time.Time) {
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
@@ -323,19 +332,19 @@ func (x *claudeTranscriptIndex) list(name string, modified time.Time) {
 		if x.byID[id] == nil {
 			x.byID[id] = map[string]struct{}{}
 		}
-		x.byID[id][name] = struct{}{}
+		x.byID[id][dir] = struct{}{}
 	}
-	x.dirs[name] = listing
+	x.dirs[dir] = listing
 }
 
-func (x *claudeTranscriptIndex) forget(name string) {
-	for _, id := range x.dirs[name].ids {
-		delete(x.byID[id], name)
+func (x *claudeTranscriptIndex) forget(dir string) {
+	for _, id := range x.dirs[dir].ids {
+		delete(x.byID[id], dir)
 		if len(x.byID[id]) == 0 {
 			delete(x.byID, id)
 		}
 	}
-	delete(x.dirs, name)
+	delete(x.dirs, dir)
 }
 
 func (c *Claude) firstUserMessage(path string) string {
@@ -421,56 +430,139 @@ type claudeProcess struct {
 // processes returns a session for every live Claude process, including
 // processes that share a session id.
 func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
-	records, err := c.records()
+	roots, records, err := c.records()
 	if err != nil {
 		return nil, err
 	}
 	var out []claudeProcess
-	transcript := c.transcripts.pass()
+	transcripts := c.transcripts.pass(roots)
 	for _, record := range records {
-		if process, ok := c.process(ctx, record, transcript); ok {
+		if process, ok := c.process(ctx, record, transcripts); ok {
 			out = append(out, process)
 		}
 	}
 	return out, nil
 }
 
-// records returns the session records of Claude processes that are alive,
-// excluding the records Agenthail writes for its own peer workers and relays.
-func (c *Claude) records() ([]map[string]any, error) {
-	sessionsDir := filepath.Join(surface.ClaudeConfigDir(c.home), "sessions")
-	entries, err := os.ReadDir(sessionsDir)
+// claudeSessionRecord is a Claude process's session record and the config
+// root it was written under.
+type claudeSessionRecord struct {
+	root   string
+	fields map[string]any
+}
+
+// records returns the config roots and the session records of Claude
+// processes that are alive in any of them, excluding the records Agenthail
+// writes for its own peer workers and relays.
+func (c *Claude) records() ([]string, []claudeSessionRecord, error) {
+	roots, err := surface.ClaudeConfigRoots(c.home)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read Claude session directory: %w", err)
+		return nil, nil, err
 	}
-	var out []map[string]any
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		raw, err := os.ReadFile(filepath.Join(sessionsDir, e.Name()))
+	var out []claudeSessionRecord
+	for _, root := range roots {
+		sessionsDir := filepath.Join(root, "sessions")
+		entries, err := os.ReadDir(sessionsDir)
 		if err != nil {
-			continue
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, nil, fmt.Errorf("read Claude session directory: %w", err)
 		}
-		var m map[string]any
-		if json.Unmarshal(raw, &m) != nil || str(m, "agenthail") != "" {
-			continue
+		for _, e := range entries {
+			if !strings.HasSuffix(e.Name(), ".json") {
+				continue
+			}
+			raw, err := os.ReadFile(filepath.Join(sessionsDir, e.Name()))
+			if err != nil {
+				continue
+			}
+			var m map[string]any
+			if json.Unmarshal(raw, &m) != nil || str(m, "agenthail") != "" {
+				continue
+			}
+			if pid, ok := m["pid"].(float64); ok && pid > 0 && !claudeRecordLive(m) {
+				continue
+			}
+			out = append(out, claudeSessionRecord{root: root, fields: m})
 		}
-		if pid, ok := m["pid"].(float64); ok && pid > 0 && !claudeRecordLive(m) {
-			continue
-		}
-		out = append(out, m)
 	}
-	return out, nil
+	return roots, out, nil
+}
+
+// conversationRoot returns the config root that holds a conversation's
+// session records and transcripts, or "" when no root holds it yet. A
+// conversation found in two roots is refused rather than guessed.
+func (c *Claude) conversationRoot(conversationID string) (string, error) {
+	roots, records, err := c.records()
+	if err != nil {
+		return "", err
+	}
+	found := map[string]bool{}
+	for _, record := range records {
+		if str(record.fields, "sessionId") == conversationID {
+			found[record.root] = true
+		}
+	}
+	return claudeHoldingRoot(conversationID, roots, found, c.transcripts.pass(roots)(conversationID))
+}
+
+func claudeHoldingRoot(conversationID string, roots []string, found map[string]bool, transcripts []string) (string, error) {
+	for _, path := range transcripts {
+		found[claudeTranscriptRoot(path)] = true
+	}
+	var holding []string
+	for _, root := range roots {
+		if found[root] {
+			holding = append(holding, root)
+		}
+	}
+	if len(holding) > 1 {
+		return "", surface.DeliveryTerminal(fmt.Errorf("Claude conversation %s exists in more than one Claude config directory (%s); remove it from all but one", conversationID, strings.Join(holding, ", ")), surface.DeliveryInvalidRequest)
+	}
+	if len(holding) == 0 {
+		return "", nil
+	}
+	return holding[0], nil
+}
+
+func claudeTranscriptRoot(path string) string {
+	return filepath.Dir(filepath.Dir(filepath.Dir(path)))
+}
+
+// sessionTranscript returns the transcript a read of sess uses, refusing a
+// conversation whose transcripts lie in more than one config root.
+func (c *Claude) sessionTranscript(sess *surface.Session) (string, error) {
+	roots, err := surface.ClaudeConfigRoots(c.home)
+	if err != nil {
+		return "", err
+	}
+	paths := c.transcripts.pass(roots)(sess.ID)
+	if _, err := claudeHoldingRoot(sess.ID, roots, map[string]bool{}, paths); err != nil {
+		return "", err
+	}
+	if sess.Transcript != "" {
+		return sess.Transcript, nil
+	}
+	return onlyTranscript(paths), nil
+}
+
+// EnsureWritable refuses a conversation that more than one config root
+// holds, since a send or control could reach either copy. Every write path of
+// the adapter checks it itself as well, whoever calls it.
+func (c *Claude) EnsureWritable(_ context.Context, sess *surface.Session) error {
+	if sess == nil {
+		return nil
+	}
+	_, err := c.conversationRoot(sess.ID)
+	return err
 }
 
 // process builds the session for a record Agenthail can deliver to: one with
 // a Remote Control bridge or a validated messaging socket. The session is the
 // record's conversation; the bridge and socket belong to the process.
-func (c *Claude) process(ctx context.Context, m map[string]any, transcript func(string) string) (claudeProcess, bool) {
+func (c *Claude) process(ctx context.Context, record claudeSessionRecord, transcripts func(string) []string) (claudeProcess, bool) {
+	m := record.fields
 	conversation := str(m, "sessionId")
 	bridge := ""
 	if !c.localOnly {
@@ -500,7 +592,7 @@ func (c *Claude) process(ctx context.Context, m map[string]any, transcript func(
 	if n, ok := m["name"].(string); ok {
 		sess.Name = n
 	}
-	sess.Transcript = transcript(conversation)
+	sess.Transcript = claudeRootTranscript(transcripts(conversation), record.root)
 	sess.HasLocal = sess.Transcript != "" && fileExists(sess.Transcript)
 	if sess.HasLocal {
 		sess.ForkedFrom = claudeForkedFrom(sess.Transcript)
@@ -539,7 +631,50 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 	}
 }
 
+// claudeRootTranscript returns a conversation's one transcript when it lies
+// under root.
+func claudeRootTranscript(paths []string, root string) string {
+	path := onlyTranscript(paths)
+	if path == "" || claudeTranscriptRoot(path) != root {
+		return ""
+	}
+	return path
+}
+
+// pidRecord reads the session record Claude process pid wrote, from the
+// config root that holds it. When records for the pid sit in more than one
+// root, the one its live process wrote wins.
+func (c *Claude) pidRecord(pid int) (string, map[string]any, bool) {
+	roots, err := surface.ClaudeConfigRoots(c.home)
+	if err != nil || pid <= 0 {
+		return "", nil, false
+	}
+	paths := surface.ClaudeSessionRecordPaths(roots, strconv.Itoa(pid))
+	var firstPath string
+	var first map[string]any
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var record map[string]any
+		if json.Unmarshal(raw, &record) != nil {
+			continue
+		}
+		if len(paths) == 1 || claudeRecordLive(record) {
+			return path, record, true
+		}
+		if first == nil {
+			firstPath, first = path, record
+		}
+	}
+	return firstPath, first, first != nil
+}
+
 func (c *Claude) peerRecordPath(pid int) string {
+	if path, _, ok := c.pidRecord(pid); ok {
+		return path
+	}
 	return filepath.Join(surface.ClaudeConfigDir(c.home), "sessions", strconv.Itoa(pid)+".json")
 }
 
@@ -791,6 +926,9 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 	if err := peerSlashCommand(sess, message); err != nil {
 		return nil, err
 	}
+	if err := c.EnsureWritable(ctx, sess); err != nil {
+		return nil, err
+	}
 	if _, err := c.reach(ctx, sess); err != nil {
 		return nil, err
 	}
@@ -878,6 +1016,9 @@ func (c *Claude) canSendHumanTurn(sess *surface.Session) bool {
 func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, message string, images surface.Uploads) (*surface.SendResult, error) {
 	if sess == nil {
 		return nil, surface.DeliveryTerminal(errors.New("Claude session is required"), surface.DeliveryInvalidRequest)
+	}
+	if err := c.EnsureWritable(ctx, sess); err != nil {
+		return nil, err
 	}
 	if !c.canSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude web bridge session is unavailable"))
@@ -999,9 +1140,9 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 }
 
 func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
-	path := sess.Transcript
-	if path == "" {
-		path = c.transcriptPath(sess)
+	path, err := c.sessionTranscript(sess)
+	if err != nil {
+		return err
 	}
 	if path == "" || !fileExists(path) {
 		return fmt.Errorf("no local transcript for streaming")
@@ -1249,6 +1390,9 @@ func (c *Claude) Compact(ctx context.Context, sess *surface.Session) error {
 }
 
 func (c *Claude) Model(ctx context.Context, sess *surface.Session, name string) (string, error) {
+	if err := c.EnsureWritable(ctx, sess); err != nil {
+		return "", err
+	}
 	if name != "" {
 		result, err := c.Control(ctx, sess, surface.ControlRequest{Action: "model", Value: name})
 		if err != nil {

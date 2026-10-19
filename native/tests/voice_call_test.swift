@@ -29,6 +29,7 @@ struct VoiceCallTest {
         await settle()
         let start = service.actions.last
         check(start?.action == "start" && start?.sdp == "v=0 fixture-offer" && start?.attemptId != nil, "the offer starts the host call with an attempt id")
+        check(service.heartbeats.first?.attemptId == start?.attemptId, "an accepted start enrolls the call in heartbeats for its attempt")
         audio.emit("connection", "connected")
         audio.emit("channel", "open")
         await settle()
@@ -143,6 +144,7 @@ struct VoiceCallTest {
 @MainActor
 private final class FixtureVoiceService: VoiceServiceClient {
     var actions: [VoiceAction] = []
+    var heartbeats: [VoiceAction] = []
     var phase = "ready"
     var target: String?
     var holdStart = false
@@ -152,6 +154,10 @@ private final class FixtureVoiceService: VoiceServiceClient {
     func request(path: String) -> URLRequest { URLRequest(url: URL(string: "https://mac.test/\(path)")!) }
     func state() async throws -> VoiceState { snapshot() }
     func action(_ action: VoiceAction) async throws -> VoiceState {
+        if action.action == "heartbeat" {
+            heartbeats.append(action)
+            return snapshot(attempt: action.attemptId)
+        }
         actions.append(action)
         if action.action == "start" && holdStart {
             try await withCheckedThrowingContinuation { pending = $0 }

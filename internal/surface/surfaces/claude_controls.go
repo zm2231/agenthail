@@ -114,6 +114,9 @@ func (c *Claude) Control(ctx context.Context, sess *surface.Session, control sur
 	if err := validateClaudeControl(control.Action, value); err != nil {
 		return nil, err
 	}
+	if err := c.EnsureWritable(ctx, sess); err != nil {
+		return nil, err
+	}
 	if claudeHosted(sess) {
 		return c.hostControl(ctx, sess, control.Action, value)
 	}

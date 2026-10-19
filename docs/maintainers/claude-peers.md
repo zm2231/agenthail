@@ -15,6 +15,20 @@ agenthail history @builder 25
 
 Claude sees names like `agenthail/codex: builder`. These are external peers, not native Claude agents or permission authorities. The UUID is derived from the canonical surface and session ID. Alias changes update the published name. The wrapper carries the reply socket and source UUID, with no fabricated `from-mode`. Native peer text is preserved as peer provenance when queued into the original agent. Read-only and offline destinations are rejected; registration does not make them writable.
 
+## Claude config roots
+
+Claude Code keeps `sessions/`, peer key files, `jobs/` and `projects/` under one config root: `CLAUDE_CONFIG_DIR` when it is set, otherwise `~/.claude`. Accounts kept in further roots are listed in `~/.agenthail/config.json`:
+
+```json
+{ "claudeConfigDirs": ["/Users/me/.claude-work"] }
+```
+
+`surface.ClaudeConfigRoots` is the one resolver the CLI, the daemon and the peer workers use. It returns the primary root first, then each listed root, once each even when named twice or through a symlink. A config that is not a JSON object, a `claudeConfigDirs` that is not a list of absolute directory paths, or a file over 64 KiB is an error: discovery fails with the config path in the message, and `doctor` reports it. A changed config applies on the next discovery pass.
+
+No root is stored. Each pass reads the session records and transcripts of every root, and a session belongs to the root that holds them. Sends and lifecycle actions run in that root: `claude agents`, `stop` and the background resume get `CLAUDE_CONFIG_DIR=<root>`, and the Claude host opens a resumed conversation with `configDir` set to it. A native send authenticates with the peer key beside the target process's record, in the root that holds it. Agenthail's own peer workers and new sessions use the primary root.
+
+A conversation whose records or transcripts appear in two roots is refused for sends, reads and lifecycle actions with an error naming both roots, rather than resolved to either copy. It is still listed.
+
 ## Durable reply endpoint design
 
 A non-Claude source receives a generated `@handle` only when it sends to a Claude session for the first time. The registry reserves that handle transactionally without taking another session's name; a later explicit `identify` rename remains the source of truth. Background peer discovery may publish an existing handle but must not mint one. Both the helper record and the wire envelope use `agenthail/<surface>: @handle` so the visible peer and the received message agree. The canonical UUID remains an authenticated wire identifier, not a user-addressable substitute for the handle.

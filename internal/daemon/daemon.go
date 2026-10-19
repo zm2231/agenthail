@@ -228,7 +228,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 		defer close(catalogDone)
 		d.runCatalog(ctx)
 	}()
-	go d.superviseClaudeHost(ctx)
+	hostDone := make(chan struct{})
+	go func() {
+		defer close(hostDone)
+		d.superviseClaudeHost(ctx)
+	}()
 	go d.sweepUploads(ctx)
 	observerTicker := time.NewTicker(d.pollInterval)
 	defer observerTicker.Stop()
@@ -237,6 +241,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			<-catalogDone
+			<-hostDone
 			d.queueWorkers.Wait()
 			d.log.Printf("stopping")
 			return nil

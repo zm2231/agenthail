@@ -141,6 +141,7 @@ type Spawn struct {
 	SessionID string   `json:"sessionId"`
 	Argv      []string `json:"argv"`
 	Cwd       string   `json:"cwd"`
+	ConfigDir string   `json:"configDir"`
 }
 
 // Spawns are the fake CLIs the host started for a session, in order.

@@ -1377,3 +1377,27 @@ func TestListAndQueueShowASessionWaitingOnTheUser(t *testing.T) {
 		t.Fatalf("queue list --json=%s err=%v", document, err)
 	}
 }
+
+func TestSendToASessionWithNoReplyRouteIsRefusedWithItsReason(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}, caps: surface.Capabilities{Send: true}}
+	app, store := cliFixture(t, fake)
+	if err := store.EnsureOperatorSession(); err != nil {
+		t.Fatal(err)
+	}
+	unrepliable, err := store.EnsureUnrepliableSender("h0123456789ab", "worker-1", "forge/builder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for target, reason := range map[string]string{
+		registry.OperatorSessionID: "Agenthail operator",
+		unrepliable:                "agenthail send h0123456789ab::worker-1",
+	} {
+		_, err := captureStdout(t, func() error { return app.Run([]string{"send", target, "please rerun the build"}) })
+		if err == nil || !strings.Contains(err.Error(), "not delivered") || !strings.Contains(err.Error(), reason) {
+			t.Fatalf("send %s err=%v", target, err)
+		}
+	}
+	if len(fake.sent) != 0 {
+		t.Fatalf("sent=%q", fake.sent)
+	}
+}

@@ -17,10 +17,13 @@ import (
 )
 
 const script = `#!/bin/sh
+root="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+mkdir -p "$root"
 printf '%s\n' "$*" >> "$HOME/argv"
+printf '%s\n' "$*" >> "$root/argv"
 case "$1" in
 agents)
- cat "$HOME/agents.json" 2>/dev/null || printf '[]\n'
+ cat "$root/agents.json" 2>/dev/null || printf '[]\n'
  ;;
 stop)
  printf 'stopped %s\n' "$2"
@@ -30,11 +33,15 @@ esac
 
 // Fixture is a fake Claude Code installation. Processes it reports as alive
 // carry the PID of a child process that lives for the whole test, never the
-// test's own, which callers would take for their own ancestor.
+// test's own, which callers would take for their own ancestor. Records, jobs
+// and transcripts go under Root, the Claude config root, which starts as the
+// primary one in Home.
 type Fixture struct {
 	Home   string
+	Root   string
 	PID    int
 	socket string
+	roots  []string
 	t      testing.TB
 }
 
@@ -54,7 +61,7 @@ func New(t testing.TB) *Fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(home) })
-	f := &Fixture{Home: home, PID: process.Process.Pid, t: t}
+	f := &Fixture{Home: home, Root: filepath.Join(home, ".claude"), PID: process.Process.Pid, t: t}
 	binary := filepath.Join(f.Home, "claude")
 	if err := os.WriteFile(binary, []byte(script), 0700); err != nil {
 		t.Fatal(err)
@@ -63,9 +70,26 @@ func New(t testing.TB) *Fixture {
 	return f
 }
 
+// AddRoot lists a further Claude config root, named under Home, in the
+// Agenthail config and makes it the root the fixture writes to.
+func (f *Fixture) AddRoot(name string) string {
+	f.t.Helper()
+	root := filepath.Join(f.Home, name)
+	f.roots = append(f.roots, root)
+	data, _ := json.Marshal(map[string]any{"claudeConfigDirs": f.roots})
+	if err := os.MkdirAll(filepath.Join(f.Home, ".agenthail"), 0700); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.Home, ".agenthail", "config.json"), data, 0600); err != nil {
+		f.t.Fatal(err)
+	}
+	f.Root = root
+	return root
+}
+
 func (f *Fixture) write(name, content string) {
 	f.t.Helper()
-	path := filepath.Join(f.Home, name)
+	path := filepath.Join(f.Root, name)
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		f.t.Fatal(err)
 	}
@@ -82,9 +106,9 @@ func (f *Fixture) Transcript(conversation, cwd string) string {
 	user, _ := json.Marshal(map[string]any{"type": "user", "uuid": "fixture-user", "sessionId": conversation, "cwd": cwd, "timestamp": at, "message": map[string]any{"role": "user", "content": "fixture question"}})
 	assistant, _ := json.Marshal(map[string]any{"type": "assistant", "uuid": "fixture-assistant", "sessionId": conversation, "cwd": cwd, "timestamp": at, "message": map[string]any{"id": "fixture-message", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": "fixture answer"}}}})
 	duration, _ := json.Marshal(map[string]any{"type": "system", "subtype": "turn_duration", "sessionId": conversation, "cwd": cwd, "timestamp": at})
-	name := filepath.Join(".claude", "projects", "fixture-project", conversation+".jsonl")
+	name := filepath.Join("projects", "fixture-project", conversation+".jsonl")
 	f.write(name, string(user)+"\n"+string(assistant)+"\n"+string(duration)+"\n")
-	return filepath.Join(f.Home, name)
+	return filepath.Join(f.Root, name)
 }
 
 // Job lists a background job in the catalog that claude agents prints; pid 0
@@ -125,19 +149,19 @@ func (f *Fixture) RecordStatus(conversation, cwd, bridge, status, waitingFor str
 		record["messagingSocketPath"] = f.socket
 	}
 	data, _ := json.Marshal(record)
-	f.write(filepath.Join(".claude", "sessions", fmt.Sprint(f.PID)+".json"), string(data))
+	f.write(filepath.Join("sessions", fmt.Sprint(f.PID)+".json"), string(data))
 }
 
 // JobState writes the record Claude keeps for background job id.
 func (f *Fixture) JobState(id, state, detail string, updated time.Time) {
 	f.t.Helper()
 	data, _ := json.Marshal(map[string]any{"state": state, "detail": detail, "updatedAt": updated})
-	f.write(filepath.Join(".claude", "jobs", id, "state.json"), string(data))
+	f.write(filepath.Join("jobs", id, "state.json"), string(data))
 }
 
 func (f *Fixture) RemoveRecord() {
 	f.t.Helper()
-	if err := os.Remove(filepath.Join(f.Home, ".claude", "sessions", fmt.Sprint(f.PID)+".json")); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(filepath.Join(f.Root, "sessions", fmt.Sprint(f.PID)+".json")); err != nil && !os.IsNotExist(err) {
 		f.t.Fatal(err)
 	}
 }
@@ -181,7 +205,18 @@ func ClaimSocket(t testing.TB, pid int) string {
 // Invocations counts claude invocations whose arguments equal args.
 func (f *Fixture) Invocations(args ...string) int {
 	f.t.Helper()
-	data, err := os.ReadFile(filepath.Join(f.Home, "argv"))
+	return f.count(filepath.Join(f.Home, "argv"), args)
+}
+
+// InvocationsIn counts claude invocations run against a config root.
+func (f *Fixture) InvocationsIn(root string, args ...string) int {
+	f.t.Helper()
+	return f.count(filepath.Join(root, "argv"), args)
+}
+
+func (f *Fixture) count(path string, args []string) int {
+	f.t.Helper()
+	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return 0
 	}

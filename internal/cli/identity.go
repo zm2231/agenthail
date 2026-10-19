@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -191,6 +192,9 @@ func (a *App) cmdChannel(args []string) error {
 		if err != nil {
 			return err
 		}
+		if fromLabel == "" && sourceID != "" {
+			fromLabel = a.resolveDisplay(sourceID)
+		}
 		if fromLabel == "" {
 			fromLabel = "hail"
 		}
@@ -199,8 +203,9 @@ func (a *App) cmdChannel(args []string) error {
 		if err != nil {
 			return err
 		}
+		members = slices.DeleteFunc(members, func(member string) bool { return sourceID != "" && member == sourceID })
 		if len(members) == 0 {
-			return fmt.Errorf("channel #%s has no members", channelName)
+			return fmt.Errorf("channel #%s has no members other than the sender", channelName)
 		}
 		var sent, queued, submitted, failed int
 		for _, mid := range members {

@@ -3,6 +3,7 @@
 These notes cover Agenthail's implementation, packaging, release automation, and service integrations. Normal installation and use do not require them.
 
 - [Packaging and releases](../packaging.md)
+- [Self-hosted CI runners](self-hosted-ci.md)
 - [Linux daemon: systemd service, updates and doctor](linux-daemon.md)
 - [Claude session host](claude-host.md)
 - [Codex integration decisions](../codex-protocol.md)

@@ -269,3 +269,20 @@ func TestFederationChannelReachesAMemberOnAnotherHost(t *testing.T) {
 		t.Fatalf("forge member got it from %v", forge.fake.senders())
 	}
 }
+
+func TestFederationChannelSendSkipsASenderOnAnotherHost(t *testing.T) {
+	mac, _, forgeRecord, _ := pairedBothWays(t)
+	for _, action := range []map[string]any{
+		{"action": "channel-create", "channel": "crew"},
+		{"action": "channel-add", "channel": "crew", "targetId": "mac-a"},
+		{"action": "channel-add", "channel": "crew", "targetId": hosts.Qualify(forgeRecord.ID, "forge-a")},
+	} {
+		if response := mac.request(t, http.MethodPost, "/api/v1/actions", action); response.Code != http.StatusOK {
+			t.Fatalf("%v status=%d body=%s", action, response.Code, response.Body.String())
+		}
+	}
+	send := mac.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "crew", "message": "standup", "sourceSessionId": hosts.Qualify(forgeRecord.ID, "forge-a")})
+	if send.Code != http.StatusOK || !strings.Contains(send.Body.String(), `"sent":1`) || !strings.Contains(send.Body.String(), `"queued":0`) {
+		t.Fatalf("channel-send status=%d body=%s", send.Code, send.Body.String())
+	}
+}
