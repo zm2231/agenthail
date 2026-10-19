@@ -744,7 +744,7 @@ select {
   font-weight: 700;
 }
 .project-name {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -758,6 +758,7 @@ select {
   font-size: 12px;
 }
 .project-header .link-button {
+  margin-left: auto;
   opacity: 0;
 }
 .project-header:hover .link-button,
