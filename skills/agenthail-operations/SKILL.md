@@ -264,6 +264,15 @@ Use `--model` only for a one-message Codex or Notion override. Use `--from` when
 the receiving agent needs a human-readable sender label. Long content should go
 through stdin.
 
+## Coordinator
+
+The person may have one coordinator, the agent they send all work to. Report
+to it by name with `agenthail send @<name>`; `agenthail coordinator --json`
+shows the name and its current session. A send to the coordinator steers it
+when busy (or queues when steering is unavailable), resumes it when ended, and
+starts a new conversation from its saved instructions when the conversation is
+gone. Do not set or clear the coordinator unless the person asks.
+
 ## Follow, Subscribe, And Notify
 
 AgentHail has four distinct completion behaviors:

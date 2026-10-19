@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/zm2231/agenthail/internal/coordinator"
 	"io"
 	"os"
 	"os/exec"
@@ -105,6 +106,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdSignin(rest)
 	case "identify":
 		return a.cmdIdentify(rest)
+	case "coordinator":
+		return a.cmdCoordinator(rest)
 	case "channel":
 		return a.cmdChannel(rest)
 	case "relay":
@@ -171,6 +174,16 @@ Identity:
   identify <target> <name>      Name a session (henceforth @name resolves to it)
   identify rm <name>             Remove an alias
   identify list                 Show all names
+
+Coordinator (the agent you send work to; a message to it always lands):
+  coordinator [--json]          Show the coordinator and its current session
+  coordinator set <target> [--name <name>] [--instructions <file>] [--permission-mode <mode>]
+                                 Make an existing session the coordinator
+  coordinator new <claude|codex> --cwd <path> [--name <name>] [--model <model>] [--instructions <file>] [--permission-mode <mode>]
+                                 Define a coordinator; the first message starts it
+  coordinator clear             Stop treating any session as the coordinator
+  A send to the coordinator steers it when busy, resumes it when ended, and
+  starts a new conversation from its saved instructions when its conversation is gone.
 
 Channels:
   channel create <name>         Create a channel
@@ -477,7 +490,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true}
+	valueFlags := map[string]bool{"--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--instructions": true, "--permission-mode": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -517,7 +530,7 @@ func validateCommandFlags(command string, args []string) error {
 		"signin":  {values: map[string]bool{"--label": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"doctor":  {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
-		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {}, "interrupt": {}, "steer": {}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
+		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {}, "interrupt": {}, "steer": {}, "identify": {}, "coordinator": {values: map[string]bool{"--name": true, "--instructions": true, "--permission-mode": true, "--cwd": true, "--model": true}, bools: map[string]bool{"--json": true}}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
 	}
 	spec, known := specs[command]
 	if !known {
@@ -1522,6 +1535,10 @@ func (a *App) cmdSend(args []string) error {
 		message = fmt.Sprintf("[from %s] %s", fromLabel, message)
 	}
 
+	coord := a.coordinator()
+	if coord.Names(target) && !coord.Named() && !hasFlag(args, "--no-queue") {
+		return a.startCoordinator(ctx, coord, message, args)
+	}
 	sess, surf, remote, err := a.resolveAnyTarget(ctx, target)
 	if err != nil {
 		return err
@@ -1529,6 +1546,7 @@ func (a *App) cmdSend(args []string) error {
 	if remote != nil {
 		return a.sendRemote(ctx, remote, message, args, timeout)
 	}
+	coordinated := coord.Is(sess.ID)
 	if !surf.Capabilities().Send {
 		return fmt.Errorf("%s does not support send", surf.Name())
 	}
@@ -1581,6 +1599,14 @@ func (a *App) cmdSend(args []string) error {
 	}
 	if hasFlag(args, "--no-queue") || syntheticNotion {
 		receipt, err = dispatcher.DeliverWithoutQueue(ctx, surf, sess, message, "", options)
+	} else if coordinated {
+		var outcome *coordinator.Outcome
+		if outcome, err = coord.Deliver(ctx, message, options); err == nil {
+			if outcome.Started {
+				return printCoordinatorStart(outcome, target, jsonOut)
+			}
+			receipt = outcome.Receipt
+		}
 	} else {
 		receipt, err = dispatcher.DeliverWithOptions(ctx, surf, sess, message, "", options)
 	}

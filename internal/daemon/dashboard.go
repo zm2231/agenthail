@@ -22,6 +22,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/coordinator"
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -1600,7 +1602,17 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 		}
-		receipt, actionErr := d.dispatcher().DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author})
+		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author}
+		var receipt *delivery.Receipt
+		var actionErr error
+		if coord := d.coordinator(); coord.Is(session.ID) {
+			var outcome *coordinator.Outcome
+			if outcome, actionErr = coord.Deliver(ctx, request.Message, options); actionErr == nil {
+				receipt = outcome.Receipt
+			}
+		} else {
+			receipt, actionErr = d.dispatcher().DeliverWithOptions(ctx, adapter, session, request.Message, "", options)
+		}
 		if actionErr != nil {
 			http.Error(w, actionErr.Error(), http.StatusBadGateway)
 			return

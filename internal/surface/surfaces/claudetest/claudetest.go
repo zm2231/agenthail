@@ -25,7 +25,19 @@ stop)
  printf 'stopped %s\n' "$2"
  ;;
 --bg)
- [ "$2" = --resume ] || exit 2
+ if [ "$2" != --resume ]; then
+  [ -f "$HOME/start-id" ] || exit 2
+  sid=$(cat "$HOME/start-id")
+  id=$(printf '%s' "$sid" | cut -c1-8)
+  for prompt; do :; done
+  printf '%s' "$prompt" > "$HOME/prompt-$sid"
+  printf 'x' >> "$HOME/starts"
+  printf '[{"id":"%s","sessionId":"%s","kind":"background","cwd":"%s","state":"working","pid":%s}]\n' "$id" "$sid" "$PWD" "$AGENTHAIL_FIXTURE_PID" > "$HOME/agents.json"
+  mkdir -p "$HOME/.claude/sessions"
+  printf '{"pid":%s,"sessionId":"%s","cwd":"%s","bridgeSessionId":"%s","status":"idle","peerFeatures":["notify_idle"],"startedAt":%s000}' "$AGENTHAIL_FIXTURE_PID" "$sid" "$PWD" "$(cat "$HOME/resume-bridge")" "$(date +%s)" > "$HOME/.claude/sessions/$AGENTHAIL_FIXTURE_PID.json"
+  printf 'backgrounded · %s (working)\n' "$id"
+  exit 0
+ fi
  id=$(printf '%s' "$3" | cut -c1-8)
  if [ -f "$HOME/resume-copy" ]; then
   printf 'backgrounded · %s (idle - send a prompt to start)\n' "$(cat "$HOME/resume-copy")"
@@ -187,6 +199,33 @@ func (f *Fixture) ResumeCopy(id string) { f.write("resume-copy", id) }
 
 // ResumeNeverReady makes a resumed process never write its record.
 func (f *Fixture) ResumeNeverReady() { f.write("resume-never-ready", "") }
+
+// StartAs makes claude start new conversations under conversation, held by
+// the live process with the Remote Control id ResumeBridge set.
+func (f *Fixture) StartAs(conversation string) { f.write("start-id", conversation) }
+
+// Starts counts the conversations claude started.
+func (f *Fixture) Starts() int {
+	f.t.Helper()
+	data, err := os.ReadFile(filepath.Join(f.Home, "starts"))
+	if os.IsNotExist(err) {
+		return 0
+	}
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return len(data)
+}
+
+// Prompt returns the first message claude started conversation with.
+func (f *Fixture) Prompt(conversation string) string {
+	f.t.Helper()
+	data, err := os.ReadFile(filepath.Join(f.Home, "prompt-"+conversation))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return string(data)
+}
 
 // Invocations counts claude invocations whose arguments equal args.
 func (f *Fixture) Invocations(args ...string) int {

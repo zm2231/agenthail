@@ -86,7 +86,7 @@ func (r *Registry) migrate() error {
 	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
-	if _, err := r.db.Exec(schema); err != nil {
+	if _, err := r.db.Exec(schema + coordinatorSchema); err != nil {
 		return err
 	}
 	if err := r.ensureHostIdentity(); err != nil {
