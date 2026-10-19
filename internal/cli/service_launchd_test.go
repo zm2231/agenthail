@@ -15,7 +15,9 @@ import (
 )
 
 // fakeLaunchd stands in for launchctl. bootstrap starts the fake daemon, as
-// RunAtLoad does, and print reports the pid launchd would supervise.
+// RunAtLoad does, and print reports the pid launchd supervises for the loaded
+// label. With orphan set, launchd reports another pid, as when it abandons a
+// half-started instance that still runs.
 type fakeLaunchd struct {
 	t     *testing.T
 	dir   string
@@ -32,29 +34,96 @@ func newFakeLaunchd(t *testing.T) *fakeLaunchd {
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	dir := t.TempDir()
 	f := &fakeLaunchd{t: t, dir: dir, calls: filepath.Join(dir, "calls")}
-	daemonScript := filepath.Join(dir, "agenthail")
-	writeExecutable(t, daemonScript, "#!/bin/sh\nmkdir -p \"$HOME/.agenthail\"\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\nwhile :; do sleep 0.05; done\n")
+	writeExecutable(t, filepath.Join(dir, "agenthail"), "#!/bin/sh\nmkdir -p \"$HOME/.agenthail\"\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\nwhile :; do sleep 0.05; done\n")
 	writeExecutable(t, filepath.Join(dir, "launchctl"), `#!/bin/sh
 dir="`+dir+`"
 printf '%s\n' "$*" >> "$dir/calls"
+start() {
+	"$dir/agenthail" daemon-run >/dev/null 2>&1 &
+	echo $! >> "$dir/pids"
+	if [ -f "$dir/orphan" ]; then echo 1 > "$dir/service-pid"; else echo $! > "$dir/service-pid"; fi
+}
+stop() {
+	[ -f "$dir/service-pid" ] || return 0
+	pid="$(cat "$dir/service-pid")"
+	[ "$pid" = 1 ] && return 0
+	kill -TERM "$pid" 2>/dev/null
+	while kill -0 "$pid" 2>/dev/null; do sleep 0.05; done
+}
+loaded() { [ -f "$dir/label" ] && [ "${1##*/}" = "$(cat "$dir/label")" ]; }
 case "$1" in
 print)
-	case "$2" in
-	*/com.agenthail.daemon) [ -f "$dir/service-pid" ] || exit 1; echo "	pid = $(cat "$dir/service-pid")" ;;
-	*) exit 1 ;;
-	esac ;;
+	loaded "$2" || exit 1
+	echo "	pid = $(cat "$dir/service-pid")" ;;
 bootstrap)
-	"$dir/agenthail" daemon-run >/dev/null 2>&1 &
-	echo $! > "$dir/service-pid" ;;
+	echo com.agenthail.daemon > "$dir/label"
+	start ;;
 bootout)
-	[ -f "$dir/service-pid" ] && kill -TERM "$(cat "$dir/service-pid")" 2>/dev/null
-	rm -f "$dir/service-pid" ;;
+	loaded "$2" || exit 0
+	stop
+	rm -f "$dir/label" "$dir/service-pid" ;;
+kickstart)
+	loaded "$3" || exit 113
+	stop
+	start ;;
 esac
 exit 0
 `)
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 	t.Cleanup(f.stop)
 	return f
+}
+
+// supervise loads label with a daemon already running under it.
+func (f *fakeLaunchd) supervise(label string) int {
+	f.t.Helper()
+	cmd := exec.Command(filepath.Join(f.dir, "agenthail"), "daemon-run")
+	if err := cmd.Start(); err != nil {
+		f.t.Fatal(err)
+	}
+	go func() { _ = cmd.Wait() }()
+	pid := cmd.Process.Pid
+	f.write("pids", strconv.Itoa(pid)+"\n")
+	f.write("service-pid", strconv.Itoa(pid))
+	f.write("label", label)
+	if running, ok := waitForDaemonPID(0, 5*time.Second); !ok || running != pid {
+		f.t.Fatalf("fake daemon = %d, %v; want %d", running, ok, pid)
+	}
+	return pid
+}
+
+func (f *fakeLaunchd) write(name, content string) {
+	f.t.Helper()
+	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	if name == "pids" {
+		flags = os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	}
+	file, err := os.OpenFile(filepath.Join(f.dir, name), flags, 0o600)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.WriteString(content); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func (f *fakeLaunchd) stop() {
+	data, _ := os.ReadFile(filepath.Join(f.dir, "pids"))
+	for _, field := range strings.Fields(string(data)) {
+		if pid, err := strconv.Atoi(field); err == nil {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	}
+}
+
+func (f *fakeLaunchd) kickstarted() bool {
+	f.t.Helper()
+	calls, err := os.ReadFile(f.calls)
+	if err != nil && !os.IsNotExist(err) {
+		f.t.Fatal(err)
+	}
+	return strings.Contains(string(calls), "kickstart")
 }
 
 func writeExecutable(t *testing.T, path, content string) {
@@ -64,31 +133,14 @@ func writeExecutable(t *testing.T, path, content string) {
 	}
 }
 
-func (f *fakeLaunchd) stop() {
-	if pid, ok := daemon.IsRunning(); ok {
-		_ = syscall.Kill(pid, syscall.SIGTERM)
-	}
-}
-
-func (f *fakeLaunchd) report(pid int) {
-	f.t.Helper()
-	if err := os.WriteFile(filepath.Join(f.dir, "service-pid"), []byte(strconv.Itoa(pid)), 0o600); err != nil {
-		f.t.Fatal(err)
-	}
-}
-
 func TestLaunchdInstallLetsRunAtLoadStartTheDaemon(t *testing.T) {
 	fake := newFakeLaunchd(t)
 	out, err := captureStdout(t, launchdService{}.Install)
 	if err != nil {
 		t.Fatalf("install: %v\n%s", err, out)
 	}
-	calls, err := os.ReadFile(fake.calls)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(calls), "kickstart") {
-		t.Fatalf("install kickstarted the service it had just bootstrapped:\n%s", calls)
+	if fake.kickstarted() {
+		t.Fatal("install kickstarted the service it had just bootstrapped")
 	}
 	pid, running := daemon.IsRunning()
 	if !running || !strings.Contains(out, "(pid "+strconv.Itoa(pid)+")") {
@@ -96,26 +148,34 @@ func TestLaunchdInstallLetsRunAtLoadStartTheDaemon(t *testing.T) {
 	}
 }
 
-func TestADaemonLaunchdDoesNotSuperviseIsNotStarted(t *testing.T) {
+func TestLaunchdInstallFailsWhenLaunchdDoesNotRunTheDaemon(t *testing.T) {
 	fake := newFakeLaunchd(t)
-	cmd := exec.Command(filepath.Join(fake.dir, "agenthail"), "daemon-run")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
+	fake.write("orphan", "")
+	launchdReadyTimeout = 500 * time.Millisecond
+	t.Cleanup(func() { launchdReadyTimeout = 15 * time.Second })
+	out, err := captureStdout(t, launchdService{}.Install)
+	if err == nil || !strings.Contains(err.Error(), daemon.LogFilePath()) {
+		t.Fatalf("install of a daemon launchd does not run = %v\n%s", err, out)
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	if _, ok := waitForDaemonPID(0, 5*time.Second); !ok {
-		t.Fatal("the fake daemon did not start")
+	if _, running := daemon.IsRunning(); !running {
+		t.Fatal("the unsupervised daemon should be running for this case")
 	}
+}
 
-	fake.report(cmd.Process.Pid + 1)
-	if pid, ok := waitForSupervisedDaemon(daemonLaunchdLabel, 0, 300*time.Millisecond); ok {
-		t.Fatalf("daemon %d counted as started while launchd runs another pid", pid)
-	}
-	fake.report(cmd.Process.Pid)
-	if pid, ok := waitForSupervisedDaemon(daemonLaunchdLabel, 0, time.Second); !ok || pid != cmd.Process.Pid {
-		t.Fatalf("supervised daemon = %d, %v; want %d", pid, ok, cmd.Process.Pid)
-	}
-	if pid, ok := waitForSupervisedDaemon(daemonLaunchdLabel, cmd.Process.Pid, 300*time.Millisecond); ok {
-		t.Fatalf("restart counted the daemon it replaced, %d", pid)
+func TestLaunchdRestartWaitsForTheDaemonLaunchdStarts(t *testing.T) {
+	for _, label := range []string{daemonLaunchdLabel, homebrewDaemonLaunchdLabel} {
+		t.Run(label, func(t *testing.T) {
+			fake := newFakeLaunchd(t)
+			before := fake.supervise(label)
+			out, err := captureStdout(t, launchdService{}.Restart)
+			if err != nil {
+				t.Fatalf("restart: %v\n%s", err, out)
+			}
+			pid, running := daemon.IsRunning()
+			service, loaded := launchdServicePID(label)
+			if !running || pid == before || !loaded || service != pid || !strings.Contains(out, "(pid "+strconv.Itoa(pid)+")") {
+				t.Fatalf("restart reported %q; daemon %d (was %d), launchd pid %d", out, pid, before, service)
+			}
+		})
 	}
 }

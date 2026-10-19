@@ -18,6 +18,10 @@ const (
 	homebrewDaemonLaunchdLabel = "homebrew.mxcl.agenthail"
 )
 
+// launchdReadyTimeout covers launchd's 10s respawn throttle for a daemon that
+// exits right after it starts.
+var launchdReadyTimeout = 15 * time.Second
+
 type launchdService struct{}
 
 func (launchdService) Name() string { return "launchd" }
@@ -153,7 +157,7 @@ func (launchdService) Install() error {
 	// RunAtLoad starts the daemon as bootstrap loads it. A kickstart here races
 	// that launch: launchd can abandon the half-started instance, which then runs
 	// unsupervised while launchd's own copy exits on the daemon lock.
-	if pid, ok := waitForSupervisedDaemon(daemonLaunchdLabel, 0, 15*time.Second); ok {
+	if pid, ok := waitForSupervisedDaemon(daemonLaunchdLabel, 0, launchdReadyTimeout); ok {
 		fmt.Printf("installed and started launchd service %s (pid %d)\n", daemonLaunchdLabel, pid)
 		printCodexSetupNote()
 		return nil
@@ -180,7 +184,7 @@ func restartLaunchdDaemon(label string) error {
 	if output, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
 		return fmt.Errorf("restart launchd service: %w (%s)", err, strings.TrimSpace(string(output)))
 	}
-	if pid, ok := waitForSupervisedDaemon(label, before, 15*time.Second); ok {
+	if pid, ok := waitForSupervisedDaemon(label, before, launchdReadyTimeout); ok {
 		fmt.Printf("daemon restarted (pid %d)\n", pid)
 		return nil
 	}
