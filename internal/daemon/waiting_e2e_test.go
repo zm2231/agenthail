@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -313,7 +315,7 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 	if got := pushes.count("session.waiting"); got != 1 {
 		t.Fatalf("one question notified %d times", got)
 	}
-	if push := pushes.first("session.waiting"); push["sessionId"] != session.ID || push["turnId"] != questionID || push["message"] != "Claude Code agent is waiting on you" {
+	if push := pushes.first("session.waiting"); push["sessionId"] != session.ID || push["turnId"] != questionID || push["message"] != "Claude Code agent asks you a question" {
 		t.Fatalf("push=%v", push)
 	}
 
@@ -648,5 +650,89 @@ func TestQueuedPeerMessageReachesARunningOrWaitingClaudeTurnOverItsSocket(t *tes
 			q.process.RecordStatus("conversation-question", q.process.Home, "session_question", "idle", "", questionAsked.Add(2*time.Hour))
 			eventually(t, "the explicit queue once the turn ends", func() bool { return manager.Count("after the turn") == 1 })
 		}
+	}
+}
+
+// detailWaiting is what /api/session reports the session waiting on.
+func (h *runningDaemon) detailWaiting(id string) *surface.Waiting {
+	h.t.Helper()
+	request, err := http.NewRequest(http.MethodGet, h.server.URL+"/api/session?id="+url.QueryEscape(id), nil)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	request.Header.Set("Origin", h.server.URL)
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: e2eToken})
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer response.Body.Close()
+	payload, err := io.ReadAll(response.Body)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		h.t.Fatalf("session status=%d body=%s", response.StatusCode, payload)
+	}
+	var decoded struct {
+		Session struct {
+			Status    surface.SessionStatus `json:"status"`
+			WaitingOn *surface.Waiting      `json:"waitingOn"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		h.t.Fatal(err)
+	}
+	return decoded.Session.WaitingOn
+}
+
+func TestSessionDetailShowsTheQuestionTheCatalogShows(t *testing.T) {
+	q := newClaudeQuestion(t)
+	h, _ := runDaemon(t, q.store, q.claude)
+	eventually(t, "the catalog to show the question", func() bool { return h.sessionWaiting(q.session.ID) != nil })
+	waiting := h.detailWaiting(q.session.ID)
+	if waiting == nil || waiting.ID != questionID || waiting.Kind != surface.WaitingQuestion {
+		t.Fatalf("detail waiting=%+v, catalog waiting=%+v", waiting, h.sessionWaiting(q.session.ID))
+	}
+	q.answer(t)
+	eventually(t, "the answered question to leave the catalog", func() bool { return h.sessionWaiting(q.session.ID) == nil })
+	if waiting := h.detailWaiting(q.session.ID); waiting != nil {
+		t.Fatalf("detail still waiting on %+v after the catalog cleared it", waiting)
+	}
+}
+
+func TestCodexInputRequestIsNotifiedAsInputNotApproval(t *testing.T) {
+	home := codextest.Home(t)
+	lifecycle := codextest.InstallLifecycle(t, home, func(string, map[string]any) map[string]any { return nil })
+	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	pushes := newPushRecorder(t, store)
+	h, stop := runDaemon(t, store, surfaces.NewCodex(unreachableDesktop))
+	status, payload := h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "session-create", "surface": "codex", "message": "Pick the migration", "cwd": t.TempDir()})
+	var created struct {
+		Session struct {
+			ID string `json:"id"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(payload, &created); status != http.StatusCreated || err != nil || created.Session.ID == "" {
+		t.Fatalf("create status=%d body=%s err=%v", status, payload, err)
+	}
+	id := created.Session.ID
+	lifecycle.Daemon().SetActiveFlags(id, "waitingOnUserInput")
+	stop()
+	h, _ = runDaemon(t, store, surfaces.NewCodex(unreachableDesktop))
+	eventually(t, "the thread to show it waits on input", func() bool {
+		waiting := h.sessionWaiting(id)
+		return waiting != nil && waiting.Kind == surface.WaitingInput
+	})
+	if waiting := h.detailWaiting(id); waiting == nil || waiting.Kind != surface.WaitingInput {
+		t.Fatalf("detail waiting=%+v", waiting)
+	}
+	eventually(t, "the waiting notification", func() bool { return pushes.count("session.waiting") == 1 })
+	if push := pushes.first("session.waiting"); push["message"] != notificationSurfaceName(surface.KindCodex)+" needs your input" {
+		t.Fatalf("push=%v", push)
 	}
 }

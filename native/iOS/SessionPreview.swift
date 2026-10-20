@@ -52,7 +52,21 @@ struct SessionPreview: View {
             NavigationStack { SessionScreen(model: model, session: session) }.tint(SessionStyle.accent)
         }
     }
+    /// The question a waiting preview session asks in its terminal.
+    nonisolated static let previewWaiting: [String: String] = ["kind": "question", "id": "preview-question"]
+
+    /// With --preview-waiting the detail reports the question too; with
+    /// --preview-waiting-catalog-only only the catalog does.
     nonisolated static var previewDetailJSON: String {
+        guard ProcessInfo.processInfo.arguments.contains("--preview-waiting") else { return basePreviewDetailJSON }
+        var detail = try! JSONSerialization.jsonObject(with: Data(basePreviewDetailJSON.utf8)) as! [String: Any]
+        var session = detail["session"] as! [String: Any]
+        session["waitingOn"] = previewWaiting
+        detail["session"] = session
+        return String(data: try! JSONSerialization.data(withJSONObject: detail), encoding: .utf8)!
+    }
+
+    nonisolated static var basePreviewDetailJSON: String {
         let reading = ProcessInfo.processInfo.arguments.contains("--preview-reading")
         guard ProcessInfo.processInfo.arguments.contains("--preview-app") || reading else { return detailJSON }
         var detail = try! JSONSerialization.jsonObject(with: Data(detailJSON.utf8)) as! [String: Any]
@@ -83,7 +97,14 @@ struct SessionPreview: View {
             ["id": "h0123456789ab::remote-demo", "project": ["id": "h0123456789ab::project-agenthail", "displayName": "agenthail", "rootPath": "/home/demo/work/agenthail", "kind": "git"], "host": ["id": "h0123456789ab", "name": "forge-agents.tail0000.ts.net", "state": "connected"], "name": "Prove the history is true", "surface": "codex", "cwd": "/home/demo/work/agenthail/.worktrees/history-truth", "status": "busy", "lastActive": "2026-09-12T04:01:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities],
             ["id": "h0123456789ab::remote-demo-2", "project": ["id": "h0123456789ab::project-agenthail", "displayName": "agenthail", "rootPath": "/home/demo/work/agenthail", "kind": "git"], "host": ["id": "h0123456789ab", "name": "forge-agents.tail0000.ts.net", "state": "connected"], "name": "Tighten the release notes", "surface": "claude", "cwd": "/home/demo/work/agenthail/.worktrees/release-notes", "status": "idle", "lastActive": "2026-09-12T03:30:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities]
         ]
-        let snapshot: [String: Any] = ["updatedAt": "2026-09-12T04:03:00Z", "daemon": ["running": true], "surfaces": [], "sessions": sessions, "totalSessions": sessions.count, "queue": [], "channels": [], "relays": [], "history": [], "attention": [], "codexRecentHours": 24]
+        var snapshot: [String: Any] = ["updatedAt": "2026-09-12T04:03:00Z", "daemon": ["running": true], "surfaces": [], "sessions": sessions, "totalSessions": sessions.count, "queue": [], "channels": [], "relays": [], "history": [], "attention": [], "codexRecentHours": 24]
+        if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--preview-waiting") }) {
+            snapshot["busyDelivery"] = "steer"
+            var waitingSessions = sessions
+            waitingSessions[0]["waitingOn"] = previewWaiting
+            waitingSessions[0]["runtime"] = ["launcher": "cmux", "focusable": true]
+            snapshot["sessions"] = waitingSessions
+        }
         return String(data: try! JSONSerialization.data(withJSONObject: snapshot), encoding: .utf8)!
     }
 
