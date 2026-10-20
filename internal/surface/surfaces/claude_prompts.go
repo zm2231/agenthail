@@ -384,6 +384,18 @@ func (p *claudePrompts) answeredWait(sessionID string, waiting *surface.Waiting)
 	return waiting
 }
 
+// retain forgets the answers of sessions whose Claude process has exited,
+// since no later record will show them moving on.
+func (p *claudePrompts) retain(live map[string]bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for sessionID := range p.answered {
+		if !live[sessionID] {
+			delete(p.answered, sessionID)
+		}
+	}
+}
+
 func (p *claudePrompts) any(sessionID string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -360,5 +362,37 @@ func TestAnEndedHoldIsForgottenAfterTheDuplicateWindow(t *testing.T) {
 			t.Fatalf("an ended hold is still remembered with no later hook call: %d sessions", remembered)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestAnAnswerIsForgottenWhenItsSessionExits(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	writeClaudeRecord(t, home, map[string]any{"kind": "interactive", "entrypoint": "cli", "status": "waiting", "waitingFor": "permission prompt", "statusUpdatedAt": time.Now().UnixMilli()})
+	claude := NewClaude(nil, home)
+	session := terminalSession(t)
+	done, cancel := holdInBackground(claude, ClaudePermissionPrompt{SessionID: "conversation", ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"ls"}`), PID: os.Getpid()})
+	defer cancel()
+	request := awaitRequests(t, claude, session)[0]
+	if _, err := claude.Respond(context.Background(), session, request.ID, surface.Decision{Behavior: "deny"}); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	claude.prompts.mu.Lock()
+	_, remembered := claude.prompts.answered["conversation"]
+	claude.prompts.mu.Unlock()
+	if !remembered {
+		t.Fatal("the answer is not remembered while the record still shows the prompt")
+	}
+	if err := os.Remove(filepath.Join(home, ".claude", "sessions", fmt.Sprint(os.Getpid())+".json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := claude.List(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	claude.prompts.mu.Lock()
+	defer claude.prompts.mu.Unlock()
+	if len(claude.prompts.answered) != 0 {
+		t.Fatalf("an exited session's answer is still remembered: %v", claude.prompts.answered)
 	}
 }
