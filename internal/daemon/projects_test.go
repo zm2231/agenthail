@@ -479,7 +479,10 @@ func TestTheCatalogAndPathResolutionAgreeRightAfterOriginChanges(t *testing.T) {
 
 func TestEveryProjectSurfaceNamesItsCoordinatorsOnEveryHost(t *testing.T) {
 	d, r, fake, from, to := daemonFixture(t)
-	repo := catalogTestRepo(t)
+	repo, err := filepath.EvalSymlinks(catalogTestRepo(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	gitRun(t, repo, "remote", "add", "origin", "https://github.com/example/widget.git")
 	from.Cwd, to.Cwd = repo, repo
 	for _, session := range []surface.Session{from, to} {
@@ -593,9 +596,21 @@ func TestEveryProjectSurfaceNamesItsCoordinatorsOnEveryHost(t *testing.T) {
 }
 
 func TestAnAddedProjectsCoordinatorStaysOneProjectAfterTheOriginChanges(t *testing.T) {
-	d, r, _, repo := projectsFixture(t)
+	d, r, fake, repo := projectsFixture(t)
 	gitRun(t, repo, "remote", "add", "origin", "https://github.com/example/widget.git")
-	if response := runDashboardAction(t, d, `{"action":"project-add","path":"`+repo+`"}`); response.Code != http.StatusOK {
+	// The project is reached through a symlink, as every macOS temp path is
+	// through /var.
+	linked := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(repo, linked); err != nil {
+		t.Fatal(err)
+	}
+	from := fake.sessions["from"]
+	from.Cwd = linked
+	fake.sessions[from.ID] = from
+	if err := r.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	if response := runDashboardAction(t, d, `{"action":"project-add","path":"`+linked+`"}`); response.Code != http.StatusOK {
 		t.Fatalf("add: %d %s", response.Code, response.Body)
 	}
 	d.discoverCatalog(context.Background())
@@ -604,8 +619,8 @@ func TestAnAddedProjectsCoordinatorStaysOneProjectAfterTheOriginChanges(t *testi
 		t.Fatalf("records=%+v err=%v", records, err)
 	}
 	added := records[0]
-	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: added.Key, ProjectRoot: repo, Name: "widget-lead", Surface: "claude", Cwd: repo}, registry.CoordinatorChange{ChangedBy: "fixture"}); err != nil {
-		t.Fatal(err)
+	if response := runDashboardAction(t, d, `{"action":"coordinator-set","sessionId":"from","name":"widget-lead"}`); response.Code != http.StatusOK {
+		t.Fatalf("set coordinator: %d %s", response.Code, response.Body)
 	}
 	gitRun(t, repo, "remote", "set-url", "origin", "https://github.com/example/widget-renamed.git")
 	d.discoverCatalog(context.Background())
@@ -616,7 +631,7 @@ func TestAnAddedProjectsCoordinatorStaysOneProjectAfterTheOriginChanges(t *testi
 	atRoot := 0
 	for _, project := range state.Projects {
 		for _, at := range project.Checkouts {
-			if at.RootPath == repo {
+			if at.RootPath == added.WorkspaceRoot {
 				atRoot++
 			}
 		}
@@ -630,7 +645,7 @@ func TestAnAddedProjectsCoordinatorStaysOneProjectAfterTheOriginChanges(t *testi
 	}
 	offered := 0
 	for _, found := range options {
-		if found.RootPath == repo {
+		if found.RootPath == added.WorkspaceRoot {
 			offered++
 			if found.ID != added.ID {
 				t.Fatalf("offered=%+v added=%+v", found, added)
