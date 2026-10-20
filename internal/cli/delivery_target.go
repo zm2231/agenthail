@@ -39,6 +39,15 @@ func (e inexactTargetError) Error() string {
 // so a mistyped word never becomes a delivery to whichever session happens to
 // contain it.
 func (a *App) resolveDeliveryTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, *remoteTarget, error) {
+	if a.registry() != nil {
+		identity, err := a.registry().HostIdentity()
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("read host identity: %w", err)
+		}
+		if target, err = a.expandTargetLead(target, identity); err != nil {
+			return nil, nil, nil, err
+		}
+	}
 	session, adapter, remote, err := a.resolveAnyTarget(ctx, target)
 	if err == nil {
 		if a.namesExactly(target, session, remote) {

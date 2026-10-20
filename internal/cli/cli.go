@@ -1340,10 +1340,6 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 		}
 		return session, adapter, nil
 	}
-	target, err := a.expandLead(target)
-	if err != nil {
-		return nil, nil, err
-	}
 	subagentPath := strings.HasPrefix(target, "@") && strings.Contains(target, "/")
 	named := strings.HasPrefix(target, "@") && !subagentPath && a.registry() != nil
 	if !subagentPath {

@@ -111,6 +111,9 @@ func (a *App) resolveAnyTarget(ctx context.Context, target string) (*surface.Ses
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("read host identity: %w", err)
 	}
+	if target, err = a.expandTargetLead(target, identity); err != nil {
+		return nil, nil, nil, err
+	}
 	if hostText, rest, ok := hosts.Split(target); ok {
 		if strings.EqualFold(hostText, identity.ID) || strings.EqualFold(hostText, identity.Name) {
 			session, adapter, err := a.resolveLocalTarget(ctx, rest)
@@ -162,6 +165,24 @@ func (a *App) resolveAnyTarget(ctx context.Context, target string) (*surface.Ses
 		local = append(local, identity.Name+hosts.Separator+a.resolveDisplay(session.ID))
 	}
 	return nil, nil, nil, ambiguousTargetError(target, local, matches)
+}
+
+// expandTargetLead expands @lead in an unqualified target or one qualified
+// with this host. Qualified with this host it stays on this host, as it
+// always resolves here.
+func (a *App) expandTargetLead(target string, identity registry.HostIdentity) (string, error) {
+	hostText, rest, qualified := hosts.Split(target)
+	if !qualified {
+		return a.expandLead(target)
+	}
+	if !strings.EqualFold(hostText, identity.ID) && !strings.EqualFold(hostText, identity.Name) {
+		return target, nil
+	}
+	expanded, err := a.expandLead(rest)
+	if err != nil {
+		return "", err
+	}
+	return hostText + hosts.Separator + expanded, nil
 }
 
 func (a *App) remoteResolved(match remoteTarget) (*surface.Session, surface.Surface, *remoteTarget, error) {

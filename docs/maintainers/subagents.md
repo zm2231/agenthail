@@ -74,6 +74,13 @@ nickname (case-insensitive), then by unique ID prefix. Two siblings that share
 a nickname make the step ambiguous, and the error lists their IDs. Claude
 subagents are not sessions and cannot be targeted.
 
+`@lead/<child>[/<child>...]` walks the subagents of the caller's project
+coordinator, on whichever host runs it. `expandLead` rewrites it to
+`@<coordinator-session-id>/...`, or `<host>::@<id>/...` for a coordinator on a
+paired host, so the parent is exact and is never a session that merely has
+`lead` in its name. A coordinator without a conversation yet has no
+subagents, and the path is refused.
+
 Commands that deliver (`send`, `steer`, `queue`, the destination of
 `relay add`, `channel add`) refuse name and cwd fragments, including as the
 `<parent>` of a path; see `resolveDeliveryTarget` in `internal/cli`. Reads
