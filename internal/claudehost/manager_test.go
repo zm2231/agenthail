@@ -447,6 +447,7 @@ func TestDiagnoseSignalsOnlyTheHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	foreign := exec.Command(node, "-e", "setInterval(() => {}, 1000)", "fake-claude.mjs")
+	foreign.Env = append(os.Environ(), claudehosttest.OwnerEnv()...)
 	if err := foreign.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -503,9 +504,12 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 			f.Peer(t, opened.PID, test.prompt)
 			request := listed(t, client, asking, 1).Requests[0]
 			busy := f.Open(t, client, working)
-			if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: working, UUID: uuid.NewString(), Text: "SLOW 1500"}); err != nil {
+			// A turn waiting on a tool request stays busy until the session
+			// closes, so the retiring host still runs it when Close arrives.
+			if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: working, UUID: uuid.NewString(), Text: "TOOL"}); err != nil {
 				t.Fatal(err)
 			}
+			listed(t, client, working, 1)
 
 			client, err := f.Manager(t, "1.1.0").Ensure(ctx)
 			if err != nil {
