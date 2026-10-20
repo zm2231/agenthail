@@ -316,13 +316,23 @@ func (c Client) Logs(ctx context.Context, sessionID string) (Logs, error) {
 // Close stops a session now, on whichever host runs it, and returns once its
 // Claude has exited.
 func (c Client) Close(ctx context.Context, sessionID string) error {
-	params := map[string]string{"sessionId": sessionID}
-	err := c.closeOn(ctx, sessionID, params)
+	return c.close(ctx, sessionID, false)
+}
+
+// CloseIdle closes a session only if it is idle when the host gets the close,
+// and otherwise refuses with busy, leaving a turn that started since the
+// caller looked to run.
+func (c Client) CloseIdle(ctx context.Context, sessionID string) error {
+	return c.close(ctx, sessionID, true)
+}
+
+func (c Client) close(ctx context.Context, sessionID string, ifIdle bool) error {
+	err := c.closeOn(ctx, sessionID, ifIdle)
 	if !(IsCode(err, "not_open") || IsCode(err, "held") || errors.Is(err, ErrNotRunning)) {
 		return err
 	}
 	for _, host := range c.Retiring() {
-		retiringErr := host.closeOn(ctx, sessionID, params)
+		retiringErr := host.closeOn(ctx, sessionID, ifIdle)
 		if IsCode(retiringErr, "not_open") || errors.Is(retiringErr, ErrNotRunning) {
 			continue
 		}
@@ -331,17 +341,18 @@ func (c Client) Close(ctx context.Context, sessionID string) error {
 	return err
 }
 
-func (c Client) closeOn(ctx context.Context, sessionID string, params map[string]string) error {
+func (c Client) closeOn(ctx context.Context, sessionID string, ifIdle bool) error {
 	hello, err := c.Hello(ctx)
 	if err != nil {
 		return err
 	}
 	if hello.CloseStops {
-		return c.call(ctx, "close", params, nil)
+		return c.call(ctx, "close", map[string]any{"sessionId": sessionID, "ifIdle": ifIdle}, nil)
 	}
-	// Such a host's close waits out a running turn, so the turn is interrupted
-	// first. It can answer, or exit without answering, before its Claude has
-	// exited, so the stop is done once that Claude has.
+	// Such a host's close waits out a running turn, so a stop interrupts the
+	// turn first. It can answer, or exit without answering, before its Claude
+	// has exited, so the close is done once that Claude has.
+	params := map[string]string{"sessionId": sessionID}
 	listing, err := c.List(ctx)
 	if err != nil {
 		return err
@@ -350,13 +361,20 @@ func (c Client) closeOn(ctx context.Context, sessionID string, params map[string
 	if i < 0 {
 		return &Error{Code: "not_open", Message: fmt.Sprintf("Claude session %s is not open in the host", sessionID)}
 	}
-	pid := listing.Sessions[i].PID
+	listed := listing.Sessions[i]
+	pid := listed.PID
 	started, err := processStart(pid)
 	if err != nil {
 		// Claude has already exited.
 		started = ""
 	}
-	if err := c.call(ctx, "interrupt", params, nil); err != nil && !IsCode(err, "not_open") {
+	if ifIdle {
+		// The host cannot refuse a close, so a session it lists as working is
+		// refused here; one that starts a turn after this waits it out.
+		if listed.State != "idle" || len(listed.Requests) > 0 {
+			return &Error{Code: "busy", Message: fmt.Sprintf("Claude session %s is working", sessionID)}
+		}
+	} else if err := c.call(ctx, "interrupt", params, nil); err != nil && !IsCode(err, "not_open") {
 		return err
 	}
 	var unknown *OutcomeUnknownError

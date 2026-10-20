@@ -605,3 +605,39 @@ func waitClaudeRunning(t *testing.T, events <-chan claudehost.Event, sessionID s
 		}
 	}
 }
+
+// An idle-only close, on this build's host and on one that predates it,
+// refuses a session with a turn running and leaves the turn to finish.
+func TestCloseIdleRefusesAWorkingSessionAndLeavesItsTurnRunning(t *testing.T) {
+	for _, protocol2 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("protocol2=%v", protocol2), func(t *testing.T) {
+			f := claudehosttest.New(t, "")
+			ctx := testContext(t)
+			client := claudehost.NewClient(f.Home)
+			if protocol2 {
+				f.StartProtocol2Host(t, "0.2.50")
+			} else {
+				var err error
+				if client, err = f.Manager(t, "1.1.0").Ensure(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			sessionID := uuid.NewString()
+			opened := f.Open(t, client, sessionID)
+			if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: sessionID, UUID: uuid.NewString(), Text: "SLOW 1500"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := client.CloseIdle(ctx, sessionID); !claudehost.IsCode(err, "busy") {
+				t.Fatalf("idle-only close of a working session = %v, want busy", err)
+			}
+			claudehosttest.WaitFor(t, "the turn to finish", func() bool { return slices.Equal(replies(f.Turns(t, sessionID)), []string{"slow:1500"}) })
+			claudehosttest.WaitFor(t, "the session to go idle", func() bool { return listed(t, client, sessionID, 0).State == "idle" })
+			if err := client.CloseIdle(ctx, sessionID); err != nil {
+				t.Fatalf("idle-only close of an idle session = %v", err)
+			}
+			if claudehosttest.Alive(opened.PID) {
+				t.Fatalf("Claude %d still runs after its idle session was closed", opened.PID)
+			}
+		})
+	}
+}

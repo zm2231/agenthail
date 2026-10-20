@@ -190,9 +190,15 @@ class Session {
   // A Claude that ended a turn without reporting its states leaves idle a
   // guess that a turn it started itself may still be running, so such a
   // session retires only as a turn result arrives.
+  // settled is Claude idle with no open request, no background task and no
+  // turn owed.
+  settled() {
+    return this.state === 'idle' && this.pending.size === 0 && this.tasks.length === 0 && this.owed.size === 0;
+  }
+
   retireIfDone({ turnEnded = false } = {}) {
     if (this.guessesIdle && !turnEnded) return;
-    if (!draining || this.ended || !this.query || this.state !== 'idle' || this.pending.size > 0 || this.tasks.length > 0 || this.owed.size > 0) return;
+    if (!draining || this.ended || !this.query || !this.settled()) return;
     if (this.measuring) {
       this.measuring.then(() => this.retireIfDone({ turnEnded }));
       return;
@@ -304,8 +310,11 @@ const methods = {
   // Claude's input and returns once the process has exited, killing it if it
   // has not within the grace period. A session that has ended but whose
   // Claude is still exiting is waited for the same way.
-  close: async ({ sessionId }) => {
+  // With ifIdle it closes only a settled session and refuses one that is
+  // working, deciding in the same step that ends its input.
+  close: async ({ sessionId, ifIdle = false }) => {
     const s = sessions.get(sessionId) ?? session(sessionId);
+    if (ifIdle && !s.ended && !s.settled()) throw new HostError('busy', `Claude session ${s.id} is working`);
     const deadline = Date.now() + CLOSE_GRACE_MS;
     if (!s.ended && s.state !== 'idle') {
       s.endRequests();

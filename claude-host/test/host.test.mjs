@@ -876,6 +876,25 @@ test('close waits for a session that has ended while its Claude is still exiting
   r.close();
 });
 
+test('an idle-only close refuses a working session and leaves its turn running', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  const { pid } = await c.call('open', { sessionId: id, cwd: f.cwd });
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'SLOW 1500' });
+  await assert.rejects(c.call('close', { sessionId: id, ifIdle: true }), { code: 'busy' });
+  assert.ok(alive(pid), 'Claude still runs');
+  await c.event(turnResult(id, uuid));
+  assert.deepEqual(transcript(f, id).map((l) => l.reply), ['slow:1500']);
+  await c.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'idle');
+  await c.call('close', { sessionId: id, ifIdle: true });
+  assert.ok(!alive(pid), 'an idle session closes');
+  c.close();
+});
+
 test('close kills a Claude that does not exit within the grace period', async () => {
   const f = fixture();
   const host = await startHost(f, { env: { AGENTHAIL_CLAUDE_HOST_CLOSE_GRACE_MS: '300' } });

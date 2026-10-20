@@ -148,6 +148,17 @@ func (c *Claude) quiesce(ctx context.Context, conversation, root string, holder 
 	deadline := time.Now().Add(request.Wait)
 	for {
 		reason := adoptBusy(holder)
+		if reason == "" && holder.hosted {
+			// A turn can start after the check, from a send or from Claude
+			// itself, so the host closes the session only if it is still idle.
+			err := c.host.client.CloseIdle(ctx, conversation)
+			switch {
+			case claudehost.IsCode(err, "busy"):
+				reason = "a turn is running"
+			case err != nil && !claudehost.IsCode(err, "not_open"):
+				return "", claudeHostDeliveryError(err)
+			}
+		}
 		if reason == "" {
 			break
 		}
@@ -171,9 +182,6 @@ func (c *Claude) quiesce(ctx context.Context, conversation, root string, holder 
 	var stopped string
 	switch {
 	case holder.hosted:
-		if err := c.host.client.Close(ctx, conversation); err != nil && !claudehost.IsCode(err, "not_open") {
-			return "", claudeHostDeliveryError(err)
-		}
 		stopped = "host"
 	case holder.background:
 		records, err := c.backgroundSessions(ctx, root)
