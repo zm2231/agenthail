@@ -217,53 +217,183 @@ func (r *Registry) checkCoordinatorTx(tx *sql.Tx, spec CoordinatorSpec, change C
 // is set, and a paired host's coordinator unless change.OverPeers is set too. A name any host's other coordinator uses, or another session's
 // name, is refused.
 func (r *Registry) SetCoordinator(spec CoordinatorSpec, change CoordinatorChange) (CoordinatorSpec, error) {
+	stored, _, err := r.ReplaceCoordinator(spec, change)
+	return stored, err
+}
+
+// CoordinatorUndo is what a coordinator change replaced here: the previous
+// coordinator row, the names it moved, and the replaced conversations it
+// forgot. WithdrawCoordinator puts them back.
+type CoordinatorUndo struct {
+	stored       CoordinatorSpec
+	previous     *CoordinatorSpec
+	aliases      map[string]string
+	replacedRows map[string]string
+}
+
+// ReplaceCoordinator is SetCoordinator that also returns what the change
+// replaced, for a replace that may have to withdraw it.
+func (r *Registry) ReplaceCoordinator(spec CoordinatorSpec, change CoordinatorChange) (CoordinatorSpec, CoordinatorUndo, error) {
+	undo := CoordinatorUndo{aliases: map[string]string{}, replacedRows: map[string]string{}}
 	tx, err := r.db.Begin()
 	if err != nil {
-		return spec, err
+		return spec, undo, err
 	}
 	defer tx.Rollback()
 	previous, err := r.checkCoordinatorTx(tx, spec, change, change.Replace && change.OverPeers)
 	if err != nil {
-		return spec, err
+		return spec, undo, err
+	}
+	if previous != nil {
+		row, err := scanCoordinator(tx.QueryRow(`SELECT `+coordinatorColumns+` FROM coordinators c WHERE c.project_id=? AND c.host_id=''`, spec.ProjectID))
+		if err != nil {
+			return spec, undo, err
+		}
+		undo.previous = &row
+		if row.SessionID != "" {
+			undo.aliases[row.Name] = row.SessionID
+		}
+	}
+	if change.SessionID != "" {
+		var prior string
+		err := tx.QueryRow(`SELECT name FROM aliases WHERE session_id=?`, change.SessionID).Scan(&prior)
+		if err == nil {
+			undo.aliases[prior] = change.SessionID
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return spec, undo, err
+		}
+	}
+	rows, err := tx.Query(`SELECT session_id,project_id FROM coordinator_replaced WHERE project_id=? OR session_id=?`, spec.ProjectID, change.SessionID)
+	if err != nil {
+		return spec, undo, err
+	}
+	for rows.Next() {
+		var sessionID, projectID string
+		if err := rows.Scan(&sessionID, &projectID); err != nil {
+			rows.Close()
+			return spec, undo, err
+		}
+		undo.replacedRows[sessionID] = projectID
+	}
+	if err := rows.Close(); err != nil {
+		return spec, undo, err
 	}
 	if previous != nil && previous.Name == spec.Name && previous.SessionID != change.SessionID {
 		if _, err := tx.Exec(`DELETE FROM aliases WHERE name=?`, spec.Name); err != nil {
-			return spec, err
+			return spec, undo, err
 		}
 	}
 	if change.SessionID != "" {
 		if err := setAliasTx(tx, spec.Name, change.SessionID); err != nil {
-			return spec, err
+			return spec, undo, err
 		}
 	}
 	if previous != nil && previous.SessionID != change.SessionID {
 		if _, err := tx.Exec(`DELETE FROM coordinator_replaced WHERE project_id=?`, spec.ProjectID); err != nil {
-			return spec, err
+			return spec, undo, err
 		}
 	}
 	if change.SessionID != "" {
 		if _, err := tx.Exec(`DELETE FROM coordinator_replaced WHERE session_id=?`, change.SessionID); err != nil {
-			return spec, err
+			return spec, undo, err
 		}
 	}
 	now := time.Now().UTC()
 	if _, err := tx.Exec(`INSERT INTO coordinators (project_id,host_id,project_root,name,surface,cwd,model,permission_mode,instructions,changed_by,changed_at_ms) VALUES (?,'',?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(project_id,host_id) DO UPDATE SET project_root=excluded.project_root,name=excluded.name,surface=excluded.surface,cwd=excluded.cwd,model=excluded.model,permission_mode=excluded.permission_mode,instructions=excluded.instructions,changed_by=excluded.changed_by,changed_at_ms=excluded.changed_at_ms`,
 		spec.ProjectID, spec.ProjectRoot, spec.Name, spec.Surface, spec.Cwd, spec.Model, spec.PermissionMode, spec.Instructions, change.ChangedBy, now.UnixMilli()); err != nil {
-		return spec, err
+		return spec, undo, err
 	}
 	action, previousName, previousSession := "set", "", ""
 	if previous != nil {
 		action, previousName, previousSession = "replaced", previous.Name, previous.SessionID
 	}
 	if err := recordCoordinatorHistoryTx(tx, spec.ProjectID, action, spec.Name, change.SessionID, previousName, previousSession, change.ChangedBy, now); err != nil {
-		return spec, err
+		return spec, undo, err
 	}
 	stored, err := publishCoordinatorTx(tx, spec.ProjectID)
 	if err != nil {
-		return spec, err
+		return spec, undo, err
 	}
-	return stored, tx.Commit()
+	undo.stored = stored
+	return stored, undo, tx.Commit()
+}
+
+// WithdrawCoordinator undoes a ReplaceCoordinator in one transaction: it
+// removes the coordinator that change recorded and its name, and restores the
+// previous coordinator, names and replaced conversations exactly. If anything
+// it would restore changed since, it changes nothing and returns an error, so
+// the recorded coordinator stays rather than the project losing both.
+func (r *Registry) WithdrawCoordinator(undo CoordinatorUndo, changedBy string) error {
+	stored := undo.stored
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	current, err := scanCoordinator(tx.QueryRow(`SELECT `+coordinatorColumns+` FROM coordinators c WHERE c.project_id=? AND c.host_id=''`, stored.ProjectID))
+	if err != nil {
+		return err
+	}
+	if current.ChangedAt.UnixMilli() != stored.ChangedAt.UnixMilli() || current.Name != stored.Name || current.SessionID != stored.SessionID {
+		return ErrCoordinatorChanged
+	}
+	if _, err := tx.Exec(`DELETE FROM coordinators WHERE project_id=? AND host_id=''`, stored.ProjectID); err != nil {
+		return err
+	}
+	if stored.SessionID != "" {
+		if _, err := tx.Exec(`DELETE FROM aliases WHERE name=? AND session_id=?`, stored.Name, stored.SessionID); err != nil {
+			return err
+		}
+	}
+	for name, sessionID := range undo.aliases {
+		var owner string
+		err := tx.QueryRow(`SELECT session_id FROM aliases WHERE name=?`, name).Scan(&owner)
+		if err == nil && owner != sessionID {
+			return fmt.Errorf("@%s now names session %s: %w", name, owner, ErrCoordinatorChanged)
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		var other string
+		err = tx.QueryRow(`SELECT name FROM aliases WHERE session_id=? AND name<>?`, sessionID, name).Scan(&other)
+		if err == nil {
+			return fmt.Errorf("session %s is now @%s: %w", sessionID, other, ErrCoordinatorChanged)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO aliases (name,session_id) VALUES (?,?)`, name, sessionID); err != nil {
+			return err
+		}
+	}
+	for sessionID, projectID := range undo.replacedRows {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO coordinator_replaced (session_id,project_id) SELECT ?,? WHERE EXISTS (SELECT 1 FROM sessions WHERE id=?)`, sessionID, projectID, sessionID); err != nil {
+			return err
+		}
+	}
+	now := time.Now().UTC()
+	if err := recordCoordinatorHistoryTx(tx, stored.ProjectID, "cleared", stored.Name, "", stored.Name, stored.SessionID, changedBy, now); err != nil {
+		return err
+	}
+	if previous := undo.previous; previous != nil {
+		if _, err := tx.Exec(`INSERT INTO coordinators (project_id,host_id,project_root,name,surface,cwd,model,permission_mode,instructions,changed_by,changed_at_ms) VALUES (?,'',?,?,?,?,?,?,?,?,?)`,
+			previous.ProjectID, previous.ProjectRoot, previous.Name, previous.Surface, previous.Cwd, previous.Model, previous.PermissionMode, previous.Instructions, previous.ChangedBy, previous.ChangedAt.UnixMilli()); err != nil {
+			return err
+		}
+		if err := recordCoordinatorHistoryTx(tx, stored.ProjectID, "set", previous.Name, previous.SessionID, stored.Name, stored.SessionID, changedBy, now); err != nil {
+			return err
+		}
+		if _, err := publishCoordinatorTx(tx, stored.ProjectID); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+	payload, _ := json.Marshal(map[string]string{"projectId": stored.ProjectID})
+	if _, _, err := appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("coordinator.removed:%s:%d", stored.ProjectID, now.UnixNano()), Type: "coordinator.removed", EntityID: stored.ProjectID, Payload: payload}); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ClearCoordinator removes this host's coordinator of a project. Its

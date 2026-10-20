@@ -167,6 +167,9 @@ func TestReplacingAPeerCoordinatorIsRefusedWhileItsHostIsUnreachable(t *testing.
 	if _, err := mac.reg.Coordinator(project); err == nil {
 		t.Fatal("mac took over while forge could not confirm")
 	}
+	if alias, err := mac.reg.LookupAlias("mac-lead"); err == nil {
+		t.Fatalf("a withdrawn replace left @mac-lead on %s", alias)
+	}
 	if owned, err := forge.reg.Coordinator(project); err != nil || owned.Name != "gadget-lead" {
 		t.Fatalf("forge coordinator=%+v err=%v", owned, err)
 	}
@@ -218,5 +221,82 @@ func TestANameClaimedWhileAPeerClearsItsCoordinatorCannotStrandTheProject(t *tes
 	}
 	if _, err := forge.reg.Coordinator(project); err == nil {
 		t.Fatal("forge kept its coordinator after confirming the clear")
+	}
+}
+
+func TestARefusedReplaceRestoresTheLocalCoordinatorOrKeepsTheNewOne(t *testing.T) {
+	for _, renamed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "restores", true: "keeps the new one when the old name moved"}[renamed], func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			upstream := catalogTestRepo(t)
+			mac := newFederationNode(t, "mac-a", "mac-other", "mac-third")
+			forge := newFederationNode(t, "forge-a")
+			cwd := filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "mac-gadget")), "src")
+			moveSessions(t, mac, cwd)
+			moveSessions(t, forge, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "forge-gadget")), "src"))
+			forge.serve(t, nil)
+			mac.start(t, testRoots(forge.server))
+			record := mac.pair(t, forge, "forge")
+			const project = "repo:github.com/example/gadget"
+			if response := forge.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "forge-a", "name": "peer-lead"}); response.Code != http.StatusOK {
+				t.Fatalf("set on forge: %d %s", response.Code, response.Body)
+			}
+			awaitFederation(t, "mac mirrors forge's coordinator", func() bool {
+				mirrored, _ := mac.reg.ProjectCoordinators(project)
+				return len(mirrored) == 1 && mirrored[0].HostID == record.ID
+			})
+			old, err := mac.reg.SetCoordinator(registry.CoordinatorSpec{ProjectID: project, ProjectRoot: cwd, Name: "old-lead", Surface: "codex", Cwd: cwd, Instructions: "brief"}, registry.CoordinatorChange{SessionID: "mac-a", Replace: true, OverPeers: true, ChangedBy: "fixture"})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			hold := &snapshotHold{release: make(chan struct{})}
+			forge.gate.actions.Store(hold)
+			var once sync.Once
+			release := func() {
+				once.Do(func() {
+					forge.gate.actions.Store(nil)
+					close(hold.release)
+				})
+			}
+			t.Cleanup(release)
+			answered := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				answered <- mac.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "mac-other", "name": "new-lead", "replace": true})
+			}()
+			awaitFederation(t, "the clear reaching forge", func() bool { return hold.waiting.Load() == 1 })
+			if response := forge.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "forge-a", "name": "peer-lead", "replace": true}); response.Code != http.StatusOK {
+				t.Fatalf("forge changes its coordinator: %d %s", response.Code, response.Body)
+			}
+			if renamed {
+				if err := mac.reg.SetAlias("renamed", "mac-a"); err != nil {
+					t.Fatal(err)
+				}
+				if err := mac.reg.SetAlias("old-lead", "mac-third"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			release()
+			response := <-answered
+			if response.Code != http.StatusConflict {
+				t.Fatalf("replace: %d %s", response.Code, response.Body)
+			}
+			current, err := mac.reg.Coordinator(project)
+			if err != nil {
+				t.Fatalf("the project lost its local coordinator: %v (%s)", err, response.Body)
+			}
+			if renamed {
+				if current.Name != "new-lead" || current.SessionID != "mac-other" || !strings.Contains(response.Body.String(), "stays here") {
+					t.Fatalf("coordinator=%+v body=%s", current, response.Body)
+				}
+				return
+			}
+			if current.Name != "old-lead" || current.SessionID != "mac-a" || current.Instructions != "brief" || !current.ChangedAt.Equal(old.ChangedAt) || !strings.Contains(response.Body.String(), "nothing changed") {
+				t.Fatalf("coordinator=%+v body=%s", current, response.Body)
+			}
+			if alias, err := mac.reg.ReverseAlias("mac-other"); err == nil && alias != "" {
+				t.Fatalf("mac-other kept @%s", alias)
+			}
+		})
 	}
 }
