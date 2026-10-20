@@ -79,7 +79,7 @@ func (f *fakeDaemonAPI) recorded() ([]map[string]any, []string) {
 	return append([]map[string]any{}, f.actions...), append([]string{}, f.keys...)
 }
 
-var forgeBuilder = remoteTarget{ID: hosts.Qualify(forgeHostID, "remote-1"), Surface: surface.KindCodex, Name: "remote work", Alias: "builder", Host: hostRef{ID: forgeHostID, Name: "forge", State: "connected"}}
+var forgeBuilder = remoteTarget{ID: hosts.Qualify(forgeHostID, "remote-1"), Surface: surface.KindCodex, Name: "remote work", Alias: "builder", Host: hostRef{ID: forgeHostID, Name: "forge", State: "connected"}, Exact: true}
 
 func federatedCLIFixture(t *testing.T, daemonRunning bool) (*App, *registry.Registry, *cliSurface, *fakeDaemonAPI) {
 	t.Helper()

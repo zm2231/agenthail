@@ -1349,10 +1349,6 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 		}
 		return session, adapter, nil
 	}
-	target, err := a.expandLead(target)
-	if err != nil {
-		return nil, nil, err
-	}
 	subagentPath := strings.HasPrefix(target, "@") && strings.Contains(target, "/")
 	named := strings.HasPrefix(target, "@") && !subagentPath && a.registry() != nil
 	if !subagentPath {
@@ -1709,7 +1705,7 @@ func (a *App) cmdSend(args []string) error {
 	if spec, named := coord.Named(target); named && !coord.Started(spec) {
 		return a.startCoordinator(ctx, coord, spec, message, args)
 	}
-	sess, surf, remote, err := a.resolveAnyTarget(ctx, target)
+	sess, surf, remote, err := a.resolveDeliveryTarget(ctx, target)
 	if err != nil {
 		return err
 	}
@@ -2471,7 +2467,7 @@ func (a *App) cmdSteer(args []string) error {
 		return err
 	}
 	defer cancel()
-	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
+	sess, surf, remote, err := a.resolveDeliveryTarget(ctx, positional[0])
 	if err != nil {
 		return err
 	}
@@ -2521,6 +2517,12 @@ func printSteerReceipt(receipt delivery.Receipt, target string) {
 		fmt.Printf("Sent to %s.\n", target)
 	}
 }
+
+const queueUsage = `usage: agenthail queue <target> "message"
+       agenthail queue list [--json] [--all] [--target <target>] [--mine] [--project <name|id>] [--cwd <path>]
+       agenthail queue retry <id>
+       agenthail queue rm <id>
+       agenthail queue clear <target>`
 
 func (a *App) cmdQueue(args []string) error {
 	if a.registry() == nil {
@@ -2630,12 +2632,12 @@ func (a *App) cmdQueue(args []string) error {
 	}
 	positional := stripFlags(args)
 	if len(positional) < 2 {
-		return fmt.Errorf("usage: agenthail queue <target> \"message\"")
+		return errors.New(queueUsage)
 	}
 	ctx := context.Background()
-	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
+	sess, surf, remote, err := a.resolveDeliveryTarget(ctx, positional[0])
 	if err != nil {
-		return err
+		return fmt.Errorf("%w\n%s", err, queueUsage)
 	}
 	if remote != nil {
 		message, err := messageText(strings.Join(positional[1:], " "))

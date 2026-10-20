@@ -158,9 +158,18 @@ Targets accept `@alias`, PID, session-ID prefix, cwd/name fragment, a
 qualified `surface:target` value, or `host::target` for a paired host. A cwd/name fragment resolves to a family's
 root session, never to one of its subagents. Address a Codex subagent by its
 ID or as `@<parent>/<nickname>` (for example `@lead/Ada/Euclid` for a nested
-one). Claude subagents are read-only and cannot be targeted. If AgentHail
+one). `@lead/<nickname>` starts from your project's coordinator, on whichever
+host runs it. Claude subagents are read-only and cannot be targeted. If AgentHail
 reports ambiguity, show the candidates and ask for one qualification. Never
 select heuristically.
+
+Commands that deliver, `send`, `steer`, `queue`, the destination of
+`relay add` and `channel add`, never take a cwd/name fragment. They take an
+alias, a session ID or unique ID prefix, a Claude conversation ID or PID,
+`surface:` with one of those, or `@<parent>/<nickname>`. A fragment is
+refused and the error lists the sessions it matched with their IDs and
+aliases. To deliver to a session someone named in words, find it with
+`agenthail list --json`, then address it by its `@alias` or ID.
 
 ```bash
 agenthail identify claude:<session-id> researcher

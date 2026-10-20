@@ -40,6 +40,7 @@ type remoteTarget struct {
 	Name    string              `json:"name"`
 	Alias   string              `json:"alias,omitempty"`
 	Host    hostRef             `json:"host"`
+	Exact   bool                `json:"exact"`
 }
 
 func (t remoteTarget) label() string {
@@ -110,6 +111,9 @@ func (a *App) resolveAnyTarget(ctx context.Context, target string) (*surface.Ses
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("read host identity: %w", err)
 	}
+	if target, err = a.expandTargetLead(target, identity); err != nil {
+		return nil, nil, nil, err
+	}
 	if hostText, rest, ok := hosts.Split(target); ok {
 		if strings.EqualFold(hostText, identity.ID) || strings.EqualFold(hostText, identity.Name) {
 			session, adapter, err := a.resolveLocalTarget(ctx, rest)
@@ -161,6 +165,24 @@ func (a *App) resolveAnyTarget(ctx context.Context, target string) (*surface.Ses
 		local = append(local, identity.Name+hosts.Separator+a.resolveDisplay(session.ID))
 	}
 	return nil, nil, nil, ambiguousTargetError(target, local, matches)
+}
+
+// expandTargetLead expands @lead in an unqualified target or one qualified
+// with this host. Qualified with this host it stays on this host, as it
+// always resolves here.
+func (a *App) expandTargetLead(target string, identity registry.HostIdentity) (string, error) {
+	hostText, rest, qualified := hosts.Split(target)
+	if !qualified {
+		return a.expandLead(target)
+	}
+	if !strings.EqualFold(hostText, identity.ID) && !strings.EqualFold(hostText, identity.Name) {
+		return target, nil
+	}
+	expanded, err := a.expandLead(rest)
+	if err != nil {
+		return "", err
+	}
+	return hostText + hosts.Separator + expanded, nil
 }
 
 func (a *App) remoteResolved(match remoteTarget) (*surface.Session, surface.Surface, *remoteTarget, error) {
@@ -215,7 +237,7 @@ func (a *App) remoteMatches(ctx context.Context, hostID, target string) ([]remot
 	matches := make([]remoteTarget, 0, len(found))
 	for _, match := range found {
 		host := names[match.HostID]
-		matches = append(matches, remoteTarget{ID: hosts.Qualify(match.HostID, match.ID), Surface: match.Surface, Name: match.Name, Alias: match.Alias, Host: hostRef{ID: host.ID, Name: host.Name, State: host.State}})
+		matches = append(matches, remoteTarget{ID: hosts.Qualify(match.HostID, match.ID), Surface: match.Surface, Name: match.Name, Alias: match.Alias, Host: hostRef{ID: host.ID, Name: host.Name, State: host.State}, Exact: true})
 	}
 	return matches, nil
 }
@@ -602,7 +624,11 @@ type listSessionView struct {
 // member on a paired host is stored as its mirrored row; whether it can take
 // a message is that host's call when the channel sends.
 func (a *App) channelMember(ctx context.Context, target string, joining bool) (string, string, error) {
-	session, adapter, remote, err := a.resolveAnyTarget(ctx, target)
+	resolve := a.resolveAnyTarget
+	if joining {
+		resolve = a.resolveDeliveryTarget
+	}
+	session, adapter, remote, err := resolve(ctx, target)
 	if err != nil {
 		return "", "", err
 	}
