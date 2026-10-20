@@ -175,3 +175,31 @@ func TestCompactSettingsKeepASymlinkedSettingsFile(t *testing.T) {
 		t.Fatalf("target=%s", data)
 	}
 }
+
+func TestCompactSettingsAddressEachModelByItsExactName(t *testing.T) {
+	_, primary, _ := compactSettingsFixture(t)
+	path := filepath.Join(primary, "settings.json")
+	writeTestFile(t, path, `{"modelSettings":{"claude-opus-5-5":{"effortLevel":"high"}}}`)
+	models := []string{"claude-opus-4.5", "us.anthropic.claude-opus-5-5-v1:0", `vendor\model`, "claude-*?", "42"}
+	for _, model := range models {
+		compactSettings(t, "--model", model, "200000")
+	}
+	roots := compactSettings(t)
+	for _, model := range models {
+		if roots[0].ModelWindows[model].Tokens != 200000 {
+			t.Fatalf("%s: windows=%+v", model, roots[0].ModelWindows)
+		}
+	}
+	for _, model := range models {
+		compactSettings(t, "--model", model, "unset")
+	}
+	data, _ := os.ReadFile(path)
+	if roots := compactSettings(t); len(roots[0].ModelWindows) != 0 || gjson.GetBytes(data, "modelSettings.claude-opus-5-5.effortLevel").String() != "high" || !gjson.GetBytes(data, "modelSettings").IsObject() {
+		t.Fatalf("windows=%+v file=%s", roots[0].ModelWindows, data)
+	}
+	_, _, work := compactSettingsFixture(t)
+	if roots := compactSettings(t, "--root", work, "--model", "42", "200000"); roots[0].ModelWindows["42"].Tokens != 200000 {
+		data, _ := os.ReadFile(filepath.Join(work, "settings.json"))
+		t.Fatalf("a numeric model name in a new file: %s", data)
+	}
+}

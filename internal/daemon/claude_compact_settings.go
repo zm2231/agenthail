@@ -40,7 +40,9 @@ func (d *Daemon) claudeCompactSettingsHandler(w http.ResponseWriter, r *http.Req
 			Enabled *bool  `json:"enabled"`
 			Idle    *bool  `json:"idleCompaction"`
 		}
-		if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&request); err != nil {
+		decoder := json.NewDecoder(io.LimitReader(r.Body, 16<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
 			http.Error(w, "invalid compaction settings request", http.StatusBadRequest)
 			return
 		}

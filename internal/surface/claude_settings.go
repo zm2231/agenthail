@@ -104,7 +104,7 @@ func ReadClaudeCompactSettings(root string) (ClaudeCompactSettings, error) {
 		settings.AutoCompactWindow = &window
 	}
 	gjson.GetBytes(data, "modelSettings").ForEach(func(model, entry gjson.Result) bool {
-		if value := entry.Get("autoCompactWindow"); value.Exists() {
+		if value := entry.Get("autoCompactWindow"); model.Type == gjson.String && value.Exists() {
 			if settings.ModelWindows == nil {
 				settings.ModelWindows = map[string]ClaudeCompactWindow{}
 			}
@@ -203,8 +203,11 @@ func WriteClaudeCompactSettings(root string, change ClaudeCompactChange) (Claude
 
 func escapeSettingsPath(key string) string {
 	var escaped strings.Builder
+	if strings.Trim(key, "0123456789") == "" {
+		escaped.WriteByte(':')
+	}
 	for _, r := range key {
-		if strings.ContainsRune(`.*?|#@\!=<>%`, r) {
+		if strings.ContainsRune(`\.*?|#@!=<>%:`, r) {
 			escaped.WriteByte('\\')
 		}
 		escaped.WriteRune(r)
