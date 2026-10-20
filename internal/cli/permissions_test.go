@@ -65,6 +65,18 @@ func TestPermissionsShowsEachGrantAndItsSettingsPane(t *testing.T) {
 	}
 }
 
+func TestPermissionsRefusesAnUnknownFlag(t *testing.T) {
+	app, calls := permissionsCLIFixture(t, true)
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"permissions", "--jsn"}) }); err == nil || len(*calls) != 0 {
+		t.Fatalf("err=%v calls=%v", err, *calls)
+	}
+	output, err := captureStdout(t, func() error { return app.Run([]string{"permissions", "--json"}) })
+	var report permissions.Report
+	if err != nil || json.Unmarshal([]byte(output), &report) != nil || len(report.Grants) != 3 {
+		t.Fatalf("err=%v output=%s", err, output)
+	}
+}
+
 func TestPermissionsNeedTheDaemonToReadItsOwnGrants(t *testing.T) {
 	app, calls := permissionsCLIFixture(t, false)
 	_, err := captureStdout(t, func() error { return app.Run([]string{"permissions"}) })
