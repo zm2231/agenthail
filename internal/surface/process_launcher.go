@@ -178,8 +178,11 @@ func validateLaunchRequest(request LaunchRequest, agents []SurfaceKind) error {
 		return errors.New("message contains NUL")
 	}
 	options := request.Options
+	if options.Account != "" && request.Surface != KindClaude {
+		return errors.New("account applies to Claude only")
+	}
 	if options.Worktree != "" || options.Agent != "" || options.PermissionMode != "" || options.ApprovalPolicy != "" || !options.TurnOptions.Empty() {
-		return fmt.Errorf("%w: a terminal launch takes only the cwd, message, model and name", ErrLaunchOptionUnsupported)
+		return fmt.Errorf("%w: a terminal launch takes only the cwd, message, model, name and Claude account", ErrLaunchOptionUnsupported)
 	}
 	return nil
 }
@@ -195,6 +198,15 @@ func agentArgv(request LaunchRequest) ([]string, error) {
 			return nil, err
 		}
 		argv := []string{binary}
+		if request.Options.Account != "" {
+			root, err := ResolveClaudeAccountRoot(home, request.Options.Account)
+			if err != nil {
+				return nil, err
+			}
+			if dir := ClaudeLaunchConfigDir(home, root); dir != "" {
+				argv = []string{"env", "CLAUDE_CONFIG_DIR=" + dir, binary}
+			}
+		}
 		if request.Options.Model != "" {
 			argv = append(argv, "--model", request.Options.Model)
 		}

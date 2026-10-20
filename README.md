@@ -78,6 +78,8 @@ A Claude session ID is the conversation ID, the name Claude gives the transcript
 
 Agenthail reads Claude Code's config root: `CLAUDE_CONFIG_DIR` when set, otherwise `~/.claude`. To include sessions from other Claude accounts, list their roots in `~/.agenthail/config.json` as `{"claudeConfigDirs": ["/Users/me/.claude-work"]}`. Each session is sent to, stopped and resumed in the root it lives in. `agenthail doctor` shows every root, and a conversation found in two roots is refused rather than guessed.
 
+`agenthail accounts` lists each root with the account signed into it, the plan usage Claude Code last cached for it, and which roots share one account. Each root has a name: `default` for the primary, otherwise the folder name (`~/.claude-work` is `claude-work`, and `~/.gentle-claude/.claude` is `gentle-claude`; roots that share a folder name are told apart by their parent folders, as in `personal/claude` and `work/claude`). Start a session under another account with `agenthail thread create claude "task" --account claude-work`; `--account` also takes the account's email or the root's path. `list --wide`, the dashboard and the apps show each Claude session's account, and their new-session forms offer the same choice.
+
 The daemon automatically registers up to 112 agents as individual Claude peers, busy agents first and then those most recently active within the last 24 hours, refreshing every 30 seconds. They appear in Claude's `ListAgents` as `agenthail/<surface>: <name>`. Claude can reply to them using native `SendMessage`; Agenthail puts those messages in its durable queue. Any other agent registers automatically on its next outbound send; a send never waits for a free peer slot. Peers outside the registered set retire 24 hours after their last send. Read-only agents can be discoverable, but inbound messages to them are denied and recorded in history.
 
 Use `--from @alias` or `--from surface:session-id` to identify the sender. Without an explicit `--from`, Agenthail resolves the sender in this order: `AGENTHAIL_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, then `CODEX_THREAD_ID`, read when the command runs. Claude Code sets `CLAUDE_CODE_SESSION_ID` in every command it runs, so a command run after `/branch` or `/resume` speaks for the conversation that is running now. Agents that Agenthail starts never inherit these variables from the process that started them. Without any of these, messages use an operator peer whose replies are kept in history. If one of them names a session this Agenthail does not know, such as a session of another Agenthail that ran the command with a scratch `HOME`, the command refuses and names the variable, the registry it checked, and the two ways out: `--from` with one of its sessions, or unsetting that variable and any later one in this order that is also set, to send without a reply address.
@@ -180,6 +182,25 @@ When the investigation finishes with something the builder needs, Agenthail pass
 `turn_finished` (the default) forwards each successful matching completion. `goal_completed` requires a source with goal support, waits for an explicit completed goal and its final turn, and forwards the latest pending completion once per goal. Active, paused, blocked, missing, or unreadable goals keep the route waiting. The regex filters the selected result; it does not determine whether a goal is complete.
 
 New routes begin after existing provider history. Completion events and provider cursors survive daemon restarts; each route advances only when its queue item and receipt commit together. A busy or offline destination keeps its handoff in the delivery queue until it can be delivered. Active routes remain until explicitly removed; an inactive route whose Claude Code source stays closed for an hour is removed. `relay list --json`, the dashboard, and native handoff controls show the condition, pending event count, and capture/consumption error. Queued means persisted for delivery, not received by the destination. See [relay recovery](docs/maintainers/durable-relays.md).
+
+### Ask for a completion report
+
+Ask an agent you hand work to to end its final message with a completion report: one line of JSON in a fenced `agenthail-report` block saying whether it finished, why it stopped, and which commits and files it touched.
+
+````markdown
+```agenthail-report
+{"v":1,"status":"blocked","stop":"needsInput","reason":"The retry limit is not specified","commits":["0d825e4d"],"paths":["internal/export/retry.go"],"next":"Choose the retry limit"}
+```
+````
+
+Read it from the agent's latest reply:
+
+```bash
+agenthail last @builder 1 --json \
+  | jq -e '.exchanges[-1].assistant | capture("(?:\\A|\n)`{3}agenthail-report\n(?<r>[^\n]+)\n`{3}\\s*\\z").r | fromjson'
+```
+
+The report is the agent's own claim; check the commits before you rely on them. The [operations skill](skills/agenthail-operations/SKILL.md#completion-report) defines every field. Agents that have the skill write one when they finish dispatched work.
 
 ## Give each project a coordinator
 

@@ -6,9 +6,56 @@ struct ClaudeCreationSettings {
     var agent = ""
     var effort = ""
     var permissionMode = ""
+    var account = ""
     var fields: [String: String] {
-        ["name": name, "worktree": worktree, "agent": agent, "effort": effort, "permissionMode": permissionMode].filter { !$0.value.isEmpty }
+        ["name": name, "worktree": worktree, "agent": agent, "effort": effort, "permissionMode": permissionMode, "account": account].filter { !$0.value.isEmpty }
     }
+}
+
+/// A Claude config directory and the account signed into it. The primary
+/// directory is chosen by sending no account.
+struct ClaudeAccountOption: Decodable, Hashable, Identifiable {
+    struct Usage: Decodable, Hashable {
+        struct Limit: Decodable, Hashable {
+            let kind: String
+            let percent: Double
+            var resetsAt: String? = nil
+        }
+        var limits: [Limit]? = nil
+    }
+    let name: String
+    let root: String
+    let label: String
+    let primary: Bool
+    let signedIn: Bool
+    var usage: Usage? = nil
+    var id: String { root }
+    var choice: String { primary ? "" : root }
+
+    func exhaustedUntil(now: Date = Date()) -> Date? {
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        let resets = (usage?.limits ?? []).filter { $0.percent >= 100 }.compactMap { limit in
+            limit.resetsAt.flatMap { parser.date(from: $0) ?? plain.date(from: $0) }
+        }.filter { $0 > now }
+        return resets.max()
+    }
+
+    var menuLabel: String {
+        var parts = [label]
+        if let until = exhaustedUntil() {
+            parts.append("out of usage until \(until.formatted(date: .abbreviated, time: .shortened))")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+struct SessionAccount: Codable, Hashable {
+    let name: String
+    let root: String
+    var email: String? = nil
+    let label: String
 }
 
 struct SessionCreationOptions: Decodable {
@@ -17,6 +64,7 @@ struct SessionCreationOptions: Decodable {
     let surfaces: [Surface]
     let projects: [LaunchProject]
     var launchers: [LauncherOption]? = nil
+    var claudeAccounts: [ClaudeAccountOption]? = nil
 }
 
 /// A project a new session can start in, most recently active first. The
@@ -61,6 +109,7 @@ struct CreationHostPicker {
     var isLoading: Bool { options == nil && loadError == nil }
     var canStart: Bool { options != nil && (selected.isEmpty || selectedHost?.isAvailable == true) }
     var projects: [LaunchProject] { options?.projects ?? [] }
+    var claudeAccounts: [ClaudeAccountOption] { options?.claudeAccounts ?? [] }
 
     mutating func update(daemon: DaemonState?) {
         let paired = daemon?.hosts ?? []
@@ -253,6 +302,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var unavailableReason: String? = nil
     var transport: String? = nil
     var waitingOn: WaitingState? = nil
+    var claudeAccount: SessionAccount? = nil
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }

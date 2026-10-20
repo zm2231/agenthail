@@ -48,7 +48,11 @@ func (d *Daemon) sessionOptionsHandler(w http.ResponseWriter, r *http.Request) {
 	if d.transportResolver != nil {
 		launchers = d.transportResolver.Options(r.Context())
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"host": d.localHost(), "surfaces": options, "projects": projects, "launchers": launchers})
+	claudeAccounts := []surface.ClaudeAccount{}
+	if accounts := d.claudeAccounts(); accounts != nil {
+		claudeAccounts = accounts
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"host": d.localHost(), "surfaces": options, "projects": projects, "launchers": launchers, "claudeAccounts": claudeAccounts})
 }
 
 const launchProjectLimit = 12

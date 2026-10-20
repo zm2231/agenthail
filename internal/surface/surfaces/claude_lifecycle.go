@@ -97,6 +97,19 @@ func validateClaudeStart(options surface.SessionStartOptions) error {
 	return nil
 }
 
+// startRoot is the config root a new conversation runs under, "" for the
+// primary.
+func (c *Claude) startRoot(options surface.SessionStartOptions) (string, error) {
+	if options.Account == "" {
+		return "", nil
+	}
+	root, err := surface.ResolveClaudeAccountRoot(c.home, options.Account)
+	if err != nil {
+		return "", surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
+	}
+	return root, nil
+}
+
 // StartSession opens a new conversation in the Claude host and sends the
 // message as its first turn. The host answers the session's permission
 // prompts, and the session has no Remote Control. The conversation id is
@@ -105,10 +118,15 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 	if err := validateClaudeStart(options); err != nil {
 		return nil, nil, err
 	}
+	root, err := c.startRoot(options)
+	if err != nil {
+		return nil, nil, err
+	}
 	id := uuid.NewString()
 	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{
 		SessionID: id, Cwd: options.Cwd, Model: options.Model, PermissionMode: options.PermissionMode,
 		Effort: options.Effort, Agent: options.Agent, Name: options.Name, Worktree: options.Worktree,
+		ConfigDir: surface.ClaudeLaunchConfigDir(c.home, root),
 	})
 	session := &surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: opened.PID, Name: options.Name, Cwd: options.Cwd, Status: surface.StatusIdle, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
 	if err != nil {
@@ -133,6 +151,10 @@ func (s claudeBackgroundStarter) StartSession(ctx context.Context, options surfa
 	if err := validateClaudeStart(options); err != nil {
 		return nil, nil, err
 	}
+	root, err := c.startRoot(options)
+	if err != nil {
+		return nil, nil, err
+	}
 	args := []string{"--bg"}
 	for _, pair := range [][2]string{{"--model", options.Model}, {"--name", options.Name}, {"--worktree", options.Worktree}, {"--agent", options.Agent}, {"--permission-mode", options.PermissionMode}, {"--effort", options.Effort}} {
 		if pair[1] != "" {
@@ -140,7 +162,7 @@ func (s claudeBackgroundStarter) StartSession(ctx context.Context, options surfa
 		}
 	}
 	args = append(args, "--", options.Message)
-	data, err := c.backgroundCommand(ctx, "", options.Cwd, args...)
+	data, err := c.backgroundCommand(ctx, root, options.Cwd, args...)
 	if err != nil {
 		return nil, nil, claudeBackgroundRunError("Claude creation", err, data)
 	}
@@ -153,7 +175,7 @@ func (s claudeBackgroundStarter) StartSession(ctx context.Context, options surfa
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		records, listErr := c.backgroundSessions(ctx, "")
+		records, listErr := c.backgroundSessions(ctx, root)
 		if listErr == nil {
 			for _, record := range records {
 				if record.ID == shortID && record.Kind == "background" && record.SessionID != "" {
