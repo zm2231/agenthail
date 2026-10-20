@@ -33,6 +33,8 @@ dist="$ROOT/dist"
 work="$dist/.pkg-stage"
 root="$work/root"
 payload="$root/Library/Application Support/Agenthail"
+daemon_bundle="$payload/Agenthail Daemon.app"
+daemon="$daemon_bundle/Contents/MacOS/agenthail"
 component="$work/Agenthail-component.pkg"
 components="$work/components.plist"
 output="$dist/Agenthail-$version-arm64.pkg"
@@ -52,13 +54,13 @@ fi
 if [ -n "${AGENTHAIL_UPDATE_RELEASE_URL:-}" ]; then
 	ldflags="$ldflags -X github.com/zm2231/agenthail/internal/cli.latestReleaseURL=$AGENTHAIL_UPDATE_RELEASE_URL"
 fi
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$ldflags" -o "$payload/agenthail" ./cmd/agenthail
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$ldflags" -o "$work/agenthail" ./cmd/agenthail
 cp sidecar/sidecar.py sidecar/cookie.mjs "$payload/"
 cp -R skills "$payload/"
 cp README.md LICENSE COMMERCIAL.md THIRD_PARTY_NOTICES.md "$payload/"
 cp packaging/launcher.sh "$root/usr/local/bin/agenthail"
 cp packaging/uninstall.sh "$root/usr/local/bin/agenthail-uninstall"
-chmod 0755 "$payload/agenthail" "$root/usr/local/bin/agenthail" "$root/usr/local/bin/agenthail-uninstall"
+chmod 0755 "$root/usr/local/bin/agenthail" "$root/usr/local/bin/agenthail-uninstall"
 
 if [ "${AGENTHAIL_CODESIGN_IDENTITY+x}" = "x" ]; then
 	app_identity="$AGENTHAIL_CODESIGN_IDENTITY"
@@ -95,10 +97,13 @@ while IFS= read -r path; do
 		fi
 	fi
 done < <(find "$payload" -type f -perm -111 -o -type f \( -name '*.dylib' -o -name '*.so' \))
-codesign --verify --strict --verbose=2 "$payload/agenthail"
 codesign --verify --strict --verbose=2 "$payload/runtime/node/bin/node"
+AGENTHAIL_CODESIGN_IDENTITY="$app_identity" \
+AGENTHAIL_APP_VERSION="$package_version" \
+AGENTHAIL_APP_BUILD="$(git rev-list --count HEAD)" \
+	"$ROOT/scripts/build-daemon-bundle.sh" "$daemon_bundle" "$work/agenthail"
 
-AGENTHAIL_CLI_SOURCE="$payload/agenthail" \
+AGENTHAIL_CLI_SOURCE="$daemon" \
 AGENTHAIL_CODESIGN_IDENTITY="$app_identity" \
 AGENTHAIL_APP_VERSION="$package_version" \
 AGENTHAIL_APP_BUILD="$(git rev-list --count HEAD)" \

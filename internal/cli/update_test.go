@@ -46,7 +46,7 @@ func updateFixture(t *testing.T, current string, checksum string) (*App, *[]reco
 		client:          server.Client(),
 		releaseURL:      server.URL + "/latest",
 		installerTeamID: "Q5Y75DVV4M",
-		executable:      func() (string, error) { return "/Library/Application Support/Agenthail/agenthail", nil },
+		executable:      func() (string, error) { return "/Library/Application Support/Agenthail/Agenthail Daemon.app/Contents/MacOS/agenthail", nil },
 		run: func(name string, args ...string) error {
 			commands = append(commands, recordedCommand{name: name, args: append([]string(nil), args...)})
 			return nil

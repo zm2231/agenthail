@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+# The daemon runs from the Agenthail Daemon bundle, which holds its privacy
+# grants. An earlier package left the bare executable, which nothing runs now.
+rm -f "/Library/Application Support/Agenthail/agenthail"
+
 user="$(stat -f %Su /dev/console 2>/dev/null || true)"
 if [ -z "$user" ] || [ "$user" = "root" ] || [ "$user" = "loginwindow" ]; then
 	echo "Agenthail installed. Run agenthail daemon install from the user account that will operate it."

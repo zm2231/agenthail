@@ -25,7 +25,12 @@ root="$payload/Library/Application Support/Agenthail"
 app="$payload/Applications/Agenthail.app"
 package_info="$component/PackageInfo"
 
-test -x "$root/agenthail"
+daemon_bundle="$root/Agenthail Daemon.app"
+test ! -e "$root/agenthail"
+test -x "$daemon_bundle/Contents/MacOS/agenthail"
+test -x "$daemon_bundle/Contents/MacOS/agenthail-permissions"
+test "$(plutil -extract CFBundleIdentifier raw -o - "$daemon_bundle/Contents/Info.plist")" = com.agenthail.daemon
+test "$(plutil -extract CFBundleExecutable raw -o - "$daemon_bundle/Contents/Info.plist")" = agenthail
 test -x "$root/runtime/python/bin/python3"
 test -x "$root/runtime/node/bin/node"
 test -f "$root/pydeps/curl_cffi/__init__.py"
@@ -37,7 +42,7 @@ test -x "$payload/usr/local/bin/agenthail"
 test -x "$payload/usr/local/bin/agenthail-uninstall"
 test -x "$app/Contents/MacOS/Agenthail"
 if [ "$(xmllint --xpath 'count(/pkg-info/relocate/bundle)' "$package_info")" != "0" ]; then
-	echo "error: Agenthail.app is relocatable" >&2
+	echo "error: a bundle in the package is relocatable" >&2
 	exit 1
 fi
 
@@ -49,7 +54,14 @@ fi
 bash -n "$payload/usr/local/bin/agenthail" "$payload/usr/local/bin/agenthail-uninstall" "$component/Scripts/preinstall" "$component/Scripts/postinstall"
 codesign --verify --deep --strict --verbose=2 "$app"
 "$(dirname "$0")/test-macos-app-voice.sh" "$app"
-codesign --verify --strict --verbose=2 "$root/agenthail"
+codesign --verify --deep --strict --verbose=2 "$daemon_bundle"
+codesign -d --entitlements - --xml "$daemon_bundle" 2>/dev/null | grep -q com.apple.security.automation.apple-events
+codesign -d --verbose=2 "$daemon_bundle" 2>&1 | grep -Eq 'flags=0x[0-9a-f]+\([^)]*runtime'
+# A Developer ID build keeps its grants across updates only if its requirement
+# names the bundle and team rather than the build.
+if codesign -d --verbose=2 "$daemon_bundle" 2>&1 | grep -q '^Authority=Developer ID Application'; then
+	codesign -d -r- "$daemon_bundle" 2>&1 | grep -q 'designated => identifier "com.agenthail.daemon" and anchor apple generic and .*certificate leaf\[subject.OU\] = '
+fi
 
 mkdir -p "$work/home/.claude/skills" "$work/home/.codex"
 mkdir -p "$work/checkout/skills/agenthail-operations"

@@ -26,4 +26,4 @@ if [ -f "$skill/SKILL.md" ]; then
 	done
 fi
 
-exec "$AGENTHAIL_ROOT/agenthail" "$@"
+exec "$AGENTHAIL_ROOT/Agenthail Daemon.app/Contents/MacOS/agenthail" "$@"

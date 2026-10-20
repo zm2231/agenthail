@@ -101,7 +101,7 @@ the per-key read lock and invalidation are keyed on that source
 [`cookie.mjs`](../../sidecar/cookie.mjs) reads only the browser and profile
 directory it is given. Resolution opens the profile's cookie store and closes
 it unread, so a missing store and a permission error (EPERM on a protected
-folder, which on macOS needs Full Disk Access for the daemon binary) are
+folder, which on macOS needs Full Disk Access for the Agenthail Daemon bundle) are
 reported with their fix as `signin.ProblemError`, and sends fail as terminal
 `signin_unreadable` before anything is posted. A consumer that is off returns
 `signin.OffError`; sends fail as terminal `signin_off`, and doctor and health

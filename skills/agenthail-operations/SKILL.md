@@ -61,6 +61,14 @@ installer on the user's behalf. Relevant overrides are
 `AGENTHAIL_NOTION_USER`. Never print browser cookies, dashboard tokens, or
 credentials.
 
+On macOS, agents AgentHail runs use the privacy grants of Agenthail Daemon.
+When desktop automation (agent-hands) fails with a permission or
+`bootstrapTimedOut` error, run `agenthail permissions` (or read `permissions` in
+`doctor --json`): it lists Accessibility, Screen Recording and Automation per
+target as granted or missing, with the System Settings pane for each. Granting
+is the person's decision: tell them, and only run `agenthail permissions
+request` when they ask, since it puts macOS prompts on their screen.
+
 AgentHail reads these overrides from the environment of each CLI or daemon
 process and stores shared session, alias, queue, relay, and delivery state in
 `~/.agenthail/registry.db`. A launchd or systemd service does not inherit

@@ -1082,6 +1082,41 @@ struct SigninBrowserState: Codable, Identifiable, Equatable {
     var addableProfiles: [SigninDetectedProfile] { profiles.filter { $0.profileId == nil } }
 }
 
+/// The daemon's macOS privacy grants, which only the daemon can read.
+struct PermissionsState: Codable, Equatable {
+    let supported: Bool
+    let holder: String?
+    let grants: [PermissionGrant]
+    let problem: String?
+
+    var needsAttention: Bool { problem != nil || grants.contains { $0.state != "granted" } }
+}
+
+struct PermissionGrant: Codable, Equatable, Identifiable {
+    let name: String
+    let target: String?
+    let targetName: String?
+    let state: String
+    let pane: String
+    let url: String
+
+    var id: String { name + (target ?? "") }
+    var title: String { targetName.map { "\(name) of \($0)" } ?? name }
+    var stateLabel: String {
+        switch state {
+        case "granted": "Granted"
+        case "missing": "Missing"
+        case "denied": "Denied"
+        case "target_not_running": "Not checked: \(targetName ?? "the app") is not running"
+        default: "Unknown"
+        }
+    }
+}
+
+struct PermissionsRequestResponse: Codable {
+    let asked: Bool
+}
+
 struct SigninState: Codable, Equatable {
     let profiles: [SigninProfileState]
     let consumers: [SigninConsumerState]
