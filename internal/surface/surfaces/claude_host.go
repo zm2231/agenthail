@@ -168,7 +168,7 @@ func claudeHostDeliveryError(err error) error {
 	switch {
 	case errors.As(err, &unknown), claudehost.IsCode(err, "unknown"):
 		return surface.DeliveryOutcomeUnknown(err)
-	case errors.Is(err, claudehost.ErrNotRunning), claudehost.IsCode(err, "draining"), claudehost.IsCode(err, "held"):
+	case errors.Is(err, claudehost.ErrNotRunning), errors.Is(err, claudehost.ErrOtherProtocol), claudehost.IsCode(err, "draining"), claudehost.IsCode(err, "held"):
 		return surface.DeliveryUnavailable(fmt.Errorf("%w: %s", surface.ErrDeliveryHeld, err))
 	case claudehost.IsCode(err, "invalid"):
 		return surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)

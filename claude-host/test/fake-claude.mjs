@@ -131,17 +131,24 @@ async function turn(message) {
   state('idle');
 }
 
+// claudeTranscriptFile is the conversation's transcript under its config
+// root's projects, in the folder Claude names by its working directory.
+function claudeTranscriptFile() {
+  const projects = path.join(configDir, 'projects');
+  const existing = fs.existsSync(projects)
+    ? fs.readdirSync(projects).map((dir) => path.join(projects, dir, `${sessionId}.jsonl`)).find((file) => fs.existsSync(file))
+    : undefined;
+  const file = existing ?? path.join(projects, process.cwd().replaceAll('/', '-'), `${sessionId}.jsonl`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  return file;
+}
+
 // With FAKE_CLAUDE_RECORD set each turn is also written to the conversation's
 // transcript under its config root's projects in Claude's own record format, appending
 // to an existing transcript of the conversation.
 function claudeTranscript(uuid, text, reply) {
   if (!process.env.FAKE_CLAUDE_RECORD) return;
-  const projects = path.join(configDir, 'projects');
-  const existing = fs.existsSync(projects)
-    ? fs.readdirSync(projects).map((dir) => path.join(projects, dir, `${sessionId}.jsonl`)).find((file) => fs.existsSync(file))
-    : undefined;
-  const file = existing ?? path.join(projects, 'fake-project', `${sessionId}.jsonl`);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const file = claudeTranscriptFile();
   const at = new Date().toISOString();
   const base = { sessionId, cwd: process.cwd(), timestamp: at };
   const records = [
@@ -156,6 +163,10 @@ function claudeTranscript(uuid, text, reply) {
 // the messaging socket a real Claude process has, so discovery finds it and
 // native peer messages reach it.
 if (process.env.FAKE_CLAUDE_RECORD) {
+  // Like Claude, --name names the process and titles the conversation; a
+  // process started without it gets a derived name, resumed or not.
+  const naming = flag('name') ? { name: flag('name'), nameSource: 'user' } : { name: `fake-${process.pid}`, nameSource: 'derived' };
+  if (flag('name')) fs.appendFileSync(claudeTranscriptFile(), JSON.stringify({ type: 'custom-title', customTitle: flag('name'), sessionId }) + '\n');
   const socket = `/tmp/cc-socks/${process.pid}.sock`;
   const record = path.join(configDir, 'sessions', `${process.pid}.json`);
   fs.mkdirSync('/tmp/cc-socks', { recursive: true, mode: 0o700 });
@@ -180,7 +191,7 @@ if (process.env.FAKE_CLAUDE_RECORD) {
       });
     })
     .listen(socket, () => {
-      fs.writeFileSync(record, JSON.stringify({ pid: process.pid, sessionId, cwd: process.cwd(), startedAt: Date.now(), kind: 'interactive', entrypoint: 'sdk-cli', status: 'idle', messagingSocketPath: socket, peerProtocol: 1 }));
+      fs.writeFileSync(record, JSON.stringify({ pid: process.pid, sessionId, cwd: process.cwd(), startedAt: Date.now(), kind: 'interactive', entrypoint: 'sdk-cli', status: 'idle', messagingSocketPath: socket, peerProtocol: 1, ...naming }));
     });
 }
 

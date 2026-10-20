@@ -14,7 +14,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { parseArgs } from 'node:util';
 
-const PROTOCOL = 2;
+const PROTOCOL = 3;
 const LOCK_FD = 3;
 const MAX_EVENTS = 4096;
 const MAX_LINE = 1 << 20;
@@ -259,7 +259,7 @@ async function open(params) {
   for (const name of ['model', 'agent', 'name', 'worktree']) {
     if (params[name] !== undefined && typeof params[name] !== 'string') throw new HostError('invalid', `${name} must be a string`);
   }
-  if (params.resume && (params.name || params.worktree)) throw new HostError('invalid', 'a resumed session keeps its name and worktree');
+  if (params.resume && params.worktree) throw new HostError('invalid', 'a resumed session keeps its worktree');
   if (params.configDir !== undefined && (typeof params.configDir !== 'string' || !path.isAbsolute(params.configDir))) {
     throw new HostError('invalid', `configDir must be an absolute path: ${params.configDir}`);
   }

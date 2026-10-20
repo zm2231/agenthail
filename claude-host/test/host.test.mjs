@@ -134,7 +134,7 @@ test('open, send and stream a turn bound to the message uuid', async () => {
   const f = fixture();
   await startHost(f, { version: '1.2.3' });
   const c = new Client(f.socket);
-  assert.deepEqual(await c.call('hello'), { protocol: 2, hostVersion: '1.2.3', pid: (await c.call('hello')).pid });
+  assert.deepEqual(await c.call('hello'), { protocol: 3, hostVersion: '1.2.3', pid: (await c.call('hello')).pid });
   await c.call('subscribe', { after: 0 });
   const id = randomUUID();
   const opened = await c.call('open', { sessionId: id, cwd: f.cwd, permissionMode: 'acceptEdits', model: 'opus', effort: 'high', agent: 'reviewer', name: 'Review the parser' });
@@ -494,7 +494,7 @@ test('a Claude that cannot be started fails the open and leaves the host running
   await assert.rejects(c.call('open', { sessionId: randomUUID(), cwd: f.cwd }), { code: 'open_failed' });
   await sleep(200);
   assert.equal(host.exitCode, null, host.stderrText);
-  assert.equal((await new Client(f.socket).call('hello')).protocol, 2);
+  assert.equal((await new Client(f.socket).call('hello')).protocol, 3);
   c.close();
 });
 
@@ -684,7 +684,7 @@ test('open rejects a bad request', async () => {
   await assert.rejects(c.call('open', { cwd: f.cwd, sessionId: 'nope' }), { code: 'invalid' });
   await assert.rejects(c.call('open', { cwd: f.cwd, permissionMode: 'yolo' }), { code: 'invalid' });
   await assert.rejects(c.call('open', { cwd: f.cwd, effort: 'extreme' }), { code: 'invalid' });
-  await assert.rejects(c.call('open', { cwd: f.cwd, resume: randomUUID(), name: 'renamed' }), { code: 'invalid' });
+  await assert.rejects(c.call('open', { cwd: f.cwd, resume: randomUUID(), worktree: 'elsewhere' }), { code: 'invalid' });
   await assert.rejects(c.call('open', { cwd: f.cwd, configDir: 'relative/claude' }), { code: 'invalid' });
   await assert.rejects(c.call('nope'), { code: 'invalid' });
   c.close();

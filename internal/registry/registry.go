@@ -1242,6 +1242,31 @@ func escapeLike(value string) string {
 	return strings.ReplaceAll(value, `_`, `\_`)
 }
 
+// NamedSession is a session of this host and the alias it answers to, if any.
+type NamedSession struct {
+	ID    string
+	Alias string
+}
+
+// SessionsNamed lists this host's top-level sessions of a surface whose name
+// is exactly name, most recently updated first.
+func (r *Registry) SessionsNamed(kind surface.SurfaceKind, name string) ([]NamedSession, error) {
+	rows, err := r.read.Query(`SELECT s.id, COALESCE((SELECT a.name FROM aliases a WHERE a.session_id = s.id ORDER BY a.created_at LIMIT 1),'') FROM sessions s WHERE s.host_id='' AND s.parent_session_id='' AND s.surface = ? AND s.name = ? ORDER BY s.updated_at DESC, s.id`, string(kind), name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []NamedSession
+	for rows.Next() {
+		var session NamedSession
+		if err := rows.Scan(&session.ID, &session.Alias); err != nil {
+			return nil, err
+		}
+		out = append(out, session)
+	}
+	return out, rows.Err()
+}
+
 func (r *Registry) matchingIDs(query string, args ...any) ([]string, error) {
 	rows, err := r.read.Query(query, args...)
 	if err != nil {

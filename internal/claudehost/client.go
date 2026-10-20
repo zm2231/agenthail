@@ -17,12 +17,17 @@ import (
 // Protocol is the host protocol this build speaks. A host that answers hello
 // with another protocol or version is replaced: it retires and serves its
 // sessions until each closes, or is stopped when it cannot retire.
-const Protocol = 2
+const Protocol = 3
 
 const maxResponseBytes = 4 << 20
 
 // ErrNotRunning means no host answered on the socket. Nothing was sent.
 var ErrNotRunning = errors.New("the Claude host is not running")
+
+// ErrOtherProtocol means the host on the socket speaks another protocol than
+// this build, as an older host does until the daemon replaces it. Nothing was
+// sent.
+var ErrOtherProtocol = errors.New("the Claude host speaks another protocol")
 
 // Error is the host's answer to a failed request. Its Code says what
 // happened: only "unknown" means the message may still reach Claude.
@@ -214,11 +219,18 @@ func (c Client) Hello(ctx context.Context) (Hello, error) {
 	return out, c.call(ctx, "hello", struct{}{}, &out)
 }
 
-// Open opens a session in the host. A conversation a retiring host still
-// runs is held by the current one; Open returns it as that host lists it.
+// Open opens a session in a host of this build's protocol. A conversation a
+// retiring host still runs is held by the current one; Open returns it as that
+// host lists it.
 func (c Client) Open(ctx context.Context, request OpenRequest) (Session, error) {
 	var out Session
-	err := c.call(ctx, "open", request, &out)
+	hello, err := c.Hello(ctx)
+	if err == nil && hello.Protocol != Protocol {
+		err = fmt.Errorf("%w: pid %d runs %s protocol %d, and this build opens sessions with protocol %d", ErrOtherProtocol, hello.PID, hello.HostVersion, hello.Protocol, Protocol)
+	}
+	if err == nil {
+		err = c.call(ctx, "open", request, &out)
+	}
 	if request.Resume == "" || !(IsCode(err, "held") || errors.Is(err, ErrNotRunning)) {
 		return out, err
 	}

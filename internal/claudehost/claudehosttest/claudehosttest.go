@@ -3,6 +3,7 @@
 package claudehosttest
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -83,7 +84,16 @@ func (f *Fixture) launch(t testing.TB, script, version string, env ...string) cl
 	if _, err := os.Stat(filepath.Join(hostDir, "node_modules", "@anthropic-ai", "claude-agent-sdk")); err != nil {
 		t.Fatalf("install the host's dependencies first (npm ci --prefix claude-host): %v", err)
 	}
-	env = append(append(os.Environ(), "FAKE_CLAUDE_DIR="+f.ClaudeDir, "FAKE_CLAUDE_RECORD=1", "HOME="+f.Home,
+	// launchd starts the daemon's host without the environment of the Claude
+	// session these tests may run in, whose host sets variables that change
+	// what Claude reports.
+	var inherited []string
+	for _, variable := range os.Environ() {
+		if !strings.HasPrefix(variable, "CLAUDE_CODE_") {
+			inherited = append(inherited, variable)
+		}
+	}
+	env = append(append(inherited, "FAKE_CLAUDE_DIR="+f.ClaudeDir, "FAKE_CLAUDE_RECORD=1", "HOME="+f.Home,
 		"NODE_OPTIONS=--report-on-signal --report-signal=SIGUSR2 --report-directory="+f.reportDir()), env...)
 	return claudehost.Launch{
 		Node:    node,
@@ -95,12 +105,25 @@ func (f *Fixture) launch(t testing.TB, script, version string, env ...string) cl
 }
 
 // StartProtocol1Host starts the host Agenthail shipped before hosts could
-// retire, the way its daemon did: in its own session, holding the host lock
-// as fd 3. Its fake Claude keeps running once its input closes, as a real one
-// was seen doing.
+// retire, the way its daemon did. Its fake Claude keeps running once its input
+// closes, as a real one was seen doing.
 func (f *Fixture) StartProtocol1Host(t testing.TB, version string) claudehost.Hello {
 	t.Helper()
-	launch := f.launch(t, filepath.Join("test", "protocol1-host.mjs"), version, "FAKE_CLAUDE_OUTLIVES_INPUT=1")
+	return f.startShippedHost(t, "protocol1-host.mjs", version, "FAKE_CLAUDE_OUTLIVES_INPUT=1")
+}
+
+// StartProtocol2Host starts the host Agenthail shipped before protocol 3, the
+// way its daemon did. It retires on drain and serves its sessions to the end.
+func (f *Fixture) StartProtocol2Host(t testing.TB, version string) claudehost.Hello {
+	t.Helper()
+	return f.startShippedHost(t, "protocol2-host.mjs", version)
+}
+
+// startShippedHost starts a host script an earlier Agenthail shipped the way
+// its daemon did: in its own session, holding the host lock as fd 3.
+func (f *Fixture) startShippedHost(t testing.TB, script, version string, env ...string) claudehost.Hello {
+	t.Helper()
+	launch := f.launch(t, filepath.Join("test", script), version, env...)
 	state := claudehost.StateDir(f.Home)
 	if err := os.MkdirAll(state, 0700); err != nil {
 		t.Fatal(err)
@@ -131,7 +154,7 @@ func (f *Fixture) StartProtocol1Host(t testing.TB, version string) claudehost.He
 	go func() { _ = cmd.Wait() }()
 	client := claudehost.NewClient(f.Home)
 	var hello claudehost.Hello
-	WaitFor(t, "the protocol 1 host", func() bool {
+	WaitFor(t, "the shipped host "+script, func() bool {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		hello, err = client.Hello(ctx)
@@ -167,15 +190,39 @@ func (f *Fixture) Start(t testing.TB) claudehost.Client {
 	return client
 }
 
-// Open opens a new session in the host and waits until discovery can see it.
+// Open opens a new session in the host on client's socket and waits until
+// discovery can see it. It speaks to the host directly, as the Agenthail that
+// started that host did, so it opens sessions in hosts of any protocol.
 func (f *Fixture) Open(t testing.TB, client claudehost.Client, sessionID string) claudehost.Session {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	session, err := client.Open(ctx, claudehost.OpenRequest{SessionID: sessionID, Cwd: f.Cwd})
+	conn, err := net.DialTimeout("unix", client.Socket, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	request, err := json.Marshal(map[string]any{"id": 1, "method": "open", "params": claudehost.OpenRequest{SessionID: sessionID, Cwd: f.Cwd}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write(append(request, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reply struct {
+		Result claudehost.Session `json:"result"`
+		Error  *claudehost.Error  `json:"error"`
+	}
+	if err := json.Unmarshal(line, &reply); err != nil {
+		t.Fatal(err)
+	}
+	if reply.Error != nil {
+		t.Fatal(reply.Error)
+	}
+	session := reply.Result
 	record := filepath.Join(f.Home, ".claude", "sessions", strconv.Itoa(session.PID)+".json")
 	WaitFor(t, "the session record", func() bool { _, err := os.Stat(record); return err == nil })
 	return session
