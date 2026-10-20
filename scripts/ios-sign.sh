@@ -14,13 +14,13 @@ case "${1:-}" in
     : "${SIGNING_IDENTITIES_P12:?missing APPLE_IOS_SIGNING_IDENTITIES_P12_BASE64}"
     : "${SIGNING_IDENTITIES_P12_PASSWORD:?missing APPLE_IOS_SIGNING_IDENTITIES_P12_PASSWORD}"
     : "${PROVISIONING_PROFILE:?missing APPLE_IOS_PROVISIONING_PROFILE_BASE64}"
+    : "${NOTIFICATION_SERVICE_PROVISIONING_PROFILE:?missing APPLE_IOS_NOTIFICATION_SERVICE_PROVISIONING_PROFILE_BASE64}"
     : "${ASC_KEY:?missing APPLE_NOTARY_KEY_BASE64}"
     : "${ASC_KEY_ID:?missing APPLE_NOTARY_KEY_ID}"
     umask 077
     KEYCHAIN_PATH="$RUNNER_TEMP/agenthail-ios-signing.keychain-db"
     KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
     printf '%s' "$SIGNING_IDENTITIES_P12" | base64 --decode > "$RUNNER_TEMP/SigningIdentities.p12"
-    printf '%s' "$PROVISIONING_PROFILE" | base64 --decode > "$RUNNER_TEMP/Agenthail.mobileprovision"
     security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
     security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
     security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
@@ -40,21 +40,42 @@ case "${1:-}" in
       fi
     done < <(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | sed -nE 's/^[[:space:]]*[0-9]+\) ([0-9A-F]+) "(Apple Development:[^"]+)"/\1|\2/p')
     test -n "$DEVELOPMENT_IDENTITY"
-    security cms -D -i "$RUNNER_TEMP/Agenthail.mobileprovision" -o "$RUNNER_TEMP/Agenthail-profile.plist"
-    PROFILE_UUID="$(plutil -extract UUID raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")"
-    PROFILE_NAME="$(plutil -extract Name raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")"
-    PROFILE_EXPIRATION="$(plutil -extract ExpirationDate raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")"
-    PROFILE_CERT_SHA="$(plutil -extract DeveloperCertificates.0 raw -o - "$RUNNER_TEMP/Agenthail-profile.plist" | base64 --decode | shasum -a 256 | awk '{print $1}')"
     SIGNING_CERT_SHA="$(security find-certificate -c "$SIGNING_IDENTITY" -p "$KEYCHAIN_PATH" | openssl x509 -outform DER | shasum -a 256 | awk '{print $1}')"
-    test "$(plutil -extract TeamIdentifier.0 raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")" = "$APPLE_TEAM_ID"
-    test "$(plutil -extract Entitlements.application-identifier raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")" = "$APPLE_TEAM_ID.$IOS_BUNDLE_ID"
-    test "$PROFILE_CERT_SHA" = "$SIGNING_CERT_SHA"
-    [[ "$PROFILE_EXPIRATION" > "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" ]]
-    mkdir -p "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
-    mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-    cp "$RUNNER_TEMP/Agenthail.mobileprovision" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
-    cp "$RUNNER_TEMP/Agenthail.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
-    test -n "$PROFILE_NAME"
+    mkdir -p "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" "$HOME/Library/MobileDevice/Provisioning Profiles"
+    install_profile() {
+      local encoded="$1" name="$2" bundle="$3" profile plist uuid index cert_found
+      profile="$RUNNER_TEMP/$name.mobileprovision"
+      plist="$RUNNER_TEMP/$name-profile.plist"
+      printf '%s' "$encoded" | base64 --decode > "$profile"
+      security cms -D -i "$profile" -o "$plist"
+      uuid="$(plutil -extract UUID raw -o - "$plist")"
+      test -n "$(plutil -extract Name raw -o - "$plist")"
+      test "$(plutil -extract TeamIdentifier.0 raw -o - "$plist")" = "$APPLE_TEAM_ID"
+      test "$(plutil -extract Entitlements.application-identifier raw -o - "$plist")" = "$APPLE_TEAM_ID.$bundle"
+      test "$(plutil -extract Entitlements.get-task-allow raw -o - "$plist")" = "false"
+      if plutil -extract ProvisionedDevices raw -o - "$plist" >/dev/null 2>&1; then
+        echo "$name profile lists devices; an App Store profile is required" >&2
+        exit 1
+      fi
+      plutil -extract Entitlements.keychain-access-groups json -o - "$plist" \
+        | grep -Fq -e "\"$APPLE_TEAM_ID.*\"" -e "\"$APPLE_TEAM_ID.$IOS_BUNDLE_ID.shared\""
+      [[ "$(plutil -extract ExpirationDate raw -o - "$plist")" > "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" ]]
+      cert_found=false
+      for index in $(seq 0 $(( $(plutil -extract DeveloperCertificates raw -o - "$plist") - 1 ))); do
+        if [[ "$(plutil -extract "DeveloperCertificates.$index" raw -o - "$plist" | base64 --decode | shasum -a 256 | awk '{print $1}')" == "$SIGNING_CERT_SHA" ]]; then
+          cert_found=true
+        fi
+      done
+      if [[ "$cert_found" != true ]]; then
+        echo "$name profile does not include the Apple Distribution certificate" >&2
+        exit 1
+      fi
+      cp "$profile" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$uuid.mobileprovision"
+      cp "$profile" "$HOME/Library/MobileDevice/Provisioning Profiles/$uuid.mobileprovision"
+      printf '%s\n' "$uuid" > "$RUNNER_TEMP/$name.profile-uuid"
+    }
+    install_profile "$PROVISIONING_PROFILE" Agenthail "$IOS_BUNDLE_ID"
+    install_profile "$NOTIFICATION_SERVICE_PROVISIONING_PROFILE" AgenthailNotificationService "$IOS_BUNDLE_ID.NotificationService"
     mkdir -p "$HOME/.appstoreconnect/private_keys"
     printf '%s' "$ASC_KEY" | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
     chmod 600 "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
@@ -81,26 +102,27 @@ case "${1:-}" in
       CURRENT_PROJECT_VERSION="$build"
     ;;
   export)
-    : "${ASC_KEY_ID:?missing APPLE_NOTARY_KEY_ID}"
-    : "${ASC_ISSUER_ID:?missing APPLE_NOTARY_ISSUER_ID}"
     archive="$2" export_dir="$3"
+    app_profile="$(cat "$RUNNER_TEMP/Agenthail.profile-uuid")"
+    service_profile="$(cat "$RUNNER_TEMP/AgenthailNotificationService.profile-uuid")"
     cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>method</key><string>app-store-connect</string>
-  <key>signingStyle</key><string>automatic</string>
+  <key>signingStyle</key><string>manual</string>
+  <key>signingCertificate</key><string>Apple Distribution</string>
   <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+  <key>provisioningProfiles</key><dict>
+    <key>${IOS_BUNDLE_ID}</key><string>${app_profile}</string>
+    <key>${IOS_BUNDLE_ID}.NotificationService</key><string>${service_profile}</string>
+  </dict>
 </dict></plist>
 PLIST
     xcodebuild -exportArchive \
       -archivePath "$archive" \
       -exportPath "$export_dir" \
-      -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
-      -allowProvisioningUpdates \
-      -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8" \
-      -authenticationKeyID "$ASC_KEY_ID" \
-      -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+      -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
     ;;
   verify)
     ipa="$2"
@@ -126,7 +148,10 @@ PLIST
     test "$(entitlement "$RUNNER_TEMP/ios-entitlements.plist" keychain-access-groups:1)" = "$shared"
     test "$(entitlement "$RUNNER_TEMP/ios-service-entitlements.plist" get-task-allow)" = "false"
     test "$(entitlement "$RUNNER_TEMP/ios-service-entitlements.plist" keychain-access-groups:0)" = "$shared"
-    ! entitlement "$RUNNER_TEMP/ios-service-entitlements.plist" keychain-access-groups:1 >/dev/null 2>&1
+    if entitlement "$RUNNER_TEMP/ios-service-entitlements.plist" keychain-access-groups:1 >/dev/null 2>&1; then
+      echo "the notification service has a keychain group beyond the shared one" >&2
+      exit 1
+    fi
     ;;
   *)
     echo "usage: $0 import | archive ARCHIVE VERSION BUILD | export ARCHIVE EXPORT_DIR | verify IPA" >&2
