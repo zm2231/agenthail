@@ -138,6 +138,14 @@ struct ElsewhereWaitCard: View {
     let accent: Color
     let open: (() -> Void)?
 
+    /// Whether a session's wait is shown as this card rather than as a request
+    /// to answer. Claude reports a dialog only when nothing else waits, so a
+    /// request still listed alongside one is stale.
+    static func shows(_ waiting: WaitingState?, readOnly: Bool, respond: Bool) -> Bool {
+        guard let waiting else { return false }
+        return waiting.kind == "dialog" || readOnly || !respond
+    }
+
     static func heading(kind: String, surface: String) -> String {
         let agent = SessionRefinement.surfaceLabel(surface)
         switch kind {

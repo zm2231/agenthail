@@ -1462,15 +1462,16 @@ function renderRequests() {
   const panel = $("#request-panel");
   const state = app.requests || { requests: [] };
   const capabilities = app.history?.capabilities || {};
-  const cards = (state.requests || []).map(renderRequestCard);
   const mode = capabilities.permissionMode
     ? `<form class="request-mode" data-permission-mode><label for="permission-mode">Permission mode</label><select id="permission-mode" name="permissionMode">${permissionModes.map(([value, label]) => `<option value="${value}"${value === (state.permissionMode || "") ? " selected" : ""}${value === "" ? " disabled" : ""}>${escape(label)}</option>`).join("")}</select><button class="soft-button" type="submit">Change</button></form>`
     : "";
   const failure = state.error ? `<p role="status">Could not read this session's requests: ${escape(state.error)}</p>` : "";
-  // A dialog has no request to answer here, even in a session that takes
-  // answers, so it always says where to settle it.
-  const dialog = app.selected?.waitingOn?.kind === "dialog" ? renderElsewhereWait(app.selected) : "";
-  panel.innerHTML = dialog + cards.join("") + failure + mode;
+  // Claude reports a dialog only when nothing else waits, so any request
+  // still listed is stale and the panel says where to settle the dialog.
+  const cards = app.selected?.waitingOn?.kind === "dialog"
+    ? renderElsewhereWait(app.selected)
+    : (state.requests || []).map(renderRequestCard).join("");
+  panel.innerHTML = cards + failure + mode;
   panel.hidden = panel.innerHTML === "";
 }
 const backgroundKinds = { shell: "Shell", agent: "Agent", monitor: "Monitor" };

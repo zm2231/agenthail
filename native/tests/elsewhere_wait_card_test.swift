@@ -18,6 +18,16 @@ struct ElsewhereWaitCardTest {
                 fatalError("\(test.kind) on \(test.surface): \(heading)")
             }
         }
+        let shown: [(waiting: WaitingState?, readOnly: Bool, respond: Bool, shows: Bool)] = [
+            (WaitingState(kind: "dialog", id: "d"), false, true, true),
+            (WaitingState(kind: "approval", id: "a"), false, true, false),
+            (WaitingState(kind: "question", id: "q"), false, false, true),
+            (WaitingState(kind: "approval", id: "a"), true, true, true),
+            (nil, false, false, false),
+        ]
+        for test in shown where ElsewhereWaitCard.shows(test.waiting, readOnly: test.readOnly, respond: test.respond) != test.shows {
+            fatalError("\(test.waiting?.kind ?? "none") readOnly=\(test.readOnly) respond=\(test.respond): expected shows=\(test.shows)")
+        }
         _ = NSApplication.shared
         func height(at width: CGFloat) -> CGFloat {
             let card = ElsewhereWaitCard(waiting: WaitingState(kind: "question", id: "q"), surface: "claude", hostName: "cmux", accent: .accentColor, open: {})

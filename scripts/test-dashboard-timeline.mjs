@@ -219,11 +219,16 @@ assert(elements["#background-panel"].innerHTML.includes("Background work running
 
 context.app.selected = { id: "session-dialog", name: "builder", surface: "claude", status: "busy", runtime: {}, waitingOn: { kind: "dialog", id: "session-dialog:dialog:1" } };
 context.app.history = { capabilities: { respond: true } };
-context.app.requests = { requests: [] };
+context.app.requests = { requests: [{ id: "stale", kind: "approval", title: "Run ls" }] };
 context.renderRequests();
 assert(elements["#request-panel"].innerHTML.includes("builder has a dialog open in its terminal") && !elements["#request-panel"].hidden, "a dialog says where to settle it even in a session that takes answers");
+assert(!elements["#request-panel"].innerHTML.includes("data-request") && !elements["#request-panel"].innerHTML.includes("Run ls"), "a dialog shows no request still listed from before it opened");
+context.app.requests = { requests: [] };
 context.app.selected.waitingOn = { kind: "approval", id: "session-dialog:approval:1" };
 context.renderRequests();
 assert(elements["#request-panel"].hidden, "an approval with no request yet shows no card until its request is read");
+context.app.requests = { requests: [{ id: "live", kind: "approval", title: "Run ls" }] };
+context.renderRequests();
+assert(elements["#request-panel"].innerHTML.includes("data-request-respond=\"allow\"") && elements["#request-panel"].innerHTML.includes("Run ls"), "an approval shows its request card");
 
 console.log("dashboard timeline VM tests passed");
