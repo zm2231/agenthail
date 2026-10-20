@@ -81,7 +81,12 @@ each root. A conversation present in two roots is refused rather than guessed.
 `agenthail accounts [--json]` shows the account signed into each root, its
 cached usage, and which roots share one account. `thread create claude
 --account <name|email|dir>` starts the session under that root; `list --wide`
-shows each Claude session's account.
+shows each Claude session's account. `thread move <target> --account <root>`
+moves a Claude session to another root, `thread move --all --account <root>
+[--project P]` moves every idle one, and `thread adopt <target>` takes a
+terminal conversation into the Agenthail host. A busy session is refused (or
+waited on with `--wait`); a terminal is stopped only with `--stop-terminal`.
+Report skipped sessions as they are listed; do not retry them in a loop.
 
 One unhealthy surface does not block the others. Preserve the `errors` object
 from JSON discovery output when reporting partial availability.

@@ -1071,6 +1071,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Agent           string                     `json:"agent"`
 		PermissionMode  string                     `json:"permissionMode"`
 		Account         string                     `json:"account"`
+		StopTerminal    bool                       `json:"stopTerminal"`
 		Fork            surface.ForkOptions        `json:"fork"`
 		NativeQueue     surface.NativeQueueRequest `json:"nativeQueue"`
 		Action          string                     `json:"action"`
@@ -1707,6 +1708,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	adapter, transportErr := d.adapters().For(session)
 	if transportErr != nil {
 		http.Error(w, transportErr.Error(), http.StatusConflict)
+		return
+	}
+	if request.Action == "session-move" {
+		d.dashboardSessionMove(w, r, adapter, session, surface.MoveRequest{To: surface.MoveTarget{Account: strings.TrimSpace(request.Account)}, StopTerminal: request.StopTerminal})
 		return
 	}
 	if request.Action == "session-fork" || request.Action == "native-queue" || strings.HasPrefix(request.Action, "session-lifecycle-") {

@@ -251,6 +251,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.superviseClaudeHost(ctx)
 	}()
 	go d.sweepUploads(ctx)
+	go d.pruneClaudeMoves(ctx)
 	observerTicker := time.NewTicker(d.pollInterval)
 	defer observerTicker.Stop()
 	d.scanAndRelay(ctx)

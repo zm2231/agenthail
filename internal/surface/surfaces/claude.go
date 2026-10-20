@@ -42,6 +42,7 @@ type Claude struct {
 	subagents    *claudeSubagentObserver
 	transcripts  *claudeTranscriptIndex
 	host         *claudeHost
+	mcpAdder     surface.ClaudeMCPAdder
 	request      ClaudeRequest
 	localOnly    bool
 }
@@ -56,7 +57,7 @@ func NewClaudeWithRequest(signins signin.Resolver, home string, request ClaudeRe
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(), host: newClaudeHost(home)}
+	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(), host: newClaudeHost(home), mcpAdder: surface.ClaudeCLIMCPAdder(home)}
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }

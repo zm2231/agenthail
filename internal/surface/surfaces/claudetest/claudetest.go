@@ -52,9 +52,14 @@ func New(t testing.TB) *Fixture {
 	if err := process.Start(); err != nil {
 		t.Fatal(err)
 	}
+	exited := make(chan struct{})
+	go func() {
+		_ = process.Wait()
+		close(exited)
+	}()
 	t.Cleanup(func() {
 		_ = process.Process.Kill()
-		_ = process.Wait()
+		<-exited
 	})
 	// A short home keeps sockets under it within the 104-byte path limit.
 	home, err := os.MkdirTemp("", "claude")

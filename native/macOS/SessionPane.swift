@@ -18,6 +18,7 @@ final class SessionPane: ObservableObject, Identifiable {
     @Published private(set) var olderError: String?
     @Published var inspectorVisible = true
     @Published var renamingSession: SessionState?
+    @Published var movingSession: SessionMoveRequest?
     @Published private(set) var forking = false
     @Published private(set) var controlPending = false
     @Published private(set) var requests: SessionRequests?

@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 struct ClaudeCreationSettings {
@@ -29,7 +30,9 @@ struct ClaudeAccountOption: Decodable, Hashable, Identifiable {
     let primary: Bool
     let signedIn: Bool
     var usage: Usage? = nil
+    var sameAccountAs: [String]? = nil
     var id: String { root }
+    func sharesAccount(with other: ClaudeAccountOption) -> Bool { sameAccountAs?.contains(other.root) == true }
     var choice: String { primary ? "" : root }
 
     func exhaustedUntil(now: Date = Date()) -> Date? {
@@ -49,6 +52,106 @@ struct ClaudeAccountOption: Decodable, Hashable, Identifiable {
         }
         return parts.joined(separator: " · ")
     }
+}
+
+struct SessionMoveResult: Decodable, Hashable {
+    let fromRoot: String
+    let toRoot: String
+    var stopped: String? = nil
+    var unchanged: Bool? = nil
+    var sameAccount: Bool? = nil
+    var warnings: [String]? = nil
+
+    var summary: String {
+        if unchanged == true { return "Already in \((toRoot as NSString).abbreviatingWithTildeInPath)." }
+        let target = (toRoot as NSString).abbreviatingWithTildeInPath
+        var lines = [fromRoot == toRoot ? "Opened in Agenthail." : "Moved to \(target)."]
+        if let stopped { lines.append("Stopped the \(stopped) that held it.") }
+        lines.append(contentsOf: warnings ?? [])
+        return lines.joined(separator: " ")
+    }
+}
+
+struct SessionMoveReply: Decodable {
+    let ok: Bool
+    var result: SessionMoveResult? = nil
+    var error: String? = nil
+    var busy: String? = nil
+    var needsConsent: Bool? = nil
+    var unknown: Bool? = nil
+}
+
+enum SessionMoveOutcome: Equatable {
+    case moved(SessionMoveResult)
+    case needsConsent(String)
+    case busy(String)
+}
+
+/// Drives moving a Claude session to another account, or opening a terminal
+/// session in Agenthail (`adopt`), for the Mac and iPhone sheets. Stopping a
+/// terminal process always waits for the person to confirm it.
+struct SessionMoveRequest: Identifiable, Hashable {
+    let session: SessionState
+    let adopt: Bool
+    var id: String { session.id + (adopt ? "/adopt" : "/move") }
+}
+
+@MainActor
+final class SessionMoveController: ObservableObject {
+    enum Phase: Equatable {
+        case loading
+        case choosing
+        case moving
+        case confirmTerminal(String)
+        case done(String)
+        case failed(String)
+    }
+
+    @Published private(set) var accounts: [ClaudeAccountOption] = []
+    @Published var selected = ""
+    @Published private(set) var phase: Phase = .loading
+    let session: SessionState
+    let adopt: Bool
+
+    init(session: SessionState, adopt: Bool) {
+        self.session = session
+        self.adopt = adopt
+        if adopt { phase = .choosing }
+    }
+
+    var currentRoot: String? { session.claudeAccount?.root }
+    var canMove: Bool { phase == .choosing && (adopt || (!selected.isEmpty && selected != currentRoot)) }
+    var sharesAccount: Bool {
+        guard let current = accounts.first(where: { $0.root == currentRoot }), let target = accounts.first(where: { $0.root == selected }) else { return false }
+        return current.sharesAccount(with: target)
+    }
+
+    func load(api: AgenthailAPI) async {
+        guard !adopt else { return }
+        do {
+            let options = try await api.sessionOptions(host: session.remoteHostID)
+            accounts = options.claudeAccounts ?? []
+            selected = accounts.first { $0.root != currentRoot && $0.signedIn }?.root ?? ""
+            phase = accounts.count > 1 ? .choosing : .failed("Only one Claude account is set up on this host. Add another config directory to claudeConfigDirs in ~/.agenthail/config.json.")
+        } catch {
+            phase = .failed(AgenthailAPIError.userMessage(error))
+        }
+    }
+
+    func move(api: AgenthailAPI, stopTerminal: Bool = false) async {
+        phase = .moving
+        do {
+            switch try await api.moveSession(id: session.id, account: adopt ? "" : selected, stopTerminal: stopTerminal) {
+            case .moved(let result): phase = .done(result.summary)
+            case .needsConsent(let message): phase = .confirmTerminal(message)
+            case .busy(let reason): phase = .failed("The session is busy: \(reason). Move it when it is idle.")
+            }
+        } catch {
+            phase = .failed(AgenthailAPIError.userMessage(error))
+        }
+    }
+
+    func cancelConfirmation() { phase = .choosing }
 }
 
 struct SessionAccount: Codable, Hashable {
@@ -303,6 +406,11 @@ struct SessionState: Codable, Identifiable, Hashable {
     var transport: String? = nil
     var waitingOn: WaitingState? = nil
     var claudeAccount: SessionAccount? = nil
+    var runtimeKind: String? = nil
+    /// A Claude session Agenthail can open in its host: one a terminal or
+    /// background job runs, on this machine or a paired host.
+    var canAdopt: Bool { surface == "claude" && runtimeKind == "claude-cli" && !isReadOnly }
+    var canMoveAccount: Bool { surface == "claude" && !isReadOnly }
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }

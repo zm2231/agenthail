@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 const claudeAccountsTTL = 5 * time.Second
@@ -28,4 +30,25 @@ func (d *Daemon) claudeAccounts() []surface.ClaudeAccount {
 	}
 	d.claudeAccountList, d.claudeAccountsAt = accounts, time.Now()
 	return accounts
+}
+
+// pruneClaudeMoves removes the source copies moves retired more than
+// surfaces.ClaudeMoveRetention ago.
+func (d *Daemon) pruneClaudeMoves(ctx context.Context) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		if home, err := os.UserHomeDir(); err == nil {
+			if pruned, err := surfaces.PruneClaudeMoves(home, surfaces.ClaudeMoveRetention, time.Now()); err != nil {
+				d.log.Printf("prune moved Claude sessions: %s", err)
+			} else if len(pruned) > 0 {
+				d.log.Printf("removed the recovery copies of %d moved Claude sessions", len(pruned))
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }

@@ -33,6 +33,10 @@ struct SessionCommands: Commands {
             }
             .keyboardShortcut(shortcuts.keyboardShortcut(.openInNewWindow))
             .disabled(session == nil)
+            Button("Move to Account…") { if let session { pane?.movingSession = SessionMoveRequest(session: session, adopt: false) } }
+                .disabled(session?.canMoveAccount != true || pane?.removedSession != nil)
+            Button("Open in Agenthail") { if let session { pane?.movingSession = SessionMoveRequest(session: session, adopt: true) } }
+                .disabled(session?.canAdopt != true || pane?.removedSession != nil)
             Button("Fork") { if let session { pane?.fork(session) } }
                 .disabled(session.map(SessionOperationAvailability.fork) != true || pane?.removedSession != nil || pane?.forking == true)
             Divider()

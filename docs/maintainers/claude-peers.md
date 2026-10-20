@@ -33,6 +33,16 @@ No root is stored. Each pass reads the session records and transcripts of every 
 
 The account reaches `agenthail accounts [--json]`, `doctor`, the `claudeAccounts` list of `/api/v1/session-options` (answered by the host that owns the session), and each Claude row's `claudeAccount` (`name`, `root`, `email`, `label`), which is derived from the root that holds the transcript. A row whose transcript does not exist yet has no account until Claude writes it. The label is the email, with the root's name in front when two roots share the email.
 
+### Moving a session
+
+`Claude.MoveSession` (`surface.SessionMover`) moves a conversation to another root, or adopts it into the host in its own root. It holds the conversation lock throughout. It refuses a target root that is not signed in and warns, without refusing, when both roots share an account. A holder that is busy, waiting on a request, or running a shell is never stopped: the move is refused with `MoveBusyError` or waits up to `Wait`. An idle host session is closed, a background job is stopped with `claude stop`, and an idle terminal is sent SIGTERM only when the request carries `StopTerminal`; without it the move returns `MoveConsentError`.
+
+The conversation's pieces (transcript and its subagent folder, `session-env`, `file-history`, `tasks`, `todos`) are copied under the target with a `.agenthail-move` suffix and checked by SHA-256. Then each source piece is renamed with `.agenthail-moved` and each staged piece takes its live name. Every step is recorded in `~/.agenthail/claude-moves/<id>.json`, so a move interrupted at any point continues from the journal on the next attempt, and a move to the root that already holds the conversation is a no-op. Only a conversation that had a holder is resumed in the target; an exited one stays exited. The renamed source is kept for `ClaudeMoveRetention` (seven days); the daemon prunes it hourly and `thread move --prune` removes it at once.
+
+Claude Code keeps folder trust, approvals and project-local MCP servers per root in `.claude.json` `projects[<cwd>]`. The move carries them: MCP servers through `claude mcp add-json --scope local`, the rest through a compare-and-swap rewrite that keeps key order and renames a temporary file over the config only if it is unchanged since it was read. Nothing is removed from the target. A failed carry is a warning, not a failed move.
+
+The dashboard action is `session-move` with `account` and `stopTerminal`; it answers 409 with `busy` or `needsConsent`.
+
 A conversation whose records or transcripts appear in two roots is refused for sends, reads and lifecycle actions with an error naming both roots, rather than resolved to either copy. It is still listed.
 
 ## Durable reply endpoint design
