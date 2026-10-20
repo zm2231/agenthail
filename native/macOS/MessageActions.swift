@@ -19,8 +19,7 @@ struct MessageActions: View {
                 button(.edit, "Edit", symbol: "pencil", action: onEdit)
             }
         }
-        .foregroundStyle(DesktopPalette.text2)
-        .opacity(shown ? 1 : 0)
+        .foregroundStyle(shown ? DesktopPalette.text2 : Color.clear)
         .animation(.easeOut(duration: 0.12), value: shown)
         .onHover { hovering = $0 }
     }

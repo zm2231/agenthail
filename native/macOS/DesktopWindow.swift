@@ -1069,7 +1069,7 @@ struct UserBubble: View {
         .overlay(alignment: .bottomTrailing) {
             if !editing {
                 MessageActions(text: envelope.body, revealed: hovering, onEdit: onEdit == nil ? nil : { editing = true })
-                    .alignmentGuide(.bottom) { $0[.top] }
+                    .offset(y: MessageActions.height)
             }
         }
         .padding(.leading, 120)
@@ -1172,7 +1172,7 @@ struct AssistantReply: View {
             .fixedSize(horizontal: false, vertical: true)
             .overlay(alignment: .bottomLeading) {
                 MessageActions(text: text, revealed: hovering)
-                    .alignmentGuide(.bottom) { $0[.top] }
+                    .offset(y: MessageActions.height)
             }
             .onHover { hovering = $0 }
     }
