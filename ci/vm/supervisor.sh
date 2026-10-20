@@ -90,7 +90,9 @@ remove_lost_runners() {
 	local token ids id
 	token="$(installation_token '{"administration":"write"}')" || return 1
 	ids="$(all_pages "$token" "/repos/$repo/actions/runners?" runners |
-		jq -r 'select((.name | startswith("agenthail-ci-slot-")) and .status == "offline" and (.busy | not)) | .id')" || return 1
+		jq -r --argjson before $(($(date +%s) - max_vm_minutes * 60)) '
+			select((.name | test("^agenthail-ci-slot-[0-9]+-[0-9]+$")) and .status == "offline" and (.busy | not)) |
+			select((.name | split("-") | last | tonumber) < $before) | .id')" || return 1
 	for id in $ids; do
 		github "$token" DELETE "/repos/$repo/actions/runners/$id" >/dev/null || return 1
 		log "removed offline runner $id"
