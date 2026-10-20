@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"howett.net/plist"
 )
 
 const (
@@ -30,9 +31,62 @@ func (launchdService) Loaded() bool {
 	return daemonServiceLoaded() || homebrewDaemonServiceLoaded()
 }
 
-func (launchdService) Check() error               { return nil }
-func (launchdService) StatusLines() []string      { return nil }
-func (launchdService) Problems() []serviceProblem { return nil }
+func (launchdService) Check() error          { return nil }
+func (launchdService) StatusLines() []string { return nil }
+func (launchdService) Problems() []serviceProblem {
+	return packageProblems(packageInstall{daemon: packagedDaemon, bare: packageBareDaemon, launcher: packageLauncher, launchAgent: daemonServicePath()})
+}
+
+// The package installs the daemon as the main executable of the Agenthail
+// Daemon bundle, which holds its privacy grants. Earlier packages installed a
+// bare executable that the launcher and the LaunchAgent ran.
+const (
+	packageRoot       = "/Library/Application Support/Agenthail"
+	bundledDaemon     = "Agenthail Daemon.app/Contents/MacOS/agenthail"
+	packagedDaemon    = packageRoot + "/" + bundledDaemon
+	packageBareDaemon = packageRoot + "/agenthail"
+	packageLauncher   = "/usr/local/bin/agenthail"
+)
+
+type packageInstall struct {
+	daemon, bare, launcher, launchAgent string
+}
+
+// packageProblems finds what an interrupted package install left pointing at
+// the bare executable, which has no privacy grants of its own.
+func packageProblems(install packageInstall) []serviceProblem {
+	if _, err := os.Stat(install.daemon); err != nil {
+		return nil
+	}
+	var problems []serviceProblem
+	if data, err := os.ReadFile(install.launchAgent); err == nil {
+		var agent struct {
+			ProgramArguments []string `plist:"ProgramArguments"`
+		}
+		if _, err := plist.Unmarshal(data, &agent); err == nil && len(agent.ProgramArguments) > 0 && agent.ProgramArguments[0] != install.daemon {
+			problems = append(problems, serviceProblem{
+				Problem: "stale_launch_agent",
+				Detail:  fmt.Sprintf("%s runs %s rather than %s, so the agents the daemon starts lack its privacy grants", install.launchAgent, agent.ProgramArguments[0], install.daemon),
+				Fix:     "agenthail daemon install",
+			})
+		}
+	}
+	if data, err := os.ReadFile(install.launcher); err == nil && !strings.Contains(string(data), bundledDaemon) {
+		problems = append(problems, serviceProblem{
+			Problem: "stale_launcher",
+			Detail:  fmt.Sprintf("%s does not run %s", install.launcher, install.daemon),
+			Fix:     "install the Agenthail package again",
+		})
+	}
+	if _, err := os.Stat(install.bare); err == nil {
+		problems = append(problems, serviceProblem{
+			Problem: "stale_daemon_executable",
+			Detail:  fmt.Sprintf("an earlier package's daemon executable is still at %s", install.bare),
+			Fix:     fmt.Sprintf("sudo rm %q, then agenthail daemon install", install.bare),
+		})
+	}
+	return problems
+}
 
 func (launchdService) Start() error {
 	if homebrewDaemonManaged() {
