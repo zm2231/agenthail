@@ -21,8 +21,27 @@ enum KeychainStore {
         var attributes = query
         attributes[kSecValueData as String] = data
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        if PairedCredential.accounts.contains(account), let group = PairedCredential.accessGroup {
+            var shared = attributes
+            shared[kSecAttrAccessGroup as String] = group
+            let status = SecItemAdd(shared as CFDictionary, nil)
+            // An unsigned simulator build has no keychain entitlements; its
+            // notifications then arrive without buttons.
+            if status != errSecMissingEntitlement {
+                guard status == errSecSuccess else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
+                return
+            }
+        }
         let status = SecItemAdd(attributes as CFDictionary, nil)
         guard status == errSecSuccess else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
+    }
+
+    /// Moves a pairing saved before the notification service could read it
+    /// into the shared group, so its notifications can offer buttons.
+    static func shareCredential() {
+        for account in PairedCredential.accounts {
+            if let value = get(account) { try? set(value, account: account) }
+        }
     }
 
     static func get(_ account: String) -> String? {

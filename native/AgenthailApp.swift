@@ -12,13 +12,17 @@ private let sessionNotificationCategory = "AGENTHAIL_SESSION"
 private let openDashboardAction = "OPEN_DASHBOARD"
 private let replyAction = "REPLY"
 
-private func registerNotificationCategories(_ center: UNUserNotificationCenter) {
+private func baseNotificationCategories() -> [UNNotificationCategory] {
     let open = UNNotificationAction(identifier: openDashboardAction, title: "Open Agenthail")
     let reply = UNTextInputNotificationAction(identifier: replyAction, title: "Reply", textInputButtonTitle: "Send", textInputPlaceholder: "Message")
-    center.setNotificationCategories([
+    return [
         UNNotificationCategory(identifier: notificationCategory, actions: [open], intentIdentifiers: []),
         UNNotificationCategory(identifier: sessionNotificationCategory, actions: [reply, open], intentIdentifiers: []),
-    ])
+    ]
+}
+
+private func registerNotificationCategories(requestID: String? = nil, actions: [RequestNotificationAction] = []) async {
+    await RequestCategoryRegistry.shared.register(requestID: requestID, actions: actions, base: baseNotificationCategories())
 }
 
 private struct NotificationState: Codable {
@@ -106,7 +110,18 @@ enum NativeCommand {
             return 64
         }
         let center = UNUserNotificationCenter.current()
-        registerNotificationCategories(center)
+        let requestID = values["request"].flatMap { $0.isEmpty ? nil : $0 }
+        let actions = values["actions"].flatMap { try? JSONDecoder().decode([RequestNotificationAction].self, from: Data($0.utf8)) } ?? []
+        let answerable = requestID != nil && !actions.isEmpty && values["session"]?.isEmpty == false
+        let registered = DispatchSemaphore(value: 0)
+        Task {
+            await registerNotificationCategories(requestID: answerable ? requestID : nil, actions: actions)
+            registered.signal()
+        }
+        if !waitForSignal(registered, timeout: 5) {
+            writeError("Notification categories timed out.\n")
+            return 1
+        }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = message
@@ -116,6 +131,10 @@ enum NativeCommand {
             content.userInfo = ["sessionId": sessionID]
             content.threadIdentifier = sessionID
             content.categoryIdentifier = sessionNotificationCategory
+            if answerable, let requestID {
+                content.userInfo["requestId"] = requestID
+                content.categoryIdentifier = RequestNotifications.categoryIdentifier(requestID: requestID)
+            }
         }
         let request = UNNotificationRequest(identifier: values["identifier"] ?? UUID().uuidString, content: content, trigger: nil)
         let semaphore = DispatchSemaphore(value: 0)
@@ -282,7 +301,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
         NSUpdateDynamicServices()
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        registerNotificationCategories(center)
+        Task { await registerNotificationCategories() }
         KeyboardShortcuts.onKeyUp(for: .openPalette) { NotificationRoute.shared.showPalette() }
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(applicationLaunched(_:)), name: NSWorkspace.didLaunchApplicationNotification, object: nil)
         terminateDuplicateApplications()
@@ -326,7 +345,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        let sessionID = response.notification.request.content.userInfo["sessionId"] as? String
+        let userInfo = response.notification.request.content.userInfo
+        let sessionID = userInfo["sessionId"] as? String
+        if let choice = RequestNotifications.choice(forAction: response.actionIdentifier), let sessionID, let requestID = userInfo["requestId"] as? String {
+            await RequestAnswer.send(choice: choice, sessionID: sessionID, requestID: requestID, api: { try AgenthailAPI() })
+            return
+        }
         if response.actionIdentifier == replyAction, let sessionID, let text = (response as? UNTextInputNotificationResponse)?.userText {
             await MainActor.run { NotificationRoute.shared.reply(text, to: sessionID) }
             return

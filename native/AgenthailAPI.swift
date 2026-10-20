@@ -374,6 +374,25 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.result
     }
 
+    func requests(sessionID: String) async throws -> SessionRequests {
+        var components = URLComponents()
+        components.path = "/api/v1/requests"
+        components.queryItems = [URLQueryItem(name: "sessionId", value: sessionID)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await get(path)
+    }
+
+    /// Answers one open request. A request that was already answered or has
+    /// expired fails with status 409.
+    func respond(sessionID: String, requestID: String, decision: RequestDecision) async throws -> String {
+        let response: RespondResponse = try await postAction(RespondRequest(sessionId: sessionID, requestId: requestID, decision: decision))
+        return response.result.outcome
+    }
+
+    func setPermissionMode(sessionID: String, mode: String) async throws {
+        let _: EmptyResponse = try await post("/api/v1/actions", body: ["action": "permission-mode", "sessionId": sessionID, "permissionMode": mode])
+    }
+
     func projectAction(_ action: String, projectID: String? = nil, path: String? = nil) async throws -> ProjectIdentity? {
         let response: ProjectActionResponse = try await postAction(ProjectActionRequest(action: action, projectId: projectID, path: path))
         return response.project
@@ -559,6 +578,18 @@ final class AgenthailAPI: @unchecked Sendable {
         }
     }
 
+}
+
+private struct RespondRequest: Encodable {
+    let action = "respond"
+    let sessionId: String
+    let requestId: String
+    let decision: RequestDecision
+}
+
+private struct RespondResponse: Decodable {
+    struct Result: Decodable { let outcome: String }
+    let result: Result
 }
 
 struct ServerSentEventParser {

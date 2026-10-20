@@ -15,6 +15,8 @@ settings:
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "0.2.5"
     CURRENT_PROJECT_VERSION: "1"
+    AGENTHAIL_IOS_BUNDLE_ID: com.agenthail.ios
+    AGENTHAIL_KEYCHAIN_GROUP: $(AppIdentifierPrefix)$(AGENTHAIL_IOS_BUNDLE_ID).shared
 targets:
   AgenthailIOS:
     type: application
@@ -22,6 +24,7 @@ targets:
     dependencies:
       - package: WebRTC
       - package: Textual
+      - target: AgenthailIOSNotificationService
     sources:
       - path: AgenthailModels.swift
       - path: TurnSettings.swift
@@ -35,10 +38,14 @@ targets:
       - path: VoiceAudioBridge.swift
       - path: VoiceCallDiagnostics.swift
       - path: VoiceOperatorModel.swift
+      - path: RequestNotifications.swift
+      - path: RequestAnswer.swift
+      - path: RequestCard.swift
+      - path: PairedCredential.swift
       - path: iOS
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.agenthail.ios
+        PRODUCT_BUNDLE_IDENTIFIER: $(AGENTHAIL_IOS_BUNDLE_ID)
         PRODUCT_NAME: Agenthail
         INFOPLIST_KEY_CFBundleDisplayName: Agenthail
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
@@ -58,6 +65,7 @@ targets:
       properties:
         ITSAppUsesNonExemptEncryption: false
         AgenthailAPNSEnvironment: $(AGENTHAIL_APNS_ENVIRONMENT)
+        AgenthailKeychainGroup: $(AGENTHAIL_KEYCHAIN_GROUP)
         NSCameraUsageDescription: Scan the pairing code shown by Agenthail on your Mac, or take a photo to send to an agent.
         NSMicrophoneUsageDescription: Talk directly to your Codex Voice orchestrator. Audio is sent to Codex, not transcribed on this device.
         UIBackgroundModes:
@@ -80,6 +88,29 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+  AgenthailIOSNotificationService:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: RequestNotifications.swift
+      - path: PairedCredential.swift
+      - path: iOSNotificationService
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(AGENTHAIL_IOS_BUNDLE_ID).NotificationService
+        PRODUCT_NAME: AgenthailNotificationService
+        CODE_SIGN_ENTITLEMENTS: iOSNotificationService/AgenthailNotificationService.entitlements
+        TARGETED_DEVICE_FAMILY: "1,2"
+    info:
+      path: iOSNotificationService/Info.plist
+      properties:
+        CFBundleDisplayName: Agenthail
+        AgenthailKeychainGroup: $(AGENTHAIL_KEYCHAIN_GROUP)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
   AgenthailIOSTests:
     type: bundle.unit-test
     platform: iOS
