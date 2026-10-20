@@ -82,9 +82,11 @@ type claudePrompts struct {
 	// ended keeps, per session, the holds that ended lately, so a duplicate
 	// hook call that arrives after its prompt was settled takes that outcome
 	// rather than holding the prompt again.
-	ended    map[string][]*claudePrompt
-	sequence uint64
-	changed  func(ClaudePromptChange)
+	ended map[string][]*claudePrompt
+	// forgetAfter is how long an ended hold is remembered.
+	forgetAfter time.Duration
+	sequence    uint64
+	changed     func(ClaudePromptChange)
 }
 
 type claudePrompt struct {
@@ -101,9 +103,8 @@ type claudePrompt struct {
 	key     string
 	holders int
 	// recordMS is the statusUpdatedAt of the wait the record showed when the
-	// hook called, and endedAt when the hold ended.
+	// hook called.
 	recordMS int64
-	endedAt  time.Time
 	// done closes when the hold ends; decision is set before then when a
 	// person answered it through Agenthail.
 	done     chan struct{}
@@ -112,7 +113,7 @@ type claudePrompt struct {
 }
 
 func newClaudePrompts() *claudePrompts {
-	return &claudePrompts{open: map[string][]*claudePrompt{}, answered: map[string]int64{}, ended: map[string][]*claudePrompt{}}
+	return &claudePrompts{open: map[string][]*claudePrompt{}, answered: map[string]int64{}, ended: map[string][]*claudePrompt{}, forgetAfter: claudePromptDuplicateWindow}
 }
 
 // OnPromptChange registers what runs after a session gains or loses a held
@@ -268,10 +269,6 @@ func claudePromptRequest(id string, kind surface.WaitingKind, prompt ClaudePermi
 // an earlier call of a duplicate hook started.
 func (p *claudePrompts) join(sessionID string, held *claudePrompt) *claudePrompt {
 	p.mu.Lock()
-	p.ended[sessionID] = slices.DeleteFunc(p.ended[sessionID], func(ended *claudePrompt) bool { return time.Since(ended.endedAt) > claudePromptDuplicateWindow })
-	if len(p.ended[sessionID]) == 0 {
-		delete(p.ended, sessionID)
-	}
 	for _, ended := range p.ended[sessionID] {
 		if ended.key == held.key && ended.shownMS != 0 && held.recordMS == ended.shownMS {
 			p.mu.Unlock()
@@ -312,8 +309,8 @@ func (p *claudePrompts) endLocked(sessionID string, held *claudePrompt, decision
 	}
 	held.closed = true
 	held.decision = decision
-	held.endedAt = time.Now()
 	p.ended[sessionID] = append(p.ended[sessionID], held)
+	time.AfterFunc(p.forgetAfter, func() { p.forget(sessionID, held) })
 	if decision != nil && held.shownMS != 0 {
 		p.answered[sessionID] = held.shownMS
 	}
@@ -323,6 +320,15 @@ func (p *claudePrompts) endLocked(sessionID string, held *claudePrompt, decision
 	}
 	close(held.done)
 	return true
+}
+
+func (p *claudePrompts) forget(sessionID string, held *claudePrompt) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.ended[sessionID] = slices.DeleteFunc(p.ended[sessionID], func(ended *claudePrompt) bool { return ended == held })
+	if len(p.ended[sessionID]) == 0 {
+		delete(p.ended, sessionID)
+	}
 }
 
 // leave drops one caller of a hold whose hook stopped waiting. The prompt

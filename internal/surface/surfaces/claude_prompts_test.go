@@ -333,3 +333,32 @@ func TestAPromptTheRecordNeverShowsIsNotHeld(t *testing.T) {
 		t.Fatalf("decision=%+v err=%v opened=%v", decision, err, opened)
 	}
 }
+
+func TestAnEndedHoldIsForgottenAfterTheDuplicateWindow(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	writeClaudeRecord(t, home, map[string]any{"kind": "interactive", "entrypoint": "cli", "status": "waiting", "waitingFor": "permission prompt", "statusUpdatedAt": time.Now().UnixMilli()})
+	claude := NewClaude(nil, home)
+	claude.prompts.forgetAfter = 50 * time.Millisecond
+	session := terminalSession(t)
+	done, cancel := holdInBackground(claude, ClaudePermissionPrompt{SessionID: "conversation", ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"ls"}`), PID: os.Getpid()})
+	defer cancel()
+	request := awaitRequests(t, claude, session)[0]
+	if _, err := claude.Respond(context.Background(), session, request.ID, surface.Decision{Behavior: "deny"}); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		claude.prompts.mu.Lock()
+		remembered := len(claude.prompts.ended)
+		claude.prompts.mu.Unlock()
+		if remembered == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("an ended hold is still remembered with no later hook call: %d sessions", remembered)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
