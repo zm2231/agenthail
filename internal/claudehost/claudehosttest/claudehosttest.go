@@ -126,14 +126,28 @@ func (f *Fixture) Turns(t testing.TB, sessionID string) []Turn {
 		t.Fatal(err)
 	}
 	var out []Turn
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+	for _, line := range Lines(data) {
 		var turn Turn
-		if err := json.Unmarshal([]byte(line), &turn); err != nil {
+		if err := json.Unmarshal(line, &turn); err != nil {
 			t.Fatal(err)
 		}
 		out = append(out, turn)
 	}
 	return out
+}
+
+// Lines are the complete records of a JSON lines file the fake may be
+// appending to while it is read; a last line without its newline is still
+// being written.
+func Lines(data []byte) [][]byte {
+	data = data[:bytes.LastIndexByte(data, '\n')+1]
+	var lines [][]byte
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if len(bytes.TrimSpace(line)) > 0 {
+			lines = append(lines, line)
+		}
+	}
+	return lines
 }
 
 type Spawn struct {
@@ -155,9 +169,9 @@ func (f *Fixture) Spawns(t testing.TB, sessionID string) []Spawn {
 		t.Fatal(err)
 	}
 	var out []Spawn
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+	for _, line := range Lines(data) {
 		var spawn Spawn
-		if err := json.Unmarshal([]byte(line), &spawn); err != nil {
+		if err := json.Unmarshal(line, &spawn); err != nil {
 			t.Fatal(err)
 		}
 		if spawn.SessionID == sessionID {
@@ -242,11 +256,11 @@ func (f *Fixture) cliPIDs() []int {
 		return nil
 	}
 	var pids []int
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+	for _, line := range Lines(data) {
 		var spawn struct {
 			PID int `json:"pid"`
 		}
-		if json.Unmarshal([]byte(line), &spawn) == nil && spawn.PID > 0 {
+		if json.Unmarshal(line, &spawn) == nil && spawn.PID > 0 {
 			pids = append(pids, spawn.PID)
 		}
 	}

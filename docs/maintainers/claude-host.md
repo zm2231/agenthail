@@ -37,9 +37,10 @@ environment as the daemon's other Claude launches (`claudeCommandEnv`), so
 ## Protocol
 
 Newline-delimited JSON over the socket, one request per connection:
-`hello`, `open`, `send`, `interrupt`, `close`, `list`, `drain`, and `subscribe`,
-which streams events after a sequence number and reports a gap when the ring
-buffer has moved past it. A failed request returns `{code, message}`:
+`hello`, `open`, `send`, `interrupt`, `respond`, `setModel`,
+`setPermissionMode`, `close`, `list`, `drain`, and `subscribe`, which streams
+events after a sequence number and reports a gap when the ring buffer has moved
+past it. A failed request returns `{code, message}`:
 
 | Code | Meaning | Delivery outcome |
 |---|---|---|
@@ -50,13 +51,57 @@ buffer has moved past it. A failed request returns `{code, message}`:
 | `invalid` | malformed request | terminal |
 | `refused` | `open`: Claude exited with an error before it started, such as a workspace it does not trust | refused, held until a person fixes the cause |
 | `open_failed` | `open`: Claude could not be spawned, was killed, or did not start in time | unavailable, retried |
+| `stale` | `respond`: the request was already answered or withdrawn | a conflict; nothing is retried |
 
 A `send` is answered only after the SDK has taken the message for Claude's
 input, so a success means the message has left the host's queue.
 
-Every permission request is answered. Agenthail does not approve tools on a
-person's behalf, so the host denies a tool that the session's permission mode
-would prompt for, with a reason, and emits a `permission_denied` event.
+## Requests
+
+Claude asks the host, through the SDK's `canUseTool`, before a tool its
+permission mode does not allow and for every `AskUserQuestion`, in every mode
+including `bypassPermissions`. The host holds each one as an open request until
+a person answers it. There is no timeout: a request ends only with an answer,
+with Claude withdrawing it (an interrupt or the turn ending, outcome
+`withdrawn`), or with its session (`ended`). Agenthail never answers on a
+person's behalf.
+
+Each open request is listed with its session in `list` (`requests`, oldest
+first) and announced as a `request_opened` event; `request_resolved` carries its
+outcome. A request has Claude's own `requestId`, the tool, its kind
+(`question` for `AskUserQuestion`, otherwise `approval`), Claude's prompt text
+(`title`, `description`, `decisionReason`), the tool's input up to 16 KB or a
+question's questions and options, and `alwaysAllow` when Claude offers a rule
+that would allow the tool from now on.
+
+`respond({sessionId, requestId, decision})` answers one: `{behavior: "allow"}`,
+`{behavior: "allow", always: true}` (only with `alwaysAllow`), or
+`{behavior: "deny", message}`. A question is allowed with `answers`, one per
+question keyed by its text; an answer that is not one of the options is the
+person's own text. A request answered twice, for another session, or after it
+was withdrawn is `stale`.
+
+A request lives in the host process that holds Claude's prompt. Clients and the
+daemon can disconnect and come back; the request is still open. The host
+cannot outlive it: when the host exits, Claude's input closes and the Claude
+process ends without running the tool, so a new host lists no such request and
+an answer to it is `stale`. The next message resumes the conversation.
+
+The daemon follows the host's events and asks for a catalog pass when a request
+opens or resolves. For a session the host runs, the oldest open request is what
+the session waits on: its `Waiting` id is the `requestId`, so each request is
+announced once.
+
+## Model and permission mode
+
+`setModel` and `setPermissionMode` change a running session at once, between
+turns or in the middle of one. Every session is opened with Claude's consent to
+`bypassPermissions` (`allowDangerouslySkipPermissions`), so a session can be
+switched into it later; the mode it runs in is still the one asked for. Claude
+starts a resumed conversation in its settings' default mode and model, so the
+host keeps the mode and model each conversation last ran with in
+`~/.agenthail/claude-host/settings.json` and reopens a resume without them in
+those.
 
 ## Delivery
 
@@ -112,8 +157,8 @@ the host, and `thread resume` reopens it. The host keeps no background log.
 A Claude process started through the SDK does not register a Remote Control
 bridge, with or without `--remote-control`, while `claude --bg` under the same
 account does. Host sessions therefore have no `bridgeSessionId` and are not
-controllable from claude.ai or the Claude apps, and `/compact` and `/model`,
-which go through Remote Control, are unsupported for them.
+controllable from claude.ai or the Claude apps, and `/compact` is unsupported
+for them. The model and permission mode change through the host instead.
 
 ## Packaging
 

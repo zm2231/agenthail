@@ -64,11 +64,55 @@ type OpenRequest struct {
 }
 
 type Session struct {
-	SessionID string `json:"sessionId"`
-	PID       int    `json:"pid"`
-	Cwd       string `json:"cwd"`
-	State     string `json:"state"`
-	OpenedAt  string `json:"openedAt"`
+	SessionID      string    `json:"sessionId"`
+	PID            int       `json:"pid"`
+	Cwd            string    `json:"cwd"`
+	State          string    `json:"state"`
+	OpenedAt       string    `json:"openedAt"`
+	PermissionMode string    `json:"permissionMode"`
+	Model          string    `json:"model"`
+	Requests       []Request `json:"requests"`
+}
+
+// Request is a tool permission or a question Claude asked through the host,
+// which holds it until a person answers it. RequestID is Claude's own id for
+// it. Input is the tool's input; a question carries Questions instead.
+type Request struct {
+	RequestID      string          `json:"requestId"`
+	ToolUseID      string          `json:"toolUseId"`
+	Tool           string          `json:"tool"`
+	Kind           string          `json:"kind"`
+	CreatedAt      time.Time       `json:"createdAt"`
+	AlwaysAllow    bool            `json:"alwaysAllow"`
+	Title          string          `json:"title,omitempty"`
+	DisplayName    string          `json:"displayName,omitempty"`
+	Description    string          `json:"description,omitempty"`
+	DecisionReason string          `json:"decisionReason,omitempty"`
+	BlockedPath    string          `json:"blockedPath,omitempty"`
+	AgentID        string          `json:"agentId,omitempty"`
+	Input          json.RawMessage `json:"input,omitempty"`
+	Questions      []Question      `json:"questions,omitempty"`
+}
+
+type Question struct {
+	Question    string           `json:"question"`
+	Header      string           `json:"header"`
+	MultiSelect bool             `json:"multiSelect"`
+	Options     []QuestionOption `json:"options"`
+}
+
+type QuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+// Decision answers a Request: allow, optionally always, or deny with a
+// message. A question is allowed with an answer keyed by each question.
+type Decision struct {
+	Behavior string            `json:"behavior"`
+	Always   bool              `json:"always,omitempty"`
+	Message  string            `json:"message,omitempty"`
+	Answers  map[string]string `json:"answers,omitempty"`
 }
 
 type Origin struct {
@@ -120,8 +164,9 @@ type Event struct {
 	Message   json.RawMessage `json:"message,omitempty"`
 	PID       int             `json:"pid,omitempty"`
 	State     string          `json:"state,omitempty"`
-	Tool      string          `json:"tool,omitempty"`
-	Reason    string          `json:"reason,omitempty"`
+	Request   *Request        `json:"request,omitempty"`
+	RequestID string          `json:"requestId,omitempty"`
+	Outcome   string          `json:"outcome,omitempty"`
 	Error     string          `json:"error,omitempty"`
 }
 
@@ -152,6 +197,26 @@ func (c Client) Send(ctx context.Context, request SendRequest) (SendResult, erro
 
 func (c Client) Interrupt(ctx context.Context, sessionID string) error {
 	return c.call(ctx, "interrupt", map[string]string{"sessionId": sessionID}, nil)
+}
+
+// Respond answers an open request and returns how the host resolved it. A
+// request that was answered or withdrawn fails with code "stale".
+func (c Client) Respond(ctx context.Context, sessionID, requestID string, decision Decision) (string, error) {
+	var out struct {
+		Outcome string `json:"outcome"`
+	}
+	err := c.call(ctx, "respond", map[string]any{"sessionId": sessionID, "requestId": requestID, "decision": decision}, &out)
+	return out.Outcome, err
+}
+
+func (c Client) SetModel(ctx context.Context, sessionID, model string) (Session, error) {
+	var out Session
+	return out, c.call(ctx, "setModel", map[string]string{"sessionId": sessionID, "model": model}, &out)
+}
+
+func (c Client) SetPermissionMode(ctx context.Context, sessionID, mode string) (Session, error) {
+	var out Session
+	return out, c.call(ctx, "setPermissionMode", map[string]string{"sessionId": sessionID, "permissionMode": mode}, &out)
 }
 
 func (c Client) Close(ctx context.Context, sessionID string) error {
@@ -228,13 +293,20 @@ func (c Client) call(ctx context.Context, method string, params, out any) error 
 	return nil
 }
 
+// SubscribeStart is the host's answer to a subscription: Seq is its latest
+// event, and Gap reports that events after the requested one were dropped
+// from its buffer, so the caller re-reads state and subscribes after Seq.
+type SubscribeStart struct {
+	Seq uint64 `json:"seq"`
+	Gap bool   `json:"gap"`
+}
+
 // Subscribe streams events after the given sequence number until ctx ends or
-// the connection drops. gap reports that events after `after` were dropped
-// from the host's buffer, so the caller re-reads state instead of replaying.
-func (c Client) Subscribe(ctx context.Context, after uint64, onEvent func(Event)) (gap bool, err error) {
+// the connection drops. On a gap it returns at once without streaming.
+func (c Client) Subscribe(ctx context.Context, after uint64, onEvent func(Event)) (start SubscribeStart, err error) {
 	conn, err := c.dial(ctx)
 	if err != nil {
-		return false, err
+		return start, err
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Time{})
@@ -242,38 +314,35 @@ func (c Client) Subscribe(ctx context.Context, after uint64, onEvent func(Event)
 	defer stop()
 	payload, _ := json.Marshal(request{ID: 1, Method: "subscribe", Params: map[string]uint64{"after": after}})
 	if _, err := conn.Write(append(payload, '\n')); err != nil {
-		return false, err
+		return start, err
 	}
 	reader := bufio.NewReaderSize(conn, 64<<10)
 	line, err := readLine(reader)
 	if err != nil {
-		return false, err
+		return start, err
 	}
 	var reply response
 	if err := json.Unmarshal(line, &reply); err != nil {
-		return false, err
-	}
-	var started struct {
-		Gap bool `json:"gap"`
+		return start, err
 	}
 	if reply.Error != nil {
-		return false, reply.Error
+		return start, reply.Error
 	}
-	_ = json.Unmarshal(reply.Result, &started)
-	if started.Gap {
-		return true, nil
+	_ = json.Unmarshal(reply.Result, &start)
+	if start.Gap {
+		return start, nil
 	}
 	for {
 		line, err := readLine(reader)
 		if err != nil {
 			if ctx.Err() != nil {
-				return false, ctx.Err()
+				return start, ctx.Err()
 			}
-			return false, err
+			return start, err
 		}
 		var message response
 		if err := json.Unmarshal(line, &message); err != nil {
-			return false, err
+			return start, err
 		}
 		if message.Event != nil {
 			onEvent(*message.Event)

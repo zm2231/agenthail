@@ -337,3 +337,58 @@ func TestFederationMirrorKeepsEachSessionsRuntime(t *testing.T) {
 		t.Fatalf("a mirrored row with a local runtime is not routed to its host: %d %s %v", routed.Code, routed.Body.String(), remote.fake.delivered())
 	}
 }
+
+func TestAForwardedChangeIsRecordedOnTheOwningHostWithWhoMadeIt(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	qualified := hosts.Qualify(record.ID, "remote-a")
+	change := func(model string, header http.Header, bearer bool) {
+		t.Helper()
+		encoded, _ := json.Marshal(map[string]string{"action": "model", "sessionId": qualified, "model": model})
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(string(encoded)))
+		for name, values := range header {
+			request.Header[name] = values
+		}
+		if bearer {
+			request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
+		}
+		request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: dashboardTestToken})
+		response := httptest.NewRecorder()
+		local.handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", model, response.Code, response.Body.String())
+		}
+	}
+	claimCLI := http.Header{ActionActorHeader: []string{CLIActor}}
+	change("from-cli", claimCLI, true)
+	change("from-dashboard", nil, true)
+	change("cookie-claims-cli", claimCLI, false)
+
+	want := map[string]string{"from-cli": "the CLI via host ", "from-dashboard": "the dashboard via host ", "cookie-claims-cli": "the dashboard via host "}
+	entries := historyOf(t, remote.reg, "remote-a", "model")
+	if len(entries) != len(want) {
+		t.Fatalf("remote model history=%+v", entries)
+	}
+	for _, entry := range entries {
+		if prefix := "changed by " + want[entry.Message]; !strings.HasPrefix(entry.Result, prefix) || len(entry.Result) == len(prefix) {
+			t.Fatalf("%s recorded %q, want %q<host>", entry.Message, entry.Result, prefix)
+		}
+	}
+	if local := historyOf(t, local.reg, qualified, "model"); len(local) != 0 {
+		t.Fatalf("the forwarding host recorded the change itself: %+v", local)
+	}
+
+	phone := deviceToken(t, remote.reg, "Spare phone", "read", "control")
+	claimed := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(`{"action":"model","sessionId":"remote-a","model":"phone"}`))
+	claimed.Header.Set("Authorization", "Bearer "+phone)
+	claimed.Header.Set(ActionActorHeader, CLIActor)
+	response := httptest.NewRecorder()
+	remote.handler.ServeHTTP(response, claimed)
+	if response.Code != http.StatusOK {
+		t.Fatalf("phone status=%d body=%s", response.Code, response.Body.String())
+	}
+	for _, entry := range historyOf(t, remote.reg, "remote-a", "model") {
+		if entry.Message == "phone" && entry.Result != "changed by device Spare phone" {
+			t.Fatalf("a device's claimed actor was trusted: %q", entry.Result)
+		}
+	}
+}

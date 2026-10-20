@@ -120,6 +120,9 @@ func (c *Claude) Control(ctx context.Context, sess *surface.Session, control sur
 	if claudeHosted(sess) {
 		return c.hostControl(ctx, sess, control.Action, value)
 	}
+	if control.Action == "permission-mode" {
+		return nil, fmt.Errorf("%w: only a session the Claude host runs changes its permission mode here", surface.ErrUnsupported)
+	}
 	if c.localOnly || nativeClaudeOnly(sess) {
 		return nil, surface.ErrUnsupported
 	}
@@ -180,6 +183,10 @@ func validateClaudeControl(action, value string) error {
 		if value == "" || strings.ContainsAny(value, "\r\n\t ") {
 			return fmt.Errorf("one explicit model is required")
 		}
+	case "permission-mode":
+		if !validClaudePermissionMode(value) {
+			return fmt.Errorf("permission mode must be one of %s", strings.Join(claudePermissionModes, ", "))
+		}
 	case "steer":
 		if value == "" || strings.HasPrefix(value, "/") {
 			return fmt.Errorf("steer requires a message, not a slash command")
@@ -200,10 +207,13 @@ func validateClaudeControl(action, value string) error {
 	return nil
 }
 
-// hostControl keeps the Claude host's own interrupt and steer. The host
-// returns once the SDK acknowledges the interrupt or takes the turn.
+// hostControl keeps the Claude host's own interrupt, steer, model and
+// permission mode. The host returns once the SDK acknowledges the change or
+// takes the turn.
 func (c *Claude) hostControl(ctx context.Context, sess *surface.Session, action, value string) (*surface.ControlResult, error) {
 	switch action {
+	case "model", "permission-mode":
+		return c.hostSetting(ctx, sess, action, value)
 	case "interrupt":
 		if err := c.interruptHost(ctx, sess); err != nil {
 			return nil, err

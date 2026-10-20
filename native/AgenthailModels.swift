@@ -157,12 +157,14 @@ struct Capabilities: Codable, Hashable {
     var interrupt = false
     var steer = false
     var attach = false
+    var commands = false
 
-    init(send: Bool = false, stream: Bool = false, reply: Bool = false, goal: Bool = false, compact: Bool = false, model: Bool = false, interrupt: Bool = false, steer: Bool = false, attach: Bool = false) {
-        (self.send, self.stream, self.reply, self.goal, self.compact, self.model, self.interrupt, self.steer, self.attach) = (send, stream, reply, goal, compact, model, interrupt, steer, attach)
+    init(send: Bool = false, stream: Bool = false, reply: Bool = false, goal: Bool = false, compact: Bool = false, model: Bool = false, interrupt: Bool = false, steer: Bool = false, attach: Bool = false, commands: Bool = false) {
+        (self.send, self.stream, self.reply, self.goal, self.compact, self.model, self.interrupt, self.steer, self.attach, self.commands) = (send, stream, reply, goal, compact, model, interrupt, steer, attach, commands)
     }
 
-    // A paired host on an older release omits attach; it cannot store uploads.
+    // A paired host on an older release omits attach and commands; it cannot
+    // store uploads or run Remote Control commands.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         send = try container.decode(Bool.self, forKey: .send)
@@ -174,6 +176,7 @@ struct Capabilities: Codable, Hashable {
         interrupt = try container.decode(Bool.self, forKey: .interrupt)
         steer = try container.decode(Bool.self, forKey: .steer)
         attach = try container.decodeIfPresent(Bool.self, forKey: .attach) ?? false
+        commands = try container.decodeIfPresent(Bool.self, forKey: .commands) ?? false
     }
 }
 
