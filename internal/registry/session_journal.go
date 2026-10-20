@@ -473,6 +473,90 @@ func (r *Registry) SessionJournalBody(sessionID, ref string, start, end int) ([]
 	return append([]byte(nil), body[:end-start]...), total, nil
 }
 
+// SessionJournalDerivation returns the version of the item derivation a
+// session's journal was last rebuilt with, 0 when it never was.
+func (r *Registry) SessionJournalDerivation(sessionID string) (int, error) {
+	var version int
+	err := r.read.QueryRow(`SELECT derived_version FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&version)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return version, err
+}
+
+// ReplaceSessionJournal rebuilds a session's journal in one transaction: it
+// removes every retained entry and appends entries in order after the
+// newest sequence, so a reader resuming from any earlier cursor receives the
+// rebuilt rows, and records derivation. It returns the entries retained.
+func (r *Registry) ReplaceSessionJournal(sessionID string, entries []SessionJournalEntry, retention SessionJournalRetention, derivation int) ([]SessionJournalEntry, error) {
+	if strings.TrimSpace(sessionID) == "" || retention.Count < 1 || retention.Bytes < 1 {
+		return nil, fmt.Errorf("invalid session journal replacement")
+	}
+	entries = entries[max(0, len(entries)-retention.Count):]
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes) VALUES(?,0,0) ON CONFLICT(session_id) DO NOTHING`, sessionID); err != nil {
+		return nil, err
+	}
+	var next uint64
+	if err := tx.QueryRow(`SELECT next_seq FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&next); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`DELETE FROM session_journal WHERE session_id=?`, sessionID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`DELETE FROM session_journal_bodies WHERE session_id=?`, sessionID); err != nil {
+		return nil, err
+	}
+	insert, err := tx.Prepare(`INSERT INTO session_journal(session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref) VALUES(?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return nil, err
+	}
+	defer insert.Close()
+	for index := range entries {
+		entry := &entries[index]
+		next++
+		entry.SessionID, entry.Seq = sessionID, next
+		entry.Bytes = len(entry.Payload) + len(entry.FullBody)
+		if entry.ObservedAt.IsZero() {
+			entry.ObservedAt = time.Now().UTC()
+		}
+		if _, err := insert.Exec(sessionID, entry.Seq, entry.Kind, entry.ProviderKey, entry.Payload, entry.ObservedAt.UTC().Format(time.RFC3339Nano), entry.Bytes, entry.BodyRef); err != nil {
+			return nil, err
+		}
+		if err := storeSessionJournalBody(tx, *entry); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := tx.Exec(`UPDATE session_journal_state SET next_seq=?,derived_version=? WHERE session_id=?`, next, derivation, sessionID); err != nil {
+		return nil, err
+	}
+	if err := trimSessionJournal(tx, sessionID, retention); err != nil {
+		return nil, err
+	}
+	var earliest sql.NullInt64
+	if err := tx.QueryRow(`SELECT MIN(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	for len(entries) > 0 && earliest.Valid && entries[0].Seq < uint64(earliest.Int64) {
+		entries = entries[1:]
+	}
+	return entries, nil
+}
+
+// MarkSessionJournalDerivation records that a session's journal holds
+// nothing to rebuild for derivation.
+func (r *Registry) MarkSessionJournalDerivation(sessionID string, derivation int) error {
+	_, err := r.db.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes,derived_version) VALUES(?,0,0,?) ON CONFLICT(session_id) DO UPDATE SET derived_version=excluded.derived_version`, sessionID, derivation)
+	return err
+}
+
 func refreshSessionJournalState(tx *sql.Tx, sessionID string) error {
 	_, err := tx.Exec(`UPDATE session_journal_state SET retained_bytes=COALESCE((SELECT SUM(bytes) FROM session_journal WHERE session_id=?),0) WHERE session_id=?`, sessionID, sessionID)
 	return err

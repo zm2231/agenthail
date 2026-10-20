@@ -2,10 +2,35 @@ package surfaces
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
 const syntheticNotification = `<task-notification>\n<task-id>task-7</task-id>\n<tool-use-id>toolu_synthetic</tool-use-id>\n<output-file>/tmp/synthetic.output</output-file>\n<status>completed</status>\n<summary>Background build finished</summary>\n</task-notification>`
+
+func TestClaudeTaskNotificationsOfOneTaskKeepTheirOwnIdentity(t *testing.T) {
+	first := `<task-notification>\n<task-id>monitor-1</task-id>\n<summary>Monitor event: first</summary>\n</task-notification>`
+	second := `<task-notification>\n<task-id>monitor-1</task-id>\n<summary>Monitor event: second</summary>\n</task-notification>`
+	path := timelineFixture(t, `{"type":"user","uuid":"n1","origin":{"kind":"task-notification"},"message":{"content":"`+first+`"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"one"}]}}
+{"type":"attachment","uuid":"q2","attachment":{"type":"queued_command","prompt":"`+second+`"}}
+{"type":"user","uuid":"n2","origin":{"kind":"task-notification"},"message":{"content":"`+second+`"}}
+{"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"two"}]}}
+`)
+	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]int{}
+	for _, item := range page.Items {
+		if item.Origin == "task-notification" {
+			ids[item.ID]++
+		}
+	}
+	if len(ids) != 2 || len(page.Exchanges) != 2 || page.Exchanges[0].User != "Monitor event: first" || page.Exchanges[1].User != "Monitor event: second" {
+		t.Fatalf("ids=%v exchanges=%+v", ids, page.Exchanges)
+	}
+}
 
 func TestClaudeTimelineClassifiesInjectedPrompts(t *testing.T) {
 	path := timelineFixture(t, `{"type":"user","uuid":"u1","origin":{"kind":"human"},"message":{"content":"Run the build"}}
@@ -49,12 +74,15 @@ func TestClaudeTimelineClassifiesInjectedPrompts(t *testing.T) {
 			t.Fatalf("item %d = %+v want %+v", index, got, expected)
 		}
 	}
-	if page.Items[1].ID != "task-notification:task-7:completed" || page.Items[2].ID != "peer:msg-1" {
+	if !strings.HasPrefix(page.Items[1].ID, "task-notification:task-7:completed:") || page.Items[2].ID != "peer:msg-1" {
 		t.Fatalf("injection identities %q %q", page.Items[1].ID, page.Items[2].ID)
 	}
 	for _, exchange := range page.Exchanges {
-		if exchange.User == "Please rebase" {
-			t.Fatal("peer body leaked into exchanges as user text")
+		if exchange.User == "Please rebase" && (exchange.Origin != "peer" || exchange.Sender != "reviewer") {
+			t.Fatalf("peer message shown as the person's words: %+v", exchange)
+		}
+		if strings.HasPrefix(exchange.User, "<task-notification>") && exchange.Origin == "" {
+			t.Fatalf("task notification shown as the person's words: %+v", exchange)
 		}
 	}
 }

@@ -2026,9 +2026,12 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	}
 	limit := 10
 	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
-		if parsed, parseErr := strconv.Atoi(rawLimit); parseErr == nil && parsed >= 1 && parsed <= 40 {
-			limit = parsed
+		parsed, parseErr := strconv.Atoi(rawLimit)
+		if parseErr != nil || parsed < 1 || parsed > surface.MaxExchangePage {
+			writeAPIError(w, http.StatusBadRequest, "invalid_limit", fmt.Sprintf("Use a limit between 1 and %d exchanges.", surface.MaxExchangePage))
+			return
 		}
+		limit = parsed
 	}
 	alias, _ := d.Registry.ReverseAlias(session.ID)
 	effective := surface.EffectiveCapabilities(adapter, session)
@@ -2179,32 +2182,25 @@ func truncateSessionExchanges(exchanges []surface.Exchange) ([]surface.Exchange,
 	for _, exchange := range exchanges {
 		metadata.OriginalBytes += len(exchange.User) + len(exchange.Assistant)
 	}
+	// Every exchange of the page is returned, so the page cursor never skips
+	// one; the newest take what older ones leave of the budget.
 	remaining := sessionTranscriptJSONBudget
-	result := make([]surface.Exchange, 0, len(exchanges))
-	for index := len(exchanges) - 1; index >= 0 && remaining > 0; index-- {
-		exchange := exchanges[index]
-		userBudget := min(sessionTranscriptFieldLimit, remaining)
+	result := make([]surface.Exchange, len(exchanges))
+	for index, exchange := range exchanges {
+		share := remaining / (len(exchanges) - index)
+		userBudget := min(sessionTranscriptFieldLimit, share)
 		if exchange.User != "" && exchange.Assistant != "" {
-			userBudget = min(userBudget, remaining/2)
+			userBudget = min(userBudget, share/2)
 		}
 		user, userEncoded, userTruncated := truncateJSONText(exchange.User, userBudget)
-		remaining -= userEncoded
-		assistant, assistantEncoded, assistantTruncated := truncateJSONText(exchange.Assistant, min(sessionTranscriptFieldLimit, remaining))
-		remaining -= assistantEncoded
-		if user == "" && assistant == "" && (exchange.User != "" || exchange.Assistant != "") {
-			metadata.Truncated = true
-			break
-		}
+		assistant, assistantEncoded, assistantTruncated := truncateJSONText(exchange.Assistant, min(sessionTranscriptFieldLimit, share-userEncoded))
+		remaining -= userEncoded + assistantEncoded
 		exchange.User = user
 		exchange.Assistant = assistant
 		metadata.ReturnedBytes += len(user) + len(assistant)
 		metadata.Truncated = metadata.Truncated || userTruncated || assistantTruncated
-		result = append(result, exchange)
+		result[index] = exchange
 	}
-	for left, right := 0, len(result)-1; left < right; left, right = left+1, right-1 {
-		result[left], result[right] = result[right], result[left]
-	}
-	metadata.Truncated = metadata.Truncated || len(result) < len(exchanges)
 	return result, metadata
 }
 

@@ -167,6 +167,12 @@ type LocalTranscriptProvider interface {
 	RequiresLocalTranscript(*Session) bool
 }
 
+// TranscriptItemReader is implemented by an adapter that can derive again,
+// from its transcript, every timeline item recorded at or after an offset.
+type TranscriptItemReader interface {
+	TranscriptItems(ctx context.Context, session *Session, from int64) ([]TimelineItem, error)
+}
+
 func IsReadOnlySession(session *Session) bool {
 	if session == nil || session.Surface != KindCodex {
 		return false
@@ -518,8 +524,13 @@ type ReplyResult struct {
 	Source   string `json:"source,omitempty"`
 }
 
+// Exchange is a prompt and the reply that ended its turn. Origin names who
+// sent a prompt that was not typed by the person: "peer", with Sender naming
+// the agent, or a prompt the provider injected, such as "task-notification".
 type Exchange struct {
 	User      string    `json:"user"`
+	Origin    string    `json:"origin,omitempty"`
+	Sender    string    `json:"sender,omitempty"`
 	Assistant string    `json:"assistant"`
 	Timestamp time.Time `json:"timestamp"`
 	Source    string    `json:"source,omitempty"`

@@ -1,13 +1,25 @@
 # Session pages and metadata
 
 `GET /api/v1/session?id=<session>&timeline=1&limit=10` returns the recent
-session journal page. `limit` counts exchanges, between 1 and 40 (default 10).
-An exchange is one turn: the prompt that opened it (a message with role `user`
-or `peer`) and the turn's last assistant message, with the prompt's timestamp.
-A reply from a different turn, or one before any prompt on the page, forms an
-exchange without a prompt. `timeline.items` holds every item of those turns, so
-the page starts at the oldest included prompt; a page holds at most 400 items,
-and a longer turn starts mid-turn. `exchanges` and `timeline.items` describe
+session journal page. `limit` counts exchanges, between 1 and 50 (default 10);
+any other value returns `400` with `error.code` set to `invalid_limit`.
+An exchange is one turn, as the provider's turn markers record it: items
+carry the turn's `turnId`, and a `done` item closes the turn. Its prompt is
+the item that opened the turn, with that item's timestamp: a message from the
+person, or one the provider injected, which the exchange labels with `origin`
+(`peer` with its `sender`, `task-notification`, `auto-continuation`, and for
+Claude `command`, `interrupt` or `system`). A prompt from the same sender
+later in the same turn, such as the question after Codex's app context, is
+appended to it; a message injected into a running turn by someone else stays
+in the turn's timeline and does not open an exchange. Items recorded without
+a turn group by role: a person's message opens an exchange, and a reply
+before any prompt forms an exchange without one. The exchange's reply is the
+turn's last assistant message. `timeline.items` holds every item of those
+turns, so the page starts at the oldest included prompt. A page reads at most
+the session's retained journal and returns the whole exchanges that fit 1 MB
+of journal rows; a single turn longer than that starts mid-turn and is marked
+truncated. Exchange text shares a 512 KB budget across every exchange of the
+page, so no exchange is dropped. `exchanges` and `timeline.items` describe
 the same turns. `timelineBefore` requests turns strictly before the returned
 `timeline.nextBefore` cursor. Items retain
 their identity, role, title, status and retained body reference. If retention
@@ -41,6 +53,14 @@ most two seconds for its first pass. A cold journal is seeded by that pass. A
 seeded journal backed by a transcript (Claude, and Codex with a local
 transcript) catches up by reading the transcript newest-first until it meets
 the journal, so turns written while no source ran appear on the next read.
+A Claude journal written by an earlier version of the item derivation is
+rebuilt from the transcript once, at a source start: in one transaction, its
+retained rows are replaced by the items the transcript records from the
+oldest retained offset, after the newest sequence, and rows the transcript
+does not hold stay after the item they followed. The journal records the
+derivation, so it is not rebuilt again. A stream client resuming from the
+newest cursor receives the rebuilt rows as upserts of the same items; an
+older cursor gets the `409` `stream_gap` response and reloads the page.
 Concurrent reads share one source and one pass, and a source that is already
 running returns at once. The page never calls a provider's metadata methods. Provider read failures are reported separately
 from an empty transcript. Sources preserve the provider's truncation flag and

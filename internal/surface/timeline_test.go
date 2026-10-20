@@ -24,3 +24,43 @@ func TestBoundSessionReadStampsSourceAndKeepsReaderReply(t *testing.T) {
 		t.Fatalf("reader reply was replaced: %+v", kept.Reply)
 	}
 }
+
+func TestExchangesFollowTurnMarkersAndLabelInjectedPrompts(t *testing.T) {
+	items := []TimelineItem{
+		{Kind: "message", Role: "user", Text: "first", TurnID: "t1", Timestamp: "2026-10-19T10:00:00Z"},
+		{Kind: "message", Role: "assistant", Text: "working", TurnID: "t1"},
+		{Kind: "message", Role: "peer", Origin: "peer", Sender: "reviewer", Text: "steer", TurnID: "t1"},
+		{Kind: "message", Role: "assistant", Text: "one", TurnID: "t1"},
+		{Kind: "done", TurnID: "t1"},
+		{Kind: "message", Role: "peer", Origin: "peer", Sender: "reviewer", Text: "after the close", TurnID: "t1", Timestamp: "2026-10-19T10:00:30Z"},
+		{Kind: "message", Role: "assistant", Text: "answered", TurnID: "t1"},
+		{Kind: "event", Role: "system", Origin: "task-notification", Text: "build finished", TurnID: "t2", Timestamp: "2026-10-19T10:01:00Z"},
+		{Kind: "message", Role: "assistant", Text: "two", TurnID: "t2"},
+		{Kind: "message", Role: "peer", Origin: "peer", Sender: "collab", Text: "next task", TurnID: "t3", Timestamp: "2026-10-19T10:02:00Z"},
+		{Kind: "message", Role: "assistant", Text: "three", TurnID: "t3"},
+		{Kind: "message", Role: "user", Text: "<app context>", TurnID: "t4", Timestamp: "2026-10-19T10:03:00Z"},
+		{Kind: "message", Role: "user", Text: "how does it work?", TurnID: "t4"},
+		{Kind: "message", Role: "assistant", Text: "like this", TurnID: "t4"},
+		{Kind: "message", Role: "user", Text: "legacy", Timestamp: "2026-10-19T10:04:00Z"},
+		{Kind: "message", Role: "assistant", Text: "four"},
+	}
+	exchanges := ExchangesFromItems(items, "journal")
+	type want struct{ user, origin, sender, assistant string }
+	wants := []want{
+		{"first", "", "", "one"},
+		{"after the close", "peer", "reviewer", "answered"},
+		{"build finished", "task-notification", "", "two"},
+		{"next task", "peer", "collab", "three"},
+		{"<app context>\n\nhow does it work?", "", "", "like this"},
+		{"legacy", "", "", "four"},
+	}
+	if len(exchanges) != len(wants) {
+		t.Fatalf("exchanges=%+v", exchanges)
+	}
+	for index, expected := range wants {
+		exchange := exchanges[index]
+		if got := (want{exchange.User, exchange.Origin, exchange.Sender, exchange.Assistant}); got != expected || exchange.Timestamp.IsZero() {
+			t.Fatalf("exchange %d = %+v want %+v", index, exchange, expected)
+		}
+	}
+}

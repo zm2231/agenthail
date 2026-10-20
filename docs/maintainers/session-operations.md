@@ -42,7 +42,9 @@ identity.
 `agenthail last <target> [count] --timeout 30s` and
 `agenthail reply <target> --timeout 30s` use one bounded session reader. The
 newest page is returned first, text and JSON identify the source, and JSON
-includes `nextBefore`. A page holds at most `count` exchanges and the activity
+includes `nextBefore`. `count` is between 1 and 50. Text output gives each
+exchange's time and who sent its prompt: `you`, `from <agent>`, `task
+notification`, or the provider's label. A page holds at most `count` exchanges and the activity
 recorded alongside them, and `nextBefore` addresses the record before the oldest
 exchange on the page, so `--before <nextBefore>` reads the preceding page with
 no gap. Past the oldest journal entry, the cursor continues into the provider
