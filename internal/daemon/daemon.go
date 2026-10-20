@@ -23,6 +23,13 @@ const (
 	defaultPollInterval      = 5 * time.Second
 	catalogDiscoveryInterval = 30 * time.Second
 	catalogStatusInterval    = time.Second
+	// pendingLaunchLifetime holds a launched session's name while discovery
+	// looks for it, once per catalogDiscoveryInterval.
+	pendingLaunchLifetime = 5 * time.Minute
+	// pendingLaunchRetention keeps a launch past its name's lifetime, so a
+	// session found late still takes the name if no one else has.
+	pendingLaunchRetention = 24 * time.Hour
+	startNameMargin        = 30 * time.Second
 )
 
 type Daemon struct {
@@ -33,7 +40,6 @@ type Daemon struct {
 	log               *log.Logger
 	errorMu           sync.Mutex
 	observeErrors     map[string]observedError
-	pendingAliasWarns map[int64]bool
 	retryMu           sync.Mutex
 	observeRetry      map[string]observeRetry
 	notificationMu    sync.Mutex
@@ -111,7 +117,6 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		Surfaces:          surfaces,
 		log:               log.New(os.Stderr, "[daemon] ", log.LstdFlags),
 		observeErrors:     map[string]observedError{},
-		pendingAliasWarns: map[int64]bool{},
 		observeRetry:      map[string]observeRetry{},
 		notificationArmed: map[string]bool{},
 		notifyDesktop:     NotifyRequest,

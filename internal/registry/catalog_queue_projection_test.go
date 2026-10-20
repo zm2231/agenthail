@@ -16,13 +16,13 @@ func catalogQueueTestState(id, name string, queueCount int) (CatalogSessionState
 	}
 	encoded, _ := json.Marshal(fingerprint)
 	return CatalogSessionState{
-			Session: surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: name, Status: surface.StatusIdle},
-			Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(),
-			ProjectionFingerprint: string(encoded),
-		}, CatalogEvent{
-			DedupeKey: "session.upserted:" + id, Type: "session.upserted", EntityID: id,
-			Payload: []byte(`{"session":` + string(encoded) + `}`),
-		}
+		Session: surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: name, Status: surface.StatusIdle},
+		Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(),
+		ProjectionFingerprint: string(encoded),
+	}, CatalogEvent{
+		DedupeKey: "session.upserted:" + id, Type: "session.upserted", EntityID: id,
+		Payload: []byte(`{"session":` + string(encoded) + `}`),
+	}
 }
 
 func TestUpdateCatalogSessionProjectionRejectsQueueCountCapturedBeforeDrain(t *testing.T) {

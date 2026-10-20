@@ -704,7 +704,16 @@ func (d *Daemon) correlatePendingLaunches(ctx context.Context, sessions []surfac
 	if err != nil {
 		return
 	}
+	now := time.Now()
 	for _, item := range pending {
+		if now.After(item.ExpiresAt.Add(pendingLaunchRetention)) {
+			if err := d.Registry.DropPendingLaunch(item); err != nil {
+				d.log.Printf("drop pending launch %d: %s", item.ID, err)
+			} else {
+				d.log.Printf("pending %s launch %d was not found within %s; dropped", item.Launcher, item.ID, now.Sub(item.LaunchedAt).Round(time.Second))
+			}
+			continue
+		}
 		launcher, ok := d.transportResolver.Launcher(item.Launcher)
 		if !ok {
 			continue
@@ -737,21 +746,14 @@ func (d *Daemon) correlatePendingLaunches(ctx context.Context, sessions []surfac
 				locationsCopy := located
 				candidate := sessions[index]
 				candidate.Runtime = &surface.Runtime{Launcher: item.Launcher, Location: &locationsCopy, Focusable: true}
-				if err := d.Registry.RegisterSessionAndDeletePending(candidate, item.ID, item.Alias); err != nil {
-					var aliasErr registry.AliasTakenError
-					var coordinatorErr registry.CoordinatorAliasError
-					if errors.As(err, &aliasErr) || errors.As(err, &coordinatorErr) {
-						d.errorMu.Lock()
-						first := !d.pendingAliasWarns[item.ID]
-						d.pendingAliasWarns[item.ID] = true
-						d.errorMu.Unlock()
-						if first {
-							d.log.Printf("pending launch %d awaiting alias %q: %s", item.ID, item.Alias, err)
-						}
-					} else {
-						d.log.Printf("correlate pending launch %d: %s", item.ID, err)
-					}
+				named, err := d.Registry.RegisterSessionAndDeletePending(candidate, item)
+				if err != nil {
+					d.log.Printf("correlate pending launch %d: %s", item.ID, err)
 					continue
+				}
+				d.log.Printf("pending %s launch %d found after %s", item.Launcher, item.ID, time.Since(item.LaunchedAt).Round(time.Second))
+				if item.Alias.Name != "" && !named {
+					d.log.Printf("pending %s launch %d: @%s was taken after its reservation lapsed; the session has no name", item.Launcher, item.ID, item.Alias.Name)
 				}
 				sessions[index].Runtime = candidate.Runtime
 				break

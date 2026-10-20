@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -244,5 +247,166 @@ func TestAHostThatExitsWhileRunningIsLoggedWithItsLogPath(t *testing.T) {
 	want := fmt.Sprintf("Claude host: pid %d is gone and pid %d now runs; see %s\n", first.pid, replaced.pid, manager.LogPath())
 	if !strings.HasSuffix(logged.String(), want) {
 		t.Fatalf("log after the host exited:\n%s\nwant it to end with:\n%s", logged.String(), want)
+	}
+}
+
+// A copy of an update that stranded a session: a protocol 1 host ran it, its
+// Claude asked a person for approval on a turn it started itself, and the old
+// daemon's drain closed its input. Claude refused the prompt and kept
+// running, and the host kept listing the prompt. Installing this build stops
+// that host; the dead prompt stops showing, an answer to it clears it, and
+// once the stranded Claude exits the next message resumes the conversation in
+// the new host and is answered.
+func TestAnUpdateFromAProtocol1HostClearsItsDeadRequestAndResumesTheSession(t *testing.T) {
+	for _, test := range []struct{ name, prompt string }{{"approval", "TOOL"}, {"question", "QUESTION"}} {
+		t.Run(test.name, func(t *testing.T) { updateFromAProtocol1Host(t, test.prompt) })
+	}
+}
+
+func updateFromAProtocol1Host(t *testing.T, prompt string) {
+	fixture := claudehosttest.New(t, "")
+	ctx := context.Background()
+	// Reaching a conversation reads Claude's background jobs; there are none.
+	agents := filepath.Join(fixture.Home, "claude-agents")
+	if err := os.WriteFile(agents, []byte("#!/bin/sh\necho '[]'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CLAUDE_BIN", agents)
+	fixture.StartProtocol1Host(t, "0.2.44")
+	client := claudehost.NewClient(fixture.Home)
+	id := uuid.NewString()
+	opened := fixture.Open(t, client, id)
+	claude := surfaces.NewClaude(nil, fixture.Home)
+	session := hostedSession(t, claude, id)
+	r := hostRegistry(t)
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	d := New(r, []surface.Surface{claude})
+	d.log = log.New(io.Discard, "", 0)
+
+	fixture.Peer(t, opened.PID, prompt)
+	var request string
+	claudehosttest.WaitFor(t, "the session to wait on the request", func() bool {
+		observation, err := d.observeTurn(ctx, claude, &session)
+		if err != nil || observation.WaitingOn == nil {
+			return false
+		}
+		request = observation.WaitingOn.ID
+		return true
+	})
+	if err := client.Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	claudehosttest.WaitFor(t, "Claude to refuse the prompt", func() bool {
+		turns := fixture.Turns(t, id)
+		return len(turns) == 1 && strings.Contains(turns[0].Reply, ":error:")
+	})
+	if listing, err := client.List(ctx); err != nil || len(listing.Sessions) != 1 || len(listing.Sessions[0].Requests) != 1 {
+		t.Fatalf("protocol 1 listing after the drain = %+v, %v; want the dead prompt still listed", listing, err)
+	}
+
+	d.SetClaudeHost(fixture.Manager(t, "0.2.48"))
+	if check := d.checkClaudeHost(ctx, claudeHostCheck{}); check.status != "running" {
+		t.Fatalf("host after the install = %+v", check)
+	}
+	if !claudehosttest.Alive(opened.PID) {
+		t.Fatal("the stranded Claude was stopped by the install")
+	}
+	answer := httptest.NewRecorder()
+	decision := surface.Decision{Behavior: "allow"}
+	if prompt == "QUESTION" {
+		decision.Answers = map[string]string{"Which color?": "Blue"}
+	}
+	d.respond(ctx, answer, claude, &session, request, decision, "the test")
+	if answer.Code != http.StatusConflict {
+		t.Fatalf("answer to the dead prompt = %d %s, want 409", answer.Code, answer.Body)
+	}
+	if waiting, _, err := r.WaitingState(id); err != nil || waiting != nil {
+		t.Fatalf("waiting after the stale answer = %+v, %v; want none", waiting, err)
+	}
+	state, err := claude.Requests(ctx, &session)
+	if err != nil || len(state.Requests) != 0 {
+		t.Fatalf("requests after the install = %+v, %v; want none", state, err)
+	}
+
+	queued, err := d.dispatcher().DeliverWithOptions(ctx, claude, &session, "while it runs", "", surface.SendOptions{Author: surface.AuthorPerson})
+	if err != nil || queued.Evidence != surface.EvidenceQueued {
+		t.Fatalf("a message while the stranded Claude runs = %+v, %v; want queued", queued, err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if turns := fixture.Turns(t, id); len(turns) != 1 {
+		t.Fatalf("turns while the stranded Claude runs = %+v, want none new", turns)
+	}
+	_ = syscall.Kill(opened.PID, syscall.SIGTERM)
+	claudehosttest.WaitFor(t, "the stranded Claude to exit", func() bool { return !claudehosttest.Alive(opened.PID) })
+	receipt, err := d.dispatcher().DeliverWithOptions(ctx, claude, &session, "after it exited", "", surface.SendOptions{Author: surface.AuthorPerson})
+	if err != nil || receipt.Evidence != surface.EvidenceDelivered {
+		t.Fatalf("the next message after the stranded Claude exited = %+v, %v; want delivered", receipt, err)
+	}
+	claudehosttest.WaitFor(t, "the answer from the new host", func() bool {
+		turns := fixture.Turns(t, id)
+		return len(turns) == 2 && turns[1].Reply == "echo:after it exited" && turns[1].PID != opened.PID
+	})
+}
+
+// After an update the daemon's request watcher follows the new host, while
+// the retiring one still runs a session waiting on a person: a request the
+// new host opens asks for a catalog pass at once.
+func TestTheRequestWatcherFollowsTheNewHostWhileTheOldOneRetires(t *testing.T) {
+	fixture := claudehosttest.New(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client, err := fixture.Manager(t, "1.0.0").Ensure(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, _ := client.Hello(ctx)
+	waiting := uuid.NewString()
+	opened := fixture.Open(t, client, waiting)
+	fixture.Peer(t, opened.PID, "TOOL")
+	d := New(hostRegistry(t), nil)
+	d.log = log.New(io.Discard, "", 0)
+	d.SetClaudeHost(fixture.Manager(t, "1.0.0"))
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		d.watchClaudeHostRequests(ctx)
+	}()
+	defer func() {
+		cancel()
+		<-watched
+	}()
+	select {
+	case <-d.catalogNudge:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the watcher did not report the old host's request")
+	}
+
+	if client, err = fixture.Manager(t, "1.1.0").Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	fresh := uuid.NewString()
+	if _, err := client.Open(ctx, claudehost.OpenRequest{SessionID: fresh, Cwd: fixture.Cwd}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(claudeHostWatchRetryWait + 500*time.Millisecond)
+	for quiet := false; !quiet; {
+		select {
+		case <-d.catalogNudge:
+		case <-time.After(300 * time.Millisecond):
+			quiet = true
+		}
+	}
+	if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: fresh, UUID: uuid.NewString(), Text: "TOOL"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-d.catalogNudge:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a request on the new host asked for no catalog pass")
+	}
+	if !claudehosttest.Alive(old.PID) {
+		t.Fatal("the old host left while its session waited on a person")
 	}
 }

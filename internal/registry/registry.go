@@ -54,7 +54,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 24
+	schemaVersion   = 25
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -248,6 +248,12 @@ func migrateTx(tx *sql.Tx) error {
 		}
 	}
 	if err := ensureColumn(tx, "launcher_pending", "alias", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "launcher_pending", "token", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "launcher_pending", "expires_at_ms", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
 	if err := ensureColumn(tx, "session_journal_state", "source_epoch", `TEXT NOT NULL DEFAULT ''`); err != nil {
@@ -617,8 +623,15 @@ CREATE TABLE IF NOT EXISTS launcher_pending (
 	cwd TEXT NOT NULL DEFAULT '',
 	name TEXT NOT NULL DEFAULT '',
 	alias TEXT NOT NULL DEFAULT '',
+	token TEXT NOT NULL DEFAULT '',
+	expires_at_ms INTEGER NOT NULL DEFAULT 0,
 	location BLOB NOT NULL,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS alias_reservations (
+	name TEXT PRIMARY KEY,
+	token TEXT NOT NULL,
+	expires_at_ms INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS relay_sources (
     source_key TEXT PRIMARY KEY,
@@ -895,37 +908,6 @@ func (r *Registry) RegisterSession(s surface.Session) error {
 	return tx.Commit()
 }
 
-func (r *Registry) RegisterSessionAndDeletePending(s surface.Session, pendingID int64, alias string) error {
-	if pendingID <= 0 {
-		return fmt.Errorf("pending launch id is required")
-	}
-	tx, err := r.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := registerSessionTx(tx, s); err != nil {
-		return err
-	}
-	if alias != "" {
-		if err := setAliasTx(tx, alias, s.ID); err != nil {
-			return err
-		}
-	}
-	result, err := tx.Exec(`DELETE FROM launcher_pending WHERE id=?`, pendingID)
-	if err != nil {
-		return err
-	}
-	deleted, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if deleted != 1 {
-		return fmt.Errorf("pending launch %d was not found", pendingID)
-	}
-	return tx.Commit()
-}
-
 func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 	if s.RuntimeKind == "" {
 		return fmt.Errorf("register session %s: no runtime kind", s.ID)
@@ -1002,31 +984,6 @@ func (r *Registry) LookupAlias(name string) (string, error) {
 	return sid, err
 }
 
-func (r *Registry) EnsureAliasAvailable(name string) error {
-	if name == "" {
-		return nil
-	}
-	if strings.EqualFold(name, LeadAlias) {
-		return ErrReservedAlias
-	}
-	var coordinator bool
-	if err := r.read.QueryRow(`SELECT EXISTS(SELECT 1 FROM coordinators WHERE host_id='' AND name=?)`, name).Scan(&coordinator); err != nil {
-		return err
-	}
-	if coordinator {
-		return CoordinatorAliasError{Name: name}
-	}
-	var owner string
-	err := r.read.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&owner)
-	if err == sql.ErrNoRows {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return AliasTakenError{Name: name, Owner: owner}
-}
-
 func (r *Registry) SetAlias(name, sessionID string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -1050,7 +1007,7 @@ func (e AliasTakenError) Error() string {
 
 // setAliasTx names a session. A coordinator's name moves only through the
 // coordinator, so it is neither given to another session nor taken from the
-// session it names.
+// session it names, and a name a session being started holds waits for it.
 func setAliasTx(tx *sql.Tx, name, sessionID string) error {
 	if strings.EqualFold(name, LeadAlias) {
 		return ErrReservedAlias
@@ -1072,6 +1029,9 @@ func setAliasTx(tx *sql.Tx, name, sessionID string) error {
 		} else if coordinated {
 			return CoordinatorAliasError{Name: held}
 		}
+	}
+	if err := aliasReservedTx(tx, name, ""); err != nil {
+		return err
 	}
 	return bindAliasTx(tx, name, sessionID)
 }
@@ -1124,6 +1084,12 @@ func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error)
 			return "", err
 		} else if coordinated {
 			continue
+		}
+		var reserved AliasReservedError
+		if err := aliasReservedTx(tx, candidate, ""); errors.As(err, &reserved) {
+			continue
+		} else if err != nil {
+			return "", err
 		}
 		if _, err := tx.Exec(`INSERT INTO aliases(name,session_id) VALUES(?,?)`, candidate, sessionID); err == nil {
 			return candidate, tx.Commit()

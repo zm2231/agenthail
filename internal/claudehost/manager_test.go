@@ -195,56 +195,172 @@ func hostLog(t *testing.T, home string) string {
 	return string(data)
 }
 
-func TestEnsureReplacesAHostOfAnotherVersionOnceItIsIdle(t *testing.T) {
+// listed waits until the hosts list the session with exactly the requests
+// named and returns its listing.
+func listed(t *testing.T, client claudehost.Client, sessionID string, requests int) claudehost.Session {
+	t.Helper()
+	var found claudehost.Session
+	claudehosttest.WaitFor(t, fmt.Sprintf("session %s listed with %d requests", sessionID, requests), func() bool {
+		listing, err := client.List(context.Background())
+		if err != nil {
+			return false
+		}
+		for _, session := range listing.Sessions {
+			if session.SessionID == sessionID && len(session.Requests) == requests {
+				found = session
+				return true
+			}
+		}
+		return false
+	})
+	return found
+}
+
+func replies(turns []claudehosttest.Turn) []string {
+	var out []string
+	for _, turn := range turns {
+		out = append(out, turn.Reply)
+	}
+	return out
+}
+
+// An update replaces the host while a session waits on a person: Claude
+// started the turn itself, from another agent's message, so the host never
+// saw it begin. The approval or question stays answerable, the answer reaches
+// Claude, the session stays reachable, and the old host leaves once the
+// session is idle.
+func TestReplacingTheHostKeepsAPendingRequestAnswerableAndItsSessionReachable(t *testing.T) {
+	for _, test := range []struct {
+		name, prompt, reply string
+		decision            claudehost.Decision
+		outcome             string
+		check               func(claudehost.Request) bool
+	}{
+		{name: "approval", prompt: "TOOL", decision: claudehost.Decision{Behavior: "allow"}, outcome: "allowed", reply: "tool:allow:",
+			check: func(r claudehost.Request) bool { return r.Kind == "approval" && r.Tool == "Bash" }},
+		{name: "question", prompt: "QUESTION", decision: claudehost.Decision{Behavior: "allow", Answers: map[string]string{"Which color?": "Blue"}}, outcome: "answered", reply: `question:allow:{"Which color?":"Blue"}`,
+			check: func(r claudehost.Request) bool {
+				return r.Kind == "question" && len(r.Questions) == 1 && r.Questions[0].Question == "Which color?" && len(r.Questions[0].Options) == 2 && r.Questions[0].Options[1].Label == "Blue"
+			}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := claudehosttest.New(t, "")
+			ctx := testContext(t)
+			client, err := f.Manager(t, "1.0.0").Ensure(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			oldHello, _ := client.Hello(ctx)
+			sessionID := uuid.NewString()
+			opened := f.Open(t, client, sessionID)
+			f.Peer(t, opened.PID, test.prompt)
+			request := listed(t, client, sessionID, 1).Requests[0]
+
+			client, err = f.Manager(t, "1.1.0").Ensure(ctx)
+			if err != nil {
+				t.Fatalf("Ensure after the update = %v, want this version's host started", err)
+			}
+			if hello, err := client.Hello(ctx); err != nil || hello.HostVersion != "1.1.0" || hello.PID == oldHello.PID {
+				t.Fatalf("hello after the update = %+v, %v", hello, err)
+			}
+			got := listed(t, client, sessionID, 1)
+			if got.PID != opened.PID || got.Requests[0].RequestID != request.RequestID || !test.check(got.Requests[0]) {
+				t.Fatalf("listing after the update = %+v, want pid %d still asking %+v", got, opened.PID, request)
+			}
+			message := uuid.NewString()
+			if result, err := client.Send(ctx, claudehost.SendRequest{SessionID: sessionID, UUID: message, Text: "after the update", Origin: &claudehost.Origin{Kind: "human"}}); err != nil || !result.Accepted {
+				t.Fatalf("send after the update = %+v, %v", result, err)
+			}
+			if outcome, err := client.Respond(ctx, sessionID, request.RequestID, test.decision); err != nil || outcome != test.outcome {
+				t.Fatalf("respond after the update = %q, %v; want %s", outcome, err, test.outcome)
+			}
+			claudehosttest.WaitFor(t, "the old host to finish the turns and leave", func() bool {
+				return !claudehosttest.Alive(oldHello.PID) && !claudehosttest.Alive(opened.PID)
+			})
+			if got := replies(f.Turns(t, sessionID)); !slices.Equal(got, []string{test.reply, "echo:after the update"}) {
+				t.Fatalf("turns = %v, want the answer to reach Claude and then the message", got)
+			}
+			if retiring := client.Retiring(); len(retiring) != 0 {
+				t.Fatalf("retiring hosts after the old one left = %v", retiring)
+			}
+
+			resumed, err := client.Open(ctx, claudehost.OpenRequest{Resume: sessionID, Cwd: f.Cwd})
+			if err != nil || resumed.PID == opened.PID {
+				t.Fatalf("resume on the new host = %+v, %v", resumed, err)
+			}
+			if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: sessionID, UUID: uuid.NewString(), Text: "on the new host"}); err != nil {
+				t.Fatal(err)
+			}
+			claudehosttest.WaitFor(t, "the turn on the new host", func() bool { return len(f.Turns(t, sessionID)) == 3 })
+		})
+	}
+}
+
+// Repeated updates retire one host each, and each leaves once its own
+// sessions are idle: a host never outlives the sessions it had.
+func TestRetiredHostsLeaveWithTheirSessions(t *testing.T) {
 	f := claudehosttest.New(t, "")
 	ctx := testContext(t)
-	old := f.Manager(t, "1.0.0")
-	client, err := old.Ensure(ctx)
+	client, err := f.Manager(t, "1").Ensure(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldHello, _ := client.Hello(ctx)
+	first, _ := client.Hello(ctx)
 	sessionID := uuid.NewString()
-	opened, err := client.Open(ctx, claudehost.OpenRequest{SessionID: sessionID, Cwd: f.Cwd})
+	opened := f.Open(t, client, sessionID)
+	if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: sessionID, UUID: uuid.NewString(), Text: "SLOW 1500"}); err != nil {
+		t.Fatal(err)
+	}
+	if client, err = f.Manager(t, "2").Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	second, _ := client.Hello(ctx)
+	if client, err = f.Manager(t, "3").Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	claudehosttest.WaitFor(t, "the host without sessions to leave", func() bool { return !claudehosttest.Alive(second.PID) })
+	if !claudehosttest.Alive(first.PID) {
+		t.Fatal("the first host left while its session was busy")
+	}
+	if retiring := client.Retiring(); len(retiring) != 1 {
+		t.Fatalf("retiring hosts = %v, want only the one with a busy session", retiring)
+	}
+	claudehosttest.WaitFor(t, "the first host to leave after the turn", func() bool {
+		return !claudehosttest.Alive(first.PID) && !claudehosttest.Alive(opened.PID)
+	})
+	if hosts := f.HostPIDs(); len(hosts) != 1 {
+		t.Fatalf("hosts = %v, want only the current one", hosts)
+	}
+}
+
+// A host from before hosts could retire is stopped by the update. The Claude
+// processes it ran keep running, held from the new host, until they exit.
+func TestEnsureStopsAProtocol1HostAndLeavesItsClaudeRunning(t *testing.T) {
+	f := claudehosttest.New(t, "")
+	ctx := testContext(t)
+	old := f.StartProtocol1Host(t, "0.2.44")
+	client := claudehost.NewClient(f.Home)
+	sessionID := uuid.NewString()
+	opened := f.Open(t, client, sessionID)
+
+	client, err := f.Manager(t, "0.2.48").Ensure(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	running := uuid.NewString()
-	if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: sessionID, UUID: running, Text: "SLOW 800"}); err != nil {
-		t.Fatal(err)
+	if hello, err := client.Hello(ctx); err != nil || hello.Protocol != claudehost.Protocol || hello.PID == old.PID {
+		t.Fatalf("hello after the update = %+v, %v", hello, err)
 	}
-
-	updated := f.Manager(t, "1.1.0")
-	if _, err := updated.Ensure(ctx); !errors.Is(err, claudehost.ErrReplacing) {
-		t.Fatalf("Ensure with a running older host = %v, want claudehost.ErrReplacing", err)
+	claudehosttest.WaitFor(t, "the protocol 1 host to exit", func() bool { return !claudehosttest.Alive(old.PID) })
+	if !claudehosttest.Alive(opened.PID) {
+		t.Fatal("the Claude the protocol 1 host ran was stopped with it")
 	}
-	if _, err := client.Open(ctx, claudehost.OpenRequest{SessionID: uuid.NewString(), Cwd: f.Cwd}); !claudehost.IsCode(err, "draining") {
-		t.Fatalf("open on a draining host = %v, want draining", err)
+	listing, err := client.List(ctx)
+	if err != nil || len(listing.Orphans) != 1 || listing.Orphans[0].SessionID != sessionID {
+		t.Fatalf("listing = %+v, %v; want the session held as an orphan", listing, err)
 	}
-	claudehosttest.WaitFor(t, "the old host to finish the turn and exit", func() bool { return !claudehosttest.Alive(oldHello.PID) && !claudehosttest.Alive(opened.PID) })
-	if got := uuids(f.Turns(t, sessionID)); !slices.Equal(got, []string{running}) {
-		t.Fatalf("turns = %v, want the running turn finished", got)
+	if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: sessionID, UUID: uuid.NewString(), Text: "x"}); !claudehost.IsCode(err, "held") {
+		t.Fatalf("send while the old Claude runs = %v, want held", err)
 	}
-
-	client, err = updated.Ensure(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hello, err := client.Hello(ctx)
-	if err != nil || hello.HostVersion != "1.1.0" || hello.PID == oldHello.PID {
-		t.Fatalf("hello after replacement = %+v, %v", hello, err)
-	}
-	if _, err := client.Open(ctx, claudehost.OpenRequest{Resume: sessionID, Cwd: f.Cwd}); err != nil {
-		t.Fatal(err)
-	}
-	next := uuid.NewString()
-	if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: sessionID, UUID: running, Text: "SLOW 800"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: sessionID, UUID: next, Text: "next"}); err != nil {
-		t.Fatal(err)
-	}
-	claudehosttest.WaitFor(t, "the next turn", func() bool { return slices.Equal(uuids(f.Turns(t, sessionID)), []string{running, next}) })
 }
 
 func TestClientDistinguishesNoHostFromARefusal(t *testing.T) {

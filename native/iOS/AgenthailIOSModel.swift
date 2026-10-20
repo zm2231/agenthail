@@ -530,6 +530,7 @@ final class AgenthailIOSModel: ObservableObject {
             _ = try await api.respond(sessionID: sessionID, requestID: request.id, decision: decision)
             operationError = nil
         } catch AgenthailAPIError.request(409, _) {
+            sessionRequests = sessionRequests?.removing(request.id)
             operationError = "That request was already answered or has expired."
         } catch {
             operationError = error.localizedDescription

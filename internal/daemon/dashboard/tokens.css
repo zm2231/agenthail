@@ -1048,18 +1048,27 @@ select {
   border-radius: 5px;
   background: var(--raised);
 }
+/* Actions sit in the turn's bottom padding, so revealing them never moves text. */
 .turn-actions {
   display: flex;
   gap: 12px;
-  margin-top: 6px;
+  height: 18px;
+  margin-bottom: -18px;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+.turn:hover .turn-actions,
+.turn:focus-within .turn-actions {
+  opacity: 1;
 }
 .turn-action {
-  padding: 4px 0;
+  padding: 1px 0;
   border: 0;
   background: transparent;
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
+  line-height: 16px;
 }
 .turn-action:hover,
 .turn-action:focus-visible {
@@ -2143,7 +2152,8 @@ select {
   font-size: 12px;
 }
 @media (hover: none) {
-  .project-header .link-button {
+  .project-header .link-button,
+  .turn-actions {
     opacity: 1;
   }
 }

@@ -60,8 +60,9 @@ type openRequestView struct {
 }
 
 // respond answers one open request and records who answered it. A request
-// that was already answered or has expired is a conflict, never a retry. The
-// turn is observed again right away so the session stops showing it.
+// that was already answered or has expired is a conflict, never a retry.
+// Either way the turn is observed again right away, so the session stops
+// showing a request nobody can answer any more.
 func (d *Daemon) respond(ctx context.Context, w http.ResponseWriter, adapter surface.Surface, session *surface.Session, requestID string, decision surface.Decision, actor string) {
 	responder, ok := adapter.(surface.Responder)
 	if !ok || !surface.EffectiveCapabilities(adapter, session).Respond {
@@ -76,6 +77,7 @@ func (d *Daemon) respond(ctx context.Context, w http.ResponseWriter, adapter sur
 		}
 		request, open := openRequest(state, requestID)
 		if !open {
+			d.observeAfterAnswer(adapter, session)
 			writeStaleRequest(w)
 			return
 		}
@@ -86,6 +88,7 @@ func (d *Daemon) respond(ctx context.Context, w http.ResponseWriter, adapter sur
 	}
 	outcome, err := responder.Respond(ctx, session, requestID, decision)
 	if errors.Is(err, surface.ErrRequestStale) {
+		d.observeAfterAnswer(adapter, session)
 		writeStaleRequest(w)
 		return
 	}
@@ -94,12 +97,18 @@ func (d *Daemon) respond(ctx context.Context, w http.ResponseWriter, adapter sur
 		return
 	}
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "request-" + outcome, SessionID: session.ID, Message: requestID, Result: "answered by " + actor})
-	observeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	if _, err := d.observeTurn(observeCtx, adapter, session); err != nil {
+	d.observeAfterAnswer(adapter, session)
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": map[string]string{"requestId": requestID, "outcome": outcome}})
+}
+
+// observeAfterAnswer records what the session waits on now, which clears the
+// waiting record and the catalog row of a request that is no longer open.
+func (d *Daemon) observeAfterAnswer(adapter surface.Surface, session *surface.Session) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := d.observeTurn(ctx, adapter, session); err != nil {
 		d.log.Printf("observe %s after an answer: %s", d.resolveDisplay(session.ID), err)
 	}
-	cancel()
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": map[string]string{"requestId": requestID, "outcome": outcome}})
 }
 
 // openRequest finds a request that is still open. A notification button's

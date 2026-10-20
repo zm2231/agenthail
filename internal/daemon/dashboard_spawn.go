@@ -20,13 +20,13 @@ func (d *Daemon) dispatcher() delivery.Dispatcher {
 	}}
 }
 
-func (d *Daemon) createNotionThread(ctx context.Context, message, alias, model string) (*delivery.Receipt, error) {
+func (d *Daemon) createNotionThread(ctx context.Context, message string, name registry.AliasReservation, model string) (*delivery.Receipt, error) {
 	adapter := d.adapters().ForSurface(surface.KindNotion)
 	if adapter == nil {
 		return nil, fmt.Errorf("Notion is not configured")
 	}
 	message = strings.TrimSpace(message)
-	alias = strings.TrimPrefix(strings.TrimSpace(alias), "@")
+	alias := name.Name
 	if message == "" {
 		return nil, fmt.Errorf("first message is required")
 	}
@@ -54,10 +54,8 @@ func (d *Daemon) createNotionThread(ctx context.Context, message, alias, model s
 	if err := d.Registry.RegisterSession(*session); err != nil {
 		return nil, fmt.Errorf("Notion thread %s was created but could not be registered: %w", session.ID, err)
 	}
-	if alias != "" {
-		if err := d.Registry.SetAlias(alias, session.ID); err != nil {
-			return nil, fmt.Errorf("Notion thread %s was created but alias %q could not be registered: %w", session.ID, alias, err)
-		}
+	if err := d.Registry.BindReservedAlias(name, session.ID); err != nil {
+		return nil, fmt.Errorf("Notion thread %s was created but alias %q could not be registered: %w", session.ID, alias, err)
 	}
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result.UUID})
 	return &delivery.Receipt{Evidence: surface.EvidenceDelivered, SessionID: session.ID, TurnID: result.UUID}, nil

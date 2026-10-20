@@ -263,7 +263,7 @@ func TestRemoteSessionCommandsRouteThroughDaemon(t *testing.T) {
 	run("thread", "resume", "forge::@builder")
 	run("thread", "logs", "forge::@builder")
 	actions, _ := api.recorded()
-	want := []string{"compact", "model", "goal-set", "goal-budget", "alias", "session-fork", "alias", "native-queue", "session-lifecycle-status", "send", "session-lifecycle-stop", "session-lifecycle-resume", "session-lifecycle-logs"}
+	want := []string{"compact", "model", "goal-set", "goal-budget", "alias", "session-fork", "native-queue", "session-lifecycle-status", "send", "session-lifecycle-stop", "session-lifecycle-resume", "session-lifecycle-logs"}
 	if len(actions) != len(want) {
 		t.Fatalf("actions=%v", actions)
 	}
@@ -273,25 +273,21 @@ func TestRemoteSessionCommandsRouteThroughDaemon(t *testing.T) {
 		}
 	}
 	for index, action := range actions {
-		wantID := forgeBuilder.ID
-		if index == 6 {
-			wantID = hosts.Qualify(forgeHostID, "fork-1")
-		}
-		if action["sessionId"] != wantID {
+		if action["sessionId"] != forgeBuilder.ID {
 			t.Fatalf("action %d sessionId=%v", index, action["sessionId"])
 		}
 	}
-	if actions[1]["model"] != "gpt-next" || actions[2]["message"] != "finish it" || actions[3]["message"] != "" || actions[4]["alias"] != "builder2" || actions[6]["alias"] != "branch" {
+	if actions[1]["model"] != "gpt-next" || actions[2]["message"] != "finish it" || actions[3]["message"] != "" || actions[4]["alias"] != "builder2" || actions[5]["alias"] != "branch" {
 		t.Fatalf("payloads=%v", actions)
 	}
 	if fork, _ := actions[5]["fork"].(map[string]any); fork["model"] != "gpt-next" {
 		t.Fatalf("fork payload=%v", actions[5])
 	}
-	if queue, _ := actions[7]["nativeQueue"].(map[string]any); queue["queueAction"] != "list" {
-		t.Fatalf("native queue payload=%v", actions[7])
+	if queue, _ := actions[6]["nativeQueue"].(map[string]any); queue["queueAction"] != "list" {
+		t.Fatalf("native queue payload=%v", actions[6])
 	}
-	if actions[9]["busyDelivery"] != "queue" || actions[9]["message"] != "when idle" {
-		t.Fatalf("queue payload=%v", actions[9])
+	if actions[8]["busyDelivery"] != "queue" || actions[8]["message"] != "when idle" {
+		t.Fatalf("queue payload=%v", actions[8])
 	}
 	if len(api.gets) != 3 || !strings.Contains(api.gets[2], "/api/v1/history?") || !strings.Contains(api.gets[2], "limit=150") {
 		t.Fatalf("gets=%v", api.gets)

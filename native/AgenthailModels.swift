@@ -1333,6 +1333,12 @@ struct SessionRequests: Decodable, Hashable {
     let permissionMode: String
     let requests: [SessionRequest]
 
+    /// The requests without one the daemon called already answered or
+    /// expired, so its card goes at once rather than staying clickable.
+    func removing(_ id: String) -> SessionRequests {
+        SessionRequests(permissionMode: permissionMode, requests: requests.filter { $0.id != id })
+    }
+
     /// The modes a person can change a running session into; an empty mode is
     /// the settings' default, which a session can start in but not be set to.
     static let permissionModes = ["acceptEdits", "auto", "plan", "manual", "dontAsk", "bypassPermissions"]

@@ -7,13 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 )
 
 // Protocol is the host protocol this build speaks. A host that answers hello
-// with another protocol or version is replaced once it is idle.
-const Protocol = 1
+// with another protocol or version is replaced: it retires and serves its
+// sessions until each closes, or is stopped when it cannot retire.
+const Protocol = 2
 
 const maxResponseBytes = 4 << 20
 
@@ -170,6 +174,8 @@ type Event struct {
 	Error     string          `json:"error,omitempty"`
 }
 
+// Client reaches the host on Socket and, for a session that host does not
+// run, the retiring hosts beside it that still serve their own sessions.
 type Client struct {
 	Socket string
 }
@@ -180,23 +186,63 @@ func SocketPath(home string) string {
 
 func NewClient(home string) Client { return Client{Socket: SocketPath(home)} }
 
+// Retiring are the hosts that gave up Socket to a newer one and still serve
+// the sessions they ran, each on a socket named by its pid. A socket nothing
+// listens on is left by a retiring host that died; it is removed.
+func (c Client) Retiring() []Client {
+	paths, _ := filepath.Glob(strings.TrimSuffix(c.Socket, ".sock") + ".*.sock")
+	var out []Client
+	for _, path := range paths {
+		var dialer net.Dialer
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		conn, err := dialer.DialContext(ctx, "unix", path)
+		cancel()
+		if errors.Is(err, syscall.ECONNREFUSED) {
+			_ = os.Remove(path)
+			continue
+		}
+		if err == nil {
+			conn.Close()
+		}
+		out = append(out, Client{Socket: path})
+	}
+	return out
+}
+
 func (c Client) Hello(ctx context.Context) (Hello, error) {
 	var out Hello
 	return out, c.call(ctx, "hello", struct{}{}, &out)
 }
 
+// Open opens a session in the host. A conversation a retiring host still
+// runs is held by the current one; Open returns it as that host lists it.
 func (c Client) Open(ctx context.Context, request OpenRequest) (Session, error) {
 	var out Session
-	return out, c.call(ctx, "open", request, &out)
+	err := c.call(ctx, "open", request, &out)
+	if request.Resume == "" || !(IsCode(err, "held") || errors.Is(err, ErrNotRunning)) {
+		return out, err
+	}
+	for _, host := range c.Retiring() {
+		listing, listErr := host.List(ctx)
+		if listErr != nil {
+			continue
+		}
+		for _, session := range listing.Sessions {
+			if session.SessionID == request.Resume {
+				return session, nil
+			}
+		}
+	}
+	return out, err
 }
 
 func (c Client) Send(ctx context.Context, request SendRequest) (SendResult, error) {
 	var out SendResult
-	return out, c.call(ctx, "send", request, &out)
+	return out, c.sessionCall(ctx, "send", request, &out)
 }
 
 func (c Client) Interrupt(ctx context.Context, sessionID string) error {
-	return c.call(ctx, "interrupt", map[string]string{"sessionId": sessionID}, nil)
+	return c.sessionCall(ctx, "interrupt", map[string]string{"sessionId": sessionID}, nil)
 }
 
 // Respond answers an open request and returns how the host resolved it. A
@@ -205,27 +251,73 @@ func (c Client) Respond(ctx context.Context, sessionID, requestID string, decisi
 	var out struct {
 		Outcome string `json:"outcome"`
 	}
-	err := c.call(ctx, "respond", map[string]any{"sessionId": sessionID, "requestId": requestID, "decision": decision}, &out)
+	err := c.sessionCall(ctx, "respond", map[string]any{"sessionId": sessionID, "requestId": requestID, "decision": decision}, &out)
 	return out.Outcome, err
 }
 
 func (c Client) SetModel(ctx context.Context, sessionID, model string) (Session, error) {
 	var out Session
-	return out, c.call(ctx, "setModel", map[string]string{"sessionId": sessionID, "model": model}, &out)
+	return out, c.sessionCall(ctx, "setModel", map[string]string{"sessionId": sessionID, "model": model}, &out)
 }
 
 func (c Client) SetPermissionMode(ctx context.Context, sessionID, mode string) (Session, error) {
 	var out Session
-	return out, c.call(ctx, "setPermissionMode", map[string]string{"sessionId": sessionID, "permissionMode": mode}, &out)
+	return out, c.sessionCall(ctx, "setPermissionMode", map[string]string{"sessionId": sessionID, "permissionMode": mode}, &out)
 }
 
 func (c Client) Close(ctx context.Context, sessionID string) error {
-	return c.call(ctx, "close", map[string]string{"sessionId": sessionID}, nil)
+	return c.sessionCall(ctx, "close", map[string]string{"sessionId": sessionID}, nil)
 }
 
+// sessionCall runs a request for one session on the host that runs it. The
+// current host answers not_open for a session it does not run, or held for
+// one a retiring host still runs; the retiring hosts are asked then. A host
+// that has the session answers for it, whatever its answer.
+func (c Client) sessionCall(ctx context.Context, method string, params, out any) error {
+	err := c.call(ctx, method, params, out)
+	if !(IsCode(err, "not_open") || IsCode(err, "held") || errors.Is(err, ErrNotRunning)) {
+		return err
+	}
+	for _, host := range c.Retiring() {
+		retiringErr := host.call(ctx, method, params, out)
+		if IsCode(retiringErr, "not_open") || errors.Is(retiringErr, ErrNotRunning) {
+			continue
+		}
+		return retiringErr
+	}
+	return err
+}
+
+// List is every session the current and retiring hosts run. A process a
+// retiring host runs is the current host's orphan; it is listed once, as the
+// retiring host's session. Draining is the current host's.
 func (c Client) List(ctx context.Context) (Listing, error) {
 	var out Listing
-	return out, c.call(ctx, "list", struct{}{}, &out)
+	err := c.call(ctx, "list", struct{}{}, &out)
+	answered := err == nil
+	served := map[string]bool{}
+	for _, host := range c.Retiring() {
+		var listing Listing
+		if host.call(ctx, "list", struct{}{}, &listing) != nil {
+			continue
+		}
+		answered = true
+		for _, session := range listing.Sessions {
+			served[session.SessionID] = true
+			out.Sessions = append(out.Sessions, session)
+		}
+	}
+	if !answered {
+		return Listing{}, err
+	}
+	orphans := out.Orphans[:0]
+	for _, orphan := range out.Orphans {
+		if !served[orphan.SessionID] {
+			orphans = append(orphans, orphan)
+		}
+	}
+	out.Orphans = orphans
+	return out, nil
 }
 
 func (c Client) Drain(ctx context.Context) error {

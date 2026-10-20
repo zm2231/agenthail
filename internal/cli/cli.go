@@ -1724,8 +1724,15 @@ func (a *App) cmdSend(args []string) error {
 	var receipt *delivery.Receipt
 	syntheticNotion := surf.Name() == surface.KindNotion && (sess.ID == "new" || strings.HasPrefix(sess.ID, "new:"))
 	syntheticNotionName := ""
+	var notionName registry.AliasReservation
 	if syntheticNotion {
 		syntheticNotionName = sess.Name
+		if a.registry() != nil {
+			if notionName, err = a.registry().ReserveAlias(syntheticNotionName, time.Now().Add(timeout+threadNameMargin)); err != nil {
+				return fmt.Errorf("reserve thread alias: %w", err)
+			}
+			defer func() { _ = a.registry().ReleaseAliasReservation(notionName) }()
+		}
 	}
 	if coordinated {
 		deliver := coord.Deliver
@@ -1799,10 +1806,8 @@ func (a *App) cmdSend(args []string) error {
 			if err := a.registry().RegisterSession(*sess); err != nil {
 				return fmt.Errorf("Notion thread %s was created but could not be registered: %w", sess.ID, err)
 			}
-			if syntheticNotionName != "" {
-				if err := a.registry().SetAlias(syntheticNotionName, sess.ID); err != nil {
-					return fmt.Errorf("Notion thread %s was created but alias %q could not be registered: %w", sess.ID, syntheticNotionName, err)
-				}
+			if err := a.registry().BindReservedAlias(notionName, sess.ID); err != nil {
+				return fmt.Errorf("Notion thread %s was created but alias %q could not be registered: %w", sess.ID, syntheticNotionName, err)
 			}
 		}
 	}

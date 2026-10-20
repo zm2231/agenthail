@@ -14,7 +14,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { parseArgs } from 'node:util';
 
-const PROTOCOL = 1;
+const PROTOCOL = 2;
 const LOCK_FD = 3;
 const MAX_EVENTS = 4096;
 const MAX_LINE = 1 << 20;
@@ -53,6 +53,9 @@ const subscribers = new Set();
 let seq = 0;
 let draining = false;
 let exiting = false;
+let listening = args.socket;
+let retiring = null;
+let stateEventsMissing = false;
 
 class HostError extends Error {
   constructor(code, message) {
@@ -90,6 +93,9 @@ class Session {
     this.stderr = '';
     this.query = null;
     this.done = null;
+    this.stateEvents = false;
+    this.guessesIdle = false;
+    this.tasks = [];
   }
 
   async *input() {
@@ -111,8 +117,11 @@ class Session {
     return taken;
   }
 
+  // end closes Claude's input. Claude then refuses every prompt it still
+  // waits on, so those requests end here rather than stay listed unanswerable.
   end() {
     this.ended = true;
+    for (const pending of [...this.pending.values()]) pending.settle('ended', { behavior: 'deny', message: WITHDRAWN });
     this.wake?.();
   }
 
@@ -120,7 +129,21 @@ class Session {
     if (this.state === state) return;
     this.state = state;
     emit(this.id, 'state', { state });
-    if (draining && state === 'idle') this.end();
+    this.retireIfDone();
+  }
+
+  // A retiring host closes a session only once Claude is idle with no open
+  // request and no background task, since closing ends the process and every
+  // task it runs. The next message resumes the conversation on the new host.
+  // A Claude that ended a turn without reporting its states leaves idle a
+  // guess that a turn it started itself may still be running, so such a
+  // session retires only as a turn result arrives.
+  retireIfDone({ turnEnded = false } = {}) {
+    if (this.guessesIdle && !turnEnded) return;
+    if (!draining || this.ended || !this.query || this.state !== 'idle' || this.pending.size > 0 || this.tasks.length > 0) return;
+    process.stderr.write(`claude-host: retiring session ${this.id} (pid ${this.pid}), now idle\n`);
+    this.end();
+    this.query.close();
   }
 
   // ask holds a permission request or question until a person answers it.
@@ -128,6 +151,7 @@ class Session {
   // (an interrupt or a turn that ended), or the session's end.
   ask(tool, input, options) {
     const request = permissionRequest(tool, input, options);
+    if (this.ended) return Promise.resolve({ behavior: 'deny', message: WITHDRAWN });
     return new Promise((resolve) => {
       const withdraw = () => settle('withdrawn', { behavior: 'deny', message: WITHDRAWN });
       const settle = (outcome, result) => {
@@ -135,6 +159,7 @@ class Session {
         options.signal?.removeEventListener('abort', withdraw);
         emit(this.id, 'request_resolved', { requestId: request.requestId, outcome });
         resolve(result);
+        this.retireIfDone();
       };
       this.pending.set(request.requestId, { request, input, suggestions: options.suggestions, settle });
       emit(this.id, 'request_opened', { request });
@@ -206,10 +231,14 @@ const methods = {
     orphans: liveOrphans(),
     draining,
   }),
-  drain: () => {
-    draining = true;
-    for (const s of sessions.values()) if (s.state === 'idle') s.end();
-    exitWhenDrained();
+  drain: async () => {
+    retiring ??= retire().catch((error) => {
+      retiring = null;
+      throw error;
+    });
+    await retiring;
+    for (const s of [...sessions.values()]) s.retireIfDone();
+    setTimeout(exitWhenDrained, 100);
     return { sessions: sessions.size };
   },
 };
@@ -256,7 +285,9 @@ async function open(params) {
       prompt: s.input(),
       options: {
         cwd,
-        env: params.configDir ? { ...process.env, CLAUDE_CONFIG_DIR: params.configDir } : process.env,
+        // Claude reports its own idle, busy and requires_action states only
+        // when asked; the SDK otherwise reads them and drops them.
+        env: { ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.configDir ? { CLAUDE_CONFIG_DIR: params.configDir } : {}) },
         pathToClaudeCodeExecutable: args.claude,
         ...(params.resume ? { resume: id } : { sessionId: id }),
         ...(permissionMode ? { permissionMode } : {}),
@@ -346,7 +377,6 @@ function decide({ request, input, suggestions }, decision) {
 
 async function send(params) {
   const s = session(params.sessionId);
-  if (draining) throw new HostError('draining', 'the Claude host is shutting down; the message is delivered on the next host');
   if (typeof params.uuid !== 'string' || !UUID.test(params.uuid)) throw new HostError('invalid', 'uuid must be a uuid');
   const images = params.images ?? [];
   if (!Array.isArray(images)) throw new HostError('invalid', 'images must be a list');
@@ -445,9 +475,19 @@ async function run(s, exit) {
   try {
     for await (const message of s.query) {
       if (message.type === 'system' && message.subtype === 'session_state_changed') {
+        s.stateEvents = true;
         s.setState(message.state === 'idle' ? 'idle' : 'busy');
-      } else if (message.type === 'result' && s.inbox.length === 0) {
+      } else if (message.type === 'system' && message.subtype === 'background_tasks_changed') {
+        s.tasks = Array.isArray(message.tasks) ? message.tasks : [];
+        s.retireIfDone();
+      } else if (message.type === 'result' && !s.stateEvents && s.inbox.length === 0) {
+        s.guessesIdle = true;
+        if (!stateEventsMissing) {
+          stateEventsMissing = true;
+          process.stderr.write(`claude-host: Claude ${s.pid} sent a turn result without session state events; idle is read from turn results, which miss turns Claude starts itself\n`);
+        }
         s.setState('idle');
+        s.retireIfDone({ turnEnded: true });
       }
       emit(s.id, 'sdk', { message });
     }
@@ -582,7 +622,10 @@ function liveOrphans() {
   return [...orphans.values()];
 }
 
+// A retiring host stops recording: state.json belongs to the host that
+// replaced it, which holds this host's sessions as running processes.
 function writeState() {
+  if (draining) return;
   const entries = {};
   for (const o of liveOrphans()) entries[o.sessionId] = { pid: o.pid, started: o.started, cwd: o.cwd, openedAt: o.openedAt };
   for (const s of sessions.values()) if (s.pid) entries[s.id] = { pid: s.pid, started: s.started, cwd: s.cwd, openedAt: s.openedAt };
@@ -624,9 +667,44 @@ function exitWhenDrained() {
 function shutdown(code) {
   server.close();
   try {
-    fs.unlinkSync(args.socket);
+    fs.unlinkSync(listening);
   } catch {}
   process.exit(code);
+}
+
+// retire hands the daemon's socket and the host lock to the next host while
+// this one keeps serving its own sessions on a socket of its own, named by its
+// pid beside the daemon's, until the last one closes. It refuses new sessions.
+async function retire() {
+  const socket = `${args.socket.replace(/\.sock$/, '')}.${process.pid}.sock`;
+  const next = net.createServer(serve);
+  next.on('error', (error) => process.stderr.write(`claude-host: ${error.message}\n`));
+  try {
+    fs.unlinkSync(socket);
+  } catch {}
+  await new Promise((resolve, reject) => {
+    next.once('error', reject);
+    next.listen(socket, resolve);
+  });
+  fs.chmodSync(socket, 0o600);
+  draining = true;
+  server.close();
+  try {
+    fs.unlinkSync(args.socket);
+  } catch {}
+  server = next;
+  listening = socket;
+  // A subscriber came in through the daemon's socket and follows whichever
+  // host serves it. It gets no more events from this host and is closed once
+  // any reply it waits on is written, so it reconnects to the new host, and
+  // follows this one on its own socket if it still wants to.
+  const following = [...subscribers];
+  subscribers.clear();
+  setImmediate(() => {
+    for (const subscriber of following) subscriber.end();
+  });
+  fs.closeSync(LOCK_FD);
+  process.stderr.write(`claude-host: pid ${process.pid} retiring with ${sessions.size} sessions on ${socket}\n`);
 }
 
 function fail(message) {
@@ -637,7 +715,7 @@ function fail(message) {
 try {
   fs.unlinkSync(args.socket);
 } catch {}
-const server = net.createServer(serve);
+let server = net.createServer(serve);
 // A host that cannot listen exits with the reason. Once listening, a failed
 // accept costs that one client, not the sessions this host runs.
 server.on('error', (error) => {

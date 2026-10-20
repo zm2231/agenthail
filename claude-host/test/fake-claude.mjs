@@ -43,11 +43,34 @@ let interrupt = null;
 let turns = Promise.resolve();
 let inputClosed = false;
 
+// Claude reports its states to the SDK host only under
+// CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS. The SDK sets
+// CLAUDE_CODE_SDK_READS_SESSION_STATE, under which Claude marks them
+// sdk_host_only and the SDK drops them. FAKE_CLAUDE_NO_STATE_EVENTS stands for
+// a Claude that sends neither.
+function state(value) {
+  if (process.env.FAKE_CLAUDE_NO_STATE_EVENTS) return;
+  const event = { type: 'system', subtype: 'session_state_changed', state: value, uuid: crypto.randomUUID(), session_id: sessionId };
+  if (process.env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS) write(event);
+  else if (process.env.CLAUDE_CODE_SDK_READS_SESSION_STATE) write({ ...event, sdk_host_only: true });
+}
+
+// tasks is the set of live background tasks, sent whole on every change.
+const tasks = new Map();
+function setTasks() {
+  write({ type: 'system', subtype: 'background_tasks_changed', tasks: [...tasks.values()], uuid: crypto.randomUUID(), session_id: sessionId });
+}
+
+// Claude refuses a prompt still open when its input closes, and goes on.
+const STREAM_CLOSED = 'Tool permission request failed: AbortError: Tool permission stream closed before response received';
+
 // control asks the SDK and waits for its answer. An interrupt while it waits
 // withdraws the request, the way Claude cancels a prompt nobody answered.
 function control(request) {
   const id = `fake-${++requests}`;
+  if (inputClosed) return Promise.resolve({ behavior: 'error', message: STREAM_CLOSED });
   write({ type: 'control_request', request_id: id, request });
+  state('requires_action');
   return new Promise((resolve) => {
     pending.set(id, resolve);
     interrupt = () => {
@@ -63,18 +86,20 @@ async function turn(message) {
   if (uuid && seen.has(uuid)) return;
   seen.add(uuid);
   const text = typeof message.message.content === 'string' ? message.message.content : JSON.stringify(message.message.content);
-  write({ type: 'system', subtype: 'session_state_changed', state: 'running', uuid: crypto.randomUUID(), session_id: sessionId });
+  state('running');
   let reply = `echo:${text}`;
   if (text.startsWith('TOOL')) {
     const suggestions = [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'true' }], behavior: 'allow', destination: 'session' }];
     const decision = await control({ subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'true' }, tool_use_id: 'toolu_fake', title: 'Claude wants to run true', ...(text.includes('ALWAYS') ? { permission_suggestions: suggestions } : {}) });
     interrupt = null;
+    state('running');
     reply = `tool:${decision.behavior}:${decision.message ?? ''}${decision.updatedPermissions ? ':always' : ''}`;
   } else if (text.startsWith('QUESTION')) {
     const questions = [{ question: 'Which color?', header: 'Color', multiSelect: false, options: [{ label: 'Red', description: 'Warm' }, { label: 'Blue', description: 'Cool' }] }];
     if (text.startsWith('QUESTIONS')) questions.push({ question: 'Which size?', header: 'Size', multiSelect: false, options: [{ label: 'S', description: 'Small' }, { label: 'L', description: 'Large' }] });
     const decision = await control({ subtype: 'can_use_tool', tool_name: 'AskUserQuestion', input: { questions }, tool_use_id: 'toolu_question' });
     interrupt = null;
+    state('running');
     reply = `question:${decision.behavior}:${JSON.stringify(decision.updatedInput?.answers ?? null)}`;
   } else if (text.startsWith('SLOW')) {
     const ms = Number(text.split(' ')[1] ?? 30000);
@@ -87,12 +112,23 @@ async function turn(message) {
     });
     interrupt = null;
     reply = interrupted ? 'interrupted' : `slow:${ms}`;
+  } else if (text.startsWith('BACKGROUND')) {
+    // A background shell that outlives the turn, like run_in_background.
+    const ms = Number(text.split(' ')[1] ?? 30000);
+    const id = `task-${uuid}`;
+    tasks.set(id, { task_id: id, task_type: 'local_bash', description: 'background shell' });
+    setTasks();
+    setTimeout(() => {
+      tasks.delete(id);
+      setTasks();
+    }, ms);
+    reply = `background:${ms}`;
   }
   fs.appendFileSync(transcript, JSON.stringify({ uuid, text, reply, origin: message.origin ?? null, priority: message.priority ?? null, pid: process.pid, inputClosed }) + '\n');
   claudeTranscript(uuid, text, reply);
   write({ type: 'assistant', uuid: crypto.randomUUID(), session_id: sessionId, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: reply }] } });
   write({ type: 'result', subtype: 'success', is_error: false, result: reply, uuid: crypto.randomUUID(), session_id: sessionId, user_message_uuids: [uuid], duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {} });
-  write({ type: 'system', subtype: 'session_state_changed', state: 'idle', uuid: crypto.randomUUID(), session_id: sessionId });
+  state('idle');
 }
 
 // With FAKE_CLAUDE_RECORD set each turn is also written to the conversation's
@@ -165,12 +201,18 @@ lines.on('line', (line) => {
     turns = turns.then(() => turn(message));
   }
 });
-// Claude cannot ask anyone once its input closes, so a prompt still open
-// then ends the process without running the tool.
+// Claude cannot ask anyone once its input closes: it refuses the prompts
+// still open, finishes its turns and exits. With FAKE_CLAUDE_OUTLIVES_INPUT
+// it keeps running and serving its messaging socket instead, as a Claude
+// whose input an earlier host closed was seen doing.
 lines.on('close', async () => {
   inputClosed = true;
-  if (pending.size > 0) process.exit(0);
+  for (const [id, resolve] of [...pending]) {
+    pending.delete(id);
+    resolve({ behavior: 'error', message: STREAM_CLOSED });
+  }
   await turns;
+  if (process.env.FAKE_CLAUDE_OUTLIVES_INPUT) return setInterval(() => {}, 1 << 30);
   process.exit(0);
 });
 process.on('SIGTERM', () => process.exit(0));

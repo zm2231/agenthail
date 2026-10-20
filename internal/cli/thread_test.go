@@ -21,10 +21,14 @@ type starterCLISurface struct {
 	delivery *surface.SendResult
 	err      error
 	wait     bool
+	during   func()
 }
 
 func (f *starterCLISurface) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
 	f.options = append(f.options, options)
+	if f.during != nil {
+		f.during()
+	}
 	if f.wait {
 		<-ctx.Done()
 		return nil, nil, ctx.Err()
@@ -272,5 +276,57 @@ func TestThreadCreateCodexHonorsTimeout(t *testing.T) {
 	}
 	if time.Since(started) > time.Second {
 		t.Fatalf("timeout took %s", time.Since(started))
+	}
+}
+
+func TestThreadCreateHoldsItsNameFromBeforeTheStart(t *testing.T) {
+	cwd := t.TempDir()
+	base := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"alpha": {ID: "alpha", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}}}
+	starter := &starterCLISurface{
+		cliSurface: base,
+		session:    &surface.Session{ID: "thread-123", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: cwd, Transport: "managed"},
+		delivery:   &surface.SendResult{UUID: "turn-456", Accepted: true},
+	}
+	app := threadFixture(t, starter)
+	starter.during = func() {
+		if err := app.Run([]string{"identify", "codex:alpha", "builder"}); err == nil || !strings.Contains(err.Error(), "@builder is the name of a conversation being started") {
+			t.Errorf("identify during the start: err=%v", err)
+		}
+	}
+	if _, err := captureStdout(t, func() error {
+		return app.Run([]string{"thread", "create", "codex", "Build this", "--cwd", cwd, "--alias", "builder", "--json"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if owner, err := app.Registry.LookupAlias("builder"); err != nil || owner != "thread-123" {
+		t.Fatalf("owner=%q err=%v", owner, err)
+	}
+}
+
+func TestThreadCreateThatStartsNothingFreesItsName(t *testing.T) {
+	starter := &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindCodex}, wait: true}
+	app := threadFixture(t, starter)
+	if _, err := captureStdout(t, func() error {
+		return app.Run([]string{"thread", "create", "codex", "Build this", "--cwd", t.TempDir(), "--alias", "builder", "--timeout", "50ms"})
+	}); err == nil {
+		t.Fatal("a start that timed out succeeded")
+	}
+	if _, err := app.Registry.ReserveAlias("builder", time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("the timed-out start kept its name: %v", err)
+	}
+}
+
+func TestThreadCreateRefusesANameAnotherStartHolds(t *testing.T) {
+	starter := &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindCodex}}
+	app := threadFixture(t, starter)
+	if _, err := app.Registry.ReserveAlias("builder", time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	_, err := captureStdout(t, func() error {
+		return app.Run([]string{"thread", "create", "codex", "Build this", "--cwd", t.TempDir(), "--alias", "builder"})
+	})
+	var reserved registry.AliasReservedError
+	if !errors.As(err, &reserved) || len(starter.options) != 0 {
+		t.Fatalf("err=%v starts=%d", err, len(starter.options))
 	}
 }

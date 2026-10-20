@@ -1475,7 +1475,12 @@ async function respondToRequest(requestId, decision) {
     const result = await action("respond", { requestId, decision });
     toast(`Request ${result?.result?.outcome || "answered"}.`);
   } catch (error) {
-    toast(/already answered or has expired/.test(error.message) ? "That request was already answered or has expired." : error.message);
+    const stale = /already answered or has expired/.test(error.message);
+    if (stale && app.requests) {
+      app.requests = { ...app.requests, requests: (app.requests.requests || []).filter((request) => request.id !== requestId) };
+      renderRequests();
+    }
+    toast(stale ? "That request was already answered or has expired." : error.message);
   }
   app.requestsKey = "";
   await load();

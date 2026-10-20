@@ -827,7 +827,7 @@ struct TranscriptView: View {
             .frame(maxWidth: 700)
             .padding(.horizontal, 24)
             .padding(.top, 28)
-            .padding(.bottom, 12)
+            .padding(.bottom, 12 + MessageActions.height)
             .frame(maxWidth: .infinity)
         }
         .scrollPosition($position)
@@ -1081,6 +1081,12 @@ struct UserBubble: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
+        .overlay(alignment: .bottomTrailing) {
+            if !editing {
+                MessageActions(text: envelope.body, revealed: hovering, onEdit: onEdit == nil ? nil : { editing = true })
+                    .offset(y: MessageActions.height)
+            }
+        }
         .padding(.leading, 120)
         .onHover { hovering = $0 }
     }
@@ -1118,7 +1124,6 @@ struct UserBubble: View {
                 .font(.system(size: 11))
                 .foregroundStyle(DesktopPalette.text2)
         }
-        MessageActions(text: message, emphasized: hovering, onEdit: onEdit == nil ? nil : { editing = true })
     }
 }
 
@@ -1174,16 +1179,17 @@ struct AssistantReply: View {
     @State private var hovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            StructuredText(markdown: text)
-                .font(.system(size: 15.5, design: .serif))
-                .lineSpacing(4)
-                .foregroundStyle(DesktopPalette.text)
-                .textual.textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-            MessageActions(text: text, emphasized: hovering)
-        }
-        .onHover { hovering = $0 }
+        StructuredText(markdown: text)
+            .font(.system(size: 15.5, design: .serif))
+            .lineSpacing(4)
+            .foregroundStyle(DesktopPalette.text)
+            .textual.textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .overlay(alignment: .bottomLeading) {
+                MessageActions(text: text, revealed: hovering)
+                    .offset(y: MessageActions.height)
+            }
+            .onHover { hovering = $0 }
     }
 }
 
