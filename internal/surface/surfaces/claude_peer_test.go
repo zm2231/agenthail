@@ -19,6 +19,35 @@ import (
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
+func TestClaudeLifecycleCapabilitiesFollowTheRuntime(t *testing.T) {
+	adapter := NewClaude(nil, t.TempDir())
+	for _, tc := range []struct {
+		runtime surface.RuntimeKind
+		want    surface.Lifecycle
+	}{
+		{surface.RuntimeClaudeBackground, surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true}},
+		{surface.RuntimeClaudeHost, surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true}},
+		{surface.RuntimeClaudeCLI, surface.Lifecycle{}},
+	} {
+		session := &surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: tc.runtime, Transport: "uds", Bridge: "session_bridge"}
+		if got := adapter.SessionCapabilities(session).Lifecycle; got != tc.want {
+			t.Fatalf("%s lifecycle=%+v, want %+v", tc.runtime, got, tc.want)
+		}
+		adapter.DisableRemoteControl()
+		if got := adapter.SessionCapabilities(session).Lifecycle; got != tc.want {
+			t.Fatalf("%s without Remote Control lifecycle=%+v, want %+v", tc.runtime, got, tc.want)
+		}
+		adapter = NewClaude(nil, t.TempDir())
+	}
+	if adapter.Capabilities().Lifecycle != (surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true}) {
+		t.Fatal("the adapter advertises less lifecycle than its sessions reach")
+	}
+	var codex surface.Surface = NewCodex("")
+	if codex.Capabilities().Lifecycle != (surface.Lifecycle{}) {
+		t.Fatalf("Codex advertises a lifecycle: %+v", codex.Capabilities().Lifecycle)
+	}
+}
+
 func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	t.Setenv("TZ", "America/New_York")
 	home := t.TempDir()
@@ -56,6 +85,15 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	if sessions[0].Transcript != transcript {
 		t.Fatal("transcript escaped adapter home")
 	}
+	for kind, want := range map[string]surface.RuntimeKind{"bg": surface.RuntimeClaudeBackground, "interactive": surface.RuntimeClaudeCLI} {
+		record["kind"] = kind
+		write(record)
+		sessions, err = adapter.List(context.Background())
+		if err != nil || len(sessions) != 1 || sessions[0].RuntimeKind != want {
+			t.Fatalf("record kind %s: sessions=%+v err=%v, want runtime %s", kind, sessions, err, want)
+		}
+	}
+	delete(record, "kind")
 	record["bridgeSessionId"] = "session_bridge"
 	write(record)
 	resolved, err := adapter.Resolve(context.Background(), "local-id")

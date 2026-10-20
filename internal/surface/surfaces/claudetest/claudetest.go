@@ -141,7 +141,19 @@ func (f *Fixture) Record(conversation, cwd, bridge string) {
 // since the given time.
 func (f *Fixture) RecordStatus(conversation, cwd, bridge, status, waitingFor string, since time.Time) {
 	f.t.Helper()
-	record := map[string]any{"pid": f.PID, "sessionId": conversation, "cwd": cwd, "status": status, "kind": "interactive", "entrypoint": "cli", "peerFeatures": []string{"notify_idle"}, "startedAt": time.Now().UnixMilli()}
+	f.record("interactive", conversation, cwd, bridge, status, waitingFor, since)
+}
+
+// BackgroundRecord writes the record Claude keeps for an idle background job
+// holding conversation.
+func (f *Fixture) BackgroundRecord(conversation, cwd string) {
+	f.t.Helper()
+	f.record("bg", conversation, cwd, "", "idle", "", time.Time{})
+}
+
+func (f *Fixture) record(kind, conversation, cwd, bridge, status, waitingFor string, since time.Time) {
+	f.t.Helper()
+	record := map[string]any{"pid": f.PID, "sessionId": conversation, "cwd": cwd, "status": status, "kind": kind, "entrypoint": "cli", "peerFeatures": []string{"notify_idle"}, "startedAt": time.Now().UnixMilli()}
 	if waitingFor != "" {
 		record["waitingFor"] = waitingFor
 	}

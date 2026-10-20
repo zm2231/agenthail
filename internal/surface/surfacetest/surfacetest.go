@@ -8,7 +8,7 @@ import "github.com/zm2231/agenthail/internal/surface"
 func RuntimeKinds(kind surface.SurfaceKind) []surface.RuntimeKind {
 	switch kind {
 	case surface.KindClaude:
-		return []surface.RuntimeKind{surface.RuntimeClaudeCLI}
+		return []surface.RuntimeKind{surface.RuntimeClaudeCLI, surface.RuntimeClaudeHost, surface.RuntimeClaudeBackground}
 	case surface.KindCodex:
 		return []surface.RuntimeKind{surface.RuntimeCodexDesktop, surface.RuntimeCodexAppServer}
 	case surface.KindNotion:

@@ -250,8 +250,9 @@ never the identity. `/branch` and `/clear` create a new session without an alias
 After `/branch`, `agenthail whoami` names the branch. Move an alias only with
 `agenthail identify <target> <name>`.
 
-Use `thread status`, `stop` or `resume` with the alias; a host session has no
-`logs`, so read it with `agenthail last`. Preserve unknown launch outcomes;
+Use `thread status`, `logs`, `stop` or `resume` with the alias; a host
+session's `logs` is its Claude process's stderr while it is open, and
+`agenthail last` reads the conversation. Preserve unknown launch outcomes;
 inspect `agenthail list` before retrying.
 Send to a Claude session whose process has ended (a stopped or finished
 background job, or a closed terminal session) like any other session: the send

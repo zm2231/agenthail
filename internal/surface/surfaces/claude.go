@@ -65,7 +65,7 @@ func NewClaudeWithRequest(signins signin.Resolver, home string, request ClaudeRe
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
 
 func (c *Claude) RuntimeKinds() []surface.RuntimeKind {
-	return []surface.RuntimeKind{surface.RuntimeClaudeCLI, surface.RuntimeClaudeHost}
+	return []surface.RuntimeKind{surface.RuntimeClaudeCLI, surface.RuntimeClaudeHost, surface.RuntimeClaudeBackground}
 }
 
 func (c *Claude) ObserveClaudeRuns(ctx context.Context) ([]surface.ClaudeRunObservation, error) {
@@ -85,6 +85,7 @@ func (c *Claude) Capabilities() surface.Capabilities {
 		Send: true, Stream: true, Reply: true, GoalSet: true, GoalStatus: true,
 		Compact: true, Model: true, Interrupt: true, Steer: true,
 		Attach: true, Commands: true,
+		Lifecycle: surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true},
 	}
 }
 
@@ -95,6 +96,9 @@ func (c *Claude) Capabilities() surface.Capabilities {
 // install without Remote Control. Hosted and socket sessions stream only from
 // a local transcript. A goal is set only where the session runs /goal as a
 // command: its peer socket hands the text to the model as a message.
+// Lifecycle follows the runtime: a background job and a host session have
+// status, logs, stop and resume; an interactive session belongs to its
+// terminal.
 func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities {
 	capabilities := c.Capabilities()
 	capabilities.GoalSet = sess == nil || c.canSendHumanTurn(sess)
@@ -104,10 +108,14 @@ func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities
 		capabilities.Commands = false
 		capabilities.Respond = true
 		capabilities.PermissionMode = true
+		capabilities.Lifecycle = surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true}
 		return capabilities
 	}
 	if sess == nil {
 		return capabilities
+	}
+	if sess.RuntimeKind != surface.RuntimeClaudeBackground {
+		capabilities.Lifecycle = surface.Lifecycle{}
 	}
 	if sess.Transport == "uds" {
 		capabilities.Stream = sess.HasLocal && sess.Transcript != ""
@@ -601,8 +609,11 @@ func (c *Claude) process(ctx context.Context, record claudeSessionRecord, transc
 	if socket != "" {
 		sess.Transport = "uds"
 	}
-	if hosted {
+	switch {
+	case hosted:
 		sess.RuntimeKind = surface.RuntimeClaudeHost
+	case str(m, "kind") == "bg":
+		sess.RuntimeKind = surface.RuntimeClaudeBackground
 	}
 	if n, ok := m["name"].(string); ok {
 		sess.Name = n
