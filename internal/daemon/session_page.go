@@ -10,15 +10,26 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const sessionPageItemLimit = 400
+const (
+	// sessionPageScanRows bounds the journal rows one page reads while
+	// looking for the start of its oldest exchange: the whole retained
+	// journal of a session.
+	sessionPageScanRows = sessionJournalRetentionCount
+	// sessionPageBytes bounds the journal payload one page returns, so the
+	// page with its exchanges stays inside what a client reads.
+	sessionPageBytes = 1 << 20
+)
 
 type journalPageItem struct {
 	seq     uint64
+	size    int
 	payload sessionJournalPayload
 }
 
 // readJournalPage returns the newest limit exchanges before the cursor, each from the item that
-// opened it, with every item of those turns. A turn longer than the item limit starts mid-turn.
+// opened it, with every item of those turns. It reads until it has seen where the oldest of them
+// starts or the journal begins, at most sessionPageScanRows rows and a little past sessionPageBytes,
+// and returns the whole exchanges that fit sessionPageBytes; the cursor addresses the next one.
 func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*surface.SessionReadResult, error) {
 	result := &surface.SessionReadResult{Source: "journal", Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}}
 	var collected []journalPageItem
@@ -26,10 +37,13 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 	var positions, starts []int
 	cursor := before
 	var page registry.SessionJournalPage
+	reachedStart := false
+	collectedBytes := 0
 	for {
 		next, err := d.Registry.ReadSessionJournalPage(sessionID, cursor, 200)
 		var gap *registry.SessionJournalHistoryGapError
 		if cursor != before && errors.As(err, &gap) {
+			reachedStart = true
 			break
 		}
 		if err != nil {
@@ -45,21 +59,22 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 			if err := json.Unmarshal(entry.Payload, &payload); err != nil {
 				return result, fmt.Errorf("decode journal item: %w", err)
 			}
-			chunk = append(chunk, journalPageItem{seq: entry.Seq, payload: payload})
+			chunk = append(chunk, journalPageItem{seq: entry.Seq, size: len(entry.Payload), payload: payload})
 		}
 		collected = append(chunk, collected...)
+		for _, item := range chunk {
+			collectedBytes += item.size
+		}
 		items, positions = journalVisibleItems(collected)
 		starts = surface.ExchangeStarts(items)
-		if len(starts) > limit || len(collected) >= sessionPageItemLimit || page.NextBefore == 0 || len(page.Entries) < 200 {
+		reachedStart = page.NextBefore == 0 || len(page.Entries) < 200
+		if len(starts) > limit || len(collected) >= sessionPageScanRows || collectedBytes > sessionPageBytes || reachedStart {
 			break
 		}
 		cursor = page.NextBefore
 	}
-	first := 0
-	if len(starts) > limit {
-		first = positions[starts[len(starts)-limit]]
-	}
-	first = max(first, len(collected)-sessionPageItemLimit)
+	first, truncated := journalPageStart(collected, positions, starts, limit, reachedStart)
+	result.Truncated = truncated
 	if first > 0 {
 		result.NextBefore = int64(collected[first].seq)
 	} else {
@@ -88,6 +103,30 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 		result.UnavailableReason = ""
 	}
 	return result, nil
+}
+
+// journalPageStart returns the first collected row of the page: the start of
+// the oldest of at most limit exchanges that fit sessionPageBytes, or the
+// journal's first row when the page reaches it. A newest exchange larger than
+// a page starts mid-turn and is reported truncated.
+func journalPageStart(collected []journalPageItem, positions, starts []int, limit int, reachedStart bool) (int, bool) {
+	suffix := make([]int, len(collected)+1)
+	for index := len(collected) - 1; index >= 0; index-- {
+		suffix[index] = suffix[index+1] + collected[index].size
+	}
+	if reachedStart && len(starts) <= limit && suffix[0] <= sessionPageBytes {
+		return 0, false
+	}
+	for _, start := range starts[max(0, len(starts)-limit):] {
+		if suffix[positions[start]] <= sessionPageBytes {
+			return positions[start], false
+		}
+	}
+	first := len(collected)
+	for first > 0 && suffix[first-1] <= sessionPageBytes {
+		first--
+	}
+	return min(first, max(0, len(collected)-1)), true
 }
 
 // journalVisibleItems returns the timeline items among entries and each item's entry position.
@@ -119,6 +158,11 @@ func journalTimelineItem(payload sessionJournalPayload) surface.TimelineItem {
 	}
 	return surface.TimelineItem{ID: payload.ItemID, Kind: payload.Kind, Role: role, Origin: payload.Origin, Sender: payload.Sender, Title: title, Text: payload.Body, Timestamp: payload.TS, CallID: callID, TurnID: payload.TurnID, Status: payload.Status, Truncated: payload.Truncated, TruncationReason: payload.TruncationReason, BodyRef: payload.BodyRef, Attachment: payload.Attachment, Files: payload.Files}
 }
+
+// providerHistoryItemLimit bounds the items one page of provider history
+// gathers; provider pages are whole exchanges, so stopping between them never
+// splits a turn.
+const providerHistoryItemLimit = 400
 
 const providerHistoryCursorBase = int64(1) << 52
 
@@ -161,7 +205,7 @@ func (d *Daemon) readProviderHistoryPage(ctx context.Context, session *surface.S
 			}
 			page = append(page, item)
 		}
-		if result != nil && len(items)+len(page) > sessionPageItemLimit {
+		if result != nil && len(items)+len(page) > providerHistoryItemLimit {
 			result.NextBefore = cursor
 			break
 		}

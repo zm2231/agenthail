@@ -1918,8 +1918,8 @@ func (a *App) cmdLast(args []string) error {
 	n := 1
 	if len(positional) > 1 {
 		v, parseErr := strconv.Atoi(positional[1])
-		if parseErr != nil || v < 1 || v > 50 {
-			return fmt.Errorf("count must be an integer from 1 to 50")
+		if parseErr != nil || v < 1 || v > surface.MaxExchangePage {
+			return fmt.Errorf("count must be an integer from 1 to %d", surface.MaxExchangePage)
 		}
 		n = v
 	}
@@ -1966,11 +1966,14 @@ func (a *App) cmdLast(args []string) error {
 	}
 	full := hasFlag(args, "--full")
 	for _, ex := range exchanges {
+		if !ex.Timestamp.IsZero() {
+			fmt.Printf("%s\n", ex.Timestamp.Local().Format("2006-01-02 15:04:05"))
+		}
 		if ex.User != "" {
 			if full {
-				fmt.Printf("you  ▸ %s\n", ex.User)
+				fmt.Printf("%s ▸ %s\n", promptLabel(ex), ex.User)
 			} else {
-				fmt.Printf("you  ▸ %s\n", truncate(strings.ReplaceAll(ex.User, "\n", " "), 200))
+				fmt.Printf("%s ▸ %s\n", promptLabel(ex), truncate(strings.ReplaceAll(ex.User, "\n", " "), 200))
 			}
 		}
 		if ex.Assistant != "" {
@@ -1986,6 +1989,25 @@ func (a *App) cmdLast(args []string) error {
 		fmt.Printf("older cursor: %d\n", read.NextBefore)
 	}
 	return nil
+}
+
+// promptLabel names who sent an exchange's prompt, so an injected prompt is
+// never shown as the person's own words.
+func promptLabel(exchange surface.Exchange) string {
+	switch exchange.Origin {
+	case "":
+		return "you "
+	case "peer":
+		if exchange.Sender != "" {
+			return "from " + exchange.Sender
+		}
+		return "agent"
+	case "task-notification":
+		return "task notification"
+	case "auto-continuation":
+		return "continued"
+	}
+	return exchange.Origin
 }
 
 func printSessionReadWarning(read *surface.SessionReadResult) {
