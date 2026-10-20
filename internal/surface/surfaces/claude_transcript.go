@@ -142,13 +142,13 @@ func appendClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 		turn := &turns[len(turns)-1]
 		if turn.Closing && !claudeRecordContinuesMessage(record.Type, record.Message.ID, turn.MessageID) {
 			turn.Closing = false
-			turn.Done = record.Type != "user" || !isClaudeInterruptMarker(transcriptText(record.Message.Content))
+			turn.Done = record.Type != "user" || record.Origin.Kind == claudeOriginHuman || !isClaudeInterruptMarker(transcriptText(record.Message.Content))
 		}
 	}
 	switch record.Type {
 	case "user":
 		text := transcriptText(record.Message.Content)
-		if isClaudeInterruptMarker(text) {
+		if record.Origin.Kind != claudeOriginHuman && isClaudeInterruptMarker(text) {
 			if len(turns) > 0 {
 				turns[len(turns)-1].Interrupted = true
 			}

@@ -1325,7 +1325,8 @@ func claudeRecordHasToolResult(record map[string]any) bool {
 }
 
 func claudeRecordIsInterrupt(record map[string]any) bool {
-	if str(record, "type") != "user" {
+	origin, _ := record["origin"].(map[string]any)
+	if str(record, "type") != "user" || str(origin, "kind") == claudeOriginHuman {
 		return false
 	}
 	message, _ := record["message"].(map[string]any)

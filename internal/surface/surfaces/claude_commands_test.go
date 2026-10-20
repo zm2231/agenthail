@@ -178,3 +178,30 @@ func TestClaudeTypedTextShapedLikeCommandOutputIsThePersonsPrompt(t *testing.T) 
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
 }
+
+func TestClaudeTypedTextShapedLikeAnInterruptIsThePersonsPrompt(t *testing.T) {
+	path := timelineFixture(t, `{"type":"user","uuid":"typed","origin":{"kind":"human"},"timestamp":"2026-10-20T18:00:00Z","message":{"role":"user","content":"[Request interrupted by user] what does this mean?"}}
+{"type":"assistant","uuid":"a","timestamp":"2026-10-20T18:00:05Z","message":{"id":"m","stop_reason":"end_turn","content":[{"type":"text","text":"Claude writes it when you interrupt"}]}}
+{"type":"system","subtype":"turn_duration","durationMs":5000,"timestamp":"2026-10-20T18:00:06Z"}
+`)
+	read, err := timelineClaude().ReadSession(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 5})
+	if err != nil || read.Reply == nil || read.Reply.UserText != "[Request interrupted by user] what does this mean?" || !read.Reply.Done {
+		t.Fatalf("read reply=%+v err=%v", read.Reply, err)
+	}
+	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var done []surface.TimelineItem
+	for _, item := range page.Items {
+		if item.Kind == "message" && item.TurnID != "typed" {
+			t.Fatalf("item outside the typed turn: %+v", item)
+		}
+		if item.Kind == "done" {
+			done = append(done, item)
+		}
+	}
+	if len(done) != 1 || done[0].TurnID != "typed" || done[0].Status == "cancelled" {
+		t.Fatalf("done=%+v items=%+v", done, page.Items)
+	}
+}
