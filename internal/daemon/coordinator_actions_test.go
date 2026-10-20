@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -226,7 +227,7 @@ func TestANameClaimedWhileAPeerClearsItsCoordinatorCannotStrandTheProject(t *tes
 
 func TestARefusedReplaceRestoresTheLocalCoordinatorOrKeepsTheNewOne(t *testing.T) {
 	for _, renamed := range []bool{false, true} {
-		t.Run(map[bool]string{false: "restores", true: "keeps the new one when the old name moved"}[renamed], func(t *testing.T) {
+		t.Run(map[bool]string{false: "restores, and the new coordinator's session keeps its name meanwhile", true: "keeps the new one when the old name moved"}[renamed], func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			upstream := catalogTestRepo(t)
 			mac := newFederationNode(t, "mac-a", "mac-other", "mac-third")
@@ -267,6 +268,10 @@ func TestARefusedReplaceRestoresTheLocalCoordinatorOrKeepsTheNewOne(t *testing.T
 			awaitFederation(t, "the clear reaching forge", func() bool { return hold.waiting.Load() == 1 })
 			if response := forge.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "forge-a", "name": "peer-lead", "replace": true}); response.Code != http.StatusOK {
 				t.Fatalf("forge changes its coordinator: %d %s", response.Code, response.Body)
+			}
+			var aliasErr registry.CoordinatorAliasError
+			if err := mac.reg.SetAlias("renamed-other", "mac-other"); !errors.As(err, &aliasErr) {
+				t.Fatalf("the new coordinator's session was renamed during the replace: %v", err)
 			}
 			if renamed {
 				if err := mac.reg.SetAlias("renamed", "mac-a"); err != nil {

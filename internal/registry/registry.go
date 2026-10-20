@@ -989,7 +989,35 @@ func (e AliasTakenError) Error() string {
 	return fmt.Sprintf("alias %q is already assigned to session %q", e.Name, e.Owner)
 }
 
+// setAliasTx names a session. A coordinator's name moves only through the
+// coordinator, so it is neither given to another session nor taken from the
+// session it names.
 func setAliasTx(tx *sql.Tx, name, sessionID string) error {
+	if strings.EqualFold(name, LeadAlias) {
+		return ErrReservedAlias
+	}
+	var current string
+	err := tx.QueryRow(`SELECT name FROM aliases WHERE session_id=?`, sessionID).Scan(&current)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if current == name {
+		return nil
+	}
+	for _, held := range []string{name, current} {
+		if held == "" {
+			continue
+		}
+		if coordinated, err := coordinatorNamedTx(tx, held); err != nil {
+			return err
+		} else if coordinated {
+			return CoordinatorAliasError{Name: held}
+		}
+	}
+	return bindAliasTx(tx, name, sessionID)
+}
+
+func bindAliasTx(tx *sql.Tx, name, sessionID string) error {
 	if strings.EqualFold(name, LeadAlias) {
 		return ErrReservedAlias
 	}
@@ -1031,6 +1059,11 @@ func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error)
 			candidate = fmt.Sprintf("%s-%d", base, n+1)
 		}
 		if candidate == LeadAlias {
+			continue
+		}
+		if coordinated, err := coordinatorNamedTx(tx, candidate); err != nil {
+			return "", err
+		} else if coordinated {
 			continue
 		}
 		if _, err := tx.Exec(`INSERT INTO aliases(name,session_id) VALUES(?,?)`, candidate, sessionID); err == nil {
@@ -2873,14 +2906,24 @@ func (r *Registry) ReverseAlias(sessionID string) (string, error) {
 }
 
 func (r *Registry) RemoveAlias(name string) error {
-	res, err := r.db.Exec(`DELETE FROM aliases WHERE name = ?`, name)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if coordinated, err := coordinatorNamedTx(tx, name); err != nil {
+		return err
+	} else if coordinated {
+		return CoordinatorAliasError{Name: name}
+	}
+	res, err := tx.Exec(`DELETE FROM aliases WHERE name = ?`, name)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
 		return fmt.Errorf("alias %q does not exist", name)
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (r *Registry) RemoveFromChannel(channelName, sessionID string) error {

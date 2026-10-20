@@ -177,3 +177,38 @@ func TestCoordinatorLockPathIsOneFileForAnyProjectID(t *testing.T) {
 		t.Fatal("two projects share a lock")
 	}
 }
+
+func TestACoordinatorsNameMovesOnlyThroughTheCoordinator(t *testing.T) {
+	r := coordinatorRegistry(t, "lead-session", "other")
+	started := CoordinatorSpec{ProjectID: "p-started", ProjectRoot: "/work/a", Name: "a-lead", Surface: "claude", Cwd: "/work/a"}
+	unstarted := CoordinatorSpec{ProjectID: "p-unstarted", ProjectRoot: "/work/b", Name: "b-lead", Surface: "claude", Cwd: "/work/b"}
+	if _, err := r.SetCoordinator(started, CoordinatorChange{SessionID: "lead-session"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.SetCoordinator(unstarted, CoordinatorChange{}); err != nil {
+		t.Fatal(err)
+	}
+	var aliasErr CoordinatorAliasError
+	for name, attempt := range map[string]func() error{
+		"rename the coordinator's session": func() error { return r.SetAlias("renamed", "lead-session") },
+		"give its name to another session": func() error { return r.SetAlias("a-lead", "other") },
+		"take an unstarted coordinator's name": func() error { return r.SetAlias("b-lead", "other") },
+		"remove the name": func() error { return r.RemoveAlias("a-lead") },
+	} {
+		if err := attempt(); !errors.As(err, &aliasErr) {
+			t.Fatalf("%s: err=%v", name, err)
+		}
+	}
+	if generated, err := r.ReserveGeneratedAlias("other", "b-lead"); err != nil || generated == "b-lead" {
+		t.Fatalf("generated=%q err=%v", generated, err)
+	}
+	if spec, _ := r.Coordinator("p-started"); spec.SessionID != "lead-session" {
+		t.Fatalf("coordinator=%+v", spec)
+	}
+	if _, err := r.ClearCoordinator("p-started", "fixture", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetAlias("renamed", "lead-session"); err != nil {
+		t.Fatalf("a former coordinator's session cannot be renamed: %v", err)
+	}
+}

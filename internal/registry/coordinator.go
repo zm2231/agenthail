@@ -87,6 +87,23 @@ func (e CoordinatorExistsError) Error() string {
 	return fmt.Sprintf("the project already has coordinator %s; use --replace to take over", strings.Join(names, " and "))
 }
 
+// CoordinatorAliasError refuses to rename, unname or reuse a name that is
+// this host's coordinator's: the coordinator is whichever session the name
+// points at.
+type CoordinatorAliasError struct {
+	Name string
+}
+
+func (e CoordinatorAliasError) Error() string {
+	return fmt.Sprintf("@%s is a project coordinator's name; change it with 'agenthail coordinator set --replace' or 'agenthail coordinator clear'", e.Name)
+}
+
+func coordinatorNamedTx(tx *sql.Tx, name string) (bool, error) {
+	var found bool
+	err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM coordinators WHERE host_id='' AND name=?)`, name).Scan(&found)
+	return found, err
+}
+
 type CoordinatorNameTakenError struct {
 	Name        string
 	HostID      string
@@ -284,7 +301,7 @@ func (r *Registry) ReplaceCoordinator(spec CoordinatorSpec, change CoordinatorCh
 		}
 	}
 	if change.SessionID != "" {
-		if err := setAliasTx(tx, spec.Name, change.SessionID); err != nil {
+		if err := bindAliasTx(tx, spec.Name, change.SessionID); err != nil {
 			return spec, undo, err
 		}
 	}
