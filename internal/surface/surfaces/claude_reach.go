@@ -320,9 +320,13 @@ func (c *Claude) conversationTitle(ctx context.Context, conversation, root strin
 	return ""
 }
 
+// maxClaudeTitleRecordBytes bounds a title record: a name reaches Claude in
+// a host request, which is at most 1 MiB.
+const maxClaudeTitleRecordBytes = 1 << 20
+
 // claudeTranscriptTitle reads the last custom-title record of a transcript.
-// Title records are short, so a longer record is skipped unread rather than
-// stopping the scan.
+// A record longer than any title is skipped unread rather than stopping the
+// scan.
 func claudeTranscriptTitle(ctx context.Context, path string) string {
 	file, err := os.Open(path)
 	if err != nil {
@@ -332,7 +336,13 @@ func claudeTranscriptTitle(ctx context.Context, path string) string {
 	reader := bufio.NewReaderSize(file, 64*1024)
 	title := ""
 	for ctx.Err() == nil {
-		line, readErr := reader.ReadSlice('\n')
+		var line []byte
+		part, readErr := reader.ReadSlice('\n')
+		for readErr == bufio.ErrBufferFull && len(line)+len(part) <= maxClaudeTitleRecordBytes {
+			line = append(line, part...)
+			part, readErr = reader.ReadSlice('\n')
+		}
+		line = append(line, part...)
 		if readErr == bufio.ErrBufferFull {
 			for readErr == bufio.ErrBufferFull {
 				_, readErr = reader.ReadSlice('\n')

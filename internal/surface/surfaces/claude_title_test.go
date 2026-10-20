@@ -33,6 +33,12 @@ func TestTranscriptTitleIsTheLastTitlePastOversizedRecords(t *testing.T) {
 	if title := claudeTranscriptTitle(context.Background(), path); title != "renamed" {
 		t.Fatalf("title=%q", title)
 	}
+	long := strings.Repeat("n", 70*1024)
+	longTitled := filepath.Join(t.TempDir(), "long.jsonl")
+	writeTitleTranscript(t, longTitled, huge, `{"type":"custom-title","customTitle":"`+long+`"}`, huge)
+	if title := claudeTranscriptTitle(context.Background(), longTitled); title != long {
+		t.Fatalf("a %d-byte title read as %d bytes", len(long), len(title))
+	}
 	if title := claudeTranscriptTitle(context.Background(), filepath.Join(t.TempDir(), "missing.jsonl")); title != "" {
 		t.Fatalf("missing transcript title=%q", title)
 	}
