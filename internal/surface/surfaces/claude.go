@@ -1215,8 +1215,8 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			if uuid != "" && end.TurnID != uuid && end.Status == "" {
 				continue
 			}
-			onEvent(surface.StreamEvent{ID: end.Key, ProviderKey: "timeline:" + end.Key, Version: 1, Operation: "phase", TurnID: end.TurnID, Kind: "done", Status: end.Status})
-			if uuid != "" && end.TurnID == uuid && end.Status == "" {
+			onEvent(surface.StreamEvent{ID: end.Key, ProviderKey: "timeline:" + end.Key, Version: 1, Operation: "phase", TurnID: end.TurnID, Kind: "done", Status: end.Status, Text: end.Reason})
+			if uuid != "" && end.TurnID == uuid && (end.Status == "" || end.Status == "failed") {
 				completed = true
 			}
 		}

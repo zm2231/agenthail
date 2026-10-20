@@ -1251,6 +1251,7 @@ function renderTimelineItem(item, session) {
     const content = user ? handoffMessage(item.text) : { text: item.text, label: labels[session.surface] || session.surface };
     return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(content.text, user ? "user" : "agent", content.label, `${session.id}:${item.id}`, user ? item.files : [])}${metadata}</section>`;
   }
+  if (kind === "done") return "";
   if (kind === "notice") {
     return `<p class="timeline-item timeline-notice" role="status" ${attributes}><strong>${escape(item.title || "Notice")}</strong> ${escape(item.text || "")}</p>`;
   }
@@ -1437,11 +1438,13 @@ function renderUsageLimit(limit) {
   return `<div class="usage-limit" role="status"><p>${escape(account)}${escape(until)}</p>${offer}</div>`;
 }
 async function refreshUsageLimit(id) {
+  const request = (app.usageLimitRequest || 0) + 1;
+  app.usageLimitRequest = request;
   try {
     const response = await fetch(`/api/session?id=${encodeURIComponent(id)}&limit=1&timeline=1`);
-    if (!response.ok || app.selected?.id !== id || !app.history) return;
+    if (!response.ok) return;
     const detail = await response.json();
-    if (app.selected?.id !== id || !app.history) return;
+    if (app.usageLimitRequest !== request || app.selected?.id !== id || !app.history) return;
     app.history.usageLimit = detail.usageLimit || null;
     renderChat();
   } catch (error) {}

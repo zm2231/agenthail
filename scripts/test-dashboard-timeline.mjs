@@ -71,7 +71,8 @@ ${source.slice(goalStart, goalEnd)}
 globalThis.renderChat = renderChat;
 globalThis.goalStatusLabel = goalStatusLabel;
 globalThis.contextBreakdown = contextBreakdown;
-globalThis.renderUsageLimit = renderUsageLimit;`, context);
+globalThis.renderUsageLimit = renderUsageLimit;
+globalThis.refreshUsageLimit = refreshUsageLimit;`, context);
 
 const session = { id: "session-1", surface: "claude" };
 const items = [
@@ -203,5 +204,16 @@ context.renderChat();
 const settingsHTML = elements["#chat-body"].innerHTML;
 assert(settingsHTML.includes("Move to account") && settingsHTML.includes('value="/h/.spare"') && !settingsHTML.includes('value="/h/.claude"'), "settings offer every account but the current one");
 context.app.selected = session;
+
+const pending = [];
+context.fetch = () => new Promise((resolve) => pending.push(resolve));
+context.app.history = { exchanges: [], capabilities: {}, readOnly: false, timeline: { items: [] }, usageLimit: null };
+const older = context.refreshUsageLimit(session.id);
+const newer = context.refreshUsageLimit(session.id);
+pending[1]({ ok: true, json: async () => ({ usageLimit: { message: "newer", alternatives: [] } }) });
+await newer;
+pending[0]({ ok: true, json: async () => ({}) });
+await older;
+assert.equal(context.app.history.usageLimit?.message, "newer", "a stale refresh does not overwrite a newer usage limit");
 
 console.log("dashboard timeline VM tests passed");

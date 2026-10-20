@@ -341,11 +341,25 @@ func claudeForkedFrom(path string) string {
 
 // claudeTurnError is the error a turn the API refused ends with.
 func claudeTurnError(turn claudeTurn) string {
-	switch {
-	case turn.UsageLimited:
-		return "the Claude account is out of usage (" + turn.APIError + "); move the session to another account with: agenthail thread move <session> --account <name>"
-	case turn.APIError != "":
-		return "Claude API error: " + turn.APIError
+	if turn.APIError == "" && !turn.UsageLimited {
+		return ""
 	}
-	return ""
+	return claudeAPIErrorText(turn.UsageLimited, turn.APIError)
+}
+
+// claudeRecordAPIError is the error of a record Claude Code wrote in place of
+// a reply the API refused, or empty for any other record.
+func claudeRecordAPIError(record map[string]any) string {
+	if apiError, _ := record["isApiErrorMessage"].(bool); !apiError || str(record, "type") != "assistant" {
+		return ""
+	}
+	message, _ := record["message"].(map[string]any)
+	return claudeAPIErrorText(claudeUsageLimitRecord(record), strings.TrimSpace(claudeMessageText(message["content"])))
+}
+
+func claudeAPIErrorText(usageLimited bool, message string) string {
+	if usageLimited {
+		return "the Claude account is out of usage (" + message + "); move the session to another account with: agenthail thread move <session> --account <name>"
+	}
+	return "Claude API error: " + message
 }

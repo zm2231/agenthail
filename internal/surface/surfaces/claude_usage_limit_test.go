@@ -112,3 +112,29 @@ func TestTheSyntheticModelOfAnAPIErrorIsNotTheSessionModel(t *testing.T) {
 		t.Fatalf("model=%q", model)
 	}
 }
+
+func TestStreamingAUsageLimitedTurnEndsItFailedWithTheLimit(t *testing.T) {
+	c, sess := usageLimitedConversation(t)
+	var events []surface.StreamEvent
+	started := time.Now()
+	err := c.Stream(context.Background(), sess, "u1", func(event surface.StreamEvent) { events = append(events, event) }, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(started) > 2*time.Second {
+		t.Fatalf("the stream waited %s for a turn that had ended", time.Since(started))
+	}
+	var ended *surface.StreamEvent
+	notices := 0
+	for i, event := range events {
+		if event.Kind == "done" && event.TurnID == "u1" {
+			ended = &events[i]
+		}
+		if event.Kind == "notice" && event.Status == surface.TimelineUsageLimit && event.ResetsAt != "" {
+			notices++
+		}
+	}
+	if ended == nil || !ended.Failed() || !strings.Contains(ended.Text, "out of usage") || notices != 1 {
+		t.Fatalf("ended=%+v notices=%d events=%+v", ended, notices, events)
+	}
+}

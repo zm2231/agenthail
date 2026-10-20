@@ -623,7 +623,7 @@ func claudeRecordTimelineItems(ctx context.Context, record map[string]any, offse
 	}
 	done := make([]surface.TimelineItem, 0, len(ended)+len(items))
 	for _, end := range ended {
-		done = append(done, surface.TimelineItem{ID: end.Key, Kind: "done", TurnID: end.TurnID, Status: end.Status, Timestamp: at})
+		done = append(done, surface.TimelineItem{ID: end.Key, Kind: "done", TurnID: end.TurnID, Status: end.Status, Text: end.Reason, Timestamp: at})
 	}
 	return append(done, items...), nil
 }

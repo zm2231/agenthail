@@ -17,6 +17,8 @@ type claudeTurnEnd struct {
 	TurnID string
 	Key    string
 	Status string
+	// Reason is why a failed turn failed, such as the API refusing it.
+	Reason string
 }
 
 // claudeTurnTracker derives, one transcript record at a time, the turn each
@@ -64,7 +66,14 @@ func (t *claudeTurnTracker) observe(record map[string]any, offset int64, line []
 		at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
 		t.closing = surface.ClaudeClosingTurn{TurnID: turnID, MessageID: messageID, Key: key, At: at}
 	} else if done {
-		ended = t.finish(ended, turnID, key, "")
+		if reason := claudeRecordAPIError(record); reason != "" {
+			before := len(ended)
+			if ended = t.finish(ended, turnID, key, "failed"); len(ended) > before {
+				ended[len(ended)-1].Reason = reason
+			}
+		} else {
+			ended = t.finish(ended, turnID, key, "")
+		}
 	}
 	return turnID, ended, false
 }
@@ -221,7 +230,7 @@ func (c *Claude) TranscriptItems(ctx context.Context, session *surface.Session, 
 			at = items[len(items)-1].Timestamp
 		}
 		for _, end := range ended {
-			items = append(items, surface.TimelineItem{ID: end.Key, Kind: "done", TurnID: end.TurnID, Status: end.Status, Timestamp: at})
+			items = append(items, surface.TimelineItem{ID: end.Key, Kind: "done", TurnID: end.TurnID, Status: end.Status, Text: end.Reason, Timestamp: at})
 		}
 	}
 	seen := map[string]bool{}
