@@ -328,25 +328,26 @@ of JSON, with nothing after the closing fence.
 Fixed the export retry and pushed the branch.
 
 ```agenthail-report
-{"v":1,"status":"complete","stop":"complete","commits":["0d825e4d"],"paths":["internal/export/retry.go"],"next":"Deploy the export service"}
+{"v":1,"status":"done","stop":"complete","commits":["0d825e4d"],"paths":["internal/export/retry.go"],"next":"Deploy the export service"}
 ```
 ````
 
 | Key | Required | Value |
 | --- | --- | --- |
 | `v` | yes | `1` |
-| `status` | yes | `complete`, `partial`, `blocked` or `failed` |
-| `stop` | yes | Why you stopped: `complete`, `needsInput`, `needsApproval`, `waiting`, `usageLimited`, `budgetLimited` or `error` |
-| `reason` | unless `status` is `complete` | What is missing or went wrong, at most 280 characters |
+| `status` | yes | `done`, `partial`, `blocked` or `failed` |
+| `stop` | yes | Why you stopped: `complete`, `needsInput`, `needsApproval` or `gaveUp` |
+| `reason` | unless `status` is `done` | What is missing or went wrong, at most 280 characters |
 | `commits` | no | Commit ids you made, oldest first, at most 20 |
 | `paths` | no | Files you changed or produced, relative to the repository, at most 50 |
 | `next` | no | The one action the reader should take, at most 280 characters |
 
-`status`, `reason` and the shared values mean what they mean in a session's goal
-(`agenthail goal <target> --json`): `complete` is finished, `blocked` cannot go
-on without something it names in `reason`, and `usageLimited` and
-`budgetLimited` are the provider's limits. The report is still the agent's own
-account, separate from the goal the runtime reports.
+`blocked` means you need something named in `reason` before you can go on.
+The report is your own account and stays separate from what Agenthail observes
+about the session: its goal (`agenthail goal <target> --json`, where `blocked`
+means the goal was judged impossible), usage limits and turn errors. Do not
+restate those in the report; a report that disagrees with them, such as `done`
+while the goal is still active, is worth a reader's attention.
 
 The JSON line is at most 2048 bytes; when the paths do not fit, list the ones that matter most. Leave out a key you have nothing for rather
 than writing an empty value. Readers ignore keys they do not know; a change that
