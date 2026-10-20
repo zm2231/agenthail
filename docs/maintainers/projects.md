@@ -70,7 +70,11 @@ repository is one project on every paired host. `repository` carries
 its `id` is its `localId`, and a mirrored row qualifies it as `host::localId`.
 `localId` is the host's own id for the project: `p-<uuid>` for an added project
 and `implicit:<main checkout root>` for an implicit one. Coordinators and
-project channels are keyed by the project `id`.
+project channels are keyed by the project `id`. `#<name>` addresses a project
+by its `id` or display name. A display name several projects share is
+refused, and so is a name that is both a stored channel and a project. A
+channel cannot be created or renamed to a project's name. See
+[hosts](hosts.md#relays-and-channels-across-hosts).
 
 A changed remote moves a project to its new key on the next catalog pass.
 

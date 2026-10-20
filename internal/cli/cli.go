@@ -286,7 +286,10 @@ Channels:
   channel add <name> <target>   Add a session to a channel
   channel rm <name> <target>   Remove a session from a channel (--all deletes)
   channel list                  List channels + members (shows @alias names)
+  channel rename <name> <new>   Rename a channel
   channel send <name> "msg"     Broadcast to all members (--from <name>)
+  channel send '#<project>' "msg"  Message a project's active conversations
+                                on every host and its coordinator
 
 Automatic handoffs:
   relay add <from> <to> [regex] [--once] [--when turn_finished|goal_completed]

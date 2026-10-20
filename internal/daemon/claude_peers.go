@@ -11,8 +11,6 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const claudePeerIdleLifetime = 24 * time.Hour
-
 func (d *Daemon) startClaudePeers(ctx context.Context) (func(), error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -31,7 +29,7 @@ func (d *Daemon) startClaudePeers(ctx context.Context) (func(), error) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		d.runClaudePeerRegistration(ctx, manager.Advertise, func(now time.Time) { manager.RetireInactive(now, claudePeerIdleLifetime) })
+		d.runClaudePeerRegistration(ctx, manager.Advertise, func(now time.Time) { manager.RetireInactive(now, surface.ActiveWindow) })
 	}()
 	return func() { cancel(); <-done; manager.Close() }, nil
 }
@@ -128,7 +126,7 @@ func (d *Daemon) registerRecentClaudePeers(ctx context.Context, advertise func(c
 	var eligible []surface.Session
 	for _, record := range snapshot.Sessions {
 		session := record.Session
-		if record.Freshness.Stale || !claudePeerEligible(session, now) {
+		if record.Freshness.Stale || !surface.RecentlyActive(session, now) {
 			continue
 		}
 		// A paired host's sessions, Claude included, have no socket on this
@@ -154,14 +152,4 @@ func (d *Daemon) registerRecentClaudePeers(ctx context.Context, advertise func(c
 			d.clearObserveError("claude-peers:" + session.ID)
 		}
 	}
-}
-
-func claudePeerEligible(session surface.Session, now time.Time) bool {
-	if session.ID == "" || session.Status == surface.StatusOffline {
-		return false
-	}
-	if session.Status == surface.StatusBusy {
-		return true
-	}
-	return !session.LastActive.IsZero() && now.Sub(session.LastActive) <= claudePeerIdleLifetime
 }

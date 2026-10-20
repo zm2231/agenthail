@@ -601,7 +601,7 @@ function projectSection(project, sessions) {
   const toggle = project.archived ? "project-unarchive" : "project-archive";
   const added = (project.checkouts || []).filter((checkout) => checkout.added && checkout.host.state === "local");
   const remove = added.length === 1 ? `<button class="link-button" type="button" data-project-action="project-remove" data-project-id="${escape(added[0].projectId)}" title="${escape(`Stop treating ${added[0].rootPath} as a project`)}">Remove</button>` : "";
-  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}${coordinatorChip(project.coordinators || [])}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button>${remove}</header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
+  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}${coordinatorChip(project.coordinators || [])}${project.archived ? "" : `<button class="link-button" type="button" data-project-message="${escape(project.id)}" data-project-name="${escape(project.displayName)}" title="${escape(`Send one message to every active conversation in ${project.displayName}`)}">Message</button>`}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button>${remove}</header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
 }
 function coordinatorRef(coordinator) {
   const name = `@${coordinator.name}`;
@@ -1957,6 +1957,23 @@ document.addEventListener("click", async (event) => {
       await load();
     } catch (error) {
       toast(error.message);
+    }
+    return;
+  }
+  const projectMessage = event.target.closest("[data-project-message]");
+  if (projectMessage) {
+    const message = window.prompt(`Message every active conversation in ${projectMessage.dataset.projectName}`);
+    if (!message || !message.trim()) return;
+    projectMessage.disabled = true;
+    try {
+      const result = await action("channel-send", { channel: `#${projectMessage.dataset.projectMessage}`, message }, crypto.randomUUID(), "");
+      const names = (result.recipients || []).map((recipient) => recipient.coordinator || displayName(app.state.sessions.find((session) => session.id === recipient.sessionId) || { id: recipient.sessionId }));
+      toast(`Sent to ${names.length}: ${names.join(", ")}.`);
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      projectMessage.disabled = false;
+      await load();
     }
     return;
   }

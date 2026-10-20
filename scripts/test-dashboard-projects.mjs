@@ -47,6 +47,8 @@ assert.match(html, /data-session="far".*<span class="host-badge" title="On forge
 assert.doesNotMatch(html.slice(0, html.indexOf("</section>")), /host-badge/, "local projects and sessions carry no host badge");
 assert.doesNotMatch(html, /data-session="hidden"|data-session="loose"/, "archived sessions and sessions without a project stay out");
 assert.match(html, /Archived \(1\)<\/summary>.*data-project-action="project-unarchive" data-project-id="project-notes".*data-session="kept"/s);
+assert.match(widgetSection, /data-project-message="project-widget" data-project-name="widget"[^>]*>Message<\/button>/, "an active project offers a message to its conversations");
+assert.doesNotMatch(html.slice(html.indexOf("Archived (1)")), /data-project-message/, "an archived project offers no message");
 const local = { id: "h0", name: "mac", state: "local" };
 const remote = { id: "h1", name: "forge-agents.tail0000.ts.net", state: "connected" };
 const leads = (coordinators) => {

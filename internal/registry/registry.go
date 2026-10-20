@@ -2996,6 +2996,28 @@ func (r *Registry) RemoveFromChannel(channelName, sessionID string) error {
 	return nil
 }
 
+func (r *Registry) ChannelExists(channelName string) (bool, error) {
+	var exists bool
+	err := r.read.QueryRow(`SELECT EXISTS(SELECT 1 FROM channels WHERE name=?)`, channelName).Scan(&exists)
+	return exists, err
+}
+
+func (r *Registry) RenameChannel(channelName, newName string) error {
+	if exists, err := r.ChannelExists(newName); err != nil {
+		return err
+	} else if exists {
+		return fmt.Errorf("channel #%s already exists", newName)
+	}
+	res, err := r.db.Exec(`UPDATE channels SET name=? WHERE name=?`, newName, channelName)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("channel %q does not exist", channelName)
+	}
+	return nil
+}
+
 func (r *Registry) DeleteChannel(channelName string) error {
 	res, err := r.db.Exec(`DELETE FROM channels WHERE name = ?`, channelName)
 	if err != nil {

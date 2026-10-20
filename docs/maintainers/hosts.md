@@ -161,6 +161,19 @@ A channel lives where it was made. A remote member is stored by its raw id and
 mirrored row; `channel-send` holds the message for that member's host and
 delivers to local members directly.
 
+A project channel has no stored members. `channel-send` to `#<project>` reads
+them from the catalog when it sends: every row, local or mirrored, whose
+project `id` is the project's, that is not stale or archived and is working
+or was active within `surface.ActiveWindow`, the window peer advertising uses.
+The project's coordinators are always included. A coordinator on this host
+gets the message through `internal/coordinator`, which starts or resumes it. A
+paired host's coordinator with a session is held for that host like any
+member; one without a session gets a `coordinator-send` to its host, which
+starts it. Only a project with a repository key spans hosts, since a project
+without one has a host-qualified `id`. The answer lists every recipient with
+its outcome. `internal/broadcast` holds the resolution and the delivery for
+both the CLI and the action.
+
 ## Starting a session on a host
 
 `GET /api/v1/session-options?host=<host>` is that host's launch catalog: the

@@ -4,17 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/zm2231/agenthail/internal/broadcast"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/google/uuid"
-	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
-	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func (a *App) resolveDisplay(sessionID string) string {
@@ -96,7 +93,7 @@ func (a *App) cmdChannel(args []string) error {
 		return fmt.Errorf("registry not available")
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: agenthail channel <create|add|rm|list|send> ...")
+		return fmt.Errorf("usage: agenthail channel <create|add|rm|rename|list|send> ...")
 	}
 	ctx := context.Background()
 	switch args[0] {
@@ -104,11 +101,28 @@ func (a *App) cmdChannel(args []string) error {
 		if len(args) != 2 {
 			return fmt.Errorf("usage: agenthail channel create <name>")
 		}
-		id, err := a.registry().CreateChannel(args[1])
+		name := strings.TrimPrefix(args[1], "#")
+		if err := broadcast.ValidateChannelName(a.registry(), name); err != nil {
+			return err
+		}
+		id, err := a.registry().CreateChannel(name)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("created channel #%s (id %s)\n", args[1], id)
+		fmt.Printf("created channel #%s (id %s)\n", name, id)
+		return nil
+	case "rename":
+		if len(args) != 3 {
+			return fmt.Errorf("usage: agenthail channel rename <channel> <new-name>")
+		}
+		name, newName := strings.TrimPrefix(args[1], "#"), strings.TrimPrefix(args[2], "#")
+		if err := broadcast.ValidateChannelName(a.registry(), newName); err != nil {
+			return err
+		}
+		if err := a.registry().RenameChannel(name, newName); err != nil {
+			return err
+		}
+		fmt.Printf("renamed #%s to #%s\n", name, newName)
 		return nil
 	case "add":
 		if len(args) != 3 {
@@ -168,7 +182,6 @@ func (a *App) cmdChannel(args []string) error {
 		if len(args) < 3 {
 			return fmt.Errorf("usage: agenthail channel send <channel> \"message\" [--from <name>]")
 		}
-		channelName := strings.TrimPrefix(args[1], "#")
 		var fromLabel string
 		var msgParts []string
 		positionalOnly := false
@@ -188,74 +201,7 @@ func (a *App) cmdChannel(args []string) error {
 		if message == "" {
 			return fmt.Errorf("message is empty")
 		}
-		sourceID, err := a.sourceSessionID(ctx, fromLabel)
-		if err != nil {
-			return err
-		}
-		sender := coordinator.Sender{Service: a.coordinator()}
-		if sourceID != "" {
-			sourceID = sender.Canonical(sourceID)
-		}
-		if fromLabel == "" && sourceID != "" {
-			fromLabel = a.resolveDisplay(sourceID)
-		}
-		if fromLabel == "" {
-			fromLabel = "hail"
-		}
-		payload := fmt.Sprintf("[from %s via #%s] %s", fromLabel, channelName, message)
-		members, err := a.registry().ChannelMembers(channelName)
-		if err != nil {
-			return err
-		}
-		members = slices.DeleteFunc(members, func(member string) bool { return sourceID != "" && member == sourceID })
-		if len(members) == 0 {
-			return fmt.Errorf("channel #%s has no members other than the sender", channelName)
-		}
-		var sent, queued, submitted, failed int
-		for _, mid := range members {
-			if owner, err := a.registry().SessionHost(mid); err == nil && owner != "" {
-				if _, err := a.registry().QueueHostSend(registry.HostSend{SessionID: mid, Message: payload, Key: "channel:" + channelName + ":" + mid + ":" + uuid.NewString(), SourceSessionID: sourceID}); err != nil {
-					failed++
-					fmt.Printf("  [FAIL] %s: %s\n", a.sessionDisplay(mid), err)
-				} else {
-					queued++
-					fmt.Printf("  [QUEUE] %s (held for its host)\n", a.sessionDisplay(mid))
-				}
-				continue
-			}
-			sess, surf, err := a.resolveTarget(ctx, mid)
-			if err != nil {
-				failed++
-				fmt.Printf("  [FAIL] %s: %s\n", a.resolveDisplay(mid), err)
-				continue
-			}
-			receipt, err := sender.DeliverWithOptions(ctx, surf, sess, payload, "", surface.SendOptions{SourceSessionID: sourceID})
-			if err != nil {
-				failed++
-				fmt.Printf("  [FAIL] %s: %s\n", a.resolveDisplay(mid), err)
-				continue
-			}
-			if receipt.Evidence == surface.EvidenceQueued {
-				queued++
-				fmt.Printf("  [QUEUE] %s\n", a.resolveDisplay(mid))
-			} else if receipt.Evidence == surface.EvidenceSubmitted {
-				submitted++
-				fmt.Printf("  [SUBMIT] %s: %s\n", a.resolveDisplay(mid), receipt.Detail)
-			} else {
-				sent++
-				fmt.Printf("  [ OK ] %s\n", a.resolveDisplay(mid))
-			}
-		}
-		fmt.Printf("channel #%s: %d sent, %d queued, %d submitted, %d failed\n", channelName, sent, queued, submitted, failed)
-		if queued > 0 {
-			if _, running := daemon.IsRunning(); !running {
-				fmt.Fprintln(os.Stderr, "warning: daemon is not running; queued channel deliveries will wait until 'agenthail daemon start'")
-			}
-		}
-		if failed > 0 {
-			return fmt.Errorf("channel #%s had %d failed delivery(s)", channelName, failed)
-		}
-		return nil
+		return a.channelSend(ctx, args[1], message, fromLabel)
 	default:
 		return fmt.Errorf("unknown channel subcommand '%s'", args[0])
 	}

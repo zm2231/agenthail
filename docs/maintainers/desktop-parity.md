@@ -31,7 +31,7 @@ Status: **present** means the Mac covers the behavior; **partial** means part of
 | --- | --- |
 | Present | 40 |
 | Partial | 10 |
-| Missing | 4 |
+| Missing | 5 |
 | Decided | 1 |
 | n/a | 1 |
 
@@ -64,6 +64,7 @@ Open gaps are tracked as td stories under td-5f222f (listed at the end). Each on
 | Session scopes and projects | index.html Conversation scope; app.js renderSessions, renderProjects | GET /api/state (`counts`, `projects`, row `current`/`archived`) | present (Running, Recent, All, Archived, grouped by project) | SessionTree.swift; macOS/DesktopWindow.swift SessionSidebar |
 | Project coordinator: `@name` or `host::@name` in the project header, opening its conversation; a conflict marked; a project with only a coordinator listed | app.js coordinatorChip, renderProjects | GET /api/v1/snapshot (`projects[].coordinators`) | missing | `DashboardSnapshot` decodes no `projects` (native/AgenthailModels.swift:766) and `SessionTree.build` groups projects from sessions only (native/SessionTree.swift:109) |
 | Archive a session or project | app.js data-archive-action, data-project-action | POST /api/action `session-archive`, `project-archive` | present (context menus) | macOS/DesktopWindow.swift context menus; AgenthailModel.setArchived |
+| Message a project: one message to its active conversations on every host and its coordinator, with the recipients shown | app.js data-project-message, projectSection | POST /api/action `channel-send` with `#<project id>` (answer carries `recipients`) | missing | The project rows (native/SessionTree.swift) offer no message; Settings sends only to stored channels (macOS/DesktopSettings.swift:404) |
 | Search, plus Codex history search from 3 characters | index.html:182-188; app.js:1726-1764 | GET /api/state (local match); GET /api/search (Codex history) | present | macOS/DesktopWindow.swift:114-131, 205-280; native/AgenthailModel.swift:323-346 |
 | Surface and status filters | index.html:189-205; app.js:1878-1891 | GET /api/state (filtered client-side) | present | macOS/SessionRefinementMenu.swift:3-73 |
 | Conversation count, filter summary, recent-exchange count | index.html:112; app.js:569, 587-594, 1113-1114 | GET /api/state; GET /api/session `exchanges`; GET /api/session-stream (rebuilds exchanges) | partial | Filter counts: macOS/DesktopWindow.swift:76; exchange count of the newest page, reloaded on each session-stream event: macOS/DesktopWindow.swift:1960; no "Showing X of Y" summary |

@@ -455,39 +455,46 @@ func (a *App) coordinatorClear(path string, jsonOut bool) error {
 	return nil
 }
 
+type peerCoordinatorAnswer struct {
+	Result  delivery.Receipt `json:"result"`
+	Started bool             `json:"started"`
+}
+
+func (a *App) peerCoordinatorSend(ctx context.Context, spec registry.CoordinatorSpec, message, source, model string) (peerCoordinatorAnswer, error) {
+	var answer peerCoordinatorAnswer
+	client, err := a.daemonAPI()
+	if err != nil {
+		return answer, err
+	}
+	payload := map[string]any{"action": "coordinator-send", "host": spec.HostID, "name": spec.Name, "message": message}
+	if source != "" {
+		payload["sourceSessionId"] = source
+	}
+	if model != "" {
+		payload["model"] = model
+	}
+	data, status, err := client.action(ctx, payload)
+	if err != nil {
+		return answer, err
+	}
+	if status != http.StatusOK {
+		return answer, actionError(data)
+	}
+	return answer, json.Unmarshal(data, &answer)
+}
+
 // sendToPeerCoordinator delivers to a paired host's coordinator through
 // that host, which starts its conversation when it has none.
 func (a *App) sendToPeerCoordinator(ctx context.Context, spec registry.CoordinatorSpec, message string, args []string) error {
 	if hasFlag(args, "--no-queue") {
 		return fmt.Errorf("--no-queue is not available for %s: the daemon holds a send to another host until that host answers", a.coordinatorRef(spec))
 	}
-	client, err := a.daemonAPI()
-	if err != nil {
-		return err
-	}
-	payload := map[string]any{"action": "coordinator-send", "host": spec.HostID, "name": spec.Name, "message": message}
 	source, err := a.sourceSessionID(ctx, flagVal(args, "--from"))
 	if err != nil {
 		return err
 	}
-	if source != "" {
-		payload["sourceSessionId"] = source
-	}
-	if model := flagVal(args, "--model"); model != "" {
-		payload["model"] = model
-	}
-	data, status, err := client.action(ctx, payload)
+	answer, err := a.peerCoordinatorSend(ctx, spec, message, source, flagVal(args, "--model"))
 	if err != nil {
-		return err
-	}
-	if status != http.StatusOK {
-		return actionError(data)
-	}
-	var answer struct {
-		Result  delivery.Receipt `json:"result"`
-		Started bool             `json:"started"`
-	}
-	if err := json.Unmarshal(data, &answer); err != nil {
 		return err
 	}
 	if hasFlag(args, "--json") {

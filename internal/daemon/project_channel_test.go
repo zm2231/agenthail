@@ -1,0 +1,147 @@
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/broadcast"
+	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
+)
+
+func widgetRepo(t *testing.T, origin string) string {
+	t.Helper()
+	repo := catalogTestRepo(t)
+	gitRun(t, repo, "remote", "add", "origin", origin)
+	return repo
+}
+
+func moveSession(t *testing.T, node *federationNode, id, cwd string, lastActive time.Time) {
+	t.Helper()
+	session := node.fake.sessions[id]
+	if session.ID == "" {
+		session = surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "work " + id, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	}
+	session.Cwd, session.LastActive = cwd, lastActive
+	node.fake.sessions[id] = session
+	if err := node.reg.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAProjectChannelReachesItsActiveConversationsOnEveryHost(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	localRepo := widgetRepo(t, "https://github.com/example/widget.git")
+	remoteRepo := widgetRepo(t, "https://github.com/example/widget.git")
+	moveSession(t, local, "local-a", localRepo, time.Now())
+	moveSession(t, local, "lead", localRepo, time.Now().Add(-72*time.Hour))
+	moveSession(t, remote, "remote-a", remoteRepo, time.Now())
+	moveSession(t, remote, "remote-b", remoteRepo, time.Now().Add(-48*time.Hour))
+	if _, err := local.reg.SetCoordinator(registry.CoordinatorSpec{ProjectID: "repo:github.com/example/widget", ProjectRoot: localRepo, Name: "widget-lead", Surface: "codex", Cwd: localRepo}, registry.CoordinatorChange{SessionID: "lead", ChangedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	remote.daemon.discoverCatalog(context.Background())
+	local.daemon.discoverCatalog(context.Background())
+	awaitFederation(t, "the remote conversations mirrored in the project", func() bool {
+		for _, project := range local.snapshot(t).Projects {
+			if project.ID == "repo:github.com/example/widget" {
+				return project.SessionCount >= 4
+			}
+		}
+		return false
+	})
+
+	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#widget", "message": "standup", "sourceSessionId": "local-a"})
+	var answer struct {
+		Target     broadcast.Target      `json:"target"`
+		Recipients []broadcast.Recipient `json:"recipients"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &answer) != nil {
+		t.Fatalf("send status=%d body=%s", response.Code, response.Body)
+	}
+	if answer.Target.ProjectID != "repo:github.com/example/widget" || len(answer.Recipients) != 2 {
+		t.Fatalf("answer=%+v", answer)
+	}
+	lead, member := answer.Recipients[0], answer.Recipients[1]
+	if lead.Coordinator != "@widget-lead" || lead.Outcome != broadcast.OutcomeSent {
+		t.Fatalf("the coordinator outside the active window was not reached: %+v", lead)
+	}
+	if member.SessionID != hosts.Qualify(record.ID, "remote-a") || member.Outcome != broadcast.OutcomeQueued {
+		t.Fatalf("member=%+v", member)
+	}
+	awaitFederation(t, "the remote member received the message", func() bool {
+		for _, message := range remote.fake.delivered() {
+			if strings.HasSuffix(message, " via #widget] standup") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func TestAChannelNameAProjectAnswersToIsRefused(t *testing.T) {
+	d, r, fake, from, to := daemonFixture(t)
+	if response := runDashboardAction(t, d, `{"action":"channel-create","channel":"widget"}`); response.Code != http.StatusOK {
+		t.Fatalf("create before the project: %d %s", response.Code, response.Body)
+	}
+	repo := widgetRepo(t, "https://github.com/example/widget.git")
+	from.Cwd, from.LastActive = repo, time.Now()
+	to.Cwd, to.LastActive = repo, time.Now()
+	for _, session := range []surface.Session{from, to} {
+		fake.sessions[session.ID] = session
+		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.discoverCatalog(context.Background())
+
+	collided := runDashboardAction(t, d, `{"action":"channel-send","channel":"widget","message":"standup","sourceSessionId":"from"}`)
+	if collided.Code != http.StatusBadRequest || !strings.Contains(collided.Body.String(), "#widget is both a channel and project widget (#repo:github.com/example/widget); rename the channel with 'agenthail channel rename widget <new-name>'") {
+		t.Fatalf("send to a name a channel and a project share: %d %s", collided.Code, collided.Body)
+	}
+	if created := runDashboardAction(t, d, `{"action":"channel-create","channel":"widget"}`); created.Code != http.StatusBadRequest || !strings.Contains(created.Body.String(), "#widget already names project widget") {
+		t.Fatalf("create a project's name: %d %s", created.Code, created.Body)
+	}
+	if renamed := runDashboardAction(t, d, `{"action":"channel-rename","channel":"widget","newChannel":"widget-crew"}`); renamed.Code != http.StatusOK {
+		t.Fatalf("rename: %d %s", renamed.Code, renamed.Body)
+	}
+	sent := runDashboardAction(t, d, `{"action":"channel-send","channel":"widget","message":"standup","sourceSessionId":"from"}`)
+	if sent.Code != http.StatusOK || !strings.Contains(sent.Body.String(), `"sessionId":"to"`) || strings.Contains(sent.Body.String(), `"sessionId":"from"`) {
+		t.Fatalf("send to the project after the rename: %d %s", sent.Code, sent.Body)
+	}
+	if len(fake.sent) != 1 || fake.sent[0] != "[from "+d.resolveDisplay("from")+" via #widget] standup" {
+		t.Fatalf("sent=%q", fake.sent)
+	}
+	if archived := runDashboardAction(t, d, `{"action":"session-archive","sessionId":"to"}`); archived.Code != http.StatusOK {
+		t.Fatalf("archive: %d %s", archived.Code, archived.Body)
+	}
+	if empty := runDashboardAction(t, d, `{"action":"channel-send","channel":"widget","message":"again","sourceSessionId":"from"}`); empty.Code != http.StatusBadRequest || !strings.Contains(empty.Body.String(), "#widget has no members other than the sender") {
+		t.Fatalf("send with only an archived member: %d %s", empty.Code, empty.Body)
+	}
+}
+
+func TestAProjectNameSeveralProjectsShareIsRefused(t *testing.T) {
+	d, r, fake, from, to := daemonFixture(t)
+	from.Cwd, from.LastActive = widgetRepo(t, "https://github.com/alpha/widget.git"), time.Now()
+	to.Cwd, to.LastActive = widgetRepo(t, "https://github.com/beta/widget.git"), time.Now()
+	for _, session := range []surface.Session{from, to} {
+		fake.sessions[session.ID] = session
+		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.discoverCatalog(context.Background())
+	response := runDashboardAction(t, d, `{"action":"channel-send","channel":"widget","message":"standup"}`)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "#widget names several projects: widget (#repo:github.com/alpha/widget), widget (#repo:github.com/beta/widget)") {
+		t.Fatalf("send to a shared project name: %d %s", response.Code, response.Body)
+	}
+	byID := runDashboardAction(t, d, `{"action":"channel-send","channel":"#repo:github.com/beta/widget","message":"standup"}`)
+	if byID.Code != http.StatusOK || !strings.Contains(byID.Body.String(), `"sessionId":"to"`) || len(fake.sent) != 1 {
+		t.Fatalf("send by project id: %d %s sent=%q", byID.Code, byID.Body, fake.sent)
+	}
+}
