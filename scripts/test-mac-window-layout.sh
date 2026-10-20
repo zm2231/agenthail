@@ -29,16 +29,32 @@ codesign --force --deep --sign - "$app" >/dev/null 2>&1
 
 start_daemon() {
 	[ -z "$daemon_pid" ] || { kill "$daemon_pid" 2>/dev/null; wait "$daemon_pid" 2>/dev/null || true; }
-	rm -f "$work/port"
-	python3 "$ROOT/scripts/fixtures/layout-daemon.py" "$@" >"$work/port" &
+	rm -f "$work/port" "$work/daemon.err"
+	local started=$SECONDS
+	python3 "$ROOT/scripts/fixtures/layout-daemon.py" "$@" >"$work/port" 2>"$work/daemon.err" &
 	daemon_pid=$!
-	for _ in $(seq 1 50); do [ -s "$work/port" ] && break; sleep 0.1; done
+	for _ in $(seq 1 300); do
+		[ -s "$work/port" ] && break
+		kill -0 "$daemon_pid" 2>/dev/null || break
+		sleep 0.1
+	done
 	port="$(cat "$work/port")"
-	if [ -z "$port" ] || ! kill -0 "$daemon_pid" 2>/dev/null ||
-		! curl -fsS "http://127.0.0.1:$port/api/v1/version" >/dev/null || ! curl -fsS "http://127.0.0.1:$port/api/v1/snapshot" >/dev/null; then
-		echo "error: the synthetic daemon did not start" >&2
+	local problem=""
+	if [ -z "$port" ]; then
+		if kill -0 "$daemon_pid" 2>/dev/null; then problem="no port after $((SECONDS - started))s"; else problem="exited before printing a port"; fi
+	elif ! kill -0 "$daemon_pid" 2>/dev/null; then
+		problem="exited after printing port $port"
+	elif ! curl -fsS "http://127.0.0.1:$port/api/v1/version" >/dev/null 2>>"$work/daemon.err" ||
+		! curl -fsS "http://127.0.0.1:$port/api/v1/snapshot" >/dev/null 2>>"$work/daemon.err"; then
+		problem="port $port did not answer"
+	fi
+	if [ -n "$problem" ]; then
+		echo "error: the synthetic daemon (${*:-working}) did not start: $problem" >&2
+		echo "python3: $(command -v python3) $(python3 --version 2>&1)" >&2
+		cat "$work/daemon.err" >&2
 		exit 1
 	fi
+	echo "Synthetic daemon (${*:-working}) listening on $port after $((SECONDS - started))s"
 }
 
 stays_up() {
