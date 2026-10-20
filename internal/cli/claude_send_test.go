@@ -241,3 +241,23 @@ func TestSendByTheNameOfAnExitedSessionGivesItsIDAndAlias(t *testing.T) {
 		t.Fatalf("a name resumed the session: spawns=%d", len(spawns))
 	}
 }
+
+// An older host still on the socket after an update cannot take this build's
+// resume, so the message waits in the queue for the daemon's new host rather
+// than failing.
+func TestSendToAnExitedSessionWhileAnOlderHostRunsWaitsForTheNewHost(t *testing.T) {
+	c, conversation := exitedHostSession(t)
+	c.host.KillHost(t)
+	c.host.StartProtocol1Host(t, "0.2.44")
+	output, err := c.run(t, "send", conversation, "after the update")
+	if err != nil || !strings.Contains(output, "queued #1") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	queue, err := c.r.ListQueue(false, nil)
+	if err != nil || len(queue) != 1 || queue[0].SessionID != conversation || queue[0].Message != "after the update" {
+		t.Fatalf("queue=%+v err=%v", queue, err)
+	}
+	if spawns := c.host.Spawns(t, conversation); len(spawns) != 1 {
+		t.Fatalf("the older host resumed the session: spawns=%d", len(spawns))
+	}
+}

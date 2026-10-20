@@ -14,7 +14,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { parseArgs } from 'node:util';
 
-const PROTOCOL = 2;
+const PROTOCOL = 3;
 const LOCK_FD = 3;
 const MAX_EVENTS = 4096;
 const MAX_LINE = 1 << 20;

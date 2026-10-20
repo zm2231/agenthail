@@ -3,6 +3,7 @@
 package claudehosttest
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -176,15 +177,39 @@ func (f *Fixture) Start(t testing.TB) claudehost.Client {
 	return client
 }
 
-// Open opens a new session in the host and waits until discovery can see it.
+// Open opens a new session in the host on client's socket and waits until
+// discovery can see it. It speaks to the host directly, as the Agenthail that
+// started that host did, so it opens sessions in hosts of any protocol.
 func (f *Fixture) Open(t testing.TB, client claudehost.Client, sessionID string) claudehost.Session {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	session, err := client.Open(ctx, claudehost.OpenRequest{SessionID: sessionID, Cwd: f.Cwd})
+	conn, err := net.DialTimeout("unix", client.Socket, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	request, err := json.Marshal(map[string]any{"id": 1, "method": "open", "params": claudehost.OpenRequest{SessionID: sessionID, Cwd: f.Cwd}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write(append(request, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reply struct {
+		Result claudehost.Session `json:"result"`
+		Error  *claudehost.Error  `json:"error"`
+	}
+	if err := json.Unmarshal(line, &reply); err != nil {
+		t.Fatal(err)
+	}
+	if reply.Error != nil {
+		t.Fatal(reply.Error)
+	}
+	session := reply.Result
 	record := filepath.Join(f.Home, ".claude", "sessions", strconv.Itoa(session.PID)+".json")
 	WaitFor(t, "the session record", func() bool { _, err := os.Stat(record); return err == nil })
 	return session

@@ -18,6 +18,12 @@ The daemon owns the host. Every 30 seconds, and once at startup, it calls
    held from the new host until they exit, and the next message after that
    resumes the conversation in the new host. Either way the daemon then starts
    its own host.
+
+   Until that happens, a CLI or daemon of the new build may meet the old host
+   on the socket. `Client.Open` exchanges `hello` first and opens a session
+   only in a host of its own protocol; any other protocol is `ErrOtherProtocol`,
+   and the creation or resume is held and retried like an unreachable host.
+   Protocol 3 added a `name` on a resumed `open`.
 3. If nothing answers, take an exclusive `flock` on
    `~/.agenthail/claude-host/lock`. If another process holds it, a host is
    starting: wait for its `hello`.

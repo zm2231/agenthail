@@ -320,20 +320,35 @@ func (c *Claude) conversationTitle(ctx context.Context, conversation, root strin
 	return ""
 }
 
+// claudeTranscriptTitle reads the last custom-title record of a transcript.
+// Title records are short, so a longer record is skipped unread rather than
+// stopping the scan.
 func claudeTranscriptTitle(ctx context.Context, path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	reader := bufio.NewReaderSize(file, 64*1024)
 	title := ""
-	_, _ = scanAppendedJSONL(ctx, path, 0, maxClaudeTranscriptRecordBytes, func(line []byte) error {
-		if !bytes.Contains(line, []byte(`"custom-title"`)) {
-			return nil
+	for ctx.Err() == nil {
+		line, readErr := reader.ReadSlice('\n')
+		if readErr == bufio.ErrBufferFull {
+			for readErr == bufio.ErrBufferFull {
+				_, readErr = reader.ReadSlice('\n')
+			}
+		} else if bytes.Contains(line, []byte(`"custom-title"`)) {
+			var record struct {
+				Type        string `json:"type"`
+				CustomTitle string `json:"customTitle"`
+			}
+			if json.Unmarshal(line, &record) == nil && record.Type == "custom-title" && strings.TrimSpace(record.CustomTitle) != "" {
+				title = record.CustomTitle
+			}
 		}
-		var record struct {
-			Type        string `json:"type"`
-			CustomTitle string `json:"customTitle"`
+		if readErr != nil {
+			break
 		}
-		if json.Unmarshal(line, &record) == nil && record.Type == "custom-title" && strings.TrimSpace(record.CustomTitle) != "" {
-			title = record.CustomTitle
-		}
-		return nil
-	})
+	}
 	return title
 }
