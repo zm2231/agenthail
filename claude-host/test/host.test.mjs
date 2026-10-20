@@ -684,7 +684,7 @@ test('open rejects a bad request', async () => {
   await assert.rejects(c.call('open', { cwd: f.cwd, sessionId: 'nope' }), { code: 'invalid' });
   await assert.rejects(c.call('open', { cwd: f.cwd, permissionMode: 'yolo' }), { code: 'invalid' });
   await assert.rejects(c.call('open', { cwd: f.cwd, effort: 'extreme' }), { code: 'invalid' });
-  await assert.rejects(c.call('open', { cwd: f.cwd, resume: randomUUID(), name: 'renamed' }), { code: 'invalid' });
+  await assert.rejects(c.call('open', { cwd: f.cwd, resume: randomUUID(), worktree: 'elsewhere' }), { code: 'invalid' });
   await assert.rejects(c.call('open', { cwd: f.cwd, configDir: 'relative/claude' }), { code: 'invalid' });
   await assert.rejects(c.call('nope'), { code: 'invalid' });
   c.close();

@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -189,7 +190,9 @@ func (c *Claude) resume(ctx context.Context, conversation, cwd string) (*surface
 	if err != nil {
 		return nil, err
 	}
-	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd, ConfigDir: surface.ClaudeLaunchConfigDir(c.home, root)})
+	// Claude restores a resumed conversation's title but names the resumed
+	// process anew, so the title is passed back as its name.
+	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd, ConfigDir: surface.ClaudeLaunchConfigDir(c.home, root), Name: c.conversationTitle(ctx, conversation, root)})
 	if err != nil {
 		return nil, claudeHostResumeError(conversation, err)
 	}
@@ -300,4 +303,37 @@ func claudeTranscriptCwd(path string) string {
 		}
 	}
 	return ""
+}
+
+// conversationTitle is the last title in the conversation's transcript under
+// root, the name a person gave it when it started or renamed it.
+func (c *Claude) conversationTitle(ctx context.Context, conversation, root string) string {
+	roots, err := surface.ClaudeConfigRoots(c.home)
+	if err != nil {
+		return ""
+	}
+	for _, path := range c.transcripts.pass(roots)(conversation) {
+		if root == "" || claudeTranscriptRoot(path) == root {
+			return claudeTranscriptTitle(ctx, path)
+		}
+	}
+	return ""
+}
+
+func claudeTranscriptTitle(ctx context.Context, path string) string {
+	title := ""
+	_, _ = scanAppendedJSONL(ctx, path, 0, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+		if !bytes.Contains(line, []byte(`"custom-title"`)) {
+			return nil
+		}
+		var record struct {
+			Type        string `json:"type"`
+			CustomTitle string `json:"customTitle"`
+		}
+		if json.Unmarshal(line, &record) == nil && record.Type == "custom-title" && strings.TrimSpace(record.CustomTitle) != "" {
+			title = record.CustomTitle
+		}
+		return nil
+	})
+	return title
 }

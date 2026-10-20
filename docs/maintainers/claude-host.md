@@ -201,8 +201,12 @@ Without a running host nothing is created.
 `Claude.reach` resumes a conversation no process holds with `open({resume})`
 and waits until the host lists the process. When the conversation lives in a
 Claude config root other than the primary one, the open carries
-`configDir`, and the host runs that Claude with it as `CLAUDE_CONFIG_DIR`. The
-host's `held` answer holds the delivery. `refused` means Claude refused the
+`configDir`, and the host runs that Claude with it as `CLAUDE_CONFIG_DIR`.
+Claude restores a resumed conversation's title from its transcript (the last
+`custom-title` record) but names the resumed process anew, with
+`nameSource: "derived"`, so the open carries that title as `name` and the
+session keeps the name it was started or renamed with. The host refuses only
+a `worktree` on a resume. The host's `held` answer holds the delivery. `refused` means Claude refused the
 conversation: a queued message waits as `refused` with Claude's output as its
 last error, and a direct send fails with it. `open_failed` is a Claude that
 never got to decide, and the delivery is retried like any other unavailable
