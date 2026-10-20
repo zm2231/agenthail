@@ -59,18 +59,23 @@ targets are never messaged, stopped, resumed, or otherwise mutated.
 
 ## Context-window provenance
 
-Claude records the window it runs with in two places, and the provider reads
-them in this order for each assistant record:
+Claude's transcript records no window size, only evidence of a 1M selection.
+The provider reports a 1,000,000-token window from the first of these that
+holds for an assistant record, and an unknown window otherwise:
 
-1. `request`: the newest `api-request` record whose `params.model` has the
-   reply's model base. A `context-1m-*` entry in `params.betas` means a
-   1,000,000-token window; a request without it leaves the window unknown,
-   even after a `[1m]` launch.
-2. `transcript`: the assistant record's `requestedModel`, such as
-   `claude-opus-5-5[1m]`, when its model base matches `message.model`.
-3. `configured`: the launch model Agenthail captured, for transcripts written
-   before Claude recorded either field.
+1. `request`: the newest `api-request` record for the reply's model base
+   carried a `context-1m-*` entry in `params.betas`.
+2. `transcript`: the record's `requestedModel` is a `[1m]` model, such as
+   `claude-opus-5-5[1m]`, with the reply's model base. A record with a plain
+   `requestedModel` leaves the window unknown, even after a `[1m]` launch.
+3. `configured`: the record has no `requestedModel` and the launch model
+   Agenthail captured is a `[1m]` model.
 
+Missing evidence never means a smaller window. Claude runs some models at
+1,000,000 tokens without the beta or the tag: Claude Code 2.1.304 reports
+`contextWindow: 1000000` in the `modelUsage` of a plain `claude-opus-5-5` run
+whose request had no 1M beta. That figure exists only in Claude's runtime
+output, not on disk, so a session without 1M evidence shows tokens only.
 `message.model` never carries the `[1m]` selection, so it only rules out a
 window chosen for another model. The validator in
 `internal/surface/surfaces/claude_run_source.go` recognizes a `[1m]` model; a
@@ -96,8 +101,8 @@ registry; metadata reads remain best-effort and non-blocking.
 `Claude.StartSession` captures the launch model in
 `surface.Session.ConfiguredModel`. The registry persists it in
 `sessions.configured_model`, preserving an existing value when a later
-registration omits the model. Claude context projection resolves only that
-captured value and emits `ContextUsage.ContextWindowSource`; the existing
+registration omits the model. Claude context projection resolves the window
+from the evidence above and emits `ContextUsage.ContextWindowSource`; the existing
 session-detail API carries the field without a separate provider endpoint.
 
 Native and dashboard consumers treat a zero window, an estimated window, or

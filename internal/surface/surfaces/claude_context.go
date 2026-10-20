@@ -18,15 +18,9 @@ type claudeContextState struct {
 	latestCommandAt     time.Time
 	latestCommandDoneAt time.Time
 	seenBoundaries      map[string]bool
-	request             claudeRequestWindow
-}
-
-// claudeRequestWindow is what the newest API request Claude logged says about
-// the window: a request carrying the 1M context beta runs with a 1M window.
-type claudeRequestWindow struct {
-	seen  bool
-	model string
-	oneM  bool
+	// oneMRequests records, per model base, whether the newest API request
+	// Claude logged for that model carried the 1M context beta.
+	oneMRequests map[string]bool
 }
 
 type claudeContextRecord struct {
@@ -80,6 +74,9 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 	if state.seenBoundaries == nil {
 		state.seenBoundaries = map[string]bool{}
 	}
+	if state.oneMRequests == nil {
+		state.oneMRequests = map[string]bool{}
+	}
 	visit := func(line []byte) error {
 		var record claudeContextRecord
 		if json.Unmarshal(line, &record) != nil {
@@ -88,11 +85,12 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 		at, _ := time.Parse(time.RFC3339Nano, record.Timestamp)
 		switch {
 		case record.Type == "api-request":
-			state.request = claudeRequestWindow{seen: true, model: record.Params.Model}
+			oneM := false
 			for _, beta := range record.Params.Betas {
-				if strings.HasPrefix(beta, "context-1m-") {
-					state.request.oneM = true
-				}
+				oneM = oneM || strings.HasPrefix(beta, "context-1m-")
+			}
+			if base := claudeModelBase(record.Params.Model); base != "" {
+				state.oneMRequests[base] = oneM
 			}
 		case record.Type == "assistant":
 			used := record.Message.Usage.InputTokens + record.Message.Usage.CacheCreationTokens + record.Message.Usage.CacheReadTokens
@@ -101,7 +99,7 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 				state.usage.InputTokens = record.Message.Usage.InputTokens
 				state.usage.CachedInputTokens = record.Message.Usage.CacheCreationTokens + record.Message.Usage.CacheReadTokens
 				state.usage.OutputTokens = record.Message.Usage.OutputTokens
-				window := observeClaudeCurrentContextWindow(sess.ConfiguredModel, state.request, record.RequestedModel, record.Message.Model)
+				window := observeClaudeCurrentContextWindow(sess.ConfiguredModel, state.oneMRequests, record.RequestedModel, record.Message.Model)
 				state.usage.ContextWindow = window.Window
 				state.usage.ContextWindowSource = window.Source
 				state.usage.WindowEstimated = false
@@ -177,28 +175,28 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 	return &usage, nil
 }
 
-// observeClaudeCurrentContextWindow prefers the newest API request for the
-// replying model, then the model the record says was requested, then the
-// launch model. message.model never carries the [1m] selection, so it only
-// rules out a window chosen for a different model.
-func observeClaudeCurrentContextWindow(configuredModel string, request claudeRequestWindow, requestedModel, observedModel string) ClaudeContextWindowObservation {
+// observeClaudeCurrentContextWindow reports a 1M window on positive evidence
+// for the replying model: its newest API request carried the 1M beta, the
+// record's requestedModel is a [1m] model, or, for a record without
+// requestedModel, the launch model was. Neither record carries a window size,
+// and Claude runs some models at 1M without the beta or the tag, so a request
+// or model without them leaves the window unknown rather than smaller.
+func observeClaudeCurrentContextWindow(configuredModel string, oneMRequests map[string]bool, requestedModel, observedModel string) ClaudeContextWindowObservation {
 	observedBase := claudeModelBase(observedModel)
-	if request.seen && (observedBase == "" || claudeModelBase(request.model) == observedBase) {
-		if request.oneM {
-			return ClaudeContextWindowObservation{Window: 1_000_000, Source: ClaudeContextWindowSourceRequest, Model: request.model, Reliable: true}
+	if observedBase != "" && oneMRequests[observedBase] {
+		return ClaudeContextWindowObservation{Window: 1_000_000, Source: ClaudeContextWindowSourceRequest, Model: observedModel, Reliable: true}
+	}
+	if strings.TrimSpace(requestedModel) != "" {
+		window := ObserveClaudeConfiguredContextWindow(requestedModel)
+		if window.Window == 0 || observedBase == "" || claudeModelBase(requestedModel) != observedBase {
+			return ClaudeContextWindowObservation{Source: ClaudeContextWindowSourceUnknown, Model: requestedModel}
 		}
-		return ClaudeContextWindowObservation{Source: ClaudeContextWindowSourceUnknown, Model: request.model}
+		window.Source = ClaudeContextWindowSourceTranscript
+		return window
 	}
 	window := ObserveClaudeConfiguredContextWindow(configuredModel)
-	selected := configuredModel
-	if strings.TrimSpace(requestedModel) != "" {
-		window, selected = ObserveClaudeConfiguredContextWindow(requestedModel), requestedModel
-		if window.Window > 0 {
-			window.Source = ClaudeContextWindowSourceTranscript
-		}
-	}
-	selectedBase := claudeModelBase(selected)
-	if window.Window > 0 && selectedBase != "" && observedBase != "" && selectedBase != observedBase {
+	configuredBase := claudeModelBase(configuredModel)
+	if window.Window > 0 && configuredBase != "" && observedBase != "" && configuredBase != observedBase {
 		return ClaudeContextWindowObservation{Source: ClaudeContextWindowSourceUnknown, Model: observedModel}
 	}
 	return window

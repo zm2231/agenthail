@@ -456,8 +456,12 @@ func TestClaudeContextUsageReadsTheWindowClaudeRequested(t *testing.T) {
 		{"requested plain model after a 1M launch", "claude-opus-5-5[1m]", []string{reply("claude-opus-5-5", "claude-opus-5-5")}, 0, ClaudeContextWindowSourceUnknown},
 		{"requested 1M for another model", "", []string{reply("claude-sonnet-5-5[1m]", "claude-opus-5-5")}, 0, ClaudeContextWindowSourceUnknown},
 		{"request with the 1M beta", "", []string{request("claude-opus-5-5", "context-1m-2025-08-07"), reply("claude-opus-5-5", "claude-opus-5-5")}, 1_000_000, ClaudeContextWindowSourceRequest},
-		{"request without the 1M beta", "claude-opus-5-5[1m]", []string{request("claude-opus-5-5"), reply("claude-opus-5-5[1m]", "claude-opus-5-5")}, 0, ClaudeContextWindowSourceUnknown},
-		{"newest request is for another model", "", []string{request("claude-opus-5-5"), request("claude-haiku-5-5"), reply("claude-opus-5-5[1m]", "claude-opus-5-5")}, 1_000_000, ClaudeContextWindowSourceTranscript},
+		{"request without the 1M beta", "", []string{request("claude-opus-5-5"), reply("claude-opus-5-5", "claude-opus-5-5")}, 0, ClaudeContextWindowSourceUnknown},
+		{"request without the 1M beta after a 1M launch", "claude-opus-5-5[1m]", []string{request("claude-opus-5-5"), reply("", "claude-opus-5-5")}, 1_000_000, ClaudeContextWindowSourceConfigured},
+		{"newer request without the 1M beta", "", []string{request("claude-opus-5-5", "context-1m-2025-08-07"), request("claude-opus-5-5"), reply("claude-opus-5-5", "claude-opus-5-5")}, 0, ClaudeContextWindowSourceUnknown},
+		{"side request after the 1M request", "", []string{request("claude-opus-5-5", "context-1m-2025-08-07"), request("claude-haiku-5-5"), reply("", "claude-opus-5-5")}, 1_000_000, ClaudeContextWindowSourceRequest},
+		{"1M side request", "", []string{request("claude-haiku-5-5", "context-1m-2025-08-07"), request("claude-opus-5-5"), reply("claude-opus-5-5", "claude-opus-5-5")}, 0, ClaudeContextWindowSourceUnknown},
+		{"reply without a model", "", []string{request("claude-opus-5-5", "context-1m-2025-08-07"), reply("claude-opus-5-5[1m]", "")}, 0, ClaudeContextWindowSourceUnknown},
 		{"no requested model", "claude-opus-5-5[1m]", []string{reply("", "claude-opus-5-5")}, 1_000_000, ClaudeContextWindowSourceConfigured},
 	} {
 		t.Run(test.name, func(t *testing.T) {
