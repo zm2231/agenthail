@@ -2598,6 +2598,10 @@ type WaitingRecord struct {
 	Announce bool
 	// Changed reports that the record now names a different question or none.
 	Changed bool
+	// Replaced is the question the record named before a change, and
+	// ReplacedAnnounced whether the user was told about it.
+	Replaced          *surface.Waiting
+	ReplacedAnnounced bool
 }
 
 // RecordWaiting stores the question a session waits on. An unchanged state
@@ -2627,7 +2631,7 @@ func (r *Registry) RecordWaiting(sessionID string, waiting *surface.Waiting, now
 		if _, err := tx.Exec(`UPDATE session_runtime SET waiting_kind='',waiting_id='',waiting_since_ms=0,waiting_announced=0 WHERE session_id=?`, sessionID); err != nil {
 			return WaitingRecord{}, err
 		}
-		return WaitingRecord{Changed: true}, tx.Commit()
+		return WaitingRecord{Changed: true, Replaced: stored, ReplacedAnnounced: announced}, tx.Commit()
 	}
 	next := *waiting
 	if next.Since.IsZero() {
@@ -2637,7 +2641,7 @@ func (r *Registry) RecordWaiting(sessionID string, waiting *surface.Waiting, now
 		ON CONFLICT(session_id) DO UPDATE SET waiting_kind=excluded.waiting_kind,waiting_id=excluded.waiting_id,waiting_since_ms=excluded.waiting_since_ms,waiting_announced=0`, sessionID, string(next.Kind), next.ID, next.Since.UnixMilli(), sessionID); err != nil {
 		return WaitingRecord{}, err
 	}
-	return WaitingRecord{Waiting: &next, Announce: true, Changed: true}, tx.Commit()
+	return WaitingRecord{Waiting: &next, Announce: true, Changed: true, Replaced: stored, ReplacedAnnounced: announced}, tx.Commit()
 }
 
 // MarkWaitingAnnounced records that the user was told about question id. A

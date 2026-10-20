@@ -44,6 +44,8 @@ enum NativeCommand {
             return requestAuthorization()
         case "send":
             return send(arguments: Array(arguments.dropFirst()))
+        case "withdraw":
+            return withdraw(arguments: Array(arguments.dropFirst()))
         case "settings":
             if openNotificationSettings() { return 0 }
             writeError("Unable to open macOS notification settings.\n")
@@ -101,6 +103,19 @@ enum NativeCommand {
             _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
         }
         return semaphore.wait(timeout: .now()) == .success
+    }
+
+    private static func withdraw(arguments: [String]) -> Int32 {
+        guard let identifier = parse(arguments)["identifier"], !identifier.isEmpty else {
+            writeError("withdraw requires --identifier\n")
+            return 64
+        }
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [identifier])
+        center.removeDeliveredNotifications(withIdentifiers: [identifier])
+        let flushed = DispatchSemaphore(value: 0)
+        center.getDeliveredNotifications { _ in flushed.signal() }
+        return waitForSignal(flushed, timeout: 5) ? 0 : 1
     }
 
     private static func send(arguments: [String]) -> Int32 {
