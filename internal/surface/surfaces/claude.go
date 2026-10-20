@@ -444,11 +444,7 @@ func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
 	}
 	var out []claudeProcess
 	transcripts := c.transcripts.pass(roots)
-	live := make(map[string]bool, len(records))
-	for _, record := range records {
-		live[str(record.fields, "sessionId")] = true
-	}
-	c.prompts.retain(live)
+	c.prompts.retain()
 	for _, record := range records {
 		if process, ok := c.process(ctx, record, transcripts); ok {
 			out = append(out, process)

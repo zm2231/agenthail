@@ -78,7 +78,10 @@ type claudePrompts struct {
 	// answered is, per session, when the record showed the last prompt
 	// Agenthail answered. The record goes on showing it until Claude acts on
 	// the answer, and that is no longer a wait.
-	answered map[string]int64
+	answered map[string]claudeAnswer
+	// alive reports whether a Claude process is running; an answer is
+	// forgotten once the process that asked has exited.
+	alive func(pid int) bool
 	// ended keeps, per session, the holds that ended lately, so a duplicate
 	// hook call that arrives after its prompt was settled takes that outcome
 	// rather than holding the prompt again.
@@ -87,6 +90,11 @@ type claudePrompts struct {
 	forgetAfter time.Duration
 	sequence    uint64
 	changed     func(ClaudePromptChange)
+}
+
+type claudeAnswer struct {
+	shownMS int64
+	pid     int
 }
 
 type claudePrompt struct {
@@ -102,6 +110,7 @@ type claudePrompt struct {
 	// passes the same prompt more than once; those calls share one hold.
 	key     string
 	holders int
+	pid     int
 	// recordMS is the statusUpdatedAt of the wait the record showed when the
 	// hook called.
 	recordMS int64
@@ -113,7 +122,7 @@ type claudePrompt struct {
 }
 
 func newClaudePrompts() *claudePrompts {
-	return &claudePrompts{open: map[string][]*claudePrompt{}, answered: map[string]int64{}, ended: map[string][]*claudePrompt{}, forgetAfter: claudePromptDuplicateWindow}
+	return &claudePrompts{open: map[string][]*claudePrompt{}, answered: map[string]claudeAnswer{}, alive: claudeProcessAlive, ended: map[string][]*claudePrompt{}, forgetAfter: claudePromptDuplicateWindow}
 }
 
 // OnPromptChange registers what runs after a session gains or loses a held
@@ -145,7 +154,7 @@ func (c *Claude) HoldPrompt(ctx context.Context, prompt ClaudePermissionPrompt) 
 	session := surface.Session{ID: prompt.SessionID, PID: pid}
 	created := time.Now().UTC()
 	canonical, _ := json.Marshal(input)
-	held := &claudePrompt{input: input, suggestions: prompt.Suggestions, createdMS: created.UnixMilli(), key: prompt.ToolName + "\x00" + string(canonical), holders: 1, done: make(chan struct{})}
+	held := &claudePrompt{input: input, suggestions: prompt.Suggestions, createdMS: created.UnixMilli(), key: prompt.ToolName + "\x00" + string(canonical), holders: 1, pid: pid, done: make(chan struct{})}
 	kind := surface.WaitingApproval
 	if prompt.ToolName == "AskUserQuestion" {
 		kind = surface.WaitingQuestion
@@ -312,7 +321,7 @@ func (p *claudePrompts) endLocked(sessionID string, held *claudePrompt, decision
 	p.ended[sessionID] = append(p.ended[sessionID], held)
 	time.AfterFunc(p.forgetAfter, func() { p.forget(sessionID, held) })
 	if decision != nil && held.shownMS != 0 {
-		p.answered[sessionID] = held.shownMS
+		p.answered[sessionID] = claudeAnswer{shownMS: held.shownMS, pid: held.pid}
 	}
 	p.open[sessionID] = slices.DeleteFunc(p.open[sessionID], func(open *claudePrompt) bool { return open == held })
 	if len(p.open[sessionID]) == 0 {
@@ -357,7 +366,7 @@ func (p *claudePrompts) next() uint64 {
 func (p *claudePrompts) shown(sessionID string, sinceMS int64) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.answered[sessionID] == sinceMS {
+	if answered, found := p.answered[sessionID]; found && answered.shownMS == sinceMS {
 		return true
 	}
 	for _, held := range p.open[sessionID] {
@@ -377,7 +386,7 @@ func (p *claudePrompts) answeredWait(sessionID string, waiting *surface.Waiting)
 	if !found {
 		return waiting
 	}
-	if waiting != nil && waiting.Since.UnixMilli() == answered {
+	if waiting != nil && waiting.Since.UnixMilli() == answered.shownMS {
 		return nil
 	}
 	delete(p.answered, sessionID)
@@ -386,11 +395,11 @@ func (p *claudePrompts) answeredWait(sessionID string, waiting *surface.Waiting)
 
 // retain forgets the answers of sessions whose Claude process has exited,
 // since no later record will show them moving on.
-func (p *claudePrompts) retain(live map[string]bool) {
+func (p *claudePrompts) retain() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for sessionID := range p.answered {
-		if !live[sessionID] {
+	for sessionID, answered := range p.answered {
+		if !p.alive(answered.pid) {
 			delete(p.answered, sessionID)
 		}
 	}

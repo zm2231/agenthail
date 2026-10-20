@@ -378,21 +378,28 @@ func TestAnAnswerIsForgottenWhenItsSessionExits(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-done
-	claude.prompts.mu.Lock()
-	_, remembered := claude.prompts.answered["conversation"]
-	claude.prompts.mu.Unlock()
-	if !remembered {
-		t.Fatal("the answer is not remembered while the record still shows the prompt")
+	remembered := func() bool {
+		claude.prompts.mu.Lock()
+		defer claude.prompts.mu.Unlock()
+		_, found := claude.prompts.answered["conversation"]
+		return found
 	}
-	if err := os.Remove(filepath.Join(home, ".claude", "sessions", fmt.Sprint(os.Getpid())+".json")); err != nil {
+	if err := os.WriteFile(filepath.Join(home, ".claude", "sessions", fmt.Sprint(os.Getpid())+".json"), []byte("{"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := claude.List(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	if !remembered() {
+		t.Fatal("the answer was forgotten while its Claude process is still running")
+	}
 	claude.prompts.mu.Lock()
-	defer claude.prompts.mu.Unlock()
-	if len(claude.prompts.answered) != 0 {
-		t.Fatalf("an exited session's answer is still remembered: %v", claude.prompts.answered)
+	claude.prompts.alive = func(int) bool { return false }
+	claude.prompts.mu.Unlock()
+	if _, err := claude.List(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if remembered() {
+		t.Fatal("an exited session's answer is still remembered")
 	}
 }
