@@ -83,7 +83,16 @@ func (f *Fixture) launch(t testing.TB, script, version string, env ...string) cl
 	if _, err := os.Stat(filepath.Join(hostDir, "node_modules", "@anthropic-ai", "claude-agent-sdk")); err != nil {
 		t.Fatalf("install the host's dependencies first (npm ci --prefix claude-host): %v", err)
 	}
-	env = append(append(os.Environ(), "FAKE_CLAUDE_DIR="+f.ClaudeDir, "FAKE_CLAUDE_RECORD=1", "HOME="+f.Home,
+	// launchd starts the daemon's host without the environment of the Claude
+	// session these tests may run in, whose host sets variables that change
+	// what Claude reports.
+	var inherited []string
+	for _, variable := range os.Environ() {
+		if !strings.HasPrefix(variable, "CLAUDE_CODE_") {
+			inherited = append(inherited, variable)
+		}
+	}
+	env = append(append(inherited, "FAKE_CLAUDE_DIR="+f.ClaudeDir, "FAKE_CLAUDE_RECORD=1", "HOME="+f.Home,
 		"NODE_OPTIONS=--report-on-signal --report-signal=SIGUSR2 --report-directory="+f.reportDir()), env...)
 	return claudehost.Launch{
 		Node:    node,
