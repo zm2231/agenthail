@@ -2,7 +2,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="${1:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/agenthail-native-helpers}"
+if [ -n "${1:-}" ]; then
+  OUT="$1"
+else
+  # A private directory, so concurrent runs from other checkouts cannot
+  # rebuild the library under this one.
+  OUT="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/agenthail-native-helpers.XXXXXX")"
+  trap 'rm -rf "$OUT"' EXIT
+fi
 JOBS="${AGENTHAIL_TEST_JOBS:-$(sysctl -n hw.ncpu)}"
 
 SOURCES=(

@@ -49,6 +49,10 @@ type ForkOptions struct {
 type SessionForker interface {
 	ForkSession(context.Context, *Session, ForkOptions) (*Session, error)
 }
+
+// SessionLifecycle runs a status, logs, stop or resume action on a session.
+// A resume points the session at the process it reached, so the caller can
+// register a session that now runs elsewhere.
 type SessionLifecycle interface {
 	SessionAction(context.Context, *Session, string) (map[string]any, error)
 }

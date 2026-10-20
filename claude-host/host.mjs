@@ -294,6 +294,12 @@ const methods = {
     emit(s.id, 'permission_mode', { permissionMode });
     return s.describe();
   },
+  // logs is the tail of what the session's Claude process wrote to stderr,
+  // which the host keeps while the session is open.
+  logs: ({ sessionId }) => {
+    const s = session(sessionId);
+    return { sessionId: s.id, pid: s.pid, stderr: s.stderr };
+  },
   // close stops the session now: it interrupts a running turn, closes
   // Claude's input and returns once the process has exited, killing it if it
   // has not within the grace period. A session that has ended but whose

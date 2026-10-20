@@ -448,6 +448,7 @@ func TestDiagnoseSignalsOnlyTheHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	foreign := exec.Command(node, "-e", "setInterval(() => {}, 1000)", "fake-claude.mjs")
+	foreign.Env = append(os.Environ(), claudehosttest.OwnerEnv()...)
 	if err := foreign.Start(); err != nil {
 		t.Fatal(err)
 	}

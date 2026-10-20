@@ -592,12 +592,13 @@ type ReplyResult struct {
 // sent a prompt that was not typed by the person: "peer", with Sender naming
 // the agent, or a prompt the provider injected, such as "task-notification".
 type Exchange struct {
-	User      string    `json:"user"`
-	Origin    string    `json:"origin,omitempty"`
-	Sender    string    `json:"sender,omitempty"`
-	Assistant string    `json:"assistant"`
-	Timestamp time.Time `json:"timestamp"`
-	Source    string    `json:"source,omitempty"`
+	User      string        `json:"user"`
+	Origin    string        `json:"origin,omitempty"`
+	Sender    string        `json:"sender,omitempty"`
+	Assistant string        `json:"assistant"`
+	Timestamp time.Time     `json:"timestamp"`
+	Source    string        `json:"source,omitempty"`
+	Turn      *TurnMetadata `json:"turn,omitempty"`
 }
 
 type StreamEvent struct {
@@ -623,6 +624,7 @@ type StreamEvent struct {
 	Text             string         `json:"text"`
 	Context          *ContextUsage  `json:"context,omitempty"`
 	Goal             *GoalState     `json:"goal,omitempty"`
+	Turn             *TurnMetadata  `json:"turn,omitempty"`
 }
 
 type StreamEventClass string
@@ -743,6 +745,17 @@ type Capabilities struct {
 	// Commands is a session that takes Claude Remote Control's context, usage,
 	// status, effort and rename commands.
 	Commands bool `json:"commands"`
+	// Lifecycle is what the session's runtime does to the session itself.
+	Lifecycle Lifecycle `json:"lifecycle"`
+}
+
+// Lifecycle names the operations on a session's process that its runtime
+// supports: report its state, read its log, stop it, and start it again.
+type Lifecycle struct {
+	Status bool `json:"status"`
+	Logs   bool `json:"logs"`
+	Stop   bool `json:"stop"`
+	Resume bool `json:"resume"`
 }
 
 type SessionCapabilities struct {

@@ -301,6 +301,18 @@ func (c Client) SetPermissionMode(ctx context.Context, sessionID, mode string) (
 	return out, c.sessionCall(ctx, "setPermissionMode", map[string]string{"sessionId": sessionID, "permissionMode": mode}, &out)
 }
 
+// Logs is the tail of what an open session's Claude process wrote to stderr.
+type Logs struct {
+	SessionID string `json:"sessionId"`
+	PID       int    `json:"pid"`
+	Stderr    string `json:"stderr"`
+}
+
+func (c Client) Logs(ctx context.Context, sessionID string) (Logs, error) {
+	var out Logs
+	return out, c.sessionCall(ctx, "logs", map[string]string{"sessionId": sessionID}, &out)
+}
+
 // Close stops a session now, on whichever host runs it, and returns once its
 // Claude has exited.
 func (c Client) Close(ctx context.Context, sessionID string) error {

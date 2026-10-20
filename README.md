@@ -203,6 +203,8 @@ agenthail reply @builder --report
 
 `agenthail last @builder 5 --report` lists the reports of the last five exchanges. To keep a long reply from flooding an agent's context, `--max-bytes 4000` caps what `reply` and `last` print and says how much was cut.
 
+With `--json` or `--report`, each turn also reports its state, model, duration and token usage, and lists the fields its provider did not record; Notion records none of them. The [operations skill](skills/agenthail-operations/SKILL.md) gives the schema.
+
 The report is the agent's own claim; check the commits before you rely on them. The [operations skill](skills/agenthail-operations/SKILL.md#completion-report) defines every field. Agents that have the skill write one when they finish dispatched work.
 
 ## Give each project a coordinator
@@ -247,7 +249,7 @@ agenthail thread create codex "Implement the verified fix" --alias builder --jso
 agenthail thread create claude "Investigate the build failure" --alias investigator --json
 ```
 
-The session starts in your current folder unless you choose another project with `--cwd`. Claude sessions run in the Claude host and support status, stop and resume; read their transcript with `agenthail last`, since a host session has no background log. Codex supports forks, its native input queue, reasoning effort, plan mode, service tier and structured output. These controls are available in the CLI and web dashboard; the Mac app offers one-click forks, the native queue, effort and plan mode; see [session operations](docs/maintainers/session-operations.md) for commands and retry behavior.
+The session starts in your current folder unless you choose another project with `--cwd`. Claude sessions run in the Claude host and support status, logs, stop and resume; logs is what the session's Claude process wrote to stderr while it is open, and `agenthail last` reads the conversation. Codex supports forks, its native input queue, reasoning effort, plan mode, service tier and structured output. These controls are available in the CLI and web dashboard; the Mac app offers one-click forks, the native queue, effort and plan mode; see [session operations](docs/maintainers/session-operations.md) for commands and retry behavior.
 
 Notion threads can start the same way:
 

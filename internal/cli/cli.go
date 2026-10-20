@@ -2057,11 +2057,11 @@ func (a *App) cmdReply(args []string) error {
 		if err != nil {
 			return err
 		}
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "done": reply.Done, "report": parsed})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "done": reply.Done, "report": parsed, "turn": replyTurn(read.Exchanges, reply)})
 	}
 	text, cut := capBytes(reply.Text, mode.maxBytes)
 	if hasFlag(args, "--json") {
-		document := map[string]any{"surface": sess.Surface, "session": sess.ID, "text": text, "done": reply.Done, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning}
+		document := map[string]any{"surface": sess.Surface, "session": sess.ID, "text": text, "done": reply.Done, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning, "turn": replyTurn(read.Exchanges, reply)}
 		if cut {
 			document["truncated"], document["textBytes"] = true, len(reply.Text)
 		}

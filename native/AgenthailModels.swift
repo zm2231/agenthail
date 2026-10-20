@@ -275,13 +275,14 @@ struct Capabilities: Codable, Hashable {
     var commands = false
     var respond = false
     var permissionMode = false
+    var lifecycle = SessionLifecycle()
 
-    init(send: Bool = false, stream: Bool = false, reply: Bool = false, goal: Bool = false, goalSet: Bool = false, compact: Bool = false, model: Bool = false, interrupt: Bool = false, steer: Bool = false, attach: Bool = false, commands: Bool = false, respond: Bool = false, permissionMode: Bool = false) {
-        (self.send, self.stream, self.reply, self.goal, self.goalSet, self.compact, self.model, self.interrupt, self.steer, self.attach, self.commands, self.respond, self.permissionMode) = (send, stream, reply, goal, goalSet, compact, model, interrupt, steer, attach, commands, respond, permissionMode)
+    init(send: Bool = false, stream: Bool = false, reply: Bool = false, goal: Bool = false, goalSet: Bool = false, compact: Bool = false, model: Bool = false, interrupt: Bool = false, steer: Bool = false, attach: Bool = false, commands: Bool = false, respond: Bool = false, permissionMode: Bool = false, lifecycle: SessionLifecycle = SessionLifecycle()) {
+        (self.send, self.stream, self.reply, self.goal, self.goalSet, self.compact, self.model, self.interrupt, self.steer, self.attach, self.commands, self.respond, self.permissionMode, self.lifecycle) = (send, stream, reply, goal, goalSet, compact, model, interrupt, steer, attach, commands, respond, permissionMode, lifecycle)
     }
 
     // A paired host on an older release omits goalSet, attach, commands,
-    // respond and permissionMode; it cannot do any of them.
+    // respond, permissionMode and lifecycle; it cannot do any of them.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         send = try container.decode(Bool.self, forKey: .send)
@@ -297,7 +298,30 @@ struct Capabilities: Codable, Hashable {
         commands = try container.decodeIfPresent(Bool.self, forKey: .commands) ?? false
         respond = try container.decodeIfPresent(Bool.self, forKey: .respond) ?? false
         permissionMode = try container.decodeIfPresent(Bool.self, forKey: .permissionMode) ?? false
+        lifecycle = try container.decodeIfPresent(SessionLifecycle.self, forKey: .lifecycle) ?? SessionLifecycle()
     }
+}
+
+/// The operations on a session's process that its runtime supports.
+struct SessionLifecycle: Codable, Hashable {
+    var status = false
+    var logs = false
+    var stop = false
+    var resume = false
+
+    init(status: Bool = false, logs: Bool = false, stop: Bool = false, resume: Bool = false) {
+        (self.status, self.logs, self.stop, self.resume) = (status, logs, stop, resume)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        status = try container.decodeIfPresent(Bool.self, forKey: .status) ?? false
+        logs = try container.decodeIfPresent(Bool.self, forKey: .logs) ?? false
+        stop = try container.decodeIfPresent(Bool.self, forKey: .stop) ?? false
+        resume = try container.decodeIfPresent(Bool.self, forKey: .resume) ?? false
+    }
+
+    var any: Bool { status || logs || stop || resume }
 }
 
 struct SurfaceState: Decodable, Identifiable, Equatable {
@@ -374,7 +398,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var runtimeKind: String? = nil
     /// A Claude session Agenthail can open in its host: one a terminal or
     /// background job runs.
-    var canAdopt: Bool { surface == "claude" && runtimeKind == "claude-cli" && !isReadOnly }
+    var canAdopt: Bool { surface == "claude" && (runtimeKind == "claude-cli" || runtimeKind == "claude-bg") && !isReadOnly }
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }

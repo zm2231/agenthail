@@ -17,8 +17,9 @@ struct SessionOperationsSection: View {
             if SessionOperationAvailability.nativeQueue(session) {
                 NativeQueueSection(model: model, session: session)
             }
-            if SessionOperationAvailability.lifecycle(session) {
-                BackgroundSessionSection(model: model, session: session)
+            let lifecycle = SessionOperationAvailability.lifecycle(session)
+            if lifecycle.any {
+                BackgroundSessionSection(model: model, session: session, lifecycle: lifecycle)
             }
         }
     }
@@ -198,18 +199,20 @@ struct QueueEditorSheet: View {
 struct BackgroundSessionSection: View {
     @ObservedObject var model: AgenthailModel
     let session: SessionState
+    let lifecycle: SessionLifecycle
     @StateObject private var controller: BackgroundSessionController
 
-    init(model: AgenthailModel, session: SessionState) {
+    init(model: AgenthailModel, session: SessionState, lifecycle: SessionLifecycle) {
         self.model = model
         self.session = session
+        self.lifecycle = lifecycle
         _controller = StateObject(wrappedValue: BackgroundSessionController(keys: model.actionKeys))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                SidebarCaption("Background session").padding(.horizontal, -8)
+                SidebarCaption(SessionLifecycleCopy.title(session)).padding(.horizontal, -8)
                 Spacer()
                 if controller.busyAction != nil { ProgressView().controlSize(.mini) }
             }
@@ -222,15 +225,15 @@ struct BackgroundSessionSection: View {
                         .foregroundStyle(DesktopPalette.text2)
                 }
             } else {
-                Text("For Claude sessions Agenthail runs and Claude Code background jobs.")
+                Text(SessionLifecycleCopy.detail(session))
                     .font(.system(size: 11.5))
                     .foregroundStyle(DesktopPalette.text2)
             }
             HStack(spacing: 8) {
-                Button("Status") { run("status") }
-                Button("Logs") { run("logs") }
-                Button("Stop") { run("stop") }
-                Button("Resume") { run("resume") }
+                if lifecycle.status { Button("Status") { run("status") } }
+                if lifecycle.logs { Button("Logs") { run("logs") } }
+                if lifecycle.stop { Button("Stop") { run("stop") } }
+                if lifecycle.resume { Button("Resume") { run("resume") } }
             }
             .controlSize(.small)
             .disabled(controller.busyAction != nil)

@@ -27,7 +27,9 @@ The daemon owns the host. Every 30 seconds, and once at startup, it calls
    protocol: a retiring host of protocol 2 keeps serving `list`, `send`,
    `respond`, `interrupt`, `setModel`, `setPermissionMode`, `close` and
    `subscribe` for its sessions to a client of a later protocol, and a resume
-   of a conversation it still runs returns its process.
+   of a conversation it still runs returns its process. `logs` came later
+   without a protocol change; a host shipped before it answers `invalid`,
+   which the daemon reports as a host that predates session logs.
 3. If nothing answers, take an exclusive `flock` on
    `~/.agenthail/claude-host/lock`. If another process holds it, a host is
    starting: wait for its `hello`.
@@ -46,7 +48,7 @@ process. The old host keeps serving its sessions instead.
 lock and stops writing `state.json`, so the daemon starts the new host at
 once. The retiring host refuses `open` with `draining` and serves everything
 else for its own sessions: `send`, `respond`, `interrupt`, `setModel`,
-`setPermissionMode`, `close`, `list` and `subscribe`. It closes a session once
+`setPermissionMode`, `logs`, `close`, `list` and `subscribe`. It closes a session once
 Claude reports it idle with no open request, no background task and no turn
 owed, and exits when its last session has closed. Claude owes a turn for work
 it was handed while idle: a background task that ended, unless the live set
@@ -90,7 +92,8 @@ environment as the daemon's other Claude launches (`claudeCommandEnv`), so
 
 Newline-delimited JSON over the socket, one request per connection:
 `hello`, `open`, `send`, `interrupt`, `respond`, `setModel`,
-`setPermissionMode`, `close`, `list`, `drain`, and `subscribe`, which streams
+`setPermissionMode`, `logs` (the last 4 KiB an open session's Claude wrote to
+stderr), `close`, `list`, `drain`, and `subscribe`, which streams
 events after a sequence number and reports a gap when the ring buffer has moved
 past it. A failed request returns `{code, message}`:
 
@@ -235,8 +238,10 @@ those.
 ## Delivery
 
 A Claude process that the host runs for the conversation it lists is
-discovered with runtime kind `claude-host`; the Claude adapter serves both
-`claude-cli` and `claude-host` and decides per session from that kind. The
+discovered with runtime kind `claude-host`; a Claude Code background job
+(`claude --bg`, whose session record has kind `bg`) is `claude-bg`, and any
+other Claude process is `claude-cli`. The Claude adapter serves all three and
+decides per session from that kind. The
 process also serves Claude's native messaging socket, so its transport is
 `uds`. It is open while the host lists it; a CLI session is open while its pid
 is a running `claude` process. When the host stops listing a process that still
@@ -314,4 +319,10 @@ go test ./internal/claudehost/... ./internal/surface/surfaces/ ./internal/daemon
 The tests run the real host against a fake Claude CLI
 ([`claude-host/test/fake-claude.mjs`](../../claude-host/test/fake-claude.mjs))
 that speaks the stream-json protocol, writes a session record and serves a
-messaging socket.
+messaging socket. Hosts and fake CLIs run in their own sessions, out of reach of a
+test's cleanup once its process is killed or times out, so each one loads
+[`claude-host/test/owner-watchdog.cjs`](../../claude-host/test/owner-watchdog.cjs)
+(hosts through `NODE_OPTIONS`; the fake CLI imports it, because the Agent SDK
+drops `NODE_OPTIONS` when it starts Claude): it exits the process when any pid in
+`AGENTHAIL_TEST_OWNER_PIDS` (the test process, and for the Node tests their
+runner) is gone.

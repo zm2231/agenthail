@@ -43,6 +43,35 @@ func TestThreadOperationJSONFailurePreservesUnknown(t *testing.T) {
 	}
 }
 
+func TestThreadResumeRegistersTheSessionItReached(t *testing.T) {
+	adapter := &resumingCLISurface{cliSurface: &cliSurface{kind: surface.KindClaude}}
+	app, _ := cliFixture(t, adapter.cliSurface)
+	app.Surfaces[0].Surface = adapter
+	session := surface.Session{ID: "job", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeBackground, Status: surface.StatusOffline}
+	if err := app.Registry.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Registry.SetAlias("worker", session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := captureStdout(t, func() error { return app.Run([]string{"thread", "resume", "@worker", "--json"}) }); err != nil {
+		t.Fatal(output, err)
+	}
+	stored, err := app.Registry.Session("job")
+	if err != nil || stored.RuntimeKind != surface.RuntimeClaudeHost || stored.PID != 4242 {
+		t.Fatalf("stored=%+v err=%v, want the host process it reached", stored, err)
+	}
+}
+
+type resumingCLISurface struct{ *cliSurface }
+
+func (*resumingCLISurface) SessionAction(_ context.Context, session *surface.Session, action string) (map[string]any, error) {
+	if action == "resume" {
+		session.RuntimeKind, session.PID, session.Transport, session.Status = surface.RuntimeClaudeHost, 4242, "uds", surface.StatusIdle
+	}
+	return map[string]any{"sessionId": session.ID, "action": action}, nil
+}
+
 type lifecycleCLISurface struct{ *cliSurface }
 
 func (*lifecycleCLISurface) SessionAction(context.Context, *surface.Session, string) (map[string]any, error) {

@@ -65,7 +65,7 @@ func NewClaudeWithRequest(signins signin.Resolver, home string, request ClaudeRe
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
 
 func (c *Claude) RuntimeKinds() []surface.RuntimeKind {
-	return []surface.RuntimeKind{surface.RuntimeClaudeCLI, surface.RuntimeClaudeHost}
+	return []surface.RuntimeKind{surface.RuntimeClaudeCLI, surface.RuntimeClaudeHost, surface.RuntimeClaudeBackground}
 }
 
 func (c *Claude) ObserveClaudeRuns(ctx context.Context) ([]surface.ClaudeRunObservation, error) {
@@ -85,6 +85,7 @@ func (c *Claude) Capabilities() surface.Capabilities {
 		Send: true, Stream: true, Reply: true, GoalSet: true, GoalStatus: true,
 		Compact: true, Model: true, Interrupt: true, Steer: true,
 		Attach: true, Commands: true,
+		Lifecycle: surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true},
 	}
 }
 
@@ -95,6 +96,9 @@ func (c *Claude) Capabilities() surface.Capabilities {
 // install without Remote Control. Hosted and socket sessions stream only from
 // a local transcript. A goal is set only where the session runs /goal as a
 // command: its peer socket hands the text to the model as a message.
+// Lifecycle follows the runtime: a background job and a host session have
+// status, logs, stop and resume; an interactive session belongs to its
+// terminal.
 func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities {
 	capabilities := c.Capabilities()
 	capabilities.GoalSet = sess == nil || c.canSendHumanTurn(sess)
@@ -104,10 +108,14 @@ func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities
 		capabilities.Commands = false
 		capabilities.Respond = true
 		capabilities.PermissionMode = true
+		capabilities.Lifecycle = surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true}
 		return capabilities
 	}
 	if sess == nil {
 		return capabilities
+	}
+	if sess.RuntimeKind != surface.RuntimeClaudeBackground {
+		capabilities.Lifecycle = surface.Lifecycle{}
 	}
 	if sess.Transport == "uds" {
 		capabilities.Stream = sess.HasLocal && sess.Transcript != ""
@@ -601,8 +609,11 @@ func (c *Claude) process(ctx context.Context, record claudeSessionRecord, transc
 	if socket != "" {
 		sess.Transport = "uds"
 	}
-	if hosted {
+	switch {
+	case hosted:
 		sess.RuntimeKind = surface.RuntimeClaudeHost
+	case str(m, "kind") == "bg":
+		sess.RuntimeKind = surface.RuntimeClaudeBackground
 	}
 	if n, ok := m["name"].(string); ok {
 		sess.Name = n
@@ -1230,13 +1241,14 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		return err
 	}
 	turns := newClaudeTurnTracker(replayed.current, closing)
+	turns.meter, turns.between, turns.betweenKnown = replayed.meter, replayed.between, replayed.betweenKnown
 	completed := false
 	finish := func(ended []claudeTurnEnd) {
 		for _, end := range ended {
 			if uuid != "" && end.TurnID != uuid && end.Status == "" {
 				continue
 			}
-			onEvent(surface.StreamEvent{ID: end.Key, ProviderKey: "timeline:" + end.Key, Version: 1, Operation: "phase", TurnID: end.TurnID, Kind: "done", Status: end.Status})
+			onEvent(surface.StreamEvent{ID: end.Key, ProviderKey: "timeline:" + end.Key, Version: 1, Operation: "phase", TurnID: end.TurnID, Kind: "done", Status: end.Status, Turn: end.Turn})
 			if uuid != "" && end.TurnID == uuid && end.Status == "" {
 				completed = true
 			}
@@ -1332,7 +1344,8 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 }
 
 func claudeRecordStartsTurn(record map[string]any) bool {
-	return str(record, "type") == "user" && str(record, "uuid") != "" && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record) && !claudeRecordIsCommand(record)
+	compactSummary, _ := record["isCompactSummary"].(bool)
+	return str(record, "type") == "user" && str(record, "uuid") != "" && !compactSummary && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record) && !claudeRecordIsCommand(record)
 }
 
 func claudeRecordHasToolResult(record map[string]any) bool {

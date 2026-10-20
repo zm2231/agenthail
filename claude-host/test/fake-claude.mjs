@@ -8,6 +8,9 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import readline from 'node:readline';
+// The Agent SDK drops NODE_OPTIONS when it starts Claude, so the owner
+// watchdog the host preloads has to be loaded here.
+import './owner-watchdog.cjs';
 
 const argv = process.argv.slice(2);
 const flag = (name) => {
@@ -33,6 +36,9 @@ if (fs.existsSync(refusal)) {
   process.stderr.write(fs.readFileSync(refusal, 'utf8'));
   process.exit(1);
 }
+// A started CLI writes diagnostics to stderr, which the host keeps as the
+// session's log.
+process.stderr.write(`fake-claude: session ${sessionId} started\n`);
 const seen = new Set(
   fs.existsSync(transcript) ? fs.readFileSync(transcript, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).uuid) : [],
 );

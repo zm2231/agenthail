@@ -57,7 +57,11 @@ func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Reques
 			err = surface.ErrUnsupported
 			break
 		}
+		addressed := *session
 		result, err = lifecycle.SessionAction(ctx, session, strings.TrimPrefix(action, "session-lifecycle-"))
+		if err == nil {
+			err = d.dispatcher().RegisterReached(&addressed, session)
+		}
 	}
 	if err != nil {
 		writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "unknown": surface.IsDeliveryOutcomeUnknown(err), "error": err.Error()})

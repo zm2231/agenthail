@@ -250,8 +250,9 @@ never the identity. `/branch` and `/clear` create a new session without an alias
 After `/branch`, `agenthail whoami` names the branch. Move an alias only with
 `agenthail identify <target> <name>`.
 
-Use `thread status`, `stop` or `resume` with the alias; a host session has no
-`logs`, so read it with `agenthail last`. Preserve unknown launch outcomes;
+Use `thread status`, `logs`, `stop` or `resume` with the alias; a host
+session's `logs` is its Claude process's stderr while it is open, and
+`agenthail last` reads the conversation. Preserve unknown launch outcomes;
 inspect `agenthail list` before retrying.
 Send to a Claude session whose process has ended (a stopped or finished
 background job, or a closed terminal session) like any other session: the send
@@ -333,6 +334,31 @@ without splitting a character. A cut field says so: JSON adds `truncated` and
 `assistantTruncated`/`assistantBytes` to an exchange, with the original size;
 text output ends it with `[truncated: shown of total bytes]`. It cannot be
 combined with `--report`.
+
+Each exchange in `last --json` and `last --report`, and the reply in
+`reply --json` and `reply --report`, carries `turn`, what the provider recorded
+about that turn:
+
+```json
+{"v":1,"state":"completed","model":"gpt-5.6-terra","durationMs":4200,"usage":{"inputTokens":250,"cachedInputTokens":140,"cacheWriteTokens":5,"outputTokens":50,"reasoningTokens":10},"contextTokens":180,"compactions":[{"trigger":"threshold","preTokens":1103,"postTokens":200}]}
+```
+
+`state` is `completed`, `interrupted`, `failed`, `running` or `unknown`.
+`inputTokens` includes the cached and cache-written input, and `outputTokens`
+includes the reasoning output. `contextTokens` is how full the context was when
+the turn ended. `compactions` lists, oldest first, each compaction since the
+previous turn ended, so one Claude ran while the session sat idle, or a
+`/compact` between turns, shows on the turn after it. `trigger` is `threshold`
+(the context reached the autocompact window), `idle`, `manual`, or `unknown`;
+Codex does not record why it compacted, so its compactions are `unknown`. No
+`compactions` field, and none listed in `unavailable`, means there were none. `unavailable` lists each field the provider did
+not record for that turn, such as `["model","durationMs","usage"]`; a listed
+field is absent, never zero. Codex rollouts record every field for a finished
+turn, except the duration of an aborted one and reasoning tokens Codex did not
+count. A Codex turn read from the app server without its rollout has only its
+state. Claude transcripts record every field, with `usage.reasoningTokens` only
+when Claude wrote thinking-token counts. Notion records none, so its state is `unknown`.
+Tokens are not cost: they cover the agent's own model requests, not subagents.
 
 Use `--model` only for a one-message Codex or Notion override. Use `--from` when
 the receiving agent needs a human-readable sender label. Long content should go

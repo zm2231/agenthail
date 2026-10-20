@@ -55,6 +55,52 @@ boundary, and records the original size; `--report` replaces the text with the
 parsed completion report (`internal/report`) and cannot be combined with it.
 Both run in the CLI on whatever page the reader returned, so the daemon page,
 paired-host reads and offline provider reads behave the same.
+
+Each exchange carries `turn` (`surface.TurnMetadata`, version 1). The done item
+that ends a turn carries what the provider recorded, through the journal like
+any other field, and `surface.BoundSessionRead` gives an exchange that no done
+item ended `running` (the newest exchange of a busy session) or `unknown`.
+`unavailable` names each field the provider did not record.
+
+- Codex: a meter reads the rollout. `turn_context` gives the model,
+  `task_complete.duration_ms` the duration, and `token_count.last_token_usage`
+  each request's tokens. Codex repeats a `token_count` without a new request; a
+  record that leaves `total_token_usage` unchanged is not counted again. A
+  managed session read from the app server takes the rollout turn with the
+  same turn ID, and the app server's turn status otherwise.
+- Claude: the turn tracker sums each assistant message's usage, from the
+  message's last record, since earlier records hold partial counts.
+  `inputTokens` adds `cache_read_input_tokens` and
+  `cache_creation_input_tokens` to `input_tokens`, so both providers count
+  input the same way. `durationMs` is the wall time from the prompt record to
+  the turn's last record. `contextTokens` is the last assistant record's input
+  (`<synthetic>` records are not requests and are skipped),
+  or the `postTokens` of a compaction after it. Each `compact_boundary` gives
+  a compaction: `compactMetadata.trigger` `auto` is `threshold` and `manual` is
+  `manual`, and an informational record starting "Compacted while idle" or
+  "Compacted after an hour idle", which Claude writes just after the boundary,
+  makes it `idle`. The compaction summary Claude writes as a user record
+  neither starts a turn nor is a prompt; it shows as a `Compaction summary`
+  event.
+- Codex compactions: a `compacted` record is one compaction. `preTokens` is the
+  size of the request before it and `postTokens` the next `token_count` that is
+  smaller; `contextTokens` is the last `token_count`'s `total_tokens`. Two
+  compactions with no `token_count` between them leave the size between them
+  unrecorded, so the first has no `postTokens` and the second no `preTokens`.
+  The rollout does not say why Codex compacted, so `trigger` is `unknown`.
+- Notion: nothing is recorded, so every field is unavailable.
+
+A reader that starts mid-turn, a page or a stream window, replays from the
+record that started the turn before it, at most 64 MiB back, so it holds the
+compactions since that turn ended and the context size they started from. A
+turn that started further back reports usage and model as unavailable rather
+than a partial count, and a turn whose predecessor is out of reach reports
+`compactions` as unavailable.
+
+These numbers are accounting inputs, not a bill. They omit subagent turns,
+which run in their own transcripts, and a request cancelled before the provider
+recorded its usage. They do not price cached or cache-written tokens. Claude's
+duration includes tool runs and permission waits; Codex's is the provider's own.
 With the daemon running, phone detail, `last`, and `reply` read the same bounded
 per-session journal page. CLI JSON includes `journalSeq`; an active-daemon read
 error does not fall back to a second provider reader. Metadata loads independently.
@@ -187,7 +233,7 @@ For a `claude-bg` job, Claude assigns the background ID. Agenthail parses that I
 
 Claude Code lets one conversation stay open in several processes; resuming it elsewhere only warns. The conversation has one row whatever its processes: the process that opened it first is attached to the row, sends to the session reach it, and a later process is addressed by its PID. When a process moves to another conversation (`/branch`, `/clear`, `/resume`), registering it under the new conversation detaches it from the old row; nothing else moves. Commands run from either process still resolve to that session. Because a sender's process is unknown when several share its ID, replies to it are addressed to the session rather than to one process's socket.
 
-Status, stop and resume operate on sessions the host runs and on `claude-bg` jobs; logs exist only for `claude-bg` jobs, and a host session points to `agenthail last` instead. Interactive sessions do not acquire background lifecycle controls merely by appearing in discovery. Destructive removal is not exposed.
+Status, logs, stop and resume operate on sessions the host runs and on `claude-bg` jobs. A `claude-bg` job's logs are Claude's background log; a host session's logs are the last 4 KiB its Claude process wrote to stderr, which the host keeps while the session is open; the conversation itself is read with `agenthail last`. Interactive sessions do not acquire background lifecycle controls merely by appearing in discovery. Each session row reports which of these its runtime supports in `capabilities.lifecycle` (`status`, `logs`, `stop`, `resume`): all four for a `claude-bg` job and for a host session, and none for an interactive one, which a person opens in its terminal instead. Clients show each control only where its flag is set. A resume registers the process it reached, from the dashboard and the CLI alike: a `claude-bg` job that has ended resumes in the host and is listed from then on as a `claude-host` session. Destructive removal is not exposed.
 
 ### Delivering to a closed Claude session
 
@@ -201,7 +247,7 @@ A Claude conversation is identified by its session ID, the name of its transcrip
 
 Resumes of one conversation are serialized across Agenthail processes by `~/.agenthail/claude-resume/<session-id>.lock`, held from the liveness check through the wait, so concurrent senders resume once and each message is delivered once. The host opens a conversation by its id, so it cannot start a copy. A process from an earlier host that still runs the conversation holds the delivery. A Claude that exits with an error before it starts has refused the resume: the delivery fails with `Claude refused to resume <id>: <Claude's output>` and nothing was sent. A Claude that cannot be spawned or does not start in time is unavailable and retried. A resume whose answer from the host is lost, or that the host opened but did not list in time, is unknown: the delivery stays `submitted`, a queued item is dead-lettered as unknown, and nothing is retried.
 
-Observation reads a session whose process exited as idle when no other process holds its conversation, so its queue drains into a resume, and as offline while another process, including a starting job, holds it. A target resolves to a registered session that discovery no longer lists only when it names that session exactly: an alias, a session ID, or `surface:<id>`. Name and folder fragments never resolve to historical sessions. `agenthail thread resume` uses the same path without sending a message. For a host session, `thread status` reads the host's listing, `thread stop` closes the session in the host, and `thread logs` is refused: the host keeps no background log, so read the transcript with `agenthail last`.
+Observation reads a session whose process exited as idle when no other process holds its conversation, so its queue drains into a resume, and as offline while another process, including a starting job, holds it. A target resolves to a registered session that discovery no longer lists only when it names that session exactly: an alias, a session ID, or `surface:<id>`. Name and folder fragments never resolve to historical sessions. `agenthail thread resume` uses the same path without sending a message. For a host session, `thread status` reads the host's listing, `thread stop` closes the session in the host, and `thread logs` returns its Claude process's stderr while it is open; a closed session's logs are refused, so read the transcript with `agenthail last`.
 
 If creation returns a session, that session is registered before the initial-turn result is reported. An ambiguous initial-turn outcome records a durable `delivery_intents` row targeting that session and returns a neutral, non-retryable `submitted` result with its `deliveryId`; no automatic retry occurs. A definitive initial-turn failure records a failed delivery problem and returns a typed failure while preserving the created session. If the session identity is absent, the result is `{ok:false,status:"failed",retryable:false,unknown,error}`, where `unknown` is `true` when the initial-turn outcome is ambiguous and `false` for a definite failure; inspect the native catalog before any explicit retry of an unknown outcome. If the durable intent cannot be recorded, the result is an explicit bounded failure that carries the created session.
 

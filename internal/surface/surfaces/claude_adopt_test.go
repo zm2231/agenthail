@@ -122,3 +122,36 @@ func TestAdoptRefusesABackgroundJobThatIsStillStarting(t *testing.T) {
 		t.Fatalf("a starting job's conversation was resumed again: %+v", spawns)
 	}
 }
+
+func TestAdoptStopsARunningBackgroundJobThroughClaudeWithoutAskingAboutATerminal(t *testing.T) {
+	fixture, host, c := hostResume(t)
+	fixture.Transcript(fixtureConversation, fixture.Home)
+	fixture.BackgroundRecord(fixtureConversation, fixture.Home)
+	fixture.Job("fe758937", fixtureConversation, fixture.Home, "running", 0)
+	done, stopped := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(done); <-stopped })
+	go func() {
+		defer close(stopped)
+		for fixture.Invocations("stop", "fe758937") == 0 {
+			select {
+			case <-done:
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
+		}
+		fixture.RemoveRecord()
+	}()
+	result, err := c.AdoptSession(context.Background(), &surface.Session{ID: fixtureConversation}, surface.AdoptRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Stopped != "background job fe758937" || result.Session == nil || !claudeHosted(result.Session) {
+		t.Fatalf("result=%+v", result)
+	}
+	if !claudeProcessAlive(fixture.PID) {
+		t.Fatal("the job's process was signalled instead of stopped through Claude")
+	}
+	if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 1 {
+		t.Fatalf("spawns=%+v, want one resume", spawns)
+	}
+}
