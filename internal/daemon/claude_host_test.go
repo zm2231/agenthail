@@ -349,3 +349,64 @@ func updateFromAProtocol1Host(t *testing.T, prompt string) {
 		return len(turns) == 2 && turns[1].Reply == "echo:after it exited" && turns[1].PID != opened.PID
 	})
 }
+
+// After an update the daemon's request watcher follows the new host, while
+// the retiring one still runs a session waiting on a person: a request the
+// new host opens asks for a catalog pass at once.
+func TestTheRequestWatcherFollowsTheNewHostWhileTheOldOneRetires(t *testing.T) {
+	fixture := claudehosttest.New(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client, err := fixture.Manager(t, "1.0.0").Ensure(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, _ := client.Hello(ctx)
+	waiting := uuid.NewString()
+	opened := fixture.Open(t, client, waiting)
+	fixture.Peer(t, opened.PID, "TOOL")
+	d := New(hostRegistry(t), nil)
+	d.log = log.New(io.Discard, "", 0)
+	d.SetClaudeHost(fixture.Manager(t, "1.0.0"))
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		d.watchClaudeHostRequests(ctx)
+	}()
+	defer func() {
+		cancel()
+		<-watched
+	}()
+	select {
+	case <-d.catalogNudge:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the watcher did not report the old host's request")
+	}
+
+	if client, err = fixture.Manager(t, "1.1.0").Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	fresh := uuid.NewString()
+	if _, err := client.Open(ctx, claudehost.OpenRequest{SessionID: fresh, Cwd: fixture.Cwd}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(claudeHostWatchRetryWait + 500*time.Millisecond)
+	for quiet := false; !quiet; {
+		select {
+		case <-d.catalogNudge:
+		case <-time.After(300 * time.Millisecond):
+			quiet = true
+		}
+	}
+	if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: fresh, UUID: uuid.NewString(), Text: "TOOL"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-d.catalogNudge:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a request on the new host asked for no catalog pass")
+	}
+	if !claudehosttest.Alive(old.PID) {
+		t.Fatal("the old host left while its session waited on a person")
+	}
+}

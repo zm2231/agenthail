@@ -694,6 +694,15 @@ async function retire() {
   } catch {}
   server = next;
   listening = socket;
+  // A subscriber came in through the daemon's socket and follows whichever
+  // host serves it. It gets no more events from this host and is closed once
+  // any reply it waits on is written, so it reconnects to the new host, and
+  // follows this one on its own socket if it still wants to.
+  const following = [...subscribers];
+  subscribers.clear();
+  setImmediate(() => {
+    for (const subscriber of following) subscriber.end();
+  });
   fs.closeSync(LOCK_FD);
   process.stderr.write(`claude-host: pid ${process.pid} retiring with ${sessions.size} sessions on ${socket}\n`);
 }

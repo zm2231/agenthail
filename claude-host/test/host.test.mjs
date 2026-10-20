@@ -551,6 +551,25 @@ test('drain retires the host: it gives up the socket and lock and serves its ses
   r.close();
 });
 
+test('retiring lets go of subscribers that came in through the daemon socket', async () => {
+  const f = fixture();
+  const host = await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const closed = new Promise((resolve) => c.conn.once('close', resolve));
+  const d = new Client(f.socket);
+  const id = randomUUID();
+  await d.call('open', { sessionId: id, cwd: f.cwd });
+  await d.call('send', { sessionId: id, uuid: randomUUID(), text: 'SLOW 1000' });
+  await d.call('drain');
+  await closed;
+  const r = new Client(retiringSocket(f, host));
+  await r.call('subscribe', { after: 0 });
+  await r.event((e) => e.sessionId === id && e.kind === 'exited');
+  d.close();
+  r.close();
+});
+
 test('a retiring host keeps an open request answerable and closes the session only after its turn', async () => {
   const f = fixture();
   const host = await startHost(f);
