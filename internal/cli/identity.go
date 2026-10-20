@@ -234,7 +234,7 @@ func (a *App) cmdRelay(args []string) error {
 		if err != nil {
 			return fmt.Errorf("from-target: %w", err)
 		}
-		toSess, toAdapter, toRemote, err := a.resolveAnyTarget(ctx, positional[2])
+		toSess, toAdapter, toRemote, err := a.resolveDeliveryTarget(ctx, positional[2])
 		if err != nil {
 			return fmt.Errorf("to-target: %w", err)
 		}

@@ -74,6 +74,11 @@ nickname (case-insensitive), then by unique ID prefix. Two siblings that share
 a nickname make the step ambiguous, and the error lists their IDs. Claude
 subagents are not sessions and cannot be targeted.
 
+Commands that deliver (`send`, `steer`, `queue`, the destination of
+`relay add`, `channel add`) refuse name and cwd fragments, including as the
+`<parent>` of a path; see `resolveDeliveryTarget` in `internal/cli`. Reads
+and every other command keep fragment matching.
+
 ```bash
 agenthail send @lead/Ada "status?"
 agenthail send @lead/Ada/Euclid "status?"

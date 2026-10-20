@@ -602,7 +602,11 @@ type listSessionView struct {
 // member on a paired host is stored as its mirrored row; whether it can take
 // a message is that host's call when the channel sends.
 func (a *App) channelMember(ctx context.Context, target string, joining bool) (string, string, error) {
-	session, adapter, remote, err := a.resolveAnyTarget(ctx, target)
+	resolve := a.resolveAnyTarget
+	if joining {
+		resolve = a.resolveDeliveryTarget
+	}
+	session, adapter, remote, err := resolve(ctx, target)
 	if err != nil {
 		return "", "", err
 	}
