@@ -1195,6 +1195,29 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			defer cancel()
 			messageUUID := uuid.NewString()
 			ctx = surface.WithMessageUUID(ctx, messageUUID)
+			launchedAt := time.Now()
+			// A launch that may be running but has no session yet stays pending,
+			// holding its name, until discovery finds it at its location.
+			pend := func(location *surface.Location, detail string) {
+				if location == nil || *location == (surface.Location{}) {
+					d.writeAcceptedLaunch(w, request.Launcher, location, detail)
+					return
+				}
+				if _, err := d.Registry.RecordPendingLaunch(request.Launcher, surface.SurfaceKind(request.Surface), cwd, request.Name, reservation, *location, launchedAt, launchedAt.Add(pendingLaunchLifetime)); err != nil {
+					failure := fmt.Sprintf("persist pending correlation: %s", err)
+					if detail != "" {
+						failure = detail + "; " + failure
+					}
+					d.writeAcceptedLaunch(w, request.Launcher, location, failure)
+					return
+				}
+				keepReservation = true
+				if detail != "" {
+					d.writeAcceptedLaunch(w, request.Launcher, location, detail)
+					return
+				}
+				writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "launcher": request.Launcher, "location": location})
+			}
 			launchResult, launchErr := launcher.Launch(ctx, surface.LaunchRequest{Surface: surface.SurfaceKind(request.Surface), Options: startOptions(cwd)})
 			startErr := launchErr
 			if launchErr != nil && launchResult.Session == nil {
@@ -1204,7 +1227,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 					http.Error(w, launchErr.Error(), http.StatusBadRequest)
 					return
 				case errors.As(launchErr, &acceptedErr):
-					d.writeAcceptedLaunch(w, request.Launcher, launchResult.Location, launchErr.Error())
+					pend(launchResult.Location, launchErr.Error())
 					return
 				default:
 					http.Error(w, launchErr.Error(), http.StatusBadGateway)
@@ -1213,7 +1236,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			session, location, launchErr := locateLaunchedSession(ctx, launcher, adapter, launchResult)
 			if launchErr != nil {
-				d.writeAcceptedLaunch(w, request.Launcher, launchResult.Location, fmt.Sprintf("discovery failed: %s", launchErr))
+				pend(launchResult.Location, fmt.Sprintf("discovery failed: %s", launchErr))
 				return
 			}
 			if session == nil {
@@ -1221,13 +1244,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 					d.writeAcceptedLaunch(w, request.Launcher, nil, "location is unresolved")
 					return
 				}
-				launchedAt := time.Now()
-				if _, err := d.Registry.RecordPendingLaunch(request.Launcher, surface.SurfaceKind(request.Surface), cwd, request.Name, reservation, *location, launchedAt, launchedAt.Add(pendingLaunchLifetime)); err != nil {
-					d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("persist pending correlation: %s", err))
-					return
-				}
-				keepReservation = true
-				writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "launcher": request.Launcher, "location": location})
+				pend(location, "")
 				return
 			}
 			if session.Surface == "" {

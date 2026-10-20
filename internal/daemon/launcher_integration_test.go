@@ -31,10 +31,7 @@ func (l *launcherFixture) Agents() []surface.SurfaceKind            { return l.a
 func (l *launcherFixture) Available(context.Context) (bool, string) { return true, "fixture" }
 func (l *launcherFixture) Launch(context.Context, surface.LaunchRequest) (surface.LaunchResult, error) {
 	l.launches++
-	if l.launchErr != nil {
-		return surface.LaunchResult{}, l.launchErr
-	}
-	return l.result, nil
+	return l.result, l.launchErr
 }
 
 func (l *launcherFixture) SessionOptions() bool {

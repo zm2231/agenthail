@@ -102,3 +102,25 @@ func TestAForkIsNamedOnTheHostThatForksIt(t *testing.T) {
 		t.Fatalf("owner=%q err=%v", owner, err)
 	}
 }
+
+func TestALaunchWhoseOutcomeIsUnresolvedHoldsItsNameUntilDiscoveryFindsIt(t *testing.T) {
+	d, r, fake, _, _ := daemonFixture(t)
+	fake.kind = surface.KindClaude
+	d.Surfaces = []surface.Surface{fake}
+	cwd := t.TempDir()
+	launcher := &launcherFixture{id: surface.LauncherTMUX, agents: []surface.SurfaceKind{surface.KindClaude}, result: surface.LaunchResult{Location: &surface.Location{Session: "agenthail-1"}}, launchErr: surface.LaunchAcceptedError{Launcher: surface.LauncherTMUX, Err: errors.New("tmux launch outcome is unresolved")}}
+	d.SetLaunchers([]surface.Launcher{launcher})
+	w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", fmt.Sprintf(`{"action":"session-create","surface":"claude","launcher":"tmux","message":"hello","cwd":%q,"alias":"builder"}`, cwd))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body)
+	}
+	var reserved registry.AliasReservedError
+	if err := r.SetAlias("builder", "from"); !errors.As(err, &reserved) {
+		t.Fatalf("another session took the launch's name: err=%v", err)
+	}
+	launcher.locations = map[string]surface.Location{"created": {Session: "agenthail-1", Pane: "%1"}}
+	d.correlatePendingLaunches(context.Background(), []surface.Session{{ID: "created", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: cwd, Status: surface.StatusIdle}})
+	if owner, err := r.LookupAlias("builder"); err != nil || owner != "created" {
+		t.Fatalf("owner=%q err=%v", owner, err)
+	}
+}

@@ -83,8 +83,10 @@ its own, so a starter that crashed frees its name: after the command timeout
 plus 30 seconds for the CLI, and after the surface operation timeout plus 30
 seconds for the daemon.
 
-A terminal launch that returns no session waits for discovery, which runs
-every 30 seconds. Its name is held for 5 minutes after the launch. The daemon
+A terminal launch that returns a location but no session waits for
+discovery, which runs every 30 seconds. So does one whose outcome is
+unresolved or whose immediate discovery failed, when it has a location; one
+without a location is answered as submitted and holds no name. Its name is held for 5 minutes after the launch. The daemon
 logs each pending launch's delay when discovery finds it. A launch found after
 its name lapsed takes the name only if nothing else took it in the meantime,
 and otherwise is registered without a name and logged. A launch not found
