@@ -2114,7 +2114,7 @@ func (a *App) cmdLast(args []string) error {
 		if !ex.Timestamp.IsZero() {
 			fmt.Printf("%s\n", ex.Timestamp.Local().Format("2006-01-02 15:04:05"))
 		}
-		if ex.User != "" {
+		if ex.User != "" || ex.UserTruncated {
 			if full {
 				fmt.Printf("%s ▸ %s\n", promptLabel(ex.Exchange), ex.User)
 				if ex.UserTruncated {
@@ -2124,7 +2124,7 @@ func (a *App) cmdLast(args []string) error {
 				fmt.Printf("%s ▸ %s\n", promptLabel(ex.Exchange), truncate(strings.ReplaceAll(ex.User, "\n", " "), 200))
 			}
 		}
-		if ex.Assistant != "" {
+		if ex.Assistant != "" || ex.AssistantTruncated {
 			if full {
 				fmt.Printf(" ai  ▸ %s\n", ex.Assistant)
 				if ex.AssistantTruncated {

@@ -33,6 +33,13 @@ func readApps() []readApp {
 		offline(surface.KindCodex, surface.RuntimeCodexDesktop),
 		offline(surface.KindClaude, surface.RuntimeClaudeCLI),
 		offline(surface.KindNotion, surface.RuntimeNotionWeb),
+		{name: "paired host", build: func(t *testing.T, exchanges []surface.Exchange) (*App, string) {
+			app, _, _, _ := federatedCLIFixture(t, true)
+			app.daemonSessionPageReader = func() (sessionPageReader, error) {
+				return sessionPageFixture{result: &surface.SessionReadResult{Source: "journal", Exchanges: exchanges}}, nil
+			}
+			return app, "forge::@builder"
+		}},
 		{name: "daemon page", build: func(t *testing.T, exchanges []surface.Exchange) (*App, string) {
 			session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
 			app, _ := cliFixture(t, &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}})
@@ -110,6 +117,21 @@ func TestMaxBytesCutsRepliesOnACharacterBoundaryAndSaysWhatWasCut(t *testing.T) 
 	}
 }
 
+func TestMaxBytesInsideTheFirstCharacterStillSaysTheFieldWasCut(t *testing.T) {
+	for _, read := range readApps() {
+		t.Run(read.name, func(t *testing.T) {
+			for limit := 1; limit < len("🙂"); limit++ {
+				app, target := read.build(t, []surface.Exchange{{User: "🙂 prompt", Assistant: "🙂 a longer answer"}})
+				output, err := captureStdout(t, func() error { return app.Run([]string{"last", target, "--max-bytes", itoa(limit)}) })
+				note := "[truncated: 0 of " + itoa(len("🙂 prompt")) + " bytes]"
+				if err != nil || !utf8.ValidString(output) || strings.Count(output, note) != 1 || !strings.Contains(output, "[truncated: 0 of "+itoa(len("🙂 a longer answer"))+" bytes]") {
+					t.Fatalf("--max-bytes %d: output=%q err=%v", limit, output, err)
+				}
+			}
+		})
+	}
+}
+
 func TestMaxBytesOnAnEmptySessionPrintsNoExchanges(t *testing.T) {
 	for _, read := range readApps() {
 		t.Run(read.name, func(t *testing.T) {
@@ -134,6 +156,11 @@ func TestReportReadsOnlyTheCompletionReportAtTheEndOfTheReply(t *testing.T) {
 				{"quoted mid-reply", reportReply("Example:", valid) + "\n\nThat was an example.", "no completion report at the end of the reply"},
 				{"unclosed", "Done.\n\n" + fence + "agenthail-report\n" + valid + "\nand then more text", "no completion report at the end of the reply"},
 				{"another fence", "Done.\n\n" + fence + "json\n" + valid + "\n" + fence, "no completion report at the end of the reply"},
+				{"whole reply", fence + "agenthail-report\n" + valid + "\n" + fence + "  \n\n", ""},
+				{"crlf", strings.ReplaceAll(reportReply("Paused for a decision.", valid), "\n", "\r\n"), "no completion report at the end of the reply"},
+				{"space after the info string", "Done.\n\n" + fence + "agenthail-report \n" + valid + "\n" + fence, "no completion report at the end of the reply"},
+				{"empty block", "Done.\n\n" + fence + "agenthail-report\n" + fence, "malformed completion report: the block holds 0 lines"},
+				{"body opens a fence", "Done.\n\n" + fence + "agenthail-report\n" + fence + "json\n" + fence, "no completion report at the end of the reply"},
 				{"two lines", reportReply("Done.", `{"v":1,`+"\n"+`"status":"done","stop":"complete"}`), "malformed completion report: the block holds 2 lines"},
 				{"newer version", reportReply("Done.", `{"v":2,"status":"done","stop":"complete"}`), "malformed completion report: version 2 is not supported"},
 				{"status and stop disagree", reportReply("Done.", `{"v":1,"status":"done","stop":"needsInput"}`), `stop "needsInput" does not go with status "done"`},

@@ -41,9 +41,9 @@ var stops = map[string][]string{
 	"partial": {"needsInput", "needsApproval", "gaveUp"},
 }
 
-// Parse finds the report where the skill's jq reader does, then checks the
-// skill's rules. A report block anywhere but the end of text is quoted text,
-// so it is ErrAbsent.
+// Parse accepts only a report the skill's jq fallback also finds, then checks
+// the skill's rules. A report block anywhere but the end of text is quoted
+// text, so it is ErrAbsent.
 func Parse(text string) (Report, error) {
 	lines := strings.Split(strings.TrimRight(text, " \t\r\n"), "\n")
 	if len(lines) < 2 || strings.TrimRight(lines[len(lines)-1], " \t\r") != fence {
