@@ -1,6 +1,6 @@
 # Self-hosted CI runners
 
-Pull requests from branches in this repository run `verify`, `native`, `ios` and `ios-release` on self-hosted Mac runners labelled `agenthail`. Pull requests from forks run the same jobs on GitHub-hosted runners. `package` and `installer` always run on GitHub-hosted runners because the install test installs the package system-wide with `sudo`.
+Pull requests from branches in this repository run `verify`, `native` and `ios` on self-hosted Mac runners labelled `agenthail`. Pull requests from forks run the same jobs on GitHub-hosted runners. `package` and `installer` always run on GitHub-hosted runners because the install test installs the package system-wide with `sudo`. `ios-release` always runs on a GitHub-hosted runner: for a branch in this repository it signs, archives and exports the iPhone app and its notification service with the release credentials, without uploading, and that makes a temporary signing keychain the runner's default.
 
 ## Fork protection
 

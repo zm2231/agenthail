@@ -265,99 +265,20 @@ jobs:
           SIGNING_IDENTITIES_P12: ${{ secrets.APPLE_IOS_SIGNING_IDENTITIES_P12_BASE64 }}
           SIGNING_IDENTITIES_P12_PASSWORD: ${{ secrets.APPLE_IOS_SIGNING_IDENTITIES_P12_PASSWORD }}
           PROVISIONING_PROFILE: ${{ secrets.APPLE_IOS_PROVISIONING_PROFILE_BASE64 }}
-        run: |
-          : "${SIGNING_IDENTITIES_P12:?missing APPLE_IOS_SIGNING_IDENTITIES_P12_BASE64}"
-          : "${SIGNING_IDENTITIES_P12_PASSWORD:?missing APPLE_IOS_SIGNING_IDENTITIES_P12_PASSWORD}"
-          : "${PROVISIONING_PROFILE:?missing APPLE_IOS_PROVISIONING_PROFILE_BASE64}"
-          : "${APPLE_TEAM_ID:?missing APPLE_TEAM_ID}"
-          : "${IOS_BUNDLE_ID:?missing AGENTHAIL_IOS_BUNDLE_ID repository variable}"
-          umask 077
-          KEYCHAIN_PATH="$RUNNER_TEMP/agenthail-ios-signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
-          printf '%s' "$SIGNING_IDENTITIES_P12" | base64 --decode > "$RUNNER_TEMP/SigningIdentities.p12"
-          printf '%s' "$PROVISIONING_PROFILE" | base64 --decode > "$RUNNER_TEMP/Agenthail.mobileprovision"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$RUNNER_TEMP/SigningIdentities.p12" -k "$KEYCHAIN_PATH" -P "$SIGNING_IDENTITIES_P12_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychains -d user -s "$KEYCHAIN_PATH"
-          security default-keychain -d user -s "$KEYCHAIN_PATH"
-          SIGNING_IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | sed -nE "s/.*\"(Apple Distribution:.*\\(${APPLE_TEAM_ID}\\))\".*/\\1/p" | head -n 1)"
-          test -n "$SIGNING_IDENTITY"
-          DEVELOPMENT_IDENTITY=""
-          while IFS='|' read -r _ identity_name; do
-            if security find-certificate -c "$identity_name" -p "$KEYCHAIN_PATH" \
-              | openssl x509 -noout -subject -nameopt RFC2253 \
-              | grep -Fq "OU=$APPLE_TEAM_ID"; then
-              DEVELOPMENT_IDENTITY="$identity_name"
-              break
-            fi
-          done < <(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | sed -nE 's/^[[:space:]]*[0-9]+\) ([0-9A-F]+) "(Apple Development:[^"]+)"/\1|\2/p')
-          test -n "$DEVELOPMENT_IDENTITY"
-          security cms -D -i "$RUNNER_TEMP/Agenthail.mobileprovision" -o "$RUNNER_TEMP/Agenthail-profile.plist"
-          PROFILE_UUID="$(plutil -extract UUID raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")"
-          PROFILE_NAME="$(plutil -extract Name raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")"
-          PROFILE_EXPIRATION="$(plutil -extract ExpirationDate raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")"
-          PROFILE_CERT_SHA="$(plutil -extract DeveloperCertificates.0 raw -o - "$RUNNER_TEMP/Agenthail-profile.plist" | base64 --decode | shasum -a 256 | awk '{print $1}')"
-          SIGNING_CERT_SHA="$(security find-certificate -c "$SIGNING_IDENTITY" -p "$KEYCHAIN_PATH" | openssl x509 -outform DER | shasum -a 256 | awk '{print $1}')"
-          test "$(plutil -extract TeamIdentifier.0 raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")" = "$APPLE_TEAM_ID"
-          test "$(plutil -extract Entitlements.application-identifier raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")" = "$APPLE_TEAM_ID.$IOS_BUNDLE_ID"
-          test "$PROFILE_CERT_SHA" = "$SIGNING_CERT_SHA"
-          [[ "$PROFILE_EXPIRATION" > "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" ]]
-          mkdir -p "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          cp "$RUNNER_TEMP/Agenthail.mobileprovision" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
-          cp "$RUNNER_TEMP/Agenthail.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
-          test -n "$PROFILE_NAME"
-      - name: Configure App Store Connect authentication
-        env:
           ASC_KEY: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
           ASC_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-        run: |
-          : "${ASC_KEY:?missing APPLE_NOTARY_KEY_BASE64}"
-          : "${ASC_KEY_ID:?missing APPLE_NOTARY_KEY_ID}"
-          mkdir -p "$HOME/.appstoreconnect/private_keys"
-          printf '%s' "$ASC_KEY" | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
-          chmod 600 "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+        run: scripts/ios-sign.sh import
       - name: Archive iOS app
         env:
           ASC_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
           RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
-        run: |
-          test "$(xcrun --sdk iphoneos --show-sdk-version | cut -d. -f1)" -ge 26
-          xcodebuild archive \
-            -project native/Agenthail.xcodeproj \
-            -scheme AgenthailIOS \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/Agenthail.xcarchive" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            PRODUCT_BUNDLE_IDENTIFIER="$IOS_BUNDLE_ID" \
-            CODE_SIGN_STYLE=Automatic \
-            MARKETING_VERSION="${RELEASE_VERSION#v}" \
-            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+        run: scripts/ios-sign.sh archive "$RUNNER_TEMP/Agenthail.xcarchive" "${RELEASE_VERSION#v}" "$GITHUB_RUN_NUMBER"
       - name: Export App Store IPA
-        run: |
-          : "${APPLE_TEAM_ID:?missing APPLE_TEAM_ID}"
-          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-            <key>method</key><string>app-store-connect</string>
-            <key>signingStyle</key><string>automatic</string>
-            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
-          </dict></plist>
-          PLIST
-          xcodebuild -exportArchive \
-            -archivePath "$RUNNER_TEMP/Agenthail.xcarchive" \
-            -exportPath "$RUNNER_TEMP/export" \
-            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+        env:
+          ASC_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: scripts/ios-sign.sh export "$RUNNER_TEMP/Agenthail.xcarchive" "$RUNNER_TEMP/export"
       - name: Verify iOS release metadata
         run: |
           plist="$RUNNER_TEMP/Agenthail.xcarchive/Products/Applications/Agenthail.app/Info.plist"
@@ -366,17 +287,10 @@ jobs:
           test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"
           test "$(plutil -extract UIBackgroundModes.1 raw -o - "$plist")" = "audio"
           test "$(plutil -extract UIBackgroundModes.2 raw -o - "$plist")" = "voip"
-          test "$(plutil -extract CFBundleIdentifier raw -o - "$plist")" = "$IOS_BUNDLE_ID"
-          mkdir -p "$RUNNER_TEMP/ipa-inspect"
-          unzip -q "$RUNNER_TEMP/export/Agenthail.ipa" -d "$RUNNER_TEMP/ipa-inspect"
+          scripts/ios-sign.sh verify "$RUNNER_TEMP/export/Agenthail.ipa"
           app="$RUNNER_TEMP/ipa-inspect/Payload/Agenthail.app"
           test -s "$app/Frameworks/WebRTC.framework/WebRTC"
           cmp native/iOS/WebRTC-LICENSE.txt "$app/WebRTC-LICENSE.txt"
-          codesign --verify --deep --strict "$app"
-          codesign -d --entitlements :- "$app" > "$RUNNER_TEMP/ios-entitlements.plist" 2>/dev/null
-          test "$(/usr/libexec/PlistBuddy -c 'Print :aps-environment' "$RUNNER_TEMP/ios-entitlements.plist")" = "production"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.devicecheck.appattest-environment' "$RUNNER_TEMP/ios-entitlements.plist")" = "production"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :get-task-allow' "$RUNNER_TEMP/ios-entitlements.plist")" = "false"
       - name: Validate IPA
         env:
           ASC_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}

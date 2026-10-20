@@ -51,6 +51,12 @@ Despite the `NOTARY` names, these credentials are also used for App Store Connec
 
 The iOS archive additionally needs `APPLE_TEAM_ID`, `APPLE_IOS_SIGNING_IDENTITIES_P12_BASE64`, `APPLE_IOS_SIGNING_IDENTITIES_P12_PASSWORD`, and `APPLE_IOS_PROVISIONING_PROFILE_BASE64`. The combined release also needs its Mac signing and relay configuration; the [release workflow](../../.github/workflows/release.yml) is the authoritative list. After rotating credentials, run a read-only management status check. Signing/profile changes also require archive validation; a status check cannot validate signing assets.
 
+The app embeds a notification service, `<bundle ID>.NotificationService`. Automatic signing creates its App ID and profiles with the App Store Connect key. The app and the service share the keychain group `<team ID>.<bundle ID>.shared`, which holds only the paired Mac's address and token. [`scripts/ios-sign.sh`](../../scripts/ios-sign.sh) imports the signing assets, archives, exports and verifies both bundles' identifiers and entitlements. Release runs it before uploading, and the `ios-release` pull request check runs it without uploading, so a signing or provisioning mismatch fails the pull request first.
+
+## Device acceptance for notification answers
+
+A release that changes request notifications, the notification service or the relay is accepted on a physical iPhone after the relay deploys, alongside the physical voice check. On the TestFlight build, with the phone locked, answer a tool approval with **Allow** or **Deny** and a single question with one of its options from the notification. Record the build, that each alert showed what was asked, and that the session continued with that answer.
+
 ## Set up internal access
 
 1. Open Agenthail → TestFlight in App Store Connect using the intended Apple team.
