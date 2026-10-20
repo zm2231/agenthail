@@ -12,11 +12,13 @@ const (
 )
 
 type GoalState struct {
-	Objective       string    `json:"objective"`
-	Status          string    `json:"status"`
-	TimeUsedSeconds int64     `json:"timeUsedSeconds"`
-	TokensUsed      int64     `json:"tokensUsed"`
-	TokenBudget     *int64    `json:"tokenBudget"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	Objective       string `json:"objective"`
+	Status          string `json:"status"`
+	TimeUsedSeconds int64  `json:"timeUsedSeconds"`
+	TokensUsed      int64  `json:"tokensUsed"`
+	TokenBudget     *int64 `json:"tokenBudget"`
+	// Reason is why the provider last judged the goal met, unmet or blocked.
+	Reason    string    `json:"reason,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
