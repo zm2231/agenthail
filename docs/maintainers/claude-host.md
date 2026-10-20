@@ -27,7 +27,9 @@ The daemon owns the host. Every 30 seconds, and once at startup, it calls
    protocol: a retiring host of protocol 2 keeps serving `list`, `send`,
    `respond`, `interrupt`, `setModel`, `setPermissionMode`, `close` and
    `subscribe` for its sessions to a client of a later protocol, and a resume
-   of a conversation it still runs returns its process.
+   of a conversation it still runs returns its process. `logs` came later
+   without a protocol change; a host shipped before it answers `invalid`,
+   which the daemon reports as a host that predates session logs.
 3. If nothing answers, take an exclusive `flock` on
    `~/.agenthail/claude-host/lock`. If another process holds it, a host is
    starting: wait for its `hello`.
@@ -46,7 +48,7 @@ process. The old host keeps serving its sessions instead.
 lock and stops writing `state.json`, so the daemon starts the new host at
 once. The retiring host refuses `open` with `draining` and serves everything
 else for its own sessions: `send`, `respond`, `interrupt`, `setModel`,
-`setPermissionMode`, `close`, `list` and `subscribe`. It closes a session once
+`setPermissionMode`, `logs`, `close`, `list` and `subscribe`. It closes a session once
 Claude reports it idle with no open request, no background task and no turn
 owed, and exits when its last session has closed. Claude owes a turn for work
 it was handed while idle: a background task that ended, unless the live set
