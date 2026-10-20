@@ -1506,6 +1506,7 @@ function renderElsewhereWait(session) {
 }
 function renderRequestCard(request) {
   const created = request.createdAt ? ` · <time datetime="${escape(request.createdAt)}">${escape(new Date(request.createdAt).toLocaleTimeString())}</time>` : "";
+  if (request.kind === "input" && request.elicitation) return renderInputRequest(request, created);
   if (request.kind === "question") {
     const questions = (request.questions || []).map((question, index) => {
       const type = question.multiSelect ? "checkbox" : "radio";
@@ -1519,6 +1520,60 @@ function renderRequestCard(request) {
   const input = request.input && Object.keys(request.input).length ? `<pre>${escape(JSON.stringify(request.input, null, 2))}</pre>` : "";
   const detail = [request.description, request.reason, request.blockedPath && `Path: ${request.blockedPath}`].filter(Boolean).map((line) => `<p>${escape(line)}</p>`).join("");
   return `<div class="request-card"><h3>${escape(title)}${created}</h3>${detail}${input}<div class="request-actions"><button class="primary-button" type="button" data-request-respond="allow" data-request-id="${escape(request.id)}">Allow</button>${request.alwaysAllow ? `<button class="soft-button" type="button" data-request-respond="always" data-request-id="${escape(request.id)}">Always allow</button>` : ""}<button class="soft-button" type="button" data-request-respond="deny" data-request-id="${escape(request.id)}">Deny</button></div></div>`;
+}
+// An MCP server's request for input is a form of its fields, or a link to
+// open that is accepted once the person chose to open it.
+function renderInputRequest(request, created) {
+  const e = request.elicitation;
+  const heading = `<h3>${escape(e.server || "An MCP server")} asks for input${created}</h3><p>${escape(e.message)}</p>`;
+  const decline = `<button class="soft-button" type="button" data-request-respond="deny" data-request-id="${escape(request.id)}">Decline</button>`;
+  if (e.mode === "url") {
+    const link = /^https?:\/\//i.test(e.url || "") ? `<p><a href="${escape(e.url)}" target="_blank" rel="noopener noreferrer">${escape(e.url)}</a></p>` : `<p>${escape(e.url || "")}</p>`;
+    return `<div class="request-card">${heading}${link}<div class="request-actions"><button class="primary-button" type="button" data-request-respond="allow" data-request-id="${escape(request.id)}">Opened, continue</button>${decline}</div></div>`;
+  }
+  const fields = (e.fields || []).map(renderInputField).join("");
+  return `<form class="request-card" data-request-input="${escape(request.id)}">${heading}${fields}<div class="request-actions"><button class="primary-button" type="submit">Submit</button>${decline}</div></form>`;
+}
+function renderInputField(field) {
+  const label = `${escape(field.title || field.name)}${field.required ? " *" : ""}`;
+  const help = field.description ? `<small>${escape(field.description)}</small>` : "";
+  const name = `field-${escape(field.name)}`;
+  if (field.multiSelect) {
+    const picked = new Set(Array.isArray(field.default) ? field.default : []);
+    const options = (field.options || []).map((option) => `<label><input type="checkbox" name="${name}" value="${escape(option.value)}"${picked.has(option.value) ? " checked" : ""}><span>${escape(option.label)}</span></label>`).join("");
+    return `<fieldset data-field="${escape(field.name)}"><legend>${label}</legend>${help}${options}</fieldset>`;
+  }
+  if (field.options) {
+    const options = (field.options || []).map((option) => `<option value="${escape(option.value)}"${option.value === field.default ? " selected" : ""}>${escape(option.label)}</option>`).join("");
+    return `<label data-field="${escape(field.name)}"><span>${label}</span><select name="${name}"><option value=""></option>${options}</select>${help}</label>`;
+  }
+  if (field.type === "boolean") {
+    return `<label data-field="${escape(field.name)}"><input type="checkbox" name="${name}"${field.default === true ? " checked" : ""}><span>${label}</span>${help}</label>`;
+  }
+  const number = field.type === "number" || field.type === "integer";
+  const value = field.default === undefined ? "" : ` value="${escape(String(field.default))}"`;
+  return `<label data-field="${escape(field.name)}"><span>${label}</span><input type="${number ? "number" : "text"}"${field.type === "integer" ? ' step="1"' : number ? ' step="any"' : ""} name="${name}"${value}>${help}</label>`;
+}
+// inputContent reads a form's field values as the MCP server takes them. A
+// field left empty is left out, so the host refuses a missing required one.
+function inputContent(form, request) {
+  const content = {};
+  for (const field of request.elicitation.fields || []) {
+    const name = `field-${field.name}`;
+    if (field.multiSelect) {
+      content[field.name] = [...form.querySelectorAll(`[name="${CSS.escape(name)}"]:checked`)].map((input) => input.value);
+      continue;
+    }
+    const input = form.querySelector(`[name="${CSS.escape(name)}"]`);
+    if (field.type === "boolean") {
+      content[field.name] = input.checked;
+      continue;
+    }
+    const text = input.value.trim();
+    if (text === "") continue;
+    content[field.name] = field.type === "number" || field.type === "integer" ? Number(text) : text;
+  }
+  return content;
 }
 async function respondToRequest(requestId, decision) {
   try {
@@ -2192,6 +2247,15 @@ document.addEventListener("submit", async (event) => {
   }
   form.querySelector('[type="submit"]').disabled = true;
   await respondToRequest(form.dataset.requestQuestion, { behavior: "allow", answers });
+});
+document.addEventListener("submit", async (event) => {
+  const form = event.target.closest("[data-request-input]");
+  if (!form) return;
+  event.preventDefault();
+  const request = (app.requests?.requests || []).find((r) => r.id === form.dataset.requestInput);
+  if (!request) return;
+  form.querySelector('[type="submit"]').disabled = true;
+  await respondToRequest(request.id, { behavior: "allow", content: inputContent(form, request) });
 });
 document.addEventListener("submit", async (event) => {
   const form = event.target.closest("[data-permission-mode]");

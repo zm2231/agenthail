@@ -81,3 +81,38 @@ func TestARequestOffersOnlyTheButtonsItCanBeAnsweredWith(t *testing.T) {
 		}
 	}
 }
+
+func TestAnInputRequestIsDeclinedOrAnEmptyFormAcceptedFromANotification(t *testing.T) {
+	form := Request{ID: "e1", Kind: WaitingInput, Elicitation: &Elicitation{Server: "deploy", Message: "Where should this deploy?", Mode: "form", Fields: []ElicitationField{{Name: "env", Type: "string"}}}}
+	if got := form.Actions(); len(got) != 1 || got[0] != (RequestAction{ID: "deny", Title: "Decline"}) {
+		t.Fatalf("form actions = %+v", got)
+	}
+	if _, err := form.Choose("allow", ""); err == nil {
+		t.Fatal("a form with fields was accepted from a notification")
+	}
+	if decision, err := form.Choose("deny", ""); err != nil || decision.Behavior != "deny" {
+		t.Fatalf("deny = %+v, %v", decision, err)
+	}
+	if got := form.Prompt(); got != "Where should this deploy?" {
+		t.Fatalf("prompt = %q", got)
+	}
+	confirm := Request{ID: "e2", Kind: WaitingInput, Elicitation: &Elicitation{Server: "deploy", Mode: "form"}}
+	if got := confirm.Actions(); len(got) != 2 || got[0] != (RequestAction{ID: "allow", Title: "Accept"}) || got[1].ID != "deny" {
+		t.Fatalf("empty form actions = %+v", got)
+	}
+	if decision, err := confirm.Choose("allow", ""); err != nil || decision.Behavior != "allow" || decision.Content != nil {
+		t.Fatalf("accept = %+v, %v", decision, err)
+	}
+	if got := confirm.Prompt(); got != "deploy needs your input" {
+		t.Fatalf("prompt without a message = %q", got)
+	}
+	link := Request{ID: "e3", Kind: WaitingInput, Elicitation: &Elicitation{Server: "docs", Message: "Sign in", Mode: "url", URL: "https://example.com"}}
+	if got := link.Actions(); len(got) != 1 || got[0].ID != "deny" {
+		t.Fatalf("link actions = %+v", got)
+	}
+	for _, choice := range []string{"always", "reply", "o0"} {
+		if _, err := confirm.Choose(choice, "text"); err == nil {
+			t.Fatalf("an input request took choice %q", choice)
+		}
+	}
+}

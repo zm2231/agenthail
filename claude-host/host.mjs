@@ -148,7 +148,7 @@ class Session {
   // waits on, so those requests end here rather than stay listed unanswerable.
   end() {
     this.ended = true;
-    for (const pending of [...this.pending.values()]) pending.settle('ended', { behavior: 'deny', message: WITHDRAWN });
+    for (const pending of [...this.pending.values()]) pending.settle('ended', pending.refused);
     this.wake?.();
   }
 
@@ -192,24 +192,34 @@ class Session {
   }
 
   // ask holds a permission request or question until a person answers it.
-  // It has no deadline: it ends only with an answer, Claude withdrawing it
-  // (an interrupt or a turn that ended), or the session's end.
   ask(tool, input, options) {
-    const request = permissionRequest(tool, input, options);
-    if (this.ended) return Promise.resolve({ behavior: 'deny', message: WITHDRAWN });
+    return this.hold(permissionRequest(tool, input, options), { input, suggestions: options.suggestions }, options.signal, { behavior: 'deny', message: WITHDRAWN });
+  }
+
+  // elicit holds an MCP server's request for input until a person answers it.
+  // One nobody answered is cancelled, which MCP gives a dismissed request.
+  elicit(elicitation, options) {
+    return this.hold(elicitationRequest(elicitation, options), {}, options.signal, { action: 'cancel' });
+  }
+
+  // hold keeps a request open until a person answers it. It has no deadline:
+  // it ends only with an answer, Claude withdrawing it (an interrupt or a turn
+  // that ended), or the session's end, which settle it as refused.
+  hold(request, held, signal, refused) {
+    if (this.ended) return Promise.resolve(refused);
     return new Promise((resolve) => {
-      const withdraw = () => settle('withdrawn', { behavior: 'deny', message: WITHDRAWN });
+      const withdraw = () => settle('withdrawn', refused);
       const settle = (outcome, result) => {
         if (!this.pending.delete(request.requestId)) return;
-        options.signal?.removeEventListener('abort', withdraw);
+        signal?.removeEventListener('abort', withdraw);
         emit(this.id, 'request_resolved', { requestId: request.requestId, outcome });
         resolve(result);
         this.retireIfDone();
       };
-      this.pending.set(request.requestId, { request, input, suggestions: options.suggestions, settle });
+      this.pending.set(request.requestId, { request, ...held, refused, settle });
       emit(this.id, 'request_opened', { request });
-      if (options.signal?.aborted) withdraw();
-      else options.signal?.addEventListener('abort', withdraw, { once: true });
+      if (signal?.aborted) withdraw();
+      else signal?.addEventListener('abort', withdraw, { once: true });
     });
   }
 
@@ -367,6 +377,7 @@ async function open(params) {
         // asks canUseTool for questions in bypassPermissions.
         allowDangerouslySkipPermissions: true,
         canUseTool: (toolName, input, options) => s.ask(toolName, input, options),
+        onElicitation: (elicitation, options) => s.elicit(elicitation, options),
         spawnClaudeCodeProcess: (options) => spawnDetached(s, options, exited),
       },
     });
@@ -414,10 +425,108 @@ function permissionRequest(tool, input, options) {
   return request;
 }
 
+// elicitationRequest is an MCP server's request for input as a request a
+// person answers: a form of flat fields, or a link to open. MCP limits a
+// form's fields to strings, numbers, booleans and lists of choices.
+function elicitationRequest(elicitation, options) {
+  const mode = elicitation?.mode === 'url' ? 'url' : 'form';
+  const request = {
+    requestId: typeof options.requestId === 'string' && options.requestId ? options.requestId : randomUUID(),
+    toolUseId: '',
+    tool: '',
+    kind: 'input',
+    createdAt: new Date().toISOString(),
+    alwaysAllow: false,
+    elicitation: {
+      server: requestText(elicitation?.serverName),
+      message: requestText(elicitation?.message),
+      mode,
+      ...(mode === 'url' ? { url: typeof elicitation?.url === 'string' ? elicitation.url.slice(0, MAX_REQUEST_INPUT) : '' } : { fields: elicitationFields(elicitation?.requestedSchema) }),
+    },
+  };
+  for (const name of ['title', 'displayName', 'description']) {
+    if (typeof elicitation?.[name] === 'string' && elicitation[name] !== '') request[name] = requestText(elicitation[name]);
+  }
+  return request;
+}
+
+function requestText(value) {
+  return typeof value === 'string' ? value.slice(0, MAX_REQUEST_TEXT) : '';
+}
+
+// elicitationFields lists a form's fields in the order the server gave them.
+// A string with enum or oneOf, or a list of those, offers its choices; a
+// property of a type MCP does not define is taken as text.
+function elicitationFields(schema) {
+  const properties = schema?.properties && typeof schema.properties === 'object' && !Array.isArray(schema.properties) ? schema.properties : {};
+  const required = new Set(Array.isArray(schema?.required) ? schema.required : []);
+  return Object.entries(properties).map(([name, property]) => {
+    const multiSelect = property?.type === 'array';
+    const choices = elicitationChoices(multiSelect ? property?.items : property);
+    const type = multiSelect || choices ? 'string' : ['number', 'integer', 'boolean'].includes(property?.type) ? property.type : 'string';
+    const field = { name, title: requestText(property?.title), description: requestText(property?.description), type, required: required.has(name), multiSelect };
+    if (choices) field.options = choices;
+    if (property?.default !== undefined && fieldAccepts(field, property.default)) field.default = property.default;
+    return field;
+  });
+}
+
+function elicitationChoices(schema) {
+  if (Array.isArray(schema?.enum)) {
+    const labels = Array.isArray(schema.enumNames) ? schema.enumNames : [];
+    return schema.enum.map((value, index) => ({ value: String(value), label: requestText(String(labels[index] ?? value)) }));
+  }
+  const listed = Array.isArray(schema?.oneOf) ? schema.oneOf : Array.isArray(schema?.anyOf) ? schema.anyOf : null;
+  return listed ? listed.map((choice) => ({ value: String(choice?.const ?? ''), label: requestText(String(choice?.title ?? choice?.const ?? '')) })) : null;
+}
+
+function fieldAccepts(field, value) {
+  const values = field.options?.map((option) => option.value);
+  if (field.multiSelect) return Array.isArray(value) && value.every((v) => typeof v === 'string' && (!values || values.includes(v)));
+  switch (field.type) {
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'integer':
+      return Number.isInteger(value);
+    default:
+      return typeof value === 'string' && (!values || values.includes(value));
+  }
+}
+
+// decideInput turns a person's decision into the MCP server's result. A form
+// is accepted with a value for each required field, and only its own fields;
+// a link is accepted with no content, once the person chose to open it.
+function decideInput({ elicitation }, decision) {
+  if (decision?.behavior === 'deny') return { outcome: 'declined', result: { action: 'decline' } };
+  if (decision?.behavior !== 'allow') throw new HostError('invalid', 'decision.behavior must be allow or deny');
+  if (decision.always || decision.answers !== undefined) throw new HostError('invalid', "an MCP server's request takes content, not answers or a rule");
+  if (elicitation.mode === 'url') {
+    if (decision.content !== undefined) throw new HostError('invalid', 'a link takes no content');
+    return { outcome: 'accepted', result: { action: 'accept' } };
+  }
+  const content = decision.content ?? {};
+  if (!content || typeof content !== 'object' || Array.isArray(content)) throw new HostError('invalid', 'content must be an object of field values');
+  for (const name of Object.keys(content)) {
+    if (!elicitation.fields.some((field) => field.name === name)) throw new HostError('invalid', `not a field of this request: ${name}`);
+  }
+  for (const field of elicitation.fields) {
+    const value = content[field.name];
+    if (value === undefined) {
+      if (field.required) throw new HostError('invalid', `no value for: ${field.name}`);
+    } else if (!fieldAccepts(field, value)) {
+      throw new HostError('invalid', `not a value ${field.name} takes: ${JSON.stringify(value)}`);
+    }
+  }
+  return { outcome: 'accepted', result: { action: 'accept', content } };
+}
+
 // decide turns a person's decision into Claude's permission result. A question
 // is answered only with an answer to each of its questions, keyed by the
 // question's text; a free-text answer stands for Claude's own "Other".
 function decide({ request, input, suggestions }, decision) {
+  if (request.kind === 'input') return decideInput(request, decision);
   if (decision?.behavior === 'deny') {
     const message = typeof decision.message === 'string' && decision.message.trim() !== '' ? decision.message.trim() : DECLINED;
     return { outcome: 'denied', result: { behavior: 'deny', message } };
@@ -435,6 +544,7 @@ function decide({ request, input, suggestions }, decision) {
     return { outcome: 'answered', result: { behavior: 'allow', updatedInput: { ...input, answers } } };
   }
   if (decision.answers !== undefined) throw new HostError('invalid', 'only a question takes answers');
+  if (decision.content !== undefined) throw new HostError('invalid', "only an MCP server's request takes content");
   if (decision.always) {
     if (!request.alwaysAllow) throw new HostError('invalid', 'this request offers no rule to always allow');
     return { outcome: 'allowed_always', result: { behavior: 'allow', updatedInput: input, updatedPermissions: suggestions } };
@@ -578,7 +688,7 @@ async function run(s, exit) {
     error = e?.message ?? String(e);
   }
   s.ended = true;
-  for (const pending of [...s.pending.values()]) pending.settle('ended', { behavior: 'deny', message: WITHDRAWN });
+  for (const pending of [...s.pending.values()]) pending.settle('ended', pending.refused);
   const status = await Promise.race([exit, timeout(10_000, 'exit').catch(() => ({ code: null, signal: null }))]);
   sessions.delete(s.id);
   writeState();

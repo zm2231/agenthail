@@ -30,8 +30,17 @@ type RequestAction struct {
 // in the person's own words, after one button per option. A
 // notification answer carries one choice or one line of text, so several
 // questions, or one that takes several answers, are answered in the app and
-// get none.
+// get none. An MCP server's request is declined from a notification, and a
+// form with no fields, which only asks to go ahead, is also accepted there;
+// one with fields or a link is answered in the app.
 func (r Request) Actions() []RequestAction {
+	if r.Kind == WaitingInput {
+		decline := RequestAction{ID: "deny", Title: "Decline"}
+		if e := r.Elicitation; e != nil && e.Mode != "url" && len(e.Fields) == 0 {
+			return []RequestAction{{ID: "allow", Title: "Accept"}, decline}
+		}
+		return []RequestAction{decline}
+	}
 	if r.Kind != WaitingQuestion {
 		actions := []RequestAction{{ID: "allow", Title: "Allow"}}
 		if r.AlwaysAllow {
@@ -88,6 +97,12 @@ func (r Request) Choose(choice, text string) (Decision, error) {
 func (r Request) Prompt() string {
 	if r.Kind == WaitingQuestion && len(r.Questions) > 0 {
 		return r.Questions[0].Question
+	}
+	if r.Kind == WaitingInput && r.Elicitation != nil {
+		if message := strings.TrimSpace(r.Elicitation.Message); message != "" {
+			return message
+		}
+		return r.Elicitation.Server + " needs your input"
 	}
 	for _, text := range []string{r.Title, r.DisplayName, r.Tool} {
 		if text = strings.TrimSpace(text); text != "" {

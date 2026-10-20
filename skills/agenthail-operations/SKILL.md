@@ -238,6 +238,9 @@ The session runs in Agenthail's Claude host, which needs the daemon running. It
 has no Remote Control. A tool its permission mode does not allow, and every
 question it asks, waits for a person: `agenthail requests <target>` lists them
 and `agenthail answer <target> allow|always|deny|"answer"` answers the oldest.
+An MCP server's request for input (kind `input`) is answered with
+`agenthail answer <target> allow --answers '{"field":value}'`, `allow` alone
+for a link the person opened, or `deny`.
 Do not answer them yourself unless your user asked you to.
 A Claude CLI in a terminal shows its prompts the same way once
 `agenthail hooks install` has added the PermissionRequest hook; the daemon

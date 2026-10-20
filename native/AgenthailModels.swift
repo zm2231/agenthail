@@ -1488,7 +1488,8 @@ struct UploadedAttachment: Decodable, Equatable {
     let bytes: Int64
 }
 
-/// A tool approval or questions an open turn waits on a person for.
+/// A tool approval, questions, or an MCP server's request for input that an
+/// open turn waits on a person for.
 struct SessionRequest: Decodable, Hashable, Identifiable {
     struct Option: Decodable, Hashable {
         let label: String
@@ -1513,12 +1514,13 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
     var questions: [Question]? = nil
     let alwaysAllow: Bool
     var input: String? = nil
+    var elicitation: Elicitation? = nil
 
     var isQuestion: Bool { kind == "question" }
     var summary: String { [title, displayName].compactMap { $0 }.first { !$0.isEmpty } ?? tool }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input
+        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input, elicitation
     }
 
     init(id: String, kind: String, tool: String, title: String? = nil, questions: [Question]? = nil, alwaysAllow: Bool = false, input: String? = nil) {
@@ -1536,6 +1538,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
         reason = try container.decodeIfPresent(String.self, forKey: .reason)
         blockedPath = try container.decodeIfPresent(String.self, forKey: .blockedPath)
         questions = try container.decodeIfPresent([Question].self, forKey: .questions)
+        elicitation = try container.decodeIfPresent(Elicitation.self, forKey: .elicitation)
         alwaysAllow = try container.decodeIfPresent(Bool.self, forKey: .alwaysAllow) ?? false
         if let raw = try container.decodeIfPresent(RequestInput.self, forKey: .input), let data = try? JSONEncoder().encode(raw) {
             input = String(data: data, encoding: .utf8)
@@ -1543,20 +1546,97 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
     }
 }
 
+/// An MCP server's request for input: a form of flat fields, or in url mode a
+/// link for the person to open.
+struct Elicitation: Decodable, Hashable {
+    struct Option: Decodable, Hashable {
+        let value: String
+        let label: String
+    }
+
+    /// One form field. `type` is string, number, integer or boolean; a string
+    /// with options takes one of their values, or with `multiSelect` a list.
+    struct Field: Decodable, Hashable {
+        let name: String
+        let title: String
+        let description: String
+        let type: String
+        let required: Bool
+        let multiSelect: Bool
+        var options: [Option]? = nil
+        var initial: ElicitationValue? = nil
+
+        var label: String { title.isEmpty ? name : title }
+
+        private enum CodingKeys: String, CodingKey {
+            case name, title, description, type, required, multiSelect, options
+            case initial = "default"
+        }
+
+        init(name: String, title: String = "", description: String = "", type: String = "string", required: Bool = false, multiSelect: Bool = false, options: [Option]? = nil, initial: ElicitationValue? = nil) {
+            (self.name, self.title, self.description, self.type, self.required, self.multiSelect, self.options, self.initial) = (name, title, description, type, required, multiSelect, options, initial)
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            name = try container.decode(String.self, forKey: .name)
+            title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
+            description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
+            type = try container.decodeIfPresent(String.self, forKey: .type) ?? "string"
+            required = try container.decodeIfPresent(Bool.self, forKey: .required) ?? false
+            multiSelect = try container.decodeIfPresent(Bool.self, forKey: .multiSelect) ?? false
+            options = try container.decodeIfPresent([Option].self, forKey: .options)
+            initial = try? container.decodeIfPresent(ElicitationValue.self, forKey: .initial)
+        }
+    }
+
+    let server: String
+    let message: String
+    let mode: String
+    var url: String? = nil
+    var fields: [Field]? = nil
+}
+
+/// A value an MCP form field takes.
+enum ElicitationValue: Codable, Hashable, Sendable {
+    case string(String), number(Double), bool(Bool), strings([String])
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(Bool.self) { self = .bool(value) }
+        else if let value = try? container.decode(Double.self) { self = .number(value) }
+        else if let value = try? container.decode(String.self) { self = .string(value) }
+        else { self = .strings(try container.decode([String].self)) }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        case .strings(let value): try container.encode(value)
+        }
+    }
+}
+
 /// A person's answer to a request: a notification button's `choice`, or a
-/// `behavior` with an optional `always`, `message` or `answers`.
+/// `behavior` with an optional `always`, `message`, `answers`, or an MCP
+/// form's `content`.
 struct RequestDecision: Encodable, Hashable, Sendable {
     var choice: String? = nil
     var behavior: String? = nil
     var always: Bool? = nil
     var message: String? = nil
     var answers: [String: String]? = nil
+    var content: [String: ElicitationValue]? = nil
 
     static let allow = RequestDecision(behavior: "allow")
     static let alwaysAllow = RequestDecision(behavior: "allow", always: true)
     static let deny = RequestDecision(behavior: "deny")
     static func answers(_ answers: [String: String]) -> RequestDecision { RequestDecision(behavior: "allow", answers: answers) }
     static func choice(_ choice: String) -> RequestDecision { RequestDecision(choice: choice) }
+    static func content(_ content: [String: ElicitationValue]) -> RequestDecision { RequestDecision(behavior: "allow", content: content) }
 }
 
 /// A session's open requests, oldest first, and the permission mode it runs

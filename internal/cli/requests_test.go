@@ -142,3 +142,25 @@ func TestAHostSessionTakesAModelButNoRemoteControlCommands(t *testing.T) {
 	}
 	t.Fatalf("history = %+v", entries)
 }
+
+func TestAnInputRequestIsAnsweredWithItsFieldsOrDeclined(t *testing.T) {
+	request := surface.Request{ID: "e1", Kind: surface.WaitingInput, Elicitation: &surface.Elicitation{Server: "deploy", Mode: "form"}}
+	decision, err := requestDecision(request, "", `{"env":"prod","replicas":3}`, "")
+	if err != nil || decision.Behavior != "allow" || string(decision.Content) != `{"env":"prod","replicas":3}` {
+		t.Fatalf("answers = %+v, %v", decision, err)
+	}
+	if decision, err := requestDecision(request, "allow", "", ""); err != nil || decision.Behavior != "allow" || decision.Content != nil {
+		t.Fatalf("allow = %+v, %v", decision, err)
+	}
+	if decision, err := requestDecision(request, "deny", "", "no"); err != nil || decision.Behavior != "deny" {
+		t.Fatalf("deny = %+v, %v", decision, err)
+	}
+	for _, reply := range []string{"always", "prod", "1"} {
+		if _, err := requestDecision(request, reply, "", ""); err == nil {
+			t.Fatalf("an input request took reply %q", reply)
+		}
+	}
+	if _, err := requestDecision(request, "", `["prod"]`, ""); err == nil {
+		t.Fatal("an input request took answers that are not an object")
+	}
+}
