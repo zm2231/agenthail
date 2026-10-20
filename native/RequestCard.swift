@@ -155,7 +155,6 @@ struct ElsewhereWaitCard: View {
             Text("Agenthail can't answer this one. Answer it where the session runs\(hostName.map { ", in \($0)" } ?? ", such as its terminal"). Messages you send wait until then.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
             if let open {
                 Button("Open in \(hostName ?? "terminal")", systemImage: "arrow.up.forward.app", action: open)
                     .buttonStyle(.borderedProminent)
