@@ -241,10 +241,16 @@ func (d *Daemon) coordinatorCaller(r *http.Request, request coordinatorRequest) 
 	return actionActor(r)
 }
 
-// coordinatorRef is how a person names a coordinator: @name on this host,
-// host::@name on a paired host.
-func (d *Daemon) coordinatorRef(spec registry.CoordinatorSpec) string {
+// coordinatorRef is how the caller names a coordinator: @name on its own
+// host, host::@name on any other.
+func (d *Daemon) coordinatorRef(r *http.Request, spec registry.CoordinatorSpec) string {
 	if spec.HostID == "" {
+		if _, fromHost := requestingHost(r.Context()); fromHost {
+			return d.hostIdentity().Name + "::@" + spec.Name
+		}
+		return "@" + spec.Name
+	}
+	if requester, fromHost := requestingHost(r.Context()); fromHost && requester == spec.HostID {
 		return "@" + spec.Name
 	}
 	name := spec.HostID
@@ -254,10 +260,10 @@ func (d *Daemon) coordinatorRef(spec registry.CoordinatorSpec) string {
 	return name + "::@" + spec.Name
 }
 
-func (d *Daemon) coordinatorRefs(specs []registry.CoordinatorSpec) string {
+func (d *Daemon) coordinatorRefs(r *http.Request, specs []registry.CoordinatorSpec) string {
 	refs := make([]string, 0, len(specs))
 	for _, spec := range specs {
-		refs = append(refs, d.coordinatorRef(spec))
+		refs = append(refs, d.coordinatorRef(r, spec))
 	}
 	return strings.Join(refs, " and ")
 }
@@ -267,6 +273,8 @@ func (d *Daemon) coordinatorRefs(specs []registry.CoordinatorSpec) string {
 // replaces it; a paired host's coordinator is cleared by that host first,
 // and nothing changes here when it cannot confirm.
 func (d *Daemon) assignCoordinator(r *http.Request, w http.ResponseWriter, request coordinatorRequest, spec registry.CoordinatorSpec, sessionID string) {
+	d.coordinatorMu.Lock()
+	defer d.coordinatorMu.Unlock()
 	changedBy := d.coordinatorCaller(r, request)
 	existing, err := d.Registry.ProjectCoordinators(spec.ProjectID)
 	if err != nil {
@@ -274,7 +282,12 @@ func (d *Daemon) assignCoordinator(r *http.Request, w http.ResponseWriter, reque
 		return
 	}
 	if len(existing) > 0 && !request.Replace {
-		writeAPIError(w, http.StatusConflict, "coordinator_exists", fmt.Sprintf("%s already has coordinator %s; use --replace to take over", spec.ProjectRoot, d.coordinatorRefs(existing)))
+		writeAPIError(w, http.StatusConflict, "coordinator_exists", fmt.Sprintf("%s already has coordinator %s; use --replace to take over", spec.ProjectRoot, d.coordinatorRefs(r, existing)))
+		return
+	}
+	change := registry.CoordinatorChange{SessionID: sessionID, Replace: request.Replace, ChangedBy: changedBy}
+	if err := d.Registry.CheckCoordinator(spec, change); err != nil {
+		writeCoordinatorError(w, r, d, err)
 		return
 	}
 	for _, current := range existing {
@@ -282,28 +295,28 @@ func (d *Daemon) assignCoordinator(r *http.Request, w http.ResponseWriter, reque
 			continue
 		}
 		if err := d.clearPeerCoordinator(r.Context(), current, changedBy); err != nil {
-			writeAPIError(w, http.StatusConflict, "coordinator_not_replaced", fmt.Sprintf("cannot replace %s: %s; nothing changed", d.coordinatorRef(current), err))
+			writeAPIError(w, http.StatusConflict, "coordinator_not_replaced", fmt.Sprintf("cannot replace %s: %s; nothing changed", d.coordinatorRef(r, current), err))
 			return
 		}
 	}
-	stored, err := d.Registry.SetCoordinator(spec, registry.CoordinatorChange{SessionID: sessionID, Replace: request.Replace, ChangedBy: changedBy})
+	stored, err := d.Registry.SetCoordinator(spec, change)
 	if err != nil {
-		writeCoordinatorError(w, d, err)
+		writeCoordinatorError(w, r, d, err)
 		return
 	}
 	d.flushCatalog("coordinator " + spec.ProjectID)
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "coordinator": stored, "replaced": existing})
 }
 
-func writeCoordinatorError(w http.ResponseWriter, d *Daemon, err error) {
+func writeCoordinatorError(w http.ResponseWriter, r *http.Request, d *Daemon, err error) {
 	var exists registry.CoordinatorExistsError
 	var nameTaken registry.CoordinatorNameTakenError
 	var aliasTaken registry.AliasTakenError
 	switch {
 	case errors.As(err, &exists):
-		writeAPIError(w, http.StatusConflict, "coordinator_exists", fmt.Sprintf("the project already has coordinator %s; use --replace to take over", d.coordinatorRefs(exists.Existing)))
+		writeAPIError(w, http.StatusConflict, "coordinator_exists", fmt.Sprintf("the project already has coordinator %s; use --replace to take over", d.coordinatorRefs(r, exists.Existing)))
 	case errors.As(err, &nameTaken):
-		writeAPIError(w, http.StatusConflict, "name_taken", fmt.Sprintf("%s already coordinates %s; choose another --name", d.coordinatorRef(registry.CoordinatorSpec{Name: nameTaken.Name, HostID: nameTaken.HostID}), nameTaken.ProjectRoot))
+		writeAPIError(w, http.StatusConflict, "name_taken", fmt.Sprintf("%s already coordinates %s; choose another --name", d.coordinatorRef(r, registry.CoordinatorSpec{Name: nameTaken.Name, HostID: nameTaken.HostID}), nameTaken.ProjectRoot))
 	case errors.As(err, &aliasTaken):
 		writeAPIError(w, http.StatusConflict, "name_taken", fmt.Sprintf("@%s already names session %s; choose another --name", aliasTaken.Name, aliasTaken.Owner))
 	case errors.Is(err, registry.ErrReservedAlias):
@@ -325,6 +338,15 @@ func (d *Daemon) clearCoordinator(r *http.Request, w http.ResponseWriter, reques
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "projectId is required")
 		return
 	}
+	if _, fromHost := requestingHost(r.Context()); fromHost {
+		if !d.coordinatorMu.TryLock() {
+			writeAPIError(w, http.StatusConflict, "coordinator_busy", fmt.Sprintf("%s is changing a coordinator; try again", d.hostIdentity().Name))
+			return
+		}
+	} else {
+		d.coordinatorMu.Lock()
+	}
+	defer d.coordinatorMu.Unlock()
 	changedBy := d.coordinatorCaller(r, request)
 	existing, err := d.Registry.ProjectCoordinators(request.ProjectID)
 	if err != nil {
@@ -339,7 +361,7 @@ func (d *Daemon) clearCoordinator(r *http.Request, w http.ResponseWriter, reques
 		}
 		cleared, err := d.Registry.ClearCoordinator(request.ProjectID, changedBy, request.ChangedAt)
 		if err != nil {
-			writeCoordinatorError(w, d, err)
+			writeCoordinatorError(w, r, d, err)
 			return
 		}
 		d.flushCatalog("coordinator " + request.ProjectID)
@@ -347,15 +369,15 @@ func (d *Daemon) clearCoordinator(r *http.Request, w http.ResponseWriter, reques
 		return
 	}
 	if _, fromHost := requestingHost(r.Context()); fromHost || len(remote) == 0 {
-		writeCoordinatorError(w, d, registry.ErrNoCoordinator)
+		writeCoordinatorError(w, r, d, registry.ErrNoCoordinator)
 		return
 	}
 	if len(remote) > 1 {
-		writeAPIError(w, http.StatusConflict, "coordinator_conflict", fmt.Sprintf("the project has coordinators %s; clear it on one of those hosts", d.coordinatorRefs(remote)))
+		writeAPIError(w, http.StatusConflict, "coordinator_conflict", fmt.Sprintf("the project has coordinators %s; clear it on one of those hosts", d.coordinatorRefs(r, remote)))
 		return
 	}
 	if err := d.clearPeerCoordinator(r.Context(), remote[0], changedBy); err != nil {
-		writeAPIError(w, http.StatusConflict, "coordinator_not_cleared", fmt.Sprintf("cannot clear %s: %s", d.coordinatorRef(remote[0]), err))
+		writeAPIError(w, http.StatusConflict, "coordinator_not_cleared", fmt.Sprintf("cannot clear %s: %s", d.coordinatorRef(r, remote[0]), err))
 		return
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "cleared": remote[0]})

@@ -28,7 +28,9 @@ Every set, replace and clear appends a `coordinator_history` row naming who made
 A project that already has a coordinator on any host refuses `set` and `new`, naming it as `host::@name`. `--replace` takes over:
 
 - A coordinator on this host is replaced, and its earlier conversations stop routing to the project.
-- A coordinator on a paired host is cleared by that host first, with the routed action `coordinator-clear`. The request carries the time the coordinator last changed, and the owner refuses it if the coordinator changed since. The new coordinator is recorded only after the owner confirms. If the owner is unreachable or needs an update, the replace is refused and nothing changes.
+- A coordinator on a paired host is cleared by that host first, with the routed action `coordinator-clear`, once every local check (name, alias, agent) has passed, so a replace this host would refuse never clears it. The request carries the time the coordinator last changed, and the owner refuses it if the coordinator changed since. The new coordinator is recorded only after the owner confirms. If the owner is unreachable or needs an update, the replace is refused and nothing changes. A daemon changes one coordinator at a time; a paired host's clear that arrives while it is changing one is refused, and the replace that sent it fails without changes.
+
+Errors name a coordinator from the caller's side: `@name` for one on the caller's own host, `host::@name` for any other.
 
 Two hosts can still each hold a coordinator for one project, after a race or after pairing two hosts that each had one. Then `@lead` refuses and names both, `coordinator` and `coordinator list` show both, and `set --replace` on either host resolves it.
 

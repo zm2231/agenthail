@@ -27,6 +27,7 @@ const (
 
 type Daemon struct {
 	Registry          *registry.Registry
+	coordinatorMu     sync.Mutex
 	pollInterval      time.Duration
 	Surfaces          []surface.Surface
 	log               *log.Logger

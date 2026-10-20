@@ -194,7 +194,7 @@ func (a *App) hostName(hostID string) string {
 // coordinatorRef is how a person names a coordinator: @name on this host,
 // host::@name on a paired host.
 func (a *App) coordinatorRef(spec registry.CoordinatorSpec) string {
-	if spec.HostID == "" {
+	if identity, err := a.registry().HostIdentity(); spec.HostID == "" || err == nil && spec.HostID == identity.ID {
 		return "@" + spec.Name
 	}
 	return a.hostName(spec.HostID) + hosts.Separator + "@" + spec.Name

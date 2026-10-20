@@ -9,6 +9,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestCoordinatorSetRefusesATakeoverAndNamesWhoChangedIt(t *testing.T) {
@@ -89,7 +90,7 @@ func TestCoordinatorSetRunsOnTheConversationsHostInBothDirections(t *testing.T) 
 	})
 
 	takeover := forge.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": hosts.Qualify(macRecord.ID, "mac-a"), "name": "mac-lead"})
-	if takeover.Code != http.StatusConflict || !strings.Contains(takeover.Body.String(), "forge::@gadget-lead") {
+	if takeover.Code != http.StatusConflict || !strings.Contains(takeover.Body.String(), "already has coordinator @gadget-lead;") {
 		t.Fatalf("takeover from forge: %d %s", takeover.Code, takeover.Body)
 	}
 	replaced := forge.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": hosts.Qualify(macRecord.ID, "mac-a"), "name": "mac-lead", "replace": true, "sourceSessionId": "forge-b"})
@@ -140,6 +141,22 @@ func TestReplacingAPeerCoordinatorIsRefusedWhileItsHostIsUnreachable(t *testing.
 		mirrored, _ := mac.reg.ProjectCoordinators(project)
 		return len(mirrored) == 1 && mirrored[0].HostID == record.ID
 	})
+	if err := mac.reg.RegisterSession(surface.Session{ID: "mac-other", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: mac.fake.sessions["mac-a"].Cwd, Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mac.reg.SetAlias("taken-lead", "mac-other"); err != nil {
+		t.Fatal(err)
+	}
+	clash := mac.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "mac-a", "name": "taken-lead", "replace": true})
+	if clash.Code != http.StatusConflict || !strings.Contains(clash.Body.String(), "@taken-lead already names session mac-other") {
+		t.Fatalf("replace with a taken name: %d %s", clash.Code, clash.Body)
+	}
+	if owned, err := forge.reg.Coordinator(project); err != nil || owned.Name != "gadget-lead" {
+		t.Fatalf("a refused replace cleared forge's coordinator: %+v err=%v", owned, err)
+	}
+	if _, err := mac.reg.Coordinator(project); err == nil {
+		t.Fatal("a refused replace wrote a local coordinator")
+	}
 	forge.stop()
 	refused := mac.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "mac-a", "name": "mac-lead", "replace": true})
 	if refused.Code != http.StatusConflict || !strings.Contains(refused.Body.String(), "cannot replace forge::@gadget-lead") || !strings.Contains(refused.Body.String(), "nothing changed") {

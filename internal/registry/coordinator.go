@@ -169,40 +169,72 @@ func (r *Registry) CoordinatorsNamed(name string) ([]CoordinatorSpec, error) {
 	return r.queryCoordinators(r.read, `c.name=?`, name)
 }
 
+// CheckCoordinator reports whether SetCoordinator would accept spec once a
+// replace has cleared the paired hosts' coordinators of its project, so a
+// replace asks no host to clear one before every local check passes.
+func (r *Registry) CheckCoordinator(spec CoordinatorSpec, change CoordinatorChange) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = r.checkCoordinatorTx(tx, spec, change, change.Replace)
+	return err
+}
+
+func (r *Registry) checkCoordinatorTx(tx *sql.Tx, spec CoordinatorSpec, change CoordinatorChange, peersCleared bool) (*CoordinatorSpec, error) {
+	if spec.ProjectID == "" || spec.ProjectRoot == "" || spec.Name == "" || spec.Surface == "" || spec.Cwd == "" {
+		return nil, fmt.Errorf("a coordinator needs a project, a name, an agent and a working directory")
+	}
+	if strings.EqualFold(spec.Name, LeadAlias) {
+		return nil, ErrReservedAlias
+	}
+	existing, err := r.queryCoordinators(tx, `c.project_id=?`, spec.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	var previous *CoordinatorSpec
+	for index := range existing {
+		if !change.Replace || (existing[index].HostID != "" && !peersCleared) {
+			return nil, CoordinatorExistsError{Existing: existing}
+		}
+		if existing[index].HostID == "" {
+			previous = &existing[index]
+		}
+	}
+	var takenHost, takenRoot string
+	err = tx.QueryRow(`SELECT host_id,project_root FROM coordinators WHERE name=? AND NOT (project_id=? AND (host_id='' OR ?))`, spec.Name, spec.ProjectID, peersCleared).Scan(&takenHost, &takenRoot)
+	if err == nil {
+		return nil, CoordinatorNameTakenError{Name: spec.Name, HostID: takenHost, ProjectRoot: takenRoot}
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	var owner string
+	err = tx.QueryRow(`SELECT session_id FROM aliases WHERE name=?`, spec.Name).Scan(&owner)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	freed := previous != nil && previous.Name == spec.Name
+	if owner != "" && owner != change.SessionID && !freed {
+		return nil, AliasTakenError{Name: spec.Name, Owner: owner}
+	}
+	return previous, nil
+}
+
 // SetCoordinator makes spec this host's coordinator of its project. It
 // refuses a project that has a coordinator on any host unless change.Replace
 // is set, and a paired host's coordinator even then: its owner clears it
 // first. A name any host's other coordinator uses, or another session's
 // name, is refused.
 func (r *Registry) SetCoordinator(spec CoordinatorSpec, change CoordinatorChange) (CoordinatorSpec, error) {
-	if spec.ProjectID == "" || spec.ProjectRoot == "" || spec.Name == "" || spec.Surface == "" || spec.Cwd == "" {
-		return spec, fmt.Errorf("a coordinator needs a project, a name, an agent and a working directory")
-	}
-	if strings.EqualFold(spec.Name, LeadAlias) {
-		return spec, ErrReservedAlias
-	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return spec, err
 	}
 	defer tx.Rollback()
-	existing, err := r.queryCoordinators(tx, `c.project_id=?`, spec.ProjectID)
+	previous, err := r.checkCoordinatorTx(tx, spec, change, false)
 	if err != nil {
-		return spec, err
-	}
-	var previous *CoordinatorSpec
-	for index := range existing {
-		if existing[index].HostID != "" || !change.Replace {
-			return spec, CoordinatorExistsError{Existing: existing}
-		}
-		previous = &existing[index]
-	}
-	var takenHost, takenRoot string
-	err = tx.QueryRow(`SELECT host_id,project_root FROM coordinators WHERE name=? AND NOT (project_id=? AND host_id='')`, spec.Name, spec.ProjectID).Scan(&takenHost, &takenRoot)
-	if err == nil {
-		return spec, CoordinatorNameTakenError{Name: spec.Name, HostID: takenHost, ProjectRoot: takenRoot}
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
 		return spec, err
 	}
 	if previous != nil && previous.Name == spec.Name && previous.SessionID != change.SessionID {
@@ -212,15 +244,6 @@ func (r *Registry) SetCoordinator(spec CoordinatorSpec, change CoordinatorChange
 	}
 	if change.SessionID != "" {
 		if err := setAliasTx(tx, spec.Name, change.SessionID); err != nil {
-			return spec, err
-		}
-	} else {
-		var owner string
-		err := tx.QueryRow(`SELECT session_id FROM aliases WHERE name=?`, spec.Name).Scan(&owner)
-		if err == nil {
-			return spec, AliasTakenError{Name: spec.Name, Owner: owner}
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
 			return spec, err
 		}
 	}
