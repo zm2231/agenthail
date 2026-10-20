@@ -203,6 +203,8 @@ agenthail reply @builder --report
 
 `agenthail last @builder 5 --report` lists the reports of the last five exchanges. To keep a long reply from flooding an agent's context, `--max-bytes 4000` caps what `reply` and `last` print and says how much was cut.
 
+With `--json` or `--report`, each turn also reports its state, model, duration and token usage, and lists the fields its provider did not record; Notion records none of them. The [operations skill](skills/agenthail-operations/SKILL.md) gives the schema.
+
 The report is the agent's own claim; check the commits before you rely on them. The [operations skill](skills/agenthail-operations/SKILL.md#completion-report) defines every field. Agents that have the skill write one when they finish dispatched work.
 
 ## Give each project a coordinator

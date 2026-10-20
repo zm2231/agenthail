@@ -67,6 +67,9 @@ func TestNotionReadSessionUsesBoundedProviderMessageIDs(t *testing.T) {
 	if len(requested) != 1 || len(requested[0]) != 4 || requested[0][0] != "m3" || requested[0][3] != "m6" {
 		t.Fatalf("provider request=%v", requested)
 	}
+	for _, exchange := range read.Exchanges {
+		wantTurn(t, "notion", exchange.Turn, &surface.TurnMetadata{V: 1, State: "unknown", Unavailable: []string{"state", "model", "durationMs", "usage", "contextTokens", "compactions"}})
+	}
 
 	older, err := notion.ReadSession(context.Background(), &surface.Session{ID: "thread-1", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb}, surface.SessionReadRequest{Limit: 2, Before: read.NextBefore})
 	if err != nil {

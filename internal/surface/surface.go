@@ -592,12 +592,13 @@ type ReplyResult struct {
 // sent a prompt that was not typed by the person: "peer", with Sender naming
 // the agent, or a prompt the provider injected, such as "task-notification".
 type Exchange struct {
-	User      string    `json:"user"`
-	Origin    string    `json:"origin,omitempty"`
-	Sender    string    `json:"sender,omitempty"`
-	Assistant string    `json:"assistant"`
-	Timestamp time.Time `json:"timestamp"`
-	Source    string    `json:"source,omitempty"`
+	User      string        `json:"user"`
+	Origin    string        `json:"origin,omitempty"`
+	Sender    string        `json:"sender,omitempty"`
+	Assistant string        `json:"assistant"`
+	Timestamp time.Time     `json:"timestamp"`
+	Source    string        `json:"source,omitempty"`
+	Turn      *TurnMetadata `json:"turn,omitempty"`
 }
 
 type StreamEvent struct {
@@ -623,6 +624,7 @@ type StreamEvent struct {
 	Text             string         `json:"text"`
 	Context          *ContextUsage  `json:"context,omitempty"`
 	Goal             *GoalState     `json:"goal,omitempty"`
+	Turn             *TurnMetadata  `json:"turn,omitempty"`
 }
 
 type StreamEventClass string

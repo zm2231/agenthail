@@ -26,6 +26,7 @@ type TimelineItem struct {
 	BodyRef          string         `json:"bodyRef,omitempty"`
 	Attachment       *Attachment    `json:"attachment,omitempty"`
 	Files            []AttachedFile `json:"files,omitempty"`
+	Turn             *TurnMetadata  `json:"turn,omitempty"`
 }
 
 // AttachedFile is a file a person sent with a message that the agent received
@@ -115,6 +116,13 @@ func BoundSessionRead(session *Session, result *SessionReadResult) *SessionReadR
 		if result.Exchanges[index].Source == "" {
 			result.Exchanges[index].Source = result.Source
 		}
+		if result.Exchanges[index].Turn == nil {
+			state := TurnUnknown
+			if index == len(result.Exchanges)-1 && session != nil && session.Status == StatusBusy {
+				state = TurnRunning
+			}
+			result.Exchanges[index].Turn = NewTurnMetadata(state, TurnMeasure{})
+		}
 	}
 	if result.Reply == nil {
 		result.Reply = latestReply(session, result.Exchanges, result.Source)
@@ -196,6 +204,11 @@ func groupExchanges(items []TimelineItem, source string) ([]Exchange, []int) {
 		if item.Kind == "done" {
 			if open && (item.TurnID == "" || item.TurnID == turn) {
 				open = false
+				ended := item.Turn
+				if ended == nil {
+					ended = NewTurnMetadata(TurnStateOfDone(item.Status), TurnMeasure{})
+				}
+				exchanges[len(exchanges)-1].Turn = ended
 			}
 			continue
 		}

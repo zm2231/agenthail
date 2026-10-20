@@ -1230,13 +1230,14 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		return err
 	}
 	turns := newClaudeTurnTracker(replayed.current, closing)
+	turns.meter, turns.between, turns.betweenKnown = replayed.meter, replayed.between, replayed.betweenKnown
 	completed := false
 	finish := func(ended []claudeTurnEnd) {
 		for _, end := range ended {
 			if uuid != "" && end.TurnID != uuid && end.Status == "" {
 				continue
 			}
-			onEvent(surface.StreamEvent{ID: end.Key, ProviderKey: "timeline:" + end.Key, Version: 1, Operation: "phase", TurnID: end.TurnID, Kind: "done", Status: end.Status})
+			onEvent(surface.StreamEvent{ID: end.Key, ProviderKey: "timeline:" + end.Key, Version: 1, Operation: "phase", TurnID: end.TurnID, Kind: "done", Status: end.Status, Turn: end.Turn})
 			if uuid != "" && end.TurnID == uuid && end.Status == "" {
 				completed = true
 			}
@@ -1332,7 +1333,8 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 }
 
 func claudeRecordStartsTurn(record map[string]any) bool {
-	return str(record, "type") == "user" && str(record, "uuid") != "" && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record) && !claudeRecordIsCommand(record)
+	compactSummary, _ := record["isCompactSummary"].(bool)
+	return str(record, "type") == "user" && str(record, "uuid") != "" && !compactSummary && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record) && !claudeRecordIsCommand(record)
 }
 
 func claudeRecordHasToolResult(record map[string]any) bool {
