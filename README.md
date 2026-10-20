@@ -185,7 +185,7 @@ Ask an agent you hand work to to end its final message with a completion report:
 
 ````markdown
 ```agenthail-report
-{"v":1,"status":"blocked","stop":"needs_input","commits":["0d825e4d"],"paths":["internal/export/retry.go"],"next":"Choose the retry limit"}
+{"v":1,"status":"blocked","stop":"needsInput","reason":"The retry limit is not specified","commits":["0d825e4d"],"paths":["internal/export/retry.go"],"next":"Choose the retry limit"}
 ```
 ````
 
