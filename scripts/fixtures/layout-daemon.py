@@ -54,6 +54,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["waiting"]:
+        # A terminal session waiting on a question Agenthail can't answer.
+        SESSION["waitingOn"] = {"kind": "question", "id": "fixture-session:question:1", "since": NOW}
+        SESSION["runtime"] = {"focusable": True, "launcher": "cmux", "hostName": "cmux"}
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     print(server.server_address[1], flush=True)
     sys.stdout.close()
