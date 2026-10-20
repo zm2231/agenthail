@@ -877,6 +877,30 @@ select {
   font-family: var(--mono);
   font-size: 10px;
 }
+.lead-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+.lead-chip.idle {
+  color: var(--quiet);
+  cursor: default;
+}
+.lead-chip.conflict {
+  color: var(--warn);
+  cursor: default;
+}
 .host-badge.unavailable {
   color: var(--warn);
 }

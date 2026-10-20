@@ -96,17 +96,31 @@ func applyCatalogView(row *dashboardSession, view catalogViewState) {
 
 // dashboardProject is one project across every host: each checkout is one
 // host's project with the same key, or the host's only checkout of a project
-// without one. It is archived when every checkout is.
+// without one. It is archived when every checkout is. Coordinators lists the
+// project's coordinator on each host that has one; more than one is a
+// conflict.
 type dashboardProject struct {
-	ID           string                     `json:"id"`
-	DisplayName  string                     `json:"displayName"`
-	Kind         string                     `json:"kind"`
-	Key          string                     `json:"key,omitempty"`
-	Repository   *project.Repository        `json:"repository,omitempty"`
-	Checkouts    []dashboardProjectCheckout `json:"checkouts"`
-	LastActive   time.Time                  `json:"lastActive,omitempty"`
-	SessionCount int                        `json:"sessionCount"`
-	Archived     bool                       `json:"archived"`
+	ID           string                        `json:"id"`
+	DisplayName  string                        `json:"displayName"`
+	Kind         string                        `json:"kind"`
+	Key          string                        `json:"key,omitempty"`
+	Repository   *project.Repository           `json:"repository,omitempty"`
+	Checkouts    []dashboardProjectCheckout    `json:"checkouts"`
+	Coordinators []dashboardProjectCoordinator `json:"coordinators"`
+	LastActive   time.Time                     `json:"lastActive,omitempty"`
+	SessionCount int                           `json:"sessionCount"`
+	Archived     bool                          `json:"archived"`
+}
+
+// dashboardProjectCoordinator is one host's coordinator of a project.
+// SessionID is empty until its first message starts it.
+type dashboardProjectCoordinator struct {
+	Host      dashboardHost `json:"host"`
+	Name      string        `json:"name"`
+	Surface   string        `json:"surface"`
+	SessionID string        `json:"sessionId,omitempty"`
+	ChangedBy string        `json:"changedBy,omitempty"`
+	ChangedAt time.Time     `json:"changedAt"`
 }
 
 type dashboardProjectCheckout struct {
@@ -187,12 +201,16 @@ func catalogScopeCounts(rows []dashboardSession) map[string]int {
 	return counts
 }
 
-// catalogProjects groups the rows by project and adds the added projects that
-// have no sessions yet.
-func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, local dashboardHost) []dashboardProject {
+// catalogProjects groups the rows by project, adds the added projects and this
+// host's coordinators' projects that have no sessions yet, and names each
+// project's coordinators. A paired host's coordinator is listed on a project
+// this host shows. A coordinator whose folder this host now lists under
+// another project, after its repository's origin changed, belongs to no
+// listed project; 'coordinator list' marks it.
+func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, coordinators []registry.CoordinatorSpec, archived map[string]time.Time, local dashboardHost, hostRef func(string) dashboardHost) []dashboardProject {
 	byID := map[string]*dashboardProject{}
 	order := []string{}
-	entry := func(found *catalogProject) *dashboardProject {
+	entry := func(found *CatalogProject) *dashboardProject {
 		project, ok := byID[found.ID]
 		if !ok {
 			project = &dashboardProject{ID: found.ID, DisplayName: found.DisplayName, Kind: found.Kind, Key: found.Key, Repository: found.Repository}
@@ -201,7 +219,7 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 		}
 		return project
 	}
-	checkout := func(project *dashboardProject, host dashboardHost, found *catalogProject) *dashboardProjectCheckout {
+	checkout := func(project *dashboardProject, host dashboardHost, found *CatalogProject) *dashboardProjectCheckout {
 		for index := range project.Checkouts {
 			if project.Checkouts[index].Host.ID == host.ID && project.Checkouts[index].ProjectID == found.LocalID {
 				return &project.Checkouts[index]
@@ -238,9 +256,49 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 		project := entry(found)
 		checkout(project, local, found)
 	}
+	localRoots := map[string]bool{}
+	for _, project := range byID {
+		for _, at := range project.Checkouts {
+			if at.Host.ID == local.ID {
+				localRoots[at.RootPath] = true
+			}
+		}
+	}
+	for _, spec := range coordinators {
+		if spec.HostID != "" {
+			continue
+		}
+		if _, listed := byID[spec.ProjectID]; listed || localRoots[spec.ProjectRoot] {
+			continue
+		}
+		found := coordinatorCatalogProject(spec)
+		_, found.Archived = archived[found.LocalID]
+		checkout(entry(found), local, found)
+	}
+	for _, spec := range coordinators {
+		project, listed := byID[spec.ProjectID]
+		if !listed {
+			continue
+		}
+		host := local
+		if spec.HostID != "" {
+			host = hostRef(spec.HostID)
+		}
+		project.Coordinators = append(project.Coordinators, dashboardProjectCoordinator{Host: host, Name: spec.Name, Surface: spec.Surface, SessionID: spec.SessionID, ChangedBy: spec.ChangedBy, ChangedAt: spec.ChangedAt})
+	}
 	projects := make([]dashboardProject, 0, len(order))
 	for _, id := range order {
 		project := byID[id]
+		if project.Coordinators == nil {
+			project.Coordinators = []dashboardProjectCoordinator{}
+		}
+		sort.SliceStable(project.Coordinators, func(i, j int) bool {
+			left, right := project.Coordinators[i], project.Coordinators[j]
+			if (left.Host.ID == local.ID) != (right.Host.ID == local.ID) {
+				return left.Host.ID == local.ID
+			}
+			return left.Host.Name < right.Host.Name
+		})
 		project.Archived = true
 		for _, at := range project.Checkouts {
 			project.Archived = project.Archived && at.Archived
@@ -259,6 +317,26 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 	}
 	sort.SliceStable(projects, func(i, j int) bool { return projects[i].LastActive.After(projects[j].LastActive) })
 	return projects
+}
+
+// coordinatorCatalogProject is the project of this host's coordinator spec
+// when no session or added project names it. Added projects are always
+// listed, so it is a repository's project, rooted at its main checkout.
+func coordinatorCatalogProject(spec registry.CoordinatorSpec) *CatalogProject {
+	found := &CatalogProject{ID: spec.ProjectID, LocalID: catalogImplicitProjectID(spec.ProjectRoot), DisplayName: catalogProjectName(spec.ProjectRoot), RootPath: spec.ProjectRoot, Kind: catalogProjectGit}
+	if found.ID != found.LocalID {
+		found.Key = found.ID
+	}
+	return found
+}
+
+// coordinatorHostRef names a paired host for a mirrored coordinator. A host
+// removed since keeps its id as its name until its rows are dropped.
+func (d *Daemon) coordinatorHostRef(hostID string) dashboardHost {
+	if host, found := d.pairedHost(hostID); found {
+		return host.ref()
+	}
+	return dashboardHost{ID: hostID, Name: hostID, State: hostStateUnreachable}
 }
 
 func (d *Daemon) requestCatalogDiscovery() {
@@ -344,7 +422,7 @@ func (d *Daemon) projectAction(r *http.Request, w http.ResponseWriter, request p
 		}
 	}
 	if len(checkouts) == 0 {
-		http.Error(w, "project not found", http.StatusNotFound)
+		http.Error(w, d.projectNotListed(request.ProjectID), http.StatusNotFound)
 		return
 	}
 	status := http.StatusOK
@@ -381,14 +459,44 @@ func (d *Daemon) localProjectCheckouts(projectID string) ([]registry.ProjectReco
 		return nil, err
 	}
 	for _, raw := range raws {
-		var found catalogProject
+		var found CatalogProject
 		if json.Unmarshal(raw, &found) != nil || found.LocalID == "" || seen[found.LocalID] {
 			continue
 		}
 		seen[found.LocalID] = true
 		targets = append(targets, registry.ProjectRecord{ID: found.LocalID, WorkspaceRoot: found.RootPath, Title: found.DisplayName, Added: found.Added})
 	}
+	coordinators, err := d.Registry.LocalCoordinators()
+	if err != nil {
+		return nil, err
+	}
+	for _, spec := range coordinators {
+		found := coordinatorCatalogProject(spec)
+		if found.ID != projectID && found.LocalID != projectID || seen[found.LocalID] || projectRootHeld(records, targets, spec) {
+			continue
+		}
+		seen[found.LocalID] = true
+		targets = append(targets, registry.ProjectRecord{ID: found.LocalID, WorkspaceRoot: found.RootPath, Title: found.DisplayName})
+	}
 	return targets, nil
+}
+
+// projectRootHeld reports whether a coordinator's project is already a project
+// of this host: an added project with its id, key or folder, or a listed
+// project at its folder. Then the coordinator names that project, or one its
+// folder no longer resolves to, and stands for no project of its own.
+func projectRootHeld(records, listed []registry.ProjectRecord, spec registry.CoordinatorSpec) bool {
+	for _, record := range records {
+		if record.Added && (record.ID == spec.ProjectID || record.Key == spec.ProjectID || record.WorkspaceRoot == spec.ProjectRoot) {
+			return true
+		}
+	}
+	for _, record := range listed {
+		if record.WorkspaceRoot == spec.ProjectRoot {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *Daemon) archiveLocalProject(target registry.ProjectRecord, archive bool) error {
@@ -396,6 +504,14 @@ func (d *Daemon) archiveLocalProject(target registry.ProjectRecord, archive bool
 		return d.Registry.ArchiveProject(target, time.Now().UTC())
 	}
 	return d.Registry.UnarchiveProject(target.ID)
+}
+
+// projectNotListed refuses an action on a project id this host does not
+// list. A project's id follows its repository, so a client holding an id from
+// before an origin change is told to refresh rather than reaching whatever
+// project is in that folder now.
+func (d *Daemon) projectNotListed(projectID string) string {
+	return fmt.Sprintf("project %s is not listed on %s; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again", projectID, d.hostIdentity().Name)
 }
 
 // removeProject removes one added project of this host. Its sessions move to
@@ -413,7 +529,7 @@ func (d *Daemon) removeProject(w http.ResponseWriter, projectID string, targets 
 			http.Error(w, "project "+projectID+" was not added, so it cannot be removed; archive it to hide it", http.StatusConflict)
 			return
 		}
-		http.Error(w, "project not found", http.StatusNotFound)
+		http.Error(w, d.projectNotListed(projectID), http.StatusNotFound)
 		return
 	case 1:
 	default:
@@ -481,16 +597,16 @@ func (d *Daemon) sessionArchiveAction(w http.ResponseWriter, action, sessionID s
 // addProject adds a folder as a project of this host. A folder in a linked
 // worktree is added at the same place in the main checkout, so the project
 // holds that folder in every worktree.
-func (d *Daemon) addProject(ctx context.Context, path, title string) (catalogProject, error) {
+func (d *Daemon) addProject(ctx context.Context, path, title string) (CatalogProject, error) {
 	path, err := workspace.NormalizeCWD(path)
 	if err != nil || path == "" {
-		return catalogProject{}, fmt.Errorf("a folder path is required")
+		return CatalogProject{}, fmt.Errorf("a folder path is required")
 	}
 	if info, err := os.Stat(path); err != nil || !info.IsDir() {
-		return catalogProject{}, fmt.Errorf("%s is not a folder", path)
+		return CatalogProject{}, fmt.Errorf("%s is not a folder", path)
 	}
 	if path, err = canonicalCatalogPath(path); err != nil {
-		return catalogProject{}, err
+		return CatalogProject{}, err
 	}
 	record := registry.ProjectRecord{ID: "p-" + uuid.NewString(), WorkspaceRoot: path, Title: strings.TrimSpace(title), CreatedAt: time.Now().UTC()}
 	repository, notRepository, err := resolveCatalogRepository(ctx, path, nil)
@@ -502,29 +618,29 @@ func (d *Daemon) addProject(ctx context.Context, path, title string) (catalogPro
 			record.Repository, _ = json.Marshal(repository.repository)
 		}
 	case !notRepository:
-		return catalogProject{}, fmt.Errorf("read repository for %s: %w", path, err)
+		return CatalogProject{}, fmt.Errorf("read repository for %s: %w", path, err)
 	}
 	if record.Title == "" {
 		record.Title = filepath.Base(record.WorkspaceRoot)
 	}
 	if err := d.Registry.AddProject(record); err != nil {
-		return catalogProject{}, err
+		return CatalogProject{}, err
 	}
 	d.requestCatalogDiscovery()
 	return *addedCatalogProject(record, inRepository), nil
 }
 
-// ResolvePathProject names the project a session working in path belongs
-// to, resolved the way the catalog resolves sessions. It is "" when no
+// ResolvePathProject finds the project a session working in path belongs
+// to, resolved the way the catalog resolves sessions. It is nil when no
 // project holds the folder.
-func ResolvePathProject(ctx context.Context, reg *registry.Registry, path string) (string, error) {
+func ResolvePathProject(ctx context.Context, reg *registry.Registry, path string) (*CatalogProject, error) {
 	path, err := catalogSessionPath(path)
 	if err != nil || path == "" {
-		return "", fmt.Errorf("a folder path is required")
+		return nil, fmt.Errorf("a folder path is required")
 	}
 	records, err := reg.ListProjects()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	added := records[:0]
 	for _, record := range records {
@@ -534,12 +650,9 @@ func ResolvePathProject(ctx context.Context, reg *registry.Registry, path string
 	}
 	identity, _, transient := resolveCatalogIdentity(ctx, path, added, nil)
 	if transient {
-		return "", fmt.Errorf("resolve the project of %s: %s", path, identity.UnavailableReason)
+		return nil, fmt.Errorf("resolve the project of %s: %s", path, identity.UnavailableReason)
 	}
-	if identity.Project == nil {
-		return "", nil
-	}
-	return identity.Project.ID, nil
+	return identity.Project, nil
 }
 
 // refreshProjectRepositories keeps each added project's key current with its

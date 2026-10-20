@@ -20,6 +20,10 @@ final class SessionPane: ObservableObject, Identifiable {
     @Published var renamingSession: SessionState?
     @Published private(set) var forking = false
     @Published private(set) var controlPending = false
+    @Published private(set) var requests: SessionRequests?
+    @Published private(set) var answeringRequest: String?
+    @Published var requestError: String?
+    private var requestsKey: String?
     @Published private(set) var composerDraft = ComposerDraft() {
         didSet { observeDraft() }
     }
@@ -401,6 +405,59 @@ final class SessionPane: ObservableObject, Identifiable {
         let merged = metadata.apply(to: current)
         detail = merged
         model.refreshCachedDetail(merged, for: id)
+    }
+
+    func syncRequests(for session: SessionState) async {
+        guard session.capabilities.respond, !session.isReadOnly else {
+            requests = nil
+            requestsKey = nil
+            return
+        }
+        let key = "\(session.id)|\(session.waitingOn?.id ?? "")"
+        guard requestsKey != key else { return }
+        if requestsKey?.hasPrefix(session.id + "|") != true { requests = nil }
+        requestsKey = key
+        await fetchRequests(session.id, key: key)
+    }
+
+    private func fetchRequests(_ id: String, key: String?) async {
+        guard let api = model.api else { return }
+        do {
+            let loaded = try await api.requests(sessionID: id)
+            guard selectedSessionID == id, requestsKey == key else { return }
+            requests = loaded
+        } catch {
+            guard selectedSessionID == id else { return }
+            requestsKey = nil
+            requestError = error.localizedDescription
+        }
+    }
+
+    func respond(to request: SessionRequest, decision: RequestDecision) async {
+        guard let api = model.api, let id = selectedSessionID, answeringRequest == nil else { return }
+        answeringRequest = request.id
+        defer { answeringRequest = nil }
+        do {
+            _ = try await api.respond(sessionID: id, requestID: request.id, decision: decision)
+            requestError = nil
+        } catch AgenthailAPIError.request(409, _) {
+            requestError = "That request was already answered or has expired."
+        } catch {
+            requestError = error.localizedDescription
+        }
+        await fetchRequests(id, key: requestsKey)
+        await loadSession(id)
+    }
+
+    func setPermissionMode(_ mode: String) async {
+        guard let api = model.api, let id = selectedSessionID else { return }
+        do {
+            try await api.setPermissionMode(sessionID: id, mode: mode)
+            requestError = nil
+        } catch {
+            requestError = error.localizedDescription
+        }
+        await fetchRequests(id, key: requestsKey)
     }
 
     func reloadDetail() {

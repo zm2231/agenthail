@@ -19,6 +19,18 @@ func ClaudeConfigDir(home string) string {
 	return filepath.Join(home, ".claude")
 }
 
+// ClaudeLaunchConfigDir is the CLAUDE_CONFIG_DIR a Claude launched against
+// root is given, or "" to leave the launch with the environment's own. The
+// primary root is never named explicitly: Claude Code on macOS keys its
+// keychain credentials on whether CLAUDE_CONFIG_DIR is set, so naming the
+// default directory reads a different credential than an unset variable.
+func ClaudeLaunchConfigDir(home, root string) string {
+	if root == "" || claudeRootIdentity(filepath.Clean(root)) == claudeRootIdentity(filepath.Clean(ClaudeConfigDir(home))) {
+		return ""
+	}
+	return root
+}
+
 func AgenthailConfigPath(home string) string {
 	return filepath.Join(home, ".agenthail", "config.json")
 }

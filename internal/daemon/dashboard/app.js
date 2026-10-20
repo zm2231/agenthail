@@ -192,6 +192,14 @@ function handoffMessage(value) {
   }
   return { label, text };
 }
+function exchangePrompt(exchange) {
+  const message = handoffMessage(exchange.user);
+  if (exchange.origin === "peer") return { ...message, label: exchange.sender ? `From ${exchange.sender}` : "From an agent" };
+  if (exchange.origin === "task-notification") return { ...message, label: "Task notification" };
+  if (exchange.origin === "auto-continuation") return { ...message, label: "Continued" };
+  if (exchange.origin) return { ...message, label: exchange.origin };
+  return message;
+}
 function renderMessage(text, kind, label, turnKey, files = []) {
   const safeText = String(text || "");
   const editable = kind === "user" && label === "Conversation input";
@@ -303,15 +311,29 @@ function startLiveStream() {
     selectSession(session.id);
   });
 }
+function promptOrigin(value) {
+  if (value.role === "peer") return "peer";
+  return value.origin || "";
+}
 function exchangesFromItems(items) {
   const exchanges = [];
   let turn = "";
   let open = false;
   for (const value of items) {
+    if (value.kind === "done") {
+      if (open && (!value.turnId || value.turnId === turn)) open = false;
+      continue;
+    }
     if (!value.text) continue;
-    const prompt = ["message", "text"].includes(value.kind) && ["user", "peer"].includes(value.role);
+    const prompt = (["message", "text"].includes(value.kind) && ["user", "peer"].includes(value.role)) || (value.kind === "event" && Boolean(value.origin));
     if (prompt) {
-      exchanges.push({ user: value.text, timestamp: value.timestamp });
+      if (open && turn && value.turnId === turn) {
+        const last = exchanges.at(-1);
+        if (!last.user) Object.assign(last, { user: value.text, origin: promptOrigin(value), sender: value.sender || "" });
+        else if (last.origin === promptOrigin(value) && last.sender === (value.sender || "")) last.user += `\n\n${value.text}`;
+        continue;
+      }
+      exchanges.push({ user: value.text, origin: promptOrigin(value), sender: value.sender || "", timestamp: value.timestamp });
       turn = value.turnId || "";
       open = true;
       continue;
@@ -579,7 +601,21 @@ function projectSection(project, sessions) {
   const toggle = project.archived ? "project-unarchive" : "project-archive";
   const added = (project.checkouts || []).filter((checkout) => checkout.added && checkout.host.state === "local");
   const remove = added.length === 1 ? `<button class="link-button" type="button" data-project-action="project-remove" data-project-id="${escape(added[0].projectId)}" title="${escape(`Stop treating ${added[0].rootPath} as a project`)}">Remove</button>` : "";
-  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button>${remove}</header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
+  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}${coordinatorChip(project.coordinators || [])}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button>${remove}</header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
+}
+function coordinatorRef(coordinator) {
+  const name = `@${coordinator.name}`;
+  return coordinator.host && coordinator.host.state !== "local" ? `${shortHostName(coordinator.host.name)}::${name}` : name;
+}
+function coordinatorChip(coordinators) {
+  if (coordinators.length === 0) return "";
+  if (coordinators.length > 1) {
+    const refs = coordinators.map(coordinatorRef).join(", ");
+    return `<span class="lead-chip conflict" title="${escape(`Several hosts each have a coordinator: ${refs}. Run coordinator set --replace on one to resolve it.`)}">${coordinators.length} leads</span>`;
+  }
+  const ref = coordinatorRef(coordinators[0]);
+  if (!coordinators[0].sessionId) return `<span class="lead-chip idle" title="${escape(`${ref} starts on its first message`)}">${escape(ref)}</span>`;
+  return `<button class="lead-chip" type="button" data-session="${escape(coordinators[0].sessionId)}" title="${escape(`Open ${ref}, the project coordinator`)}">${escape(ref)}</button>`;
 }
 function renderProjects(query) {
   const byProject = new Map();
@@ -1316,7 +1352,7 @@ function renderChat() {
     ? renderTimeline(timeline, session)
     : exchanges
     .flatMap((exchange, index) => {
-      const user = handoffMessage(exchange.user);
+      const user = exchangePrompt(exchange);
       const assistant = String(exchange.assistant || "");
       return [
         exchange.user
@@ -1938,11 +1974,11 @@ document.addEventListener("click", async (event) => {
         const result = await action("project-add", { path: viewControl.dataset.projectAdd }, crypto.randomUUID(), "");
         toast(`Added project ${result.project?.displayName || ""}.`);
       }
-      await load();
     } catch (error) {
       toast(error.message);
     } finally {
       viewControl.disabled = false;
+      await load();
     }
     return;
   }

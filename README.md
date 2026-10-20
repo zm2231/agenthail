@@ -150,7 +150,7 @@ when the turn can. Use `queue` to make it wait for the turn to end, and `steer`
 when you want an explicit active-turn control.
 If Agenthail cannot reach a Codex session before starting a turn, it keeps that message pending and retries safely. A timeout after a turn has started is kept as an explicit unknown outcome instead, so Agenthail never guesses whether to send duplicate work. A queued message never expires: it stays pending until it is delivered, you cancel it, or delivery fails in a way Agenthail can prove. `queue list` shows how long each message has waited and why it is held.
 
-An agent that has asked you something is **waiting on you**, not working. That covers a Claude question (`AskUserQuestion`), plan approval or permission prompt, and a Codex approval or input request. `list`, the dashboard and the apps show "Waiting on you". Your Mac and paired iPhone get one notification per question. Messages to the agent wait until you answer, even a steer, so nothing lands in the middle of the question. An agent's message to a Claude session with a native messaging socket is the exception: Claude holds it behind the question without answering it. A steer then goes into the turn you answered; an ordinary message waits for the turn to finish. A session Agenthail's Claude host runs asks you through Agenthail: the dashboard shows its tool approvals and questions above the composer, and `agenthail requests <target>` and `agenthail answer <target> allow|always|deny|"answer"` do the same from the terminal. Nothing times out, and nothing is approved for you. `agenthail permission-mode <target> <mode>` switches such a session's permission mode while it runs.
+An agent that has asked you something is **waiting on you**, not working. That covers a Claude question (`AskUserQuestion`), plan approval or permission prompt, and a Codex approval or input request. `list`, the dashboard and the apps show "Waiting on you". Your Mac and paired iPhone get one notification per question. A subagent or a one-off Codex run (`codex exec`, Codex's own review threads) never notifies you when it finishes; when it waits on you, the notification opens the conversation that started it. Messages to the agent wait until you answer, even a steer, so nothing lands in the middle of the question. An agent's message to a Claude session with a native messaging socket is the exception: Claude holds it behind the question without answering it. A steer then goes into the turn you answered; an ordinary message waits for the turn to finish. A session Agenthail's Claude host runs asks you through Agenthail: the dashboard shows its tool approvals and questions above the composer, and `agenthail requests <target>` and `agenthail answer <target> allow|always|deny|"answer"` do the same from the terminal. Nothing times out, and nothing is approved for you. `agenthail permission-mode <target> <mode>` switches such a session's permission mode while it runs.
 
 Agenthail keeps current work fast by using Codex's bounded local state. To find an older Codex conversation, use the dashboard search box or `agenthail search codex <query>`; selected results are saved locally for later use.
 
@@ -178,6 +178,22 @@ When the investigation finishes with something the builder needs, Agenthail pass
 `turn_finished` (the default) forwards each successful matching completion. `goal_completed` requires a source with goal support, waits for an explicit completed goal and its final turn, and forwards the latest pending completion once per goal. Active, paused, blocked, missing, or unreadable goals keep the route waiting. The regex filters the selected result; it does not determine whether a goal is complete.
 
 New routes begin after existing provider history. Completion events and provider cursors survive daemon restarts; each route advances only when its queue item and receipt commit together. A busy or offline destination keeps its handoff in the delivery queue until it can be delivered. Active routes remain until explicitly removed; an inactive route whose Claude Code source stays closed for an hour is removed. `relay list --json`, the dashboard, and native handoff controls show the condition, pending event count, and capture/consumption error. Queued means persisted for delivery, not received by the destination. See [relay recovery](docs/maintainers/durable-relays.md).
+
+## Give each project a coordinator
+
+Each project can have one coordinator, the agent you send the project's work to and its other sessions report to:
+
+```bash
+cd ~/work/export-service
+agenthail coordinator new claude --instructions ~/briefs/coordinator.md
+agenthail send @export-service-lead "Ship the export fix and report back"
+```
+
+From any session in the project, `agenthail send @lead "..."` reaches that project's coordinator. A folder outside every Git repository and added project has no coordinator; `agenthail project add <folder>` makes it a project.
+
+A message to the coordinator always lands. When it is working, the message steers its current turn if the session can be steered, and otherwise waits in the queue. When its session has ended, Agenthail resumes the same conversation. When the conversation is gone, Agenthail starts a new one in the same folder, with the same agent, model and permission mode. Its first message is your saved instructions, a note saying why it started again, and your message. The reply tells you it started again. Messages still waiting for the old conversation move to the new one.
+
+`coordinator new` defines a coordinator that starts on its first message; `agenthail coordinator set <session>` gives the role to a running session instead, on this machine or a paired host. A project in a repository with a remote has one coordinator across your paired hosts: a second one is refused until you pass `--replace`, and `@lead` from a session on any of them reaches it. `agenthail coordinator` shows the current folder's coordinator, `agenthail coordinator list` shows all of them, and `agenthail coordinator clear` removes the role and leaves the session alone. Sends from the dashboard, the Mac and iPhone apps and notification replies reach the coordinator the same way, because they address its session. See [coordinator](docs/maintainers/coordinator.md).
 
 For a group that needs the same update:
 

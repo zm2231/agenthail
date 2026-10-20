@@ -102,10 +102,19 @@ func newPushRecorder(t *testing.T, store *registry.Registry) *pushRecorder {
 	t.Helper()
 	recorder := &pushRecorder{events: map[string][]map[string]string{}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		var fields map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+		payload := map[string]string{}
+		for name, value := range fields {
+			var text string
+			if json.Unmarshal(value, &text) == nil {
+				payload[name] = text
+				continue
+			}
+			payload[name] = string(value)
 		}
 		recorder.mu.Lock()
 		recorder.events[payload["eventType"]] = append(recorder.events[payload["eventType"]], payload)
@@ -420,6 +429,33 @@ func TestQuestionRecordedButNotAnnouncedIsAnnouncedAfterRestart(t *testing.T) {
 		return err == nil && announced
 	})
 	q.claude.awaitObservations(t, 3)
+	if got := q.pushes.count("session.waiting"); got != 1 {
+		t.Fatalf("one question notified %d times", got)
+	}
+}
+
+func TestACallerThatReadTheQuestionBeforeItsAnnouncementFinishedDoesNotAnnounceItAgain(t *testing.T) {
+	q := newClaudeQuestion(t)
+	waiting := surface.Waiting{Kind: surface.WaitingQuestion, ID: questionID, Since: questionAsked}
+	if record, err := q.store.RecordWaiting(q.session.ID, &waiting, questionAsked); err != nil || !record.Announce {
+		t.Fatalf("record=%+v err=%v", record, err)
+	}
+	d := New(q.store, []surface.Surface{q.claude})
+	d.announceWaiting(q.session, waiting)
+	eventually(t, "the announcement to finish", func() bool {
+		_, announced, err := q.store.WaitingState(q.session.ID)
+		d.announceMu.Lock()
+		inFlight := d.announcing[q.session.ID]
+		d.announceMu.Unlock()
+		return err == nil && announced && inFlight == ""
+	})
+	d.announceWaiting(q.session, waiting)
+	d.announceMu.Lock()
+	inFlight := d.announcing[q.session.ID]
+	d.announceMu.Unlock()
+	if inFlight != "" {
+		t.Fatalf("a question already announced started announcing again (%s)", inFlight)
+	}
 	if got := q.pushes.count("session.waiting"); got != 1 {
 		t.Fatalf("one question notified %d times", got)
 	}

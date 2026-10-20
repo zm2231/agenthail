@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -38,6 +39,8 @@ type threadCreateRequest struct {
 	approval string
 	jsonOut  bool
 }
+
+const threadNameMargin = 30 * time.Second
 
 const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree <name>] [--agent <name>] [--permission-mode <mode>] [--host <host>] [--timeout <duration>] [--json]
        agenthail thread fork <target> [--model <model>] [--last-turn <id>] [--alias <name>] [--json]
@@ -87,13 +90,15 @@ func (a *App) cmdThread(args []string) error {
 	if !ok {
 		return fmt.Errorf("%s cannot start conversations", request.surface)
 	}
-	if err := a.registry().EnsureAliasAvailable(request.alias); err != nil {
-		return fmt.Errorf("check thread alias: %w", err)
-	}
 	timeout, err := commandTimeout(args, a.DefaultTimeout)
 	if err != nil {
 		return err
 	}
+	reservation, err := a.registry().ReserveAlias(request.alias, time.Now().Add(timeout+threadNameMargin))
+	if err != nil {
+		return fmt.Errorf("reserve thread alias: %w", err)
+	}
+	defer func() { _ = a.registry().ReleaseAliasReservation(reservation) }()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	messageUUID := uuid.NewString()
@@ -104,10 +109,8 @@ func (a *App) cmdThread(args []string) error {
 		if err := a.registry().RegisterSession(*session); err != nil {
 			return emitCreateStorageFailure(request, session, fmt.Sprintf("thread %s was created, but local registration failed: %s; do not retry automatically", session.ID, err))
 		}
-		if request.alias != "" {
-			if err := a.registry().SetAlias(request.alias, session.ID); err != nil {
-				return emitCreateStorageFailure(request, session, fmt.Sprintf("thread %s was created, but its name could not be persisted: %s; do not retry automatically", session.ID, err))
-			}
+		if err := a.registry().BindReservedAlias(reservation, session.ID); err != nil {
+			return emitCreateStorageFailure(request, session, fmt.Sprintf("thread %s was created, but its name could not be persisted: %s; do not retry automatically", session.ID, err))
 		}
 	}
 

@@ -121,7 +121,7 @@ func TestDiscoveredBranchDetachesTheProcessAndLeavesTheOriginalItsAlias(t *testi
 	if _, _, err := r.RecordCatalogSession(original, originalEvent); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.SetAlias("lead", original.Session.ID); err != nil {
+	if err := r.SetAlias("chief", original.Session.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.QueueMessage(original.Session.ID, "for the original"); err != nil {
@@ -143,7 +143,7 @@ func TestDiscoveredBranchDetachesTheProcessAndLeavesTheOriginalItsAlias(t *testi
 	if err != nil || forked.PID != 77 || forked.Bridge != "session_bridge" || forked.ForkedFrom != "conversation-a" {
 		t.Fatalf("branch=%+v err=%v", forked, err)
 	}
-	if owner, err := r.LookupAlias("lead"); err != nil || owner != "conversation-a" {
+	if owner, err := r.LookupAlias("chief"); err != nil || owner != "conversation-a" {
 		t.Fatalf("alias owner=%q err=%v", owner, err)
 	}
 	if r.QueueCount("conversation-a") != 1 || r.QueueCount("conversation-b") != 0 {

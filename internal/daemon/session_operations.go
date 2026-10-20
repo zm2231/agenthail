@@ -11,7 +11,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Request, adapter surface.Surface, session *surface.Session, action string, forkOptions surface.ForkOptions, queue surface.NativeQueueRequest) {
+func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Request, adapter surface.Surface, session *surface.Session, action string, forkOptions surface.ForkOptions, forkName string, queue surface.NativeQueueRequest) {
 	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 	defer cancel()
 	var result any
@@ -23,6 +23,11 @@ func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Reques
 			err = surface.ErrUnsupported
 			break
 		}
+		name, reserved := d.reserveStartName(w, forkName)
+		if !reserved {
+			return
+		}
+		defer func() { _ = d.Registry.ReleaseAliasReservation(name) }()
 		var fork *surface.Session
 		fork, err = forker.ForkSession(ctx, session, forkOptions)
 		if err == nil && fork == nil {
@@ -31,6 +36,11 @@ func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Reques
 		if err == nil {
 			err = d.Registry.RegisterSession(*fork)
 			result = map[string]any{"session": fork}
+		}
+		if err == nil {
+			if bindErr := d.Registry.BindReservedAlias(name, fork.ID); bindErr != nil {
+				err = fmt.Errorf("fork %s was created, but its name could not be persisted: %w", fork.ID, bindErr)
+			}
 		}
 	case "native-queue":
 		native, ok := adapter.(surface.NativeQueuer)

@@ -23,16 +23,23 @@ const (
 	defaultPollInterval      = 5 * time.Second
 	catalogDiscoveryInterval = 30 * time.Second
 	catalogStatusInterval    = time.Second
+	// pendingLaunchLifetime holds a launched session's name while discovery
+	// looks for it, once per catalogDiscoveryInterval.
+	pendingLaunchLifetime = 5 * time.Minute
+	// pendingLaunchRetention keeps a launch past its name's lifetime, so a
+	// session found late still takes the name if no one else has.
+	pendingLaunchRetention = 24 * time.Hour
+	startNameMargin        = 30 * time.Second
 )
 
 type Daemon struct {
 	Registry          *registry.Registry
+	coordinatorMu     sync.Mutex
 	pollInterval      time.Duration
 	Surfaces          []surface.Surface
 	log               *log.Logger
 	errorMu           sync.Mutex
 	observeErrors     map[string]observedError
-	pendingAliasWarns map[int64]bool
 	retryMu           sync.Mutex
 	observeRetry      map[string]observeRetry
 	notificationMu    sync.Mutex
@@ -47,7 +54,10 @@ type Daemon struct {
 	catalogSelected func(sessionID string)
 	// waitingContended, when set, runs when a session's waiting lock is held
 	// by another caller and this one is about to wait for it.
-	waitingContended  func(sessionID string)
+	waitingContended func(sessionID string)
+	// notifyDesktop shows a desktop notification; it is NotifyRequest outside
+	// tests.
+	notifyDesktop     func(title, message, sessionID, identifier, requestID string, actions []surface.RequestAction) error
 	queueWorkers      sync.WaitGroup
 	events            *eventHub
 	catalog           *catalogHub
@@ -107,9 +117,9 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		Surfaces:          surfaces,
 		log:               log.New(os.Stderr, "[daemon] ", log.LstdFlags),
 		observeErrors:     map[string]observedError{},
-		pendingAliasWarns: map[int64]bool{},
 		observeRetry:      map[string]observeRetry{},
 		notificationArmed: map[string]bool{},
+		notifyDesktop:     NotifyRequest,
 		events:            newEventHub(reg),
 		sources:           newSessionSourceManager(reg),
 		sourceHolds:       map[string]map[string]func(){},

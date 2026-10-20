@@ -383,14 +383,14 @@ func TestClaudeReadGroupsTurnsFiltersNonHumanRecordsAndKeepsFullReply(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(read.Exchanges) != 1 {
+	if len(read.Exchanges) != 3 || read.Exchanges[0].Origin != "command" || read.Exchanges[1].Origin != "command" {
 		t.Fatalf("exchanges=%+v", read.Exchanges)
 	}
-	exchange := read.Exchanges[0]
-	if exchange.User != "fix it" || exchange.Assistant != "Looking at the file\n"+long || exchange.Timestamp.IsZero() {
+	exchange := read.Exchanges[2]
+	if exchange.User != "fix it" || exchange.Origin != "" || exchange.Assistant != long || exchange.Timestamp.IsZero() {
 		t.Fatalf("user=%q assistant_bytes=%d timestamp=%v", exchange.User, len(exchange.Assistant), exchange.Timestamp)
 	}
-	if read.Reply == nil || read.Reply.Text != exchange.Assistant || read.Reply.UserText != "fix it" || !read.Reply.Done {
+	if read.Reply == nil || read.Reply.Text != "Looking at the file\n"+long || read.Reply.UserText != "fix it" || !read.Reply.Done {
 		t.Fatalf("reply=%+v", read.Reply)
 	}
 	if !read.Truncated || len(read.Items) == 0 || len(read.Items[len(read.Items)-1].Text) > timelineTextBudget {
@@ -659,7 +659,8 @@ func TestClaudeReadSessionOlderCursorWalksEveryExchange(t *testing.T) {
 		}
 		cursor = read.NextBefore
 	}
-	if len(users) != 150 || len(seenItems) != 450 {
+	// Each turn closes when the next starts; the last is still closing.
+	if len(users) != 150 || len(seenItems) != 450+149 {
 		t.Fatalf("walked %d exchanges and %d items", len(users), len(seenItems))
 	}
 	for i, user := range users {

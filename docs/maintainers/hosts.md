@@ -35,8 +35,9 @@ DNS name, so it works where MagicDNS does not resolve. The address must be in
 the Tailscale ranges (`100.64.0.0/10` or `fd7a:115c:a1e0::/48`); anything else
 is refused before dialing. `GET /api/v1/version` also reports the federation range
 (`minimumFederation`, `maximumFederation`): the version of what one daemon
-serves another beyond the client API, such as the launch catalog and history
-filtered by session. If the remote's protocol or federation range does not
+serves another beyond the client API, such as the launch catalog, history
+filtered by session, and project coordinators (version 3, see
+[coordinator](coordinator.md)). If the remote's protocol or federation range does not
 include this daemon's, pairing fails and the device it just issued is revoked.
 A paired host that later reports a range without this daemon's is
 `incompatible` (shown as needing an update), and nothing is forwarded to it
@@ -47,7 +48,8 @@ asks `tailscale status --json` for the peer's IPv4 address. No new port is
 opened: the remote is reached through the Tailscale Serve route it already
 has. Device tokens stay in the registry and never appear in API responses,
 logs or CLI output. `agenthail hosts remove <host>` revokes the device on the
-remote, then drops the pairing and every mirrored session.
+remote, then drops the pairing, every mirrored session and the host's mirrored
+coordinators.
 
 ## Ownership and the mirror
 

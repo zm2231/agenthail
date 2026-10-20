@@ -4,48 +4,51 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func TestRegisterSessionAndDeletePendingRejectsAliasCollisionWithoutStealing(t *testing.T) {
+func TestALaunchFoundAfterItsNameWasTakenIsRegisteredWithoutIt(t *testing.T) {
 	r, err := Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Close()
+	name, err := r.ReserveAlias("builder", time.Now().Add(50*time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Build", name, surface.Location{Workspace: "workspace-1"}, time.Now(), time.Now().Add(50*time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
 	if err := r.RegisterSession(surface.Session{ID: "owner", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
+	var reserved AliasReservedError
+	if err := r.SetAlias("builder", "owner"); !errors.As(err, &reserved) {
+		t.Fatalf("SetAlias while the launch holds the name: err=%v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
 	if err := r.SetAlias("builder", "owner"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("SetAlias after the launch's name lapsed: %v", err)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "known", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
-		t.Fatal(err)
+	launches, err := r.PendingLaunches()
+	if err != nil || len(launches) != 1 {
+		t.Fatalf("launches=%+v err=%v", launches, err)
 	}
-	var directTaken AliasTakenError
-	if err := r.SetAlias("builder", "known"); !errors.As(err, &directTaken) {
-		t.Fatalf("SetAlias collision err=%v", err)
+	named, err := r.RegisterSessionAndDeletePending(surface.Session{ID: "created", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}, launches[0])
+	if err != nil || named {
+		t.Fatalf("named=%v err=%v", named, err)
 	}
-	pendingID, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Build", "builder", surface.Location{Workspace: "workspace-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = r.RegisterSessionAndDeletePending(surface.Session{ID: "created", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}, pendingID, "builder")
-	var taken AliasTakenError
-	if !errors.As(err, &taken) {
-		t.Fatalf("err=%v", err)
-	}
-	owner, err := r.LookupAlias("builder")
-	if err != nil || owner != "owner" {
+	if owner, err := r.LookupAlias("builder"); err != nil || owner != "owner" {
 		t.Fatalf("owner=%q err=%v", owner, err)
 	}
-	pending, err := r.PendingLaunches()
-	if err != nil {
-		t.Fatal(err)
+	if _, err := r.Session("created"); err != nil {
+		t.Fatalf("the late launch is not registered: %v", err)
 	}
-	if len(pending) != 1 || pending[0].ID != pendingID {
-		t.Fatalf("pending=%+v", pending)
+	if launches, err := r.PendingLaunches(); err != nil || len(launches) != 0 {
+		t.Fatalf("launches=%+v err=%v", launches, err)
 	}
 }
 
@@ -55,22 +58,33 @@ func TestRegisterSessionAndDeletePendingKeepsIntentOnRegistrationFailure(t *test
 		t.Fatal(err)
 	}
 	defer r.Close()
-	pendingID, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Build", "builder", surface.Location{Workspace: "workspace-1"})
+	name, err := r.ReserveAlias("builder", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingID, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Build", name, surface.Location{Workspace: "workspace-1"}, time.Now(), time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.db.Exec(`CREATE TRIGGER reject_launcher_session BEFORE INSERT ON sessions BEGIN SELECT RAISE(ABORT, 'registration blocked'); END`); err != nil {
 		t.Fatal(err)
 	}
-	err = r.RegisterSessionAndDeletePending(surface.Session{ID: "created", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}, pendingID, "builder")
-	if err == nil {
+	launches, err := r.PendingLaunches()
+	if err != nil || len(launches) != 1 {
+		t.Fatalf("launches=%+v err=%v", launches, err)
+	}
+	if _, err := r.RegisterSessionAndDeletePending(surface.Session{ID: "created", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}, launches[0]); err == nil {
 		t.Fatal("registration unexpectedly succeeded")
 	}
 	pending, err := r.PendingLaunches()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pending) != 1 || pending[0].ID != pendingID || pending[0].Alias != "builder" {
+	if len(pending) != 1 || pending[0].ID != pendingID || pending[0].Alias.Name != "builder" {
 		t.Fatalf("pending=%+v", pending)
+	}
+	var reserved AliasReservedError
+	if _, err := r.ReserveAlias("builder", time.Now().Add(time.Hour)); !errors.As(err, &reserved) {
+		t.Fatalf("the failed registration released the launch's name: err=%v", err)
 	}
 }

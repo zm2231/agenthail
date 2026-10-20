@@ -112,6 +112,33 @@ type Subagent struct {
 	Role     string `json:"role,omitempty"`
 }
 
+// Delegated reports whether an agent, not the user, started the session: a
+// spawned subagent, a `codex exec` run, or one of Codex's own review and
+// compaction threads.
+func (s Session) Delegated() bool {
+	return s.Subagent != nil || s.Source == codexSourceExec || s.Source == codexSourceSubagent
+}
+
+// Session.Source holds a Codex source string, or the key of an object source.
+const (
+	codexSourceExec     = "exec"
+	codexSourceSubagent = "subAgent"
+)
+
+// ConversationID is the root of a subagent's family, or the session itself.
+func (s Session) ConversationID() string {
+	if s.Subagent == nil {
+		return s.ID
+	}
+	if s.Subagent.RootID != "" {
+		return s.Subagent.RootID
+	}
+	if s.Subagent.ParentID != "" {
+		return s.Subagent.ParentID
+	}
+	return s.ID
+}
+
 // SubagentRollup summarizes subagents a provider observes for a session
 // without exposing them as sessions of their own (Claude Code subagents).
 type SubagentRollup struct {
@@ -138,6 +165,12 @@ type StreamCursorReader interface {
 
 type LocalTranscriptProvider interface {
 	RequiresLocalTranscript(*Session) bool
+}
+
+// TranscriptItemReader is implemented by an adapter that can derive again,
+// from its transcript, every timeline item recorded at or after an offset.
+type TranscriptItemReader interface {
+	TranscriptItems(ctx context.Context, session *Session, from int64) ([]TimelineItem, error)
 }
 
 func IsReadOnlySession(session *Session) bool {
@@ -398,6 +431,12 @@ type Waker interface {
 	NeedsWake(ctx context.Context, sess *Session) bool
 }
 
+// ConversationKeeper is a surface that can tell a conversation it would
+// resume from one whose history is gone.
+type ConversationKeeper interface {
+	ConversationExists(ctx context.Context, sess *Session) (bool, error)
+}
+
 type SessionAccessChecker interface {
 	EnsureWritable(ctx context.Context, sess *Session) error
 }
@@ -485,8 +524,13 @@ type ReplyResult struct {
 	Source   string `json:"source,omitempty"`
 }
 
+// Exchange is a prompt and the reply that ended its turn. Origin names who
+// sent a prompt that was not typed by the person: "peer", with Sender naming
+// the agent, or a prompt the provider injected, such as "task-notification".
 type Exchange struct {
 	User      string    `json:"user"`
+	Origin    string    `json:"origin,omitempty"`
+	Sender    string    `json:"sender,omitempty"`
 	Assistant string    `json:"assistant"`
 	Timestamp time.Time `json:"timestamp"`
 	Source    string    `json:"source,omitempty"`

@@ -158,13 +158,15 @@ struct Capabilities: Codable, Hashable {
     var steer = false
     var attach = false
     var commands = false
+    var respond = false
+    var permissionMode = false
 
-    init(send: Bool = false, stream: Bool = false, reply: Bool = false, goal: Bool = false, compact: Bool = false, model: Bool = false, interrupt: Bool = false, steer: Bool = false, attach: Bool = false, commands: Bool = false) {
-        (self.send, self.stream, self.reply, self.goal, self.compact, self.model, self.interrupt, self.steer, self.attach, self.commands) = (send, stream, reply, goal, compact, model, interrupt, steer, attach, commands)
+    init(send: Bool = false, stream: Bool = false, reply: Bool = false, goal: Bool = false, compact: Bool = false, model: Bool = false, interrupt: Bool = false, steer: Bool = false, attach: Bool = false, commands: Bool = false, respond: Bool = false, permissionMode: Bool = false) {
+        (self.send, self.stream, self.reply, self.goal, self.compact, self.model, self.interrupt, self.steer, self.attach, self.commands, self.respond, self.permissionMode) = (send, stream, reply, goal, compact, model, interrupt, steer, attach, commands, respond, permissionMode)
     }
 
-    // A paired host on an older release omits attach and commands; it cannot
-    // store uploads or run Remote Control commands.
+    // A paired host on an older release omits attach, commands, respond and
+    // permissionMode; it cannot do any of them.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         send = try container.decode(Bool.self, forKey: .send)
@@ -177,6 +179,8 @@ struct Capabilities: Codable, Hashable {
         steer = try container.decode(Bool.self, forKey: .steer)
         attach = try container.decodeIfPresent(Bool.self, forKey: .attach) ?? false
         commands = try container.decodeIfPresent(Bool.self, forKey: .commands) ?? false
+        respond = try container.decodeIfPresent(Bool.self, forKey: .respond) ?? false
+        permissionMode = try container.decodeIfPresent(Bool.self, forKey: .permissionMode) ?? false
     }
 }
 
@@ -801,7 +805,19 @@ struct ExchangeState: Decodable, Identifiable {
     let user: String
     let assistant: String
     let timestamp: String
+    var origin: String?
+    var sender: String?
     var id: String { timestamp + user + assistant }
+
+    var promptLabel: String {
+        switch origin ?? "" {
+        case "": return "You"
+        case "peer": return sender.map { "From \($0)" } ?? "From an agent"
+        case "task-notification": return "Task notification"
+        case "auto-continuation": return "Continued"
+        default: return origin ?? "You"
+        }
+    }
 }
 
 struct ContextState: Decodable {
@@ -1238,4 +1254,127 @@ struct UploadedAttachment: Decodable, Equatable {
     let name: String
     let mediaType: String
     let bytes: Int64
+}
+
+/// A tool approval or questions an open turn waits on a person for.
+struct SessionRequest: Decodable, Hashable, Identifiable {
+    struct Option: Decodable, Hashable {
+        let label: String
+        let description: String
+    }
+
+    struct Question: Decodable, Hashable {
+        let question: String
+        let header: String
+        let multiSelect: Bool
+        let options: [Option]
+    }
+
+    let id: String
+    let kind: String
+    let tool: String
+    var title: String? = nil
+    var displayName: String? = nil
+    var description: String? = nil
+    var reason: String? = nil
+    var blockedPath: String? = nil
+    var questions: [Question]? = nil
+    let alwaysAllow: Bool
+    var input: String? = nil
+
+    var isQuestion: Bool { kind == "question" }
+    var summary: String { [title, displayName].compactMap { $0 }.first { !$0.isEmpty } ?? tool }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input
+    }
+
+    init(id: String, kind: String, tool: String, title: String? = nil, questions: [Question]? = nil, alwaysAllow: Bool = false, input: String? = nil) {
+        (self.id, self.kind, self.tool, self.title, self.questions, self.alwaysAllow, self.input) = (id, kind, tool, title, questions, alwaysAllow, input)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        kind = try container.decode(String.self, forKey: .kind)
+        tool = try container.decode(String.self, forKey: .tool)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        reason = try container.decodeIfPresent(String.self, forKey: .reason)
+        blockedPath = try container.decodeIfPresent(String.self, forKey: .blockedPath)
+        questions = try container.decodeIfPresent([Question].self, forKey: .questions)
+        alwaysAllow = try container.decodeIfPresent(Bool.self, forKey: .alwaysAllow) ?? false
+        if let raw = try container.decodeIfPresent(RequestInput.self, forKey: .input), let data = try? JSONEncoder().encode(raw) {
+            input = String(data: data, encoding: .utf8)
+        }
+    }
+}
+
+/// A person's answer to a request: a notification button's `choice`, or a
+/// `behavior` with an optional `always`, `message` or `answers`.
+struct RequestDecision: Encodable, Hashable, Sendable {
+    var choice: String? = nil
+    var behavior: String? = nil
+    var always: Bool? = nil
+    var message: String? = nil
+    var answers: [String: String]? = nil
+
+    static let allow = RequestDecision(behavior: "allow")
+    static let alwaysAllow = RequestDecision(behavior: "allow", always: true)
+    static let deny = RequestDecision(behavior: "deny")
+    static func answers(_ answers: [String: String]) -> RequestDecision { RequestDecision(behavior: "allow", answers: answers) }
+    static func choice(_ choice: String) -> RequestDecision { RequestDecision(choice: choice) }
+}
+
+/// A session's open requests, oldest first, and the permission mode it runs
+/// in, empty when it runs in its settings' default.
+struct SessionRequests: Decodable, Hashable {
+    let permissionMode: String
+    let requests: [SessionRequest]
+
+    /// The modes a person can change a running session into; an empty mode is
+    /// the settings' default, which a session can start in but not be set to.
+    static let permissionModes = ["acceptEdits", "auto", "plan", "manual", "dontAsk", "bypassPermissions"]
+
+    static func permissionModeLabel(_ mode: String) -> String {
+        switch mode {
+        case "": return "Default (Claude settings)"
+        case "acceptEdits": return "Accept edits"
+        case "auto": return "Auto"
+        case "plan": return "Plan"
+        case "manual": return "Manual"
+        case "dontAsk": return "Don't ask"
+        case "bypassPermissions": return "Bypass permissions"
+        default: return mode
+        }
+    }
+}
+
+/// A request's tool input, kept only to show it as JSON.
+private indirect enum RequestInput: Codable {
+    case string(String), number(Double), bool(Bool), null
+    case array([RequestInput]), object([String: RequestInput])
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { self = .null }
+        else if let value = try? container.decode(Bool.self) { self = .bool(value) }
+        else if let value = try? container.decode(Double.self) { self = .number(value) }
+        else if let value = try? container.decode(String.self) { self = .string(value) }
+        else if let value = try? container.decode([RequestInput].self) { self = .array(value) }
+        else { self = .object(try container.decode([String: RequestInput].self)) }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        case .null: try container.encodeNil()
+        case .array(let value): try container.encode(value)
+        case .object(let value): try container.encode(value)
+        }
+    }
 }

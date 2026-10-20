@@ -618,6 +618,110 @@ func TestOpenAddsQueueUploadsToARegistryAtTheVersionBefore(t *testing.T) {
 	}
 }
 
+func TestOpenUpgradesTheProjectsTableReleasedBeforeAddedProjects(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`DROP TABLE projects`,
+		`CREATE TABLE projects (id TEXT PRIMARY KEY, kind TEXT NOT NULL, root_path TEXT NOT NULL, display_name TEXT NOT NULL, registered INTEGER NOT NULL DEFAULT 0, archived_at_ms INTEGER NOT NULL DEFAULT 0)`,
+		`INSERT INTO projects VALUES('project-aaa','folder','/work/notes','notes',1,0)`,
+		`INSERT INTO projects VALUES('project-bbb','repo','/work/app','app',0,1760000000000)`,
+		`INSERT INTO projects VALUES('project-ccc','repo','/work/lib','lib',0,0)`,
+		`INSERT INTO projects VALUES('project-ddd','folder','/work/site','site',1,0)`,
+		`INSERT INTO projects VALUES('project-eee','repo','/work/site','site',0,1761000000000)`,
+		`PRAGMA user_version=22`,
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	projects, err := r.ListProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]ProjectRecord{}
+	for _, project := range projects {
+		got[project.WorkspaceRoot] = project
+	}
+	if len(got) != 3 || len(projects) != 3 {
+		t.Fatalf("projects=%+v", projects)
+	}
+	if site := got["/work/site"]; site.ID != "p-project-ddd" || !site.Added || site.ArchivedAt.UnixMilli() != 1761000000000 {
+		t.Fatalf("folder sharing a root with an archived repository=%+v", site)
+	}
+	if notes := got["/work/notes"]; notes.ID != "p-project-aaa" || !notes.Added || notes.Title != "notes" || !notes.ArchivedAt.IsZero() {
+		t.Fatalf("registered folder=%+v", notes)
+	}
+	if app := got["/work/app"]; app.ID != "implicit:/work/app" || app.Added || app.ArchivedAt.UnixMilli() != 1760000000000 {
+		t.Fatalf("archived repository=%+v", app)
+	}
+	var leftover int
+	if err := r.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='projects_released'`).Scan(&leftover); err != nil || leftover != 0 {
+		t.Fatalf("leftover=%d err=%v", leftover, err)
+	}
+}
+
+func TestOpenAddsCoordinatorsToARegistryAtTheVersionBefore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, r, "first", "second")
+	for _, statement := range []string{
+		`DROP TABLE coordinator_replaced`,
+		`DROP TABLE coordinator_history`,
+		`DROP TABLE coordinators`,
+		`PRAGMA user_version=23`,
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var version int
+	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("user_version=%d err=%v", version, err)
+	}
+	spec := CoordinatorSpec{ProjectID: "repo:example/app", ProjectRoot: "/work/app", Name: "app-lead", Surface: "codex", Cwd: "/work/app"}
+	if _, err := r.SetCoordinator(spec, CoordinatorChange{SessionID: "first", ChangedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.HandOverCoordinator(spec, "first", "second"); err != nil {
+		t.Fatal(err)
+	}
+	coordinators, err := r.LocalCoordinators()
+	if err != nil || len(coordinators) != 1 || coordinators[0].SessionID != "second" {
+		t.Fatalf("coordinators=%+v err=%v", coordinators, err)
+	}
+	replaced, ok, err := r.CoordinatorOfSession("first")
+	if err != nil || !ok || replaced.Name != "app-lead" {
+		t.Fatalf("replaced conversation's coordinator=%+v ok=%v err=%v", replaced, ok, err)
+	}
+	history, err := r.CoordinatorHistory(spec.ProjectID)
+	if err != nil || len(history) != 1 || history[0].SessionID != "first" {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+}
+
 func TestOpenRefusesARegistryANewerAgenthailMigrated(t *testing.T) {
 	for _, journal := range []string{"WAL", "DELETE"} {
 		t.Run(journal, func(t *testing.T) {
@@ -744,4 +848,43 @@ func registryFiles(t *testing.T, path string) map[string]string {
 		}
 	}
 	return files
+}
+
+func TestOpenHoldsNoNameForALaunchPendingAtTheVersionBefore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, r, "first")
+	for _, statement := range []string{
+		`DROP TABLE alias_reservations`,
+		`DROP TABLE launcher_pending`,
+		`CREATE TABLE launcher_pending (id INTEGER PRIMARY KEY AUTOINCREMENT, launcher TEXT NOT NULL, agent TEXT NOT NULL, cwd TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '', alias TEXT NOT NULL DEFAULT '', location BLOB NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')))`,
+		`INSERT INTO launcher_pending(launcher,agent,cwd,alias,location,created_at) VALUES('tmux','claude','/work/app','builder','{"workspace":"w"}','2026-10-18 07:35:43')`,
+		`PRAGMA user_version=24`,
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var version int
+	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("user_version=%d err=%v", version, err)
+	}
+	pending, err := r.PendingLaunches()
+	if err != nil || len(pending) != 1 || pending[0].Alias.Name != "builder" || !pending[0].ExpiresAt.Before(time.Now()) {
+		t.Fatalf("pending=%+v err=%v", pending, err)
+	}
+	if err := r.SetAlias("builder", "first"); err != nil {
+		t.Fatalf("a launch pending before the upgrade holds its name: %v", err)
+	}
 }

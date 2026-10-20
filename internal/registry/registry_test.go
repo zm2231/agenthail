@@ -1172,7 +1172,11 @@ func TestReadsDoNotWaitForAWriterBlockedOnAnotherProcess(t *testing.T) {
 			readsDone <- err
 			return
 		}
-		readsDone <- r.EnsureAliasAvailable("unclaimed")
+		_, err := r.LookupAlias("unclaimed")
+		if errors.Is(err, sql.ErrNoRows) {
+			err = nil
+		}
+		readsDone <- err
 	}()
 	select {
 	case err := <-readsDone:

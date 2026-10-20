@@ -57,6 +57,12 @@ type Batch struct {
 	Lost   bool
 }
 
+// Deliverer sends a delegated turn to its target session and updates session
+// when another conversation took it. delivery.Dispatcher is one.
+type Deliverer interface {
+	DeliverWithoutQueue(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions) (*delivery.Receipt, error)
+}
+
 type Provider interface {
 	Create(context.Context, string, string) (*surface.Session, error)
 	Cursor(context.Context) (Cursor, error)
@@ -135,7 +141,7 @@ type Service struct {
 	eventGap                bool
 	commandPath             string
 	target                  TargetResolver
-	dispatcher              delivery.Dispatcher
+	dispatcher              Deliverer
 	setOperatorSourceActive func(session *surface.Session, active bool)
 	stream                  SessionStreamProvider
 	operatorSourceActive    bool
@@ -182,19 +188,19 @@ func New(path string, provider Provider, register func(surface.Session) error, c
 	return NewWithTargets(path, provider, register, commandPath, nil, delivery.Dispatcher{})
 }
 
-func NewWithTargets(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher delivery.Dispatcher) *Service {
+func NewWithTargets(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer) *Service {
 	return NewWithTargetsAndOperatorSource(path, provider, register, commandPath, target, dispatcher, nil)
 }
 
-func NewWithTargetsAndOperatorSource(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher delivery.Dispatcher, setOperatorSourceActive func(session *surface.Session, active bool)) *Service {
+func NewWithTargetsAndOperatorSource(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer, setOperatorSourceActive func(session *surface.Session, active bool)) *Service {
 	return NewWithTargetsAndOperatorSourceAndStream(path, provider, register, commandPath, target, dispatcher, setOperatorSourceActive, nil)
 }
 
-func NewWithTargetsAndOperatorSourceAndStream(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher delivery.Dispatcher, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider) *Service {
+func NewWithTargetsAndOperatorSourceAndStream(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider) *Service {
 	return newService(path, provider, register, commandPath, target, dispatcher, setOperatorSourceActive, stream, systemClock)
 }
 
-func newService(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher delivery.Dispatcher, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider, clock clock) *Service {
+func newService(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider, clock clock) *Service {
 	s := &Service{path: path, provider: provider, register: register, commandPath: commandPath, target: target, dispatcher: dispatcher, setOperatorSourceActive: setOperatorSourceActive, stream: stream, clock: clock, speechTimeout: delegatedSpeechTimeout}
 	s.background, s.stop = context.WithCancel(context.Background())
 	s.state.State = State{Protocol: 1, Phase: "idle", Events: []Event{}}

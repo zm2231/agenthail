@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -30,10 +31,7 @@ func (l *launcherFixture) Agents() []surface.SurfaceKind            { return l.a
 func (l *launcherFixture) Available(context.Context) (bool, string) { return true, "fixture" }
 func (l *launcherFixture) Launch(context.Context, surface.LaunchRequest) (surface.LaunchResult, error) {
 	l.launches++
-	if l.launchErr != nil {
-		return surface.LaunchResult{}, l.launchErr
-	}
-	return l.result, nil
+	return l.result, l.launchErr
 }
 
 func (l *launcherFixture) SessionOptions() bool {
@@ -149,8 +147,12 @@ func TestSessionCreateTerminalLocationPersistsPendingWithoutGuessingID(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pending) != 1 || pending[0].Location.Workspace != location.Workspace || pending[0].Alias != "builder" {
+	if len(pending) != 1 || pending[0].Location.Workspace != location.Workspace || pending[0].Alias.Name != "builder" {
 		t.Fatalf("pending=%+v", pending)
+	}
+	var reserved registry.AliasReservedError
+	if err := r.SetAlias("builder", "from"); !errors.As(err, &reserved) {
+		t.Fatalf("another session took the pending launch's name: err=%v", err)
 	}
 	launcher.locations = map[string]surface.Location{"created": {Workspace: "workspace-1", Surface: "surface-1"}}
 	d.correlatePendingLaunches(context.Background(), []surface.Session{{ID: "created", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: cwd, Status: surface.StatusIdle}})
@@ -237,6 +239,22 @@ func TestSessionCreateRejectsAliasCollisionBeforeLaunch(t *testing.T) {
 	}
 }
 
+func TestSessionCreateRejectsAnUnstartedCoordinatorsNameBeforeLaunch(t *testing.T) {
+	d, r, fake, _, _ := daemonFixture(t)
+	fake.kind = surface.KindClaude
+	d.Surfaces = []surface.Surface{fake}
+	cwd := t.TempDir()
+	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: "project-fixture", ProjectRoot: cwd, Name: "fixture-lead", Surface: string(surface.KindClaude), Cwd: cwd}, registry.CoordinatorChange{}); err != nil {
+		t.Fatal(err)
+	}
+	launcher := &launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}}
+	d.SetLaunchers([]surface.Launcher{launcher})
+	w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello","alias":"fixture-lead"}`)
+	if w.Code != http.StatusBadRequest || launcher.launches != 0 || !strings.Contains(w.Body.String(), "coordinator") {
+		t.Fatalf("status=%d launches=%d body=%s", w.Code, launcher.launches, w.Body.String())
+	}
+}
+
 func TestSessionCreateRejectsMissingLauncherSurfaceBeforeLaunch(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
 	fake.kind = surface.KindCodex
@@ -274,7 +292,7 @@ func TestPendingCorrelationFiltersAgentAndCwd(t *testing.T) {
 		"claude": {Workspace: "workspace-1", Surface: "surface-1"},
 	}}
 	d.SetLaunchers([]surface.Launcher{launcher})
-	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Created", "", surface.Location{Workspace: "workspace-1"}); err != nil {
+	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Created", registry.AliasReservation{}, surface.Location{Workspace: "workspace-1"}, time.Now(), time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	d.correlatePendingLaunches(context.Background(), []surface.Session{
@@ -298,7 +316,7 @@ func TestWorkspaceOnlyLaunchCorrelationUsesDiscoveredLocation(t *testing.T) {
 	fullLocation := surface.Location{Workspace: "workspace-1", Surface: "surface-1"}
 	launcher := &launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}, locations: map[string]surface.Location{"created": fullLocation}}
 	d.SetLaunchers([]surface.Launcher{launcher})
-	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Created", "", location); err != nil {
+	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Created", registry.AliasReservation{}, location, time.Now(), time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	d.correlatePendingLaunches(context.Background(), []surface.Session{{ID: "created", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: "/repo", Status: surface.StatusIdle}})

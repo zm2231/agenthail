@@ -147,6 +147,7 @@ func (a *App) threadOperationRemote(ctx context.Context, remote *remoteTarget, o
 	case "fork":
 		payload["action"] = "session-fork"
 		payload["fork"] = surface.ForkOptions{Model: flagVal(args, "--model"), LastTurnID: flagVal(args, "--last-turn")}
+		payload["alias"] = strings.TrimPrefix(flagVal(args, "--alias"), "@")
 	case "queue":
 		if len(positional) < 3 {
 			return fmt.Errorf("native queue action is required")
@@ -162,18 +163,6 @@ func (a *App) threadOperationRemote(ctx context.Context, remote *remoteTarget, o
 	result, err := a.remoteAction(ctx, remote, operation, payload)
 	if err != nil {
 		return err
-	}
-	if alias := strings.TrimPrefix(flagVal(args, "--alias"), "@"); operation == "fork" && alias != "" {
-		var forked struct {
-			Session surface.Session `json:"session"`
-		}
-		if err := json.Unmarshal(result, &forked); err != nil || forked.Session.ID == "" {
-			return fmt.Errorf("fork of %s returned no session", remote.label())
-		}
-		fork := remoteTarget{ID: forked.Session.ID, Surface: forked.Session.Surface, Host: remote.Host}
-		if _, err := a.remoteAction(ctx, &fork, "name", map[string]any{"action": "alias", "alias": alias}); err != nil {
-			return err
-		}
 	}
 	return json.NewEncoder(os.Stdout).Encode(result)
 }

@@ -10,6 +10,9 @@ final class AgenthailIOSModel: ObservableObject {
 
     @Published var snapshot: DashboardSnapshot?
     @Published var selectedDetail: SessionDetail?
+    @Published var sessionRequests: SessionRequests?
+    @Published var answeringRequest: String?
+    private var sessionRequestsKey: String?
     @Published var selectedSessionID: String?
     @Published var connectionError: String?
     @Published var reconnecting = false
@@ -453,6 +456,8 @@ final class AgenthailIOSModel: ObservableObject {
             composerAttachments = attachmentDrafts[id] ?? []
             attachmentProblem = nil
             selectedDetail = nil
+            sessionRequests = nil
+            sessionRequestsKey = nil
             olderActivity = []
             activityCursor = nil
             olderActivityError = nil
@@ -490,6 +495,58 @@ final class AgenthailIOSModel: ObservableObject {
             sessionError = error.localizedDescription
         }
         await refreshDeliveries()
+    }
+
+    func syncRequests(for session: SessionState) async {
+        guard session.capabilities.respond, !session.isReadOnly else {
+            sessionRequests = nil
+            sessionRequestsKey = nil
+            return
+        }
+        let key = "\(session.id)|\(session.waitingOn?.id ?? "")"
+        guard sessionRequestsKey != key else { return }
+        sessionRequestsKey = key
+        await fetchRequests(session.id, key: key)
+    }
+
+    private func fetchRequests(_ id: String, key: String?) async {
+        guard let api else { return }
+        do {
+            let requests = try await api.requests(sessionID: id)
+            guard selectedSessionID == id, sessionRequestsKey == key else { return }
+            sessionRequests = requests
+        } catch {
+            guard selectedSessionID == id else { return }
+            sessionRequestsKey = nil
+            operationError = error.localizedDescription
+        }
+    }
+
+    func respond(to request: SessionRequest, sessionID: String, decision: RequestDecision) async {
+        guard let api, answeringRequest == nil else { return }
+        answeringRequest = request.id
+        defer { answeringRequest = nil }
+        do {
+            _ = try await api.respond(sessionID: sessionID, requestID: request.id, decision: decision)
+            operationError = nil
+        } catch AgenthailAPIError.request(409, _) {
+            operationError = "That request was already answered or has expired."
+        } catch {
+            operationError = error.localizedDescription
+        }
+        await fetchRequests(sessionID, key: sessionRequestsKey)
+        await refreshSession(sessionID)
+    }
+
+    func setPermissionMode(_ mode: String, sessionID: String) async {
+        guard let api else { return }
+        do {
+            try await api.setPermissionMode(sessionID: sessionID, mode: mode)
+            operationError = nil
+        } catch {
+            operationError = error.localizedDescription
+        }
+        await fetchRequests(sessionID, key: sessionRequestsKey)
     }
 
     private func refreshDeliveries() async {

@@ -28,7 +28,7 @@ const (
 // catalogProject is the project a session belongs to. ID is Key when the
 // project has one, so every host's checkout of it is one project; otherwise
 // it is LocalID, this host's own id for it.
-type catalogProject struct {
+type CatalogProject struct {
 	ID          string              `json:"id"`
 	LocalID     string              `json:"localId"`
 	DisplayName string              `json:"displayName"`
@@ -50,7 +50,7 @@ type catalogCheckout struct {
 }
 
 type catalogIdentity struct {
-	Project           *catalogProject `json:"project,omitempty"`
+	Project           *CatalogProject `json:"project,omitempty"`
 	Checkout          catalogCheckout `json:"checkout"`
 	UnavailableReason string          `json:"unavailableReason,omitempty"`
 }
@@ -69,7 +69,7 @@ type catalogIdentityCache struct {
 	entries map[string]catalogIdentityEntry
 	// known keeps the last resolved project per path past the TTL, so a git
 	// failure that is not "not a repository" never moves a session.
-	known        map[string]*catalogProject
+	known        map[string]*CatalogProject
 	projects     []registry.ProjectRecord
 	repositories catalogRepositoryCache
 	roots        map[string]catalogRootEntry
@@ -91,7 +91,7 @@ type catalogIdentityEntry struct {
 }
 
 func newCatalogIdentityCache() *catalogIdentityCache {
-	return &catalogIdentityCache{entries: map[string]catalogIdentityEntry{}, known: map[string]*catalogProject{}, repositories: catalogRepositoryCache{}, roots: map[string]catalogRootEntry{}}
+	return &catalogIdentityCache{entries: map[string]catalogIdentityEntry{}, known: map[string]*CatalogProject{}, repositories: catalogRepositoryCache{}, roots: map[string]catalogRootEntry{}}
 }
 
 // setProjects replaces the added projects. A changed set drops the cached
@@ -138,7 +138,7 @@ func (c *catalogIdentityCache) rootRepository(ctx context.Context, root string, 
 // identity resolves a session's project and checkout. prior reads the project
 // last stored for the session; it is used when git fails and this cache has
 // never resolved the path.
-func (c *catalogIdentityCache) identity(ctx context.Context, session surface.Session, now time.Time, prior func() *catalogProject) catalogIdentity {
+func (c *catalogIdentityCache) identity(ctx context.Context, session surface.Session, now time.Time, prior func() *CatalogProject) catalogIdentity {
 	path, err := catalogSessionPath(session.Cwd)
 	if err != nil || path == "" {
 		return catalogIdentity{Project: prior(), UnavailableReason: "workspace path is unavailable"}
@@ -280,12 +280,12 @@ func (repository catalogRepository) key(root string) string {
 	return project.Key(repository.repository.CanonicalKey, filepath.ToSlash(rel))
 }
 
-func (repository catalogRepository) implicitProject() *catalogProject {
+func (repository catalogRepository) implicitProject() *CatalogProject {
 	name := catalogProjectName(repository.mainRoot)
 	if repository.repository != nil {
 		name = repository.repository.Name
 	}
-	found := &catalogProject{LocalID: catalogImplicitProjectID(repository.mainRoot), DisplayName: name, RootPath: repository.mainRoot, Kind: catalogProjectGit, Key: repository.key(repository.mainRoot), Repository: repository.repository}
+	found := &CatalogProject{LocalID: catalogImplicitProjectID(repository.mainRoot), DisplayName: name, RootPath: repository.mainRoot, Kind: catalogProjectGit, Key: repository.key(repository.mainRoot), Repository: repository.repository}
 	found.ID = found.LocalID
 	if found.Key != "" {
 		found.ID = found.Key
@@ -295,8 +295,8 @@ func (repository catalogRepository) implicitProject() *catalogProject {
 
 func catalogImplicitProjectID(mainRoot string) string { return "implicit:" + mainRoot }
 
-func addedCatalogProject(record registry.ProjectRecord, inRepository bool) *catalogProject {
-	found := &catalogProject{ID: record.ID, LocalID: record.ID, DisplayName: record.Title, RootPath: record.WorkspaceRoot, Kind: catalogProjectFolder, Added: true}
+func addedCatalogProject(record registry.ProjectRecord, inRepository bool) *CatalogProject {
+	found := &CatalogProject{ID: record.ID, LocalID: record.ID, DisplayName: record.Title, RootPath: record.WorkspaceRoot, Kind: catalogProjectFolder, Added: true}
 	if inRepository {
 		found.Kind = catalogProjectGit
 	}

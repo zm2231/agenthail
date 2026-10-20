@@ -2,7 +2,6 @@ package surfaces
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -1194,34 +1193,34 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		offset += int64(len(prefix))
 	}
 	deadline := time.Now().Add(timeout)
-	currentTurnID := ""
-	if state.hasCurrent {
-		hasTurnStart, scanErr := claudeTranscriptHasTurnStart(ctx, path, offset)
-		if scanErr != nil {
-			return scanErr
-		}
-		if !hasTurnStart {
-			currentTurnID = state.current.UserID
-		}
+	file, err := os.Open(path)
+	if err != nil {
+		return err
 	}
-	terminalTurns := map[string]bool{}
+	replayed, err := claudeTurnStateAt(ctx, file, offset)
+	file.Close()
+	if err != nil {
+		return err
+	}
+	turns := newClaudeTurnTracker(replayed.current, closing)
 	completed := false
-	finish := func(turnID, key string) {
-		if terminalTurns[turnID] {
-			return
-		}
-		terminalTurns[turnID] = true
-		onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: 1, Operation: "phase", TurnID: turnID, Kind: "done"})
-		if uuid != "" && turnID == uuid {
-			completed = true
+	finish := func(ended []claudeTurnEnd) {
+		for _, end := range ended {
+			if uuid != "" && end.TurnID != uuid && end.Status == "" {
+				continue
+			}
+			onEvent(surface.StreamEvent{ID: end.Key, ProviderKey: "timeline:" + end.Key, Version: 1, Operation: "phase", TurnID: end.TurnID, Kind: "done", Status: end.Status})
+			if uuid != "" && end.TurnID == uuid && end.Status == "" {
+				completed = true
+			}
 		}
 	}
 	for time.Now().Before(deadline) {
 		// A closing turn belongs to the bytes before offset; a rewritten transcript drops it.
 		// The anchor then rolls forward over the bytes this scan parses, never a later read.
 		tail, tailErr := transcriptTail(path, offset)
-		if closing.TurnID != "" && (tailErr != nil || anchorOf(tail) != closing.Anchor) {
-			closing = surface.ClaudeClosingTurn{}
+		if turns.closing.TurnID != "" && (tailErr != nil || anchorOf(tail) != turns.closing.Anchor) {
+			turns.closing = surface.ClaudeClosingTurn{}
 		}
 		lineOffset := offset
 		next, scanErr := scanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
@@ -1235,31 +1234,15 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			if json.Unmarshal(line, &record) != nil {
 				return nil
 			}
-			messageID := strNested(record, "message", "id")
-			if closing.TurnID != "" && !claudeRecordContinuesMessage(str(record, "type"), messageID, closing.MessageID) {
-				if !claudeRecordIsInterrupt(record) {
-					finish(closing.TurnID, closing.Key)
-				}
-				closing = surface.ClaudeClosingTurn{}
+			items := claudeTimelineItems(record)
+			turnID, ended, interrupted := turns.observe(record, recordOffset, line, len(items))
+			if interrupted && uuid != "" && turnID == uuid {
+				return fmt.Errorf("Claude turn %s was interrupted", uuid)
 			}
-			turnID := currentTurnID
-			if claudeRecordStartsTurn(record) {
-				currentTurnID = str(record, "uuid")
-				turnID = currentTurnID
-			}
-			done, ending, interrupted := claudeStreamTerminal(record)
+			finish(ended)
 			if interrupted {
-				if uuid != "" && turnID == uuid {
-					return fmt.Errorf("Claude turn %s was interrupted", uuid)
-				}
-				if turnID != "" && !terminalTurns[turnID] {
-					terminalTurns[turnID] = true
-					key := stableTimelineItemID(recordOffset, line, 0)
-					onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: 1, Operation: "phase", TurnID: turnID, Kind: "done", Status: "cancelled"})
-				}
 				return nil
 			}
-			items := claudeTimelineItems(record)
 			if err := decorateTimelineAttachments(ctx, items, record, "claude", recordOffset); err != nil {
 				return err
 			}
@@ -1278,34 +1261,21 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 				at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
 				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Files: item.Files, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
 			}
-			if turnID == "" {
-				return nil
-			}
-			key := stableTimelineItemID(recordOffset, line, len(items))
-			if ending {
-				at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
-				closing = surface.ClaudeClosingTurn{TurnID: turnID, MessageID: messageID, Key: key, At: at}
-			} else if done {
-				finish(turnID, key)
-			}
 			return nil
 		})
 		if scanErr != nil {
 			return scanErr
 		}
 		offset = next
-		if closing.TurnID != "" && c.settledAfter(sess, closing.At) {
-			finish(closing.TurnID, closing.Key)
-			closing = surface.ClaudeClosingTurn{}
-		}
-		if closing.TurnID != "" {
-			closing.Anchor = anchorOf(tail)
+		finish(turns.settle(func(at time.Time) bool { return c.settledAfter(sess, at) }))
+		if turns.closing.TurnID != "" {
+			turns.closing.Anchor = anchorOf(tail)
 		}
 		if uuid == "" {
 			sess.TranscriptOffset = offset
 			sess.TranscriptOffsetSet = true
 			sess.TranscriptIdentity = identity
-			sess.ClaudeClosingTurn = closing
+			sess.ClaudeClosingTurn = turns.closing
 		}
 		if completed {
 			return nil
@@ -1317,25 +1287,6 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		}
 	}
 	return fmt.Errorf("stream timed out after %s: %w", timeout, surface.ErrStreamWindow)
-}
-
-var errClaudeTurnStartFound = errors.New("claude turn start found")
-
-func claudeTranscriptHasTurnStart(ctx context.Context, path string, offset int64) (bool, error) {
-	_, err := scanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
-		if !bytes.Contains(line, []byte(`"user"`)) {
-			return nil
-		}
-		var record map[string]any
-		if json.Unmarshal(line, &record) == nil && claudeRecordStartsTurn(record) {
-			return errClaudeTurnStartFound
-		}
-		return nil
-	})
-	if errors.Is(err, errClaudeTurnStartFound) {
-		return true, nil
-	}
-	return false, err
 }
 
 func claudeRecordStartsTurn(record map[string]any) bool {

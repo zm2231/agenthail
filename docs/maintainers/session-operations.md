@@ -25,7 +25,8 @@ saved session; `--project`, `--cwd` and `--archived`
 need the daemon.
 
 `agenthail project list [--all]`, `project add <path>`, and
-`project <archive|unarchive> <name|id>` manage projects.
+`project <archive|unarchive> <name|id>` manage projects. `project list` names
+each project's coordinator in its LEAD column.
 `agenthail thread <archive|unarchive> <target>` archives one session. Both route
 to the host that owns the project or session.
 
@@ -42,7 +43,9 @@ identity.
 `agenthail last <target> [count] --timeout 30s` and
 `agenthail reply <target> --timeout 30s` use one bounded session reader. The
 newest page is returned first, text and JSON identify the source, and JSON
-includes `nextBefore`. A page holds at most `count` exchanges and the activity
+includes `nextBefore`. `count` is between 1 and 50. Text output gives each
+exchange's time and who sent its prompt: `you`, `from <agent>`, `task
+notification`, or the provider's label. A page holds at most `count` exchanges and the activity
 recorded alongside them, and `nextBefore` addresses the record before the oldest
 exchange on the page, so `--before <nextBefore>` reads the preceding page with
 no gap. Past the oldest journal entry, the cursor continues into the provider
@@ -106,7 +109,23 @@ both were attempted; a question recorded but not yet announced when the daemon
 stops is announced after it restarts. Both notifications carry a key derived
 from the session and question: the desktop notification identifier and the APNs
 `apns-collapse-id`, so an announcement repeated after a stop replaces the one
-already shown rather than adding a second. While a target waits, nothing is
+already shown rather than adding a second. When the session's provider takes
+answers through Agenthail, the announcement reads the open request at that
+moment. The desktop notification shows its prompt, the first question's for a
+request with several, and its buttons: `allow`, `always`, `deny` and `reply`
+for an approval, or `o0` to `o3` for a single question's options and `reply`.
+Apple documents only that a banner shows the first two actions; what the
+expanded view shows of five is checked on a device. Several questions, or one
+that takes several answers, get no buttons, since a notification answer
+carries one choice or one line of text; opening the notification opens the
+session with the request above its message box. The push stays generic and
+adds only the request ID; the phone fetches the prompt and buttons from
+`GET /api/v1/requests`, which returns each open request with `prompt` and
+`actions`. A button answers with `respond` and `decision.choice`, plus
+`decision.message` for `reply`, which answers a question with that text or
+denies an approval with it as the reason. A choice is resolved against the
+request as it is then: one it no longer offers is refused, and an answered
+request is `stale`. While a target waits, nothing is
 steered into it, and a peer socket message is not held: Claude keeps it queued
 behind the question or prompt without answering or dismissing it. `send` under
 the `steer` policy to a target without a peer socket, and `steer`, queue a steer,

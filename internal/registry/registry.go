@@ -54,7 +54,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 22
+	schemaVersion   = 25
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -147,7 +147,13 @@ func migrateTx(tx *sql.Tx) error {
 	if version > schemaVersion {
 		return &NewerSchemaError{Found: version, Supported: schemaVersion}
 	}
+	if err := setAsideReleasedProjectsTable(tx); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(schema); err != nil {
+		return err
+	}
+	if err := upgradeReleasedProjectsTable(tx); err != nil {
 		return err
 	}
 	if err := ensureHostIdentity(tx); err != nil {
@@ -157,6 +163,9 @@ func migrateTx(tx *sql.Tx) error {
 		return err
 	}
 	if err := ensureColumn(tx, "routes", "active", `INTEGER NOT NULL DEFAULT 1`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "session_journal_state", "derived_version", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
 	for _, column := range []struct {
@@ -239,6 +248,12 @@ func migrateTx(tx *sql.Tx) error {
 		}
 	}
 	if err := ensureColumn(tx, "launcher_pending", "alias", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "launcher_pending", "token", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "launcher_pending", "expires_at_ms", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
 	if err := ensureColumn(tx, "session_journal_state", "source_epoch", `TEXT NOT NULL DEFAULT ''`); err != nil {
@@ -405,6 +420,48 @@ func dropQueueExpiry(tx *sql.Tx) error {
 	return nil
 }
 
+// setAsideReleasedProjectsTable renames the projects table that v0.2.43 and
+// v0.2.44 created (kind, root_path, display_name, registered) so the schema can
+// create the current one.
+func setAsideReleasedProjectsTable(tx *sql.Tx) error {
+	released, err := columnExists(tx, "projects", "root_path")
+	if err != nil || !released {
+		return err
+	}
+	_, err = tx.Exec(`ALTER TABLE projects RENAME TO projects_released`)
+	return err
+}
+
+// upgradeReleasedProjectsTable carries the released table's rows into the
+// current one: a registered folder becomes an added project, and an archived
+// repository becomes the archive row of its implicit project. Rows that share a
+// root collapse into one, keeping the added project and the latest archive time.
+func upgradeReleasedProjectsTable(tx *sql.Tx) error {
+	var name string
+	err := tx.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='projects_released'`).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO projects(id,workspace_root,title,added,archived_at_ms)
+		SELECT 'p-' || MIN(id), root_path, MIN(display_name), 1,
+			(SELECT MAX(archived_at_ms) FROM projects_released other WHERE other.root_path=folder.root_path)
+		FROM projects_released folder WHERE registered=1 GROUP BY root_path`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO projects(id,workspace_root,title,added,archived_at_ms)
+		SELECT 'implicit:' || root_path, root_path, MIN(display_name), 0, MAX(archived_at_ms)
+		FROM projects_released WHERE registered=0 AND archived_at_ms>0
+			AND root_path NOT IN (SELECT workspace_root FROM projects)
+		GROUP BY root_path`); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`DROP TABLE projects_released`)
+	return err
+}
+
 func columnExists(tx *sql.Tx, table, name string) (bool, error) {
 	rows, err := tx.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
@@ -455,6 +512,37 @@ CREATE TABLE IF NOT EXISTS sessions (
 	subagent_depth INTEGER NOT NULL DEFAULT 0,
 	agent_nickname TEXT NOT NULL DEFAULT '', agent_role TEXT NOT NULL DEFAULT '',
 	host_id TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS coordinators (
+	project_id TEXT NOT NULL,
+	host_id TEXT NOT NULL DEFAULT '',
+	project_root TEXT NOT NULL DEFAULT '',
+	name TEXT NOT NULL,
+	surface TEXT NOT NULL,
+	cwd TEXT NOT NULL DEFAULT '',
+	model TEXT NOT NULL DEFAULT '',
+	permission_mode TEXT NOT NULL DEFAULT '',
+	instructions TEXT NOT NULL DEFAULT '',
+	session_id TEXT NOT NULL DEFAULT '',
+	changed_by TEXT NOT NULL DEFAULT '',
+	changed_at_ms INTEGER NOT NULL,
+	PRIMARY KEY (project_id, host_id),
+	UNIQUE (name, host_id)
+);
+CREATE TABLE IF NOT EXISTS coordinator_history (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	project_id TEXT NOT NULL,
+	action TEXT NOT NULL CHECK (action IN ('set','replaced','cleared')),
+	name TEXT NOT NULL,
+	session_id TEXT NOT NULL DEFAULT '',
+	previous_name TEXT NOT NULL DEFAULT '',
+	previous_session_id TEXT NOT NULL DEFAULT '',
+	changed_by TEXT NOT NULL DEFAULT '',
+	at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS coordinator_replaced (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	project_id TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS session_rekeys (
 	old_id TEXT PRIMARY KEY, new_id TEXT NOT NULL,
@@ -535,8 +623,15 @@ CREATE TABLE IF NOT EXISTS launcher_pending (
 	cwd TEXT NOT NULL DEFAULT '',
 	name TEXT NOT NULL DEFAULT '',
 	alias TEXT NOT NULL DEFAULT '',
+	token TEXT NOT NULL DEFAULT '',
+	expires_at_ms INTEGER NOT NULL DEFAULT 0,
 	location BLOB NOT NULL,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS alias_reservations (
+	name TEXT PRIMARY KEY,
+	token TEXT NOT NULL,
+	expires_at_ms INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS relay_sources (
     source_key TEXT PRIMARY KEY,
@@ -648,7 +743,8 @@ CREATE TABLE IF NOT EXISTS session_journal_state (
 	seed_status TEXT NOT NULL DEFAULT 'unknown',
 	seed_seq INTEGER NOT NULL DEFAULT 0,
 	seed_identity TEXT NOT NULL DEFAULT '',
-	history_before INTEGER NOT NULL DEFAULT -1
+	history_before INTEGER NOT NULL DEFAULT -1,
+	derived_version INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS session_journal_bodies (
 	ref TEXT PRIMARY KEY,
@@ -812,37 +908,6 @@ func (r *Registry) RegisterSession(s surface.Session) error {
 	return tx.Commit()
 }
 
-func (r *Registry) RegisterSessionAndDeletePending(s surface.Session, pendingID int64, alias string) error {
-	if pendingID <= 0 {
-		return fmt.Errorf("pending launch id is required")
-	}
-	tx, err := r.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := registerSessionTx(tx, s); err != nil {
-		return err
-	}
-	if alias != "" {
-		if err := setAliasTx(tx, alias, s.ID); err != nil {
-			return err
-		}
-	}
-	result, err := tx.Exec(`DELETE FROM launcher_pending WHERE id=?`, pendingID)
-	if err != nil {
-		return err
-	}
-	deleted, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if deleted != 1 {
-		return fmt.Errorf("pending launch %d was not found", pendingID)
-	}
-	return tx.Commit()
-}
-
 func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 	if s.RuntimeKind == "" {
 		return fmt.Errorf("register session %s: no runtime kind", s.ID)
@@ -919,21 +984,6 @@ func (r *Registry) LookupAlias(name string) (string, error) {
 	return sid, err
 }
 
-func (r *Registry) EnsureAliasAvailable(name string) error {
-	if name == "" {
-		return nil
-	}
-	var owner string
-	err := r.read.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&owner)
-	if err == sql.ErrNoRows {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return AliasTakenError{Name: name, Owner: owner}
-}
-
 func (r *Registry) SetAlias(name, sessionID string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -955,7 +1005,41 @@ func (e AliasTakenError) Error() string {
 	return fmt.Sprintf("alias %q is already assigned to session %q", e.Name, e.Owner)
 }
 
+// setAliasTx names a session. A coordinator's name moves only through the
+// coordinator, so it is neither given to another session nor taken from the
+// session it names, and a name a session being started holds waits for it.
 func setAliasTx(tx *sql.Tx, name, sessionID string) error {
+	if strings.EqualFold(name, LeadAlias) {
+		return ErrReservedAlias
+	}
+	var current string
+	err := tx.QueryRow(`SELECT name FROM aliases WHERE session_id=?`, sessionID).Scan(&current)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if current == name {
+		return nil
+	}
+	for _, held := range []string{name, current} {
+		if held == "" {
+			continue
+		}
+		if coordinated, err := coordinatorNamedTx(tx, held); err != nil {
+			return err
+		} else if coordinated {
+			return CoordinatorAliasError{Name: held}
+		}
+	}
+	if err := aliasReservedTx(tx, name, ""); err != nil {
+		return err
+	}
+	return bindAliasTx(tx, name, sessionID)
+}
+
+func bindAliasTx(tx *sql.Tx, name, sessionID string) error {
+	if strings.EqualFold(name, LeadAlias) {
+		return ErrReservedAlias
+	}
 	var owner string
 	err := tx.QueryRow(`SELECT session_id FROM aliases WHERE name=?`, name).Scan(&owner)
 	if err != nil && err != sql.ErrNoRows {
@@ -993,6 +1077,20 @@ func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error)
 		if n > 0 {
 			candidate = fmt.Sprintf("%s-%d", base, n+1)
 		}
+		if candidate == LeadAlias {
+			continue
+		}
+		if coordinated, err := coordinatorNamedTx(tx, candidate); err != nil {
+			return "", err
+		} else if coordinated {
+			continue
+		}
+		var reserved AliasReservedError
+		if err := aliasReservedTx(tx, candidate, ""); errors.As(err, &reserved) {
+			continue
+		} else if err != nil {
+			return "", err
+		}
 		if _, err := tx.Exec(`INSERT INTO aliases(name,session_id) VALUES(?,?)`, candidate, sessionID); err == nil {
 			return candidate, tx.Commit()
 		} else if !strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -1003,13 +1101,18 @@ func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error)
 }
 
 // ResolveTarget resolves an alias, an exact ID, a unique ID prefix, or a
-// name/cwd fragment. Name and cwd fragments match only family roots, so a
+// name/cwd fragment; "@<name>" resolves only an alias or exact ID, so a
+// name never reaches another session by substring. Name and cwd fragments
+// match only family roots, so a
 // family resolves to its root. "@<parent>/<child>[/<child>...]" walks
 // subagents: <parent> is any other target form and each <child> is a direct
 // subagent's nickname (case-insensitive), ID, or unique ID prefix.
 func (r *Registry) ResolveTarget(target string) (string, error) {
-	if path, ok := strings.CutPrefix(target, "@"); ok && strings.Contains(path, "/") {
-		return r.resolveSubagentPath(path)
+	if path, ok := strings.CutPrefix(target, "@"); ok {
+		if strings.Contains(path, "/") {
+			return r.resolveSubagentPath(path)
+		}
+		return r.ExactTarget("", path)
 	}
 	return r.resolveTarget(target, "")
 }
@@ -1017,6 +1120,9 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 // ResolveSurfaceTarget resolves a target like ResolveTarget, but matches and
 // judges ambiguity only among sessions of the given surface.
 func (r *Registry) ResolveSurfaceTarget(kind surface.SurfaceKind, target string) (string, error) {
+	if name, ok := strings.CutPrefix(target, "@"); ok {
+		return r.ExactTarget(kind, name)
+	}
 	return r.resolveTarget(target, string(kind))
 }
 
@@ -2825,14 +2931,24 @@ func (r *Registry) ReverseAlias(sessionID string) (string, error) {
 }
 
 func (r *Registry) RemoveAlias(name string) error {
-	res, err := r.db.Exec(`DELETE FROM aliases WHERE name = ?`, name)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if coordinated, err := coordinatorNamedTx(tx, name); err != nil {
+		return err
+	} else if coordinated {
+		return CoordinatorAliasError{Name: name}
+	}
+	res, err := tx.Exec(`DELETE FROM aliases WHERE name = ?`, name)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
 		return fmt.Errorf("alias %q does not exist", name)
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (r *Registry) RemoveFromChannel(channelName, sessionID string) error {

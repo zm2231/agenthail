@@ -186,10 +186,10 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 	statements := []statement{
 		{"aliases", `UPDATE aliases SET session_id=?2 WHERE session_id=?1`, hasAlias},
 		{"channel_members", `INSERT OR IGNORE INTO channel_members(channel_id,session_id) SELECT channel_id,?2 FROM channel_members WHERE session_id=?1`, false},
-		{"routes", `UPDATE routes SET from_session=?2 WHERE from_session=?1`, false},
-		{"routes", `UPDATE routes SET to_session=?2 WHERE to_session=?1`, false},
-		{"routes", `DELETE FROM routes WHERE from_session=to_session AND from_session=?2`, false},
-		{"routes", `DELETE FROM routes WHERE id NOT IN (SELECT MIN(id) FROM routes GROUP BY from_session,to_session,IFNULL(channel_id,''),pattern,handoff,once_only,active,event_cursor,last_goal_key) AND (from_session=?2 OR to_session=?2)`, false},
+		{"coordinator_replaced", `INSERT OR IGNORE INTO coordinator_replaced(session_id,project_id) SELECT ?2,project_id FROM coordinator_replaced WHERE session_id=?1`, false},
+		{"coordinators", `UPDATE coordinators SET session_id=?2 WHERE session_id=?1`, false},
+		{"coordinator_history", `UPDATE coordinator_history SET session_id=?2 WHERE session_id=?1`, false},
+		{"coordinator_history", `UPDATE coordinator_history SET previous_session_id=?2 WHERE previous_session_id=?1`, false},
 		{"message_queue", `UPDATE message_queue SET session_id=?2 WHERE session_id=?1`, false},
 		{"message_queue", `UPDATE message_queue SET source_session_id=?2 WHERE source_session_id=?1`, false},
 		{"attention_items", `UPDATE attention_items SET session_id=?2 WHERE session_id=?1`, false},
@@ -209,6 +209,9 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		{"sessions", `UPDATE sessions SET root_session_id=?2 WHERE root_session_id=?1`, false},
 		{"sessions", `UPDATE sessions SET forked_from=?2 WHERE forked_from=?1`, false},
 	}
+	for _, query := range routeMoves {
+		statements = append(statements, statement{"routes", query, false})
+	}
 	for _, s := range statements {
 		if s.skip || !tables[s.table] {
 			continue
@@ -217,11 +220,26 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 			return fmt.Errorf("%s: %w", s.table, err)
 		}
 	}
+	if tables["coordinators"] && tables["catalog_events"] {
+		if err := publishSessionCoordinatorTx(tx, newID); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(`DELETE FROM sessions WHERE id=?`, oldID); err != nil {
 		return err
 	}
 	_, err := tx.Exec(`INSERT INTO session_rekeys(old_id,new_id) VALUES(?,?) ON CONFLICT(old_id) DO UPDATE SET new_id=excluded.new_id`, oldID, newID)
 	return err
+}
+
+// routeMoves point the relay routes of session ?1 at session ?2, dropping a
+// route the move turns into a session relaying to itself and any route it
+// duplicates.
+var routeMoves = []string{
+	`UPDATE routes SET from_session=?2 WHERE from_session=?1`,
+	`UPDATE routes SET to_session=?2 WHERE to_session=?1`,
+	`DELETE FROM routes WHERE from_session=to_session AND from_session=?2`,
+	`DELETE FROM routes WHERE id NOT IN (SELECT MIN(id) FROM routes GROUP BY from_session,to_session,IFNULL(channel_id,''),pattern,handoff,once_only,active,event_cursor,last_goal_key) AND (from_session=?2 OR to_session=?2)`,
 }
 
 func tableColumns(tx *sql.Tx, table string) ([]string, error) {

@@ -21,6 +21,7 @@ root="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 mkdir -p "$root"
 printf '%s\n' "$*" >> "$HOME/argv"
 printf '%s\n' "$*" >> "$root/argv"
+printf '%s\n' "${CLAUDE_CONFIG_DIR+=$CLAUDE_CONFIG_DIR}" >> "$HOME/configdirs"
 case "$1" in
 agents)
  cat "$root/agents.json" 2>/dev/null || printf '[]\n'
@@ -202,6 +203,9 @@ func ClaimSocket(t testing.TB, pid int) string {
 	return path
 }
 
+// AgentsUnreadable makes claude agents print a catalog Agenthail cannot parse.
+func (f *Fixture) AgentsUnreadable() { f.write("agents.json", "{") }
+
 // Invocations counts claude invocations whose arguments equal args.
 func (f *Fixture) Invocations(args ...string) int {
 	f.t.Helper()
@@ -212,6 +216,31 @@ func (f *Fixture) Invocations(args ...string) int {
 func (f *Fixture) InvocationsIn(root string, args ...string) int {
 	f.t.Helper()
 	return f.count(filepath.Join(root, "argv"), args)
+}
+
+// ConfigDir is the CLAUDE_CONFIG_DIR one run of the claude binary had.
+type ConfigDir struct {
+	Set bool
+	Dir string
+}
+
+// ConfigDirs are the CLAUDE_CONFIG_DIR values the claude binary ran with, in
+// order.
+func (f *Fixture) ConfigDirs() []ConfigDir {
+	f.t.Helper()
+	data, err := os.ReadFile(filepath.Join(f.Home, "configdirs"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	var dirs []ConfigDir
+	for _, line := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
+		dir, set := strings.CutPrefix(line, "=")
+		dirs = append(dirs, ConfigDir{Set: set, Dir: dir})
+	}
+	return dirs
 }
 
 func (f *Fixture) count(path string, args []string) int {

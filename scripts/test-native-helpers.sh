@@ -13,6 +13,8 @@ SOURCES=(
   DuplicateApplicationPolicy.swift
   EventRetryBackoff.swift
   OperationsRefreshPolicy.swift
+  RequestAnswer.swift
+  RequestNotifications.swift
   SessionSelection.swift
   SessionTree.swift
   StatusRefreshPolicy.swift

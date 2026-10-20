@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -452,6 +453,9 @@ func (s *sessionSource) loadSeed() error {
 	defer cancel()
 	if seeded && transcriptBacked {
 		err := s.catchUpLocalTranscript(ctx, trustedIdentity)
+		if err == nil {
+			err = s.rederiveJournal(ctx)
+		}
 		if localTranscript || !errors.Is(err, errTranscriptReplaced) {
 			return err
 		}
@@ -476,6 +480,7 @@ func (s *sessionSource) loadSeed() error {
 		s.session.CodexPendingEventUser = read.CodexPendingEventUser
 		s.session.CodexPendingEventTurn = read.CodexPendingEventTurn
 		s.session.CodexCurrentTurnID = read.CodexCurrentTurnID
+		s.session.ClaudeClosingTurn = read.ClaudeClosingTurn
 		s.session.TranscriptIdentity = read.TranscriptIdentity
 	} else if localTranscript {
 		return fmt.Errorf("Codex local transcript is unavailable")
@@ -487,7 +492,13 @@ func (s *sessionSource) loadSeed() error {
 		return err
 	}
 	s.appendSeedItems(read.Items)
-	return s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.TranscriptIdentity)
+	if err := s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.TranscriptIdentity); err != nil {
+		return err
+	}
+	if _, ok := s.adapter.(surface.TranscriptItemReader); ok {
+		return s.manager.registry.MarkSessionJournalDerivation(s.session.ID, transcriptJournalDerivation)
+	}
+	return nil
 }
 
 func (s *sessionSource) setSeedErr(err error) {
@@ -547,6 +558,7 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 			s.session.CodexPendingEventUser = read.CodexPendingEventUser
 			s.session.CodexPendingEventTurn = read.CodexPendingEventTurn
 			s.session.CodexCurrentTurnID = read.CodexCurrentTurnID
+			s.session.ClaudeClosingTurn = read.ClaudeClosingTurn
 			s.session.TranscriptIdentity = read.TranscriptIdentity
 		}
 		pages = append(pages, read.Items)
@@ -562,6 +574,137 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 		return err
 	}
 	return nil
+}
+
+// transcriptJournalDerivation versions how a transcript-backed journal's
+// items are derived. A journal written by an earlier derivation is rebuilt
+// from the transcript once, at a source start.
+const transcriptJournalDerivation = 1
+
+// rederiveJournal rebuilds a journal written by an earlier derivation from
+// the transcript, from the oldest offset it retains, keeping each row the
+// transcript does not hold after the item it followed. The journal records
+// the derivation, so a rebuilt journal is never rebuilt again.
+func (s *sessionSource) rederiveJournal(ctx context.Context) error {
+	reader, ok := s.adapter.(surface.TranscriptItemReader)
+	if !ok {
+		return nil
+	}
+	version, err := s.manager.registry.SessionJournalDerivation(s.session.ID)
+	if err != nil || version >= transcriptJournalDerivation {
+		return err
+	}
+	var rows []registry.SessionJournalEntry
+	before := uint64(0)
+	for {
+		page, err := s.manager.registry.ReadSessionJournalPage(s.session.ID, before, 200)
+		var gap *registry.SessionJournalHistoryGapError
+		if errors.As(err, &gap) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		rows = append(page.Entries, rows...)
+		if page.NextBefore == 0 {
+			break
+		}
+		before = page.NextBefore
+	}
+	from := int64(-1)
+	for _, row := range rows {
+		if offset, ok := transcriptItemOffset(transcriptRowItemID(row)); ok && (from < 0 || offset < from) {
+			from = offset
+		}
+	}
+	if from < 0 {
+		return s.manager.registry.MarkSessionJournalDerivation(s.session.ID, transcriptJournalDerivation)
+	}
+	s.providerMu.Lock()
+	items, err := reader.TranscriptItems(ctx, &s.session, from)
+	s.providerMu.Unlock()
+	if err != nil {
+		return err
+	}
+	derived := make(map[string]bool, len(items))
+	for _, item := range items {
+		derived[item.ID] = true
+	}
+	var leading []registry.SessionJournalEntry
+	following := map[string][]registry.SessionJournalEntry{}
+	last := ""
+	for _, row := range rows {
+		if id := transcriptRowItemID(row); id != "" {
+			if derived[id] {
+				last = id
+			}
+			continue
+		}
+		if row.BodyRef != "" {
+			full, found, err := s.manager.registry.SessionJournalEntryByProviderKey(s.session.ID, row.ProviderKey)
+			if err != nil {
+				return err
+			}
+			if found {
+				row.FullBody = full.FullBody
+			}
+		}
+		if last == "" {
+			leading = append(leading, row)
+		} else {
+			following[last] = append(following[last], row)
+		}
+	}
+	entries := leading
+	bodies := map[string]string{}
+	for _, item := range items {
+		s.mu.Lock()
+		payload, bodyKey := s.normalizeLocked(seedEvent(s.session.Surface, item))
+		s.mu.Unlock()
+		entry, err := sessionJournalEntry(s.session.ID, payload)
+		if err != nil {
+			return err
+		}
+		if bodyKey != "" {
+			bodies[bodyKey] = item.Text
+		}
+		entries = append(entries, entry)
+		entries = append(entries, following[item.ID]...)
+	}
+	replaced, err := s.manager.registry.ReplaceSessionJournal(s.session.ID, entries, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes}, transcriptJournalDerivation)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	for key, body := range bodies {
+		s.appendBodies[key] = body
+	}
+	s.mu.Unlock()
+	for _, entry := range replaced {
+		s.publish(entry)
+	}
+	return nil
+}
+
+// transcriptRowItemID returns the transcript item a journal row records, or
+// "" for a row the transcript does not hold.
+func transcriptRowItemID(row registry.SessionJournalEntry) string {
+	id, found := strings.CutPrefix(row.ProviderKey, "timeline:")
+	if !found {
+		return ""
+	}
+	return strings.TrimSuffix(id, ":phase:"+row.Kind)
+}
+
+// transcriptItemOffset reads the transcript offset a Claude timeline item ID
+// begins with.
+func transcriptItemOffset(itemID string) (int64, bool) {
+	digits, _, found := strings.Cut(itemID, "-")
+	if !found {
+		return 0, false
+	}
+	offset, err := strconv.ParseInt(digits, 10, 64)
+	return offset, err == nil && offset >= 0
 }
 
 func (s *sessionSource) knownJournalItems() (map[string]struct{}, error) {
@@ -615,38 +758,45 @@ func (s *sessionSource) appendSeedItems(items []surface.TimelineItem) {
 		if item.ID == "" {
 			continue
 		}
-		at, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
-		providerKey := "timeline:" + item.ID
-		if s.session.Surface == surface.KindCodex && strings.HasPrefix(item.ID, "codex:") {
-			providerKey = item.ID
-		}
-		operation := "upsert"
-		if item.Kind == "done" {
-			operation = "phase"
-		}
-		if s.mergeSeedIntoAuthoritativeRow(providerKey, operation, item) {
+		event := seedEvent(s.session.Surface, item)
+		if s.mergeSeedIntoAuthoritativeRow(event.ProviderKey, event.Operation, item) {
 			continue
 		}
-		s.append(surface.StreamEvent{
-			Role:             item.Role,
-			Origin:           item.Origin,
-			Sender:           item.Sender,
-			Title:            item.Title,
-			Status:           item.Status,
-			Truncated:        item.Truncated,
-			TruncationReason: item.TruncationReason,
-			ID:               item.ID,
-			ProviderKey:      providerKey,
-			Version:          uint64(len(item.Text)),
-			Operation:        operation,
-			TurnID:           item.TurnID,
-			CallID:           item.CallID,
-			Attachment:       item.Attachment,
-			Files:            item.Files,
-			Timestamp:        at,
-			Kind:             item.Kind,
-			Text:             item.Text,
-		})
+		s.append(event)
+	}
+}
+
+// seedEvent is the journal event that records a timeline item read from a
+// provider's history.
+func seedEvent(kind surface.SurfaceKind, item surface.TimelineItem) surface.StreamEvent {
+	at, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
+	providerKey := "timeline:" + item.ID
+	if kind == surface.KindCodex && strings.HasPrefix(item.ID, "codex:") {
+		providerKey = item.ID
+	}
+	operation := "upsert"
+	if item.Kind == "done" {
+		operation = "phase"
+	}
+	return surface.StreamEvent{
+		Role:             item.Role,
+		Origin:           item.Origin,
+		Sender:           item.Sender,
+		Title:            item.Title,
+		Status:           item.Status,
+		Truncated:        item.Truncated,
+		TruncationReason: item.TruncationReason,
+		ID:               item.ID,
+		ProviderKey:      providerKey,
+		Version:          uint64(len(item.Text)),
+		Operation:        operation,
+		TurnID:           item.TurnID,
+		CallID:           item.CallID,
+		Attachment:       item.Attachment,
+		Files:            item.Files,
+		Timestamp:        at,
+		Kind:             item.Kind,
+		Text:             item.Text,
 	}
 }
 
@@ -764,14 +914,21 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 }
 
 func (s *sessionSource) persist(payload sessionJournalPayload) (registry.SessionJournalEntry, bool, error) {
-	retention := registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes}
+	entry, err := sessionJournalEntry(s.session.ID, payload)
+	if err != nil {
+		return registry.SessionJournalEntry{}, false, err
+	}
+	return s.manager.registry.AppendSessionJournalEntry(entry, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+}
+
+// sessionJournalEntry encodes a journal payload. A body longer than the
+// inline limit is kept whole behind a body reference when the journal can
+// hold it, and is otherwise marked as not retained.
+func sessionJournalEntry(sessionID string, payload sessionJournalPayload) (registry.SessionJournalEntry, error) {
 	fullBody := []byte(payload.Body)
 	if len(fullBody) <= sessionStreamBodyBytes {
 		encoded, err := json.Marshal(payload)
-		if err != nil {
-			return registry.SessionJournalEntry{}, false, err
-		}
-		return s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, retention)
+		return registry.SessionJournalEntry{SessionID: sessionID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, err
 	}
 	prefix := fullBody[:sessionStreamBodyBytes]
 	for !utf8.Valid(prefix) {
@@ -784,28 +941,15 @@ func (s *sessionSource) persist(payload sessionJournalPayload) (registry.Session
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return registry.SessionJournalEntry{}, false, err
+		return registry.SessionJournalEntry{}, err
 	}
 	if payload.BodyRef == "" || len(encoded)+len(fullBody) > sessionJournalRetentionBytes {
 		payload.BodyRef = ""
 		payload.TruncationReason = "full_body_not_retained"
 		encoded, err = json.Marshal(payload)
-		if err != nil {
-			return registry.SessionJournalEntry{}, false, err
-		}
 		fullBody = nil
 	}
-	entry, changed, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, BodyRef: payload.BodyRef, FullBody: fullBody, ObservedAt: time.Now().UTC()}, retention)
-	if !errors.Is(err, registry.ErrSessionJournalEntryTooLarge) || payload.BodyRef == "" {
-		return entry, changed, err
-	}
-	payload.BodyRef = ""
-	payload.TruncationReason = "full_body_not_retained"
-	encoded, err = json.Marshal(payload)
-	if err != nil {
-		return registry.SessionJournalEntry{}, false, err
-	}
-	return s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, retention)
+	return registry.SessionJournalEntry{SessionID: sessionID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, BodyRef: payload.BodyRef, FullBody: fullBody, ObservedAt: time.Now().UTC()}, err
 }
 
 func (s *sessionSource) publish(entry registry.SessionJournalEntry) {

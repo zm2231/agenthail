@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -35,8 +36,7 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 	var adapter surface.Surface
 	if operation == "stop" || operation == "resume" || operation == "logs" || operation == "status" {
 		if a.registry() != nil {
-			selector := strings.TrimPrefix(target, "@")
-			selector = strings.TrimPrefix(selector, "claude:")
+			selector := strings.TrimPrefix(target, "claude:")
 			if id, e := a.registry().ResolveTarget(selector); e == nil {
 				session, _ = a.registry().Session(id)
 			}
@@ -65,6 +65,13 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 		if !ok {
 			return surface.ErrUnsupported
 		}
+		var name registry.AliasReservation
+		if a.registry() != nil {
+			if name, err = a.registry().ReserveAlias(strings.TrimPrefix(flagVal(args, "--alias"), "@"), time.Now().Add(timeout+threadNameMargin)); err != nil {
+				return fmt.Errorf("reserve fork alias: %w", err)
+			}
+			defer func() { _ = a.registry().ReleaseAliasReservation(name) }()
+		}
 		fork, err := forker.ForkSession(ctx, session, surface.ForkOptions{Model: flagVal(args, "--model"), LastTurnID: flagVal(args, "--last-turn")})
 		if err != nil {
 			return err
@@ -76,10 +83,8 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 			if err := a.registry().RegisterSession(*fork); err != nil {
 				return err
 			}
-			if alias := strings.TrimPrefix(flagVal(args, "--alias"), "@"); alias != "" {
-				if err := a.registry().SetAlias(alias, fork.ID); err != nil {
-					return err
-				}
+			if err := a.registry().BindReservedAlias(name, fork.ID); err != nil {
+				return err
 			}
 		}
 		output = map[string]any{"session": fork}

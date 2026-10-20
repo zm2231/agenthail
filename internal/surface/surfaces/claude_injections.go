@@ -1,6 +1,8 @@
 package surfaces
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"regexp"
 	"strings"
 
@@ -12,6 +14,9 @@ const (
 	claudeOriginTaskNotification = "task-notification"
 	claudeOriginPeer             = "peer"
 	claudeOriginAutoContinuation = "auto-continuation"
+	claudeOriginCommand          = "command"
+	claudeOriginInterrupt        = "interrupt"
+	claudeOriginSystem           = "system"
 )
 
 var (
@@ -50,7 +55,10 @@ func claudeInjectedItem(kind string, origin map[string]any, text string) surface
 			item.Text = strings.TrimSpace(text)
 		}
 		if taskID := tags["task-id"]; taskID != "" {
-			item.ID = "task-notification:" + taskID + ":" + item.Status
+			// One task can notify many times with the same status, as a
+			// monitor does, so the text tells its notifications apart.
+			digest := sha256.Sum256([]byte(strings.TrimSpace(text)))
+			item.ID = "task-notification:" + taskID + ":" + item.Status + ":" + hex.EncodeToString(digest[:6])
 		}
 		return item
 	case claudeOriginPeer:
@@ -79,6 +87,24 @@ func claudeInjectedItem(kind string, origin map[string]any, text string) surface
 		return surface.TimelineItem{Kind: "event", Role: "system", Origin: kind, Title: "Continued automatically", Text: strings.TrimSpace(text)}
 	default:
 		return surface.TimelineItem{Kind: "event", Role: "system", Origin: kind, Title: "Injected prompt", Text: strings.TrimSpace(text)}
+	}
+}
+
+// claudeRecordedOrigin names who wrote a user-role record that Claude Code
+// records verbatim but no person typed as a prompt: a slash command or its
+// output, an interrupt marker, or a system message.
+func claudeRecordedOrigin(text string) string {
+	text = strings.TrimSpace(text)
+	if isHumanTranscriptText(text) {
+		return ""
+	}
+	switch {
+	case strings.HasPrefix(text, "[Request interrupted"), strings.HasPrefix(text, "[Request to"):
+		return claudeOriginInterrupt
+	case strings.HasPrefix(text, "<system"), strings.HasPrefix(text, "This session is being continued"):
+		return claudeOriginSystem
+	default:
+		return claudeOriginCommand
 	}
 }
 

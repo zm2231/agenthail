@@ -434,7 +434,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			}
 			seen[session.ID] = struct{}{}
 			identityCtx, identityCancel := context.WithTimeout(ctx, 3*time.Second)
-			identity := d.catalogIdentities.identity(identityCtx, session, observedAt, func() *catalogProject { return d.storedCatalogProject(session.ID) })
+			identity := d.catalogIdentities.identity(identityCtx, session, observedAt, func() *CatalogProject { return d.storedCatalogProject(session.ID) })
 			identityCancel()
 			open := openSessions[session.ID]
 			alias := aliasByID[session.ID]
@@ -704,7 +704,16 @@ func (d *Daemon) correlatePendingLaunches(ctx context.Context, sessions []surfac
 	if err != nil {
 		return
 	}
+	now := time.Now()
 	for _, item := range pending {
+		if now.After(item.ExpiresAt.Add(pendingLaunchRetention)) {
+			if err := d.Registry.DropPendingLaunch(item); err != nil {
+				d.log.Printf("drop pending launch %d: %s", item.ID, err)
+			} else {
+				d.log.Printf("pending %s launch %d was not found within %s; dropped", item.Launcher, item.ID, now.Sub(item.LaunchedAt).Round(time.Second))
+			}
+			continue
+		}
 		launcher, ok := d.transportResolver.Launcher(item.Launcher)
 		if !ok {
 			continue
@@ -737,20 +746,14 @@ func (d *Daemon) correlatePendingLaunches(ctx context.Context, sessions []surfac
 				locationsCopy := located
 				candidate := sessions[index]
 				candidate.Runtime = &surface.Runtime{Launcher: item.Launcher, Location: &locationsCopy, Focusable: true}
-				if err := d.Registry.RegisterSessionAndDeletePending(candidate, item.ID, item.Alias); err != nil {
-					var aliasErr registry.AliasTakenError
-					if errors.As(err, &aliasErr) {
-						d.errorMu.Lock()
-						first := !d.pendingAliasWarns[item.ID]
-						d.pendingAliasWarns[item.ID] = true
-						d.errorMu.Unlock()
-						if first {
-							d.log.Printf("pending launch %d awaiting alias %q: %s", item.ID, item.Alias, err)
-						}
-					} else {
-						d.log.Printf("correlate pending launch %d: %s", item.ID, err)
-					}
+				named, err := d.Registry.RegisterSessionAndDeletePending(candidate, item)
+				if err != nil {
+					d.log.Printf("correlate pending launch %d: %s", item.ID, err)
 					continue
+				}
+				d.log.Printf("pending %s launch %d found after %s", item.Launcher, item.ID, time.Since(item.LaunchedAt).Round(time.Second))
+				if item.Alias.Name != "" && !named {
+					d.log.Printf("pending %s launch %d: @%s was taken after its reservation lapsed; the session has no name", item.Launcher, item.ID, item.Alias.Name)
 				}
 				sessions[index].Runtime = candidate.Runtime
 				break
@@ -796,12 +799,12 @@ func (d *Daemon) correlateObservedTerminalLaunches(ctx context.Context, sessions
 	}
 }
 
-func (d *Daemon) storedCatalogProject(sessionID string) *catalogProject {
+func (d *Daemon) storedCatalogProject(sessionID string) *CatalogProject {
 	raw, err := d.Registry.CatalogSessionProject(sessionID)
 	if err != nil || len(raw) == 0 {
 		return nil
 	}
-	var project *catalogProject
+	var project *CatalogProject
 	if json.Unmarshal(raw, &project) != nil || project == nil || project.ID == "" || project.LocalID == "" {
 		return nil
 	}
@@ -815,7 +818,7 @@ func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surfa
 	current, reason := surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: queueCount, Open: open, Now: observedAt, CodexRecentHours: config.CodexRecentHours})
 	host := d.localHost()
 	effective := surface.EffectiveCapabilities(adapter, &session)
-	return dashboardSession{ID: session.ID, Surface: session.Surface, RuntimeKind: session.RuntimeKind, ConfiguredModel: session.ConfiguredModel, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, Project: identity.Project, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Subagents: session.Subagents, ObservedSubagents: session.Subagents, Host: &host}
+	return dashboardSession{ID: session.ID, Surface: session.Surface, RuntimeKind: session.RuntimeKind, ConfiguredModel: session.ConfiguredModel, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, Project: identity.Project, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Delegated: session.Delegated(), Subagents: session.Subagents, ObservedSubagents: session.Subagents, Host: &host}
 }
 
 type catalogStoredListing struct {

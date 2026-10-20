@@ -295,6 +295,16 @@ Use `--model` only for a one-message Codex or Notion override. Use `--from` when
 the receiving agent needs a human-readable sender label. Long content should go
 through stdin.
 
+## Coordinator
+
+Each project may have a coordinator, the agent the person sends the project's
+work to, on this machine or a paired host. Report to your project's coordinator
+with `agenthail send @lead "..."`; `agenthail coordinator --json` shows its host,
+name and current session. A send to the coordinator steers it
+when busy (or queues when steering is unavailable), resumes it when ended, and
+starts a new conversation from its saved instructions when the conversation is
+gone. Do not set or clear the coordinator unless the person asks.
+
 ## Follow, Subscribe, And Notify
 
 AgentHail has four distinct completion behaviors:
@@ -339,7 +349,10 @@ agenthail daemon notify off
 
 Mac notifications require System Settings authorization. iPhone notifications
 require pairing the phone from Operations and allowing notifications on iOS.
-They are not agent-to-agent relays.
+They are not agent-to-agent relays. When a host session waits on an approval or
+a single question, its notification offers buttons that answer it, and a
+**Reply** that answers in the person's words or denies with a reason; the human
+presses them, never an agent.
 
 There is no generic CLI callback that subscribes an arbitrary Photon, Slack, or
 webhook conversation to future queued completions. Do not promise automatic

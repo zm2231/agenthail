@@ -45,8 +45,11 @@ type QuestionOption struct {
 // Decision is a person's answer to a Request. Behavior is "allow" or "deny".
 // Always allows the tool from now on with the rule the request offers. A
 // question is allowed with Answers, one per question keyed by its text; a
-// multi-select answer joins its labels with ", ".
+// multi-select answer joins its labels with ", ". Choice is instead a
+// notification button's id, which the daemon resolves with Request.Choose
+// against the open request.
 type Decision struct {
+	Choice   string            `json:"choice,omitempty"`
 	Behavior string            `json:"behavior"`
 	Always   bool              `json:"always,omitempty"`
 	Message  string            `json:"message,omitempty"`

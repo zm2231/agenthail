@@ -41,6 +41,7 @@ type daemonSurface struct {
 	observeCalls   atomic.Int32
 	startOptions   []surface.SessionStartOptions
 	startErr       error
+	startHook      func()
 	caps           surface.Capabilities
 	streamEvents   []surface.StreamEvent
 	streamErr      error
@@ -238,6 +239,10 @@ func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Sess
 }
 func (f *daemonSurface) StartSession(_ context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
 	f.startOptions = append(f.startOptions, options)
+	if hook := f.startHook; hook != nil {
+		f.startHook = nil
+		hook()
+	}
 	session := &surface.Session{ID: "started", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Name: "Started conversation", Cwd: options.Cwd, Status: surface.StatusBusy, Source: "appServer", Transport: "managed", LastActive: time.Now()}
 	f.sessions[session.ID] = *session
 	if f.startErr != nil {

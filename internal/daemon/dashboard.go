@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -106,13 +107,14 @@ type dashboardSession struct {
 	Source            string                     `json:"source,omitempty"`
 	Transport         string                     `json:"transport,omitempty"`
 	ForkedFrom        string                     `json:"forkedFrom,omitempty"`
-	Project           *catalogProject            `json:"project,omitempty"`
+	Project           *CatalogProject            `json:"project,omitempty"`
 	Checkout          *catalogCheckout           `json:"checkout,omitempty"`
 	ObservedAt        time.Time                  `json:"observedAt,omitempty"`
 	UnavailableReason string                     `json:"unavailableReason,omitempty"`
 	Runtime           *surface.Runtime           `json:"runtime,omitempty"`
 	Freshness         *registry.CatalogFreshness `json:"freshness,omitempty"`
 	Subagent          *surface.Subagent          `json:"subagent,omitempty"`
+	Delegated         bool                       `json:"delegated,omitempty"`
 	Subagents         *surface.SubagentRollup    `json:"subagents,omitempty"`
 	ObservedSubagents *surface.SubagentRollup    `json:"observedSubagents,omitempty"`
 	HiddenSubagents   *surface.SubagentRollup    `json:"hiddenSubagents,omitempty"`
@@ -121,27 +123,28 @@ type dashboardSession struct {
 }
 
 type dashboardState struct {
-	UpdatedAt          time.Time                  `json:"updatedAt"`
-	EventCursor        uint64                     `json:"eventCursor"`
-	HostEpoch          string                     `json:"hostEpoch"`
-	CatalogSeq         uint64                     `json:"catalogSeq"`
-	Daemon             map[string]any             `json:"daemon"`
-	Surfaces           []dashboardSurface         `json:"surfaces"`
-	Sessions           []dashboardSession         `json:"sessions"`
-	TotalSessions      int                        `json:"totalSessions"`
-	Counts             map[string]int             `json:"counts,omitempty"`
-	Projects           []dashboardProject         `json:"projects,omitempty"`
-	NextCursor         string                     `json:"nextCursor,omitempty"`
-	Queue              []dashboardQueue           `json:"queue"`
-	Channels           []dashboardChannel         `json:"channels"`
-	Relays             []dashboardRelay           `json:"relays"`
-	History            []dashboardHistory         `json:"history"`
-	Attention          []dashboardAttention       `json:"attention"`
-	DeliveryProblems   []registry.DeliveryProblem `json:"deliveryProblems"`
-	CodexRecentHours   int                        `json:"codexRecentHours"`
-	BusyDelivery       string                     `json:"busyDelivery"`
-	Signin             []signin.Status            `json:"signin"`
-	Rekeyed            map[string]string          `json:"rekeyed,omitempty"`
+	UpdatedAt          time.Time                   `json:"updatedAt"`
+	EventCursor        uint64                      `json:"eventCursor"`
+	HostEpoch          string                      `json:"hostEpoch"`
+	CatalogSeq         uint64                      `json:"catalogSeq"`
+	Daemon             map[string]any              `json:"daemon"`
+	Surfaces           []dashboardSurface          `json:"surfaces"`
+	Sessions           []dashboardSession          `json:"sessions"`
+	TotalSessions      int                         `json:"totalSessions"`
+	Counts             map[string]int              `json:"counts,omitempty"`
+	Projects           []dashboardProject          `json:"projects,omitempty"`
+	NextCursor         string                      `json:"nextCursor,omitempty"`
+	Queue              []dashboardQueue            `json:"queue"`
+	Channels           []dashboardChannel          `json:"channels"`
+	Relays             []dashboardRelay            `json:"relays"`
+	History            []dashboardHistory          `json:"history"`
+	Attention          []dashboardAttention        `json:"attention"`
+	DeliveryProblems   []registry.DeliveryProblem  `json:"deliveryProblems"`
+	CodexRecentHours   int                         `json:"codexRecentHours"`
+	BusyDelivery       string                      `json:"busyDelivery"`
+	Signin             []signin.Status             `json:"signin"`
+	Rekeyed            map[string]string           `json:"rekeyed,omitempty"`
+	Coordinators       []registry.CoordinatorEntry `json:"coordinators"`
 	catalogPageApplied bool
 	catalogPageFilter  string
 	catalogPageOffset  int
@@ -805,9 +808,17 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read projects: %w", err)
 	}
+	coordinators, err := d.Registry.LocalCoordinators()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read coordinators: %w", err)
+	}
 	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Sessions: []dashboardSession{}, Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Signin: make([]signin.Status, 0, len(signin.Consumers)), Rekeyed: rekeyed}
 	for _, consumer := range signin.Consumers {
 		state.Signin = append(state.Signin, d.signinConsumer(consumer))
+	}
+	state.Coordinators = make([]registry.CoordinatorEntry, 0, len(coordinators))
+	for _, spec := range coordinators {
+		state.Coordinators = append(state.Coordinators, spec.Entry())
 	}
 	if page != nil {
 		state.catalogPageApplied = true
@@ -948,7 +959,11 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	} else {
 		state.TotalSessions = len(state.Sessions)
 		state.Counts = catalogScopeCounts(state.Sessions)
-		state.Projects = catalogProjects(state.Sessions, projectRecords, d.localHost())
+		coordinators, err := d.Registry.Coordinators()
+		if err != nil {
+			return dashboardState{}, fmt.Errorf("read coordinators: %w", err)
+		}
+		state.Projects = catalogProjects(state.Sessions, projectRecords, coordinators, view.archive.Projects, d.localHost(), d.coordinatorHostRef)
 	}
 	return state, nil
 }
@@ -1085,6 +1100,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Attachments     []string                   `json:"attachments"`
 		RequestID       string                     `json:"requestId"`
 		Decision        surface.Decision           `json:"decision"`
+		Instructions    *string                    `json:"instructions"`
+		Replace         bool                       `json:"replace"`
+		ChangedAt       time.Time                  `json:"changedAt"`
+		ChangedBy       string                     `json:"changedBy"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid dashboard request", http.StatusBadRequest)
@@ -1096,6 +1115,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if strings.HasPrefix(request.Action, "project-") {
 		d.projectAction(r, w, projectRequest{Action: request.Action, ProjectID: request.ProjectID, Path: request.Path, Title: request.Title})
+		return
+	}
+	if strings.HasPrefix(request.Action, "coordinator-") {
+		d.coordinatorAction(r, w, coordinatorRequest{Action: request.Action, SessionID: request.SessionID, SourceSessionID: request.SourceSessionID, ProjectID: request.ProjectID, Name: request.Name, Surface: request.Surface, Cwd: request.Cwd, Path: request.Path, Model: request.Model, PermissionMode: request.PermissionMode, Instructions: request.Instructions, Replace: request.Replace, ChangedAt: request.ChangedAt, ChangedBy: request.ChangedBy, Message: request.Message})
 		return
 	}
 	if request.Action == "delivery-dismiss" {
@@ -1148,15 +1171,16 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				http.Error(w, "surface is not configured", http.StatusConflict)
 				return
 			}
-			if err := d.Registry.EnsureAliasAvailable(alias); err != nil {
-				var taken registry.AliasTakenError
-				if errors.As(err, &taken) {
-					http.Error(w, err.Error(), http.StatusBadRequest)
-				} else {
-					http.Error(w, fmt.Sprintf("check conversation name: %s", err), http.StatusInternalServerError)
-				}
+			reservation, reserved := d.reserveStartName(w, alias)
+			if !reserved {
 				return
 			}
+			keepReservation := false
+			defer func() {
+				if !keepReservation {
+					_ = d.Registry.ReleaseAliasReservation(reservation)
+				}
+			}()
 			if d.transportResolver == nil {
 				http.Error(w, "launcher transport is unavailable", http.StatusConflict)
 				return
@@ -1175,6 +1199,29 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			defer cancel()
 			messageUUID := uuid.NewString()
 			ctx = surface.WithMessageUUID(ctx, messageUUID)
+			launchedAt := time.Now()
+			// A launch that may be running but has no session yet stays pending,
+			// holding its name, until discovery finds it at its location.
+			pend := func(location *surface.Location, detail string) {
+				if location == nil || *location == (surface.Location{}) {
+					d.writeAcceptedLaunch(w, request.Launcher, location, detail)
+					return
+				}
+				if _, err := d.Registry.RecordPendingLaunch(request.Launcher, surface.SurfaceKind(request.Surface), cwd, request.Name, reservation, *location, launchedAt, launchedAt.Add(pendingLaunchLifetime)); err != nil {
+					failure := fmt.Sprintf("persist pending correlation: %s", err)
+					if detail != "" {
+						failure = detail + "; " + failure
+					}
+					d.writeAcceptedLaunch(w, request.Launcher, location, failure)
+					return
+				}
+				keepReservation = true
+				if detail != "" {
+					d.writeAcceptedLaunch(w, request.Launcher, location, detail)
+					return
+				}
+				writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "launcher": request.Launcher, "location": location})
+			}
 			launchResult, launchErr := launcher.Launch(ctx, surface.LaunchRequest{Surface: surface.SurfaceKind(request.Surface), Options: startOptions(cwd)})
 			startErr := launchErr
 			if launchErr != nil && launchResult.Session == nil {
@@ -1184,7 +1231,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 					http.Error(w, launchErr.Error(), http.StatusBadRequest)
 					return
 				case errors.As(launchErr, &acceptedErr):
-					d.writeAcceptedLaunch(w, request.Launcher, launchResult.Location, launchErr.Error())
+					pend(launchResult.Location, launchErr.Error())
 					return
 				default:
 					http.Error(w, launchErr.Error(), http.StatusBadGateway)
@@ -1193,7 +1240,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			session, location, launchErr := locateLaunchedSession(ctx, launcher, adapter, launchResult)
 			if launchErr != nil {
-				d.writeAcceptedLaunch(w, request.Launcher, launchResult.Location, fmt.Sprintf("discovery failed: %s", launchErr))
+				pend(launchResult.Location, fmt.Sprintf("discovery failed: %s", launchErr))
 				return
 			}
 			if session == nil {
@@ -1201,13 +1248,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 					d.writeAcceptedLaunch(w, request.Launcher, nil, "location is unresolved")
 					return
 				}
-				pendingID, err := d.Registry.RecordPendingLaunch(request.Launcher, surface.SurfaceKind(request.Surface), cwd, request.Name, alias, *location)
-				if err != nil {
-					d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("persist pending correlation: %s", err))
-					return
-				}
-				_ = pendingID
-				writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "launcher": request.Launcher, "location": location})
+				pend(location, "")
 				return
 			}
 			if session.Surface == "" {
@@ -1220,11 +1261,9 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("register session: %s", err))
 				return
 			}
-			if alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"); alias != "" {
-				if err := d.Registry.SetAlias(alias, session.ID); err != nil {
-					d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("persist session name: %s", err))
-					return
-				}
+			if err := d.Registry.BindReservedAlias(reservation, session.ID); err != nil {
+				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("persist session name: %s", err))
+				return
 			}
 			launchFields := map[string]any{"launcher": request.Launcher, "location": location, "sessionId": session.ID}
 			if launchResult.Session != nil {
@@ -1251,15 +1290,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@")
-		if err := d.Registry.EnsureAliasAvailable(alias); err != nil {
-			var taken registry.AliasTakenError
-			if errors.As(err, &taken) {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-			} else {
-				http.Error(w, fmt.Sprintf("check conversation name: %s", err), http.StatusInternalServerError)
-			}
+		reservation, reserved := d.reserveStartName(w, alias)
+		if !reserved {
 			return
 		}
+		defer func() { _ = d.Registry.ReleaseAliasReservation(reservation) }()
 		ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 		defer cancel()
 		messageUUID := uuid.NewString()
@@ -1271,11 +1306,9 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but local registration failed: %s; do not retry automatically", registerErr), nil)
 				return
 			}
-			if alias != "" {
-				if aliasErr := d.Registry.SetAlias(alias, session.ID); aliasErr != nil {
-					writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but its name could not be persisted: %s; do not retry automatically", aliasErr), nil)
-					return
-				}
+			if aliasErr := d.Registry.BindReservedAlias(reservation, session.ID); aliasErr != nil {
+				writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but its name could not be persisted: %s; do not retry automatically", aliasErr), nil)
+				return
 			}
 			d.writeStartedSessionOutcome(w, session, alias, messageUUID, request.Message, sent, startErr, nil)
 			return
@@ -1298,9 +1331,14 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if request.Action == "notion-create" {
+		name, reserved := d.reserveStartName(w, strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"))
+		if !reserved {
+			return
+		}
+		defer func() { _ = d.Registry.ReleaseAliasReservation(name) }()
 		ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 		defer cancel()
-		receipt, createErr := d.createNotionThread(ctx, request.Message, request.Alias, request.Model)
+		receipt, createErr := d.createNotionThread(ctx, request.Message, name, request.Model)
 		if createErr != nil {
 			http.Error(w, createErr.Error(), http.StatusBadGateway)
 			return
@@ -1386,6 +1424,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, membersErr.Error(), http.StatusBadRequest)
 			return
 		}
+		sender := coordinator.Sender{Service: d.coordinator()}
+		if request.SourceSessionID != "" {
+			request.SourceSessionID = sender.Canonical(request.SourceSessionID)
+		}
 		members = slices.DeleteFunc(members, func(member string) bool { return request.SourceSessionID != "" && member == request.SourceSessionID })
 		if len(members) == 0 {
 			http.Error(w, "channel has no members other than the sender", http.StatusBadRequest)
@@ -1420,7 +1462,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				failed++
 				continue
 			}
-			receipt, deliverErr := d.dispatcher().DeliverWithOptions(operationCtx, adapter, session, request.Message, "", surface.SendOptions{SourceSessionID: request.SourceSessionID})
+			receipt, deliverErr := sender.DeliverWithOptions(operationCtx, adapter, session, request.Message, "", surface.SendOptions{SourceSessionID: request.SourceSessionID})
 			if deliverErr != nil {
 				failed++
 				continue
@@ -1651,8 +1693,13 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		if err := d.Registry.SetAlias(alias, session.ID); err != nil {
 			var taken registry.AliasTakenError
+			var reserved registry.AliasReservedError
 			if errors.As(err, &taken) {
 				http.Error(w, fmt.Sprintf("@%s is already used by another session", alias), http.StatusConflict)
+				return
+			}
+			if errors.As(err, &reserved) {
+				http.Error(w, reserved.Error(), http.StatusConflict)
 				return
 			}
 			http.Error(w, fmt.Sprintf("name conversation: %s", err), http.StatusBadRequest)
@@ -1668,7 +1715,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if request.Action == "session-fork" || request.Action == "native-queue" || strings.HasPrefix(request.Action, "session-lifecycle-") {
-		d.dashboardSessionOperation(w, r, adapter, session, request.Action, request.Fork, request.NativeQueue)
+		d.dashboardSessionOperation(w, r, adapter, session, request.Action, request.Fork, strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"), request.NativeQueue)
 		return
 	}
 	if err := d.ensureDashboardWritable(r.Context(), adapter, session); err != nil {
@@ -1716,7 +1763,8 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			d.queueHostRelay(w, r, session, request.Message, request.SourceSessionID, request.BusyDelivery, request.RelayHops)
 			return
 		}
-		receipt, actionErr := d.dispatcher().DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, Uploads: attached})
+		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, Uploads: attached}
+		receipt, actionErr := coordinator.Sender{Service: d.coordinator()}.DeliverWithOptions(ctx, adapter, session, request.Message, "", options)
 		if actionErr != nil {
 			http.Error(w, actionErr.Error(), http.StatusBadGateway)
 			return
@@ -1946,7 +1994,7 @@ func (d *Daemon) dashboardSearchHandler(w http.ResponseWriter, r *http.Request) 
 		alias, _ := d.Registry.ReverseAlias(result.Session.ID)
 		effective := surface.EffectiveCapabilities(adapter, &result.Session)
 		payload = append(payload, map[string]any{
-			"session": dashboardSession{ID: result.Session.ID, Surface: result.Session.Surface, Name: result.Session.Name, Cwd: result.Session.Cwd, Alias: alias, Status: result.Session.Status, LastActive: result.Session.LastActive, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: result.Session.Source, Transport: result.Session.Transport},
+			"session": dashboardSession{ID: result.Session.ID, Surface: result.Session.Surface, Name: result.Session.Name, Cwd: result.Session.Cwd, Alias: alias, Status: result.Session.Status, LastActive: result.Session.LastActive, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: result.Session.Source, Transport: result.Session.Transport, Subagent: result.Session.Subagent, Delegated: result.Session.Delegated()},
 			"snippet": result.Snippet,
 		})
 	}
@@ -2000,9 +2048,12 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	}
 	limit := 10
 	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
-		if parsed, parseErr := strconv.Atoi(rawLimit); parseErr == nil && parsed >= 1 && parsed <= 40 {
-			limit = parsed
+		parsed, parseErr := strconv.Atoi(rawLimit)
+		if parseErr != nil || parsed < 1 || parsed > surface.MaxExchangePage {
+			writeAPIError(w, http.StatusBadRequest, "invalid_limit", fmt.Sprintf("Use a limit between 1 and %d exchanges.", surface.MaxExchangePage))
+			return
 		}
+		limit = parsed
 	}
 	alias, _ := d.Registry.ReverseAlias(session.ID)
 	effective := surface.EffectiveCapabilities(adapter, session)
@@ -2153,32 +2204,25 @@ func truncateSessionExchanges(exchanges []surface.Exchange) ([]surface.Exchange,
 	for _, exchange := range exchanges {
 		metadata.OriginalBytes += len(exchange.User) + len(exchange.Assistant)
 	}
+	// Every exchange of the page is returned, so the page cursor never skips
+	// one; the newest take what older ones leave of the budget.
 	remaining := sessionTranscriptJSONBudget
-	result := make([]surface.Exchange, 0, len(exchanges))
-	for index := len(exchanges) - 1; index >= 0 && remaining > 0; index-- {
-		exchange := exchanges[index]
-		userBudget := min(sessionTranscriptFieldLimit, remaining)
+	result := make([]surface.Exchange, len(exchanges))
+	for index, exchange := range exchanges {
+		share := remaining / (len(exchanges) - index)
+		userBudget := min(sessionTranscriptFieldLimit, share)
 		if exchange.User != "" && exchange.Assistant != "" {
-			userBudget = min(userBudget, remaining/2)
+			userBudget = min(userBudget, share/2)
 		}
 		user, userEncoded, userTruncated := truncateJSONText(exchange.User, userBudget)
-		remaining -= userEncoded
-		assistant, assistantEncoded, assistantTruncated := truncateJSONText(exchange.Assistant, min(sessionTranscriptFieldLimit, remaining))
-		remaining -= assistantEncoded
-		if user == "" && assistant == "" && (exchange.User != "" || exchange.Assistant != "") {
-			metadata.Truncated = true
-			break
-		}
+		assistant, assistantEncoded, assistantTruncated := truncateJSONText(exchange.Assistant, min(sessionTranscriptFieldLimit, share-userEncoded))
+		remaining -= userEncoded + assistantEncoded
 		exchange.User = user
 		exchange.Assistant = assistant
 		metadata.ReturnedBytes += len(user) + len(assistant)
 		metadata.Truncated = metadata.Truncated || userTruncated || assistantTruncated
-		result = append(result, exchange)
+		result[index] = exchange
 	}
-	for left, right := 0, len(result)-1; left < right; left, right = left+1, right-1 {
-		result[left], result[right] = result[right], result[left]
-	}
-	metadata.Truncated = metadata.Truncated || len(result) < len(exchanges)
 	return result, metadata
 }
 
@@ -2323,4 +2367,19 @@ func (d *Daemon) writeAcceptedLaunch(w http.ResponseWriter, launcher string, loc
 		body["location"] = location
 	}
 	writeDashboardJSON(w, http.StatusAccepted, body)
+}
+
+// reserveStartName holds a new session's name from before it starts until it
+// is registered, refusing a name another session, coordinator or start holds.
+func (d *Daemon) reserveStartName(w http.ResponseWriter, name string) (registry.AliasReservation, bool) {
+	reservation, err := d.Registry.ReserveAlias(name, time.Now().Add(surfaceOperationTimeout+startNameMargin))
+	if err == nil {
+		return reservation, true
+	}
+	if registry.AliasRefused(err) {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	} else {
+		http.Error(w, fmt.Sprintf("reserve conversation name: %s", err), http.StatusInternalServerError)
+	}
+	return registry.AliasReservation{}, false
 }
