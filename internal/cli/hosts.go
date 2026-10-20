@@ -107,6 +107,10 @@ func (a *App) resolveAnyTarget(ctx context.Context, target string) (*surface.Ses
 		session, adapter, err := a.resolveLocalTarget(ctx, target)
 		return session, adapter, nil, err
 	}
+	target, err := a.expandLead(target)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	identity, err := a.registry().HostIdentity()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("read host identity: %w", err)
