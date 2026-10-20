@@ -91,9 +91,9 @@ func (c *Claude) Capabilities() surface.Capabilities {
 // for any other session Control cannot reach through Remote Control: a CLI
 // session reached only over its native peer socket, or any session on an
 // install without Remote Control. Hosted and socket sessions stream only from
-// a local transcript. Lifecycle follows the runtime: a background job has
-// Claude's status, logs, stop and resume; the host stops and resumes its
-// sessions but keeps no log; an interactive session belongs to its terminal.
+// a local transcript. Lifecycle follows the runtime: a background job and a
+// host session have status, logs, stop and resume; an interactive session
+// belongs to its terminal.
 func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities {
 	capabilities := c.Capabilities()
 	if claudeHosted(sess) {
@@ -102,7 +102,7 @@ func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities
 		capabilities.Commands = false
 		capabilities.Respond = true
 		capabilities.PermissionMode = true
-		capabilities.Lifecycle = surface.Lifecycle{Status: true, Stop: true, Resume: true}
+		capabilities.Lifecycle = surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true}
 		return capabilities
 	}
 	if sess == nil {

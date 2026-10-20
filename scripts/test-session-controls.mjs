@@ -51,7 +51,7 @@ assert.equal(options.find(x => x.value === 'session-fork').disabled, true);
 assert.deepEqual(lifecycleOptions(), ['session-lifecycle-status', 'session-lifecycle-logs', 'session-lifecycle-stop', 'session-lifecycle-resume']);
 app.selected = {id:'hosted',surface:'claude',capabilities:{lifecycle:{status:true,logs:false,stop:true,resume:true}}};
 vm.runInContext('syncSessionOperationFields()', context);
-assert.deepEqual(lifecycleOptions(), ['session-lifecycle-status', 'session-lifecycle-stop', 'session-lifecycle-resume'], 'a host session offers no logs');
+assert.deepEqual(lifecycleOptions(), ['session-lifecycle-status', 'session-lifecycle-stop', 'session-lifecycle-resume'], 'an operation whose flag is off is not offered');
 assert.equal(options.find(x => x.value === 'session-lifecycle-logs').hidden, true);
 app.selected = {id:'interactive',surface:'claude',capabilities:{lifecycle:{status:false,logs:false,stop:false,resume:false}}};
 vm.runInContext('syncSessionOperationFields()', context);

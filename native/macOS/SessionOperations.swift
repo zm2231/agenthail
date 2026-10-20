@@ -177,7 +177,7 @@ enum SessionLifecycleCopy {
     static func detail(_ session: SessionState) -> String {
         switch session.runtimeKind {
         case "claude-bg": return "A Claude Code background job."
-        case "claude-host": return "Agenthail runs this session. Stop closes it; the next message or Resume opens it again."
+        case "claude-host": return "Agenthail runs this session. Logs shows what its Claude process wrote to stderr; Stop closes it, and the next message or Resume opens it again."
         default: return "Controls for this session's process."
         }
     }

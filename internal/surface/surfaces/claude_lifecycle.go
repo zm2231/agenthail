@@ -243,7 +243,9 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 
 // hostSessionAction runs a lifecycle action on a session the Claude host
 // runs. Stop closes it in the host; the conversation resumes on the next
-// message or resume. The host keeps no background log.
+// message or resume. Logs is what its Claude process wrote to stderr, which
+// the host keeps while the session is open; the conversation itself is the
+// transcript.
 func (c *Claude) hostSessionAction(ctx context.Context, session *surface.Session, action string) (map[string]any, error) {
 	switch action {
 	case "status":
@@ -272,8 +274,20 @@ func (c *Claude) hostSessionAction(ctx context.Context, session *surface.Session
 			return nil, err
 		}
 		return map[string]any{"sessionId": session.ID, "action": action, "unchanged": !resumed, "state": string(session.Status)}, nil
+	case "logs":
+		logs, err := c.host.client.Logs(ctx, session.ID)
+		if claudehost.IsCode(err, "not_open") {
+			return nil, fmt.Errorf("Claude session %s is not open in the host, which keeps its process log only while it runs; read the conversation with agenthail last", session.ID)
+		}
+		if claudehost.IsCode(err, "invalid") {
+			return nil, fmt.Errorf("the running Claude host predates session logs; it reports them once the next Agenthail install replaces it: %w", err)
+		}
+		if err != nil {
+			return nil, claudeHostDeliveryError(err)
+		}
+		return map[string]any{"sessionId": session.ID, "action": action, "pid": logs.PID, "output": logs.Stderr}, nil
 	default:
-		return nil, fmt.Errorf("a Claude host session has no background log; read its transcript with agenthail last")
+		return nil, fmt.Errorf("Claude lifecycle action must be status, stop, resume, or logs")
 	}
 }
 

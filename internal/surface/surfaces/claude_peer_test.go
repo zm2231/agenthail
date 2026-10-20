@@ -26,7 +26,7 @@ func TestClaudeLifecycleCapabilitiesFollowTheRuntime(t *testing.T) {
 		want    surface.Lifecycle
 	}{
 		{surface.RuntimeClaudeBackground, surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true}},
-		{surface.RuntimeClaudeHost, surface.Lifecycle{Status: true, Stop: true, Resume: true}},
+		{surface.RuntimeClaudeHost, surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true}},
 		{surface.RuntimeClaudeCLI, surface.Lifecycle{}},
 	} {
 		session := &surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: tc.runtime, Transport: "uds", Bridge: "session_bridge"}

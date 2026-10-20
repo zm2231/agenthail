@@ -23,7 +23,7 @@ func TestSessionRowReportsTheLifecycleItsRuntimeSupports(t *testing.T) {
 	d := New(registry, []surface.Surface{adapter})
 	for runtime, want := range map[surface.RuntimeKind]map[string]bool{
 		surface.RuntimeClaudeBackground: {"status": true, "logs": true, "stop": true, "resume": true},
-		surface.RuntimeClaudeHost:       {"status": true, "logs": false, "stop": true, "resume": true},
+		surface.RuntimeClaudeHost:       {"status": true, "logs": true, "stop": true, "resume": true},
 		surface.RuntimeClaudeCLI:        {"status": false, "logs": false, "stop": false, "resume": false},
 	} {
 		row := d.catalogSessionProjection(adapter, surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: runtime, Transport: "uds"}, catalogIdentity{}, time.Now(), "", 0, false, DashboardConfig{})
@@ -81,8 +81,7 @@ func TestResumingABackgroundJobRegistersItsHostSession(t *testing.T) {
 	if err != nil || stored.RuntimeKind != surface.RuntimeClaudeHost || stored.PID <= 0 {
 		t.Fatalf("stored=%+v err=%v, want the host session", stored, err)
 	}
-	row := d.catalogSessionProjection(adapter, *stored, catalogIdentity{}, time.Now(), "", 0, false, DashboardConfig{})
-	if row.Capabilities.Lifecycle != (surface.Lifecycle{Status: true, Stop: true, Resume: true}) {
-		t.Fatalf("lifecycle=%+v, want the host's", row.Capabilities.Lifecycle)
+	if stored.Transport != "uds" {
+		t.Fatalf("stored=%+v, want the host process's transport", stored)
 	}
 }

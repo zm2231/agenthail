@@ -197,6 +197,26 @@ test('a session opened in a Claude config root runs its Claude there', async () 
   c.close();
 });
 
+test('logs returns what an open session wrote to stderr', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  const id = randomUUID();
+  const opened = await c.call('open', { sessionId: id, cwd: f.cwd });
+  let logs;
+  for (let i = 0; i < 200; i++) {
+    logs = await c.call('logs', { sessionId: id });
+    if (logs.stderr.includes('started')) break;
+    await sleep(25);
+  }
+  assert.equal(logs.sessionId, id);
+  assert.equal(logs.pid, opened.pid);
+  assert.match(logs.stderr, new RegExp(`fake-claude: session ${id} started`));
+  await c.call('close', { sessionId: id });
+  await assert.rejects(c.call('logs', { sessionId: id }), { code: 'not_open' });
+  c.close();
+});
+
 test('a peer message keeps its text and carries the sender as origin', async () => {
   const f = fixture();
   await startHost(f);

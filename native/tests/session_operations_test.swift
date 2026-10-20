@@ -113,7 +113,7 @@ struct SessionOperationsTest {
         check(background.map(SessionOperationAvailability.lifecycle) == SessionLifecycle(status: true, logs: true, stop: true, resume: true), "a background job offers all four operations")
         check(background.map(SessionLifecycleCopy.title) == "Background session", "a background job keeps its label")
         let hosted = lifecycleSession("claude-host", lifecycle: #"{"status":true,"logs":false,"stop":true,"resume":true}"#)
-        check(hosted.map(SessionOperationAvailability.lifecycle) == SessionLifecycle(status: true, stop: true, resume: true), "a host session offers no logs")
+        check(hosted.map(SessionOperationAvailability.lifecycle) == SessionLifecycle(status: true, stop: true, resume: true), "an operation whose flag is off is not offered")
         check(hosted.map(SessionLifecycleCopy.title) == "Session", "a host session is not labelled a background session")
         let interactive = lifecycleSession("claude-cli", lifecycle: #"{"status":false,"logs":false,"stop":false,"resume":false}"#)
         check(interactive.map { SessionOperationAvailability.lifecycle($0).any } == false, "an interactive session offers no lifecycle operation")

@@ -90,7 +90,8 @@ environment as the daemon's other Claude launches (`claudeCommandEnv`), so
 
 Newline-delimited JSON over the socket, one request per connection:
 `hello`, `open`, `send`, `interrupt`, `respond`, `setModel`,
-`setPermissionMode`, `close`, `list`, `drain`, and `subscribe`, which streams
+`setPermissionMode`, `logs` (the last 4 KiB an open session's Claude wrote to
+stderr), `close`, `list`, `drain`, and `subscribe`, which streams
 events after a sequence number and reports a gap when the ring buffer has moved
 past it. A failed request returns `{code, message}`:
 

@@ -236,6 +236,12 @@ const methods = {
     emit(s.id, 'permission_mode', { permissionMode });
     return s.describe();
   },
+  // logs is the tail of what the session's Claude process wrote to stderr,
+  // which the host keeps while the session is open.
+  logs: ({ sessionId }) => {
+    const s = session(sessionId);
+    return { sessionId: s.id, pid: s.pid, stderr: s.stderr };
+  },
   close: async ({ sessionId }) => {
     const s = session(sessionId);
     s.end();
