@@ -13,6 +13,8 @@ report_failure() {
 trap 'report_failure "$LINENO" "$BASH_COMMAND"' ERR
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+daemon_bundle="/Library/Application Support/Agenthail/Agenthail Daemon.app"
+daemon_exe="$daemon_bundle/Contents/MacOS/agenthail"
 pkg="${1:?usage: scripts/test-pkg-install.sh <Agenthail.pkg>}"
 pkg="$(cd "$(dirname "$pkg")" && pwd)/$(basename "$pkg")"
 expected_revision="${AGENTHAIL_EXPECTED_REVISION:-$(git rev-parse HEAD)}"
@@ -37,8 +39,8 @@ assert_supervised_daemon() {
 	pid="$(service_daemon_pid)"
 	[[ "$pid" =~ ^[0-9]+$ ]]
 	test "$(cat "$HOME/.agenthail/daemon.pid")" = "$pid"
-	ps -p "$pid" -o command= | grep -Fq '/Library/Application Support/Agenthail/agenthail daemon-run'
-	test "$({ pgrep -u "$UID" -f '^/Library/Application Support/Agenthail/agenthail daemon-run$' || true; } | wc -l | tr -d ' ')" = 1
+	ps -p "$pid" -o command= | grep -Fq "$daemon_exe daemon-run"
+	test "$({ pgrep -u "$UID" -fx "$daemon_exe daemon-run" || true; } | wc -l | tr -d ' ')" = 1
 }
 cleanup_fixtures() {
 	[ -z "$legacy_pid" ] || ! fixture_is_running "$legacy_pid" "$legacy_app/Contents/MacOS/Agenthail" || kill -TERM "$legacy_pid" >/dev/null 2>&1 || true
@@ -48,7 +50,19 @@ cleanup_fixtures() {
 trap cleanup_fixtures EXIT
 
 mkdir -p "$HOME/.codex"
+# A package from before the daemon bundle left a bare executable and a
+# LaunchAgent that runs it; this one replaces both.
+legacy_daemon="/Library/Application Support/Agenthail/agenthail"
+plist="$HOME/Library/LaunchAgents/com.agenthail.daemon.plist"
+sudo mkdir -p "/Library/Application Support/Agenthail"
+sudo cp /usr/bin/true "$legacy_daemon"
+mkdir -p "$HOME/Library/LaunchAgents"
+plutil -create xml1 "$plist"
+plutil -insert Label -string com.agenthail.daemon "$plist"
+plutil -insert ProgramArguments -json "[\"$legacy_daemon\",\"daemon-run\"]" "$plist"
 sudo installer -pkg "$pkg" -target /
+test ! -e "$legacy_daemon"
+test "$(plutil -extract ProgramArguments.0 raw -o - "$plist")" = "$daemon_exe"
 
 test -x /usr/local/bin/agenthail
 test -x /usr/local/bin/agenthail-uninstall
@@ -188,8 +202,10 @@ if tail -c "+$((daemon_log_offset + 1))" "$HOME/.agenthail/daemon.log" | grep -F
 fi
 doctor_json="$(/usr/local/bin/agenthail doctor --json || true)"
 jq -e '.surfaces | length == 3' <<<"$doctor_json" >/dev/null
+# launchd runs the daemon from its bundle, so the grants it reads are the
+# bundle's, whichever of them this machine has.
+jq -e --arg holder "$daemon_bundle" '.permissions.holder == $holder and .permissions.problem == null and (.permissions.grants | length == 3) and all(.permissions.grants[]; .state != "unknown")' <<<"$doctor_json" >/dev/null
 jq -e 'all(.surfaces[]; ((.error // "") | test("curl_cffi|python.*not found|node.*not found|sweet-cookie"; "i") | not))' <<<"$doctor_json" >/dev/null
-plist="$HOME/Library/LaunchAgents/com.agenthail.daemon.plist"
 test "$(plutil -extract EnvironmentVariables.AGENTHAIL_PYTHON raw -o - "$plist")" = "/Library/Application Support/Agenthail/runtime/python/bin/python3"
 test "$(plutil -extract EnvironmentVariables.AGENTHAIL_SIDECAR raw -o - "$plist")" = "/Library/Application Support/Agenthail/sidecar.py"
 launchctl bootout "gui/$UID/com.agenthail.daemon" >/dev/null 2>&1 || true

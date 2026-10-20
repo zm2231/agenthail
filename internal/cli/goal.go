@@ -25,8 +25,9 @@ func (a *App) cmdGoal(args []string) error {
 	if remote != nil {
 		return a.goalRemote(ctx, remote, positional, hasFlag(args, "--json"))
 	}
-	if !surface.CapabilitiesFor(surf, sess).Goal {
-		return fmt.Errorf("%s does not support goal management", surf.Name())
+	capabilities := surface.CapabilitiesFor(surf, sess)
+	if !capabilities.GoalStatus {
+		return fmt.Errorf("%s does not report goals", surf.Name())
 	}
 	if len(positional) == 1 {
 		goal, getErr := surf.GoalGet(ctx, sess)
@@ -42,6 +43,9 @@ func (a *App) cmdGoal(args []string) error {
 		}
 		fmt.Print(formatGoalState(goal))
 		return nil
+	}
+	if !capabilities.Goal {
+		return fmt.Errorf("%s does not support goal management", surf.Name())
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
@@ -99,6 +103,9 @@ func formatGoalState(goal *surface.GoalState) string {
 	fmt.Fprintf(&output, "%s [%s]\n", goal.Objective, goal.Status)
 	if goal.Status == surface.GoalStatusBlocked || goal.Status == surface.GoalStatusUsageLimited || goal.Status == surface.GoalStatusBudgetLimited {
 		output.WriteString("Needs you\n")
+	}
+	if goal.Reason != "" {
+		fmt.Fprintf(&output, "Reason: %s\n", goal.Reason)
 	}
 	fmt.Fprintf(&output, "Elapsed: %ds · Tokens: %d", goal.TimeUsedSeconds, goal.TokensUsed)
 	if goal.TokenBudget != nil {

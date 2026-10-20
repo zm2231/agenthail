@@ -33,6 +33,8 @@ type Claude struct {
 	contextState map[string]*claudeContextState
 	observeMu    sync.Mutex
 	observeState map[string]*claudeObservationState
+	goalMu       sync.Mutex
+	goals        map[string]*claudeGoalCursor
 	modelsMu     sync.Mutex
 	modelsCache  []surface.ModelOption
 	modelsAt     time.Time
@@ -78,7 +80,7 @@ func (c *Claude) ObserveAllClaudeSubagents(ctx context.Context) ([]surface.Claud
 
 func (c *Claude) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
-		Send: true, Stream: true, Reply: true, Goal: false,
+		Send: true, Stream: true, Reply: true, GoalStatus: true,
 		Compact: true, Model: true, Interrupt: true, Steer: true,
 		Attach: true, Commands: true,
 	}
@@ -1222,6 +1224,12 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		}
 	}
 	for time.Now().Before(deadline) {
+		if info, statErr := os.Stat(path); statErr == nil {
+			if current := transcriptFileIdentity(info); identity != "" && current != identity {
+				// A transcript replaced at the same path is read from its start, as a shorter rewrite is.
+				identity, offset = current, 0
+			}
+		}
 		// A closing turn belongs to the bytes before offset; a rewritten transcript drops it.
 		// The anchor then rolls forward over the bytes this scan parses, never a later read.
 		tail, tailErr := transcriptTail(path, offset)
@@ -1273,6 +1281,15 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			return scanErr
 		}
 		offset = next
+		if uuid == "" {
+			goal, version, changed, goalErr := c.streamGoal(ctx, sess)
+			if goalErr != nil {
+				return goalErr
+			}
+			if changed {
+				onEvent(surface.StreamEvent{ID: "goal", ProviderKey: "goal", Version: version, Operation: "replace", Kind: "goal", Goal: goal})
+			}
+		}
 		finish(turns.settle(func(at time.Time) bool { return c.settledAfter(sess, at) }))
 		if turns.closing.TurnID != "" {
 			turns.closing.Anchor = anchorOf(tail)
@@ -1347,10 +1364,6 @@ func (c *Claude) GoalSet(ctx context.Context, sess *surface.Session, text string
 
 func (c *Claude) GoalClear(ctx context.Context, sess *surface.Session) error {
 	return surface.ErrUnsupported
-}
-
-func (c *Claude) GoalGet(ctx context.Context, sess *surface.Session) (*surface.GoalState, error) {
-	return nil, surface.ErrUnsupported
 }
 
 func (c *Claude) Compact(ctx context.Context, sess *surface.Session) error {

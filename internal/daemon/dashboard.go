@@ -90,6 +90,7 @@ type dashboardSession struct {
 	Surface           surface.SurfaceKind        `json:"surface"`
 	RuntimeKind       surface.RuntimeKind        `json:"runtimeKind,omitempty"`
 	ConfiguredModel   string                     `json:"configuredModel,omitempty"`
+	ClaudeAccount     *surface.SessionAccount    `json:"claudeAccount,omitempty"`
 	Name              string                     `json:"name"`
 	Cwd               string                     `json:"cwd,omitempty"`
 	Alias             string                     `json:"alias,omitempty"`
@@ -1069,6 +1070,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Worktree        string                     `json:"worktree"`
 		Agent           string                     `json:"agent"`
 		PermissionMode  string                     `json:"permissionMode"`
+		Account         string                     `json:"account"`
 		Fork            surface.ForkOptions        `json:"fork"`
 		NativeQueue     surface.NativeQueueRequest `json:"nativeQueue"`
 		Action          string                     `json:"action"`
@@ -1150,7 +1152,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		startOptions := func(cwd string) surface.SessionStartOptions {
-			return surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode}
+			return surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode, Account: strings.TrimSpace(request.Account)}
 		}
 		if request.Launcher != "" {
 			if strings.TrimSpace(request.Message) == "" {
@@ -2124,7 +2126,7 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 	if provider, ok := adapter.(surface.ContextUsageProvider); ok {
 		requests["context"] = func() (any, error) { return provider.ContextUsage(ctx, session) }
 	}
-	if effective.Goal {
+	if effective.GoalStatus {
 		requests["goal"] = func() (any, error) { return adapter.GoalGet(ctx, session) }
 	}
 	if effective.Model {

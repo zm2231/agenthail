@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/zm2231/agenthail/internal/installdir"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -105,7 +106,7 @@ func sidecarPath() (string, error) {
 	}
 	if exe, err := os.Executable(); err == nil {
 		for _, name := range []string{"sidecar.py", "claude-worker"} {
-			sibling := filepath.Join(filepath.Dir(exe), name)
+			sibling := filepath.Join(installdir.Of(exe), name)
 			if _, err := os.Stat(sibling); err == nil {
 				return sibling, nil
 			}
@@ -288,7 +289,7 @@ func sidecarRequestWithCookies(parent context.Context, method, url string, heade
 }
 
 // configuredCookieBridge locates cookie.mjs: AGENTHAIL_COOKIE_BRIDGE, then a
-// copy beside the executable or on PATH.
+// copy in the install directory or on PATH.
 func configuredCookieBridge() string {
 	if bridge := os.Getenv("AGENTHAIL_COOKIE_BRIDGE"); bridge != "" {
 		return bridge
@@ -299,7 +300,7 @@ func configuredCookieBridge() string {
 func cookieBridgePath(name string) string {
 	for _, check := range []string{name, name + ".mjs"} {
 		if exe, err := os.Executable(); err == nil {
-			sibling := filepath.Join(filepath.Dir(exe), check)
+			sibling := filepath.Join(installdir.Of(exe), check)
 			if _, err := os.Stat(sibling); err == nil {
 				return sibling
 			}

@@ -65,7 +65,7 @@ func (c *Codex) RequiresLocalTranscript(session *surface.Session) bool {
 
 func (c *Codex) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
-		Send: true, Stream: true, Reply: true, Goal: true,
+		Send: true, Stream: true, Reply: true, Goal: true, GoalStatus: true,
 		Compact: true, Model: true, Interrupt: true, Steer: true,
 		Attach: true,
 	}
@@ -812,8 +812,8 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 	if err := options.TurnOptions.Validate(surface.KindCodex); err != nil {
 		return nil, nil, err
 	}
-	if options.Worktree != "" || options.Agent != "" || options.PermissionMode != "" || options.Name != "" {
-		return nil, nil, fmt.Errorf("name, worktree, agent and permission-mode creation options require Claude")
+	if options.Worktree != "" || options.Agent != "" || options.PermissionMode != "" || options.Name != "" || options.Account != "" {
+		return nil, nil, fmt.Errorf("name, worktree, agent, permission-mode and account creation options require Claude")
 	}
 	message := strings.TrimSpace(options.Message)
 	if message == "" {

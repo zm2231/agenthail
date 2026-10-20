@@ -411,6 +411,7 @@ type SessionStartOptions struct {
 	Worktree       string `json:"worktree,omitempty"`
 	Agent          string `json:"agent,omitempty"`
 	PermissionMode string `json:"permissionMode,omitempty"`
+	Account        string `json:"account,omitempty"`
 	Message        string `json:"message"`
 	Cwd            string `json:"cwd,omitempty"`
 	Model          string `json:"model,omitempty"`
@@ -646,15 +647,18 @@ type GoalController interface {
 }
 
 type Capabilities struct {
-	Send      bool `json:"send"`
-	Stream    bool `json:"stream"`
-	Reply     bool `json:"reply"`
-	Goal      bool `json:"goal"`
-	Compact   bool `json:"compact"`
-	Model     bool `json:"model"`
-	Interrupt bool `json:"interrupt"`
-	Steer     bool `json:"steer"`
-	Attach    bool `json:"attach"`
+	Send   bool `json:"send"`
+	Stream bool `json:"stream"`
+	Reply  bool `json:"reply"`
+	// Goal is a session whose goal is set, edited, paused and budgeted here.
+	Goal bool `json:"goal"`
+	// GoalStatus is a session whose goal status GoalGet reads.
+	GoalStatus bool `json:"goalStatus"`
+	Compact    bool `json:"compact"`
+	Model      bool `json:"model"`
+	Interrupt  bool `json:"interrupt"`
+	Steer      bool `json:"steer"`
+	Attach     bool `json:"attach"`
 	// Respond and PermissionMode are a session whose open requests a person
 	// answers here and whose permission mode changes while it runs.
 	Respond        bool `json:"respond"`

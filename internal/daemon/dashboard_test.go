@@ -104,7 +104,7 @@ func (s *goalControlSurface) UpdateGoal(_ context.Context, _ *surface.Session, u
 
 func TestDashboardGoalActionsUseTypedUpdatesAndValidateBudget(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
-	fake.caps.Goal = true
+	fake.caps.Goal, fake.caps.GoalStatus = true, true
 	adapter := &goalControlSurface{daemonSurface: fake}
 	handler := dashboardRouter(New(registry, []surface.Surface{adapter}))
 	request := func(action, message string) *httptest.ResponseRecorder {

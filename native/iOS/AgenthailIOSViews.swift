@@ -1030,6 +1030,7 @@ struct SessionInspector: View {
                     LabeledContent("Agent", value: detail.session.surface.capitalized)
                     LabeledContent("Status", value: detail.session.waitingOn != nil ? "Waiting on you" : detail.session.status.capitalized)
                     if let value = detail.model { LabeledContent("Model", value: value) }
+                    if let account = liveSession.claudeAccount { LabeledContent("Account", value: account.label) }
                     if let value = detail.session.cwd, !value.isEmpty { LabeledContent("Workspace", value: value).textSelection(.enabled) }
                     if let value = detail.session.source { LabeledContent("Source", value: value) }
                     if let value = detail.session.transport { LabeledContent("Connection", value: value) }
@@ -1072,6 +1073,7 @@ struct SessionInspector: View {
                         if let value = goal.tokenBudget { LabeledContent("Token budget", value: value.formatted()) }
                         if let value = goal.createdAt { LabeledContent("Created", value: value) }
                         if let value = goal.updatedAt { LabeledContent("Updated", value: value) }
+                        if let reason = goal.reason { LabeledContent("Reason") { Text(reason).textSelection(.enabled) } }
                     }
                 }
                 if let runs = detail.claudeRuns, !runs.isEmpty {

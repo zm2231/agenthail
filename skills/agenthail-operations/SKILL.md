@@ -61,6 +61,14 @@ installer on the user's behalf. Relevant overrides are
 `AGENTHAIL_NOTION_USER`. Never print browser cookies, dashboard tokens, or
 credentials.
 
+On macOS, agents AgentHail runs use the privacy grants of Agenthail Daemon.
+When desktop automation (agent-hands) fails with a permission or
+`bootstrapTimedOut` error, run `agenthail permissions` (or read `permissions` in
+`doctor --json`): it lists Accessibility, Screen Recording and Automation per
+target as granted or missing, with the System Settings pane for each. Granting
+is the person's decision: tell them, and only run `agenthail permissions
+request` when they ask, since it puts macOS prompts on their screen.
+
 AgentHail reads these overrides from the environment of each CLI or daemon
 process and stores shared session, alias, queue, relay, and delivery state in
 `~/.agenthail/registry.db`. A launchd or systemd service does not inherit
@@ -70,6 +78,10 @@ overrides in the service; rerun it after changing them. Claude Code state is
 read from `CLAUDE_CONFIG_DIR` when it is set, otherwise `~/.claude`, plus every
 root listed as `claudeConfigDirs` in `~/.agenthail/config.json`. `doctor` shows
 each root. A conversation present in two roots is refused rather than guessed.
+`agenthail accounts [--json]` shows the account signed into each root, its
+cached usage, and which roots share one account. `thread create claude
+--account <name|email|dir>` starts the session under that root; `list --wide`
+shows each Claude session's account.
 
 One unhealthy surface does not block the others. Preserve the `errors` object
 from JSON discovery output when reporting partial availability.
@@ -264,6 +276,7 @@ agenthail send @builder "Walk through the issue." --stream --timeout 2m
 agenthail send @builder - --reply --json < prompt.txt
 
 agenthail reply @builder --json
+agenthail reply @builder --json --max-bytes 4000
 agenthail last @builder 5 --full --json
 agenthail stream @builder --timeout 10s
 agenthail steer @builder "Prioritize the failing test."
@@ -303,6 +316,13 @@ delivery. `--reply` waits for one new completed reply only when delivery is
 immediate. A queued `--reply` returns the durable queue receipt. `--stream`
 watches live deltas and cannot be combined with `--reply` or `--json`.
 
+`--max-bytes N` caps `reply` text, and each `last` prompt and reply, at N bytes
+without splitting a character. A cut field says so: JSON adds `truncated` and
+`textBytes` to `reply`, and `userTruncated`/`userBytes` or
+`assistantTruncated`/`assistantBytes` to an exchange, with the original size;
+text output ends it with `[truncated: shown of total bytes]`. It cannot be
+combined with `--report`.
+
 Use `--model` only for a one-message Codex or Notion override. Use `--from` when
 the receiving agent needs a human-readable sender label. Long content should go
 through stdin.
@@ -316,6 +336,71 @@ name and current session. A send to the coordinator steers it
 when busy (or queues when steering is unavailable), resumes it when ended, and
 starts a new conversation from its saved instructions when the conversation is
 gone. Do not set or clear the coordinator unless the person asks.
+
+When you dispatch work to another agent, ask it to end its final message with a
+completion report (below). When you finish work someone dispatched to you, end
+your final message, and your report to `@lead`, with one.
+
+## Completion Report
+
+End the final message of a finished piece of work with exactly one completion
+report: a fenced block whose info string is `agenthail-report`, holding one line
+of JSON, with nothing after the closing fence.
+
+````markdown
+Fixed the export retry and pushed the branch.
+
+```agenthail-report
+{"v":1,"status":"done","stop":"complete","commits":["0d825e4d"],"paths":["internal/export/retry.go"],"next":"Deploy the export service"}
+```
+````
+
+| Key | Required | Value |
+| --- | --- | --- |
+| `v` | yes | `1` |
+| `status` | yes | `done`, `partial`, `blocked` or `failed` |
+| `stop` | yes | Why you stopped: `complete`, `needsInput`, `needsApproval` or `gaveUp` |
+| `reason` | unless `status` is `done` | What is missing or went wrong, at most 280 characters |
+| `commits` | no | Commit ids you made, oldest first, at most 20 |
+| `paths` | no | Files you changed or produced, relative to the repository, at most 50 |
+| `next` | no | The one action the reader should take, at most 280 characters |
+
+`stop` is `complete` exactly when `status` is `done`. A `blocked` report stops
+with `needsInput` or `needsApproval`, a `failed` one with `gaveUp`, and a
+`partial` one with any of those three. `blocked` means you need something named
+in `reason` before you can go on.
+The report is your own account and stays separate from what Agenthail observes
+about the session: its goal (`agenthail goal <target> --json`, where `blocked`
+means the goal was judged impossible), usage limits and turn errors. Do not
+restate those in the report; a report that disagrees with them, such as `done`
+while the goal is still active, is worth a reader's attention.
+
+The JSON line is at most 2048 bytes; when the paths do not fit, list the ones that matter most. Leave out a key you have nothing for rather
+than writing an empty value. Readers ignore keys they do not know; a change that
+breaks this shape uses a new `v`. A report anywhere but the end of the final
+message is quoted text, not a report.
+
+The report is your claim, not evidence. A reader checks `commits` and `paths`
+before acting on them. Read it with `--report`, which checks every rule above:
+
+```bash
+agenthail reply @builder --report
+agenthail last @builder 5 --report
+```
+
+`reply --report` prints the report as JSON and exits non-zero, naming the broken
+rule, when the latest reply has no valid report. `last --report` lists each
+exchange's `report` or `reportError` and fails only when the newest exchange
+has none, because earlier ones are often questions without a report. Neither
+prints the reply text.
+
+An Agenthail without `--report` can find the same report with jq, which does
+not check the rules; keep the two in step if either changes:
+
+```bash
+agenthail last @builder 1 --json \
+  | jq -e '.exchanges[-1].assistant | capture("(?:\\A|\n)`{3}agenthail-report\n(?<r>[^\n]+)\n`{3}\\s*\\z").r | fromjson'
+```
 
 ## Follow, Subscribe, And Notify
 

@@ -50,6 +50,11 @@ recorded alongside them, and `nextBefore` addresses the record before the oldest
 exchange on the page, so `--before <nextBefore>` reads the preceding page with
 no gap. Past the oldest journal entry, the cursor continues into the provider
 history recorded at seed time.
+`--max-bytes N` cuts each prompt and reply after the read, at a character
+boundary, and records the original size; `--report` replaces the text with the
+parsed completion report (`internal/report`) and cannot be combined with it.
+Both run in the CLI on whatever page the reader returned, so the daemon page,
+paired-host reads and offline provider reads behave the same.
 With the daemon running, phone detail, `last`, and `reply` read the same bounded
 per-session journal page. CLI JSON includes `journalSeq`; an active-daemon read
 error does not fall back to a second provider reader. Metadata loads independently.

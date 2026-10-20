@@ -66,6 +66,7 @@ struct SessionLaunchForm: Equatable {
     var folder = ""
     var model = ""
     var effort = ""
+    var account = ""
     var message = ""
 
     var usesFolder: Bool { agent != "notion" }
@@ -102,7 +103,7 @@ struct SessionLaunchForm: Equatable {
     func creationBody() throws -> Data {
         let effort = setsEffort ? effort : ""
         let turnSettings = agent == "codex" && !effort.isEmpty ? TurnSettings(effort: effort) : TurnSettings()
-        let claude = agent == "claude" ? ClaudeCreationSettings(effort: effort) : ClaudeCreationSettings()
+        let claude = agent == "claude" ? ClaudeCreationSettings(effort: effort, account: account) : ClaudeCreationSettings()
         return try AgenthailAPI.creationBody(surface: agent, message: trimmedMessage, cwd: cwd, model: modelID, turnSettings: turnSettings, claude: claude, launcher: launcher, host: host)
     }
 

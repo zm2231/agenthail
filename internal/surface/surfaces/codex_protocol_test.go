@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -225,5 +226,40 @@ func TestCodexResolveRejectsDuplicateExactNamesAcrossPages(t *testing.T) {
 	session, err := NewCodex(bridge.URL).Resolve(context.Background(), "duplicate")
 	if err == nil || session != nil || !strings.Contains(err.Error(), "thread-1") || !strings.Contains(err.Error(), "thread-2") {
 		t.Fatalf("session=%+v err=%v", session, err)
+	}
+}
+
+func TestTheVoiceOperatorThreadStartsWithEveryAgenthailVoiceTool(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	bridge := startDesktopBridge(t, func(method string) string {
+		if method == "thread/start" {
+			return `{"result":{"thread":{"id":"operator","source":"vscode"}}}`
+		}
+		return ""
+	})
+	voice := &CodexVoice{Codex: NewCodex(bridge.URL)}
+	if session, err := voice.Create(context.Background(), "/tmp/project", "operate"); err != nil || session.ID != "operator" {
+		t.Fatalf("session=%+v err=%v", session, err)
+	}
+	program := bridge.Request("thread/start")
+	_, params, _ := strings.Cut(program, `request("thread/start",`)
+	params, _, _ = strings.Cut(params, ",15000))")
+	var request struct {
+		DynamicTools []struct {
+			Name  string `json:"name"`
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"dynamicTools"`
+	}
+	if err := json.Unmarshal([]byte(params), &request); err != nil || len(request.DynamicTools) != 1 || request.DynamicTools[0].Name != "agenthail" {
+		t.Fatalf("thread/start=%s err=%v", program, err)
+	}
+	var names []string
+	for _, tool := range request.DynamicTools[0].Tools {
+		names = append(names, tool.Name)
+	}
+	if strings.Join(names, " ") != "voice_transfer voice_return_to_orchestrator voice_projects voice_send_to_lead" {
+		t.Fatalf("tools=%v", names)
 	}
 }
