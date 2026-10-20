@@ -32,6 +32,7 @@ type fixtureProvider struct {
 	interrupts   int
 	speaking     chan struct{}
 	speakingText string
+	respondErr   error
 	toolCalls    []struct {
 		requestID string
 		success   bool
@@ -186,7 +187,7 @@ func (p *fixtureProvider) RespondDynamicToolCall(_ context.Context, requestID st
 		success   bool
 		text      string
 	}{requestID, success, text})
-	return nil
+	return p.respondErr
 }
 func (p *fixtureProvider) Request(ctx context.Context, _ *surface.Session, method string, params map[string]any) error {
 	p.mu.Lock()
@@ -1064,5 +1065,37 @@ func TestAnOperatorCreatedWithOtherToolsSaysOnceThatANewConversationGetsTheCurre
 	older.service.Close()
 	if v := newFixture(t, fixtureOptions{path: f.path}).View(); strings.Contains(v.Message, toolsOutdatedNotice) {
 		t.Fatal("the notice came back after a restart")
+	}
+}
+
+type heldLeads struct{ sent, release chan string }
+
+func (l heldLeads) List(context.Context) ([]Project, error) { return nil, nil }
+func (l heldLeads) LeadSession(context.Context, string) (string, error) {
+	return "", errors.New("unused")
+}
+func (l heldLeads) SendToLead(_ context.Context, project, message, _ string) (LeadReceipt, error) {
+	l.sent <- message
+	<-l.release
+	return LeadReceipt{Ref: "@" + project + "-lead"}, nil
+}
+
+func TestALeadSendAnsweredAfterTheCallEndedKeepsCodexsRefusalAcrossARestart(t *testing.T) {
+	f, p := fixture(t)
+	leads := heldLeads{sent: make(chan string, 1), release: make(chan string)}
+	f.service.SetProjects(leads)
+	connectFixture(t, f)
+	p.mu.Lock()
+	p.respondErr = errors.New("renderer gone")
+	p.mu.Unlock()
+	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-a", "threadId": "operator", "namespace": "agenthail", "tool": "voice_send_to_lead", "arguments": map[string]any{"project": "widget", "message": "ship it"}}})
+	if got := <-leads.sent; got != "ship it" {
+		t.Fatalf("sent=%q", got)
+	}
+	hangUp(t, f)
+	close(leads.release)
+	waitFor(t, "the refused answer", func() bool { return strings.Contains(f.View().Message, "renderer gone") })
+	if got := New(f.path, p, nil, "/fixture/agenthail").View("phone").Message; !strings.Contains(got, "Voice tool response could not be returned to Codex: renderer gone") {
+		t.Fatalf("after restart message=%q", got)
 	}
 }
