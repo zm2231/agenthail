@@ -305,6 +305,61 @@ test('a question is answered with an answer to each of its questions', async () 
   c.close();
 });
 
+test("an MCP server's form is answered with a value for its fields", async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const { id, uuid, request } = await openPending(f, c, 'ELICIT');
+  assert.equal(request.kind, 'input');
+  assert.deepEqual(request.elicitation, {
+    server: 'deploy',
+    message: 'Where should this deploy?',
+    mode: 'form',
+    fields: [
+      { name: 'env', title: 'Environment', description: '', type: 'string', required: true, multiSelect: false, options: [{ value: 'staging', label: 'Staging' }, { value: 'prod', label: 'Production' }] },
+      { name: 'replicas', title: 'Replicas', description: '', type: 'integer', required: false, multiSelect: false, default: 2 },
+      { name: 'notify', title: 'Notify the team', description: '', type: 'boolean', required: false, multiSelect: false },
+      { name: 'regions', title: 'Regions', description: '', type: 'string', required: false, multiSelect: true, options: [{ value: 'us', label: 'US' }, { value: 'eu', label: 'EU' }] },
+      { name: 'note', title: '', description: 'Why now', type: 'string', required: false, multiSelect: false },
+    ],
+  });
+  const respond = (decision) => c.call('respond', { sessionId: id, requestId: request.requestId, decision });
+  await assert.rejects(respond({ behavior: 'allow' }), { code: 'invalid' });
+  await assert.rejects(respond({ behavior: 'allow', content: { env: 'dev' } }), { code: 'invalid' });
+  await assert.rejects(respond({ behavior: 'allow', content: { env: 'prod', replicas: 1.5 } }), { code: 'invalid' });
+  await assert.rejects(respond({ behavior: 'allow', content: { env: 'prod', regions: ['mars'] } }), { code: 'invalid' });
+  await assert.rejects(respond({ behavior: 'allow', content: { env: 'prod', other: 'x' } }), { code: 'invalid' });
+  await assert.rejects(respond({ behavior: 'allow', answers: { env: 'prod' } }), { code: 'invalid' });
+  const content = { env: 'prod', replicas: 3, notify: true, regions: ['us', 'eu'], note: 'release' };
+  assert.deepEqual(await respond({ behavior: 'allow', content }), { outcome: 'accepted' });
+  await c.event(turnResult(id, uuid));
+  assert.equal(transcript(f, id)[0].reply, `elicit:accept:${JSON.stringify(content)}`);
+  c.close();
+});
+
+test("an MCP server's link is accepted without content, and a request is declined", async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const link = await openPending(f, c, 'ELICIT URL');
+  assert.deepEqual(link.request.elicitation, { server: 'docs', message: 'Sign in to docs', mode: 'url', url: 'https://example.com/auth' });
+  await assert.rejects(c.call('respond', { sessionId: link.id, requestId: link.request.requestId, decision: { behavior: 'allow', content: {} } }), { code: 'invalid' });
+  assert.deepEqual(await c.call('respond', { sessionId: link.id, requestId: link.request.requestId, decision: { behavior: 'allow' } }), { outcome: 'accepted' });
+  await c.event(turnResult(link.id, link.uuid));
+  assert.equal(transcript(f, link.id)[0].reply, 'elicit:accept:null');
+
+  const form = await openPending(f, c, 'ELICIT');
+  assert.deepEqual(await c.call('respond', { sessionId: form.id, requestId: form.request.requestId, decision: { behavior: 'deny' } }), { outcome: 'declined' });
+  await c.event(turnResult(form.id, form.uuid));
+  assert.equal(transcript(f, form.id)[0].reply, 'elicit:decline:null');
+
+  const tool = await openPending(f, c, 'TOOL');
+  await assert.rejects(c.call('respond', { sessionId: tool.id, requestId: tool.request.requestId, decision: { behavior: 'allow', content: {} } }), { code: 'invalid' });
+  c.close();
+});
+
 test('a request answered for another session or one never asked is refused', async () => {
   const f = fixture();
   await startHost(f);

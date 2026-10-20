@@ -97,6 +97,41 @@ func TestAHostQuestionIsAnsweredWithItsOptionsAndAWrongSessionIsStale(t *testing
 	}
 }
 
+func TestAHostMCPFormIsWhatTheSessionWaitsOnAndIsAnsweredWithItsFields(t *testing.T) {
+	c, fixture := hostedClaude(t)
+	sess, request := openRequest(t, c, fixture, "ELICIT")
+	e := request.Elicitation
+	if request.Kind != surface.WaitingInput || e == nil || e.Server != "deploy" || e.Mode != "form" || len(e.Fields) != 5 {
+		t.Fatalf("request = %+v", request)
+	}
+	if env := e.Fields[0]; env.Name != "env" || !env.Required || len(env.Options) != 2 || env.Options[1] != (surface.ElicitationOption{Value: "prod", Label: "Production"}) {
+		t.Fatalf("env field = %+v", env)
+	}
+	if replicas := e.Fields[1]; replicas.Type != "integer" || string(replicas.Default) != "2" {
+		t.Fatalf("replicas field = %+v", replicas)
+	}
+	if regions := e.Fields[3]; !regions.MultiSelect || len(regions.Options) != 2 {
+		t.Fatalf("regions field = %+v", regions)
+	}
+	ctx := context.Background()
+	c.host.forget()
+	observation, err := c.Observe(ctx, sess)
+	if err != nil || observation.WaitingOn == nil || observation.WaitingOn.ID != request.ID || observation.WaitingOn.Kind != surface.WaitingInput {
+		t.Fatalf("observation = %+v, %v; want waiting on input %s", observation, err, request.ID)
+	}
+	if _, err := c.Respond(ctx, sess, request.ID, surface.Decision{Behavior: "allow", Content: json.RawMessage(`{"env":"dev"}`)}); err == nil || errors.Is(err, surface.ErrRequestStale) {
+		t.Fatalf("respond with a value the field does not take = %v, want invalid", err)
+	}
+	outcome, err := c.Respond(ctx, sess, request.ID, surface.Decision{Behavior: "allow", Content: json.RawMessage(`{"env":"prod","regions":["eu"]}`)})
+	if err != nil || outcome != "accepted" {
+		t.Fatalf("respond = %q, %v", outcome, err)
+	}
+	claudehosttest.WaitFor(t, "the accepted turn", func() bool { return len(fixture.Turns(t, sess.ID)) == 1 })
+	if reply := fixture.Turns(t, sess.ID)[0].Reply; reply != `elicit:accept:{"env":"prod","regions":["eu"]}` {
+		t.Fatalf("reply = %q", reply)
+	}
+}
+
 func TestAHostSessionChangesModelAndPermissionModeLive(t *testing.T) {
 	c, fixture := hostedClaude(t)
 	client := fixture.Start(t)
