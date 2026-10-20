@@ -123,7 +123,7 @@ func TestMobileQueueIncludesFailedRowAndRetriesThroughActionAPI(t *testing.T) {
 	}
 }
 
-func TestLaunchProjectsListRecentProjectsThenRegisteredFolders(t *testing.T) {
+func TestLaunchProjectsListRecentProjectsThenAddedFolders(t *testing.T) {
 	d, reg, _, _, _ := daemonFixture(t)
 	now := time.Now().UTC()
 	record := func(id, project string, lastActive time.Time, subagent bool) {
@@ -136,16 +136,16 @@ func TestLaunchProjectsListRecentProjectsThenRegisteredFolders(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	record("older", `{"id":"project-api","displayName":"api","rootPath":"/work/api","kind":"git"}`, now.Add(-2*time.Hour), false)
-	record("newer", `{"id":"project-web","displayName":"web","rootPath":"/work/web","kind":"git"}`, now.Add(-time.Hour), false)
-	record("worktree", `{"id":"project-api","displayName":"api","rootPath":"/work/api","kind":"git"}`, now.Add(-30*time.Minute), false)
-	record("helper", `{"id":"project-tools","displayName":"tools","rootPath":"/work/tools","kind":"git"}`, now, true)
-	record("hidden", `{"id":"project-old","displayName":"old","rootPath":"/work/old","kind":"git"}`, now, false)
+	record("older", `{"id":"repo:github.com/example/api","localId":"implicit:/work/api","displayName":"api","rootPath":"/work/api","kind":"git"}`, now.Add(-2*time.Hour), false)
+	record("newer", `{"id":"implicit:/work/web","localId":"implicit:/work/web","displayName":"web","rootPath":"/work/web","kind":"git"}`, now.Add(-time.Hour), false)
+	record("worktree", `{"id":"repo:github.com/example/api","localId":"implicit:/work/api","displayName":"api","rootPath":"/work/api","kind":"git"}`, now.Add(-30*time.Minute), false)
+	record("helper", `{"id":"implicit:/work/tools","localId":"implicit:/work/tools","displayName":"tools","rootPath":"/work/tools","kind":"git"}`, now, true)
+	record("hidden", `{"id":"implicit:/work/old","localId":"implicit:/work/old","displayName":"old","rootPath":"/work/old","kind":"git"}`, now, false)
 	record("loose", `null`, now, false)
-	if err := reg.ArchiveProject(registrypkg.ProjectRecord{ID: "project-old", Kind: "git", RootPath: "/work/old", DisplayName: "old"}, now); err != nil {
+	if err := reg.ArchiveProject(registrypkg.ProjectRecord{ID: "implicit:/work/old", WorkspaceRoot: "/work/old", Title: "old"}, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.RegisterFolderProject("folder-notes", "/work/notes", "notes"); err != nil {
+	if err := reg.AddProject(registrypkg.ProjectRecord{ID: "p-notes", WorkspaceRoot: "/work/notes", Title: "notes", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	projects, err := d.launchProjects()

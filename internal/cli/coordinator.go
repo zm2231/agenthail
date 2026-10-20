@@ -8,10 +8,11 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/delivery"
-	"github.com/zm2231/agenthail/internal/project"
+	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -70,7 +71,7 @@ func (a *App) cmdCoordinator(args []string) error {
 
 // projectAt resolves the project containing a folder the user typed, the
 // working directory when path is empty.
-func (a *App) projectAt(path string) (*project.Project, error) {
+func (a *App) projectAt(path string) (*daemon.CatalogProject, error) {
 	cwd, err := resolveThreadCwd(path)
 	if err != nil {
 		return nil, err
@@ -81,14 +82,10 @@ func (a *App) projectAt(path string) (*project.Project, error) {
 // projectOf resolves the project of a session's folder, which may no longer
 // exist: a removed worktree stays in its repository's project. A coordinator
 // belongs to a project, so a folder outside every project has none.
-func (a *App) projectOf(cwd string) (*project.Project, error) {
-	records, err := a.registry().ListProjects()
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), project.GitTimeout)
+func (a *App) projectOf(cwd string) (*daemon.CatalogProject, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	found, err := project.Of(ctx, cwd, records)
+	found, err := daemon.ResolvePathProject(ctx, a.registry(), cwd)
 	if err != nil {
 		return nil, fmt.Errorf("find the project of %s: %w", cwd, err)
 	}
@@ -107,7 +104,7 @@ func (a *App) expandLead(target string) (string, error) {
 		return target, nil
 	}
 	cwd := a.callerCwd()
-	var found *project.Project
+	var found *daemon.CatalogProject
 	var err error
 	if cwd == "" {
 		found, err = a.projectAt("")
@@ -273,7 +270,7 @@ func (a *App) coordinatorNew(agent string, args []string) error {
 	return nil
 }
 
-func (a *App) coordinatorSpec(args []string, found *project.Project, agent, cwd, model string) (registry.CoordinatorSpec, error) {
+func (a *App) coordinatorSpec(args []string, found *daemon.CatalogProject, agent, cwd, model string) (registry.CoordinatorSpec, error) {
 	name := strings.TrimPrefix(strings.TrimSpace(flagVal(args, "--name")), "@")
 	if name == "" {
 		name = defaultCoordinatorName(found.DisplayName)

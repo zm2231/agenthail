@@ -22,6 +22,7 @@ import (
 	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
+	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sessionstream"
@@ -81,6 +82,8 @@ func (a *App) openRegistry() (*registry.Registry, error) {
 	a.Registry, a.registryErr = a.OpenRegistry()
 	if a.registryErr != nil {
 		a.registryErr = fmt.Errorf("open registry: %w", a.registryErr)
+	} else {
+		a.Registry.SetBusyPolicy(deliverypolicy.Load)
 	}
 	return a.Registry, a.registryErr
 }
@@ -157,6 +160,12 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdCompact(rest)
 	case "model":
 		return a.cmdModel(rest)
+	case "permission-mode":
+		return a.cmdPermissionMode(rest)
+	case "requests":
+		return a.cmdRequests(rest)
+	case "answer":
+		return a.cmdAnswer(rest)
 	case "control":
 		return a.cmdControl(rest)
 	case "interrupt":
@@ -219,11 +228,11 @@ Session commands:
   thread <status|stop|resume|logs> <target>  Manage a Claude session (logs: claude-bg jobs)
   thread <archive|unarchive> <target>  Hide a session until it is active again
   thread queue <target> <list|add|update|delete|reorder|start>  Manage Codex native input
-  list [--all|--archived] [--project <name|id>] [--cwd <path>] [--wide]
+  list [--all|--archived] [--project <name|id>|--cwd <path>] [--wide]
                                  List current sessions (with the daemon: --all or --archived);
-                                 --cwd includes that workspace and descendants
-  project list|add <path>|archive <name>|unarchive <name>
-                                 List projects, add a non-Git folder, or hide a project
+                                 --cwd lists the project that holds that folder
+  project list|add <path>|remove <name>|archive <name>|unarchive <name>
+                                 List, add or remove project folders, or hide a project
   runs [--json]                  Read verified Claude job and subagent records
   whoami [--json]                Show the caller session bound to this process
   search codex <query>           Search older Codex conversation history on demand
@@ -236,6 +245,11 @@ Session commands:
   compact <target>              Compress context (typed control; unsupported for socket-only Claude peers)
   model <target> [name] [--json] [--timeout 30s]
                                  Get or set model; Claude waits for its own control response
+  permission-mode <target> [mode] [--json]
+                                 Get or set the permission mode of a session the Claude host runs
+  requests <target> [--json]     List the tool approvals and questions a session waits on you for
+  answer <target> <allow|always|deny|"answer"> [--request id] [--reason text] [--answers json]
+                                 Answer the oldest open request, or the one --request names
   interrupt <target> [--json] [--timeout 30s]
                                  Stop current turn; Claude waits for the turn to end
   steer <target> "message" [--json] [--timeout 30s]
@@ -243,8 +257,8 @@ Session commands:
   control <target> <context|usage|status|effort|rename> [value] [--json] [--timeout 30s]
                                  Run a Claude Remote Control command and show its output
   queue <target> "msg"|-        Hold until target is ready; start daemon to deliver queued work
-  queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]
-                                 Inspect queued work scoped to a session or workspace
+  queue list [--json] [--all] [--target <target>] [--mine] [--project <name|id>|--cwd <path>]
+                                 Inspect queued work scoped to a session or project
   queue retry <id>              Retry a failed message
   queue rm <id>                 Cancel a pending queued message
   queue clear <target>          Cancel all pending messages for a target
@@ -572,7 +586,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--instructions": true, "--project": true, "--permission-mode": true}
+	valueFlags := map[string]bool{"--request": true, "--reason": true, "--answers": true, "--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--project": true, "--instructions": true, "--permission-mode": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -608,19 +622,21 @@ func validateCommandFlags(command string, args []string) error {
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
 		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--host": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"channel": {},
-		"project": {values: map[string]bool{"--host": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}}, "projects": {values: map[string]bool{"--host": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}},
+		"project": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}}, "projects": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}},
 		"hosts":  {values: map[string]bool{"--address": true, "--name": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"signin": {values: map[string]bool{"--label": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"doctor": {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
-		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "interrupt": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "steer": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "control": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "identify": {}, "coordinator": {values: map[string]bool{"--name": true, "--instructions": true, "--permission-mode": true, "--cwd": true, "--model": true}, bools: map[string]bool{"--json": true}}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
+		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
+		"permission-mode": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "requests": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
+		"answer": {values: map[string]bool{"--timeout": true, "--request": true, "--reason": true, "--answers": true}, bools: map[string]bool{"--json": true}}, "interrupt": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "steer": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "control": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "identify": {}, "coordinator": {values: map[string]bool{"--name": true, "--instructions": true, "--permission-mode": true, "--cwd": true, "--model": true}, bools: map[string]bool{"--json": true}}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
 	}
 	spec, known := specs[command]
 	if !known {
 		return nil
 	}
 	if command == "queue" && len(args) > 0 && args[0] == "list" {
-		spec.values = map[string]bool{"--target": true, "--cwd": true}
+		spec.values = map[string]bool{"--target": true, "--cwd": true, "--project": true}
 		spec.bools = map[string]bool{"--all": true, "--mine": true, "--json": true, "--help": true}
 	}
 	if command == "relay" && len(args) > 0 && args[0] == "add" {
@@ -697,7 +713,7 @@ func (a *App) cmdClaudeRuns(args []string) error {
 
 func (a *App) cmdList(args []string) error {
 	if len(stripFlags(args)) != 0 {
-		return fmt.Errorf("usage: agenthail list [--all|--archived] [--project <name|id>] [--cwd <path>] [--wide] [--json]")
+		return fmt.Errorf("usage: agenthail list [--all|--archived] [--project <name|id>|--cwd <path>] [--wide] [--json]")
 	}
 	scope, err := listScopeFromArgs(args)
 	if err != nil {
@@ -706,12 +722,8 @@ func (a *App) cmdList(args []string) error {
 	projectSelector := strings.TrimSpace(flagVal(args, "--project"))
 	jsonOut := hasFlag(args, "--json")
 	rootCwd := flagVal(args, "--cwd")
-	if rootCwd != "" {
-		var err error
-		rootCwd, err = workspace.NormalizeCWD(rootCwd)
-		if err != nil {
-			return fmt.Errorf("normalize --cwd: %w", err)
-		}
+	if rootCwd != "" && projectSelector != "" {
+		return fmt.Errorf("choose either --cwd or --project")
 	}
 	ctx := context.Background()
 
@@ -729,16 +741,13 @@ func (a *App) cmdList(args []string) error {
 	successfulSurfaces := 0
 	remoteRows := map[string]listHostRow{}
 	views := map[string]listCatalogView{}
-	if !catalogBacked && (projectSelector != "" || hasFlag(args, "--archived")) {
-		return fmt.Errorf("--project and --archived need the daemon; start it with: agenthail daemon start")
+	if !catalogBacked && (projectSelector != "" || rootCwd != "" || hasFlag(args, "--archived")) {
+		return fmt.Errorf("--project, --cwd and --archived need the daemon; start it with: agenthail daemon start")
 	}
 	if catalogBacked {
 		successfulSurfaces = 1
 		for _, record := range catalog.Sessions {
 			if record.HostID != "" {
-				if rootCwd != "" {
-					continue
-				}
 				session, row := listRemoteSession(record)
 				session.Subagents = catalogSubagentRollup(record)
 				remoteRows[session.ID] = row
@@ -849,19 +858,6 @@ func (a *App) cmdList(args []string) error {
 		}
 		allSessions = filtered
 	}
-	if rootCwd != "" {
-		filtered := allSessions[:0]
-		for _, s := range allSessions {
-			within, err := workspace.IsWithin(rootCwd, s.Cwd)
-			if err != nil {
-				return fmt.Errorf("compare session workspace: %w", err)
-			}
-			if within {
-				filtered = append(filtered, s)
-			}
-		}
-		allSessions = filtered
-	}
 
 	sort.SliceStable(allSessions, func(i, j int) bool {
 		if allSessions[i].LastActive.IsZero() {
@@ -877,11 +873,9 @@ func (a *App) cmdList(args []string) error {
 		families = -1
 	}
 	if catalogBacked {
-		projectID := ""
-		if projectSelector != "" {
-			if projectID, err = resolveListProject(views, projectSelector); err != nil {
-				return err
-			}
+		projectID, err := a.selectedProject(ctx, views, projectSelector, rootCwd)
+		if err != nil {
+			return err
 		}
 		allSessions = filterListScope(allSessions, views, scope, projectID)
 	}
@@ -2258,6 +2252,9 @@ func (a *App) cmdModel(args []string) error {
 	}
 	if controller, ok := surf.(surface.Controller); ok && name != "" {
 		result, controlErr := controller.Control(ctx, sess, surface.ControlRequest{Action: "model", Value: name})
+		if controlErr == nil {
+			a.recordHistory(registry.HistoryEntry{Kind: "model", SessionID: sess.ID, Message: name, Result: "changed by " + daemon.CLIActor})
+		}
 		if controlErr == nil && a.registry() != nil {
 			if err := a.registry().RegisterSession(*sess); err != nil {
 				return fmt.Errorf("persist Claude model state: %w", err)
@@ -2302,7 +2299,7 @@ func (a *App) cmdControl(args []string) error {
 		return a.controlRemote(ctx, remote, action, value, args)
 	}
 	controller, ok := surf.(surface.Controller)
-	if !ok || !surface.EffectiveCapabilities(surf, sess).Model {
+	if !ok || !surface.EffectiveCapabilities(surf, sess).Commands {
 		return fmt.Errorf("%s does not support Claude Remote Control commands", surf.Name())
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
@@ -2449,21 +2446,22 @@ func (a *App) cmdQueue(args []string) error {
 	}
 	if len(args) > 0 && args[0] == "list" {
 		if hasFlag(args, "--help") {
-			fmt.Println("usage: agenthail queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]")
-			fmt.Println("  --target  show messages for one destination")
-			fmt.Println("  --mine    show messages sent by or addressed to the caller session")
-			fmt.Println("  --cwd     show messages for targets in a workspace and its descendants")
+			fmt.Println("usage: agenthail queue list [--json] [--all] [--target <target>] [--mine] [--project <name|id>] [--cwd <path>]")
+			fmt.Println("  --target   show messages for one destination")
+			fmt.Println("  --mine     show messages sent by or addressed to the caller session")
+			fmt.Println("  --project  show messages for targets in one project")
+			fmt.Println("  --cwd      show messages for targets in the project that holds this folder")
 			fmt.Println("  --all     include terminal queue history")
 			return nil
 		}
 		if len(stripFlags(args)) != 1 {
-			return fmt.Errorf("usage: agenthail queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]")
+			return fmt.Errorf("usage: agenthail queue list [--json] [--all] [--target <target>] [--mine] [--project <name|id>] [--cwd <path>]")
 		}
 		rows, err := a.registry().ListQueue(hasFlag(args, "--all"), a.adapters())
 		if err != nil {
 			return err
 		}
-		rows, err = a.filterQueueRows(context.Background(), rows, flagVal(args, "--target"), hasFlag(args, "--mine"), flagVal(args, "--cwd"))
+		rows, err = a.filterQueueRows(context.Background(), rows, flagVal(args, "--target"), hasFlag(args, "--mine"), strings.TrimSpace(flagVal(args, "--project")), flagVal(args, "--cwd"))
 		if err != nil {
 			return err
 		}
@@ -2589,7 +2587,7 @@ func (a *App) cmdQueue(args []string) error {
 	if _, ok := daemon.IsRunning(); !ok {
 		fmt.Fprintf(os.Stderr, "warning: daemon is not running; queued message will not be delivered until you start it (agenthail daemon start)\n")
 	}
-	if err := a.registry().QueueMessage(sess.ID, message); err != nil {
+	if _, err := a.registry().QueueMessageWithOptions(sess.ID, message, "", surface.SendOptions{BusyDelivery: string(deliverypolicy.Queue)}); err != nil {
 		return err
 	}
 	if waiting, err := a.registry().SessionWaiting(sess.ID); err == nil && waiting != nil {
@@ -2600,7 +2598,7 @@ func (a *App) cmdQueue(args []string) error {
 	return nil
 }
 
-func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, targetSelector string, mine bool, cwd string) ([]registry.QueueRow, error) {
+func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, targetSelector string, mine bool, projectSelector, cwd string) ([]registry.QueueRow, error) {
 	targetID := ""
 	if targetSelector != "" {
 		sessionID, err := a.queueSessionID(ctx, targetSelector)
@@ -2620,16 +2618,25 @@ func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, tar
 			return nil, fmt.Errorf("--mine requires a caller session binding; set AGENTHAIL_SESSION_ID, CODEX_THREAD_ID, or CLAUDE_CODE_SESSION_ID")
 		}
 	}
-	root := ""
-	if cwd != "" {
-		var err error
-		root, err = workspace.NormalizeCWD(cwd)
+	if projectSelector != "" && cwd != "" {
+		return nil, fmt.Errorf("choose either --cwd or --project")
+	}
+	var views map[string]listCatalogView
+	projectID := ""
+	if projectSelector != "" || cwd != "" {
+		snapshot, err := a.registry().CatalogSnapshot()
 		if err != nil {
-			return nil, fmt.Errorf("normalize --cwd: %w", err)
+			return nil, fmt.Errorf("read daemon catalog: %w", err)
+		}
+		views = make(map[string]listCatalogView, len(snapshot.Sessions))
+		for _, record := range snapshot.Sessions {
+			views[record.Session.ID] = catalogListView(record)
+		}
+		if projectID, err = a.selectedProject(ctx, views, projectSelector, cwd); err != nil {
+			return nil, err
 		}
 	}
 	filtered := make([]registry.QueueRow, 0, len(rows))
-	sessions := make(map[string]*surface.Session)
 	for _, row := range rows {
 		if targetID != "" && row.SessionID != targetID {
 			continue
@@ -2637,21 +2644,8 @@ func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, tar
 		if mineID != "" && row.SessionID != mineID && row.SourceSessionID != mineID {
 			continue
 		}
-		if root != "" {
-			session := sessions[row.SessionID]
-			if session == nil {
-				var err error
-				session, err = a.registry().Session(row.SessionID)
-				if err != nil {
-					return nil, fmt.Errorf("read queue target %s: %w", row.SessionID, err)
-				}
-				sessions[row.SessionID] = session
-			}
-			within, err := workspace.IsWithin(root, session.Cwd)
-			if err != nil {
-				return nil, fmt.Errorf("compare queue target workspace: %w", err)
-			}
-			if !within {
+		if projectID != "" {
+			if project := views[row.SessionID].Project; project == nil || project.ID != projectID {
 				continue
 			}
 		}

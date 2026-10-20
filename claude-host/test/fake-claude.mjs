@@ -43,10 +43,19 @@ let interrupt = null;
 let turns = Promise.resolve();
 let inputClosed = false;
 
+// control asks the SDK and waits for its answer. An interrupt while it waits
+// withdraws the request, the way Claude cancels a prompt nobody answered.
 function control(request) {
   const id = `fake-${++requests}`;
   write({ type: 'control_request', request_id: id, request });
-  return new Promise((resolve) => pending.set(id, resolve));
+  return new Promise((resolve) => {
+    pending.set(id, resolve);
+    interrupt = () => {
+      pending.delete(id);
+      write({ type: 'control_cancel_request', request_id: id });
+      resolve({ behavior: 'cancelled' });
+    };
+  });
 }
 
 async function turn(message) {
@@ -57,8 +66,15 @@ async function turn(message) {
   write({ type: 'system', subtype: 'session_state_changed', state: 'running', uuid: crypto.randomUUID(), session_id: sessionId });
   let reply = `echo:${text}`;
   if (text.startsWith('TOOL')) {
-    const decision = await control({ subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'true' }, tool_use_id: 'toolu_fake' });
-    reply = `tool:${decision.behavior}:${decision.message ?? ''}`;
+    const suggestions = [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'true' }], behavior: 'allow', destination: 'session' }];
+    const decision = await control({ subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'true' }, tool_use_id: 'toolu_fake', title: 'Claude wants to run true', ...(text.includes('ALWAYS') ? { permission_suggestions: suggestions } : {}) });
+    interrupt = null;
+    reply = `tool:${decision.behavior}:${decision.message ?? ''}${decision.updatedPermissions ? ':always' : ''}`;
+  } else if (text.startsWith('QUESTION')) {
+    const questions = [{ question: 'Which color?', header: 'Color', multiSelect: false, options: [{ label: 'Red', description: 'Warm' }, { label: 'Blue', description: 'Cool' }] }];
+    const decision = await control({ subtype: 'can_use_tool', tool_name: 'AskUserQuestion', input: { questions }, tool_use_id: 'toolu_question' });
+    interrupt = null;
+    reply = `question:${decision.behavior}:${JSON.stringify(decision.updatedInput?.answers ?? null)}`;
   } else if (text.startsWith('SLOW')) {
     const ms = Number(text.split(' ')[1] ?? 30000);
     const interrupted = await new Promise((resolve) => {
@@ -137,6 +153,9 @@ lines.on('line', (line) => {
   if (message.type === 'control_request') {
     const subtype = message.request.subtype;
     if (subtype === 'interrupt') interrupt?.();
+    if (subtype === 'set_model' || subtype === 'set_permission_mode') {
+      fs.appendFileSync(path.join(dir, 'controls.jsonl'), JSON.stringify({ sessionId, pid: process.pid, ...message.request }) + '\n');
+    }
     const response = subtype === 'initialize' ? { commands: [], models: [], account: {}, output_style: 'default', available_output_styles: [] } : {};
     write({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response } });
   } else if (message.type === 'control_response') {
@@ -145,8 +164,11 @@ lines.on('line', (line) => {
     turns = turns.then(() => turn(message));
   }
 });
+// Claude cannot ask anyone once its input closes, so a prompt still open
+// then ends the process without running the tool.
 lines.on('close', async () => {
   inputClosed = true;
+  if (pending.size > 0) process.exit(0);
   await turns;
   process.exit(0);
 });

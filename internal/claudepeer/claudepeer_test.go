@@ -51,8 +51,8 @@ func TestWorkerRegistersQueuesAndCleansUpOnParentEOF(t *testing.T) {
 		t.Fatalf("queue count=%d", got)
 	}
 	item, err := reg.QueueItem(1, nil)
-	if err != nil || item.BusyDelivery != "steer" {
-		t.Fatalf("worker queue mode=%q err=%v", item.BusyDelivery, err)
+	if err != nil || item.BusyDelivery != "" {
+		t.Fatalf("worker queue mode=%q err=%v, want no per-message choice", item.BusyDelivery, err)
 	}
 	history, err := reg.ListHistory(10, s.ID)
 	if err != nil || len(history) == 0 {

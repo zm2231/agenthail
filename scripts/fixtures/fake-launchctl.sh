@@ -7,7 +7,10 @@ PIDFILE="$HOME/.agenthail/daemon.pid"
 case "${1:-}" in
 	print)
 		case "${2:-}" in
-			*com.agenthail.daemon*) test -f "$STATE" ;;
+			*com.agenthail.daemon*)
+				test -f "$STATE"
+				echo "	pid = $(cat "$HOME/.fake-agenthail-launchd-last-pid")"
+				;;
 			*) exit 1 ;;
 		esac
 		;;

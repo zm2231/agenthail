@@ -90,8 +90,10 @@ Claude's control capabilities depend on its transport. Native UDS messages
 cannot execute slash commands, steer a running turn, or correlate message IDs
 with transcript turns for `send --reply` / `--stream`. Use `last` to inspect
 the transcript or native `SendMessage` for an explicit reply. Compact, model,
-interrupt, and steer are typed controls that require a Remote Control attachment;
-a session the Claude host runs takes interrupt and steer through the host.
+interrupt, steer and the `control` commands (context, usage, status, effort,
+rename) require a Remote Control attachment. A session the Claude host runs has
+no Remote Control: it takes interrupt, steer, model and permission-mode changes
+through the host, and has no compact or `control` commands.
 A receipt with `evidence: "transport_accepted"` only proves socket acceptance;
 receiver policy can still hold or deny the message. Do not claim model delivery
 from it. Report the immediate send status and target as returned: Sent, Queued,
@@ -206,8 +208,11 @@ Desktop with a writable bridge but does not itself create a thread.
 
 Create Claude sessions with `agenthail thread create claude "task" --alias worker --json`.
 The session runs in Agenthail's Claude host, which needs the daemon running. It
-has no Remote Control and the host denies tools its permission mode would prompt
-for, so pick a permission mode that allows the work.
+has no Remote Control. A tool its permission mode does not allow, and every
+question it asks, waits for a person: `agenthail requests <target>` lists them
+and `agenthail answer <target> allow|always|deny|"answer"` answers the oldest.
+Do not answer them yourself unless your user asked you to.
+`agenthail permission-mode <target> <mode>` changes the mode while it runs.
 A Claude session ID is the conversation ID (the transcript name). The process,
 messaging socket and Remote Control session are attachments; Remote Control is
 never the identity. `/branch` and `/clear` create a new session without an alias
@@ -254,6 +259,9 @@ agenthail interrupt @builder
 agenthail compact @builder
 agenthail model @builder
 agenthail model @builder <model-name> --json
+agenthail permission-mode @builder acceptEdits
+agenthail requests @builder --json
+agenthail answer @builder deny --reason "Not this file."
 agenthail control @builder context --json
 agenthail control @builder effort medium
 agenthail goal @builder --json
@@ -386,8 +394,9 @@ input request) carries `waitingOn` and lists as `wait`; messages to it,
 including steers, are queued until the user answers. Do not interrupt it to get
 a message through. Finished items appear in history and remain available through
 `queue list --all`. `--target` filters by destination, `--mine` includes
-messages sent by or addressed to the caller session, and `--cwd` includes target
-sessions in that normalized workspace and its descendants.
+messages sent by or addressed to the caller session, `--project` keeps targets
+in one project, and `--cwd` keeps targets in the project that holds that
+folder, including sessions in its worktrees.
 
 ## Channels
 

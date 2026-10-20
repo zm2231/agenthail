@@ -27,7 +27,6 @@ import (
 	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/hosts"
-	"github.com/zm2231/agenthail/internal/project"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -108,7 +107,7 @@ type dashboardSession struct {
 	Source            string                     `json:"source,omitempty"`
 	Transport         string                     `json:"transport,omitempty"`
 	ForkedFrom        string                     `json:"forkedFrom,omitempty"`
-	Project           *project.Project           `json:"project,omitempty"`
+	Project           *CatalogProject            `json:"project,omitempty"`
 	Checkout          *catalogCheckout           `json:"checkout,omitempty"`
 	ObservedAt        time.Time                  `json:"observedAt,omitempty"`
 	UnavailableReason string                     `json:"unavailableReason,omitempty"`
@@ -282,6 +281,7 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/api/session-attachment", dashboard.guard(d.hostRouted("sessionId", d.apiSessionAttachmentHandler)))
 	mux.HandleFunc("/api/session-stream", dashboard.guard(d.hostRouted("id", d.apiSessionStreamHandler)))
 	mux.HandleFunc("/api/models", dashboard.guard(d.hostRouted("id", d.dashboardModelsHandler)))
+	mux.HandleFunc("/api/requests", dashboard.guard(d.hostRouted("sessionId", d.requestsHandler)))
 	mux.HandleFunc("/api/search", dashboard.guard(d.dashboardSearchHandler))
 	mux.HandleFunc("/api/history", dashboard.guard(d.hostRouted("sessionId", d.dashboardHistoryHandler)))
 	mux.HandleFunc("/api/action", dashboard.guard(d.idempotentActionHandler(d.hostRoutedAction(d.dashboardActionHandler))))
@@ -1082,7 +1082,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Author          surface.Author             `json:"author"`
 		ProjectID       string                     `json:"projectId"`
 		Path            string                     `json:"path"`
+		Title           string                     `json:"title"`
 		Attachments     []string                   `json:"attachments"`
+		RequestID       string                     `json:"requestId"`
+		Decision        surface.Decision           `json:"decision"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid dashboard request", http.StatusBadRequest)
@@ -1093,7 +1096,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if strings.HasPrefix(request.Action, "project-") {
-		d.projectAction(r.Context(), w, request.Action, request.ProjectID, request.Path)
+		d.projectAction(r, w, projectRequest{Action: request.Action, ProjectID: request.ProjectID, Path: request.Path, Title: request.Title})
 		return
 	}
 	if request.Action == "delivery-dismiss" {
@@ -1809,13 +1812,29 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		result, err = d.control(ctx, adapter, session, surface.ControlRequest{Action: "model", Value: request.Model})
+		if err == nil {
+			d.recordSetting(session, "model", strings.TrimSpace(request.Model), actionActor(r))
+		}
 		if err == nil && session.Surface == surface.KindClaude {
 			if persistErr := d.Registry.RegisterSession(*session); persistErr != nil {
 				err = fmt.Errorf("persist Claude model state: %w", persistErr)
 			}
 		}
+	case "permission-mode":
+		if !effective.PermissionMode {
+			http.Error(w, "this session's permission mode cannot change while it runs", http.StatusBadRequest)
+			return
+		}
+		mode := strings.TrimSpace(request.PermissionMode)
+		result, err = d.control(ctx, adapter, session, surface.ControlRequest{Action: "permission-mode", Value: mode})
+		if err == nil {
+			d.recordSetting(session, "permission-mode", mode, actionActor(r))
+		}
+	case "respond":
+		d.respond(ctx, w, adapter, session, strings.TrimSpace(request.RequestID), request.Decision, actionActor(r))
+		return
 	case "context", "usage", "status", "effort", "rename":
-		if _, ok := adapter.(surface.Controller); !ok || !effective.Model {
+		if _, ok := adapter.(surface.Controller); !ok || !effective.Commands {
 			http.Error(w, "this session does not support Claude Remote Control commands", http.StatusBadRequest)
 			return
 		}

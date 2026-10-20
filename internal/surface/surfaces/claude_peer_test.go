@@ -458,3 +458,32 @@ func TestClaudeResolveExactIDBeatsCwdContainingIt(t *testing.T) {
 		t.Fatalf("cwd text target=%+v err=%v", resolved, err)
 	}
 }
+
+func TestClaudeAdvertisesRemoteControlCommandsOnlyWhereControlReachesThem(t *testing.T) {
+	adapter := NewClaude(nil, t.TempDir())
+	bridged := &surface.Session{ID: "bridged", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"}
+	socketOnly := &surface.Session{ID: "socket", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"}
+	hosted := &surface.Session{ID: "hosted", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds"}
+	for _, tc := range []struct {
+		name     string
+		session  *surface.Session
+		commands bool
+		model    bool
+	}{
+		{"bridged", bridged, true, true},
+		{"socket only", socketOnly, false, false},
+		{"hosted", hosted, false, true},
+	} {
+		caps := adapter.SessionCapabilities(tc.session)
+		if caps.Commands != tc.commands || caps.Model != tc.model {
+			t.Fatalf("%s: commands=%v model=%v, want %v %v", tc.name, caps.Commands, caps.Model, tc.commands, tc.model)
+		}
+	}
+	adapter.DisableRemoteControl()
+	if caps := adapter.SessionCapabilities(bridged); caps.Commands || caps.Model || caps.Steer || caps.Compact || caps.Interrupt {
+		t.Fatalf("an install without Remote Control advertises it: %+v", caps)
+	}
+	if caps := adapter.SessionCapabilities(hosted); !caps.Model || !caps.Steer || !caps.Interrupt || caps.Commands {
+		t.Fatalf("an install without Remote Control dropped the host's controls: %+v", caps)
+	}
+}

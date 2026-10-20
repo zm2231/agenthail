@@ -901,7 +901,7 @@ func (d *Daemon) forwardHostAction(w http.ResponseWriter, r *http.Request, host 
 	if key == "" {
 		key = "fwd-" + uuid.NewString()
 	}
-	header := http.Header{actionIdempotencyHeader: []string{key}}
+	header := http.Header{actionIdempotencyHeader: []string{key}, ActionActorHeader: []string{actionActor(r)}}
 	response, err := host.client.Do(r.Context(), http.MethodPost, "/api/v1/actions", nil, body, header)
 	if err == nil {
 		answer, readErr := readHostAnswer(host, response)

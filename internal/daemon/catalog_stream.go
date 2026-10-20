@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/project"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -377,7 +376,8 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 	if projects, err := d.Registry.ListProjects(); err != nil {
 		d.log.Printf("catalog projects: %s", err)
 	} else {
-		d.catalogIdentities.setFolders(projects)
+		d.refreshProjectRepositories(ctx, projects, time.Now())
+		d.catalogIdentities.setProjects(projects)
 	}
 	for _, adapter := range d.Surfaces {
 		priorStamps := map[string]catalogLiveSession{}
@@ -434,7 +434,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			}
 			seen[session.ID] = struct{}{}
 			identityCtx, identityCancel := context.WithTimeout(ctx, 3*time.Second)
-			identity := d.catalogIdentities.identity(identityCtx, session, observedAt, func() *project.Project { return d.storedCatalogProject(session.ID) })
+			identity := d.catalogIdentities.identity(identityCtx, session, observedAt, func() *CatalogProject { return d.storedCatalogProject(session.ID) })
 			identityCancel()
 			open := openSessions[session.ID]
 			alias := aliasByID[session.ID]
@@ -796,16 +796,16 @@ func (d *Daemon) correlateObservedTerminalLaunches(ctx context.Context, sessions
 	}
 }
 
-func (d *Daemon) storedCatalogProject(sessionID string) *project.Project {
+func (d *Daemon) storedCatalogProject(sessionID string) *CatalogProject {
 	raw, err := d.Registry.CatalogSessionProject(sessionID)
 	if err != nil || len(raw) == 0 {
 		return nil
 	}
-	var stored *project.Project
-	if json.Unmarshal(raw, &stored) != nil || stored == nil || stored.ID == "" || stored.Kind == "" {
+	var project *CatalogProject
+	if json.Unmarshal(raw, &project) != nil || project == nil || project.ID == "" || project.LocalID == "" {
 		return nil
 	}
-	return stored
+	return project
 }
 
 func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time, alias string, queueCount int, open bool, config DashboardConfig) dashboardSession {

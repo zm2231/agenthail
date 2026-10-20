@@ -81,7 +81,7 @@ func validateClaudeStart(options surface.SessionStartOptions) error {
 	if options.Effort != "" && !slices.Contains([]string{"low", "medium", "high", "xhigh", "max"}, options.Effort) {
 		return fmt.Errorf("invalid Claude effort")
 	}
-	if options.PermissionMode != "" && !slices.Contains([]string{"acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"}, options.PermissionMode) {
+	if options.PermissionMode != "" && !validClaudePermissionMode(options.PermissionMode) {
 		return fmt.Errorf("invalid Claude permission mode")
 	}
 	if options.Cwd == "" || !filepath.IsAbs(options.Cwd) {

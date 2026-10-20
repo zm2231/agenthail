@@ -50,7 +50,7 @@ func newCoordinatorCLI(t *testing.T) *coordinatorCLI {
 // @<name>-lead.
 func (c *coordinatorCLI) project(t *testing.T, id, dir, name string) {
 	t.Helper()
-	if err := c.r.RegisterFolderProject(id, mustEvalSymlinks(t, dir), name); err != nil {
+	if err := c.r.AddProject(registry.ProjectRecord{ID: id, WorkspaceRoot: mustEvalSymlinks(t, dir), Title: name, Added: true}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -243,7 +243,7 @@ func TestCodexCoordinatorStartsOnItsFirstMessage(t *testing.T) {
 	t.Cleanup(func() { r.Close() })
 	app := &App{OpenRegistry: func() (*registry.Registry, error) { return r, nil }, Surfaces: []SurfaceEntry{{Name: "codex", Surface: surfaces.NewCodex("1")}}, DefaultTimeout: 10 * time.Second, catalogDaemonRunning: func() bool { return false }}
 	cwd := t.TempDir()
-	if err := r.RegisterFolderProject("project-codex", mustEvalSymlinks(t, cwd), "fixture"); err != nil {
+	if err := r.AddProject(registry.ProjectRecord{ID: "project-codex", WorkspaceRoot: mustEvalSymlinks(t, cwd), Title: "fixture", Added: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := app.Run([]string{"coordinator", "new", "codex", "--cwd", cwd, "--permission-mode", "plan"}); err == nil {
