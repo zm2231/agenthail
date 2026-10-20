@@ -5,14 +5,28 @@ set -euo pipefail
 
 # The job temp directory lives in the user's own temp directory, as it does
 # on hosted runners and users' Macs: /var/folders resolves to /private/var,
-# and tests must see that symlink.
+# and tests must see that symlink. Its name stays short because tests put
+# Unix sockets in it, and macOS limits a socket path to 104 bytes. A marker
+# per runner records the directory so the next job can remove it even when
+# the runner was killed before cleanup.
 user_tmp="$(getconf DARWIN_USER_TEMP_DIR)"
-tmp="${user_tmp:?}agenthail-ci/$RUNNER_NAME"
+marker="${user_tmp:?}agenthail-ci-$(printf '%s' "$RUNNER_NAME" | shasum -a 256 | cut -c1-16)"
+tmp=""
+[ ! -f "$marker" ] || tmp="$(cat "$marker")"
+case "$tmp" in "$user_tmp"[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]) ;; *) tmp="" ;; esac
+
+remove_tmp() {
+	[ -z "$tmp" ] || rm -rf "$tmp"
+	rm -f "$marker"
+}
 
 prepare() {
 	local home="$RUNNER_TEMP/home" cache="$RUNNER_TOOL_CACHE/agenthail-cache"
-	rm -rf "$tmp"
-	mkdir -p "$home" "$tmp" "$cache/go-build" "$cache/go-mod" "$cache/npm"
+	[ -z "$tmp" ] || stop_pids "$tmp/" >&2
+	remove_tmp
+	tmp="$(mktemp -d "${user_tmp}XXXX")"
+	echo "$tmp" >"$marker"
+	mkdir -p "$home" "$cache/go-build" "$cache/go-mod" "$cache/npm"
 	cat <<EOF
 HOME=$home
 CFFIXED_USER_HOME=$home
@@ -32,25 +46,31 @@ ancestors() {
 	done
 }
 
-job_pids() {
-	local keep pid
+pids_matching() {
+	local keep pattern pid
 	keep=" $(ancestors | tr '\n' ' ') "
-	{ pgrep -u "$(id -u)" -f "$RUNNER_TEMP/" || true; pgrep -u "$(id -u)" -f "$tmp/" || true; pgrep -u "$(id -u)" -f "$GITHUB_WORKSPACE/" || true; } | sort -u |
+	for pattern in "$@"; do
+		pgrep -u "$(id -u)" -f "$pattern" || true
+	done | sort -u |
 		while read -r pid; do
 			[[ "$keep" == *" $pid "* ]] || echo "$pid"
 		done
 }
 
-cleanup() {
+stop_pids() {
 	local pids
-	pids="$(job_pids | xargs)"
+	pids="$(pids_matching "$@" | xargs)"
 	if [ -n "$pids" ]; then
 		echo "Stopping leftover job processes: $pids"
 		kill $pids 2>/dev/null || true
 		sleep 2
-		pids="$(job_pids | xargs)"
+		pids="$(pids_matching "$@" | xargs)"
 		[ -z "$pids" ] || kill -9 $pids 2>/dev/null || true
 	fi
+}
+
+cleanup() {
+	stop_pids "$RUNNER_TEMP/" "$GITHUB_WORKSPACE/" ${tmp:+"$tmp/"}
 	if [ -n "${SIMULATOR_UDID:-}" ]; then
 		xcrun simctl shutdown "$SIMULATOR_UDID" 2>/dev/null || true
 		xcrun simctl erase "$SIMULATOR_UDID"
@@ -59,7 +79,8 @@ cleanup() {
 		git -C "$GITHUB_WORKSPACE" reset --hard -q
 		git -C "$GITHUB_WORKSPACE" clean -ffdxq
 	fi
-	rm -rf "${RUNNER_TEMP:?}/home" "$tmp"
+	rm -rf "${RUNNER_TEMP:?}/home"
+	remove_tmp
 }
 
 case "${1:-}" in

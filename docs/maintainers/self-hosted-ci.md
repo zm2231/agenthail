@@ -20,9 +20,9 @@ Each runner is a separate service under the same macOS user, in `~/actions-runne
 
 ## Job isolation
 
-`scripts/ci-self-hosted.sh prepare` gives `verify` and `native` a scratch `HOME` and `CFFIXED_USER_HOME` inside the job temp directory, and keeps the Go and npm caches per runner. `TMPDIR` and `GOTMPDIR` point to a per-runner directory under the user's own temp directory in `/var/folders`, the same place hosted runners and users' Macs use, so tests see that `/var` resolves to `/private/var`. `prepare` empties that directory first, which also clears what a killed runner left behind. The iOS jobs keep the real `HOME` because the simulator service uses it. Each runner uses its own simulator, named `Agenthail CI <runner name>`, and its own DerivedData next to its workspace.
+`scripts/ci-self-hosted.sh prepare` gives `verify` and `native` a scratch `HOME` and `CFFIXED_USER_HOME` inside the job temp directory, and keeps the Go and npm caches per runner. `TMPDIR` and `GOTMPDIR` point to a new directory directly under the user's own temp directory in `/var/folders`, the same place hosted runners and users' Macs use, so tests see that `/var` resolves to `/private/var`. Its name is four characters, because tests create Unix sockets in it and macOS limits a socket path to 104 bytes. A marker file per runner records the directory. If a runner was killed before cleanup, the next `prepare` stops the processes still running from the old directory and deletes it. The iOS jobs keep the real `HOME` because the simulator service uses it. Each runner uses its own simulator, named `Agenthail CI <runner name>`, and its own DerivedData next to its workspace.
 
-`scripts/ci-self-hosted.sh cleanup` runs after every self-hosted job, including failed and cancelled ones. It stops processes started from the job's workspace or temp directories, erases the job's simulator, resets the workspace, and deletes the scratch `HOME` and the per-runner temp directory.
+`scripts/ci-self-hosted.sh cleanup` runs after every self-hosted job, including failed and cancelled ones. It stops processes started from the job's workspace or temp directories, erases the job's simulator, resets the workspace, and deletes the scratch `HOME`, the job's temp directory and its marker.
 
 ## Disposable VM runners
 
