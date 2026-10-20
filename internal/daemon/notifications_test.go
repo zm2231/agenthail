@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestDisabledNotificationsAreNoOp(t *testing.T) {
@@ -48,6 +50,40 @@ func TestNotifyPassesSessionToHelper(t *testing.T) {
 		if !test.want && strings.Contains(string(data), "--session") {
 			t.Fatalf("unexpected session flag: %q", data)
 		}
+	}
+}
+
+func TestARequestNotificationPassesItsButtonsToTheHelper(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("desktop notifications are macOS only")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	argsPath := filepath.Join(home, "args")
+	helper := filepath.Join(home, "helper")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > '"+argsPath+"'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_MAC_APP", helper)
+	if err := SaveNotificationConfig(NotificationConfig{Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	actions := []surface.RequestAction{{ID: "allow", Title: "Allow"}, {ID: "deny", Title: "Deny"}}
+	if err := NotifyRequest("Agenthail", "worker: Claude wants to run true", "session-1", "agenthail-key", "request-1", actions); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "--request\nrequest-1\n--actions\n[{\"id\":\"allow\",\"title\":\"Allow\"},{\"id\":\"deny\",\"title\":\"Deny\"}]\n") {
+		t.Fatalf("args = %q", data)
+	}
+	if err := NotifyRequest("Agenthail", "done", "session-1", "", "request-1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(argsPath); strings.Contains(string(data), "--request") {
+		t.Fatalf("a request without buttons passed one: %q", data)
 	}
 }
 

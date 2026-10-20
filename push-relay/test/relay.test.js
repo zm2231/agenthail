@@ -181,6 +181,48 @@ test("send asks APNs to collapse a repeated notification into one", async () => 
   assert.equal("apns-collapse-id" in delivered[1].headers, false)
 })
 
+test("send marks a request's notification for the app to fetch and drops anything else the request asks", async () => {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])
+  const pkcs8 = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64")
+  const env = environment({ APNS_KEY_P8: `-----BEGIN PRIVATE KEY-----\n${pkcs8}\n-----END PRIVATE KEY-----`, APNS_KEY_ID: "KEY1234567", APNS_TOPIC: "com.agenthail.ios" })
+  const credential = "fixture-credential"
+  env.PUSH_DEVICES.values.set("device:phone", JSON.stringify({
+    token: "ab".repeat(32),
+    environment: "sandbox",
+    attestedAt: Date.now(),
+    appAttestKeyHash: "fixture-key-hash",
+    credentialHash: await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential)).then(value => Buffer.from(value).toString("base64url"))
+  }))
+  const delivered = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    delivered.push(JSON.parse(init.body))
+    return new Response(null, { status: 200 })
+  }
+  const notification = { installationId: "phone", credential, title: "Agenthail", message: "Claude Code agent is waiting on you", eventType: "session.waiting", actions: [{ id: "o1", title: "Blue" }], prompt: "Which color?" }
+  try {
+    for (const extra of [{ requestId: "req-1" }, { requestId: "req 2" }, { requestId: "x".repeat(121) }, {}]) {
+      const response = await send(request("POST", { ...notification, ...extra }), env)
+      assert.equal(response.status, 200)
+    }
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  assert.equal(delivered[0].aps["mutable-content"], 1)
+  assert.equal(delivered[0].requestId, "req-1")
+  assert.equal("category" in delivered[0].aps, false)
+  for (const payload of delivered.slice(1)) {
+    assert.equal("mutable-content" in payload.aps, false)
+    assert.equal("requestId" in payload, false)
+  }
+  for (const payload of delivered) {
+    assert.equal("actions" in payload, false)
+    assert.equal(JSON.stringify(payload).includes("color"), false)
+    assert.equal(JSON.stringify(payload).includes("Blue"), false)
+    assert.equal(payload.aps.alert.body, "Claude Code agent is waiting on you")
+  }
+})
+
 test("registration rejects malformed APNs tokens", async () => {
   const env = environment()
   const response = await register(request("POST", await registrationBody(env, { deviceToken: "not-a-token" })), env, acceptAttestation)
@@ -270,6 +312,7 @@ test("health reports the relay protocol and capabilities", async () => {
   assert.ok(health.capabilities.includes("rate-limit"))
   assert.ok(health.capabilities.includes("app-attest"))
   assert.ok(health.capabilities.includes("registration-check"))
+  assert.ok(health.capabilities.includes("request-id"))
   assert.equal(health.ok, false)
   assert.deepEqual(health.appAttest, { required: true, configured: false })
   assert.deepEqual(health.apns, { configured: false })
