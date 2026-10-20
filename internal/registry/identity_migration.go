@@ -187,6 +187,9 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		{"aliases", `UPDATE aliases SET session_id=?2 WHERE session_id=?1`, hasAlias},
 		{"channel_members", `INSERT OR IGNORE INTO channel_members(channel_id,session_id) SELECT channel_id,?2 FROM channel_members WHERE session_id=?1`, false},
 		{"coordinator_replaced", `INSERT OR IGNORE INTO coordinator_replaced(session_id,project_id) SELECT ?2,project_id FROM coordinator_replaced WHERE session_id=?1`, false},
+		{"coordinators", `UPDATE coordinators SET session_id=?2 WHERE session_id=?1`, false},
+		{"coordinator_history", `UPDATE coordinator_history SET session_id=?2 WHERE session_id=?1`, false},
+		{"coordinator_history", `UPDATE coordinator_history SET previous_session_id=?2 WHERE previous_session_id=?1`, false},
 		{"message_queue", `UPDATE message_queue SET session_id=?2 WHERE session_id=?1`, false},
 		{"message_queue", `UPDATE message_queue SET source_session_id=?2 WHERE source_session_id=?1`, false},
 		{"attention_items", `UPDATE attention_items SET session_id=?2 WHERE session_id=?1`, false},
@@ -215,6 +218,11 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		}
 		if _, err := tx.Exec(s.query, oldID, newID); err != nil {
 			return fmt.Errorf("%s: %w", s.table, err)
+		}
+	}
+	if tables["coordinators"] && tables["catalog_events"] {
+		if err := publishSessionCoordinatorTx(tx, newID); err != nil {
+			return err
 		}
 	}
 	if _, err := tx.Exec(`DELETE FROM sessions WHERE id=?`, oldID); err != nil {

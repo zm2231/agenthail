@@ -629,7 +629,7 @@ func validateCommandFlags(command string, args []string) error {
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
 		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
 		"permission-mode": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "requests": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
-		"answer": {values: map[string]bool{"--timeout": true, "--request": true, "--reason": true, "--answers": true}, bools: map[string]bool{"--json": true}}, "interrupt": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "steer": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "control": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "identify": {}, "coordinator": {values: map[string]bool{"--name": true, "--instructions": true, "--permission-mode": true, "--cwd": true, "--model": true}, bools: map[string]bool{"--json": true}}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
+		"answer": {values: map[string]bool{"--timeout": true, "--request": true, "--reason": true, "--answers": true}, bools: map[string]bool{"--json": true}}, "interrupt": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "steer": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "control": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "identify": {}, "coordinator": {values: map[string]bool{"--name": true, "--instructions": true, "--permission-mode": true, "--cwd": true, "--model": true, "--host": true}, bools: map[string]bool{"--json": true, "--replace": true}}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
 	}
 	spec, known := specs[command]
 	if !known {
@@ -1646,6 +1646,13 @@ func (a *App) cmdSend(args []string) error {
 		message = fmt.Sprintf("[from %s] %s", fromLabel, message)
 	}
 
+	_, peerLead, err := a.leadTarget(target)
+	if err != nil {
+		return err
+	}
+	if peerLead != nil && !hasFlag(args, "--stream") && !hasFlag(args, "--reply") {
+		return a.sendToPeerCoordinator(ctx, *peerLead, message, args)
+	}
 	if target, err = a.expandLead(target); err != nil {
 		return err
 	}

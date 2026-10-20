@@ -189,11 +189,11 @@ agenthail coordinator new claude --instructions ~/briefs/coordinator.md
 agenthail send @export-service-lead "Ship the export fix and report back"
 ```
 
-From any session in the project, `agenthail send @lead "..."` reaches that project's coordinator. A folder outside every Git repository and registered folder project has no coordinator; `agenthail project add <folder>` makes it a project.
+From any session in the project, `agenthail send @lead "..."` reaches that project's coordinator. A folder outside every Git repository and added project has no coordinator; `agenthail project add <folder>` makes it a project.
 
 A message to the coordinator always lands. When it is working, the message steers its current turn if the session can be steered, and otherwise waits in the queue. When its session has ended, Agenthail resumes the same conversation. When the conversation is gone, Agenthail starts a new one in the same folder, with the same agent, model and permission mode. Its first message is your saved instructions, a note saying why it started again, and your message. The reply tells you it started again. Messages still waiting for the old conversation move to the new one.
 
-`coordinator new` defines a coordinator that starts on its first message; `agenthail coordinator set <session>` gives the role to a running session instead. `agenthail coordinator` shows the current folder's coordinator, `agenthail coordinator list` shows all of them, and `agenthail coordinator clear` removes the role and leaves the session alone. Sends from the dashboard, the Mac and iPhone apps and notification replies reach the coordinator the same way, because they address its session. See [coordinator](docs/maintainers/coordinator.md).
+`coordinator new` defines a coordinator that starts on its first message; `agenthail coordinator set <session>` gives the role to a running session instead, on this machine or a paired host. A project in a repository with a remote has one coordinator across your paired hosts: a second one is refused until you pass `--replace`, and `@lead` from a session on any of them reaches it. `agenthail coordinator` shows the current folder's coordinator, `agenthail coordinator list` shows all of them, and `agenthail coordinator clear` removes the role and leaves the session alone. Sends from the dashboard, the Mac and iPhone apps and notification replies reach the coordinator the same way, because they address its session. See [coordinator](docs/maintainers/coordinator.md).
 
 For a group that needs the same update:
 

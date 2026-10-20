@@ -386,9 +386,10 @@ func hostUnavailableReason(name, state, detail string) string {
 }
 
 type remoteSnapshot struct {
-	HostEpoch  string             `json:"hostEpoch"`
-	CatalogSeq uint64             `json:"catalogSeq"`
-	Sessions   []dashboardSession `json:"sessions"`
+	HostEpoch    string                      `json:"hostEpoch"`
+	CatalogSeq   uint64                      `json:"catalogSeq"`
+	Sessions     []dashboardSession          `json:"sessions"`
+	Coordinators []registry.CoordinatorEntry `json:"coordinators"`
 }
 
 func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost) (bool, error) {
@@ -440,6 +441,15 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 		if err := d.removeHostRow(host.record.ID, row.Session.ID, "omitted_by_host"); err != nil {
 			return 0, err
 		}
+	}
+	coordinators := make([]registry.CoordinatorEntry, 0, len(snapshot.Coordinators))
+	for _, entry := range snapshot.Coordinators {
+		if entry, ok := mirroredCoordinator(host.record.ID, entry); ok {
+			coordinators = append(coordinators, entry)
+		}
+	}
+	if err := d.Registry.ReplaceHostCoordinators(host.record.ID, coordinators); err != nil {
+		return 0, err
 	}
 	host.epoch = snapshot.HostEpoch
 	if err := d.Registry.RecordHostCatalogCursor(host.record.ID, snapshot.HostEpoch, snapshot.CatalogSeq); err != nil {
@@ -530,8 +540,42 @@ func (d *Daemon) applyHostCatalogEvent(host *pairedHost, envelope catalogStreamE
 			return err
 		}
 		return d.updateMirroredQueueCount(host, payload.SessionID, payload.QueueCount)
+	case "coordinator.changed":
+		var entry registry.CoordinatorEntry
+		if err := json.Unmarshal(envelope.Data, &entry); err != nil {
+			return err
+		}
+		if entry, ok := mirroredCoordinator(host.record.ID, entry); ok {
+			return d.Registry.PutHostCoordinator(host.record.ID, entry)
+		}
+	case "coordinator.removed":
+		var payload struct {
+			ProjectID string `json:"projectId"`
+		}
+		if err := json.Unmarshal(envelope.Data, &payload); err != nil {
+			return err
+		}
+		if entry, ok := mirroredCoordinator(host.record.ID, registry.CoordinatorEntry{ProjectID: payload.ProjectID, Name: "-"}); ok {
+			return d.Registry.RemoveHostCoordinator(host.record.ID, entry.ProjectID)
+		}
 	}
 	return nil
+}
+
+// mirroredCoordinator names a paired host's coordinator as this host does:
+// a project id without a repository key is that host's own and is qualified
+// with it. A host publishes only its own coordinators, so an id already
+// qualified is refused rather than mirrored back.
+func mirroredCoordinator(hostID string, entry registry.CoordinatorEntry) (registry.CoordinatorEntry, bool) {
+	if entry.ProjectID == "" || entry.Name == "" {
+		return entry, false
+	}
+	if _, _, qualified := hosts.Split(entry.ProjectID); qualified {
+		return entry, false
+	}
+	entry.ProjectID = hosts.Qualify(hostID, entry.ProjectID)
+	entry.SessionID = hosts.Qualify(hostID, entry.SessionID)
+	return entry, true
 }
 
 func (d *Daemon) updateMirroredQueueCount(host *pairedHost, sessionID string, count int) error {

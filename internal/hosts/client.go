@@ -22,9 +22,11 @@ import (
 const (
 	ProtocolVersion = 1
 	// FederationVersion names what one daemon serves another beyond the
-	// client API: the session-options launch catalog and history filtered
-	// by session. A host outside this range is reported as needing an update.
-	FederationVersion = 2
+	// client API: the session-options launch catalog, history filtered by
+	// session, and each host's project coordinators with the actions that
+	// set and clear them. A host outside this range is reported as needing
+	// an update.
+	FederationVersion = 3
 	ResponseHeader    = "Agenthail-Host"
 	responseBodyLimit = 32 << 20
 )

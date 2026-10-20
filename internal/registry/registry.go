@@ -457,19 +457,35 @@ CREATE TABLE IF NOT EXISTS sessions (
 	host_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS coordinators (
-	project_id TEXT PRIMARY KEY,
-	project_root TEXT NOT NULL,
-	name TEXT NOT NULL UNIQUE,
+	project_id TEXT NOT NULL,
+	host_id TEXT NOT NULL DEFAULT '',
+	project_root TEXT NOT NULL DEFAULT '',
+	name TEXT NOT NULL,
 	surface TEXT NOT NULL,
-	cwd TEXT NOT NULL,
+	cwd TEXT NOT NULL DEFAULT '',
 	model TEXT NOT NULL DEFAULT '',
 	permission_mode TEXT NOT NULL DEFAULT '',
 	instructions TEXT NOT NULL DEFAULT '',
-	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+	session_id TEXT NOT NULL DEFAULT '',
+	changed_by TEXT NOT NULL DEFAULT '',
+	changed_at_ms INTEGER NOT NULL,
+	PRIMARY KEY (project_id, host_id),
+	UNIQUE (name, host_id)
+);
+CREATE TABLE IF NOT EXISTS coordinator_history (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	project_id TEXT NOT NULL,
+	action TEXT NOT NULL CHECK (action IN ('set','replaced','cleared')),
+	name TEXT NOT NULL,
+	session_id TEXT NOT NULL DEFAULT '',
+	previous_name TEXT NOT NULL DEFAULT '',
+	previous_session_id TEXT NOT NULL DEFAULT '',
+	changed_by TEXT NOT NULL DEFAULT '',
+	at_ms INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS coordinator_replaced (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-	project_id TEXT NOT NULL REFERENCES coordinators(project_id) ON DELETE CASCADE
+	project_id TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS session_rekeys (
 	old_id TEXT PRIMARY KEY, new_id TEXT NOT NULL,

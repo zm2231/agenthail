@@ -2,6 +2,7 @@ package cli
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -55,6 +56,19 @@ func (c *coordinatorCLI) project(t *testing.T, id, dir, name string) {
 	}
 }
 
+// define records a coordinator of a project as the daemon's set and new
+// actions do, so these tests start from a defined coordinator.
+func (c *coordinatorCLI) define(t *testing.T, spec registry.CoordinatorSpec, sessionID string) {
+	t.Helper()
+	if spec.Surface == "" {
+		spec.Surface = string(surface.KindClaude)
+	}
+	spec.ProjectRoot = mustEvalSymlinks(t, spec.Cwd)
+	if _, err := c.r.SetCoordinator(spec, registry.CoordinatorChange{SessionID: sessionID}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (c *coordinatorCLI) spec(t *testing.T) registry.CoordinatorSpec {
 	t.Helper()
 	spec, err := c.r.Coordinator("project-fixture")
@@ -67,7 +81,7 @@ func (c *coordinatorCLI) spec(t *testing.T) registry.CoordinatorSpec {
 func (c *coordinatorCLI) withGoneCoordinator(t *testing.T) *coordinatorCLI {
 	t.Helper()
 	c.register(t, surface.Session{ID: goneConversation, Bridge: "session_gone", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: exitedPID, Status: surface.StatusIdle, Cwd: c.host.Cwd})
-	if err := c.r.SetCoordinator(registry.CoordinatorSpec{ProjectID: "project-fixture", ProjectRoot: mustEvalSymlinks(t, c.host.Cwd), Name: "fixture-lead", Surface: string(surface.KindClaude), Cwd: c.host.Cwd, Instructions: "You coordinate fixture workers."}, goneConversation); err != nil {
+	if _, err := c.r.SetCoordinator(registry.CoordinatorSpec{ProjectID: "project-fixture", ProjectRoot: mustEvalSymlinks(t, c.host.Cwd), Name: "fixture-lead", Surface: string(surface.KindClaude), Cwd: c.host.Cwd, Instructions: "You coordinate fixture workers."}, registry.CoordinatorChange{SessionID: goneConversation}); err != nil {
 		t.Fatal(err)
 	}
 	return c
@@ -135,13 +149,7 @@ func (c *coordinatorCLI) heldReplacement(t *testing.T) {
 func TestSendToCoordinatorWhoseConversationIsGoneStartsOneFromItsInstructions(t *testing.T) {
 	c := newCoordinatorCLI(t)
 	c.register(t, surface.Session{ID: goneConversation, Bridge: "session_gone", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: exitedPID, Status: surface.StatusIdle, Cwd: c.host.Cwd})
-	instructions := filepath.Join(t.TempDir(), "brief.md")
-	if err := os.WriteFile(instructions, []byte("You coordinate fixture workers."), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := c.run(t, "coordinator", "set", goneConversation, "--instructions", instructions); err != nil {
-		t.Fatal(err)
-	}
+	c.define(t, registry.CoordinatorSpec{ProjectID: "project-fixture", Name: "fixture-lead", Cwd: c.host.Cwd, Instructions: "You coordinate fixture workers."}, goneConversation)
 	if err := c.r.QueueMessage(goneConversation, "queued before the restart"); err != nil {
 		t.Fatal(err)
 	}
@@ -187,9 +195,7 @@ func TestSendToCoordinatorWhoseConversationIsGoneStartsOneFromItsInstructions(t 
 
 func TestDefinedCoordinatorStartsOnItsFirstMessage(t *testing.T) {
 	c := newCoordinatorCLI(t)
-	if _, err := c.run(t, "coordinator", "new", "claude", "--cwd", c.host.Cwd, "--model", "fixture-model"); err != nil {
-		t.Fatal(err)
-	}
+	c.define(t, registry.CoordinatorSpec{ProjectID: "project-fixture", Name: "fixture-lead", Cwd: c.host.Cwd, Model: "fixture-model"}, "")
 	output, err := c.run(t, "send", "@fixture-lead", "first task")
 	if err != nil || !strings.Contains(output, "Started coordinator @fixture-lead") {
 		t.Fatalf("output=%q err=%v", output, err)
@@ -246,10 +252,7 @@ func TestCodexCoordinatorStartsOnItsFirstMessage(t *testing.T) {
 	if err := r.AddProject(registry.ProjectRecord{ID: "project-codex", WorkspaceRoot: mustEvalSymlinks(t, cwd), Title: "fixture", Added: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.Run([]string{"coordinator", "new", "codex", "--cwd", cwd, "--permission-mode", "plan"}); err == nil {
-		t.Fatal("a codex coordinator accepted a Claude permission mode")
-	}
-	if _, err := captureStdout(t, func() error { return app.Run([]string{"coordinator", "new", "codex", "--cwd", cwd}) }); err != nil {
+	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: "project-codex", ProjectRoot: mustEvalSymlinks(t, cwd), Name: "fixture-lead", Surface: string(surface.KindCodex), Cwd: cwd}, registry.CoordinatorChange{}); err != nil {
 		t.Fatal(err)
 	}
 	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "@fixture-lead", "first task"}) })
@@ -268,9 +271,7 @@ func TestCodexCoordinatorStartsOnItsFirstMessage(t *testing.T) {
 
 func TestBareCoordinatorNameIsAFragmentNotTheCoordinator(t *testing.T) {
 	c := newCoordinatorCLI(t)
-	if _, err := c.run(t, "coordinator", "new", "claude", "--cwd", c.host.Cwd); err != nil {
-		t.Fatal(err)
-	}
+	c.define(t, registry.CoordinatorSpec{ProjectID: "project-fixture", Name: "fixture-lead", Cwd: c.host.Cwd}, "")
 	if _, err := c.run(t, "send", "fixture-lead", "not for the coordinator"); err == nil || c.started(t) != 0 {
 		t.Fatalf("a bare name started the coordinator: err=%v started=%d", err, c.started(t))
 	}
@@ -344,14 +345,8 @@ func TestLeadIsTheCoordinatorOfTheSendersProject(t *testing.T) {
 	}
 	c.project(t, "project-alpha", alpha, "alpha")
 	c.project(t, "project-beta", beta, "beta")
-	for _, dir := range []string{alpha, beta} {
-		if _, err := c.run(t, "coordinator", "new", "claude", "--cwd", dir); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := c.run(t, "coordinator", "new", "claude", "--cwd", c.host.Cwd, "--name", "beta-lead"); err == nil || !strings.Contains(err.Error(), "already coordinates") {
-		t.Fatalf("a second project took @beta-lead: err=%v", err)
-	}
+	c.define(t, registry.CoordinatorSpec{ProjectID: "project-alpha", Name: "alpha-lead", Cwd: alpha}, "")
+	c.define(t, registry.CoordinatorSpec{ProjectID: "project-beta", Name: "beta-lead", Cwd: beta}, "")
 	const worker = "7b8c9d0e-1f2a-4b3c-9d4e-5f6a7b8c9d0e"
 	c.register(t, surface.Session{ID: worker, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: exitedPID, Status: surface.StatusIdle, Cwd: beta})
 
@@ -389,7 +384,7 @@ func TestAFolderOutsideEveryProjectHasNoLead(t *testing.T) {
 	if _, err := c.run(t, "send", "@lead", "anyone?"); err == nil || !strings.Contains(err.Error(), "is not in a project") {
 		t.Fatalf("err=%v", err)
 	}
-	if _, err := c.run(t, "coordinator", "new", "claude"); err == nil || !strings.Contains(err.Error(), "is not in a project") {
+	if _, err := c.run(t, "coordinator"); err == nil || !strings.Contains(err.Error(), "is not in a project") {
 		t.Fatalf("err=%v", err)
 	}
 	if _, err := c.run(t, "identify", goneConversation, "lead"); err == nil {
@@ -400,18 +395,48 @@ func TestAFolderOutsideEveryProjectHasNoLead(t *testing.T) {
 	}
 }
 
-func TestALongProjectNameStillGetsAValidCoordinatorName(t *testing.T) {
-	c := newCoordinatorCLI(t)
-	dir := filepath.Join(t.TempDir(), "long")
-	if err := os.MkdirAll(dir, 0700); err != nil {
+func TestCoordinatorSetOfAPairedHostsSessionAsksThatHost(t *testing.T) {
+	app, _, _, api := federatedCLIFixture(t, true)
+	api.responses = map[string]string{"coordinator-set": `{"ok":true,"coordinator":{"projectId":"repo:github.com/example/widget","projectRoot":"/home/remote/src","name":"builder-lead","surface":"codex","sessionId":"remote-1"},"replaced":[{"projectId":"repo:github.com/example/widget","name":"old-lead","hostId":"` + forgeHostID + `"}]}`}
+	output, err := captureStdout(t, func() error {
+		return app.Run([]string{"coordinator", "set", "forge::@builder", "--name", "builder-lead", "--replace"})
+	})
+	if err != nil || !strings.Contains(output, "replaced forge::@old-lead") || !strings.Contains(output, "@builder-lead coordinates /home/remote/src") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	actions, _ := api.recorded()
+	if len(actions) != 1 || actions[0]["action"] != "coordinator-set" || actions[0]["sessionId"] != forgeBuilder.ID || actions[0]["name"] != "builder-lead" || actions[0]["replace"] != true {
+		t.Fatalf("actions=%v", actions)
+	}
+}
+
+func TestLeadOnAPairedHostIsReachedThroughThatHost(t *testing.T) {
+	app, reg, fake, api := federatedCLIFixture(t, true)
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"remote", "add", "origin", "https://github.com/example/widget.git"}} {
+		if output, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, output)
+		}
+	}
+	t.Chdir(repo)
+	for _, key := range []string{"AGENTHAIL_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"} {
+		t.Setenv(key, "")
+	}
+	if err := reg.ReplaceHostCoordinators(forgeHostID, []registry.CoordinatorEntry{{ProjectID: "repo:github.com/example/widget", ProjectRoot: "/home/remote/widget", Name: "widget-lead", Surface: "codex"}}); err != nil {
 		t.Fatal(err)
 	}
-	c.project(t, "project-long", dir, strings.Repeat("archive-", 12))
-	if _, err := c.run(t, "coordinator", "new", "claude", "--cwd", dir); err != nil {
-		t.Fatal(err)
+	api.responses = map[string]string{"coordinator-send": `{"ok":true,"started":true,"result":{"evidence":"delivered","status":"sent","detail":"Started coordinator @widget-lead."}}`}
+	for _, target := range []string{"@lead", "@widget-lead"} {
+		output, err := captureStdout(t, func() error { return app.Run([]string{"send", target, "status?"}) })
+		if err != nil || !strings.Contains(output, "Started coordinator @widget-lead") || !strings.Contains(output, "agenthail last forge::@widget-lead") {
+			t.Fatalf("%s: output=%q err=%v", target, output, err)
+		}
 	}
-	spec, err := c.r.Coordinator("project-long")
-	if err != nil || len(spec.Name) > 80 || !strings.HasSuffix(spec.Name, "-lead") || strings.Contains(spec.Name, "--") {
-		t.Fatalf("spec=%+v err=%v", spec, err)
+	actions, _ := api.recorded()
+	if len(actions) != 2 || actions[0]["action"] != "coordinator-send" || actions[0]["host"] != forgeHostID || actions[0]["name"] != "widget-lead" || actions[0]["message"] != "status?" {
+		t.Fatalf("actions=%v", actions)
+	}
+	if len(fake.sent) != 0 {
+		t.Fatalf("local surface received %v", fake.sent)
 	}
 }
