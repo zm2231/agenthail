@@ -672,6 +672,56 @@ func TestOpenUpgradesTheProjectsTableReleasedBeforeAddedProjects(t *testing.T) {
 	}
 }
 
+func TestOpenAddsCoordinatorsToARegistryAtTheVersionBefore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, r, "first", "second")
+	for _, statement := range []string{
+		`DROP TABLE coordinator_replaced`,
+		`DROP TABLE coordinator_history`,
+		`DROP TABLE coordinators`,
+		`PRAGMA user_version=23`,
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var version int
+	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("user_version=%d err=%v", version, err)
+	}
+	spec := CoordinatorSpec{ProjectID: "repo:example/app", ProjectRoot: "/work/app", Name: "app-lead", Surface: "codex", Cwd: "/work/app"}
+	if _, err := r.SetCoordinator(spec, CoordinatorChange{SessionID: "first", ChangedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.HandOverCoordinator(spec, "first", "second"); err != nil {
+		t.Fatal(err)
+	}
+	coordinators, err := r.LocalCoordinators()
+	if err != nil || len(coordinators) != 1 || coordinators[0].SessionID != "second" {
+		t.Fatalf("coordinators=%+v err=%v", coordinators, err)
+	}
+	replaced, ok, err := r.CoordinatorOfSession("first")
+	if err != nil || !ok || replaced.Name != "app-lead" {
+		t.Fatalf("replaced conversation's coordinator=%+v ok=%v err=%v", replaced, ok, err)
+	}
+	history, err := r.CoordinatorHistory(spec.ProjectID)
+	if err != nil || len(history) != 1 || history[0].SessionID != "first" {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+}
+
 func TestOpenRefusesARegistryANewerAgenthailMigrated(t *testing.T) {
 	for _, journal := range []string{"WAL", "DELETE"} {
 		t.Run(journal, func(t *testing.T) {
