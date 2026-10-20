@@ -393,16 +393,13 @@ func TestAnAnswerIsForgottenWhenItsSessionExits(t *testing.T) {
 	if !remembered() {
 		t.Fatal("the answer was forgotten while its Claude process is still running")
 	}
-	claude.prompts.mu.Lock()
-	process := claude.prompts.answered["conversation"].process
-	claude.prompts.mu.Unlock()
-	if !claudeRecordLive(process) {
-		t.Fatalf("the asking process does not identify as live: %v", process)
-	}
 	// The asking process exited and its pid now belongs to a process that
-	// started at another time.
+	// started at another time. The record names no procStart, as Claude's
+	// records need not.
 	claude.prompts.mu.Lock()
-	process["procStart"] = "Thu Jan 1 00:00:00 1970"
+	answer := claude.prompts.answered["conversation"]
+	answer.started = answer.started.Add(-time.Hour)
+	claude.prompts.answered["conversation"] = answer
 	claude.prompts.mu.Unlock()
 	if _, err := claude.List(context.Background()); err != nil {
 		t.Fatal(err)
