@@ -425,7 +425,8 @@ func setAsideReleasedProjectsTable(tx *sql.Tx) error {
 
 // upgradeReleasedProjectsTable carries the released table's rows into the
 // current one: a registered folder becomes an added project, and an archived
-// repository becomes the archive row of its implicit project.
+// repository becomes the archive row of its implicit project. Rows that share a
+// root collapse into one, keeping the added project and the latest archive time.
 func upgradeReleasedProjectsTable(tx *sql.Tx) error {
 	var name string
 	err := tx.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='projects_released'`).Scan(&name)
@@ -435,9 +436,17 @@ func upgradeReleasedProjectsTable(tx *sql.Tx) error {
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT OR IGNORE INTO projects(id,workspace_root,title,added,archived_at_ms)
-		SELECT CASE WHEN registered=1 THEN 'p-' || id ELSE 'implicit:' || root_path END, root_path, display_name, registered, archived_at_ms
-		FROM projects_released WHERE registered=1 OR archived_at_ms>0`); err != nil {
+	if _, err := tx.Exec(`INSERT INTO projects(id,workspace_root,title,added,archived_at_ms)
+		SELECT 'p-' || MIN(id), root_path, MIN(display_name), 1,
+			(SELECT MAX(archived_at_ms) FROM projects_released other WHERE other.root_path=folder.root_path)
+		FROM projects_released folder WHERE registered=1 GROUP BY root_path`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO projects(id,workspace_root,title,added,archived_at_ms)
+		SELECT 'implicit:' || root_path, root_path, MIN(display_name), 0, MAX(archived_at_ms)
+		FROM projects_released WHERE registered=0 AND archived_at_ms>0
+			AND root_path NOT IN (SELECT workspace_root FROM projects)
+		GROUP BY root_path`); err != nil {
 		return err
 	}
 	_, err = tx.Exec(`DROP TABLE projects_released`)

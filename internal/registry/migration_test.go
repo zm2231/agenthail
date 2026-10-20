@@ -630,6 +630,8 @@ func TestOpenUpgradesTheProjectsTableReleasedBeforeAddedProjects(t *testing.T) {
 		`INSERT INTO projects VALUES('project-aaa','folder','/work/notes','notes',1,0)`,
 		`INSERT INTO projects VALUES('project-bbb','repo','/work/app','app',0,1760000000000)`,
 		`INSERT INTO projects VALUES('project-ccc','repo','/work/lib','lib',0,0)`,
+		`INSERT INTO projects VALUES('project-ddd','folder','/work/site','site',1,0)`,
+		`INSERT INTO projects VALUES('project-eee','repo','/work/site','site',0,1761000000000)`,
 		`PRAGMA user_version=22`,
 	} {
 		if _, err := r.db.Exec(statement); err != nil {
@@ -652,8 +654,11 @@ func TestOpenUpgradesTheProjectsTableReleasedBeforeAddedProjects(t *testing.T) {
 	for _, project := range projects {
 		got[project.WorkspaceRoot] = project
 	}
-	if len(got) != 2 {
+	if len(got) != 3 || len(projects) != 3 {
 		t.Fatalf("projects=%+v", projects)
+	}
+	if site := got["/work/site"]; site.ID != "p-project-ddd" || !site.Added || site.ArchivedAt.UnixMilli() != 1761000000000 {
+		t.Fatalf("folder sharing a root with an archived repository=%+v", site)
 	}
 	if notes := got["/work/notes"]; notes.ID != "p-project-aaa" || !notes.Added || notes.Title != "notes" || !notes.ArchivedAt.IsZero() {
 		t.Fatalf("registered folder=%+v", notes)
