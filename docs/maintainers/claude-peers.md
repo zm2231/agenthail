@@ -43,6 +43,8 @@ Claude Code keeps folder trust, approvals and project-local MCP servers per root
 
 The dashboard action is `session-move` with `account` and `stopTerminal`; it answers 409 with `busy` or `needsConsent`.
 
+When the API refuses a turn, Claude Code writes an assistant record with `isApiErrorMessage` in place of the reply. The timeline turns it into a `notice` item; a usage limit (`error: "rate_limit"` or `apiError: "usage_limit_reached"`) has status `usage_limit` and `resetsAt` from `quotaLimits` or `apiErrorParams.rate_limit_info`, carried through the stream event and the journal. The turn counts as done, and its reply carries the limit as its error. `surface.ActiveUsageLimit` takes the newest such notice with no assistant message after it and a reset still ahead; the session detail response then has `usageLimit` with the message, the reset, the session's account, and as `alternatives` the signed-in accounts on that host that do not share its account and whose cached usage is not exhausted.
+
 A conversation whose records or transcripts appear in two roots is refused for sends, reads and lifecycle actions with an error naming both roots, rather than resolved to either copy. It is still listed.
 
 ## Durable reply endpoint design

@@ -43,6 +43,7 @@ type sessionJournalPayload struct {
 	Sender           string                 `json:"sender,omitempty"`
 	Title            string                 `json:"title,omitempty"`
 	Status           string                 `json:"status,omitempty"`
+	ResetsAt         string                 `json:"resetsAt,omitempty"`
 	ItemID           string                 `json:"itemId"`
 	ProviderKey      string                 `json:"providerKey,omitempty"`
 	Version          uint64                 `json:"version"`
@@ -784,6 +785,7 @@ func seedEvent(kind surface.SurfaceKind, item surface.TimelineItem) surface.Stre
 		Sender:           item.Sender,
 		Title:            item.Title,
 		Status:           item.Status,
+		ResetsAt:         item.ResetsAt,
 		Truncated:        item.Truncated,
 		TruncationReason: item.TruncationReason,
 		ID:               item.ID,
@@ -1018,7 +1020,7 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) (sessionJourn
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, Context: event.Context, Goal: event.Goal, Attachment: event.Attachment, Files: event.Files, Truncated: event.Truncated, TruncationReason: event.TruncationReason}, bodyKey
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, ResetsAt: event.ResetsAt, Context: event.Context, Goal: event.Goal, Attachment: event.Attachment, Files: event.Files, Truncated: event.Truncated, TruncationReason: event.TruncationReason}, bodyKey
 }
 
 // prepareStream waits under ctx for the session journal to be seeded, then

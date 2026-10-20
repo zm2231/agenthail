@@ -1183,6 +1183,7 @@ async function selectSession(id, focus = false) {
     detail.transcriptWarning = detail.readError || "";
     app.history = detail;
     renderChat();
+    if (!app.moveAccounts?.[id]) loadMoveAccounts(app.selected);
     const metadataSeq = detail.journalSeq;
     fetch(`/api/session-metadata?id=${encodeURIComponent(id)}`)
       .then((result) => { if (!result.ok) throw Error("Metadata unavailable"); return result.json(); })
@@ -1249,6 +1250,9 @@ function renderTimelineItem(item, session) {
     const content = user ? handoffMessage(item.text) : { text: item.text, label: labels[session.surface] || session.surface };
     return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(content.text, user ? "user" : "agent", content.label, `${session.id}:${item.id}`, user ? item.files : [])}${metadata}</section>`;
   }
+  if (kind === "notice") {
+    return `<p class="timeline-item timeline-notice" role="status" ${attributes}><strong>${escape(item.title || "Notice")}</strong> ${escape(item.text || "")}</p>`;
+  }
   if (["toolCall", "toolResult", "reasoning"].includes(kind)) {
     const title = item.title || kind;
     const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';
@@ -1262,9 +1266,11 @@ function renderTimelineItem(item, session) {
 function renderTimeline(items, session) {
   return items.map(item => renderTimelineItem(item, session)).join("");
 }
-function timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents) {
+function timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents, usageLimit, moveAccounts) {
   return JSON.stringify([
     session.id,
+    usageLimit || null,
+    moveAccounts || null,
     exchanges,
     JSON.stringify(goal || null),
     Boolean(capabilities.goal),
@@ -1284,7 +1290,7 @@ function renderClaudeMetadata(claudeRuns, claudeSubagents) {
   return `<details class="session-details"><summary>Observed Claude runs</summary>${runRows ? `<ul>${runRows}</ul>` : "<p>No observed Claude runs.</p>"}</details><details class="session-details"><summary>Observed Claude subagents</summary>${subagentRows ? `<ul>${subagentRows}</ul>` : "<p>No observed Claude subagents.</p>"}</details>`;
 }
 function renderChat() {
-  const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context, transcriptWarning, claudeRuns, claudeSubagents } = app.history || {};
+  const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context, transcriptWarning, claudeRuns, claudeSubagents, usageLimit } = app.history || {};
   const session = app.selected;
   const controls = [];
   if (session.runtime?.focusable)
@@ -1340,13 +1346,20 @@ function renderChat() {
   } else if (capabilities.goalStatus && goal?.objective) {
     settings.push(`<div class="session-tools session-goal-status" data-tool="goal-status"><label><span>Goal</span><input value="${escape(goal.objective)}" readonly></label>${goalMetrics(goal)}</div>`);
   }
+  if (canMoveAccount(session, readOnly)) {
+    const accounts = app.moveAccounts?.[session.id] || [];
+    const choices = accounts.filter(account => account.root !== session.claudeAccount?.root);
+    settings.push(choices.length
+      ? `<form class="session-tools" data-tool="move"><label><span>Claude account</span><select name="account">${choices.map(account => `<option value="${escape(account.root)}"${account.signedIn ? "" : " disabled"}>${escape(claudeAccountOption(account))}</option>`).join("")}</select></label><p class="session-tool-note">Currently ${escape(session.claudeAccount?.label || "unknown")}. The conversation keeps its history and name, and spends the chosen account's usage from its next turn.</p><div class="session-tool-actions"><button class="soft-button" type="submit">Move to account</button></div></form>`
+      : `<p class="session-tool-note">${accounts.length ? "This host has no other Claude account. Add one to claudeConfigDirs in ~/.agenthail/config.json." : "Loading Claude accounts…"}</p>`);
+  }
   const toolRows = [
     `<details class="session-details"><summary>Conversation settings</summary>${settings.join("")}</details>`,
     remoteHostName(session) ? "" : `<details class="session-details"><summary>Voice</summary><p>Call this exact conversation through Codex Voice, or transfer an active call here.</p><button class="soft-button" type="button" data-voice-session="${escape(session.id)}">Call this session</button></details>`,
   ];
   if (session.surface === "claude") toolRows.push(renderClaudeMetadata(claudeRuns, claudeSubagents));
   const timeline = app.history?.timeline?.items || [];
-  const signature = timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents);
+  const signature = timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents, usageLimit, app.moveAccounts?.[session.id]);
   if (app.transcriptSignature === signature) return;
   const chatBody = $("#chat-body");
   const previousScrollTop = chatBody.scrollTop;
@@ -1379,7 +1392,7 @@ function renderChat() {
     })
     .join("");
   chatBody.innerHTML =
-    `${transcriptWarning ? `<p role="status">${escape(transcriptWarning)}</p>` : ""}${renderGoalAttention(goal)}${toolRows.join("")}${messages || '<div class="empty-state"><span class="empty-glyph">✦</span><h2>No saved exchanges yet</h2><p>Send a message to start this conversation from Agenthail.</p></div>'}`;
+    `${transcriptWarning ? `<p role="status">${escape(transcriptWarning)}</p>` : ""}${renderUsageLimit(app.history?.usageLimit)}${renderGoalAttention(goal)}${toolRows.join("")}${messages || '<div class="empty-state"><span class="empty-glyph">✦</span><h2>No saved exchanges yet</h2><p>Send a message to start this conversation from Agenthail.</p></div>'}`;
   renderLiveTurn();
   app.transcriptSignature = signature;
   if (app.pendingEntryScroll) {
@@ -1407,6 +1420,50 @@ function goalMetrics(goal) {
 }
 function goalStatusLabel(status) {
   return ({ active: "Active", paused: "Paused", blocked: "Blocked", usageLimited: "Usage limited", budgetLimited: "Budget limited", complete: "Complete" })[status] || status || "Unknown";
+}
+function canMoveAccount(session, readOnly) {
+  return session?.surface === "claude" && !readOnly && !session.subagent;
+}
+function renderUsageLimit(limit) {
+  if (!limit) return "";
+  const resets = Date.parse(limit.resetsAt || "");
+  const until = resets ? ` It resets ${new Date(resets).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.` : "";
+  const account = limit.account?.label ? `${limit.account.label} is out of usage.` : "This Claude account is out of usage.";
+  const alternatives = limit.alternatives || [];
+  const offer = alternatives.length
+    ? `<form class="usage-limit-offer" data-tool="move"><select name="account" aria-label="Claude account">${alternatives.map(option => `<option value="${escape(option.root)}">${escape(claudeAccountOption(option))}</option>`).join("")}</select><button class="soft-button" type="submit">Move to this account</button></form>`
+    : "<span>No other signed-in Claude account has usage left on this host.</span>";
+  return `<div class="usage-limit" role="status"><p>${escape(account)}${escape(until)}</p>${offer}</div>`;
+}
+async function loadMoveAccounts(session) {
+  if (!canMoveAccount(session, app.history?.readOnly)) return;
+  const host = session.host && session.host.state !== "local" ? `?host=${encodeURIComponent(session.host.id)}` : "";
+  try {
+    const response = await fetch(`/api/v1/session-options${host}`);
+    if (!response.ok) return;
+    const options = await response.json();
+    app.moveAccounts = { ...(app.moveAccounts || {}), [session.id]: options.claudeAccounts || [] };
+    if (app.selected?.id === session.id) renderChat();
+  } catch (error) {}
+}
+async function moveSession(account) {
+  const request = { account };
+  for (;;) {
+    try {
+      const result = await action("session-move", request);
+      const moved = result?.result || {};
+      for (const warning of moved.warnings || []) toast(warning);
+      return moved;
+    } catch (error) {
+      let body;
+      try { body = JSON.parse(error.message); } catch (parseError) { throw error; }
+      if (body.needsConsent && !request.stopTerminal && confirm(`${body.error} Stopping it ends the terminal session; the conversation continues in Agenthail.`)) {
+        request.stopTerminal = true;
+        continue;
+      }
+      throw Error(body.error || error.message);
+    }
+  }
 }
 function renderGoalAttention(goal) {
   if (!goal || !["blocked", "usageLimited", "budgetLimited"].includes(goal.status)) return "";
@@ -2055,7 +2112,14 @@ document.addEventListener("submit", async (event) => {
   const tool = form.dataset.tool;
   const input = form.querySelector("input");
   try {
-    if (tool === "alias") {
+    if (tool === "move") {
+      const select = form.querySelector("select[name=account]");
+      form.querySelectorAll("button,select").forEach(control => control.disabled = true);
+      const moved = await moveSession(select.value);
+      toast(moved.toRoot ? `Moved to ${moved.toRoot}.` : "Moved.");
+      app.moveAccounts = {};
+      await load();
+    } else if (tool === "alias") {
       await action("alias", { alias: input.value.trim() });
       toast("Conversation name saved.");
       await load();

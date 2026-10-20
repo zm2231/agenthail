@@ -373,6 +373,8 @@ struct SessionScreen: View {
     let session: SessionState
     @State private var showingInfo = false
     @State private var showingVoice = false
+    @State private var usageMove: String?
+    private var currentSession: SessionState { model.snapshot?.sessions.first { $0.id == session.id } ?? session }
     @State private var activityOnly = false
     @State private var followingLatest = true
     @State private var atLatest = true
@@ -415,6 +417,21 @@ struct SessionScreen: View {
                     if let detail {
                         if let warning = detail.transcriptWarning {
                             Label(warning, systemImage: "exclamationmark.bubble").font(.footnote).foregroundStyle(.secondary)
+                        }
+                        if let limit = detail.usageLimit {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label(limit.summary, systemImage: "gauge.with.dots.needle.100percent").font(.callout)
+                                if let alternative = limit.alternatives?.first, currentSession.canMoveAccount {
+                                    Button("Move to \(alternative.label)…") { usageMove = alternative.root }
+                                        .buttonStyle(.borderedProminent)
+                                } else {
+                                    Text("No other signed-in Claude account on this host has usage left.").font(.footnote).foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                            .accessibilityIdentifier("usage-limit-banner")
                         }
                         if let timeline = detail.timeline,
                            Self.showsActivity(timeline: timeline, itemCount: items.count, activityCursor: model.activityCursor, exchangeCount: detail.exchanges.count) {
@@ -567,6 +584,9 @@ struct SessionScreen: View {
                 if let liveDetail = model.selectedDetail, liveDetail.session.id == session.id {
                     SessionInspector(model: model, session: session, initialDetail: liveDetail)
                 }
+            }
+            .sheet(isPresented: Binding(get: { usageMove != nil }, set: { if !$0 { usageMove = nil } })) {
+                IOSMoveSessionSheet(model: model, session: currentSession, adopt: false, preferredAccount: usageMove)
             }
             .sheet(isPresented: $showingVoice) {
                 if let call = voiceCalls.model {
@@ -1409,9 +1429,9 @@ struct IOSMoveSessionSheet: View {
     @StateObject private var controller: SessionMoveController
     @Environment(\.dismiss) private var dismiss
 
-    init(model: AgenthailIOSModel, session: SessionState, adopt: Bool) {
+    init(model: AgenthailIOSModel, session: SessionState, adopt: Bool, preferredAccount: String? = nil) {
         self.model = model
-        _controller = StateObject(wrappedValue: SessionMoveController(session: session, adopt: adopt))
+        _controller = StateObject(wrappedValue: SessionMoveController(session: session, adopt: adopt, preferredAccount: preferredAccount))
     }
 
     var body: some View {

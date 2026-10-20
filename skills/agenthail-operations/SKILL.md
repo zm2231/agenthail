@@ -87,6 +87,8 @@ moves a Claude session to another root, `thread move --all --account <root>
 terminal conversation into the Agenthail host. A busy session is refused (or
 waited on with `--wait`); a terminal is stopped only with `--stop-terminal`.
 Report skipped sessions as they are listed; do not retry them in a loop.
+A `send --reply` that fails with "out of usage" means the session's account
+hit its limit: move it with `thread move` rather than resending.
 
 One unhealthy surface does not block the others. Preserve the `errors` object
 from JSON discovery output when reporting partial availability.

@@ -53,6 +53,7 @@ const context = {
   renderGoalAttention: () => "",
   renderLiveTurn: () => {},
   alignTranscriptTop: () => {},
+  claudeAccountOption: (account) => account.label,
   escape: (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
     "<": "&lt;",
@@ -69,7 +70,8 @@ ${source.slice(chatStart, chatEnd)}
 ${source.slice(goalStart, goalEnd)}
 globalThis.renderChat = renderChat;
 globalThis.goalStatusLabel = goalStatusLabel;
-globalThis.contextBreakdown = contextBreakdown;`, context);
+globalThis.contextBreakdown = contextBreakdown;
+globalThis.renderUsageLimit = renderUsageLimit;`, context);
 
 const session = { id: "session-1", surface: "claude" };
 const items = [
@@ -182,5 +184,24 @@ assert.equal(JSON.stringify(full.map(([label]) => label)), JSON.stringify(["Used
 assert.equal(JSON.stringify(context.contextBreakdown({ usedTokens: 0, contextWindow: 0, compactionCount: 0 }).map(([label, value]) => `${label}=${value}`)), JSON.stringify(["Used tokens=0", "Context window=Unavailable", "Compactions=0"]), "unreported figures are left out and an unknown window says so");
 assert.equal(context.contextBreakdown({ usedTokens: 1, contextWindow: 9, compactionCount: 0, windowEstimated: true })[1][0], "Estimated window", "an estimated window is labeled");
 assert.equal(context.contextBreakdown({ usedTokens: 1, contextWindow: 9, compactionCount: 0, contextWindowSource: "configured" })[1][0], "Configured window", "a configured window is labeled");
+
+const notice = context.renderTimeline([{ id: "limit-1", kind: "notice", title: "Usage limit reached", text: "You've hit your session limit <b>", status: "usage_limit" }], session);
+assert(notice.includes("timeline-notice") && notice.includes("Usage limit reached") && notice.includes("&lt;b&gt;") && !notice.includes("turn-action"), "a notice renders as an escaped status line, not as the agent's message");
+const offer = context.renderUsageLimit({ message: "limit", resetsAt: "2026-10-21T11:00:00Z", account: { label: "me@example.com" }, alternatives: [{ root: "/h/.spare", label: "spare@example.com" }] });
+assert(offer.includes("me@example.com is out of usage") && offer.includes('data-tool="move"') && offer.includes('value="/h/.spare"') && offer.includes("spare@example.com"), "the limit banner offers the other account");
+assert(context.renderUsageLimit({ message: "limit", alternatives: [] }).includes("No other signed-in Claude account"), "with no alternative the banner says so");
+assert.equal(context.renderUsageLimit(null), "", "no limit, no banner");
+context.app.transcriptSignature = null;
+context.app.history = { exchanges: [], capabilities: {}, readOnly: false, timeline: { items: [] }, usageLimit: { message: "limit", account: { label: "me@example.com" }, alternatives: [{ root: "/h/.spare", label: "spare@example.com" }] } };
+context.renderChat();
+assert(elements["#chat-body"].innerHTML.includes("usage-limit-offer"), "the chat shows the limit banner");
+context.app.transcriptSignature = null;
+context.app.moveAccounts = { "session-1": [{ root: "/h/.claude", label: "me@example.com", signedIn: true }, { root: "/h/.spare", label: "spare@example.com", signedIn: true }] };
+context.app.selected = { ...session, claudeAccount: { root: "/h/.claude", label: "me@example.com" } };
+context.app.history = { exchanges: [], capabilities: {}, readOnly: false, timeline: { items: [] } };
+context.renderChat();
+const settingsHTML = elements["#chat-body"].innerHTML;
+assert(settingsHTML.includes("Move to account") && settingsHTML.includes('value="/h/.spare"') && !settingsHTML.includes('value="/h/.claude"'), "settings offer every account but the current one");
+context.app.selected = session;
 
 console.log("dashboard timeline VM tests passed");

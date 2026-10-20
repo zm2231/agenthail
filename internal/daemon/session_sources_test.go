@@ -1378,3 +1378,22 @@ func TestSessionJournalKeepsAttachedFilesForTheChatPage(t *testing.T) {
 		t.Fatalf("item=%+v", got)
 	}
 }
+
+func TestAUsageLimitNoticeKeepsItsResetTimeThroughTheJournal(t *testing.T) {
+	_, registry, fake, from, _ := daemonFixture(t)
+	source := &sessionSource{manager: newSessionSourceManager(registry), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	notice := surface.TimelineItem{ID: "n", Kind: "notice", Title: "Usage limit reached", Text: "You've hit your session limit", Status: surface.TimelineUsageLimit, ResetsAt: "2026-10-21T11:00:00Z"}
+	payload, _ := source.normalizeLocked(seedEvent(surface.KindClaude, notice))
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored sessionJournalPayload
+	if err := json.Unmarshal(encoded, &stored); err != nil {
+		t.Fatal(err)
+	}
+	item := journalTimelineItem(stored)
+	if item.Kind != "notice" || item.Status != surface.TimelineUsageLimit || item.ResetsAt != notice.ResetsAt || item.Text != notice.Text {
+		t.Fatalf("item=%+v", item)
+	}
+}

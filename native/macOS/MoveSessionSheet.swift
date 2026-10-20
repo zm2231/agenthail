@@ -7,7 +7,7 @@ struct MoveSessionSheet: View {
 
     init(model: AgenthailModel, request: SessionMoveRequest) {
         self.model = model
-        _controller = StateObject(wrappedValue: SessionMoveController(session: request.session, adopt: request.adopt))
+        _controller = StateObject(wrappedValue: SessionMoveController(session: request.session, adopt: request.adopt, preferredAccount: request.preferredAccount))
     }
 
     var body: some View {
@@ -93,6 +93,44 @@ struct MoveSessionSheet: View {
         Task {
             await controller.move(api: api, stopTerminal: stopTerminal)
             if case .done = controller.phase { _ = await model.refresh(fresh: true) }
+        }
+    }
+}
+
+/// Shown above the composer when the session's Claude account is out of
+/// usage, with the move that gets it working again.
+struct UsageLimitBanner: View {
+    @ObservedObject var pane: SessionPane
+    let session: SessionState
+
+    var body: some View {
+        if let detail = pane.detail, detail.session.id == session.id, let limit = detail.usageLimit {
+            let alternative = limit.alternatives?.first
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: "gauge.with.dots.needle.100percent")
+                    .foregroundStyle(DesktopPalette.amber)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(limit.summary)
+                        .font(.system(size: 12.5, weight: .medium))
+                    if alternative == nil {
+                        Text("No other signed-in Claude account on this host has usage left.")
+                            .foregroundStyle(DesktopPalette.text2)
+                    }
+                }
+                Spacer(minLength: 8)
+                if let alternative, session.canMoveAccount {
+                    Button("Move to \(alternative.label)…") {
+                        pane.movingSession = SessionMoveRequest(session: session, adopt: false, preferredAccount: alternative.root)
+                    }
+                    .help("Move this session to another Claude account")
+                }
+            }
+            .font(.system(size: 12.5))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(DesktopPalette.warnBackground, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(DesktopPalette.warnLine))
+            .padding(.bottom, 8)
         }
     }
 }

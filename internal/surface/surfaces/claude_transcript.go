@@ -28,6 +28,9 @@ type claudeTurn struct {
 	Done        bool
 	Closing     bool
 	Interrupted bool
+	// UsageLimit is the message Claude Code wrote when the account's usage
+	// limit refused the turn.
+	UsageLimit string
 }
 
 type claudeRecord struct {
@@ -38,10 +41,13 @@ type claudeRecord struct {
 		Command string `json:"command"`
 		Args    string `json:"args"`
 	} `json:"commandRun"`
-	Subtype   string `json:"subtype"`
-	Content   string `json:"content"`
-	Timestamp string `json:"timestamp"`
-	Message   struct {
+	Subtype           string `json:"subtype"`
+	Content           string `json:"content"`
+	Timestamp         string `json:"timestamp"`
+	IsAPIErrorMessage bool   `json:"isApiErrorMessage"`
+	Error             string `json:"error"`
+	APIError          string `json:"apiError"`
+	Message           struct {
 		ID         string `json:"id"`
 		Model      string `json:"model"`
 		StopReason string `json:"stop_reason"`
@@ -182,6 +188,12 @@ func appendClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 			} else if turn.Assistant != text && !strings.Contains(turn.Assistant, text) {
 				turn.Assistant += "\n" + text
 			}
+		}
+		if record.IsAPIErrorMessage && (record.Error == "rate_limit" || record.APIError == "usage_limit_reached") {
+			turn.UsageLimit = strings.TrimSpace(transcriptText(record.Message.Content))
+			turn.Done, turn.Closing, turn.Interrupted = true, false, false
+			turn.TerminalAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
+			return turns
 		}
 		turn.Done = false
 		turn.Closing = record.Message.StopReason == "end_turn"

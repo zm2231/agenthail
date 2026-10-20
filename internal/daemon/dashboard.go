@@ -2103,6 +2103,9 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	} else if sessionRead.UnavailableReason != "" {
 		response["readError"] = sessionRead.UnavailableReason
 	}
+	if offer := d.usageLimitOffer(session, sessionRead.Items, time.Now()); offer != nil && timelineBefore == 0 {
+		response["usageLimit"] = offer
+	}
 	if r.URL.Query().Get("timeline") == "1" {
 		response["timeline"] = &surface.SessionTimeline{Items: sessionRead.Items, NextBefore: sessionRead.NextBefore, Source: sessionRead.Source, Truncated: sessionRead.Truncated, UnavailableReason: sessionRead.UnavailableReason}
 	}

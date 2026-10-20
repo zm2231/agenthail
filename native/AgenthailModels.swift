@@ -90,9 +90,27 @@ enum SessionMoveOutcome: Equatable {
 /// Drives moving a Claude session to another account, or opening a terminal
 /// session in Agenthail (`adopt`), for the Mac and iPhone sheets. Stopping a
 /// terminal process always waits for the person to confirm it.
+/// The session's Claude account is out of usage; alternatives are the other
+/// signed-in accounts on its host that still have usage.
+struct SessionUsageLimit: Decodable, Hashable {
+    let message: String
+    var resetsAt: String? = nil
+    var account: SessionAccount? = nil
+    var alternatives: [ClaudeAccountOption]? = nil
+
+    var resetsDate: Date? { resetsAt.flatMap { ISO8601DateFormatter().date(from: $0) } }
+
+    var summary: String {
+        var text = "\(account?.label ?? "This Claude account") is out of usage."
+        if let resets = resetsDate { text += " It resets \(resets.formatted(date: .abbreviated, time: .shortened))." }
+        return text
+    }
+}
+
 struct SessionMoveRequest: Identifiable, Hashable {
     let session: SessionState
     let adopt: Bool
+    var preferredAccount: String? = nil
     var id: String { session.id + (adopt ? "/adopt" : "/move") }
 }
 
@@ -112,10 +130,12 @@ final class SessionMoveController: ObservableObject {
     @Published private(set) var phase: Phase = .loading
     let session: SessionState
     let adopt: Bool
+    private let preferredAccount: String?
 
-    init(session: SessionState, adopt: Bool) {
+    init(session: SessionState, adopt: Bool, preferredAccount: String? = nil) {
         self.session = session
         self.adopt = adopt
+        self.preferredAccount = preferredAccount
         if adopt { phase = .choosing }
     }
 
@@ -131,7 +151,10 @@ final class SessionMoveController: ObservableObject {
         do {
             let options = try await api.sessionOptions(host: session.remoteHostID)
             accounts = options.claudeAccounts ?? []
-            selected = accounts.first { $0.root != currentRoot && $0.signedIn }?.root ?? ""
+            let current = accounts.first { $0.root == currentRoot }
+            let candidates = accounts.filter { $0.root != currentRoot && $0.signedIn }
+            let fresh = candidates.filter { candidate in candidate.exhaustedUntil() == nil && current.map { !$0.sharesAccount(with: candidate) } != false }
+            selected = candidates.first { $0.root == preferredAccount }?.root ?? fresh.first?.root ?? candidates.first?.root ?? ""
             phase = accounts.count > 1 ? .choosing : .failed("Only one Claude account is set up on this host. Add another config directory to claudeConfigDirs in ~/.agenthail/config.json.")
         } catch {
             phase = .failed(AgenthailAPIError.userMessage(error))
@@ -1066,6 +1089,7 @@ struct SessionDetail: Decodable {
     var claudeSubagents: [ClaudeSubagentLink]?
     var metadataErrors: [String: String]?
     var timeline: SessionTimeline?
+    var usageLimit: SessionUsageLimit?
     let readSource: String?
     let readError: String?
     let transcriptWarning: String?

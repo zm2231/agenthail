@@ -206,3 +206,23 @@ func TestClaudeRootsWithOneFolderNameGetDistinctNames(t *testing.T) {
 		t.Fatalf("accounts=%+v", accounts)
 	}
 }
+
+func TestActiveUsageLimitIsTheNewestLimitNotAnsweredOrExpired(t *testing.T) {
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	limit := TimelineItem{Kind: "notice", Status: TimelineUsageLimit, Text: "limit", ResetsAt: now.Add(time.Hour).Format(time.RFC3339)}
+	user := TimelineItem{Kind: "message", Role: "user", Text: "retry"}
+	reply := TimelineItem{Kind: "message", Role: "assistant", Text: "done"}
+	if got := ActiveUsageLimit([]TimelineItem{reply, limit, user}, now); got == nil || got.Text != "limit" {
+		t.Fatalf("an unanswered limit was missed: %+v", got)
+	}
+	if got := ActiveUsageLimit([]TimelineItem{limit, reply}, now); got != nil {
+		t.Fatalf("a limit the agent answered after is still active: %+v", got)
+	}
+	if got := ActiveUsageLimit([]TimelineItem{limit}, now.Add(2*time.Hour)); got != nil {
+		t.Fatalf("a limit past its reset is still active: %+v", got)
+	}
+	limit.ResetsAt = ""
+	if got := ActiveUsageLimit([]TimelineItem{limit}, now); got == nil {
+		t.Fatal("a limit without a reset time was dropped")
+	}
+}

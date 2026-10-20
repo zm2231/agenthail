@@ -2250,3 +2250,27 @@ select {
   width: auto;
   flex: 0 1 240px;
 }
+.usage-limit {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--raised);
+}
+.usage-limit p {
+  margin: 0;
+}
+.usage-limit-offer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.timeline-notice {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--warn);
+  color: var(--muted);
+}

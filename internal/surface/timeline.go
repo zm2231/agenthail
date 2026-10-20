@@ -10,17 +10,19 @@ var ErrTranscriptUnavailable = errors.New("session transcript unavailable")
 
 // TimelineItem preserves the ordered, user-visible contents of an agent transcript.
 type TimelineItem struct {
-	ID               string         `json:"id"`
-	Kind             string         `json:"kind"`
-	Role             string         `json:"role,omitempty"`
-	Origin           string         `json:"origin,omitempty"`
-	Sender           string         `json:"sender,omitempty"`
-	Title            string         `json:"title"`
-	Text             string         `json:"text"`
-	Timestamp        string         `json:"timestamp,omitempty"`
-	CallID           string         `json:"callId,omitempty"`
-	TurnID           string         `json:"turnId,omitempty"`
-	Status           string         `json:"status,omitempty"`
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Role      string `json:"role,omitempty"`
+	Origin    string `json:"origin,omitempty"`
+	Sender    string `json:"sender,omitempty"`
+	Title     string `json:"title"`
+	Text      string `json:"text"`
+	Timestamp string `json:"timestamp,omitempty"`
+	CallID    string `json:"callId,omitempty"`
+	TurnID    string `json:"turnId,omitempty"`
+	Status    string `json:"status,omitempty"`
+	// ResetsAt is when a usage limit a notice reports lifts, in RFC 3339.
+	ResetsAt         string         `json:"resetsAt,omitempty"`
 	Truncated        bool           `json:"truncated"`
 	TruncationReason string         `json:"truncationReason,omitempty"`
 	BodyRef          string         `json:"bodyRef,omitempty"`
@@ -229,4 +231,28 @@ func groupExchanges(items []TimelineItem, source string) ([]Exchange, []int) {
 		exchanges[len(exchanges)-1].Assistant = item.Text
 	}
 	return exchanges, starts
+}
+
+// TimelineUsageLimit is the status of a notice that the session's Claude
+// account reached a usage limit.
+const TimelineUsageLimit = "usage_limit"
+
+// ActiveUsageLimit returns the usage-limit notice that still holds the
+// session: the newest one with no assistant message after it, unless its
+// reset time has passed.
+func ActiveUsageLimit(items []TimelineItem, now time.Time) *TimelineItem {
+	for i := len(items) - 1; i >= 0; i-- {
+		item := items[i]
+		if item.Kind == "message" && item.Role == "assistant" {
+			return nil
+		}
+		if item.Kind != "notice" || item.Status != TimelineUsageLimit {
+			continue
+		}
+		if resetsAt, err := time.Parse(time.RFC3339, item.ResetsAt); err == nil && !now.Before(resetsAt) {
+			return nil
+		}
+		return &items[i]
+	}
+	return nil
 }

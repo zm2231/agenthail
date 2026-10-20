@@ -1469,6 +1469,7 @@ struct ComposerView: View {
                     }
                 }
             }
+            UsageLimitBanner(pane: pane, session: session)
             if session.isReadOnly || !session.capabilities.send {
                 Text(session.readOnlyReason ?? "This session is closed. You can read it, but not message it.")
                     .font(.system(size: 13))

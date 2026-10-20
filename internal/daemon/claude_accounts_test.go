@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -134,5 +135,49 @@ func TestSessionMoveActionMovesAClaudeSessionAndReRegistersIt(t *testing.T) {
 	want := filepath.Join(spare, "projects", "fixture-project", conversation+".jsonl")
 	if err != nil || stored.Transcript != want {
 		t.Fatalf("stored=%+v err=%v, want transcript %s", stored, err, want)
+	}
+}
+
+func TestUsageLimitOfferListsOnlyAccountsThatCanTakeTheSession(t *testing.T) {
+	_, registry, _, _, _ := daemonFixture(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	now := time.Now()
+	future := now.Add(time.Hour).UTC().Format(time.RFC3339)
+	usage := func(account string, percent int) string {
+		return `,"cachedUsageUtilization":{"fetchedAtMs":1,"accountUuid":"` + account + `","utilization":{"limits":[{"kind":"session","percent":` + strconv.Itoa(percent) + `,"resets_at":"` + future + `"}]}}`
+	}
+	shared, spare, spent, out := filepath.Join(home, ".shared"), filepath.Join(home, ".spare"), filepath.Join(home, ".spent"), filepath.Join(home, ".out")
+	for path, content := range map[string]string{
+		filepath.Join(home, ".agenthail", "config.json"): `{"claudeConfigDirs":["` + shared + `","` + spare + `","` + spent + `","` + out + `"]}`,
+		filepath.Join(home, ".claude.json"):              `{"oauthAccount":{"accountUuid":"a","emailAddress":"me@example.com"}` + usage("a", 100) + `}`,
+		filepath.Join(shared, ".claude.json"):            `{"oauthAccount":{"accountUuid":"a","emailAddress":"me@example.com"}}`,
+		filepath.Join(spare, ".claude.json"):             `{"oauthAccount":{"accountUuid":"b","emailAddress":"spare@example.com"}` + usage("b", 20) + `}`,
+		filepath.Join(spent, ".claude.json"):             `{"oauthAccount":{"accountUuid":"c","emailAddress":"spent@example.com"}` + usage("c", 100) + `}`,
+		filepath.Join(out, ".claude.json"):               `{}`,
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := New(registry, []surface.Surface{surfaces.NewClaude(nil, home)})
+	session := &surface.Session{ID: "s", Surface: surface.KindClaude, Transcript: filepath.Join(home, ".claude", "projects", "-p", "s.jsonl")}
+	limit := surface.TimelineItem{Kind: "notice", Status: surface.TimelineUsageLimit, Text: "You've hit your session limit", ResetsAt: future}
+	offer := d.usageLimitOffer(session, []surface.TimelineItem{limit}, now)
+	if offer == nil || offer.Account == nil || offer.Account.Root != filepath.Join(home, ".claude") || offer.Message != limit.Text {
+		t.Fatalf("offer=%+v", offer)
+	}
+	if len(offer.Alternatives) != 1 || offer.Alternatives[0].Root != spare {
+		t.Fatalf("alternatives=%+v, want only %s", offer.Alternatives, spare)
+	}
+	if d.usageLimitOffer(session, []surface.TimelineItem{limit, {Kind: "message", Role: "assistant", Text: "back"}}, now) != nil {
+		t.Fatal("an answered limit still offers a move")
+	}
+	if d.usageLimitOffer(&surface.Session{ID: "c", Surface: surface.KindCodex}, []surface.TimelineItem{limit}, now) != nil {
+		t.Fatal("a Codex session was offered a Claude account")
 	}
 }
