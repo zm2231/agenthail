@@ -96,6 +96,7 @@ class Session {
     this.stateEvents = false;
     this.guessesIdle = false;
     this.tasks = [];
+    this.taskSince = new Map();
     this.owed = new Set();
     this.ambient = new Set();
   }
@@ -199,7 +200,21 @@ class Session {
       permissionMode: this.permissionMode,
       model: this.model,
       requests: [...this.pending.values()].map((p) => p.request),
+      tasks: this.describeTasks(),
     };
+  }
+
+  // describeTasks lists the live background tasks Claude last reported, with
+  // when this host first saw each one.
+  describeTasks() {
+    return this.tasks.map((task) => ({
+      id: task.task_id,
+      type: task.task_type ?? '',
+      description: task.description ?? '',
+      parentId: task.parent_task_id ?? '',
+      ambient: task.ambient === true,
+      since: this.taskSince.get(task.task_id),
+    }));
   }
 }
 
@@ -502,6 +517,9 @@ async function run(s, exit) {
         for (const task of tasks) if (task.ambient) s.ambient.add(task.task_id);
         for (const task of s.tasks) if (!task.ambient && !live.has(task.task_id) && s.state === 'idle') s.owe(`task:${task.task_id}`);
         s.tasks = tasks;
+        for (const id of [...s.taskSince.keys()]) if (!live.has(id)) s.taskSince.delete(id);
+        for (const id of live) if (!s.taskSince.has(id)) s.taskSince.set(id, new Date().toISOString());
+        emit(s.id, 'tasks', { tasks: s.describeTasks() });
         s.retireIfDone();
       } else if (message.type === 'system' && message.subtype === 'task_notification') {
         // An ambient task is not activity, so its end owes no turn. Its

@@ -42,6 +42,47 @@ type Waiting struct {
 	Since time.Time   `json:"since,omitzero"`
 }
 
+// BackgroundTasks is work a session started that runs on after its turn ends:
+// shells, subagents and monitors. Running counts only tasks that are activity;
+// an ambient task, such as a monitor waiting for events, is listed but does not
+// keep the session's work from being done. Since is when the oldest running
+// task started. Source is where the tasks were read: the Claude host, the
+// transcript, or only the process's own status, which names no tasks.
+type BackgroundTasks struct {
+	Running bool             `json:"running"`
+	Tasks   []BackgroundTask `json:"tasks,omitempty"`
+	Since   time.Time        `json:"since,omitzero"`
+	Source  string           `json:"source"`
+}
+
+const (
+	BackgroundSourceHost       = "host"
+	BackgroundSourceTranscript = "transcript"
+	BackgroundSourceStatus     = "status"
+)
+
+// BackgroundTask kinds.
+const (
+	BackgroundShell   = "shell"
+	BackgroundAgent   = "agent"
+	BackgroundMonitor = "monitor"
+)
+
+type BackgroundTask struct {
+	ID          string    `json:"id"`
+	Kind        string    `json:"kind"`
+	Description string    `json:"description,omitempty"`
+	ParentID    string    `json:"parentId,omitempty"`
+	Ambient     bool      `json:"ambient,omitempty"`
+	Since       time.Time `json:"since,omitzero"`
+}
+
+// BackgroundRunning reports whether background tasks keep a session's work
+// from being done.
+func BackgroundRunning(tasks *BackgroundTasks) bool {
+	return tasks != nil && tasks.Running
+}
+
 // SameWaiting reports whether two waiting states describe the same question.
 func SameWaiting(left, right *Waiting) bool {
 	if left == nil || right == nil {
@@ -64,6 +105,7 @@ type Session struct {
 	PID                   int               `json:"pid"`
 	Status                SessionStatus     `json:"status"`
 	WaitingOn             *Waiting          `json:"waitingOn,omitempty"`
+	BackgroundTasks       *BackgroundTasks  `json:"backgroundTasks,omitempty"`
 	Transcript            string            `json:"transcript"`
 	HasLocal              bool              `json:"hasLocal"`
 	Source                string            `json:"source,omitempty"`
@@ -508,13 +550,14 @@ type RuntimeEnsurer interface {
 }
 
 type TurnObservation struct {
-	Status          SessionStatus `json:"status"`
-	ActiveTurnID    string        `json:"activeTurnId,omitempty"`
-	TerminalTurnID  string        `json:"terminalTurnId,omitempty"`
-	CompletedTurnID string        `json:"completedTurnId,omitempty"`
-	InputTurnID     string        `json:"inputTurnId,omitempty"`
-	WaitingOn       *Waiting      `json:"waitingOn,omitempty"`
-	Reply           *ReplyResult  `json:"reply,omitempty"`
+	Status          SessionStatus    `json:"status"`
+	ActiveTurnID    string           `json:"activeTurnId,omitempty"`
+	TerminalTurnID  string           `json:"terminalTurnId,omitempty"`
+	CompletedTurnID string           `json:"completedTurnId,omitempty"`
+	InputTurnID     string           `json:"inputTurnId,omitempty"`
+	WaitingOn       *Waiting         `json:"waitingOn,omitempty"`
+	BackgroundTasks *BackgroundTasks `json:"backgroundTasks,omitempty"`
+	Reply           *ReplyResult     `json:"reply,omitempty"`
 }
 
 type ReplyResult struct {
