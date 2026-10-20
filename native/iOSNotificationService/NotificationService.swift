@@ -16,7 +16,7 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
               let credential = PairedCredential.read() else { return finish(with: nil) }
         Task {
             let notice = await RequestNotifications.fetchNotice(endpoint: credential.endpoint, token: credential.token, sessionID: sessionID, requestID: requestID)
-            if let notice {
+            if let notice, !notice.actions.isEmpty {
                 await RequestCategoryRegistry.shared.register(requestID: requestID, actions: notice.actions, base: [])
             }
             finish(with: notice.map { (requestID, $0) })
@@ -36,7 +36,9 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
         if let answer {
             content.subtitle = content.body
             content.body = answer.notice.prompt
-            content.categoryIdentifier = RequestNotifications.categoryIdentifier(requestID: answer.requestID)
+            if !answer.notice.actions.isEmpty {
+                content.categoryIdentifier = RequestNotifications.categoryIdentifier(requestID: answer.requestID)
+            }
         }
         deliver(content)
     }

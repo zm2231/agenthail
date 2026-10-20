@@ -50,11 +50,13 @@ struct RequestNotificationsTest {
         let notice = RequestNotifications.notice(from: Data(body.utf8), requestID: "req-1")
         check(notice == RequestNotice(prompt: "Which color?", actions: [RequestNotificationAction(id: "o0", title: "Red"), RequestNotificationAction(id: "o1", title: "Blue")]), "notice \(String(describing: notice))")
         check(RequestNotifications.notice(from: Data(body.utf8), requestID: "gone") == nil, "a request no longer open offers nothing")
+        for appOnly in [#"{"requests":[{"id":"r","prompt":"Which color?","actions":[]}]}"#, #"{"requests":[{"id":"r","prompt":"Which color?"}]}"#] {
+            check(RequestNotifications.notice(from: Data(appOnly.utf8), requestID: "r") == RequestNotice(prompt: "Which color?", actions: []), "a request answered in the app still shows its prompt: \(appOnly)")
+        }
         for bad in [
             #"{"requests":[{"id":"r","prompt":"Ask","actions":[{"id":"o9","title":"Nine"}]}]}"#,
             #"{"requests":[{"id":"r","prompt":"Ask","actions":[{"id":"o0","title":"A"},{"id":"o0","title":"B"}]}]}"#,
-            #"{"requests":[{"id":"r","prompt":"Ask","actions":[]}]}"#,
-            #"{"requests":[{"id":"r","prompt":"Ask"}]}"#,
+            #"{"requests":[{"id":"r","prompt":"Ask","actions":[{"id":"o0","title":"A"},{"id":"o1","title":"B"},{"id":"o2","title":"C"},{"id":"o3","title":"D"},{"id":"reply","title":"Reply…"}]}]}"#,
             #"{"requests":[{"id":"r","prompt":" ","actions":[{"id":"allow","title":"Allow"}]}]}"#,
             "not json"
         ] {
@@ -66,6 +68,10 @@ struct RequestNotificationsTest {
         check(category.identifier == "AGENTHAIL_REQ_req-1" && category.actions.map(\.identifier) == ["allow", "deny"], "category \(category.identifier)")
         check(category.actions.allSatisfy { $0.options.contains(.authenticationRequired) }, "every answer needs the device unlocked")
         check(category.actions[1].options.contains(.destructive) && !category.actions[0].options.contains(.destructive), "only deny is destructive")
+        let replying = RequestNotifications.category(requestID: "req-2", actions: [RequestNotificationAction(id: "o0", title: "Red"), RequestNotificationAction(id: "reply", title: "Reply…")])
+        check(!(replying.actions[0] is UNTextInputNotificationAction) && (replying.actions[1] as? UNTextInputNotificationAction)?.textInputButtonTitle == "Send", "reply takes text")
+        check(replying.actions[1].options.contains(.authenticationRequired), "a reply needs the device unlocked")
+        check(RequestNotifications.choice(forAction: "reply") == "reply", "reply is a choice")
     }
 
     static func checkMerge() {
@@ -121,6 +127,9 @@ struct RequestNotificationsTest {
         } catch {
             check(false, "stale error \(error)")
         }
+        RespondStub.replies = [(200, #"{"ok":true,"result":{"requestId":"req-2","outcome":"denied"}}"#)]
+        _ = try? await api.respond(sessionID: "s1", requestID: "req-2", decision: RequestDecision(choice: "reply", message: "use staging"))
+        check((RespondStub.bodies.last?["decision"] as? [String: String]) == ["choice": "reply", "message": "use staging"], "reply body \(RespondStub.bodies.last ?? [:])")
         RespondStub.replies = [(200, "{}")]
         try? await api.setPermissionMode(sessionID: "s1", mode: "plan")
         let mode = RespondStub.bodies.last ?? [:]

@@ -25,7 +25,7 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNU
         let userInfo = response.notification.request.content.userInfo
         guard let sessionID = userInfo["sessionId"] as? String, !sessionID.isEmpty else { return }
         if let choice = RequestNotifications.choice(forAction: response.actionIdentifier), let requestID = userInfo["requestId"] as? String {
-            await RequestAnswer.send(choice: choice, sessionID: sessionID, requestID: requestID, api: Self.pairedAPI)
+            await RequestAnswer.send(choice: choice, text: (response as? UNTextInputNotificationResponse)?.userText, sessionID: sessionID, requestID: requestID, api: Self.pairedAPI)
             return
         }
         await MainActor.run {

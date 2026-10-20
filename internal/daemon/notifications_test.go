@@ -82,8 +82,8 @@ func TestARequestNotificationPassesItsButtonsToTheHelper(t *testing.T) {
 	if err := NotifyRequest("Agenthail", "done", "session-1", "", "request-1", nil); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(argsPath); strings.Contains(string(data), "--request") {
-		t.Fatalf("a request without buttons passed one: %q", data)
+	if data, _ := os.ReadFile(argsPath); !strings.Contains(string(data), "--request\nrequest-1\n") || strings.Contains(string(data), "--actions") {
+		t.Fatalf("a request without buttons = %q", data)
 	}
 }
 

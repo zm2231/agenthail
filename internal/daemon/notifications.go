@@ -125,7 +125,7 @@ func Notify(title, message, sessionID, identifier string) error {
 }
 
 // NotifyRequest is Notify for a session's open request, with the buttons that
-// answer it from the notification.
+// answer it from the notification when it has any.
 func NotifyRequest(title, message, sessionID, identifier, requestID string, actions []surface.RequestAction) error {
 	config, err := LoadNotificationConfig()
 	if err != nil {
@@ -149,12 +149,15 @@ func NotifyRequest(title, message, sessionID, identifier, requestID string, acti
 	if sessionID != "" {
 		args = append(args, "--session", sessionID)
 	}
+	if requestID != "" {
+		args = append(args, "--request", requestID)
+	}
 	if requestID != "" && len(actions) > 0 {
 		encoded, err := json.Marshal(actions)
 		if err != nil {
 			return err
 		}
-		args = append(args, "--request", requestID, "--actions", string(encoded))
+		args = append(args, "--actions", string(encoded))
 	}
 	_, err = runNotificationHelper(5*time.Second, args...)
 	return err

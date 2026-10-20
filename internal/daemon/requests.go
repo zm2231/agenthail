@@ -79,7 +79,7 @@ func (d *Daemon) respond(ctx context.Context, w http.ResponseWriter, adapter sur
 			writeStaleRequest(w)
 			return
 		}
-		if decision, err = request.Choose(decision.Choice); err != nil {
+		if decision, err = request.Choose(decision.Choice, decision.Message); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

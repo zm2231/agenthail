@@ -25,7 +25,9 @@ private struct OpenRequests: Decodable {
 // by every notification that uses it.
 enum RequestNotifications {
     static let categoryPrefix = "AGENTHAIL_REQ_"
-    static let choices: Set<String> = ["allow", "always", "deny", "o0", "o1", "o2", "o3"]
+    static let replyChoice = "reply"
+    static let choices: Set<String> = ["allow", "always", "deny", "o0", "o1", "o2", "o3", replyChoice]
+    static let maxActions = 4
     static let retainedRequests = 32
 
     static func categoryIdentifier(requestID: String) -> String { categoryPrefix + requestID }
@@ -35,12 +37,12 @@ enum RequestNotifications {
     }
 
     /// The request a waiting notification names, as this Mac describes it
-    /// now: the line to show and the buttons that answer it. Nil when the
-    /// request is no longer open or offers no buttons.
+    /// now: the line to show and the buttons that answer it, none when it is
+    /// answered only in the app. Nil when the request is no longer open.
     static func notice(from data: Data, requestID: String) -> RequestNotice? {
         guard let state = try? JSONDecoder().decode(OpenRequests.self, from: data),
               let open = state.requests.first(where: { $0.id == requestID }),
-              let actions = open.actions, !actions.isEmpty, actions.count <= 4,
+              case let actions = open.actions ?? [], actions.count <= maxActions,
               actions.allSatisfy({ choices.contains($0.id) && !$0.title.isEmpty }),
               Set(actions.map(\.id)).count == actions.count,
               let prompt = open.prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty else { return nil }
@@ -78,8 +80,11 @@ enum RequestNotifications {
     }
 
     static func category(requestID: String, actions: [RequestNotificationAction]) -> UNNotificationCategory {
-        let buttons = actions.map { action in
-            UNNotificationAction(identifier: action.id, title: action.title, options: action.id == "deny" ? [.authenticationRequired, .destructive] : [.authenticationRequired])
+        let buttons = actions.map { action -> UNNotificationAction in
+            if action.id == replyChoice {
+                return UNTextInputNotificationAction(identifier: action.id, title: action.title, options: [.authenticationRequired], textInputButtonTitle: "Send", textInputPlaceholder: "Message")
+            }
+            return UNNotificationAction(identifier: action.id, title: action.title, options: action.id == "deny" ? [.authenticationRequired, .destructive] : [.authenticationRequired])
         }
         return UNNotificationCategory(identifier: categoryIdentifier(requestID: requestID), actions: buttons, intentIdentifiers: [])
     }

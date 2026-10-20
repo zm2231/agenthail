@@ -72,6 +72,7 @@ async function turn(message) {
     reply = `tool:${decision.behavior}:${decision.message ?? ''}${decision.updatedPermissions ? ':always' : ''}`;
   } else if (text.startsWith('QUESTION')) {
     const questions = [{ question: 'Which color?', header: 'Color', multiSelect: false, options: [{ label: 'Red', description: 'Warm' }, { label: 'Blue', description: 'Cool' }] }];
+    if (text.startsWith('QUESTIONS')) questions.push({ question: 'Which size?', header: 'Size', multiSelect: false, options: [{ label: 'S', description: 'Small' }, { label: 'L', description: 'Large' }] });
     const decision = await control({ subtype: 'can_use_tool', tool_name: 'AskUserQuestion', input: { questions }, tool_use_id: 'toolu_question' });
     interrupt = null;
     reply = `question:${decision.behavior}:${JSON.stringify(decision.updatedInput?.answers ?? null)}`;

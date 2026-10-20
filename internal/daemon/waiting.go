@@ -124,9 +124,8 @@ func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waitin
 		var actions []surface.RequestAction
 		if request, open := d.waitingRequest(notificationCtx, session, waiting); open {
 			desktopMessage = fmt.Sprintf("%s: %s", d.resolveDisplay(sessionID), request.Prompt())
-			if actions = request.Actions(); len(actions) > 0 {
-				mobile.RequestID = request.ID
-			}
+			mobile.RequestID = request.ID
+			actions = request.Actions()
 		}
 		if err := NotifyRequest("Agenthail", desktopMessage, sessionID, "agenthail-"+key, mobile.RequestID, actions); err != nil {
 			d.log.Printf("desktop notification: %s", err)

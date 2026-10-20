@@ -41,8 +41,8 @@ func PushRelayURL() string {
 // mobileNotification is one push to every paired device. CollapseID, when
 // set, makes a repeat of the same notification replace the earlier one on the
 // device instead of adding a second. RequestID, when set, names the open
-// request the device fetches from this Mac to offer its buttons; what the
-// request asks never goes through the relay.
+// request the device fetches from this Mac to show what it asks and offer
+// any buttons; what the request asks never goes through the relay.
 type mobileNotification struct {
 	Title, Message, SessionID, TurnID, EventType, CollapseID, RequestID string
 }

@@ -340,7 +340,8 @@ agenthail daemon notify off
 Mac notifications require System Settings authorization. iPhone notifications
 require pairing the phone from Operations and allowing notifications on iOS.
 They are not agent-to-agent relays. When a host session waits on an approval or
-a single question, its notification offers buttons that answer it; the human
+a single question, its notification offers buttons that answer it, and a
+**Reply** that answers in the person's words or denies with a reason; the human
 presses them, never an agent.
 
 There is no generic CLI callback that subscribes an arbitrary Photon, Slack, or
