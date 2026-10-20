@@ -87,8 +87,16 @@ type claudePrompt struct {
 	// prompt, or zero before it did.
 	shownMS   int64
 	createdMS int64
-	decided   chan ClaudePromptDecision
-	answered  bool
+	// key names the prompt by its tool and input. Claude runs every matching
+	// hook, so the same hook installed in more than one settings source
+	// passes the same prompt more than once; those calls share one hold.
+	key     string
+	holders int
+	// done closes when the hold ends; decision is set before then when a
+	// person answered it through Agenthail.
+	done     chan struct{}
+	closed   bool
+	decision *ClaudePromptDecision
 }
 
 func newClaudePrompts() *claudePrompts {
@@ -123,7 +131,8 @@ func (c *Claude) HoldPrompt(ctx context.Context, prompt ClaudePermissionPrompt) 
 	}
 	session := surface.Session{ID: prompt.SessionID, PID: pid}
 	created := time.Now().UTC()
-	held := &claudePrompt{input: input, suggestions: prompt.Suggestions, createdMS: created.UnixMilli(), decided: make(chan ClaudePromptDecision, 1)}
+	canonical, _ := json.Marshal(input)
+	held := &claudePrompt{input: input, suggestions: prompt.Suggestions, createdMS: created.UnixMilli(), key: prompt.ToolName + "\x00" + string(canonical), holders: 1, done: make(chan struct{})}
 	kind := surface.WaitingApproval
 	if prompt.ToolName == "AskUserQuestion" {
 		kind = surface.WaitingQuestion
@@ -136,21 +145,19 @@ func (c *Claude) HoldPrompt(ctx context.Context, prompt ClaudePermissionPrompt) 
 		created, held.shownMS = waiting.Since, waiting.Since.UnixMilli()
 	}
 	held.request = claudePromptRequest(id, kind, prompt, input, created)
-	c.prompts.add(prompt.SessionID, held)
+	held = c.prompts.join(prompt.SessionID, held)
 	ticker := time.NewTicker(claudePromptSettleEvery)
 	defer ticker.Stop()
 	for {
 		select {
-		case decision := <-held.decided:
-			c.prompts.remove(prompt.SessionID, held, true)
-			return &decision, nil
+		case <-held.done:
+			return held.decision, nil
 		case <-ctx.Done():
-			c.prompts.remove(prompt.SessionID, held, false)
+			c.prompts.leave(prompt.SessionID, held)
 			return nil, ctx.Err()
 		case <-ticker.C:
 			if c.promptSettled(session, held) {
-				c.prompts.remove(prompt.SessionID, held, true)
-				return nil, nil
+				c.prompts.end(prompt.SessionID, held, nil)
 			}
 		}
 	}
@@ -241,29 +248,66 @@ func claudePromptRequest(id string, kind surface.WaitingKind, prompt ClaudePermi
 	return request
 }
 
-func (p *claudePrompts) add(sessionID string, held *claudePrompt) {
+// join holds a new prompt, or returns the open hold of the same prompt that
+// an earlier call of a duplicate hook started.
+func (p *claudePrompts) join(sessionID string, held *claudePrompt) *claudePrompt {
 	p.mu.Lock()
+	for _, open := range p.open[sessionID] {
+		if open.key == held.key {
+			open.holders++
+			p.mu.Unlock()
+			return open
+		}
+	}
 	p.open[sessionID] = append(p.open[sessionID], held)
 	changed := p.changed
 	p.mu.Unlock()
 	if changed != nil {
 		changed(ClaudePromptChange{SessionID: sessionID, RequestID: held.request.ID, Open: true})
 	}
+	return held
 }
 
-func (p *claudePrompts) remove(sessionID string, held *claudePrompt, settled bool) {
+// end closes a hold with a person's decision, or with none when the session
+// settled the prompt itself. Every caller holding it returns.
+func (p *claudePrompts) end(sessionID string, held *claudePrompt, decision *ClaudePromptDecision) {
 	p.mu.Lock()
-	if held.answered && held.shownMS != 0 {
+	ended := p.endLocked(sessionID, held, decision)
+	changed := p.changed
+	p.mu.Unlock()
+	if ended && changed != nil {
+		changed(ClaudePromptChange{SessionID: sessionID, RequestID: held.request.ID, Settled: true})
+	}
+}
+
+func (p *claudePrompts) endLocked(sessionID string, held *claudePrompt, decision *ClaudePromptDecision) bool {
+	if held.closed {
+		return false
+	}
+	held.closed = true
+	held.decision = decision
+	if decision != nil && held.shownMS != 0 {
 		p.answered[sessionID] = held.shownMS
 	}
 	p.open[sessionID] = slices.DeleteFunc(p.open[sessionID], func(open *claudePrompt) bool { return open == held })
 	if len(p.open[sessionID]) == 0 {
 		delete(p.open, sessionID)
 	}
+	close(held.done)
+	return true
+}
+
+// leave drops one caller of a hold whose hook stopped waiting. The prompt
+// may still be open in the session, so the last caller to leave ends the
+// hold without calling it settled.
+func (p *claudePrompts) leave(sessionID string, held *claudePrompt) {
+	p.mu.Lock()
+	held.holders--
+	ended := held.holders == 0 && p.endLocked(sessionID, held, nil)
 	changed := p.changed
 	p.mu.Unlock()
-	if changed != nil {
-		changed(ClaudePromptChange{SessionID: sessionID, RequestID: held.request.ID, Settled: settled})
+	if ended && changed != nil {
+		changed(ClaudePromptChange{SessionID: sessionID, RequestID: held.request.ID})
 	}
 }
 
@@ -337,22 +381,27 @@ func (p *claudePrompts) requests(sessionID string) []surface.Request {
 // prompt. A prompt already answered, or no longer held, is stale.
 func (p *claudePrompts) answer(sessionID, requestID string, decision surface.Decision) (string, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	var held *claudePrompt
 	for _, open := range p.open[sessionID] {
 		if open.request.ID == requestID {
 			held = open
 		}
 	}
-	if held == nil || held.answered {
+	if held == nil {
+		p.mu.Unlock()
 		return "", surface.ErrRequestStale
 	}
 	outcome, result, err := decidePrompt(held, decision)
 	if err != nil {
+		p.mu.Unlock()
 		return "", err
 	}
-	held.answered = true
-	held.decided <- result
+	p.endLocked(sessionID, held, &result)
+	changed := p.changed
+	p.mu.Unlock()
+	if changed != nil {
+		changed(ClaudePromptChange{SessionID: sessionID, RequestID: requestID, Settled: true})
+	}
 	return outcome, nil
 }
 

@@ -189,3 +189,84 @@ func TestOnlyATerminalSessionsOwnProcessHasItsPromptHeld(t *testing.T) {
 		})
 	}
 }
+
+func TestTheSamePromptPassedByTwoHooksIsOneRequestAndBothGetTheAnswer(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	writeClaudeRecord(t, home, map[string]any{"kind": "interactive", "entrypoint": "cli", "status": "waiting", "waitingFor": "input needed", "statusUpdatedAt": time.Now().UnixMilli()})
+	claude := NewClaude(nil, home)
+	var mu sync.Mutex
+	var changes []ClaudePromptChange
+	claude.OnPromptChange(func(change ClaudePromptChange) {
+		mu.Lock()
+		changes = append(changes, change)
+		mu.Unlock()
+	})
+	session := terminalSession(t)
+	prompt := ClaudePermissionPrompt{SessionID: "conversation", ToolName: "AskUserQuestion", ToolInput: json.RawMessage(pickAColor), PID: os.Getpid()}
+	first, cancelFirst := holdInBackground(claude, prompt)
+	defer cancelFirst()
+	second, cancelSecond := holdInBackground(claude, prompt)
+	defer cancelSecond()
+	requests := awaitRequests(t, claude, session)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		claude.prompts.mu.Lock()
+		holders := 0
+		if open := claude.prompts.open["conversation"]; len(open) == 1 {
+			holders = open[0].holders
+		}
+		claude.prompts.mu.Unlock()
+		if holders == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the second hook call did not join the first hold")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if state, _ := claude.Requests(context.Background(), session); len(state.Requests) != 1 {
+		t.Fatalf("requests=%+v", state.Requests)
+	}
+	if _, err := claude.Respond(context.Background(), session, requests[0].ID, surface.Decision{Behavior: "allow", Answers: map[string]string{"Pick a color": "Red"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, done := range []<-chan heldPrompt{first, second} {
+		held := <-done
+		if held.err != nil || held.decision == nil || held.decision.UpdatedInput["answers"].(map[string]string)["Pick a color"] != "Red" {
+			t.Fatalf("held=%+v", held)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(changes) != 2 || !changes[0].Open || !changes[1].Settled {
+		t.Fatalf("changes=%+v", changes)
+	}
+}
+
+func TestAHookThatStopsWaitingLeavesTheHoldToTheOtherCall(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	writeClaudeRecord(t, home, map[string]any{"kind": "interactive", "entrypoint": "cli", "status": "waiting", "waitingFor": "permission prompt", "statusUpdatedAt": time.Now().UnixMilli()})
+	claude := NewClaude(nil, home)
+	session := terminalSession(t)
+	prompt := ClaudePermissionPrompt{SessionID: "conversation", ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"ls"}`), PID: os.Getpid()}
+	first, cancelFirst := holdInBackground(claude, prompt)
+	second, cancelSecond := holdInBackground(claude, prompt)
+	defer cancelSecond()
+	request := awaitRequests(t, claude, session)[0]
+	time.Sleep(50 * time.Millisecond)
+	cancelFirst()
+	if held := <-first; !errors.Is(held.err, context.Canceled) {
+		t.Fatalf("first=%+v", held)
+	}
+	if state, _ := claude.Requests(context.Background(), session); len(state.Requests) != 1 {
+		t.Fatal("the hold ended while another call still held it")
+	}
+	if _, err := claude.Respond(context.Background(), session, request.ID, surface.Decision{Behavior: "deny"}); err != nil {
+		t.Fatal(err)
+	}
+	if held := <-second; held.decision == nil || held.decision.Behavior != "deny" {
+		t.Fatalf("second=%+v", held)
+	}
+}

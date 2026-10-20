@@ -158,8 +158,19 @@ func claudePromptHookCommand() (string, error) {
 	return "'" + strings.ReplaceAll(executable, "'", `'\''`) + "' " + claudePromptHookArgs, nil
 }
 
+// isClaudePromptHook reports whether a hook command is one `hooks install`
+// wrote: this executable, or another agenthail executable, quoted as install
+// quotes it and followed by exactly the hook's arguments.
 func isClaudePromptHook(command string) bool {
-	return strings.HasSuffix(strings.TrimSpace(command), claudePromptHookArgs) && strings.Contains(command, "agenthail")
+	if own, err := claudePromptHookCommand(); err == nil && command == own {
+		return true
+	}
+	executable, found := strings.CutSuffix(command, " "+claudePromptHookArgs)
+	if !found || len(executable) < 2 || executable[0] != '\'' || executable[len(executable)-1] != '\'' {
+		return false
+	}
+	path := strings.ReplaceAll(executable[1:len(executable)-1], `'\''`, "'")
+	return filepath.IsAbs(path) && filepath.Base(path) == "agenthail"
 }
 
 func readClaudeSettings(path string) ([]byte, os.FileMode, error) {

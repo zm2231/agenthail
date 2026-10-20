@@ -21,7 +21,8 @@ const cmuxSettings = `{
   "model": "opus",
   "hooks": {
     "PermissionRequest": [
-      {"matcher": "*", "hooks": [{"type": "command", "command": "cmux-hook permission", "timeout": 125}]}
+      {"matcher": "*", "hooks": [{"type": "command", "command": "cmux-hook permission", "timeout": 125}]},
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "/usr/local/bin/agenthail-wrapper hook permission-request"}]}
     ],
     "Stop": [{"hooks": [{"type": "command", "command": "notify-done"}]}]
   },
@@ -74,11 +75,11 @@ func TestHooksInstallAddsThePromptHookToEveryClaudeRootAndKeepsOtherSettings(t *
 		t.Fatal(err)
 	}
 	entries := gjson.GetBytes(data, "hooks.PermissionRequest").Array()
-	if len(entries) != 2 || entries[0].Get("hooks.0.command").String() != "cmux-hook permission" {
-		t.Fatalf("a repeated install did not keep one hook beside cmux's: %s", data)
+	if len(entries) != 3 || entries[0].Get("hooks.0.command").String() != "cmux-hook permission" || entries[1].Get("hooks.0.command").String() != "/usr/local/bin/agenthail-wrapper hook permission-request" {
+		t.Fatalf("a repeated install did not keep one hook beside the others: %s", data)
 	}
-	ours := entries[1].Get("hooks.0")
-	if !strings.HasSuffix(ours.Get("command").String(), "' hook permission-request") || ours.Get("timeout").Int() != claudePromptHookTimeout || entries[1].Get("matcher").String() != "*" {
+	ours := entries[2].Get("hooks.0")
+	if !strings.HasSuffix(ours.Get("command").String(), "' hook permission-request") || ours.Get("timeout").Int() != claudePromptHookTimeout || entries[2].Get("matcher").String() != "*" {
 		t.Fatalf("hook=%s", ours.Raw)
 	}
 	if gjson.GetBytes(data, "model").String() != "opus" || gjson.GetBytes(data, "permissions.allow.0").String() != "Bash(ls)" || gjson.GetBytes(data, "hooks.Stop.0.hooks.0.command").String() != "notify-done" {
@@ -98,7 +99,7 @@ func TestHooksInstallAddsThePromptHookToEveryClaudeRootAndKeepsOtherSettings(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entries := gjson.GetBytes(data, "hooks.PermissionRequest").Array(); len(entries) != 1 || entries[0].Get("hooks.0.command").String() != "cmux-hook permission" {
+	if entries := gjson.GetBytes(data, "hooks.PermissionRequest").Array(); len(entries) != 2 || entries[0].Get("hooks.0.command").String() != "cmux-hook permission" || entries[1].Get("hooks.0.command").String() != "/usr/local/bin/agenthail-wrapper hook permission-request" {
 		t.Fatalf("uninstall touched another hook or left ours: %s", data)
 	}
 	if hook := doctorHook(); hook[filepath.Join(home, ".claude")] || hook[second] {
@@ -233,5 +234,26 @@ func TestThePromptHookOutlivesADaemonRestartAndStopsOnARefusal(t *testing.T) {
 	defer mu.Unlock()
 	if len(calls) != 1 {
 		t.Fatalf("a refusal was retried %d times", len(calls))
+	}
+}
+
+func TestOnlyTheHookCommandInstallWritesIsAgenthails(t *testing.T) {
+	for command, ours := range map[string]bool{
+		"'/usr/local/bin/agenthail' hook permission-request":                         true,
+		`'/Library/Application Support/Agenthail/agenthail' hook permission-request`: true,
+		`'/tmp/it'\''s/agenthail' hook permission-request`:                           true,
+		"/usr/local/bin/agenthail-wrapper hook permission-request":                   false,
+		"'/usr/local/bin/agenthail-wrapper' hook permission-request":                 false,
+		"agenthail hook permission-request":                                          false,
+		"'/usr/local/bin/agenthail' hook permission-request --verbose":               false,
+		"'agenthail' hook permission-request":                                        false,
+	} {
+		if isClaudePromptHook(command) != ours {
+			t.Errorf("isClaudePromptHook(%q) != %v", command, ours)
+		}
+	}
+	command, err := claudePromptHookCommand()
+	if err != nil || !strings.HasSuffix(command, " "+claudePromptHookArgs) {
+		t.Fatalf("command=%q err=%v", command, err)
 	}
 }
