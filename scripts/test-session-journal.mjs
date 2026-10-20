@@ -210,4 +210,32 @@ assert.ok(!launchOption.hidden && !launchInput.disabled, 'a launcher that applie
 launcherSelect.value = 'cmux';
 vm.runInContext('renderStartLaunchers()', launcherContext);
 assert.equal(launcherSelect.value, '', 'an unavailable launcher cannot remain selected');
+const groupingContext = vm.createContext({});
+const groupingStart = source.indexOf('function handoffMessage(');
+vm.runInContext(source.slice(groupingStart, source.indexOf('function renderMessage(', groupingStart)), groupingContext);
+vm.runInContext(source.slice(source.indexOf('function promptOrigin('), source.indexOf('function resizeComposer(')), groupingContext);
+groupingContext.groupItems = [
+  {kind: 'message', role: 'user', text: 'first', turnId: 't1', timestamp: 'a'},
+  {kind: 'message', role: 'assistant', text: 'one', turnId: 't1'},
+  {kind: 'message', role: 'peer', sender: 'collab', text: 'steer', turnId: 't1'},
+  {kind: 'message', role: 'assistant', text: 'one more', turnId: 't1'},
+  {kind: 'done', turnId: 't1'},
+  {kind: 'event', origin: 'task-notification', text: 'build finished', turnId: 't2', timestamp: 'b'},
+  {kind: 'message', role: 'assistant', text: 'two', turnId: 't2'},
+  {kind: 'done', turnId: 't2'},
+  {kind: 'message', role: 'assistant', text: 'unprompted'},
+  {kind: 'message', role: 'user', text: 'context', turnId: 't3', timestamp: 'c'},
+  {kind: 'message', role: 'user', text: 'question', turnId: 't3'},
+];
+const grouped = vm.runInContext('exchangesFromItems(groupItems)', groupingContext);
+assert.equal(grouped.length, 4, 'a mid-turn peer steer stays in its turn and done closes a turn');
+assert.equal(grouped[3].user, 'context\n\nquestion', 'prompts of one turn from one sender read as one prompt');
+assert.equal(grouped[0].user, 'first');
+assert.equal(grouped[0].assistant, 'one more');
+assert.equal(grouped[1].origin, 'task-notification');
+assert.equal(grouped[1].timestamp, 'b');
+assert.equal(grouped[2].user, undefined);
+assert.equal(vm.runInContext('exchangePrompt(groupItems[0])', groupingContext).label, 'Conversation input');
+assert.equal(vm.runInContext('exchangePrompt({user: "x", origin: "peer", sender: "collab"})', groupingContext).label, 'From collab');
+assert.equal(vm.runInContext('exchangePrompt({user: "x", origin: "task-notification"})', groupingContext).label, 'Task notification');
 console.log('Session journal browser behavior: stream identity, paging cursor, upserts, roles, context, and switching pass.');

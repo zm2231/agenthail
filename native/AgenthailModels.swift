@@ -805,7 +805,19 @@ struct ExchangeState: Decodable, Identifiable {
     let user: String
     let assistant: String
     let timestamp: String
+    var origin: String?
+    var sender: String?
     var id: String { timestamp + user + assistant }
+
+    var promptLabel: String {
+        switch origin ?? "" {
+        case "": return "You"
+        case "peer": return sender.map { "From \($0)" } ?? "From an agent"
+        case "task-notification": return "Task notification"
+        case "auto-continuation": return "Continued"
+        default: return origin ?? "You"
+        }
+    }
 }
 
 struct ContextState: Decodable {
