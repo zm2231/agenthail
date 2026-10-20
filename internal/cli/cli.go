@@ -2208,7 +2208,7 @@ func (a *App) cmdModel(args []string) error {
 	if controller, ok := surf.(surface.Controller); ok && name != "" {
 		result, controlErr := controller.Control(ctx, sess, surface.ControlRequest{Action: "model", Value: name})
 		if controlErr == nil {
-			a.recordHistory(registry.HistoryEntry{Kind: "model", SessionID: sess.ID, Message: name, Result: "changed by " + cliActor})
+			a.recordHistory(registry.HistoryEntry{Kind: "model", SessionID: sess.ID, Message: name, Result: "changed by " + daemon.CLIActor})
 		}
 		if controlErr == nil && a.registry() != nil {
 			if err := a.registry().RegisterSession(*sess); err != nil {
@@ -2254,7 +2254,7 @@ func (a *App) cmdControl(args []string) error {
 		return a.controlRemote(ctx, remote, action, value, args)
 	}
 	controller, ok := surf.(surface.Controller)
-	if !ok || !surface.EffectiveCapabilities(surf, sess).Model {
+	if !ok || !surface.EffectiveCapabilities(surf, sess).Commands {
 		return fmt.Errorf("%s does not support Claude Remote Control commands", surf.Name())
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {

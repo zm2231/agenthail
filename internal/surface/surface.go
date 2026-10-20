@@ -615,6 +615,9 @@ type Capabilities struct {
 	// answers here and whose permission mode changes while it runs.
 	Respond        bool `json:"respond"`
 	PermissionMode bool `json:"permissionMode"`
+	// Commands is a session that takes Claude Remote Control's context, usage,
+	// status, effort and rename commands.
+	Commands bool `json:"commands"`
 }
 
 type SessionCapabilities struct {

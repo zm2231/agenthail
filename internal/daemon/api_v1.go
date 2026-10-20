@@ -21,6 +21,15 @@ type apiDeviceTokenContextKey struct{}
 
 type apiHostPrincipalContextKey struct{}
 
+type apiDashboardBearerContextKey struct{}
+
+// dashboardBearer reports whether the request presented the local dashboard
+// token, which only this machine's CLI holds.
+func dashboardBearer(ctx context.Context) bool {
+	bearer, _ := ctx.Value(apiDashboardBearerContextKey{}).(bool)
+	return bearer
+}
+
 type apiHostPrincipal struct {
 	host     bool
 	hostID   string
@@ -106,6 +115,7 @@ func (d *Daemon) apiV1Guard(dashboard *dashboardServer, scope string, next http.
 		if token := bearerToken(r); token != "" {
 			if constantTokenEqual(token, dashboard.token) {
 				bearerAuthorized = true
+				r = r.WithContext(context.WithValue(r.Context(), apiDashboardBearerContextKey{}, true))
 			} else if device, err := d.Registry.AuthenticateDevice(token, scope); err == nil {
 				bearerAuthorized = true
 				ctx := context.WithValue(r.Context(), apiDeviceTokenContextKey{}, token)

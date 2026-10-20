@@ -124,9 +124,9 @@ func TestAHostSessionChangesModelAndPermissionModeLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got []string
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+	for _, line := range claudehosttest.Lines(data) {
 		var control struct{ Subtype, Mode, Model string }
-		if err := json.Unmarshal([]byte(line), &control); err != nil {
+		if err := json.Unmarshal(line, &control); err != nil {
 			t.Fatal(err)
 		}
 		got = append(got, control.Subtype+"="+control.Mode+control.Model)

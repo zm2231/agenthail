@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -194,5 +195,28 @@ func TestAHostRequestAsksForACatalogPassAtOnce(t *testing.T) {
 	case <-d.catalogNudge:
 	case <-time.After(5 * time.Second):
 		t.Fatal("an opened request did not ask for a catalog pass")
+	}
+}
+
+func TestTheDashboardOffersAHostSessionNoRemoteControlCommands(t *testing.T) {
+	fixture := claudehosttest.New(t, "")
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	claude := surfaces.NewClaude(nil, fixture.Home)
+	session := hostedSession(t, claude, id)
+	r := hostRegistry(t)
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	if caps := surface.EffectiveCapabilities(claude, &session); caps.Commands || !caps.Model {
+		t.Fatalf("capabilities = %+v", caps)
+	}
+	handler := New(r, []surface.Surface{claude}).dashboardHandler(&dashboardServer{token: "secret"})
+	for _, action := range []string{"status", "context", "usage", "effort", "rename"} {
+		response := apiCall(t, handler, http.MethodPost, "/api/v1/actions", "secret", map[string]any{"action": action, "sessionId": id, "message": "high"})
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "Remote Control commands") {
+			t.Fatalf("%s status=%d body=%s", action, response.Code, response.Body.String())
+		}
 	}
 }

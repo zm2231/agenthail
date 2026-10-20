@@ -119,3 +119,26 @@ func TestPermissionModeShowsAndChangesAHostSessionsMode(t *testing.T) {
 		t.Fatalf("history = %+v", entries)
 	}
 }
+
+func TestAHostSessionTakesAModelButNoRemoteControlCommands(t *testing.T) {
+	app, r, _, _, id := hostedClaudeApp(t)
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"model", "@worker", "opus"}) }); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"status", "context", "usage"} {
+		_, err := captureStdout(t, func() error { return app.Run([]string{"control", "@worker", command}) })
+		if err == nil || !strings.Contains(err.Error(), "does not support Claude Remote Control commands") {
+			t.Fatalf("control %s = %v, want unsupported", command, err)
+		}
+	}
+	entries, err := r.ListHistory(50, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Kind == "model" && entry.Message == "opus" && entry.Result == "changed by the CLI" {
+			return
+		}
+	}
+	t.Fatalf("history = %+v", entries)
+}

@@ -1129,7 +1129,7 @@ struct SessionInspector: View {
                             Button("Change model") { showingModels = true }
                                 .disabled(model.pendingControls.contains(session.id))
                         }
-                        if session.surface == "claude" && detail.capabilities.model {
+                        if detail.capabilities.commands {
                             Group {
                                 Button("Check runtime status") { model.action("status", session: session) }
                                 Button("Inspect context") { model.action("context", session: session) }

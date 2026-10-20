@@ -90,8 +90,10 @@ Claude's control capabilities depend on its transport. Native UDS messages
 cannot execute slash commands, steer a running turn, or correlate message IDs
 with transcript turns for `send --reply` / `--stream`. Use `last` to inspect
 the transcript or native `SendMessage` for an explicit reply. Compact, model,
-interrupt, and steer are typed controls that require a Remote Control attachment;
-a session the Claude host runs takes interrupt and steer through the host.
+interrupt, steer and the `control` commands (context, usage, status, effort,
+rename) require a Remote Control attachment. A session the Claude host runs has
+no Remote Control: it takes interrupt, steer, model and permission-mode changes
+through the host, and has no compact or `control` commands.
 A receipt with `evidence: "transport_accepted"` only proves socket acceptance;
 receiver policy can still hold or deny the message. Do not claim model delivery
 from it. Report the immediate send status and target as returned: Sent, Queued,

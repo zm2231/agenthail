@@ -10,11 +10,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
-
-const cliActor = "the CLI"
 
 // cmdRequests lists what a session waits on a person for.
 func (a *App) cmdRequests(args []string) error {
@@ -139,7 +138,7 @@ func (a *App) cmdPermissionMode(args []string) error {
 	}
 	result, controlErr := controller.Control(ctx, sess, surface.ControlRequest{Action: "permission-mode", Value: mode})
 	if controlErr == nil {
-		a.recordHistory(registry.HistoryEntry{Kind: "permission-mode", SessionID: sess.ID, Message: mode, Result: "changed by " + cliActor})
+		a.recordHistory(registry.HistoryEntry{Kind: "permission-mode", SessionID: sess.ID, Message: mode, Result: "changed by " + daemon.CLIActor})
 	}
 	return a.printControlResult(sess, result, controlErr, args)
 }
@@ -198,7 +197,7 @@ func (a *App) respond(ctx context.Context, target, requestID string, decision su
 	if err != nil {
 		return "", err
 	}
-	a.recordHistory(registry.HistoryEntry{Kind: "request-" + outcome, SessionID: sess.ID, Message: requestID, Result: "answered by " + cliActor})
+	a.recordHistory(registry.HistoryEntry{Kind: "request-" + outcome, SessionID: sess.ID, Message: requestID, Result: "answered by " + daemon.CLIActor})
 	return outcome, nil
 }
 

@@ -1827,7 +1827,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		d.respond(ctx, w, adapter, session, strings.TrimSpace(request.RequestID), request.Decision, actionActor(r))
 		return
 	case "context", "usage", "status", "effort", "rename":
-		if _, ok := adapter.(surface.Controller); !ok || !effective.Model {
+		if _, ok := adapter.(surface.Controller); !ok || !effective.Commands {
 			http.Error(w, "this session does not support Claude Remote Control commands", http.StatusBadRequest)
 			return
 		}

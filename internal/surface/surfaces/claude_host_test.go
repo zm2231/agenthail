@@ -73,8 +73,8 @@ func TestAHostSessionIsListedOnTheHostRuntimeWithItsNativeSocket(t *testing.T) {
 		t.Fatalf("agent route = %v, want the native socket", got)
 	}
 	caps := surface.EffectiveCapabilities(c, sess)
-	if !caps.Steer || !caps.Interrupt || caps.Compact || !caps.Model || !caps.Respond || !caps.PermissionMode {
-		t.Fatalf("capabilities = %+v, want every host control and no compact", caps.Capabilities)
+	if !caps.Steer || !caps.Interrupt || caps.Compact || caps.Commands || !caps.Model || !caps.Respond || !caps.PermissionMode {
+		t.Fatalf("capabilities = %+v, want every host control and no compact or Remote Control commands", caps.Capabilities)
 	}
 }
 
