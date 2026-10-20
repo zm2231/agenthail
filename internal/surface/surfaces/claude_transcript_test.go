@@ -593,7 +593,7 @@ func TestClaudeStreamSupportsUDSTranscriptTail(t *testing.T) {
 		t.Fatalf("events=%+v", events)
 	}
 	page, err := readTimeline(context.Background(), path, "claude", 0, 20)
-	if err != nil || len(page.Items) != 2 || page.Items[1].ID != events[0].ID {
+	if err != nil || len(page.Items) != 3 || page.Items[1].ID != events[0].ID || page.Items[1].TurnID != "u1" || page.Items[2].Kind != "done" || page.Items[2].ID != events[1].ID || page.Items[2].TurnID != "u1" {
 		t.Fatalf("page/live identity mismatch: page=%+v live=%q err=%v", page, events[0].ID, err)
 	}
 }

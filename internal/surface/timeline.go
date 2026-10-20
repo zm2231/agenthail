@@ -132,10 +132,30 @@ func latestReply(session *Session, exchanges []Exchange, source string) *ReplyRe
 	return &ReplyResult{Done: false, Source: source}
 }
 
+// MaxExchangePage is the most exchanges one session page returns.
+const MaxExchangePage = 50
+
 // IsPromptItem reports whether item opens a turn: a message from the person or
-// from another agent.
+// from another agent, or a prompt the provider injected on the person's
+// behalf.
 func IsPromptItem(item TimelineItem) bool {
-	return (item.Kind == "message" || item.Kind == "text") && (item.Role == "user" || item.Role == "peer") && item.Text != ""
+	if item.Text == "" {
+		return false
+	}
+	switch item.Kind {
+	case "message", "text":
+		return item.Role == "user" || item.Role == "peer"
+	case "event":
+		return item.Origin != ""
+	}
+	return false
+}
+
+func promptOrigin(item TimelineItem) string {
+	if item.Role == "peer" {
+		return "peer"
+	}
+	return item.Origin
 }
 
 func isReplyItem(item TimelineItem) bool {
@@ -149,10 +169,11 @@ func isReplyItem(item TimelineItem) bool {
 }
 
 // ExchangesFromItems groups ordered timeline items into turns. An exchange is a
-// prompt and the last assistant message of its turn. A reply from another turn,
-// or before any prompt, forms an exchange without a prompt. An item without a
-// turn ID belongs to the open turn, because transcript pages and live streams do
-// not both record one.
+// prompt and the last assistant message of its turn. A prompt carrying the
+// turn ID of the turn in progress was injected into it and stays in it; a done
+// item ends its turn. A reply from another turn, or before any prompt, forms an
+// exchange without a prompt. An item without a turn ID belongs to the open
+// turn, because journals written before turns were recorded have none.
 func ExchangesFromItems(items []TimelineItem, source string) []Exchange {
 	exchanges, _ := groupExchanges(items, source)
 	return exchanges
@@ -171,8 +192,24 @@ func groupExchanges(items []TimelineItem, source string) ([]Exchange, []int) {
 	turn, open := "", false
 	for index, item := range items {
 		at, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
+		if item.Kind == "done" {
+			if open && (item.TurnID == "" || item.TurnID == turn) {
+				open = false
+			}
+			continue
+		}
 		if IsPromptItem(item) {
-			exchanges = append(exchanges, Exchange{User: item.Text, Timestamp: at, Source: source})
+			if len(exchanges) > 0 && turn != "" && item.TurnID == turn {
+				last := &exchanges[len(exchanges)-1]
+				switch {
+				case last.User == "":
+					last.User, last.Origin, last.Sender = item.Text, promptOrigin(item), item.Sender
+				case last.Origin == promptOrigin(item) && last.Sender == item.Sender:
+					last.User += "\n\n" + item.Text
+				}
+				continue
+			}
+			exchanges = append(exchanges, Exchange{User: item.Text, Origin: promptOrigin(item), Sender: item.Sender, Timestamp: at, Source: source})
 			starts = append(starts, index)
 			turn, open = item.TurnID, true
 			continue
