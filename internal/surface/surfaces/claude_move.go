@@ -297,12 +297,14 @@ func (c *Claude) finishMove(ctx context.Context, sess *surface.Session, journal 
 		var retired []string
 		for _, piece := range journal.Pieces {
 			source := filepath.Join(journal.From, piece)
-			if err := os.Rename(source, source+claudeMovedSuffix); err != nil {
+			if err := renameNoReplace(source, source+claudeMovedSuffix); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					continue
 				}
-				restoreClaudePieces(retired)
-				return nil, fmt.Errorf("retire %s: %w", source, err)
+				if errors.Is(err, os.ErrExist) {
+					err = fmt.Errorf("%s is left from an earlier move; keep whichever copy holds the conversation and remove the other", source+claudeMovedSuffix)
+				}
+				return nil, errors.Join(fmt.Errorf("retire %s: %w", source, err), restoreClaudePieces(retired))
 			}
 			retired = append(retired, source)
 		}
@@ -311,14 +313,22 @@ func (c *Claude) finishMove(ctx context.Context, sess *surface.Session, journal 
 			// A terminal resumed in the instant before the rename writes to
 			// the retired file through its open descriptor; give the source
 			// back rather than promote a copy that misses its writes.
-			if err := c.checkStagedMove(ctx, journal, claudeMovedSuffix); err != nil {
-				restoreClaudePieces(retired)
+			err := c.checkStagedMove(ctx, journal, claudeMovedSuffix)
+			for _, source := range retired {
+				if err == nil && claudePathExists(source) {
+					err = &surface.MoveBusyError{Session: journal.Conversation, Reason: "it was written to during the move"}
+				}
+			}
+			if err != nil {
+				if restoreErr := restoreClaudePieces(retired); restoreErr != nil {
+					return nil, restoreErr
+				}
 				return nil, err
 			}
 		}
 		for _, piece := range journal.Pieces {
 			live := filepath.Join(journal.To, piece)
-			if err := os.Rename(live+claudeStagedSuffix, live); err != nil && !errors.Is(err, os.ErrNotExist) {
+			if err := renameNoReplace(live+claudeStagedSuffix, live); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return nil, fmt.Errorf("switch %s live: %w", live, err)
 			}
 		}
@@ -390,10 +400,20 @@ func (c *Claude) atMoveStep(step string) {
 	}
 }
 
-func restoreClaudePieces(retired []string) {
+// restoreClaudePieces gives retired pieces their names back. A piece whose
+// name a writer has taken again in the meantime keeps both copies, since
+// either may hold turns the other lacks.
+func restoreClaudePieces(retired []string) error {
+	var errs []error
 	for _, source := range retired {
-		_ = os.Rename(source+claudeMovedSuffix, source)
+		if err := renameNoReplace(source+claudeMovedSuffix, source); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				err = fmt.Errorf("%s was written again during the move; both it and %s are kept, so merge them before moving it", source, source+claudeMovedSuffix)
+			}
+			errs = append(errs, err)
+		}
 	}
+	return errors.Join(errs...)
 }
 
 type claudeMoveHolder struct {

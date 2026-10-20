@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -391,5 +392,49 @@ func TestAMoveGivesTheSourceBackWhenATerminalResumesItMidMove(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestARefusedMoveKeepsASourceRecreatedMidMoveAndItsRetiredCopy(t *testing.T) {
+	fixture, _, c, primary, spare := moveFixture(t)
+	transcript := fixture.Transcript(fixtureConversation, fixture.Home)
+	original, err := os.ReadFile(transcript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recreated := `{"type":"user","cwd":` + strconv.Quote(fixture.Home) + `,"message":{"role":"user","content":"appended by path after the rename"}}` + "\n"
+	c.moveStep = func(at string) {
+		if at == "retired" {
+			c.moveStep = nil
+			if err := os.WriteFile(transcript, []byte(recreated), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	_, err = c.MoveSession(context.Background(), &surface.Session{ID: fixtureConversation}, surface.MoveRequest{To: surface.MoveTarget{Account: "spare"}})
+	if err == nil || !strings.Contains(err.Error(), "both it and") {
+		t.Fatalf("err=%v", err)
+	}
+	var busy *surface.MoveBusyError
+	if errors.As(err, &busy) {
+		t.Fatal("a move that needs a merge was reported as merely busy")
+	}
+	if content, _ := os.ReadFile(transcript); string(content) != recreated {
+		t.Fatalf("the recreated source was overwritten: %q", content)
+	}
+	if content, _ := os.ReadFile(transcript + claudeMovedSuffix); string(content) != string(original) {
+		t.Fatalf("the retired copy was lost: %q", content)
+	}
+	if _, err := os.Stat(filepath.Join(spare, "projects", "fixture-project", fixtureConversation+".jsonl")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the target was promoted: %v", err)
+	}
+	if _, err := c.MoveSession(context.Background(), &surface.Session{ID: fixtureConversation}, surface.MoveRequest{To: surface.MoveTarget{Account: "spare"}}); err == nil || !strings.Contains(err.Error(), "left from an earlier move") {
+		t.Fatalf("a retry overwrote the retired copy: %v", err)
+	}
+	if content, _ := os.ReadFile(transcript + claudeMovedSuffix); string(content) != string(original) {
+		t.Fatalf("the retry replaced the retired copy: %q", content)
+	}
+	if root, _ := c.conversationRoot(fixtureConversation); root != primary {
+		t.Fatalf("root=%s", root)
 	}
 }
