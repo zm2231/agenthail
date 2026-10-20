@@ -500,7 +500,11 @@ target whose turn is waiting on its user (a Claude question, plan approval or
 permission prompt, a Codex approval or
 input request) carries `waitingOn` and lists as `wait`; messages to it,
 including steers, are queued until the user answers. Do not interrupt it to get
-a message through. Finished items appear in history and remain available through
+a message through. A Claude session between turns whose background tasks
+(a background shell, an async agent, a Monitor) still run carries
+`backgroundTasks` with `running: true` and lists as `bg`: its work is not done,
+and Claude starts a turn of its own when a task reports. Ambient tasks, such as
+file watchers, are listed with `ambient: true` but do not count. Finished items appear in history and remain available through
 `queue list --all`. `--target` filters by destination, `--mine` includes
 messages sent by or addressed to the caller session, `--project` keeps targets
 in one project, and `--cwd` keeps targets in the project that holds that

@@ -1204,6 +1204,12 @@ func sessStat(s surface.Session, queued int) string {
 		}
 		return "run"
 	}
+	if surface.BackgroundRunning(s.BackgroundTasks) {
+		if queued > 0 {
+			return "bg+q"
+		}
+		return "bg"
+	}
 	if queued > 0 {
 		return "queue"
 	}
