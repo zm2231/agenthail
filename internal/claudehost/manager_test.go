@@ -2,6 +2,7 @@ package claudehost_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -505,9 +506,15 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 			f.Peer(t, opened.PID, test.prompt)
 			request := listed(t, client, asking, 1).Requests[0]
 			busy := f.Open(t, client, working)
+			events := make(chan claudehost.Event, 256)
+			subscribed, stop := context.WithCancel(ctx)
+			defer stop()
+			go func() { _, _ = client.Subscribe(subscribed, 0, func(e claudehost.Event) { events <- e }) }()
 			if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: working, UUID: uuid.NewString(), Text: "SLOW 60000"}); err != nil {
 				t.Fatal(err)
 			}
+			waitClaudeRunning(t, events, working)
+			stop()
 			retired := uuid.NewString()
 			exiting := f.Open(t, client, retired)
 
@@ -574,5 +581,26 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 			}
 			claudehosttest.WaitFor(t, "the turn on the new host", func() bool { return len(f.Turns(t, asking)) == 3 })
 		})
+	}
+}
+
+// waitClaudeRunning waits for Claude to report that it runs a turn of the
+// session; a host calls the session busy as soon as it passes a message on.
+func waitClaudeRunning(t *testing.T, events <-chan claudehost.Event, sessionID string) {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case e := <-events:
+			var message struct {
+				Subtype string `json:"subtype"`
+				State   string `json:"state"`
+			}
+			if e.SessionID == sessionID && e.Kind == "sdk" && json.Unmarshal(e.Message, &message) == nil && message.Subtype == "session_state_changed" && message.State == "running" {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("Claude never reported running a turn of %s", sessionID)
+		}
 	}
 }

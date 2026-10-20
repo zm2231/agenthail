@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -337,6 +339,11 @@ func (c Client) closeOn(ctx context.Context, sessionID string, params map[string
 		return &Error{Code: "not_open", Message: fmt.Sprintf("Claude session %s is not open in the host", sessionID)}
 	}
 	pid := listing.Sessions[i].PID
+	started, err := processStart(pid)
+	if err != nil {
+		// Claude has already exited.
+		started = ""
+	}
 	if err := c.call(ctx, "interrupt", params, nil); err != nil && !IsCode(err, "not_open") {
 		return err
 	}
@@ -344,18 +351,32 @@ func (c Client) closeOn(ctx context.Context, sessionID string, params map[string
 	if err := c.call(ctx, "close", params, nil); err != nil && !IsCode(err, "not_open") && !errors.Is(err, ErrNotRunning) && !errors.As(err, &unknown) {
 		return err
 	}
-	return waitExited(ctx, pid)
+	return waitExited(ctx, pid, started)
 }
 
-func waitExited(ctx context.Context, pid int) error {
-	for !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+// waitExited waits until the process that had this pid and start time has
+// exited; a later process given the same pid does not count.
+func waitExited(ctx context.Context, pid int, started string) error {
+	for started != "" {
+		if now, err := processStart(pid); err != nil || now != started {
+			return nil
+		}
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("Claude %d has not exited: %w", pid, ctx.Err())
-		case <-time.After(50 * time.Millisecond):
+		case <-time.After(100 * time.Millisecond):
 		}
 	}
 	return nil
+}
+
+// processStart is the process's start time as ps reports it in UTC. It is
+// claudepeer.ProcessStart, which this package cannot import.
+func processStart(pid int) (string, error) {
+	command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	out, err := command.Output()
+	return strings.TrimSpace(string(out)), err
 }
 
 // sessionCall runs a request for one session on the host that runs it. The
