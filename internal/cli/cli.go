@@ -25,6 +25,7 @@ import (
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/report"
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -241,8 +242,8 @@ Session commands:
   search codex <query>           Search older Codex conversation history on demand
   send <target> "msg"|-       Send now when idle; queue when busy (use --no-queue to refuse delay)
   stream <target>               Tail live activity
-  reply <target> [--before cursor] [--json] [--timeout 30s]  Fetch last assistant reply
-  last <target> [count] [--before cursor] [--full] [--json] [--timeout 30s]  Show a bounded exchange page
+  reply <target> [--before cursor] [--json] [--max-bytes N | --report] [--timeout 30s]  Fetch last assistant reply, capped or as its completion report
+  last <target> [count] [--before cursor] [--full] [--json] [--max-bytes N | --report] [--timeout 30s]  Show a bounded exchange page
   goal <target> [set|edit|pause|resume|budget|clear] [value] [--json]
                                  Read goal usage or control its objective, status and budget
   compact <target>              Compress context (typed control; unsupported for socket-only Claude peers)
@@ -592,7 +593,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--request": true, "--reason": true, "--answers": true, "--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--project": true, "--instructions": true, "--permission-mode": true}
+	valueFlags := map[string]bool{"--request": true, "--reason": true, "--answers": true, "--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--max-bytes": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--project": true, "--instructions": true, "--permission-mode": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -624,7 +625,7 @@ func validateCommandFlags(command string, args []string) error {
 	specs := map[string]flagSpec{
 		"list": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--wide": true, "--json": true}}, "runs": {bools: map[string]bool{"--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "accounts": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
-		"reply": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
+		"reply": {values: map[string]bool{"--before": true, "--timeout": true, "--max-bytes": true}, bools: map[string]bool{"--json": true, "--report": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true, "--max-bytes": true}, bools: map[string]bool{"--full": true, "--json": true, "--report": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true, "--max-bytes": true}, bools: map[string]bool{"--full": true, "--json": true, "--report": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
 		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--account": true, "--host": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"channel": {},
@@ -1989,7 +1990,11 @@ func sessionReadBefore(args []string) (int64, error) {
 func (a *App) cmdReply(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) != 1 {
-		return fmt.Errorf("usage: agenthail reply <target> [--before cursor] [--json] [--timeout 30s]")
+		return fmt.Errorf("usage: agenthail reply <target> [--before cursor] [--json] [--max-bytes N | --report] [--timeout 30s]")
+	}
+	mode, err := readModeFlags(args)
+	if err != nil {
+		return err
 	}
 	timeout, err := commandTimeout(args, a.DefaultTimeout)
 	if err != nil {
@@ -2024,14 +2029,29 @@ func (a *App) cmdReply(args []string) error {
 	if reply.Error != "" {
 		return fmt.Errorf("latest %s turn did not complete successfully: %s", sess.Surface, reply.Error)
 	}
+	if mode.report {
+		parsed, err := report.Parse(reply.Text)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "done": reply.Done, "report": parsed})
+	}
+	text, cut := capBytes(reply.Text, mode.maxBytes)
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "text": reply.Text, "done": reply.Done, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning})
+		document := map[string]any{"surface": sess.Surface, "session": sess.ID, "text": text, "done": reply.Done, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning}
+		if cut {
+			document["truncated"], document["textBytes"] = true, len(reply.Text)
+		}
+		return json.NewEncoder(os.Stdout).Encode(document)
 	} else {
 		printSessionReadWarning(read)
 		if read.Source != "" {
 			fmt.Printf("[%s]\n", read.Source)
 		}
-		fmt.Println(reply.Text)
+		fmt.Println(text)
+		if cut {
+			fmt.Println(truncationNote(len(text), len(reply.Text)))
+		}
 		if read.NextBefore > 0 {
 			fmt.Printf("older cursor: %d\n", read.NextBefore)
 		}
@@ -2042,7 +2062,11 @@ func (a *App) cmdReply(args []string) error {
 func (a *App) cmdLast(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) < 1 || len(positional) > 2 {
-		return fmt.Errorf("usage: agenthail last <target> [count] [--before cursor] [--full] [--json] [--timeout 30s]")
+		return fmt.Errorf("usage: agenthail last <target> [count] [--before cursor] [--full] [--json] [--max-bytes N | --report] [--timeout 30s]")
+	}
+	mode, err := readModeFlags(args)
+	if err != nil {
+		return err
 	}
 	timeout, err := commandTimeout(args, a.DefaultTimeout)
 	if err != nil {
@@ -2088,8 +2112,15 @@ func (a *App) cmdLast(args []string) error {
 	if read.UnavailableReason != "" && len(exchanges) == 0 {
 		return fmt.Errorf("session read unavailable from %s: %s", read.Source, read.UnavailableReason)
 	}
+	if mode.report {
+		return printExchangeReports(sess, read, exchanges)
+	}
+	capped := make([]cappedExchange, len(exchanges))
+	for i, exchange := range exchanges {
+		capped[i] = capExchange(exchange, mode.maxBytes)
+	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning, "exchanges": exchanges})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning, "exchanges": capped})
 	}
 	printSessionReadWarning(read)
 	if len(exchanges) == 0 {
@@ -2106,21 +2137,27 @@ func (a *App) cmdLast(args []string) error {
 	} else {
 		fmt.Printf("── %s ──\n", label)
 	}
-	full := hasFlag(args, "--full")
-	for _, ex := range exchanges {
+	full := hasFlag(args, "--full") || mode.maxBytes > 0
+	for _, ex := range capped {
 		if !ex.Timestamp.IsZero() {
 			fmt.Printf("%s\n", ex.Timestamp.Local().Format("2006-01-02 15:04:05"))
 		}
-		if ex.User != "" {
+		if ex.User != "" || ex.UserTruncated {
 			if full {
-				fmt.Printf("%s ▸ %s\n", promptLabel(ex), ex.User)
+				fmt.Printf("%s ▸ %s\n", promptLabel(ex.Exchange), ex.User)
+				if ex.UserTruncated {
+					fmt.Println(truncationNote(len(ex.User), ex.UserBytes))
+				}
 			} else {
-				fmt.Printf("%s ▸ %s\n", promptLabel(ex), truncate(strings.ReplaceAll(ex.User, "\n", " "), 200))
+				fmt.Printf("%s ▸ %s\n", promptLabel(ex.Exchange), truncate(strings.ReplaceAll(ex.User, "\n", " "), 200))
 			}
 		}
-		if ex.Assistant != "" {
+		if ex.Assistant != "" || ex.AssistantTruncated {
 			if full {
 				fmt.Printf(" ai  ▸ %s\n", ex.Assistant)
+				if ex.AssistantTruncated {
+					fmt.Println(truncationNote(len(ex.Assistant), ex.AssistantBytes))
+				}
 			} else {
 				fmt.Printf(" ai  ▸ %s\n", truncate(strings.ReplaceAll(ex.Assistant, "\n", " "), 200))
 			}
