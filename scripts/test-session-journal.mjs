@@ -220,6 +220,8 @@ groupingContext.groupItems = [
   {kind: 'message', role: 'peer', sender: 'collab', text: 'steer', turnId: 't1'},
   {kind: 'message', role: 'assistant', text: 'one more', turnId: 't1'},
   {kind: 'done', turnId: 't1'},
+  {kind: 'event', origin: 'task-notification', text: 'queued after the close', turnId: 't1', timestamp: 'q'},
+  {kind: 'message', role: 'assistant', text: 'handled', turnId: 't1'},
   {kind: 'event', origin: 'task-notification', text: 'build finished', turnId: 't2', timestamp: 'b'},
   {kind: 'message', role: 'assistant', text: 'two', turnId: 't2'},
   {kind: 'done', turnId: 't2'},
@@ -228,7 +230,10 @@ groupingContext.groupItems = [
   {kind: 'message', role: 'user', text: 'question', turnId: 't3'},
 ];
 const grouped = vm.runInContext('exchangesFromItems(groupItems)', groupingContext);
-assert.equal(grouped.length, 4, 'a mid-turn peer steer stays in its turn and done closes a turn');
+assert.equal(grouped.length, 5, 'a mid-turn peer steer stays in its turn and done closes a turn');
+assert.equal(grouped[1].origin, 'task-notification', 'an injection after the turn closed opens its own exchange');
+assert.equal(grouped[1].assistant, 'handled');
+grouped.splice(1, 1);
 assert.equal(grouped[3].user, 'context\n\nquestion', 'prompts of one turn from one sender read as one prompt');
 assert.equal(grouped[0].user, 'first');
 assert.equal(grouped[0].assistant, 'one more');

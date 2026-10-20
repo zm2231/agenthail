@@ -3,8 +3,11 @@ package surfaces
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -121,4 +124,59 @@ func transcriptItemOffsetForTest(t *testing.T, id string) int64 {
 		t.Fatalf("item %q carries no offset", id)
 	}
 	return offset
+}
+
+func TestClaudeSourceStartedWhileATurnClosesFinishesItOnceWhenIdle(t *testing.T) {
+	textAt := time.Date(2026, 10, 19, 10, 0, 1, 0, time.UTC)
+	home := t.TempDir()
+	claude := NewClaude(nil, home)
+	path := writeTranscript(t, `{"type":"user","uuid":"u1","timestamp":"2026-10-19T10:00:00Z","message":{"content":"first"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-10-19T10:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"one"}]}}
+`)
+	session := &surface.Session{ID: "bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transcript: path, HasLocal: true}
+	seed, err := claude.ReadSession(context.Background(), session, surface.SessionReadRequest{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range seed.Items {
+		if item.Kind == "done" {
+			t.Fatalf("a busy session's closing turn was settled: %+v", item)
+		}
+	}
+	if seed.ClaudeClosingTurn.TurnID != "u1" {
+		t.Fatalf("seed closing turn %+v", seed.ClaudeClosingTurn)
+	}
+	session.TranscriptOffset, session.TranscriptOffsetSet, session.TranscriptIdentity = seed.TranscriptOffset, true, seed.TranscriptIdentity
+	session.ClaudeClosingTurn = seed.ClaudeClosingTurn
+
+	dir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	record := fmt.Sprintf(`{"pid":%d,"sessionId":"bridge","status":"idle","statusUpdatedAt":%d}`, os.Getpid(), textAt.Add(time.Second).UnixMilli())
+	if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(os.Getpid())+".json"), []byte(record), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var done []surface.StreamEvent
+	err = claude.Stream(context.Background(), session, "", func(event surface.StreamEvent) {
+		if event.Kind == "done" {
+			done = append(done, event)
+		}
+	}, 300*time.Millisecond)
+	if !errors.Is(err, surface.ErrStreamWindow) {
+		t.Fatalf("stream err=%v", err)
+	}
+	settled, err := claude.ReadSession(context.Background(), &surface.Session{ID: "bridge", Transcript: path}, surface.SessionReadRequest{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pageDone []surface.TimelineItem
+	for _, item := range settled.Items {
+		if item.Kind == "done" {
+			pageDone = append(pageDone, item)
+		}
+	}
+	if len(done) != 1 || len(pageDone) != 1 || done[0].ID != pageDone[0].ID || done[0].TurnID != "u1" || pageDone[0].TurnID != "u1" {
+		t.Fatalf("stream done %+v, page done %+v", done, pageDone)
+	}
 }

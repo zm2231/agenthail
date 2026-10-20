@@ -327,7 +327,7 @@ function exchangesFromItems(items) {
     if (!value.text) continue;
     const prompt = (["message", "text"].includes(value.kind) && ["user", "peer"].includes(value.role)) || (value.kind === "event" && Boolean(value.origin));
     if (prompt) {
-      if (exchanges.length && turn && value.turnId === turn) {
+      if (open && turn && value.turnId === turn) {
         const last = exchanges.at(-1);
         if (!last.user) Object.assign(last, { user: value.text, origin: promptOrigin(value), sender: value.sender || "" });
         else if (last.origin === promptOrigin(value) && last.sender === (value.sender || "")) last.user += `\n\n${value.text}`;

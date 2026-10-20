@@ -59,21 +59,22 @@ type SessionReadRequest struct {
 }
 
 type SessionReadResult struct {
-	JournalSeq            uint64         `json:"journalSeq,omitempty"`
-	TranscriptOffset      int64          `json:"-"`
-	TranscriptOffsetSet   bool           `json:"-"`
-	TranscriptIdentity    string         `json:"-"`
-	CodexPendingEventUser bool           `json:"-"`
-	CodexPendingEventTurn string         `json:"-"`
-	CodexCurrentTurnID    string         `json:"-"`
-	Items                 []TimelineItem `json:"items"`
-	Exchanges             []Exchange     `json:"exchanges"`
-	Reply                 *ReplyResult   `json:"reply,omitempty"`
-	NextBefore            int64          `json:"nextBefore"`
-	Source                string         `json:"source"`
-	Truncated             bool           `json:"truncated"`
-	UnavailableReason     string         `json:"unavailableReason,omitempty"`
-	Warning               string         `json:"warning,omitempty"`
+	JournalSeq            uint64            `json:"journalSeq,omitempty"`
+	TranscriptOffset      int64             `json:"-"`
+	TranscriptOffsetSet   bool              `json:"-"`
+	TranscriptIdentity    string            `json:"-"`
+	CodexPendingEventUser bool              `json:"-"`
+	CodexPendingEventTurn string            `json:"-"`
+	CodexCurrentTurnID    string            `json:"-"`
+	ClaudeClosingTurn     ClaudeClosingTurn `json:"-"`
+	Items                 []TimelineItem    `json:"items"`
+	Exchanges             []Exchange        `json:"exchanges"`
+	Reply                 *ReplyResult      `json:"reply,omitempty"`
+	NextBefore            int64             `json:"nextBefore"`
+	Source                string            `json:"source"`
+	Truncated             bool              `json:"truncated"`
+	UnavailableReason     string            `json:"unavailableReason,omitempty"`
+	Warning               string            `json:"warning,omitempty"`
 }
 
 type SessionReader interface {
@@ -199,7 +200,7 @@ func groupExchanges(items []TimelineItem, source string) ([]Exchange, []int) {
 			continue
 		}
 		if IsPromptItem(item) {
-			if len(exchanges) > 0 && turn != "" && item.TurnID == turn {
+			if open && turn != "" && item.TurnID == turn {
 				last := &exchanges[len(exchanges)-1]
 				switch {
 				case last.User == "":

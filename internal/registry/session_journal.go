@@ -473,10 +473,6 @@ func (r *Registry) SessionJournalBody(sessionID, ref string, start, end int) ([]
 	return append([]byte(nil), body[:end-start]...), total, nil
 }
 
-// RewriteSessionJournalPayloads replaces the payloads of existing entries in
-// place, keeping each entry's sequence, for details derived later from the
-// same provider record. Clients that already hold an entry see the change on
-// their next page read, not as a new event.
 // SessionJournalDerivation returns the version of the item derivation a
 // session's journal was last rebuilt with, 0 when it never was.
 func (r *Registry) SessionJournalDerivation(sessionID string) (int, error) {

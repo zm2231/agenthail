@@ -32,7 +32,8 @@ func TestExchangesFollowTurnMarkersAndLabelInjectedPrompts(t *testing.T) {
 		{Kind: "message", Role: "peer", Origin: "peer", Sender: "reviewer", Text: "steer", TurnID: "t1"},
 		{Kind: "message", Role: "assistant", Text: "one", TurnID: "t1"},
 		{Kind: "done", TurnID: "t1"},
-		{Kind: "message", Role: "user", Origin: "interrupt", Text: "[Request interrupted by user]", TurnID: "t1"},
+		{Kind: "message", Role: "peer", Origin: "peer", Sender: "reviewer", Text: "after the close", TurnID: "t1", Timestamp: "2026-10-19T10:00:30Z"},
+		{Kind: "message", Role: "assistant", Text: "answered", TurnID: "t1"},
 		{Kind: "event", Role: "system", Origin: "task-notification", Text: "build finished", TurnID: "t2", Timestamp: "2026-10-19T10:01:00Z"},
 		{Kind: "message", Role: "assistant", Text: "two", TurnID: "t2"},
 		{Kind: "message", Role: "peer", Origin: "peer", Sender: "collab", Text: "next task", TurnID: "t3", Timestamp: "2026-10-19T10:02:00Z"},
@@ -47,6 +48,7 @@ func TestExchangesFollowTurnMarkersAndLabelInjectedPrompts(t *testing.T) {
 	type want struct{ user, origin, sender, assistant string }
 	wants := []want{
 		{"first", "", "", "one"},
+		{"after the close", "peer", "reviewer", "answered"},
 		{"build finished", "task-notification", "", "two"},
 		{"next task", "peer", "collab", "three"},
 		{"<app context>\n\nhow does it work?", "", "", "like this"},

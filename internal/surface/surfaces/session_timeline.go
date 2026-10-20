@@ -437,6 +437,14 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		if before <= 0 && last >= 0 {
 			claudeEnds[last] = append(claudeEnds[last], turns.settle(settled)...)
 		}
+		if before <= 0 && turns.closing.TurnID != "" {
+			// A stream resuming at the page's end finishes the turn the page saw closing.
+			closing := turns.closing
+			if closing.Anchor, err = completionAnchor(path, completeEnd); err != nil {
+				return nil, err
+			}
+			result.ClaudeClosingTurn = closing
+		}
 	}
 	offset := start + int64(len(data))
 	budget := 512 << 10
