@@ -71,3 +71,7 @@ start_daemon waiting
 for width in $WIDTHS; do
 	stays_up "a session waiting on a prompt Agenthail can't answer" "$width"
 done
+start_daemon waiting-queued
+for width in $WIDTHS; do
+	stays_up "a waiting session holding queued messages" "$width"
+done
