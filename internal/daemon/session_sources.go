@@ -59,6 +59,7 @@ type sessionJournalPayload struct {
 	Reason           string                 `json:"reason,omitempty"`
 	Attachment       *surface.Attachment    `json:"attachment,omitempty"`
 	Files            []surface.AttachedFile `json:"files,omitempty"`
+	Turn             *surface.TurnMetadata  `json:"turn,omitempty"`
 }
 
 type sessionSourceManager struct {
@@ -797,6 +798,7 @@ func seedEvent(kind surface.SurfaceKind, item surface.TimelineItem) surface.Stre
 		Timestamp:        at,
 		Kind:             item.Kind,
 		Text:             item.Text,
+		Turn:             item.Turn,
 	}
 }
 
@@ -848,7 +850,10 @@ func (s *sessionSource) mergeSeedIntoAuthoritativeRow(providerKey, operation str
 	if len(item.Files) > 0 {
 		merged.Files = item.Files
 	}
-	if merged.Role == payload.Role && merged.Origin == payload.Origin && merged.Sender == payload.Sender && merged.Title == payload.Title && merged.Status == payload.Status && merged.TurnID == payload.TurnID && merged.CallID == payload.CallID && merged.Truncated == payload.Truncated && merged.TruncationReason == payload.TruncationReason && reflect.DeepEqual(merged.Attachment, payload.Attachment) && reflect.DeepEqual(merged.Files, payload.Files) {
+	if item.Turn != nil {
+		merged.Turn = item.Turn
+	}
+	if merged.Role == payload.Role && merged.Origin == payload.Origin && merged.Sender == payload.Sender && merged.Title == payload.Title && merged.Status == payload.Status && merged.TurnID == payload.TurnID && merged.CallID == payload.CallID && merged.Truncated == payload.Truncated && merged.TruncationReason == payload.TruncationReason && reflect.DeepEqual(merged.Attachment, payload.Attachment) && reflect.DeepEqual(merged.Files, payload.Files) && reflect.DeepEqual(merged.Turn, payload.Turn) {
 		return true
 	}
 	encoded, err := json.Marshal(merged)
@@ -1018,7 +1023,7 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) (sessionJourn
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, Context: event.Context, Goal: event.Goal, Attachment: event.Attachment, Files: event.Files, Truncated: event.Truncated, TruncationReason: event.TruncationReason}, bodyKey
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, Context: event.Context, Goal: event.Goal, Attachment: event.Attachment, Files: event.Files, Truncated: event.Truncated, TruncationReason: event.TruncationReason, Turn: event.Turn}, bodyKey
 }
 
 // prepareStream waits under ctx for the session journal to be seeded, then

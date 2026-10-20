@@ -46,6 +46,7 @@ const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--
        agenthail thread fork <target> [--model <model>] [--last-turn <id>] [--alias <name>] [--json]
        agenthail thread <status|stop|resume|logs> <target> [--json]
        agenthail thread <archive|unarchive> <target> [--json]
+       agenthail thread adopt <target> [--wait <duration>] [--stop-terminal] [--json]
        agenthail thread queue <target> <list|add|update|delete|reorder|start> [message] [--id <id>] [--ids <id,id>] [--client-id <stable-id>] [--cursor <cursor>] [--json]
 
 Codex threads start on Codex Desktop when its bridge is reachable and on Codex's app-server daemon otherwise.
@@ -58,6 +59,9 @@ func (a *App) cmdThread(args []string) error {
 	}
 	if len(args) > 0 && (args[0] == "archive" || args[0] == "unarchive") {
 		return a.cmdThreadArchive(args)
+	}
+	if len(args) > 0 && args[0] == "adopt" {
+		return a.cmdThreadAdopt(args)
 	}
 	if len(args) > 0 && args[0] != "create" {
 		return a.cmdThreadOperation(args)

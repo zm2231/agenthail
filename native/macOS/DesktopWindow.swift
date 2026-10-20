@@ -31,6 +31,7 @@ struct DesktopWindow: View {
         .toolbar(removing: .sidebarToggle)
         .environmentObject(model)
         .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
+        .sheet(item: $pane.adoptingSession) { AdoptSessionSheet(model: model, session: $0) }
         .sheet(isPresented: $model.newSessionVisible, onDismiss: {
             if model.newSessionMessage != nil { model.newSessionVisible = true }
         }) {
@@ -360,6 +361,9 @@ extension SessionSidebar {
         .contextMenu {
             Button("Open in New Window") { openWindow(id: "session", value: session.id) }
             Button("Rename…") { pane.renamingSession = session }
+            if session.canAdopt {
+                Button("Open in Agenthail") { pane.adoptingSession = session }
+            }
             Divider()
             Button(session.archived == true ? "Unarchive" : "Archive") { model.setArchived(sessionID: session.id, session.archived != true) }
             if session.project == nil, session.remoteHostName == nil, let cwd = session.cwd, !cwd.isEmpty {
@@ -627,7 +631,14 @@ struct ConversationPane: View {
                         RemovedSessionBar(onClose: pane.closeRemovedSession)
                     } else {
                         VStack(spacing: 0) {
-                            if let request = pane.requests?.requests.first, pane.detail?.readOnly == false {
+                            if let waiting = session.waitingOn, ElsewhereWaitCard.shows(waiting, readOnly: pane.detail?.readOnly == true, respond: session.capabilities.respond) {
+                                ElsewhereWaitCard(waiting: waiting, surface: session.surface, hostName: session.runtime?.hostName, accent: DesktopPalette.accentText,
+                                                  open: session.runtime?.focusable == true ? { model.focusInTerminal(session) } : nil)
+                                    .id(waiting.id)
+                                    .frame(maxWidth: 720)
+                                    .padding(.horizontal, 16)
+                                    .padding(.top, 8)
+                            } else if let request = pane.requests?.requests.first, pane.detail?.readOnly == false {
                                 RequestCard(request: request, answering: pane.answeringRequest != nil, accent: DesktopPalette.accentText) { decision in
                                     Task { await pane.respond(to: request, decision: decision) }
                                 }
@@ -635,13 +646,6 @@ struct ConversationPane: View {
                                 .frame(maxWidth: 720)
                                 .padding(.horizontal, 16)
                                 .padding(.top, 8)
-                            } else if let waiting = session.waitingOn, pane.detail?.readOnly == true || !session.capabilities.respond {
-                                ElsewhereWaitCard(waiting: waiting, surface: session.surface, hostName: session.runtime?.hostName, accent: DesktopPalette.accentText,
-                                                  open: session.runtime?.focusable == true ? { model.focusInTerminal(session) } : nil)
-                                    .id(waiting.id)
-                                    .frame(maxWidth: 720)
-                                    .padding(.horizontal, 16)
-                                    .padding(.top, 8)
                             }
                             if let error = pane.requestError {
                                 Text(error).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 4)

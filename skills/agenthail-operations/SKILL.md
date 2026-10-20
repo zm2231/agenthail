@@ -83,6 +83,10 @@ cached usage, and which roots share one account. `thread create claude
 --account <name|email|dir>` starts the session under that root; `list --wide`
 shows each Claude session's account.
 
+`thread adopt <target>` takes a terminal or background Claude conversation
+into the Agenthail host. A busy session is refused (or waited on with
+`--wait`); a terminal is stopped only with `--stop-terminal`.
+
 `agenthail claude settings compact [--json]` shows each root's compaction
 settings as its `settings.json` holds them: `autoCompactWindow`, each
 `modelSettings.<model>.autoCompactWindow`, `autoCompactEnabled` and
@@ -343,6 +347,31 @@ without splitting a character. A cut field says so: JSON adds `truncated` and
 text output ends it with `[truncated: shown of total bytes]`. It cannot be
 combined with `--report`.
 
+Each exchange in `last --json` and `last --report`, and the reply in
+`reply --json` and `reply --report`, carries `turn`, what the provider recorded
+about that turn:
+
+```json
+{"v":1,"state":"completed","model":"claude-opus-5-5","durationMs":4200,"usage":{"inputTokens":250,"cachedInputTokens":140,"cacheWriteTokens":5,"outputTokens":50,"reasoningTokens":10},"contextTokens":180,"compactions":[{"trigger":"threshold","preTokens":1103,"postTokens":200}]}
+```
+
+`state` is `completed`, `interrupted`, `failed`, `running` or `unknown`.
+`inputTokens` includes the cached and cache-written input, and `outputTokens`
+includes the reasoning output. `contextTokens` is how full the context was when
+the turn ended. `compactions` lists, oldest first, each compaction since the
+previous turn ended, so one Claude ran while the session sat idle, or a
+`/compact` between turns, shows on the turn after it. `trigger` is `threshold`
+(the context reached the autocompact window), `idle`, `manual`, or `unknown`;
+Codex does not record why it compacted, so its compactions are `unknown`. No
+`compactions` field, and none listed in `unavailable`, means there were none. `unavailable` lists each field the provider did
+not record for that turn, such as `["model","durationMs","usage"]`; a listed
+field is absent, never zero. Codex rollouts record every field for a finished
+turn, except the duration of an aborted one and reasoning tokens Codex did not
+count. A Codex turn read from the app server without its rollout has only its
+state. Claude transcripts record every field, with `usage.reasoningTokens` only
+when Claude wrote thinking-token counts. Notion records none, so its state is `unknown`.
+Tokens are not cost: they cover the agent's own model requests, not subagents.
+
 Use `--model` only for a one-message Codex or Notion override. Use `--from` when
 the receiving agent needs a human-readable sender label. Long content should go
 through stdin.
@@ -509,8 +538,8 @@ is a send a paired host accepted into its own queue. `refused` means the target
 refused to start, for example Claude failing to resume the conversation; the
 row's last error says why, and the sender receives one
 `[agenthail delivery held ...]` notice. It needs a person, not a resend. A
-target whose turn is waiting on its user (a Claude question, plan approval or
-permission prompt, a Codex approval or
+target whose turn is waiting on its user (a Claude question, plan approval,
+permission prompt or dialog open in its terminal, a Codex approval or
 input request) carries `waitingOn` and lists as `wait`; messages to it,
 including steers, are queued until the user answers. Do not interrupt it to get
 a message through. A Claude session between turns whose background tasks

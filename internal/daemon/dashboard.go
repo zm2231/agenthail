@@ -1073,6 +1073,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Agent           string                     `json:"agent"`
 		PermissionMode  string                     `json:"permissionMode"`
 		Account         string                     `json:"account"`
+		StopTerminal    bool                       `json:"stopTerminal"`
 		Fork            surface.ForkOptions        `json:"fork"`
 		NativeQueue     surface.NativeQueueRequest `json:"nativeQueue"`
 		Action          string                     `json:"action"`
@@ -1239,7 +1240,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 					pend(launchResult.Location, launchErr.Error())
 					return
 				default:
-					http.Error(w, launchErr.Error(), http.StatusBadGateway)
+					d.writeUnstartedSession(w, request.Message, launchErr)
 					return
 				}
 			}
@@ -1321,18 +1322,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		if startErr == nil {
 			startErr = errors.New("session starter returned no session")
 		}
-		unknown := surface.IsDeliveryOutcomeUnknown(startErr)
-		kind := "failed"
-		if unknown {
-			kind = "unknown"
-		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: kind, Message: request.Message, Error: startErr.Error()})
-		writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "status": "failed", "retryable": false, "unknown": unknown, "error": func() string {
-			if unknown {
-				return fmt.Sprintf("initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: %s", startErr)
-			}
-			return startErr.Error()
-		}()})
+		d.writeUnstartedSession(w, request.Message, startErr)
 		return
 	}
 	if request.Action == "notion-create" {
@@ -1709,6 +1699,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	adapter, transportErr := d.adapters().For(session)
 	if transportErr != nil {
 		http.Error(w, transportErr.Error(), http.StatusConflict)
+		return
+	}
+	if request.Action == "session-adopt" {
+		d.dashboardSessionAdopt(w, r, adapter, session, surface.AdoptRequest{StopTerminal: request.StopTerminal})
 		return
 	}
 	if request.Action == "session-fork" || request.Action == "native-queue" || strings.HasPrefix(request.Action, "session-lifecycle-") {
@@ -2248,6 +2242,22 @@ func writeDashboardJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+// writeUnstartedSession records and reports a session-create that returned
+// no session.
+func (d *Daemon) writeUnstartedSession(w http.ResponseWriter, message string, startErr error) {
+	unknown := surface.IsDeliveryOutcomeUnknown(startErr)
+	kind := "failed"
+	if unknown {
+		kind = "unknown"
+	}
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: kind, Message: message, Error: startErr.Error()})
+	detail := startErr.Error()
+	if unknown {
+		detail = fmt.Sprintf("initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: %s", startErr)
+	}
+	writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "status": "failed", "retryable": false, "unknown": unknown, "error": detail})
 }
 
 func (d *Daemon) writeStartedSessionOutcome(w http.ResponseWriter, session *surface.Session, alias, messageUUID, message string, sent *surface.SendResult, startErr error, extra map[string]any) {

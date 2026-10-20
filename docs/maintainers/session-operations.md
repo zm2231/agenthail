@@ -55,6 +55,52 @@ boundary, and records the original size; `--report` replaces the text with the
 parsed completion report (`internal/report`) and cannot be combined with it.
 Both run in the CLI on whatever page the reader returned, so the daemon page,
 paired-host reads and offline provider reads behave the same.
+
+Each exchange carries `turn` (`surface.TurnMetadata`, version 1). The done item
+that ends a turn carries what the provider recorded, through the journal like
+any other field, and `surface.BoundSessionRead` gives an exchange that no done
+item ended `running` (the newest exchange of a busy session) or `unknown`.
+`unavailable` names each field the provider did not record.
+
+- Codex: a meter reads the rollout. `turn_context` gives the model,
+  `task_complete.duration_ms` the duration, and `token_count.last_token_usage`
+  each request's tokens. Codex repeats a `token_count` without a new request; a
+  record that leaves `total_token_usage` unchanged is not counted again. A
+  managed session read from the app server takes the rollout turn with the
+  same turn ID, and the app server's turn status otherwise.
+- Claude: the turn tracker sums each assistant message's usage, from the
+  message's last record, since earlier records hold partial counts.
+  `inputTokens` adds `cache_read_input_tokens` and
+  `cache_creation_input_tokens` to `input_tokens`, so both providers count
+  input the same way. `durationMs` is the wall time from the prompt record to
+  the turn's last record. `contextTokens` is the last assistant record's input
+  (`<synthetic>` records are not requests and are skipped),
+  or the `postTokens` of a compaction after it. Each `compact_boundary` gives
+  a compaction: `compactMetadata.trigger` `auto` is `threshold` and `manual` is
+  `manual`, and an informational record starting "Compacted while idle" or
+  "Compacted after an hour idle", which Claude writes just after the boundary,
+  makes it `idle`. The compaction summary Claude writes as a user record
+  neither starts a turn nor is a prompt; it shows as a `Compaction summary`
+  event.
+- Codex compactions: a `compacted` record is one compaction. `preTokens` is the
+  size of the request before it and `postTokens` the next `token_count` that is
+  smaller; `contextTokens` is the last `token_count`'s `total_tokens`. Two
+  compactions with no `token_count` between them leave the size between them
+  unrecorded, so the first has no `postTokens` and the second no `preTokens`.
+  The rollout does not say why Codex compacted, so `trigger` is `unknown`.
+- Notion: nothing is recorded, so every field is unavailable.
+
+A reader that starts mid-turn, a page or a stream window, replays from the
+record that started the turn before it, at most 64 MiB back, so it holds the
+compactions since that turn ended and the context size they started from. A
+turn that started further back reports usage and model as unavailable rather
+than a partial count, and a turn whose predecessor is out of reach reports
+`compactions` as unavailable.
+
+These numbers are accounting inputs, not a bill. They omit subagent turns,
+which run in their own transcripts, and a request cancelled before the provider
+recorded its usage. They do not price cached or cache-written tokens. Claude's
+duration includes tool runs and permission waits; Codex's is the provider's own.
 With the daemon running, phone detail, `last`, and `reply` read the same bounded
 per-session journal page. CLI JSON includes `journalSeq`; an active-daemon read
 error does not fall back to a second provider reader. Metadata loads independently.
@@ -90,12 +136,17 @@ choice, such as a relay, follows the setting as it stands when the daemon drains
 it, so changing the setting applies to messages already waiting.
 
 A busy target can be waiting on its user. `surface.Waiting` on the session and
-on its turn observation carries the kind (`question`, `approval`, `input`), a
-stable id and when it was first seen. Claude reads it from the live process's
-record, `sessions/<pid>.json`: `"status":"waiting"` with `waitingFor` set to
-`input needed` for `AskUserQuestion` (kind `question`) or `permission prompt`
-for a plan approval or a tool permission (kind `approval`), and
-`statusUpdatedAt` as when it started. The id is
+on its turn observation carries the kind (`question`, `approval`, `input`,
+`dialog`), a stable id and when it was first seen. Claude reads it from the
+live process's record, `sessions/<pid>.json`: `"status":"waiting"` with
+`waitingFor` as Claude itself classes it. `input needed` (`AskUserQuestion`, an
+MCP server's question) is kind `question`. `permission prompt` (a plan approval
+or a tool permission), `sandbox request`, `worker request` and `goal proposal`
+are kind `approval`, as is any value Claude adds later. `dialog open` (a panel
+open in the terminal, such as `/model` or a settings review) is kind `dialog`:
+only the terminal can settle it, so every client shows where to settle it even
+in a session that takes answers through Agenthail. `statusUpdatedAt` is when it
+started. The id is
 `<conversation>:<kind>:<statusUpdatedAt>`. A session the
 [Claude host](claude-host.md#requests) runs reads it from the host instead: its
 oldest open request, under Claude's own request id. Claude 2.1.303 writes a pending tool

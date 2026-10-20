@@ -70,13 +70,14 @@ func capExchange(exchange surface.Exchange, limit int) cappedExchange {
 }
 
 type exchangeReport struct {
-	Timestamp   time.Time      `json:"timestamp"`
-	Report      *report.Report `json:"report,omitempty"`
-	ReportError string         `json:"reportError,omitempty"`
+	Timestamp   time.Time             `json:"timestamp"`
+	Report      *report.Report        `json:"report,omitempty"`
+	ReportError string                `json:"reportError,omitempty"`
+	Turn        *surface.TurnMetadata `json:"turn,omitempty"`
 }
 
 func readExchangeReport(exchange surface.Exchange) (exchangeReport, error) {
-	read := exchangeReport{Timestamp: exchange.Timestamp}
+	read := exchangeReport{Timestamp: exchange.Timestamp, Turn: exchange.Turn}
 	parsed, err := report.Parse(exchange.Assistant)
 	if err != nil {
 		read.ReportError = err.Error()
@@ -101,4 +102,13 @@ func printExchangeReports(session *surface.Session, read *surface.SessionReadRes
 		return fmt.Errorf("newest exchange: %w", newest)
 	}
 	return newest
+}
+
+func replyTurn(exchanges []surface.Exchange, reply *surface.ReplyResult) *surface.TurnMetadata {
+	for index := len(exchanges) - 1; index >= 0; index-- {
+		if exchanges[index].Assistant == reply.Text && exchanges[index].Turn != nil {
+			return exchanges[index].Turn
+		}
+	}
+	return surface.NewTurnMetadata(surface.TurnUnknown, surface.TurnMeasure{})
 }

@@ -33,6 +33,10 @@ No root is stored. Each pass reads the session records and transcripts of every 
 
 The account reaches `agenthail accounts [--json]`, `doctor`, the `claudeAccounts` list of `/api/v1/session-options` (answered by the host that owns the session), and each Claude row's `claudeAccount` (`name`, `root`, `email`, `label`), which is derived from the root that holds the transcript. A row whose transcript does not exist yet has no account until Claude writes it. The label is the email, with the root's name in front when two roots share the email.
 
+### Adopting a session
+
+`Claude.AdoptSession` (`surface.SessionAdopter`) reopens a conversation in the host, in the root that holds it, under the conversation lock. A conversation the host already holds is returned unchanged. A holder that is running a turn, waiting on a request, or running background work (`surface.BackgroundRunning` of its tasks) is never stopped: adoption is refused with `AdoptBusyError` or waits up to `Wait`. An idle background job is stopped with `claude stop`, and an idle terminal is sent SIGTERM only when the request carries `StopTerminal`; without it adoption returns `AdoptConsentError`. Once no process holds the conversation it is resumed in the host. The dashboard action is `session-adopt` with `stopTerminal`; it answers 409 with `busy` or `needsConsent`.
+
 A conversation whose records or transcripts appear in two roots is refused for sends, reads and lifecycle actions with an error naming both roots, rather than resolved to either copy. It is still listed.
 
 ## Durable reply endpoint design

@@ -283,10 +283,11 @@ var claudeBackgroundLine = regexp.MustCompile(`(?m)^backgrounded · ([A-Za-z0-9_
 // the background ID once a job exists, so a run that never started, or exited
 // on its own without printing one, started nothing.
 func claudeBackgroundRunError(action string, err error, output []byte) error {
-	failure := fmt.Errorf("%s: %w: %s", action, err, strings.TrimSpace(string(output)))
-	if surface.IsDeliveryUnavailable(err) {
-		return surface.DeliveryUnavailable(failure)
+	var unavailable surface.DeliveryUnavailableError
+	if errors.As(err, &unavailable) {
+		return surface.DeliveryUnavailable(fmt.Errorf("%s: %w: %s", action, unavailable.Err, strings.TrimSpace(string(output))))
 	}
+	failure := fmt.Errorf("%s: %w: %s", action, err, strings.TrimSpace(string(output)))
 	var exit *exec.ExitError
 	var path *fs.PathError
 	switch {

@@ -201,6 +201,8 @@ func elsewhereWaitingMessage(name string, kind surface.WaitingKind) string {
 		return fmt.Sprintf("%s asks you a question", name)
 	case surface.WaitingInput:
 		return fmt.Sprintf("%s needs your input", name)
+	case surface.WaitingDialog:
+		return fmt.Sprintf("%s has a dialog open in its terminal", name)
 	default:
 		return fmt.Sprintf("%s needs your approval", name)
 	}

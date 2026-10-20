@@ -878,24 +878,34 @@ func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.T
 }
 
 // recordWaiting reads what the session's live process reports it is waiting
-// on: "status":"waiting" with waitingFor "input needed" for AskUserQuestion,
-// and "permission prompt" for a plan approval or a tool permission.
-// statusUpdatedAt is when it started waiting, so it names one question.
+// on: "status":"waiting" with the waitingFor Claude classes itself. Its
+// permission prompts, sandbox, worker and goal requests ask for approval;
+// "input needed" (AskUserQuestion, an MCP server's question) is a question;
+// "dialog open" is a panel only its terminal can settle. statusUpdatedAt is
+// when it started waiting, so it names one question.
 func (c *Claude) recordWaiting(sess *surface.Session) *surface.Waiting {
 	record, live := c.liveRecord(*sess)
 	if !live || str(record, "status") != "waiting" {
 		return nil
 	}
-	kind := surface.WaitingApproval
-	if str(record, "waitingFor") == "input needed" {
-		kind = surface.WaitingQuestion
-	}
+	kind := claudeWaitingKind(str(record, "waitingFor"))
 	since, _ := record["statusUpdatedAt"].(float64)
 	waiting := &surface.Waiting{Kind: kind, ID: fmt.Sprintf("%s:%s:%d", sess.ID, kind, int64(since))}
 	if since > 0 {
 		waiting.Since = time.UnixMilli(int64(since)).UTC()
 	}
 	return waiting
+}
+
+func claudeWaitingKind(waitingFor string) surface.WaitingKind {
+	switch waitingFor {
+	case "input needed":
+		return surface.WaitingQuestion
+	case "dialog open":
+		return surface.WaitingDialog
+	default:
+		return surface.WaitingApproval
+	}
 }
 
 func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
@@ -1220,13 +1230,14 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		return err
 	}
 	turns := newClaudeTurnTracker(replayed.current, closing)
+	turns.meter, turns.between, turns.betweenKnown = replayed.meter, replayed.between, replayed.betweenKnown
 	completed := false
 	finish := func(ended []claudeTurnEnd) {
 		for _, end := range ended {
 			if uuid != "" && end.TurnID != uuid && end.Status == "" {
 				continue
 			}
-			onEvent(surface.StreamEvent{ID: end.Key, ProviderKey: "timeline:" + end.Key, Version: 1, Operation: "phase", TurnID: end.TurnID, Kind: "done", Status: end.Status})
+			onEvent(surface.StreamEvent{ID: end.Key, ProviderKey: "timeline:" + end.Key, Version: 1, Operation: "phase", TurnID: end.TurnID, Kind: "done", Status: end.Status, Turn: end.Turn})
 			if uuid != "" && end.TurnID == uuid && end.Status == "" {
 				completed = true
 			}
@@ -1322,7 +1333,8 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 }
 
 func claudeRecordStartsTurn(record map[string]any) bool {
-	return str(record, "type") == "user" && str(record, "uuid") != "" && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record) && !claudeRecordIsCommand(record)
+	compactSummary, _ := record["isCompactSummary"].(bool)
+	return str(record, "type") == "user" && str(record, "uuid") != "" && !compactSummary && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record) && !claudeRecordIsCommand(record)
 }
 
 func claudeRecordHasToolResult(record map[string]any) bool {
