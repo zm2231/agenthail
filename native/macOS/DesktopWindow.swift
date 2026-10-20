@@ -1999,9 +1999,9 @@ struct DetailsTab: View {
                     }
                 }
                 detailRow("Surface", session.surface.capitalized)
-                if let account = session.claudeAccount {
-                    detailRow("Account", account.label)
-                        .help(account.root)
+                if let configRoot = session.claudeConfigRoot {
+                    detailRow("Config folder", configRoot.summary)
+                        .help(configRoot.root)
                 }
                 if let detail = pane.detail {
                     detailRow("Exchanges", SessionFacts.exchangeLabel(detail.exchanges.count))

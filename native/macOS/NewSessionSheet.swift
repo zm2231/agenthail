@@ -30,7 +30,7 @@ struct NewSessionSheet: View {
     }
 
     private var projects: [LaunchProject] { hosts.projects }
-    private var claudeAccounts: [ClaudeAccountOption] { form.agent == "claude" ? hosts.claudeAccounts : [] }
+    private var claudeConfigRoots: [ClaudeConfigRootOption] { form.agent == "claude" ? hosts.claudeConfigRoots : [] }
     private var startsOnThisMac: Bool { hosts.hostQuery == nil }
 
     private var agentModels: [ModelOption] { hosts.models[form.agent] ?? [] }
@@ -96,13 +96,13 @@ struct NewSessionSheet: View {
                             Button("Choose…", action: chooseFolder)
                         }
                     }
-                    if claudeAccounts.count > 1 {
-                        Picker("Account", selection: $form.account) {
-                            ForEach(claudeAccounts) { account in
-                                Text(account.menuLabel)
-                                    .tag(account.choice)
-                                    .selectionDisabled(!account.signedIn)
-                                    .help(account.root)
+                    if claudeConfigRoots.count > 1 {
+                        Picker("Config folder", selection: $form.configRoot) {
+                            ForEach(claudeConfigRoots) { root in
+                                Text(root.menuLabel)
+                                    .tag(root.choice)
+                                    .selectionDisabled(!root.signedIn)
+                                    .help(root.root)
                             }
                         }
                     }

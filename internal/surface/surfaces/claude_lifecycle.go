@@ -100,10 +100,10 @@ func validateClaudeStart(options surface.SessionStartOptions) error {
 // startRoot is the config root a new conversation runs under, "" for the
 // primary.
 func (c *Claude) startRoot(options surface.SessionStartOptions) (string, error) {
-	if options.Account == "" {
+	if options.ConfigRoot == "" {
 		return "", nil
 	}
-	root, err := surface.ResolveClaudeAccountRoot(c.home, options.Account)
+	root, err := surface.ResolveClaudeConfigRoot(c.home, options.ConfigRoot)
 	if err != nil {
 		return "", surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
 	}

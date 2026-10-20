@@ -78,10 +78,10 @@ overrides in the service; rerun it after changing them. Claude Code state is
 read from `CLAUDE_CONFIG_DIR` when it is set, otherwise `~/.claude`, plus every
 root listed as `claudeConfigDirs` in `~/.agenthail/config.json`. `doctor` shows
 each root. A conversation present in two roots is refused rather than guessed.
-`agenthail accounts [--json]` shows the account signed into each root, its
-cached usage, and which roots share one account. `thread create claude
---account <name|email|dir>` starts the session under that root; `list --wide`
-shows each Claude session's account.
+`agenthail roots [--json]` shows the login each root currently holds and its
+cached usage; a root is a config folder, not an account. `thread create claude
+--root <name|dir>` starts the session in that root; `list --wide` shows the
+config folder each Claude session lives in.
 
 `thread adopt <target>` takes a terminal or background Claude conversation
 into the Agenthail host. A busy session is refused (or waited on with

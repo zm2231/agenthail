@@ -23,7 +23,7 @@ type listProject struct {
 
 type listCatalogView struct {
 	Project       *listProject            `json:"project,omitempty"`
-	ClaudeAccount *surface.SessionAccount `json:"claudeAccount,omitempty"`
+	ClaudeConfigRoot *surface.SessionConfigRoot `json:"claudeConfigRoot,omitempty"`
 	Subagents     *surface.SubagentRollup `json:"-"`
 	Current       bool                    `json:"current"`
 	Archived      bool                    `json:"archived,omitempty"`
