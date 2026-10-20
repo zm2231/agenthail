@@ -476,3 +476,177 @@ func TestTheCatalogAndPathResolutionAgreeRightAfterOriginChanges(t *testing.T) {
 		t.Fatalf("added project after: session=%s records=%+v", id, records)
 	}
 }
+
+func TestEveryProjectSurfaceNamesItsCoordinatorsOnEveryHost(t *testing.T) {
+	d, r, fake, from, to := daemonFixture(t)
+	repo := catalogTestRepo(t)
+	gitRun(t, repo, "remote", "add", "origin", "https://github.com/example/widget.git")
+	from.Cwd, to.Cwd = repo, repo
+	for _, session := range []surface.Session{from, to} {
+		fake.sessions[session.ID] = session
+		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.discoverCatalog(context.Background())
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	call := func(method, path, body string, into any) {
+		t.Helper()
+		request := httptest.NewRequest(method, path, strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s %s: %d %s", method, path, response.Code, response.Body)
+		}
+		if into != nil {
+			if err := json.Unmarshal(response.Body.Bytes(), into); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	projects := func() map[string]dashboardProject {
+		t.Helper()
+		var state dashboardState
+		call(http.MethodGet, "/api/v1/snapshot?fresh=1", "", &state)
+		byID := map[string]dashboardProject{}
+		for _, found := range state.Projects {
+			byID[found.ID] = found
+		}
+		return byID
+	}
+	launchable := func(id string) bool {
+		t.Helper()
+		var options struct {
+			Projects []launchProject `json:"projects"`
+		}
+		call(http.MethodGet, "/api/v1/session-options", "", &options)
+		for _, found := range options.Projects {
+			if found.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	widget, found := projects()["repo:github.com/example/widget"]
+	if !found {
+		t.Fatalf("projects=%+v", projects())
+	}
+	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: widget.ID, ProjectRoot: repo, Name: "widget-lead", Surface: "claude", Cwd: repo}, registry.CoordinatorChange{SessionID: to.ID, ChangedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	unstartedRoot := filepath.Join(t.TempDir(), "unstarted")
+	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: "repo:github.com/example/unstarted", ProjectRoot: unstartedRoot, Name: "unstarted-lead", Surface: "codex", Cwd: unstartedRoot}, registry.CoordinatorChange{ChangedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	byID := projects()
+	if leads := byID[widget.ID].Coordinators; len(leads) != 1 || leads[0].Name != "widget-lead" || leads[0].SessionID != to.ID || leads[0].Host.State != hostStateLocal || leads[0].ChangedBy != "fixture" {
+		t.Fatalf("widget coordinators=%+v", leads)
+	}
+	unstarted := byID["repo:github.com/example/unstarted"]
+	if leads := unstarted.Coordinators; len(leads) != 1 || leads[0].SessionID != "" || unstarted.DisplayName != "unstarted" || unstarted.SessionCount != 0 || unstarted.Archived || len(unstarted.Checkouts) != 1 || unstarted.Checkouts[0].RootPath != unstartedRoot || unstarted.Checkouts[0].Host.State != hostStateLocal {
+		t.Fatalf("unstarted project=%+v", unstarted)
+	}
+	localID := unstarted.Checkouts[0].ProjectID
+	if !launchable(localID) {
+		t.Fatal("a coordinator's project without sessions is not offered for a new session")
+	}
+	call(http.MethodPost, "/api/v1/actions", `{"action":"project-archive","projectId":"repo:github.com/example/unstarted"}`, nil)
+	if found := projects()["repo:github.com/example/unstarted"]; !found.Archived || len(found.Coordinators) != 1 {
+		t.Fatalf("archived project=%+v", found)
+	}
+	if launchable(localID) {
+		t.Fatal("an archived project is offered for a new session")
+	}
+	call(http.MethodPost, "/api/v1/actions", `{"action":"project-unarchive","projectId":"repo:github.com/example/unstarted"}`, nil)
+	if found := projects()["repo:github.com/example/unstarted"]; found.Archived || !launchable(localID) {
+		t.Fatalf("unarchived project=%+v", found)
+	}
+
+	if err := r.PutHostCoordinator("forge", registry.CoordinatorEntry{ProjectID: widget.ID, ProjectRoot: "/srv/widget", Name: "forge-lead", Surface: "codex", SessionID: hosts.Qualify("forge", "s-forge"), ChangedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if leads := projects()[widget.ID].Coordinators; len(leads) != 2 || leads[0].Name != "widget-lead" || leads[1].Name != "forge-lead" || leads[1].Host.ID != "forge" || leads[1].SessionID != hosts.Qualify("forge", "s-forge") {
+		t.Fatalf("conflicting coordinators=%+v", leads)
+	}
+
+	gitRun(t, repo, "remote", "set-url", "origin", "https://github.com/example/widget-renamed.git")
+	d.discoverCatalog(context.Background())
+	byID = projects()
+	renamed, found := byID["repo:github.com/example/widget-renamed"]
+	if _, stale := byID[widget.ID]; stale || !found || len(renamed.Coordinators) != 0 || len(renamed.Checkouts) != 1 {
+		t.Fatalf("after the origin changed: projects=%+v", byID)
+	}
+	var options struct {
+		Projects []launchProject `json:"projects"`
+	}
+	call(http.MethodGet, "/api/v1/session-options", "", &options)
+	offered := 0
+	for _, found := range options.Projects {
+		if found.RootPath == repo {
+			offered++
+		}
+	}
+	if offered != 1 {
+		t.Fatalf("session options=%+v", options.Projects)
+	}
+}
+
+func TestAnAddedProjectsCoordinatorStaysOneProjectAfterTheOriginChanges(t *testing.T) {
+	d, r, _, repo := projectsFixture(t)
+	gitRun(t, repo, "remote", "add", "origin", "https://github.com/example/widget.git")
+	if response := runDashboardAction(t, d, `{"action":"project-add","path":"`+repo+`"}`); response.Code != http.StatusOK {
+		t.Fatalf("add: %d %s", response.Code, response.Body)
+	}
+	d.discoverCatalog(context.Background())
+	records, err := r.ListProjects()
+	if err != nil || len(records) != 1 {
+		t.Fatalf("records=%+v err=%v", records, err)
+	}
+	added := records[0]
+	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: added.Key, ProjectRoot: repo, Name: "widget-lead", Surface: "claude", Cwd: repo}, registry.CoordinatorChange{ChangedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "remote", "set-url", "origin", "https://github.com/example/widget-renamed.git")
+	d.discoverCatalog(context.Background())
+	state, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	atRoot := 0
+	for _, project := range state.Projects {
+		for _, at := range project.Checkouts {
+			if at.RootPath == repo {
+				atRoot++
+			}
+		}
+	}
+	if atRoot != 1 {
+		t.Fatalf("projects=%+v", state.Projects)
+	}
+	options, err := d.launchProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	offered := 0
+	for _, found := range options {
+		if found.RootPath == repo {
+			offered++
+			if found.ID != added.ID {
+				t.Fatalf("offered=%+v added=%+v", found, added)
+			}
+		}
+	}
+	if offered != 1 {
+		t.Fatalf("session options=%+v", options)
+	}
+	response := runDashboardAction(t, d, `{"action":"project-archive","projectId":"`+added.Key+`"}`)
+	want := "project " + added.Key + " is not listed on " + d.hostIdentity().Name + "; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\n"
+	if response.Code != http.StatusNotFound || response.Body.String() != want {
+		t.Fatalf("archive by the id the project no longer has: %d %q", response.Code, response.Body)
+	}
+	archive, err := r.ArchiveState()
+	if err != nil || len(archive.Projects) != 0 {
+		t.Fatalf("archived=%v err=%v", archive.Projects, err)
+	}
+}

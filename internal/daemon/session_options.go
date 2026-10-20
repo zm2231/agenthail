@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -62,8 +63,8 @@ type launchProject struct {
 }
 
 // launchProjects lists this host's projects, the most recently active first,
-// followed by added projects without sessions. Archived projects are left
-// out.
+// followed by added projects and coordinators' projects without sessions.
+// Archived projects are left out.
 func (d *Daemon) launchProjects() ([]launchProject, error) {
 	snapshot, err := d.Registry.CatalogSnapshot()
 	if err != nil {
@@ -108,6 +109,24 @@ func (d *Daemon) launchProjects() ([]launchProject, error) {
 		}
 		added := addedCatalogProject(record, false)
 		byID[record.ID] = &candidate{project: launchProject{ID: added.LocalID, DisplayName: added.DisplayName, RootPath: added.RootPath, Kind: added.Kind}}
+	}
+	coordinators, err := d.Registry.LocalCoordinators()
+	if err != nil {
+		return nil, err
+	}
+	listed := make([]registry.ProjectRecord, 0, len(byID))
+	for _, entry := range byID {
+		listed = append(listed, registry.ProjectRecord{WorkspaceRoot: entry.project.RootPath})
+	}
+	for _, spec := range coordinators {
+		if projectRootHeld(records, listed, spec) {
+			continue
+		}
+		found := coordinatorCatalogProject(spec)
+		if _, archived := archive.Projects[found.LocalID]; archived {
+			continue
+		}
+		byID[found.LocalID] = &candidate{project: launchProject{ID: found.LocalID, DisplayName: found.DisplayName, RootPath: found.RootPath, Kind: found.Kind}}
 	}
 	candidates := make([]*candidate, 0, len(byID))
 	for _, entry := range byID {
