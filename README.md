@@ -193,7 +193,7 @@ Read it from the agent's latest reply:
 
 ```bash
 agenthail last @builder 1 --json \
-  | jq -e '.exchanges[-1].assistant | capture("`{3}agenthail-report\n(?<r>[^\n]+)\n`{3}\\s*$").r | fromjson'
+  | jq -e '.exchanges[-1].assistant | capture("(?:\\A|\n)`{3}agenthail-report\n(?<r>[^\n]+)\n`{3}\\s*\\z").r | fromjson'
 ```
 
 The report is the agent's own claim; check the commits before you rely on them. The [operations skill](skills/agenthail-operations/SKILL.md#completion-report) defines every field. Agents that have the skill write one when they finish dispatched work.

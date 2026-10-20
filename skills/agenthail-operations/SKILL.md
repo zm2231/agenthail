@@ -328,7 +328,7 @@ of JSON, with nothing after the closing fence.
 Fixed the export retry and pushed the branch.
 
 ```agenthail-report
-{"v":1,"status":"complete","stop":"complete","commits":["0d825e4d"],"paths":["internal/export/retry.go"],"next":"Review PR #142"}
+{"v":1,"status":"complete","stop":"complete","commits":["0d825e4d"],"paths":["internal/export/retry.go"],"next":"Deploy the export service"}
 ```
 ````
 
@@ -359,7 +359,7 @@ non-zero when the last reply has no report:
 
 ```bash
 agenthail last @builder 1 --json \
-  | jq -e '.exchanges[-1].assistant | capture("`{3}agenthail-report\n(?<r>[^\n]+)\n`{3}\\s*$").r | fromjson'
+  | jq -e '.exchanges[-1].assistant | capture("(?:\\A|\n)`{3}agenthail-report\n(?<r>[^\n]+)\n`{3}\\s*\\z").r | fromjson'
 ```
 
 ## Follow, Subscribe, And Notify
