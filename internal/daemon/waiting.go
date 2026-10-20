@@ -173,10 +173,14 @@ func (d *Daemon) waitingRequest(ctx context.Context, session surface.Session, wa
 // elsewhereWaitingMessage says what a session waits on when Agenthail
 // cannot read the prompt itself.
 func elsewhereWaitingMessage(name string, kind surface.WaitingKind) string {
-	if kind == surface.WaitingQuestion {
+	switch kind {
+	case surface.WaitingQuestion:
 		return fmt.Sprintf("%s asks you a question", name)
+	case surface.WaitingInput:
+		return fmt.Sprintf("%s needs your input", name)
+	default:
+		return fmt.Sprintf("%s needs your approval", name)
 	}
-	return fmt.Sprintf("%s needs your approval", name)
 }
 
 // waitingNotificationKey names one question's notifications within the 64

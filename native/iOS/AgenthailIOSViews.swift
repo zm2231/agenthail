@@ -516,7 +516,7 @@ struct SessionScreen: View {
                         .padding(.horizontal)
                         .padding(.top, 6)
                     } else if let detail, let waiting = detail.session.waitingOn, detail.readOnly || !detail.capabilities.respond {
-                        ElsewhereWaitCard(waiting: waiting, hostName: session.runtime?.hostName, accent: SessionStyle.accent,
+                        ElsewhereWaitCard(waiting: waiting, surface: session.surface, hostName: session.runtime?.hostName, accent: SessionStyle.accent,
                                           open: session.runtime?.focusable == true ? { model.focusSession(session) } : nil)
                             .id(waiting.id)
                             .padding(.horizontal)

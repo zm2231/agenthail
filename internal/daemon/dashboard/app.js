@@ -1456,7 +1456,7 @@ function renderRequests() {
 }
 // A session waiting on a prompt Agenthail cannot answer shows where to answer it.
 function renderElsewhereWait(session) {
-  const asking = session.waitingOn.kind === "question" ? "asks you a question" : "needs your approval";
+  const asking = { question: "asks you a question", input: "needs your input" }[session.waitingOn.kind] || "needs your approval";
   const open = session.runtime?.focusable ? '<div class="request-actions"><button class="primary-button" data-action="session-focus" type="button">Open session</button></div>' : "";
   return `<div class="request-card"><h3>${escape(displayName(session))} ${asking}</h3><p>Agenthail can't answer this one. Answer it where the session runs, such as its terminal. Messages you send wait until then.</p>${open}</div>`;
 }

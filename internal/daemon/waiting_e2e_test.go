@@ -700,3 +700,39 @@ func TestSessionDetailShowsTheQuestionTheCatalogShows(t *testing.T) {
 		t.Fatalf("detail still waiting on %+v after the catalog cleared it", waiting)
 	}
 }
+
+func TestCodexInputRequestIsNotifiedAsInputNotApproval(t *testing.T) {
+	home := codextest.Home(t)
+	lifecycle := codextest.InstallLifecycle(t, home, func(string, map[string]any) map[string]any { return nil })
+	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	pushes := newPushRecorder(t, store)
+	h, stop := runDaemon(t, store, surfaces.NewCodex(unreachableDesktop))
+	status, payload := h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "session-create", "surface": "codex", "message": "Pick the migration", "cwd": t.TempDir()})
+	var created struct {
+		Session struct {
+			ID string `json:"id"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(payload, &created); status != http.StatusCreated || err != nil || created.Session.ID == "" {
+		t.Fatalf("create status=%d body=%s err=%v", status, payload, err)
+	}
+	id := created.Session.ID
+	lifecycle.Daemon().SetActiveFlags(id, "waitingOnUserInput")
+	stop()
+	h, _ = runDaemon(t, store, surfaces.NewCodex(unreachableDesktop))
+	eventually(t, "the thread to show it waits on input", func() bool {
+		waiting := h.sessionWaiting(id)
+		return waiting != nil && waiting.Kind == surface.WaitingInput
+	})
+	if waiting := h.detailWaiting(id); waiting == nil || waiting.Kind != surface.WaitingInput {
+		t.Fatalf("detail waiting=%+v", waiting)
+	}
+	eventually(t, "the waiting notification", func() bool { return pushes.count("session.waiting") == 1 })
+	if push := pushes.first("session.waiting"); push["message"] != notificationSurfaceName(surface.KindCodex)+" needs your input" {
+		t.Fatalf("push=%v", push)
+	}
+}

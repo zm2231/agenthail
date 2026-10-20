@@ -133,15 +133,23 @@ struct RequestCard: View {
 /// A session waiting on a prompt Agenthail cannot answer, with where to answer it.
 struct ElsewhereWaitCard: View {
     let waiting: WaitingState
+    let surface: String
     let hostName: String?
     let accent: Color
     let open: (() -> Void)?
 
-    private var question: Bool { waiting.kind == "question" }
+    static func heading(kind: String, surface: String) -> String {
+        let agent = SessionRefinement.surfaceLabel(surface)
+        switch kind {
+        case "question": return "\(agent) asks you a question"
+        case "input": return "\(agent) needs your input"
+        default: return "\(agent) needs your approval"
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(question ? "Claude asks you a question" : "Claude needs your approval", systemImage: question ? "questionmark.bubble" : "hand.raised")
+            Label(Self.heading(kind: waiting.kind, surface: surface), systemImage: waiting.kind == "approval" ? "hand.raised" : "questionmark.bubble")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(accent)
             Text("Agenthail can't answer this one. Answer it where the session runs\(hostName.map { ", in \($0)" } ?? ", such as its terminal"). Messages you send wait until then.")
