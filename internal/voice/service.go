@@ -33,6 +33,11 @@ Use Sent, Queued, and Submitted receipts without treating them as proof of deliv
 Report delivery problems when notified; never claim a reply or completed work without evidence.
 When the user asks to route a connected call to an exact existing session, use the Agenthail
 voice transfer tool. Use the return tool to resume the normal orchestrator workflow.
+When the user names a project or its coordinator (lead), use the voice projects tool to list
+projects and their coordinators on this host and paired hosts, and the send-to-lead tool or
+the transfer tool's project argument to reach one. Never guess a lead from a session name; when a
+tool refuses because a name matches several projects or a project has coordinators on two hosts,
+tell the user why and let them choose.
 Hangup ends audio only. Continue authorized work in this same persistent thread.
 "Stop speaking" is not permission to cancel agent work. Clarify an ambiguous "stop";
 use agenthail interrupt only for the specific requested agent and supported transport.
@@ -98,6 +103,7 @@ type State struct {
 	Phase          string           `json:"phase"`
 	AttemptID      string           `json:"attemptId,omitempty"`
 	SkillDigest    string           `json:"skillDigest,omitempty"`
+	ToolsDigest    string           `json:"toolsDigest,omitempty"`
 	Message        string           `json:"message,omitempty"`
 	SDP            string           `json:"sdp,omitempty"`
 	Events         []Event          `json:"events"`
@@ -124,6 +130,9 @@ type diskState struct {
 	Owner                   string   `json:"owner"`
 	Messages                []string `json:"messages"`
 	NativeHeartbeatEnrolled bool     `json:"nativeHeartbeatEnrolled,omitempty"`
+	// ToolsNoticeShown records that a call ended while the outdated tools
+	// notice was shown, so it is shown once per operator.
+	ToolsNoticeShown bool `json:"toolsNoticeShown,omitempty"`
 }
 
 type Service struct {
@@ -141,6 +150,7 @@ type Service struct {
 	eventGap                bool
 	commandPath             string
 	target                  TargetResolver
+	projects                Projects
 	dispatcher              Deliverer
 	setOperatorSourceActive func(session *surface.Session, active bool)
 	stream                  SessionStreamProvider
@@ -279,6 +289,9 @@ func (s *Service) capture() *snapshot {
 	if s.provider == nil {
 		v.Phase = "blocked"
 		v.Message = "Codex Desktop voice is not configured on this host."
+	}
+	if v.Message == "" && s.toolsOutdated() {
+		v.Message = toolsOutdatedNotice
 	}
 	// HTTP encoding must not race the observer's mutation of the retained events.
 	data, _ := json.Marshal(v)
@@ -945,7 +958,7 @@ func (s *Service) createOperator(ctx context.Context) error {
 		return err
 	}
 	s.state = diskState{State: State{
-		Protocol: 1, Session: session, Phase: "ready", SkillDigest: digest, Events: []Event{},
+		Protocol: 1, Session: session, Phase: "ready", SkillDigest: digest, ToolsDigest: ToolsDigest(), Events: []Event{},
 	}}
 	s.cursor, s.boundAttempt, s.eventGap = Cursor{}, "", false
 	if err := s.save(); err != nil {
@@ -1058,6 +1071,9 @@ func (s *Service) poll(ctx context.Context) error {
 			}
 		case "thread/realtime/closed":
 			v.Phase, v.SDP = "ended", ""
+			if s.toolsOutdated() {
+				s.state.ToolsNoticeShown = true
+			}
 		case "thread/realtime/error":
 			v.Phase = "unknown"
 			v.Message, _ = e.Params["message"].(string)
@@ -1101,23 +1117,10 @@ func (s *Service) handleDynamicToolCall(ctx context.Context, e Event) {
 		return
 	}
 	arguments, _ := e.Params["arguments"].(map[string]any)
-	targetID, _ := arguments["targetId"].(string)
-	var err error
-	switch tool {
-	case "voice_transfer":
-		err = s.selectTarget(ctx, targetID, true)
-	case "voice_return_to_orchestrator":
-		err = s.selectTarget(ctx, "", true)
-	default:
-		err = errors.New("unsupported Agenthail voice tool")
-	}
+	message, err := s.callTool(ctx, tool, arguments)
 	if err != nil {
 		_ = responder.RespondDynamicToolCall(ctx, requestID, false, err.Error())
 		return
-	}
-	message := "Voice is now with the Agenthail orchestrator."
-	if target := s.state.State.Target; target != nil {
-		message = "Voice transferred to " + target.Name + "."
 	}
 	if err := responder.RespondDynamicToolCall(ctx, requestID, true, message); err != nil {
 		s.state.State.Message = "Voice tool response could not be returned to Codex: " + err.Error()

@@ -2,6 +2,7 @@ package voice
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -244,6 +245,7 @@ type fixtureOptions struct {
 	target         *targetFixture
 	operatorSource func(*surface.Session, bool)
 	stream         SessionStreamProvider
+	path           string
 }
 
 type voiceFixture struct {
@@ -265,6 +267,9 @@ func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 	t.Helper()
 	f := &voiceFixture{t: t, provider: &fixtureProvider{polled: make(chan struct{}, 1)}, path: filepath.Join(t.TempDir(), "voice", "operator.json"), ticks: make(chan time.Time), now: time.Unix(1_700_000_000, 0)}
 	var resolver TargetResolver
+	if options.path != "" {
+		f.path = options.path
+	}
 	if target := options.target; target != nil {
 		resolver = func(_ context.Context, id string) (*Target, error) {
 			resolved, err := target.Resolve(context.Background(), id)
@@ -1018,5 +1023,42 @@ func TestPersistenceFailureDoesNotPreventAudioTeardown(t *testing.T) {
 	}
 	if requests, _, _ := p.snapshot(); !reflect.DeepEqual(requests, []string{"thread/realtime/start", "thread/realtime/stop"}) {
 		t.Fatalf("audio teardown skipped: %v", requests)
+	}
+}
+
+func TestAnOperatorCreatedWithOtherToolsSaysOnceThatANewConversationGetsTheCurrentOnes(t *testing.T) {
+	f, _ := fixture(t)
+	if v := apply(t, f, Action{Action: "prepare"}); v.Message != "" {
+		t.Fatalf("a current operator was told to start over: %q", v.Message)
+	}
+	f.service.Close()
+	data, err := os.ReadFile(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved map[string]any
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatal(err)
+	}
+	delete(saved["state"].(map[string]any), "toolsDigest")
+	if data, err = json.Marshal(saved); err != nil || os.WriteFile(f.path, data, 0o600) != nil {
+		t.Fatal(err)
+	}
+
+	older := newFixture(t, fixtureOptions{path: f.path})
+	if v := older.View(); v.Message != toolsOutdatedNotice {
+		t.Fatalf("message=%q", v.Message)
+	}
+	connectFixture(t, older)
+	if v := older.View(); v.Message != toolsOutdatedNotice {
+		t.Fatalf("message during the call=%q", v.Message)
+	}
+	hangUp(t, older)
+	if v := older.View(); v.Message == toolsOutdatedNotice {
+		t.Fatal("the notice outlived the call it was shown in")
+	}
+	older.service.Close()
+	if v := newFixture(t, fixtureOptions{path: f.path}).View(); v.Message == toolsOutdatedNotice {
+		t.Fatal("the notice came back after a restart")
 	}
 }

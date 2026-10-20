@@ -110,6 +110,7 @@ existing transport; the voice layer does not emulate them.
 | Interrupt | **Interrupt orchestrator turn** only stops the operator. **Stop selected session** asks for confirmation, then checks the selected session's exact identity, writability, interrupt capability, and confirmed active turn before requesting that exact turn's interruption. It keeps audio connected and does not parse an ambiguous spoken "stop" as a worker cancellation. |
 | Approvals | Existing native approval policy remains in effect. The phone can display recorded activity but does not implement approval/question replies. A blocked native approval needs attention on the Mac. |
 | Multiple phones | One paired token owns an active call. Other devices see occupancy and cannot take over or read its negotiation SDP. |
+| Project coordinators | The operator's `voice_projects` tool lists every project this host knows, from sessions on this host and paired hosts, added projects, and coordinators, with each project's coordinators by host. `voice_send_to_lead` sends to a project's coordinator by project name or id, on this host or a paired host, and starts the coordinator's conversation when it has none. `voice_transfer` takes `project` instead of `targetId` to move the call to a coordinator on this host that already has a conversation. A project is found by the same rules as `@lead` and `@<project>-lead`: a name several projects share, a project with no coordinator, and a project with coordinators on two hosts are refused with the reason, never picked. |
 | Reconnect | No automatic redial or inference replay. Hang up an uncertain call, then call again. A missing phone heartbeat requests audio stop after about 40 seconds; worker turns remain. |
 
 On iPhone the call is an outgoing CallKit call with the `audio` and `voip`
@@ -197,7 +198,7 @@ the native close event, and `start` clears it.
 
 State lives beside `registry.db` at `voice/operator.json`, with a private operator
 workspace at `voice/operator/`. The state file is atomically replaced with mode
-0600. It retains the operator ID, skill digest, call attempt, hashed device owner,
+0600. It retains the operator ID, skill and tool digests, call attempt, hashed device owner,
 bounded recent events, text deduplication IDs, and the latest text receipt. SDP is
 never persisted. A host
 restart cannot restore a physical media connection; an active saved call becomes
@@ -209,6 +210,13 @@ does not rewrite developer instructions of an already-running Codex thread. The
 details sheet shows the digest so this is inspectable. Reprovisioning a different
 operator or recovering an ambiguous creation is a manual operator decision, not an
 automatic migration.
+
+The host-handled voice tools are pinned the same way. Codex registers dynamic
+tools only in `thread/start`; `thread/resume` and the thread settings update take
+none, and a resumed thread keeps the tools persisted at its start. The state file
+records a digest of the tool set. When the saved operator was created with a
+different set, the voice screen says so, naming **New conversation** as the way to
+get the current tools, until the first call with that operator ends.
 
 Recent voice events are limited to 100 records and 16 KiB per record. Normal
 session activity uses the existing bounded, paginated timeline. Large or missing
