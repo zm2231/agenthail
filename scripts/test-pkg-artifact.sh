@@ -55,12 +55,14 @@ bash -n "$payload/usr/local/bin/agenthail" "$payload/usr/local/bin/agenthail-uni
 codesign --verify --deep --strict --verbose=2 "$app"
 "$(dirname "$0")/test-macos-app-voice.sh" "$app"
 codesign --verify --deep --strict --verbose=2 "$daemon_bundle"
-codesign -d --entitlements - --xml "$daemon_bundle" 2>/dev/null | grep -q com.apple.security.automation.apple-events
-codesign -d --verbose=2 "$daemon_bundle" 2>&1 | grep -Eq 'flags=0x[0-9a-f]+\([^)]*runtime'
+daemon_entitlements="$(codesign -d --entitlements - --xml "$daemon_bundle" 2>/dev/null)"
+grep -q com.apple.security.automation.apple-events <<<"$daemon_entitlements"
+daemon_signature="$(codesign -d --verbose=2 "$daemon_bundle" 2>&1)"
+grep -Eq 'flags=0x[0-9a-f]+\([^)]*runtime' <<<"$daemon_signature"
 # A Developer ID build keeps its grants across updates only if its requirement
 # names the bundle and team rather than the build.
-if codesign -d --verbose=2 "$daemon_bundle" 2>&1 | grep -q '^Authority=Developer ID Application'; then
-	codesign -d -r- "$daemon_bundle" 2>&1 | grep -q 'designated => identifier "com.agenthail.daemon" and anchor apple generic and .*certificate leaf\[subject.OU\] = '
+if grep -q '^Authority=Developer ID Application' <<<"$daemon_signature"; then
+	grep -q 'designated => identifier "com.agenthail.daemon" and anchor apple generic and .*certificate leaf\[subject.OU\] = ' <<<"$(codesign -d -r- "$daemon_bundle" 2>&1)"
 fi
 
 mkdir -p "$work/home/.claude/skills" "$work/home/.codex"

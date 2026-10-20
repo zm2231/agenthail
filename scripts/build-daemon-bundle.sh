@@ -64,7 +64,8 @@ if [ "$IDENTITY" != "-" ]; then
 		;;
 	esac
 fi
-codesign -d --entitlements - --xml "$OUTPUT" 2>/dev/null | grep -q 'com.apple.security.automation.apple-events' || {
+entitlements="$(codesign -d --entitlements - --xml "$OUTPUT" 2>/dev/null)"
+grep -q 'com.apple.security.automation.apple-events' <<<"$entitlements" || {
 	echo "error: the daemon bundle lacks the Apple Events entitlement" >&2
 	exit 1
 }
