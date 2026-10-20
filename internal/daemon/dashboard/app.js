@@ -579,7 +579,21 @@ function projectSection(project, sessions) {
   const toggle = project.archived ? "project-unarchive" : "project-archive";
   const added = (project.checkouts || []).filter((checkout) => checkout.added && checkout.host.state === "local");
   const remove = added.length === 1 ? `<button class="link-button" type="button" data-project-action="project-remove" data-project-id="${escape(added[0].projectId)}" title="${escape(`Stop treating ${added[0].rootPath} as a project`)}">Remove</button>` : "";
-  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button>${remove}</header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
+  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}${coordinatorChip(project.coordinators || [])}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button>${remove}</header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
+}
+function coordinatorRef(coordinator) {
+  const name = `@${coordinator.name}`;
+  return coordinator.host && coordinator.host.state !== "local" ? `${shortHostName(coordinator.host.name)}::${name}` : name;
+}
+function coordinatorChip(coordinators) {
+  if (coordinators.length === 0) return "";
+  if (coordinators.length > 1) {
+    const refs = coordinators.map(coordinatorRef).join(", ");
+    return `<span class="lead-chip conflict" title="${escape(`Several hosts each have a coordinator: ${refs}. Run coordinator set --replace on one to resolve it.`)}">${coordinators.length} leads</span>`;
+  }
+  const ref = coordinatorRef(coordinators[0]);
+  if (!coordinators[0].sessionId) return `<span class="lead-chip idle" title="${escape(`${ref} starts on its first message`)}">${escape(ref)}</span>`;
+  return `<button class="lead-chip" type="button" data-session="${escape(coordinators[0].sessionId)}" title="${escape(`Open ${ref}, the project coordinator`)}">${escape(ref)}</button>`;
 }
 function renderProjects(query) {
   const byProject = new Map();

@@ -89,3 +89,27 @@ func TestThreadArchiveRoutesARemoteSessionThroughTheDaemon(t *testing.T) {
 		t.Fatalf("actions=%v", actions)
 	}
 }
+
+func TestProjectListNamesEachProjectsLeadAsThisHostAddressesIt(t *testing.T) {
+	app, _, _, api := federatedCLIFixture(t, true)
+	mac := `{"id":"local","name":"mac","state":"local"}`
+	forge := `{"id":"h0123456789ab","name":"forge","state":"connected"}`
+	api.snapshot = `{"projects":[
+{"id":"repo:github.com/example/widget","displayName":"widget","kind":"git","checkouts":[{"host":` + mac + `,"projectId":"p-widget","rootPath":"/work/widget"}],"coordinators":[{"host":` + mac + `,"name":"widget-lead","surface":"claude"}]},
+{"id":"repo:github.com/example/api","displayName":"api","kind":"git","checkouts":[{"host":` + forge + `,"projectId":"h0123456789ab::implicit:/srv/api","rootPath":"/srv/api"}],"coordinators":[{"host":` + forge + `,"name":"api-lead","surface":"codex"}]},
+{"id":"repo:github.com/example/site","displayName":"site","kind":"git","checkouts":[{"host":` + mac + `,"projectId":"p-site","rootPath":"/work/site"}],"coordinators":[{"host":` + mac + `,"name":"site-lead","surface":"claude"},{"host":` + forge + `,"name":"site-forge","surface":"codex"}]},
+{"id":"p-notes","displayName":"notes","kind":"folder","checkouts":[{"host":` + mac + `,"projectId":"p-notes","rootPath":"/work/notes"}],"coordinators":[]}]}`
+	output, err := captureStdout(t, func() error { return app.Run([]string{"project", "list"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := map[string]string{}
+	for _, line := range strings.Split(output, "\n") {
+		if fields := strings.Fields(line); len(fields) > 2 {
+			lines[fields[0]] = fields[2]
+		}
+	}
+	if lines["PROJECT"] != "LEAD" || lines["widget"] != "@widget-lead" || lines["api"] != "forge::@api-lead" || lines["notes"] != "-" || !strings.Contains(output, "conflict (2)") {
+		t.Fatalf("output=%q", output)
+	}
+}

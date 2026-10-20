@@ -39,6 +39,12 @@ Two hosts can still each hold a coordinator for one project, after a race or aft
 
 A host serves its own coordinators in `coordinators[]` of `/api/v1/snapshot` and appends `coordinator.changed` (on a set, replace or new conversation) and `coordinator.removed` (on a clear) to its catalog stream. A paired host replaces its mirror of that host's rows from each snapshot and applies the events. A host never re-exports mirrored rows, so hosts paired both ways do not loop. `hosts remove` drops the removed host's coordinators with its sessions. These are part of federation version 3; a host on an older version shows as needing an update and is sent none of these actions.
 
+## Where it shows
+
+Each project in the daemon snapshot lists `coordinators`: for each host that has one, its host, name, agent, who changed it last and when, and, once started, `sessionId`. A project normally has one; more than one is the conflict above. A project with this host's coordinator and no sessions yet is still a project: it appears in the snapshot and in the new-session picker (`/api/v1/session-options`), and can be archived. A paired host's coordinator is listed on a project this host shows.
+
+The dashboard shows the coordinator in the project header as `@name`, or `host::@name` for a paired host's, and opens its conversation from it; until it starts it says it starts on its first message. A conflict shows the number of coordinators and names them. `project list` prints the coordinator in its LEAD column, `conflict (N)` when hosts disagree.
+
 ## Addresses
 
 - `@<name>` reaches this host's coordinator by name. An `@<name>` that no session or coordinator here holds reaches the paired host's coordinator of that name; a name several hosts' coordinators share is refused with each `host::@name`.

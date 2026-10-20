@@ -40,14 +40,46 @@ type projectCheckout struct {
 	Archived     bool        `json:"archived"`
 }
 
+type projectCoordinator struct {
+	Host      projectHost `json:"host"`
+	Name      string      `json:"name"`
+	Surface   string      `json:"surface"`
+	SessionID string      `json:"sessionId,omitempty"`
+	ChangedBy string      `json:"changedBy,omitempty"`
+	ChangedAt time.Time   `json:"changedAt"`
+}
+
 type projectRow struct {
-	ID           string            `json:"id"`
-	DisplayName  string            `json:"displayName"`
-	Kind         string            `json:"kind"`
-	Checkouts    []projectCheckout `json:"checkouts"`
-	LastActive   time.Time         `json:"lastActive,omitempty"`
-	SessionCount int               `json:"sessionCount"`
-	Archived     bool              `json:"archived"`
+	ID           string               `json:"id"`
+	DisplayName  string               `json:"displayName"`
+	Kind         string               `json:"kind"`
+	Checkouts    []projectCheckout    `json:"checkouts"`
+	Coordinators []projectCoordinator `json:"coordinators"`
+	LastActive   time.Time            `json:"lastActive,omitempty"`
+	SessionCount int                  `json:"sessionCount"`
+	Archived     bool                 `json:"archived"`
+}
+
+// lead names the project's coordinator as this host addresses it, "-" when it
+// has none, and marks a conflict when several hosts each have one;
+// 'coordinator list' names them.
+func (p projectRow) lead() string {
+	refs := make([]string, 0, len(p.Coordinators))
+	for _, coordinator := range p.Coordinators {
+		ref := "@" + coordinator.Name
+		if coordinator.Host.State != "local" {
+			ref = coordinator.Host.Name + "::" + ref
+		}
+		refs = append(refs, ref)
+	}
+	switch len(refs) {
+	case 0:
+		return "-"
+	case 1:
+		return refs[0]
+	default:
+		return fmt.Sprintf("conflict (%d)", len(refs))
+	}
 }
 
 func (p projectRow) hostNames() string {
@@ -118,13 +150,13 @@ func (a *App) cmdProject(args []string) error {
 			fmt.Println("no projects found")
 			return nil
 		}
-		fmt.Printf("%-24s %-20s %-8s %-10s %s\n", "PROJECT", "HOSTS", "SESSIONS", "LAST", "ROOT")
+		fmt.Printf("%-24s %-20s %-24s %-8s %-10s %s\n", "PROJECT", "HOSTS", "LEAD", "SESSIONS", "LAST", "ROOT")
 		for _, project := range projects {
 			name := project.DisplayName
 			if project.Archived {
 				name += " (archived)"
 			}
-			fmt.Printf("%-24s %-20s %-8d %-10s %s\n", truncate(name, 24), truncate(project.hostNames(), 20), project.SessionCount, relTime(project.LastActive), project.rootPath())
+			fmt.Printf("%-24s %-20s %-24s %-8d %-10s %s\n", truncate(name, 24), truncate(project.hostNames(), 20), truncate(project.lead(), 24), project.SessionCount, relTime(project.LastActive), project.rootPath())
 		}
 		return nil
 	case "add":

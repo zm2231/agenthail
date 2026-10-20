@@ -959,7 +959,11 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	} else {
 		state.TotalSessions = len(state.Sessions)
 		state.Counts = catalogScopeCounts(state.Sessions)
-		state.Projects = catalogProjects(state.Sessions, projectRecords, d.localHost())
+		coordinators, err := d.Registry.Coordinators()
+		if err != nil {
+			return dashboardState{}, fmt.Errorf("read coordinators: %w", err)
+		}
+		state.Projects = catalogProjects(state.Sessions, projectRecords, coordinators, view.archive.Projects, d.localHost(), d.coordinatorHostRef)
 	}
 	return state, nil
 }

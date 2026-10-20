@@ -96,17 +96,31 @@ func applyCatalogView(row *dashboardSession, view catalogViewState) {
 
 // dashboardProject is one project across every host: each checkout is one
 // host's project with the same key, or the host's only checkout of a project
-// without one. It is archived when every checkout is.
+// without one. It is archived when every checkout is. Coordinators lists the
+// project's coordinator on each host that has one; more than one is a
+// conflict.
 type dashboardProject struct {
-	ID           string                     `json:"id"`
-	DisplayName  string                     `json:"displayName"`
-	Kind         string                     `json:"kind"`
-	Key          string                     `json:"key,omitempty"`
-	Repository   *project.Repository        `json:"repository,omitempty"`
-	Checkouts    []dashboardProjectCheckout `json:"checkouts"`
-	LastActive   time.Time                  `json:"lastActive,omitempty"`
-	SessionCount int                        `json:"sessionCount"`
-	Archived     bool                       `json:"archived"`
+	ID           string                        `json:"id"`
+	DisplayName  string                        `json:"displayName"`
+	Kind         string                        `json:"kind"`
+	Key          string                        `json:"key,omitempty"`
+	Repository   *project.Repository           `json:"repository,omitempty"`
+	Checkouts    []dashboardProjectCheckout    `json:"checkouts"`
+	Coordinators []dashboardProjectCoordinator `json:"coordinators"`
+	LastActive   time.Time                     `json:"lastActive,omitempty"`
+	SessionCount int                           `json:"sessionCount"`
+	Archived     bool                          `json:"archived"`
+}
+
+// dashboardProjectCoordinator is one host's coordinator of a project.
+// SessionID is empty until its first message starts it.
+type dashboardProjectCoordinator struct {
+	Host      dashboardHost `json:"host"`
+	Name      string        `json:"name"`
+	Surface   string        `json:"surface"`
+	SessionID string        `json:"sessionId,omitempty"`
+	ChangedBy string        `json:"changedBy,omitempty"`
+	ChangedAt time.Time     `json:"changedAt"`
 }
 
 type dashboardProjectCheckout struct {
@@ -187,9 +201,11 @@ func catalogScopeCounts(rows []dashboardSession) map[string]int {
 	return counts
 }
 
-// catalogProjects groups the rows by project and adds the added projects that
-// have no sessions yet.
-func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, local dashboardHost) []dashboardProject {
+// catalogProjects groups the rows by project, adds the added projects and this
+// host's coordinators' projects that have no sessions yet, and names each
+// project's coordinators. A paired host's coordinator is listed on a project
+// this host shows.
+func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, coordinators []registry.CoordinatorSpec, archived map[string]time.Time, local dashboardHost, hostRef func(string) dashboardHost) []dashboardProject {
 	byID := map[string]*dashboardProject{}
 	order := []string{}
 	entry := func(found *CatalogProject) *dashboardProject {
@@ -238,9 +254,41 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 		project := entry(found)
 		checkout(project, local, found)
 	}
+	for _, spec := range coordinators {
+		if spec.HostID != "" {
+			continue
+		}
+		if _, listed := byID[spec.ProjectID]; listed {
+			continue
+		}
+		found := coordinatorCatalogProject(spec)
+		_, found.Archived = archived[found.LocalID]
+		checkout(entry(found), local, found)
+	}
+	for _, spec := range coordinators {
+		project, listed := byID[spec.ProjectID]
+		if !listed {
+			continue
+		}
+		host := local
+		if spec.HostID != "" {
+			host = hostRef(spec.HostID)
+		}
+		project.Coordinators = append(project.Coordinators, dashboardProjectCoordinator{Host: host, Name: spec.Name, Surface: spec.Surface, SessionID: spec.SessionID, ChangedBy: spec.ChangedBy, ChangedAt: spec.ChangedAt})
+	}
 	projects := make([]dashboardProject, 0, len(order))
 	for _, id := range order {
 		project := byID[id]
+		if project.Coordinators == nil {
+			project.Coordinators = []dashboardProjectCoordinator{}
+		}
+		sort.SliceStable(project.Coordinators, func(i, j int) bool {
+			left, right := project.Coordinators[i], project.Coordinators[j]
+			if (left.Host.ID == local.ID) != (right.Host.ID == local.ID) {
+				return left.Host.ID == local.ID
+			}
+			return left.Host.Name < right.Host.Name
+		})
 		project.Archived = true
 		for _, at := range project.Checkouts {
 			project.Archived = project.Archived && at.Archived
@@ -259,6 +307,26 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 	}
 	sort.SliceStable(projects, func(i, j int) bool { return projects[i].LastActive.After(projects[j].LastActive) })
 	return projects
+}
+
+// coordinatorCatalogProject is the project of this host's coordinator spec
+// when no session or added project names it. Added projects are always
+// listed, so it is a repository's project, rooted at its main checkout.
+func coordinatorCatalogProject(spec registry.CoordinatorSpec) *CatalogProject {
+	found := &CatalogProject{ID: spec.ProjectID, LocalID: catalogImplicitProjectID(spec.ProjectRoot), DisplayName: catalogProjectName(spec.ProjectRoot), RootPath: spec.ProjectRoot, Kind: catalogProjectGit}
+	if found.ID != found.LocalID {
+		found.Key = found.ID
+	}
+	return found
+}
+
+// coordinatorHostRef names a paired host for a mirrored coordinator. A host
+// removed since keeps its id as its name until its rows are dropped.
+func (d *Daemon) coordinatorHostRef(hostID string) dashboardHost {
+	if host, found := d.pairedHost(hostID); found {
+		return host.ref()
+	}
+	return dashboardHost{ID: hostID, Name: hostID, State: hostStateUnreachable}
 }
 
 func (d *Daemon) requestCatalogDiscovery() {
@@ -388,7 +456,30 @@ func (d *Daemon) localProjectCheckouts(projectID string) ([]registry.ProjectReco
 		seen[found.LocalID] = true
 		targets = append(targets, registry.ProjectRecord{ID: found.LocalID, WorkspaceRoot: found.RootPath, Title: found.DisplayName, Added: found.Added})
 	}
+	coordinators, err := d.Registry.LocalCoordinators()
+	if err != nil {
+		return nil, err
+	}
+	for _, spec := range coordinators {
+		found := coordinatorCatalogProject(spec)
+		if found.ID != projectID && found.LocalID != projectID || seen[found.LocalID] || addedProjectNamed(records, spec.ProjectID) {
+			continue
+		}
+		seen[found.LocalID] = true
+		targets = append(targets, registry.ProjectRecord{ID: found.LocalID, WorkspaceRoot: found.RootPath, Title: found.DisplayName})
+	}
 	return targets, nil
+}
+
+// addedProjectNamed reports whether an added project is the project with this
+// id, by its own id or its repository key.
+func addedProjectNamed(records []registry.ProjectRecord, id string) bool {
+	for _, record := range records {
+		if record.Added && (record.ID == id || record.Key == id) {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *Daemon) archiveLocalProject(target registry.ProjectRecord, archive bool) error {
