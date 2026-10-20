@@ -91,11 +91,11 @@ func (d *Daemon) catalogWaiting(ctx context.Context, adapter surface.Surface, se
 }
 
 // announceWaiting tells the user, on the desktop and on paired devices, that
-// a session is waiting on them. The record is marked announced only after
-// both were attempted, so a daemon stopped in between announces the question
-// again after it restarts rather than never. Both notifications carry a key
-// derived from the question, so a repeat replaces the one already shown
-// instead of adding a second.
+// a session is waiting on them, and opens the conversation they know it by.
+// The record is marked announced only after both were attempted, so a daemon
+// stopped in between announces the question again after it restarts rather
+// than never. Both notifications carry a key derived from the question, so a
+// repeat replaces the one already shown instead of adding a second.
 func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waiting) {
 	d.announceMu.Lock()
 	if d.announcing == nil {
@@ -105,9 +105,17 @@ func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waitin
 		d.announceMu.Unlock()
 		return
 	}
+	// A caller may have read the question as unannounced just before an
+	// announcement finished. That announcement marks the record before it
+	// leaves announcing, so the record read here already shows it.
+	if recorded, announced, err := d.Registry.WaitingState(session.ID); err == nil && announced && recorded != nil && recorded.ID == waiting.ID {
+		d.announceMu.Unlock()
+		return
+	}
 	d.announcing[session.ID] = waiting.ID
 	d.announceMu.Unlock()
-	desktopMessage := fmt.Sprintf("%s is waiting on you", d.resolveDisplay(session.ID))
+	conversationID := session.ConversationID()
+	desktopMessage := fmt.Sprintf("%s is waiting on you", d.resolveDisplay(conversationID))
 	mobileMessage := fmt.Sprintf("%s is waiting on you", notificationSurfaceName(session.Surface))
 	key := waitingNotificationKey(session.ID, waiting.ID)
 	go func(sessionID, questionID string) {
@@ -118,16 +126,48 @@ func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waitin
 			}
 			d.announceMu.Unlock()
 		}()
-		if err := Notify("Agenthail", desktopMessage, sessionID, "agenthail-"+key); err != nil {
-			d.log.Printf("desktop notification: %s", err)
-		}
 		notificationCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		d.notifyPairedDevices(notificationCtx, mobileNotification{Title: "Agenthail", Message: mobileMessage, SessionID: sessionID, TurnID: questionID, EventType: "session.waiting", CollapseID: key})
+		mobile := mobileNotification{Title: "Agenthail", Message: mobileMessage, SessionID: conversationID, TurnID: questionID, EventType: "session.waiting", CollapseID: key}
+		var actions []surface.RequestAction
+		if request, open := d.waitingRequest(notificationCtx, session, waiting); open {
+			// A notification's buttons answer the session it names, so one
+			// that carries a request names the session that holds it.
+			mobile.SessionID = sessionID
+			desktopMessage = fmt.Sprintf("%s: %s", d.resolveDisplay(sessionID), request.Prompt())
+			mobile.RequestID = request.ID
+			actions = request.Actions()
+		}
+		if err := d.notifyDesktop("Agenthail", desktopMessage, mobile.SessionID, "agenthail-"+key, mobile.RequestID, actions); err != nil {
+			d.log.Printf("desktop notification: %s", err)
+		}
+		d.notifyPairedDevices(notificationCtx, mobile)
 		if err := d.Registry.MarkWaitingAnnounced(sessionID, questionID); err != nil {
 			d.log.Printf("mark waiting announced %s: %s", sessionID, err)
 		}
 	}(session.ID, waiting.ID)
+}
+
+// waitingRequest is the open request a session waits on, when its provider
+// takes answers through Agenthail, read now so the notification shows what is
+// actually asked.
+func (d *Daemon) waitingRequest(ctx context.Context, session surface.Session, waiting surface.Waiting) (surface.Request, bool) {
+	adapter, err := d.adapters().For(&session)
+	if err != nil {
+		return surface.Request{}, false
+	}
+	responder, ok := adapter.(surface.Responder)
+	if !ok || !surface.EffectiveCapabilities(adapter, &session).Respond {
+		return surface.Request{}, false
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	state, err := responder.Requests(requestCtx, &session)
+	if err != nil {
+		d.log.Printf("read the request %s waits on: %s", d.resolveDisplay(session.ID), err)
+		return surface.Request{}, false
+	}
+	return openRequest(state, waiting.ID)
 }
 
 // waitingNotificationKey names one question's notifications within the 64

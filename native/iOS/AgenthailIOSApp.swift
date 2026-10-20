@@ -5,6 +5,7 @@ import UserNotifications
 final class IOSAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        KeychainStore.shareCredential()
         return true
     }
 
@@ -21,10 +22,24 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNU
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        guard let sessionID = response.notification.request.content.userInfo["sessionId"] as? String, !sessionID.isEmpty else { return }
+        let userInfo = response.notification.request.content.userInfo
+        guard let sessionID = userInfo["sessionId"] as? String, !sessionID.isEmpty else { return }
+        if let choice = RequestNotifications.choice(forAction: response.actionIdentifier), let requestID = userInfo["requestId"] as? String {
+            await RequestAnswer.send(choice: choice, text: (response as? UNTextInputNotificationResponse)?.userText, sessionID: sessionID, requestID: requestID, api: Self.pairedAPI)
+            return
+        }
         await MainActor.run {
             NotificationCenter.default.post(name: .agenthailNotificationOpened, object: sessionID)
         }
+    }
+}
+
+extension IOSAppDelegate {
+    nonisolated static func pairedAPI() throws -> AgenthailAPI {
+        guard let endpoint = KeychainStore.get("endpoint").flatMap(URL.init(string:)), let token = KeychainStore.get("token") else {
+            throw AgenthailAPIError.unavailable("Pair this phone with Agenthail on your Mac first.")
+        }
+        return AgenthailAPI(baseURL: endpoint, token: token)
     }
 }
 

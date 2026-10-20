@@ -186,7 +186,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 			}
 		}
 		terminalCompletion := observation.ActiveTurnID == ""
-		if terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && observation.Reply != nil && observation.Reply.Done {
+		if terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && !session.Delegated() && observation.Reply != nil && observation.Reply.Done {
 			desktopNotificationMessage = fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
 			mobileNotificationMessage = fmt.Sprintf("%s finished", notificationSurfaceName(session.Surface))
 			if observation.Reply.Error != "" {
@@ -200,7 +200,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 			}
 		}
 	}
-	if found && observation.Status == surface.StatusBusy && (previous.LastStatus != surface.StatusBusy || previous.ActiveTurnID != observation.ActiveTurnID) {
+	if found && !session.Delegated() && observation.Status == surface.StatusBusy && (previous.LastStatus != surface.StatusBusy || previous.ActiveTurnID != observation.ActiveTurnID) {
 		d.armCompletionNotification(session.ID)
 	}
 	if err := d.Registry.SaveRuntimeState(session.ID, *observation); err != nil {
@@ -216,7 +216,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	}
 	if desktopNotificationMessage != "" {
 		go func(desktopMessage, mobileMessage, sessionID, turnID string) {
-			if err := Notify("Agenthail", desktopMessage, sessionID, ""); err != nil {
+			if err := d.notifyDesktop("Agenthail", desktopMessage, sessionID, "", "", nil); err != nil {
 				d.log.Printf("desktop notification: %s", err)
 			}
 			notificationCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
