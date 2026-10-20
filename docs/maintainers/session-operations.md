@@ -21,8 +21,8 @@ is an error that lists their ids. See
 `list` discovers sessions directly and prints the working directory in place
 of the project. It shows the 15 most recently active session families and
 leaves out Notion threads idle for more than seven days; `--all` lists every
-saved session; `--project` and `--archived` need
-the daemon.
+saved session; `--project`, `--cwd` and `--archived`
+need the daemon.
 
 `agenthail project list [--all]`, `project add <path>`, and
 `project <archive|unarchive> <name|id>` manage projects.

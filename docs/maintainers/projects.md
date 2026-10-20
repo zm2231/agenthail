@@ -72,7 +72,7 @@ its `id` is its `localId`, and a mirrored row qualifies it as `host::localId`.
 and `implicit:<main checkout root>` for an implicit one. Coordinators and
 project channels are keyed by the project `id`.
 
-A changed remote moves a project to its new key within two minutes.
+A changed remote moves a project to its new key on the next catalog pass.
 
 ## Scopes
 

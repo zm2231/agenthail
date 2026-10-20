@@ -435,3 +435,21 @@ func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing
 		t.Fatalf("forge did not record the archive: %+v err=%v", state, err)
 	}
 }
+
+func TestTheCatalogAndPathResolutionAgreeRightAfterOriginChanges(t *testing.T) {
+	d, r, _, repo := projectsFixture(t)
+	gitRun(t, repo, "remote", "add", "origin", "https://github.com/example/widget.git")
+	d.discoverCatalog(context.Background())
+	if id := storedProjection(t, r, "from").Project.ID; id != "repo:github.com/example/widget" {
+		t.Fatalf("before: %s", id)
+	}
+	gitRun(t, repo, "remote", "set-url", "origin", "git@github.com:another-owner/widget-renamed.git")
+	d.discoverCatalog(context.Background())
+	resolved, err := ResolvePathProject(context.Background(), r, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored := storedProjection(t, r, "from").Project.ID; stored != "repo:github.com/another-owner/widget-renamed" || resolved != stored {
+		t.Fatalf("catalog=%s resolved=%s", stored, resolved)
+	}
+}

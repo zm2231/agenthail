@@ -234,7 +234,7 @@ func TestChangingOriginMovesTheProject(t *testing.T) {
 	cache := newCatalogIdentityCache()
 	before := catalogProjectAt(t, cache, repo)
 	gitRun(t, repo, "remote", "set-url", "origin", "https://github.com/someone-else/gadget.git")
-	later := cache.identity(context.Background(), surface.Session{Cwd: repo}, time.Now().Add(catalogIdentityTTL), noStoredProject)
+	later := cache.identity(context.Background(), surface.Session{Cwd: repo}, time.Now(), noStoredProject)
 	if before.ID != "repo:github.com/example/gadget" || later.Project == nil || later.Project.ID != "repo:github.com/someone-else/gadget" {
 		t.Fatalf("before=%+v later=%+v", before, later.Project)
 	}
