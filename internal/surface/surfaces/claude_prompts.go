@@ -70,8 +70,8 @@ var claudePromptSettleEvery = time.Second
 // claudePrompts holds the permission prompts that terminal Claude sessions
 // pass to Agenthail through its PermissionRequest hook. Each is held until a
 // person answers it through Agenthail, or the session settles it without
-// Agenthail: the terminal, cmux or Remote Control answered first, or the
-// process ended.
+// Agenthail: the terminal, Remote Control or another PermissionRequest hook
+// (cmux installs one, for example) answered first, or the process ended.
 type claudePrompts struct {
 	mu   sync.Mutex
 	open map[string][]*claudePrompt
