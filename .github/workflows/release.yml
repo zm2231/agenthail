@@ -227,6 +227,10 @@ jobs:
           name="agenthail-${AGENTHAIL_VERSION}-linux-${ARCH}"
           (cd dist && sha256sum -c "$name.tar.gz.sha256")
           mkdir -p "$RUNNER_TEMP/inspect"
+          if tar -tvzf "dist/$name.tar.gz" | grep -v '^[d-]'; then
+            echo "error: agenthail update extracts only directories and regular files" >&2
+            exit 1
+          fi
           tar -xzf "dist/$name.tar.gz" -C "$RUNNER_TEMP/inspect"
           test -x "$RUNNER_TEMP/inspect/$name/agenthail"
           test -f "$RUNNER_TEMP/inspect/$name/skills/agenthail-operations/SKILL.md"

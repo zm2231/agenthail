@@ -63,6 +63,8 @@ func releaseArchive(t *testing.T, tag string) []byte {
 		{name: root + "/README.md", body: "readme", mode: 0644},
 		{name: root + "/skills/"},
 		{name: root + "/skills/agenthail-operations/SKILL.md", body: "skill " + tag, mode: 0644},
+		{name: root + "/claude-host/"},
+		{name: root + "/claude-host/host.mjs", body: "host " + tag, mode: 0644},
 	})
 }
 
@@ -152,6 +154,23 @@ func TestLinuxUpdateInstallsArchiveAndRestartsDaemon(t *testing.T) {
 	}
 	if _, err := os.Stat(fixture.dataDir + ".previous"); !os.IsNotExist(err) {
 		t.Fatalf("previous install kept after a healthy restart: %v", err)
+	}
+}
+
+func TestLinuxUpdateReplacesInstalledClaudeHost(t *testing.T) {
+	fixture := newArchiveUpdateFixture(t, releaseArchive(t, "v0.2.0"))
+	if err := os.MkdirAll(filepath.Join(fixture.dataDir, "claude-host"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixture.dataDir, "claude-host", "host.mjs"), []byte("host v0.1.7"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureStdout(t, func() error { return fixture.app.Run([]string{"update"}) }); err != nil {
+		t.Fatal(err)
+	}
+	host, _ := os.ReadFile(filepath.Join(fixture.dataDir, "claude-host", "host.mjs"))
+	if string(host) != "host v0.2.0" {
+		t.Fatalf("host=%q", host)
 	}
 }
 

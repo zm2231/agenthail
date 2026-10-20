@@ -575,15 +575,18 @@ function projectSection(project, sessions) {
   const ordered = [...sessions].sort((a, b) => Date.parse(b.lastActive || 0) - Date.parse(a.lastActive || 0));
   const shown = expanded ? ordered : ordered.filter((session, index) => index < collapsedProjectSessions || sessionNeedsYou(session));
   const hidden = ordered.length - shown.length;
-  const host = project.host && project.host.state !== "local" ? `<span class="host-badge" title="On ${escape(project.host.name)}">${escape(shortHostName(project.host.name))}</span>` : "";
+  const host = (project.checkouts || []).filter((checkout) => checkout.host.state !== "local").map((checkout) => `<span class="host-badge" title="${escape(`${checkout.rootPath} on ${checkout.host.name}${checkout.archived ? " (archived there)" : ""}`)}">${escape(shortHostName(checkout.host.name))}</span>`).join("");
   const toggle = project.archived ? "project-unarchive" : "project-archive";
-  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button></header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
+  const added = (project.checkouts || []).filter((checkout) => checkout.added && checkout.host.state === "local");
+  const remove = added.length === 1 ? `<button class="link-button" type="button" data-project-action="project-remove" data-project-id="${escape(added[0].projectId)}" title="${escape(`Stop treating ${added[0].rootPath} as a project`)}">Remove</button>` : "";
+  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button>${remove}</header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
 }
 function renderProjects(query) {
   const byProject = new Map();
+  const projectArchived = new Map((app.state.projects || []).map((project) => [project.id, project.archived]));
   for (const session of app.state.sessions) {
     if (!session.project) continue;
-    if (session.archived && !session.project.archived) continue;
+    if (session.archived && !projectArchived.get(session.project.id)) continue;
     if (query && !`${displayName(session)} ${session.project.displayName} ${remoteHostName(session)}`.toLowerCase().includes(query)) continue;
     if (!byProject.has(session.project.id)) byProject.set(session.project.id, []);
     byProject.get(session.project.id).push(session);
@@ -1259,7 +1262,7 @@ function renderChat() {
       '<button data-action="compact" type="button">Compact</button>',
     );
   controls.push(`<button data-archive-action="${session.archived ? "session-unarchive" : "session-archive"}" type="button">${session.archived ? "Unarchive" : "Archive"}</button>`);
-  if (!session.project && session.cwd && !remoteHostName(session))
+  if (session.cwd && !remoteHostName(session) && !(session.project?.added && session.project.rootPath === session.cwd))
     controls.push(`<button data-project-add="${escape(session.cwd)}" type="button">Add folder as project</button>`);
   $("#chat-actions").innerHTML = mobileConversationView()
     ? ""
@@ -1930,10 +1933,10 @@ document.addEventListener("click", async (event) => {
         toast(viewControl.dataset.archiveAction === "session-archive" ? "Conversation archived." : "Conversation unarchived.");
       } else if (viewControl.dataset.projectAction) {
         await action(viewControl.dataset.projectAction, { projectId: viewControl.dataset.projectId }, crypto.randomUUID(), "");
-        toast(viewControl.dataset.projectAction === "project-archive" ? "Project archived." : "Project unarchived.");
+        toast({ "project-archive": "Project archived.", "project-unarchive": "Project unarchived.", "project-remove": "Project removed." }[viewControl.dataset.projectAction]);
       } else {
         const result = await action("project-add", { path: viewControl.dataset.projectAdd }, crypto.randomUUID(), "");
-        toast(result.project?.kind === "git" ? `Already part of ${result.project.displayName}.` : `Added project ${result.project?.displayName || ""}.`);
+        toast(`Added project ${result.project?.displayName || ""}.`);
       }
       await load();
     } catch (error) {

@@ -105,6 +105,13 @@ func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waitin
 		d.announceMu.Unlock()
 		return
 	}
+	// A caller may have read the question as unannounced just before an
+	// announcement finished. That announcement marks the record before it
+	// leaves announcing, so the record read here already shows it.
+	if recorded, announced, err := d.Registry.WaitingState(session.ID); err == nil && announced && recorded != nil && recorded.ID == waiting.ID {
+		d.announceMu.Unlock()
+		return
+	}
 	d.announcing[session.ID] = waiting.ID
 	d.announceMu.Unlock()
 	desktopMessage := fmt.Sprintf("%s is waiting on you", d.resolveDisplay(session.ID))
