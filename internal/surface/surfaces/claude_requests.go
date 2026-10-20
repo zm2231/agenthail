@@ -28,7 +28,8 @@ func (c *Claude) hostWaiting(ctx context.Context, sess *surface.Session) *surfac
 func (c *Claude) Requests(ctx context.Context, sess *surface.Session) (surface.RequestState, error) {
 	state := surface.RequestState{Requests: []surface.Request{}}
 	if !claudeHosted(sess) {
-		return state, fmt.Errorf("%w: Claude answers requests through Agenthail only in sessions its host runs", surface.ErrUnsupported)
+		state.Requests = c.prompts.requests(sess.ID)
+		return state, nil
 	}
 	c.host.forget()
 	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
@@ -47,11 +48,11 @@ func (c *Claude) Requests(ctx context.Context, sess *surface.Session) (surface.R
 // its process runs on without a host, which no answer reaches. A request
 // lives only in the host that holds Claude's prompt, so none outlives it.
 func (c *Claude) Respond(ctx context.Context, sess *surface.Session, requestID string, decision surface.Decision) (string, error) {
-	if !claudeHosted(sess) {
-		return "", fmt.Errorf("%w: Claude answers requests through Agenthail only in sessions its host runs", surface.ErrUnsupported)
-	}
 	if requestID == "" {
 		return "", fmt.Errorf("a request id is required")
+	}
+	if !claudeHosted(sess) {
+		return c.prompts.answer(sess.ID, requestID, decision)
 	}
 	defer c.host.forget()
 	outcome, err := c.host.client.Respond(ctx, sess.ID, requestID, claudehost.Decision{Behavior: decision.Behavior, Always: decision.Always, Message: decision.Message, Answers: decision.Answers})

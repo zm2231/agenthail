@@ -17,6 +17,17 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNU
         NotificationCenter.default.post(name: .agenthailPushRegistrationFailed, object: error.localizedDescription)
     }
 
+    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
+        guard let key = userInfo["withdraw"] as? String, !key.isEmpty else { return .noData }
+        let center = UNUserNotificationCenter.current()
+        let withdrawn = await center.deliveredNotifications()
+            .filter { $0.request.identifier == key || $0.request.content.userInfo["collapseId"] as? String == key }
+            .map(\.request.identifier)
+        guard !withdrawn.isEmpty else { return .noData }
+        center.removeDeliveredNotifications(withIdentifiers: withdrawn)
+        return .newData
+    }
+
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         [.banner, .sound, .badge]
     }

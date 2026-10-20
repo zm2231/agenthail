@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
-import worker, { AppAttestChallenge, checkRegistration, issueChallenge, register, revoke, send, verifyAppAttestation } from "../src/index.js"
+import worker, { AppAttestChallenge, checkRegistration, issueChallenge, register, revoke, send, verifyAppAttestation, withdraw } from "../src/index.js"
 
 const productionAttestation = JSON.parse(readFileSync(new URL("fixtures/app-attest-production.json", import.meta.url), "utf8"))
 
@@ -436,4 +436,38 @@ test("registration rejects replayed challenges", async () => {
   assert.equal(replay.status, 409)
   assert.deepEqual(await replay.json(), { error: "challenge_replayed" })
   assert.equal(env.PUSH_DEVICES.values.size, 1)
+})
+
+test("withdraw sends a silent background push naming the notification to remove", async () => {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])
+  const pkcs8 = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64")
+  const env = environment({ APNS_KEY_P8: `-----BEGIN PRIVATE KEY-----\n${pkcs8}\n-----END PRIVATE KEY-----`, APNS_KEY_ID: "KEY1234567", APNS_TOPIC: "com.agenthail.ios" })
+  const credential = "fixture-credential"
+  env.PUSH_DEVICES.values.set("device:phone", JSON.stringify({
+    token: "ab".repeat(32),
+    environment: "sandbox",
+    attestedAt: Date.now(),
+    appAttestKeyHash: "fixture-key-hash",
+    credentialHash: await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential)).then(value => Buffer.from(value).toString("base64url"))
+  }))
+  const delivered = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    delivered.push({ headers: init.headers, payload: JSON.parse(init.body) })
+    return new Response(null, { status: 200 })
+  }
+  try {
+    assert.equal((await send(request("POST", { installationId: "phone", credential, title: "Agenthail", message: "asks you a question", collapseId: "waiting-abc" }), env)).status, 200)
+    assert.equal((await withdraw(request("POST", { installationId: "phone", credential, collapseId: "waiting-abc" }), env)).status, 200)
+    assert.equal((await withdraw(request("POST", { installationId: "phone", credential }), env)).status, 400)
+    assert.equal((await withdraw(request("POST", { installationId: "phone", credential: "wrong" }), env)).status, 401)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  assert.equal(delivered.length, 2)
+  assert.equal(delivered[0].payload.collapseId, "waiting-abc")
+  assert.equal(delivered[1].headers["apns-push-type"], "background")
+  assert.equal(delivered[1].headers["apns-priority"], "5")
+  assert.equal("apns-collapse-id" in delivered[1].headers, false)
+  assert.deepEqual(delivered[1].payload, { aps: { "content-available": 1 }, withdraw: "waiting-abc" })
 })

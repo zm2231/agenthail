@@ -212,6 +212,9 @@ has no Remote Control. A tool its permission mode does not allow, and every
 question it asks, waits for a person: `agenthail requests <target>` lists them
 and `agenthail answer <target> allow|always|deny|"answer"` answers the oldest.
 Do not answer them yourself unless your user asked you to.
+A Claude CLI in a terminal shows its prompts the same way once
+`agenthail hooks install` has added the PermissionRequest hook; the daemon
+holds the prompt, so `requests` and `answer` need it running.
 `agenthail permission-mode <target> <mode>` changes the mode while it runs.
 A Claude session ID is the conversation ID (the transcript name). The process,
 messaging socket and Remote Control session are attachments; Remote Control is

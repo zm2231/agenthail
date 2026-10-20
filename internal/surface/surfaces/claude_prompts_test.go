@@ -1,0 +1,191 @@
+package surfaces
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
+)
+
+const pickAColor = `{"questions":[{"question":"Pick a color","header":"Color","options":[{"label":"Red","description":"Warm"},{"label":"Blue","description":"Cool"}],"multiSelect":false}]}`
+
+type heldPrompt struct {
+	decision *ClaudePromptDecision
+	err      error
+}
+
+func holdInBackground(claude *Claude, prompt ClaudePermissionPrompt) (<-chan heldPrompt, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan heldPrompt, 1)
+	go func() {
+		decision, err := claude.HoldPrompt(ctx, prompt)
+		done <- heldPrompt{decision, err}
+	}()
+	return done, cancel
+}
+
+func awaitRequests(t *testing.T, claude *Claude, session *surface.Session) []surface.Request {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		state, err := claude.Requests(context.Background(), session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(state.Requests) > 0 {
+			return state.Requests
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("the prompt was never held")
+	return nil
+}
+
+func terminalSession(t *testing.T) *surface.Session {
+	t.Helper()
+	transcript := writeTranscript(t, `{"type":"user","uuid":"prompt","timestamp":"2026-10-18T23:00:27Z","message":{"content":"Ask me which color I prefer"}}`)
+	return &surface.Session{ID: "conversation", Bridge: "bridge", Surface: surface.KindClaude, PID: os.Getpid(), Status: surface.StatusBusy, Transcript: transcript}
+}
+
+func TestATerminalQuestionHeldByTheHookIsAnsweredThroughAgenthail(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	asked := time.Now().Add(-time.Second).Truncate(time.Millisecond).UTC()
+	writeClaudeRecord(t, home, map[string]any{"kind": "interactive", "entrypoint": "cli", "status": "waiting", "waitingFor": "input needed", "statusUpdatedAt": asked.UnixMilli()})
+	claude := NewClaude(nil, home)
+	var mu sync.Mutex
+	var changes []ClaudePromptChange
+	claude.OnPromptChange(func(change ClaudePromptChange) {
+		mu.Lock()
+		changes = append(changes, change)
+		mu.Unlock()
+	})
+	session := terminalSession(t)
+	if claude.SessionCapabilities(session).Respond {
+		t.Fatal("a session with no held prompt offered answers")
+	}
+	done, cancel := holdInBackground(claude, ClaudePermissionPrompt{SessionID: "conversation", ToolName: "AskUserQuestion", ToolInput: json.RawMessage(pickAColor), PID: os.Getpid()})
+	defer cancel()
+	requests := awaitRequests(t, claude, session)
+	request := requests[0]
+	if request.Kind != surface.WaitingQuestion || len(request.Questions) != 1 || request.Questions[0].Question != "Pick a color" || !request.CreatedAt.Equal(asked) {
+		t.Fatalf("request=%+v", request)
+	}
+	if !claude.SessionCapabilities(session).Respond {
+		t.Fatal("a held prompt was not answerable")
+	}
+	observation, err := claude.Observe(context.Background(), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.WaitingOn == nil || observation.WaitingOn.ID != request.ID || !strings.Contains(request.ID, ":held:") {
+		t.Fatalf("the session waits on %+v, not the held request %s", observation.WaitingOn, request.ID)
+	}
+	if _, err := claude.Respond(context.Background(), session, request.ID, surface.Decision{Behavior: "allow", Answers: map[string]string{"Pick a color": "Blue"}}); err != nil {
+		t.Fatal(err)
+	}
+	held := <-done
+	if held.err != nil || held.decision == nil || held.decision.Behavior != "allow" {
+		t.Fatalf("held=%+v", held)
+	}
+	answers, _ := held.decision.UpdatedInput["answers"].(map[string]string)
+	if answers["Pick a color"] != "Blue" || held.decision.UpdatedInput["questions"] == nil {
+		t.Fatalf("updatedInput=%+v", held.decision.UpdatedInput)
+	}
+	observation, err = claude.Observe(context.Background(), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.WaitingOn != nil {
+		t.Fatalf("the record still showing the answered question made it wait again: %+v", observation.WaitingOn)
+	}
+	if _, err := claude.Respond(context.Background(), session, request.ID, surface.Decision{Behavior: "deny"}); !errors.Is(err, surface.ErrRequestStale) {
+		t.Fatalf("a second answer err=%v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(changes) != 2 || !changes[0].Open || changes[1].Open || !changes[1].Settled || changes[1].RequestID != request.ID {
+		t.Fatalf("changes=%+v", changes)
+	}
+}
+
+func TestAPromptAnsweredInTheTerminalStopsBeingHeld(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	previous := claudePromptSettleEvery
+	claudePromptSettleEvery = 10 * time.Millisecond
+	t.Cleanup(func() { claudePromptSettleEvery = previous })
+	home := t.TempDir()
+	asked := time.Now().Add(-time.Second).UnixMilli()
+	writeClaudeRecord(t, home, map[string]any{"kind": "interactive", "entrypoint": "cli", "status": "waiting", "waitingFor": "permission prompt", "statusUpdatedAt": asked})
+	claude := NewClaude(nil, home)
+	session := terminalSession(t)
+	done, cancel := holdInBackground(claude, ClaudePermissionPrompt{SessionID: "conversation", ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"ls"}`), PID: os.Getpid()})
+	defer cancel()
+	request := awaitRequests(t, claude, session)[0]
+	writeClaudeRecord(t, home, map[string]any{"kind": "interactive", "entrypoint": "cli", "status": "busy", "statusUpdatedAt": asked + 500})
+	select {
+	case held := <-done:
+		if held.err != nil || held.decision != nil {
+			t.Fatalf("held=%+v", held)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the prompt stayed held after the terminal answered it")
+	}
+	if _, err := claude.Respond(context.Background(), session, request.ID, surface.Decision{Behavior: "allow"}); !errors.Is(err, surface.ErrRequestStale) {
+		t.Fatalf("a late answer err=%v", err)
+	}
+}
+
+func TestAlwaysAllowAppliesTheRulesClaudeSuggested(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	writeClaudeRecord(t, home, map[string]any{"kind": "interactive", "entrypoint": "cli", "status": "waiting", "waitingFor": "permission prompt", "statusUpdatedAt": time.Now().UnixMilli()})
+	claude := NewClaude(nil, home)
+	session := terminalSession(t)
+	suggestions := json.RawMessage(`[{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"ls"}],"behavior":"allow","destination":"localSettings"}]`)
+	done, cancel := holdInBackground(claude, ClaudePermissionPrompt{SessionID: "conversation", ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"ls"}`), Suggestions: suggestions, PID: os.Getpid()})
+	defer cancel()
+	request := awaitRequests(t, claude, session)[0]
+	if request.Kind != surface.WaitingApproval || !request.AlwaysAllow || !strings.Contains(string(request.Input), `"ls"`) {
+		t.Fatalf("request=%+v", request)
+	}
+	if outcome, err := claude.Respond(context.Background(), session, request.ID, surface.Decision{Behavior: "allow", Always: true}); err != nil || outcome != "allowed_always" {
+		t.Fatalf("outcome=%q err=%v", outcome, err)
+	}
+	held := <-done
+	if held.decision == nil || string(held.decision.UpdatedPermissions) != string(suggestions) || held.decision.UpdatedInput["command"] != "ls" {
+		t.Fatalf("decision=%+v", held.decision)
+	}
+}
+
+func TestOnlyATerminalSessionsOwnProcessHasItsPromptHeld(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	for _, test := range []struct {
+		name   string
+		fields map[string]any
+		pid    int
+	}{
+		{name: "background job", fields: map[string]any{"kind": "bg", "entrypoint": "cli"}, pid: os.Getpid()},
+		{name: "SDK host", fields: map[string]any{"kind": "interactive", "entrypoint": "sdk-ts"}, pid: os.Getpid()},
+		{name: "another process", fields: map[string]any{"kind": "interactive", "entrypoint": "cli"}, pid: os.Getpid() + 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			test.fields["status"] = "waiting"
+			test.fields["waitingFor"] = "permission prompt"
+			writeClaudeRecord(t, home, test.fields)
+			claude := NewClaude(nil, home)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := claude.HoldPrompt(ctx, ClaudePermissionPrompt{SessionID: "conversation", ToolName: "Bash", PID: test.pid}); !errors.Is(err, ErrPromptNotHeld) {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+}

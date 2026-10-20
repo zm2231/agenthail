@@ -142,7 +142,10 @@ func TestAPermissionModeChangeNeedsTheHost(t *testing.T) {
 	if _, err := c.Control(context.Background(), sess, surface.ControlRequest{Action: "permission-mode", Value: "plan"}); err == nil {
 		t.Fatal("a CLI session changed its permission mode")
 	}
-	if _, err := c.Requests(context.Background(), sess); !errors.Is(err, surface.ErrUnsupported) {
-		t.Fatalf("requests of a CLI session = %v, want unsupported", err)
+	if c.SessionCapabilities(sess).Respond {
+		t.Fatal("a CLI session with no prompt held through the hook offered answers")
+	}
+	if state, err := c.Requests(context.Background(), sess); err != nil || len(state.Requests) != 0 {
+		t.Fatalf("requests of a CLI session with no held prompt = %+v, %v", state, err)
 	}
 }
