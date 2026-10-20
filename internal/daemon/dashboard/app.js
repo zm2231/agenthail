@@ -1268,6 +1268,7 @@ function timelineSignature(session, exchanges, goal, capabilities, transcriptWar
     exchanges,
     JSON.stringify(goal || null),
     Boolean(capabilities.goal),
+    Boolean(capabilities.goalStatus),
     transcriptWarning,
     timeline,
     claudeRuns,
@@ -1333,9 +1334,11 @@ function renderChat() {
     if (goal?.status === "paused") goalActions.push('<button class="soft-button" data-action="goal-resume" type="button">Resume</button>');
     if (goal?.objective) goalActions.push('<button class="soft-button" data-action="goal-clear" type="button">Clear</button>');
     if (goal?.tokenBudget != null) goalActions.push('<button class="soft-button" data-action="goal-budget" data-goal-budget-clear="true" type="button">Clear budget</button>');
-    const metrics = goal ? `<div class="session-tool-note">Status: ${escape(goalStatusLabel(goal.status))}${goal.timeUsedSeconds != null ? ` · Elapsed: ${escape(formatGoalDuration(goal.timeUsedSeconds))}` : ""}${goal.tokensUsed != null ? ` · Tokens: ${compactTokenCount(goal.tokensUsed)}` : ""}${goal.tokenBudget != null ? ` · Budget: ${compactTokenCount(goal.tokenBudget)}` : ""}${goal.createdAt ? ` · Created: ${escape(goal.createdAt)}` : ""}${goal.updatedAt ? ` · Updated: ${escape(goal.updatedAt)}` : ""}</div>` : "";
+    const metrics = goalMetrics(goal);
     settings.push(`<form class="session-tools" data-tool="goal"><label><span>Goal</span><input name="goal" value="${escape(goal?.objective || "")}" placeholder="Set a focused goal"></label>${metrics}<div class="session-tool-actions"><button class="soft-button" type="submit">${goal?.objective ? "Edit goal" : "Save goal"}</button>${goalActions.join("")}</div></form>`);
     settings.push(`<form class="session-tools" data-tool="goal-budget"><label><span>Token budget</span><input name="tokenBudget" type="number" min="0" step="1" value="${goal?.tokenBudget ?? ""}" placeholder="Optional"></label><div class="session-tool-actions"><button class="soft-button" type="submit">Save budget</button></div></form>`);
+  } else if (capabilities.goalStatus && goal?.objective) {
+    settings.push(`<div class="session-tools session-goal-status" data-tool="goal-status"><label><span>Goal</span><input value="${escape(goal.objective)}" readonly></label>${goalMetrics(goal)}</div>`);
   }
   const toolRows = [
     `<details class="session-details"><summary>Conversation settings</summary>${settings.join("")}</details>`,
@@ -1398,6 +1401,9 @@ function compactTokenCount(value) {
   if (count >= 1000000) return `${(count / 1000000).toFixed(count >= 10000000 ? 0 : 1).replace(/\.0$/, "")}m`;
   if (count >= 1000) return `${Math.round(count / 1000)}k`;
   return String(count);
+}
+function goalMetrics(goal) {
+  return goal ? `<div class="session-tool-note">Status: ${escape(goalStatusLabel(goal.status))}${goal.timeUsedSeconds != null ? ` · Elapsed: ${escape(formatGoalDuration(goal.timeUsedSeconds))}` : ""}${goal.tokensUsed != null ? ` · Tokens: ${compactTokenCount(goal.tokensUsed)}` : ""}${goal.tokenBudget != null ? ` · Budget: ${compactTokenCount(goal.tokenBudget)}` : ""}${goal.createdAt ? ` · Created: ${escape(goal.createdAt)}` : ""}${goal.updatedAt ? ` · Updated: ${escape(goal.updatedAt)}` : ""}</div>${goal.reason ? `<p class="session-tool-note">Reason: ${escape(goal.reason)}</p>` : ""}` : "";
 }
 function goalStatusLabel(status) {
   return ({ active: "Active", paused: "Paused", blocked: "Blocked", usageLimited: "Usage limited", budgetLimited: "Budget limited", complete: "Complete" })[status] || status || "Unknown";

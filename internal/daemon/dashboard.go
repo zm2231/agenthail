@@ -2126,7 +2126,7 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 	if provider, ok := adapter.(surface.ContextUsageProvider); ok {
 		requests["context"] = func() (any, error) { return provider.ContextUsage(ctx, session) }
 	}
-	if effective.Goal {
+	if effective.GoalStatus {
 		requests["goal"] = func() (any, error) { return adapter.GoalGet(ctx, session) }
 	}
 	if effective.Model {

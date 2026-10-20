@@ -15,7 +15,7 @@ func TestGoalReportsStatusUsageAndAttention(t *testing.T) {
 	fake := &cliSurface{
 		kind:     surface.KindCodex,
 		sessions: map[string]surface.Session{"g": {ID: "g", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}},
-		caps:     surface.Capabilities{Goal: true},
+		caps:     surface.Capabilities{Goal: true, GoalStatus: true},
 	}
 	app, _ := cliFixture(t, fake)
 	show := func(goal *surface.GoalState, flags ...string) string {
@@ -56,5 +56,24 @@ func TestGoalReportsStatusUsageAndAttention(t *testing.T) {
 	}
 	if document.Session != "g" || document.Goal.Status != surface.GoalStatusBlocked || document.Goal.TokenBudget == nil || *document.Goal.TokenBudget != budget || !document.Goal.CreatedAt.Equal(at) {
 		t.Fatalf("document=%+v", document)
+	}
+}
+
+func TestGoalShowsAReportedGoalButRefusesControlsTheSessionLacks(t *testing.T) {
+	fake := &cliSurface{
+		kind:     surface.KindClaude,
+		sessions: map[string]surface.Session{"g": {ID: "g", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}},
+		caps:     surface.Capabilities{GoalStatus: true},
+		goal:     &surface.GoalState{Objective: "tests pass", Status: surface.GoalStatusBlocked, Reason: "the test binary cannot be built here"},
+	}
+	app, _ := cliFixture(t, fake)
+	output, err := captureStdout(t, func() error { return app.Run([]string{"goal", "claude:g"}) })
+	if err != nil || !strings.Contains(output, "tests pass [blocked]") || !strings.Contains(output, "Needs you") || !strings.Contains(output, "Reason: the test binary cannot be built here") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	for _, action := range [][]string{{"set", "lint"}, {"clear"}, {"pause"}} {
+		if err := app.Run(append([]string{"goal", "claude:g"}, action...)); err == nil || !strings.Contains(err.Error(), "does not support goal management") {
+			t.Fatalf("%v err=%v", action, err)
+		}
 	}
 }

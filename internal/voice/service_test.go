@@ -2,6 +2,7 @@ package voice
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -31,6 +32,7 @@ type fixtureProvider struct {
 	interrupts   int
 	speaking     chan struct{}
 	speakingText string
+	respondErr   error
 	toolCalls    []struct {
 		requestID string
 		success   bool
@@ -185,7 +187,7 @@ func (p *fixtureProvider) RespondDynamicToolCall(_ context.Context, requestID st
 		success   bool
 		text      string
 	}{requestID, success, text})
-	return nil
+	return p.respondErr
 }
 func (p *fixtureProvider) Request(ctx context.Context, _ *surface.Session, method string, params map[string]any) error {
 	p.mu.Lock()
@@ -244,6 +246,7 @@ type fixtureOptions struct {
 	target         *targetFixture
 	operatorSource func(*surface.Session, bool)
 	stream         SessionStreamProvider
+	path           string
 }
 
 type voiceFixture struct {
@@ -265,6 +268,9 @@ func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 	t.Helper()
 	f := &voiceFixture{t: t, provider: &fixtureProvider{polled: make(chan struct{}, 1)}, path: filepath.Join(t.TempDir(), "voice", "operator.json"), ticks: make(chan time.Time), now: time.Unix(1_700_000_000, 0)}
 	var resolver TargetResolver
+	if options.path != "" {
+		f.path = options.path
+	}
 	if target := options.target; target != nil {
 		resolver = func(_ context.Context, id string) (*Target, error) {
 			resolved, err := target.Resolve(context.Background(), id)
@@ -1018,5 +1024,86 @@ func TestPersistenceFailureDoesNotPreventAudioTeardown(t *testing.T) {
 	}
 	if requests, _, _ := p.snapshot(); !reflect.DeepEqual(requests, []string{"thread/realtime/start", "thread/realtime/stop"}) {
 		t.Fatalf("audio teardown skipped: %v", requests)
+	}
+}
+
+func TestAnOperatorCreatedWithOtherToolsSaysOnceThatANewConversationGetsTheCurrentOnes(t *testing.T) {
+	f, _ := fixture(t)
+	if v := apply(t, f, Action{Action: "prepare"}); v.Message != "" {
+		t.Fatalf("a current operator was told to start over: %q", v.Message)
+	}
+	f.service.Close()
+	data, err := os.ReadFile(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved map[string]any
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatal(err)
+	}
+	delete(saved["state"].(map[string]any), "toolsDigest")
+	if data, err = json.Marshal(saved); err != nil || os.WriteFile(f.path, data, 0o600) != nil {
+		t.Fatal(err)
+	}
+
+	older := newFixture(t, fixtureOptions{path: f.path})
+	if v := older.View(); v.Message != toolsOutdatedNotice {
+		t.Fatalf("message=%q", v.Message)
+	}
+	connectFixture(t, older)
+	if v := older.View(); v.Message != toolsOutdatedNotice {
+		t.Fatalf("message during the call=%q", v.Message)
+	}
+	older.observe(Event{Method: "thread/realtime/error", Params: map[string]any{"message": "Realtime audio failed."}})
+	if v := older.View(); !strings.HasPrefix(v.Message, "Realtime audio failed.") || !strings.HasSuffix(v.Message, toolsOutdatedNotice) {
+		t.Fatalf("another message hid the notice: %q", v.Message)
+	}
+	hangUp(t, older)
+	if v := older.View(); strings.Contains(v.Message, toolsOutdatedNotice) {
+		t.Fatal("the notice outlived the call it was shown in")
+	}
+	older.service.Close()
+	if v := newFixture(t, fixtureOptions{path: f.path}).View(); strings.Contains(v.Message, toolsOutdatedNotice) {
+		t.Fatal("the notice came back after a restart")
+	}
+}
+
+type heldLeads struct{ sent, release chan string }
+
+func (l heldLeads) List(context.Context) ([]Project, error) { return nil, nil }
+func (l heldLeads) LeadSession(context.Context, string) (string, error) {
+	return "", errors.New("unused")
+}
+func (l heldLeads) SendToLead(_ context.Context, project, message, _ string) (LeadReceipt, error) {
+	l.sent <- message
+	<-l.release
+	return LeadReceipt{Ref: "@" + project + "-lead"}, nil
+}
+
+func TestALeadSendAnsweredAfterTheCallEndedReportsCodexsRefusalToItsOwnOperator(t *testing.T) {
+	for _, replaced := range []bool{false, true} {
+		t.Run(map[bool]string{false: "kept across a restart", true: "not on a newer operator"}[replaced], func(t *testing.T) {
+			f, p := fixture(t)
+			leads := heldLeads{sent: make(chan string, 1), release: make(chan string)}
+			f.service.SetProjects(leads)
+			connectFixture(t, f)
+			p.mu.Lock()
+			p.respondErr = errors.New("renderer gone")
+			p.mu.Unlock()
+			f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-a", "threadId": "operator", "namespace": "agenthail", "tool": "voice_send_to_lead", "arguments": map[string]any{"project": "widget", "message": "ship it"}}})
+			if got := <-leads.sent; got != "ship it" {
+				t.Fatalf("sent=%q", got)
+			}
+			hangUp(t, f)
+			if replaced {
+				apply(t, f, Action{Action: "new"})
+			}
+			close(leads.release)
+			f.service.Close()
+			const refusal = "Voice tool response could not be returned to Codex: renderer gone"
+			if got := New(f.path, p, nil, "/fixture/agenthail").View("phone").Message; strings.Contains(got, refusal) == replaced {
+				t.Fatalf("after restart message=%q", got)
+			}
+		})
 	}
 }

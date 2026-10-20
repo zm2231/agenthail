@@ -47,8 +47,16 @@ lock and stops writing `state.json`, so the daemon starts the new host at
 once. The retiring host refuses `open` with `draining` and serves everything
 else for its own sessions: `send`, `respond`, `interrupt`, `setModel`,
 `setPermissionMode`, `close`, `list` and `subscribe`. It closes a session once
-Claude reports it idle with no open request and no background task, and exits
-when its last session has closed. The next message resumes that conversation
+Claude reports it idle with no open request, no background task and no turn
+owed, and exits when its last session has closed. Claude owes a turn for work
+it was handed while idle: a background task that ended, unless the live set
+marked it `ambient` (not activity, so no turn follows), which Claude reports
+before it starts the turn telling the model, and a message the host passed it
+that no turn has started on or answered (`user_message_uuids`). Claude reports
+idle only with its queue empty, so the next `running` covers everything it was
+handed; work that arrives while it runs is covered by that turn's idle.
+If Claude never starts an owed turn, the session stays on the retiring host
+until a later message runs one. The next message resumes that conversation
 in the new host. It never closes the input of a session that is still working,
 because Claude then refuses every prompt it waits on.
 

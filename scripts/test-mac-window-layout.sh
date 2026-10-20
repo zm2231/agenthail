@@ -27,33 +27,67 @@ ditto "$source_app" "$app"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.agenthail.layouttest" -c "Delete :CFBundleURLTypes" -c "Delete :NSServices" "$app/Contents/Info.plist"
 codesign --force --deep --sign - "$app" >/dev/null 2>&1
 
-python3 "$ROOT/scripts/fixtures/layout-daemon.py" >"$work/port" &
-daemon_pid=$!
-for _ in $(seq 1 50); do [ -s "$work/port" ] && break; sleep 0.1; done
-port="$(cat "$work/port")"
-if [ -z "$port" ] || ! kill -0 "$daemon_pid" 2>/dev/null ||
-	! curl -fsS "http://127.0.0.1:$port/api/v1/version" >/dev/null || ! curl -fsS "http://127.0.0.1:$port/api/v1/snapshot" >/dev/null; then
-	echo "error: the synthetic daemon did not start" >&2
-	exit 1
-fi
+start_daemon() {
+	[ -z "$daemon_pid" ] || { kill "$daemon_pid" 2>/dev/null; wait "$daemon_pid" 2>/dev/null || true; }
+	rm -f "$work/port" "$work/daemon.err"
+	local started=$SECONDS
+	python3 "$ROOT/scripts/fixtures/layout-daemon.py" "$@" >"$work/port" 2>"$work/daemon.err" &
+	daemon_pid=$!
+	for _ in $(seq 1 300); do
+		[ -s "$work/port" ] && break
+		kill -0 "$daemon_pid" 2>/dev/null || break
+		sleep 0.1
+	done
+	port="$(cat "$work/port")"
+	local problem=""
+	if [ -z "$port" ]; then
+		if kill -0 "$daemon_pid" 2>/dev/null; then problem="no port after $((SECONDS - started))s"; else problem="exited before printing a port"; fi
+	elif ! kill -0 "$daemon_pid" 2>/dev/null; then
+		problem="exited after printing port $port"
+	elif ! curl -fsS "http://127.0.0.1:$port/api/v1/version" >/dev/null 2>>"$work/daemon.err" ||
+		! curl -fsS "http://127.0.0.1:$port/api/v1/snapshot" >/dev/null 2>>"$work/daemon.err"; then
+		problem="port $port did not answer"
+	fi
+	if [ -n "$problem" ]; then
+		echo "error: the synthetic daemon (${*:-working}) did not start: $problem" >&2
+		echo "python3: $(command -v python3) $(python3 --version 2>&1)" >&2
+		cat "$work/daemon.err" >&2
+		exit 1
+	fi
+	echo "Synthetic daemon (${*:-working}) listening on $port after $((SECONDS - started))s"
+}
 
-for width in $WIDTHS; do
-	home="$work/home-$width"
+stays_up() {
+	local name="$1" width="$2"
+	local home="$work/home-$name-$width"
 	mkdir -p "$home"
 	env HOME="$home" CFFIXED_USER_HOME="$home" defaults write com.agenthail.layouttest "NSWindow Frame main" "100 40 $width 900 0 0 1920 1050 "
 	env -i HOME="$home" CFFIXED_USER_HOME="$home" PATH=/usr/bin:/bin TMPDIR="$work" AGENTHAIL_CLI=/usr/bin/false \
-		AGENTHAIL_API_URL="http://127.0.0.1:$port" AGENTHAIL_API_TOKEN=fixture "$app/Contents/MacOS/Agenthail" >"$work/app-$width.log" 2>&1 &
+		AGENTHAIL_API_URL="http://127.0.0.1:$port" AGENTHAIL_API_TOKEN=fixture "$app/Contents/MacOS/Agenthail" >"$work/app-$name-$width.log" 2>&1 &
 	app_pid=$!
 	for _ in $(seq 1 "$SECONDS_ALIVE"); do
 		sleep 1
 		if ! kill -0 "$app_pid" 2>/dev/null; then
-			echo "error: the main window aborted at a saved width of $width pt" >&2
-			tail -20 "$work/app-$width.log" >&2
+			echo "error: the main window aborted with $name selected at a saved width of $width pt" >&2
+			tail -20 "$work/app-$name-$width.log" >&2
 			exit 1
 		fi
 	done
 	kill "$app_pid"
 	wait "$app_pid" 2>/dev/null || true
 	app_pid=""
-	echo "Main window stayed up for ${SECONDS_ALIVE}s at a saved width of $width pt"
+	echo "Main window stayed up for ${SECONDS_ALIVE}s with $name selected at a saved width of $width pt"
+}
+
+start_daemon
+for width in $WIDTHS; do
+	stays_up "a working session" "$width"
+done
+start_daemon waiting
+for width in $WIDTHS; do
+	stays_up "a session waiting on a prompt Agenthail can't answer" "$width"
+done
+start_daemon waiting-queued
+for width in $WIDTHS; do
+	stays_up "a waiting session holding queued messages" "$width"
 done
