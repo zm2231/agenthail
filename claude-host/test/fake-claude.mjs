@@ -164,7 +164,7 @@ function notified(id) {
   const reply = `notified:${id}`;
   fs.appendFileSync(transcript, JSON.stringify({ uuid: null, text: '<task-notification>', reply, origin: { kind: 'task-notification' }, priority: null, pid: process.pid, inputClosed }) + '\n');
   write({ type: 'assistant', uuid: crypto.randomUUID(), session_id: sessionId, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: reply }] } });
-  write({ type: 'result', subtype: 'success', is_error: false, result: reply, uuid: crypto.randomUUID(), session_id: sessionId, duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {} });
+  write({ type: 'result', subtype: 'success', is_error: false, result: reply, uuid: crypto.randomUUID(), session_id: sessionId, duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, modelUsage: modelUsage() });
   state('idle');
 }
 

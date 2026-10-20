@@ -51,16 +51,32 @@ type claudeContextRecord struct {
 }
 
 func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surface.ContextUsage, error) {
+	usage, model, err := c.transcriptContextUsage(ctx, sess)
+	if err != nil {
+		return nil, err
+	}
+	if window, ok := c.providerContextWindow(ctx, sess, model); ok {
+		usage.ContextWindow, usage.ContextWindowSource, usage.WindowEstimated = window, ClaudeContextWindowSourceProvider, false
+	}
+	if usage.UsedTokens == 0 && usage.ContextWindow == 0 && usage.CompactionCount == 0 {
+		return nil, nil
+	}
+	return &usage, nil
+}
+
+// transcriptContextUsage is what the transcript records about the session's
+// context, and the model of its latest reply.
+func (c *Claude) transcriptContextUsage(ctx context.Context, sess *surface.Session) (surface.ContextUsage, string, error) {
 	path, err := c.sessionTranscript(sess)
 	if err != nil || path == "" {
-		return nil, err
+		return surface.ContextUsage{}, "", err
 	}
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return surface.ContextUsage{}, "", nil
 		}
-		return nil, err
+		return surface.ContextUsage{}, "", err
 	}
 	c.contextMu.Lock()
 	defer c.contextMu.Unlock()
@@ -94,13 +110,15 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 				state.oneMRequests[base] = oneM
 			}
 		case record.Type == "assistant":
+			if model := record.Message.Model; model != "" && model != "<synthetic>" {
+				state.model = model
+			}
 			used := record.Message.Usage.InputTokens + record.Message.Usage.CacheCreationTokens + record.Message.Usage.CacheReadTokens
 			if used > 0 && contextEventIsCurrent(at, state.usage.UpdatedAt) {
 				state.usage.UsedTokens = used
 				state.usage.InputTokens = record.Message.Usage.InputTokens
 				state.usage.CachedInputTokens = record.Message.Usage.CacheCreationTokens + record.Message.Usage.CacheReadTokens
 				state.usage.OutputTokens = record.Message.Usage.OutputTokens
-				state.model = record.Message.Model
 				window := observeClaudeCurrentContextWindow(sess.ConfiguredModel, state.oneMRequests, record.RequestedModel, record.Message.Model)
 				state.usage.ContextWindow = window.Window
 				state.usage.ContextWindowSource = window.Source
@@ -148,11 +166,11 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 	if state.offset == 0 {
 		lines, offset, readErr := readRecentJSONLLines(ctx, path, 0, initialClaudeObservationBytes, maxClaudeTranscriptRecordBytes)
 		if readErr != nil {
-			return nil, readErr
+			return surface.ContextUsage{}, "", readErr
 		}
 		for _, line := range lines {
 			if err := visit(line); err != nil {
-				return nil, err
+				return surface.ContextUsage{}, "", err
 			}
 		}
 		state.offset = offset
@@ -162,7 +180,7 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 		state.offset = offset
 		state.fileInfo = info
 		if scanErr != nil {
-			return nil, scanErr
+			return surface.ContextUsage{}, "", scanErr
 		}
 	}
 	completedAt := state.usage.LastCompactedAt
@@ -170,14 +188,7 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 		completedAt = state.latestCommandDoneAt
 	}
 	state.usage.Compacting = !state.latestCommandAt.IsZero() && state.latestCommandAt.After(completedAt)
-	usage := state.usage
-	if window, ok := c.providerContextWindow(ctx, sess, state.model); ok {
-		usage.ContextWindow, usage.ContextWindowSource, usage.WindowEstimated = window, ClaudeContextWindowSourceProvider, false
-	}
-	if usage.UsedTokens == 0 && usage.ContextWindow == 0 && usage.CompactionCount == 0 {
-		return nil, nil
-	}
-	return &usage, nil
+	return state.usage, state.model, nil
 }
 
 // providerContextWindow is the window Claude reported running the session's
@@ -188,10 +199,7 @@ func (c *Claude) providerContextWindow(ctx context.Context, sess *surface.Sessio
 		return 0, false
 	}
 	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
-	if !ok || listed.ContextWindow <= 0 {
-		return 0, false
-	}
-	if observed := claudeModelBase(observedModel); observed != "" && observed != claudeModelBase(listed.ContextModel) {
+	if !ok || listed.ContextWindow <= 0 || claudeModelBase(observedModel) != claudeModelBase(listed.ContextModel) {
 		return 0, false
 	}
 	return listed.ContextWindow, true

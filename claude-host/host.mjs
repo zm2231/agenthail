@@ -104,9 +104,10 @@ class Session {
   // measure records the context window Claude runs the main model with. A
   // turn result counts usage for every model the turn called, side queries
   // included, so Claude's own context report names which entry is the main
-  // model's. The transcript records no window size.
+  // model's. The transcript records no window size. It runs before the
+  // result is acted on, since an idle session may be closed on it.
   async measure(result) {
-    const usage = await this.query.getContextUsage({ detail: 'summary' });
+    const usage = await Promise.race([this.query.getContextUsage({ detail: 'summary' }), timeout(5_000, 'context report')]);
     const window = result.modelUsage?.[usage?.model]?.contextWindow;
     if (!Number.isInteger(window) || window <= 0) return;
     if (this.context?.window === window && this.context?.model === usage.model) return;
@@ -508,6 +509,7 @@ async function run(s, exit) {
   try {
     for await (const message of s.query) {
       for (const uuid of message.user_message_uuids ?? []) s.owed.delete(uuid);
+      if (message.type === 'result') await s.measure(message).catch(() => {});
       if (message.type === 'system' && message.subtype === 'session_state_changed') {
         s.stateEvents = true;
         if (message.state === 'running') s.turnStarted();
@@ -533,7 +535,6 @@ async function run(s, exit) {
         s.setState('idle');
         s.retireIfDone({ turnEnded: true });
       }
-      if (message.type === 'result') s.measure(message).catch(() => {});
       emit(s.id, 'sdk', { message });
     }
   } catch (e) {
