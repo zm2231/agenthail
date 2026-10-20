@@ -87,3 +87,24 @@ func TestAdoptResumesAConversationInTheConfigRootThatHoldsIt(t *testing.T) {
 		t.Fatalf("spawns=%+v, want one resume in %s", spawns, spare)
 	}
 }
+
+func TestAdoptRefusesASessionWithABackgroundAgentRunning(t *testing.T) {
+	fixture, host, c := hostResume(t)
+	path := fixture.Transcript(fixtureConversation, fixture.Home)
+	fixture.RecordStatus(fixtureConversation, fixture.Home, "", "idle", "", time.Now().Add(-time.Second))
+	now := time.Now().UTC().Add(time.Second)
+	appendTranscript(t, path, mustJSON(t, backgroundCall(now, "call-agent", "Agent", map[string]any{"description": "Review the diff"}))+"\n"+
+		mustJSON(t, backgroundResult(now, "call-agent", map[string]any{"isAsync": true, "agentId": "a-review"}))+"\n")
+	_, err := c.AdoptSession(context.Background(), &surface.Session{ID: fixtureConversation}, surface.AdoptRequest{StopTerminal: true})
+	var busy *surface.AdoptBusyError
+	if !errors.As(err, &busy) || !strings.Contains(busy.Reason, "background task") {
+		t.Fatalf("err=%v", err)
+	}
+	if !claudeProcessAlive(fixture.PID) || len(host.Spawns(t, fixtureConversation)) != 0 {
+		t.Fatal("a session with background work was stopped or resumed")
+	}
+	appendTranscript(t, path, mustJSON(t, backgroundNotification(now.Add(time.Second), "a-review"))+"\n")
+	if _, err := c.AdoptSession(context.Background(), &surface.Session{ID: fixtureConversation}, surface.AdoptRequest{StopTerminal: true}); err != nil {
+		t.Fatalf("adopting once the agent ended: %v", err)
+	}
+}

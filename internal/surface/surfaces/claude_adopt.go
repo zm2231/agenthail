@@ -101,7 +101,8 @@ func (c *Claude) adoptHolder(ctx context.Context, conversation string) (*claudeA
 			holder.session = process.session
 		} else {
 			pid, _ := record.fields["pid"].(float64)
-			holder.session = surface.Session{ID: conversation, PID: int(pid), Cwd: str(record.fields, "cwd"), Status: claudePeerStatus(record.fields)}
+			holder.session = surface.Session{ID: conversation, PID: int(pid), Cwd: str(record.fields, "cwd"), Status: claudePeerStatus(record.fields), Transcript: c.resolveTranscript(conversation)}
+			holder.session.BackgroundTasks = c.recordBackground(ctx, &holder.session)
 		}
 		holder.hosted = claudeHosted(&holder.session)
 		return holder, nil
@@ -110,24 +111,16 @@ func (c *Claude) adoptHolder(ctx context.Context, conversation string) (*claudeA
 }
 
 // adoptBusy names the work a stop would cut off: a turn, a question or
-// permission prompt, a running subagent, or a background shell.
+// permission prompt, or a running background task.
 func adoptBusy(holder *claudeAdoptHolder) string {
-	switch status := str(holder.record, "status"); {
-	case status == "busy":
-		return "a turn is running"
-	case status == "waiting" || holder.record["waitingFor"] != nil:
+	status := str(holder.record, "status")
+	switch {
+	case status == "waiting" || holder.record["waitingFor"] != nil || holder.session.WaitingOn != nil:
 		return "it is waiting on a question or permission"
-	case status == "shell":
+	case status == "busy" || holder.session.Status == surface.StatusBusy:
+		return "a turn is running"
+	case surface.BackgroundRunning(holder.session.BackgroundTasks):
 		return "a background task is running"
-	}
-	if holder.session.Status == surface.StatusBusy {
-		return "a turn is running"
-	}
-	if holder.session.WaitingOn != nil {
-		return "it is waiting on a question or permission"
-	}
-	if rollup := holder.session.Subagents; rollup != nil && rollup.Working > 0 {
-		return fmt.Sprintf("%d subagents are working", rollup.Working)
 	}
 	return ""
 }
