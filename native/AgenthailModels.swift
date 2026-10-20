@@ -937,6 +937,7 @@ struct GoalState: Decodable {
     let tokenBudget: Int?
     let createdAt: String?
     let updatedAt: String?
+    let reason: String?
 
     var displayStatus: String {
         switch status {
@@ -953,7 +954,7 @@ struct GoalState: Decodable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case objective, status, timeUsedSeconds, tokensUsed, tokenBudget, createdAt, updatedAt
+        case objective, status, timeUsedSeconds, tokensUsed, tokenBudget, createdAt, updatedAt, reason
     }
 
     init(from decoder: Decoder) throws {
@@ -965,6 +966,7 @@ struct GoalState: Decodable {
         tokenBudget = try container.decodeIfPresent(Int.self, forKey: .tokenBudget)
         createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
         updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
+        reason = try container.decodeIfPresent(String.self, forKey: .reason).flatMap { $0.isEmpty ? nil : $0 }
     }
 }
 

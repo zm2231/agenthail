@@ -207,9 +207,25 @@ func (*nilGoalSurface) GoalGet(context.Context, *surface.Session) (*surface.Goal
 
 func TestDashboardSessionMetadataExplicitlyClearsNilGoal(t *testing.T) {
 	_, registry, fake, _, _ := daemonFixture(t)
-	fake.caps.Goal = true
+	fake.caps.Goal, fake.caps.GoalStatus = true, true
 	response := serveSessionMetadata(context.Background(), New(registry, []surface.Surface{&nilGoalSurface{daemonSurface: fake}}))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"goal":null`) || strings.Contains(response.Body.String(), `"errors"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+type reportedGoalSurface struct{ *daemonSurface }
+
+func (*reportedGoalSurface) GoalGet(context.Context, *surface.Session) (*surface.GoalState, error) {
+	return &surface.GoalState{Objective: "tests pass", Status: surface.GoalStatusComplete, Reason: "go test exited 0"}, nil
+}
+
+func TestDashboardSessionMetadataReadsAGoalTheSessionOnlyReports(t *testing.T) {
+	_, registry, fake, _, _ := daemonFixture(t)
+	fake.caps.GoalStatus = true
+	response := serveSessionMetadata(context.Background(), New(registry, []surface.Surface{&reportedGoalSurface{daemonSurface: fake}}))
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"objective":"tests pass"`) || !strings.Contains(body, `"reason":"go test exited 0"`) {
+		t.Fatalf("status=%d body=%s", response.Code, body)
 	}
 }

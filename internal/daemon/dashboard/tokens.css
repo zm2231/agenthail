@@ -2039,6 +2039,15 @@ select {
   gap: 10px;
   margin-top: 14px;
 }
+.session-details .session-goal-status {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+.session-goal-status .session-tool-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
 .session-details .session-tools label {
   display: grid;
   gap: 6px;

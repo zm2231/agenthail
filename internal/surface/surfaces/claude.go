@@ -33,6 +33,8 @@ type Claude struct {
 	contextState map[string]*claudeContextState
 	observeMu    sync.Mutex
 	observeState map[string]*claudeObservationState
+	goalMu       sync.Mutex
+	goals        map[string]claudeGoalCursor
 	modelsMu     sync.Mutex
 	modelsCache  []surface.ModelOption
 	modelsAt     time.Time
@@ -77,7 +79,7 @@ func (c *Claude) ObserveAllClaudeSubagents(ctx context.Context) ([]surface.Claud
 
 func (c *Claude) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
-		Send: true, Stream: true, Reply: true, Goal: false,
+		Send: true, Stream: true, Reply: true, GoalStatus: true,
 		Compact: true, Model: true, Interrupt: true, Steer: true,
 		Attach: true, Commands: true,
 	}
@@ -1204,6 +1206,9 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 	}
 	turns := newClaudeTurnTracker(replayed.current, closing)
 	completed := false
+	// goalAt is the end of the last goal record this scan read; the goal is
+	// sent once the scan ends, as the whole transcript describes it.
+	var goalAt int64
 	finish := func(ended []claudeTurnEnd) {
 		for _, end := range ended {
 			if uuid != "" && end.TurnID != uuid && end.Status == "" {
@@ -1233,6 +1238,9 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			var record map[string]any
 			if json.Unmarshal(line, &record) != nil {
 				return nil
+			}
+			if _, ok := parseClaudeGoalRecord(line); ok && uuid == "" {
+				goalAt = lineOffset
 			}
 			items := claudeTimelineItems(record)
 			turnID, ended, interrupted := turns.observe(record, recordOffset, line, len(items))
@@ -1267,6 +1275,14 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			return scanErr
 		}
 		offset = next
+		if goalAt > 0 {
+			goal, goalErr := c.GoalGet(ctx, sess)
+			if goalErr != nil {
+				return goalErr
+			}
+			onEvent(surface.StreamEvent{ID: "goal", ProviderKey: "goal", Version: uint64(goalAt), Operation: "replace", Kind: "goal", Goal: goal})
+			goalAt = 0
+		}
 		finish(turns.settle(func(at time.Time) bool { return c.settledAfter(sess, at) }))
 		if turns.closing.TurnID != "" {
 			turns.closing.Anchor = anchorOf(tail)
@@ -1341,10 +1357,6 @@ func (c *Claude) GoalSet(ctx context.Context, sess *surface.Session, text string
 
 func (c *Claude) GoalClear(ctx context.Context, sess *surface.Session) error {
 	return surface.ErrUnsupported
-}
-
-func (c *Claude) GoalGet(ctx context.Context, sess *surface.Session) (*surface.GoalState, error) {
-	return nil, surface.ErrUnsupported
 }
 
 func (c *Claude) Compact(ctx context.Context, sess *surface.Session) error {

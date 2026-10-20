@@ -42,6 +42,12 @@ struct GoalSection: View {
             }
             Text(goal.objective)
                 .textSelection(.enabled)
+            if let reason = goal.reason {
+                Text(reason)
+                    .font(.system(size: 11))
+                    .foregroundStyle(DesktopPalette.text2)
+                    .textSelection(.enabled)
+            }
             let usage = GoalSection.usage(goal)
             if !usage.isEmpty {
                 Text(usage)

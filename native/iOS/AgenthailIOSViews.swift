@@ -1072,6 +1072,7 @@ struct SessionInspector: View {
                         if let value = goal.tokenBudget { LabeledContent("Token budget", value: value.formatted()) }
                         if let value = goal.createdAt { LabeledContent("Created", value: value) }
                         if let value = goal.updatedAt { LabeledContent("Updated", value: value) }
+                        if let reason = goal.reason { LabeledContent("Reason") { Text(reason).textSelection(.enabled) } }
                     }
                 }
                 if let runs = detail.claudeRuns, !runs.isEmpty {
