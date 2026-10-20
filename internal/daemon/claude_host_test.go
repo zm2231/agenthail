@@ -410,3 +410,77 @@ func TestTheRequestWatcherFollowsTheNewHostWhileTheOldOneRetires(t *testing.T) {
 		t.Fatal("the old host left while its session waited on a person")
 	}
 }
+
+// A protocol 2 host retiring under this build's daemon keeps the prompt its
+// session waits on answerable: the daemon lists it, the person's answer
+// reaches Claude through the old host, and the session's next message after
+// the old host leaves with it resumes the conversation on this build's host.
+func TestAnUpdateFromAProtocol2HostAnswersItsPromptThroughTheNewDaemon(t *testing.T) {
+	for _, test := range []struct {
+		name, prompt, reply string
+		decision            surface.Decision
+	}{
+		{name: "approval", prompt: "TOOL", decision: surface.Decision{Behavior: "allow"}, reply: "tool:allow:"},
+		{name: "question", prompt: "QUESTION", decision: surface.Decision{Behavior: "allow", Answers: map[string]string{"Which color?": "Blue"}}, reply: `question:allow:{"Which color?":"Blue"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := claudehosttest.New(t, "")
+			ctx := context.Background()
+			agents := filepath.Join(fixture.Home, "claude-agents")
+			if err := os.WriteFile(agents, []byte("#!/bin/sh\necho '[]'\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("AGENTHAIL_CLAUDE_BIN", agents)
+			old := fixture.StartProtocol2Host(t, "0.2.50")
+			client := claudehost.NewClient(fixture.Home)
+			id := uuid.NewString()
+			opened := fixture.Open(t, client, id)
+			claude := surfaces.NewClaude(nil, fixture.Home)
+			session := hostedSession(t, claude, id)
+			r := hostRegistry(t)
+			if err := r.RegisterSession(session); err != nil {
+				t.Fatal(err)
+			}
+			d := New(r, []surface.Surface{claude})
+			d.log = log.New(io.Discard, "", 0)
+			fixture.Peer(t, opened.PID, test.prompt)
+			claudehosttest.WaitFor(t, "the session to wait on the request", func() bool {
+				observation, err := d.observeTurn(ctx, claude, &session)
+				return err == nil && observation.WaitingOn != nil
+			})
+
+			d.SetClaudeHost(fixture.Manager(t, "0.2.51"))
+			if check := d.checkClaudeHost(ctx, claudeHostCheck{}); check.status != "running" || check.pid == old.PID {
+				t.Fatalf("host after the install = %+v", check)
+			}
+			if hello, err := client.Hello(ctx); err != nil || hello.Protocol != claudehost.Protocol {
+				t.Fatalf("hello after the install = %+v, %v", hello, err)
+			}
+			state, err := claude.Requests(ctx, &session)
+			if err != nil || len(state.Requests) != 1 {
+				t.Fatalf("requests through the retiring protocol 2 host = %+v, %v", state, err)
+			}
+			answer := httptest.NewRecorder()
+			d.respond(ctx, answer, claude, &session, state.Requests[0].ID, test.decision, "the test")
+			if answer.Code != http.StatusOK {
+				t.Fatalf("answer through the retiring protocol 2 host = %d %s", answer.Code, answer.Body)
+			}
+			claudehosttest.WaitFor(t, "the answer to reach Claude and the old host to leave with its session", func() bool {
+				turns := fixture.Turns(t, id)
+				return len(turns) == 1 && turns[0].Reply == test.reply && !claudehosttest.Alive(old.PID) && !claudehosttest.Alive(opened.PID)
+			})
+			if waiting, _, err := r.WaitingState(id); err != nil || waiting != nil {
+				t.Fatalf("waiting after the answer = %+v, %v; want none", waiting, err)
+			}
+
+			receipt, err := d.dispatcher().DeliverWithOptions(ctx, claude, &session, "after the update", "", surface.SendOptions{Author: surface.AuthorPerson})
+			if err != nil || receipt.Evidence != surface.EvidenceDelivered {
+				t.Fatalf("the next message = %+v, %v; want delivered", receipt, err)
+			}
+			claudehosttest.WaitFor(t, "the answer from this build's host", func() bool {
+				turns := fixture.Turns(t, id)
+				return len(turns) == 2 && turns[1].Reply == "echo:after the update" && turns[1].PID != opened.PID
+			})
+		})
+	}
+}

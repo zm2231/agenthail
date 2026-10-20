@@ -2,12 +2,16 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -139,5 +143,121 @@ func TestResolvingARegisteredSessionTheSurfaceCannotGiveDoesNotRefreshIt(t *test
 				t.Fatalf("resolving refreshed the registered session: before=%v err=%v", before, err)
 			}
 		})
+	}
+}
+
+// exitedHostSession creates a host session named host-replace through the CLI,
+// as `thread create --name` does, and ends its Claude process.
+func exitedHostSession(t *testing.T) (*coordinatorCLI, string) {
+	t.Helper()
+	c := newCoordinatorCLI(t)
+	output, err := c.run(t, "thread", "create", "claude", "start the work", "--name", "host-replace", "--cwd", c.host.Cwd, "--json")
+	if err != nil {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	var created struct {
+		Session struct {
+			ID string `json:"id"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal([]byte(output), &created); err != nil || created.Session.ID == "" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	c.firstTurn(t, created.Session.ID)
+	end(t, c, created.Session.ID)
+	return c, created.Session.ID
+}
+
+// end kills a session's Claude process and waits until the host has let it go.
+func end(t *testing.T, c *coordinatorCLI, conversation string) {
+	t.Helper()
+	spawns := c.host.Spawns(t, conversation)
+	pid := spawns[len(spawns)-1].PID
+	_ = syscall.Kill(pid, syscall.SIGKILL)
+	claudehosttest.WaitFor(t, "the Claude process to end", func() bool { return !claudehosttest.Alive(pid) })
+	claudehosttest.WaitFor(t, "the host to let the session go", func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		listing, err := claudehost.NewClient(c.claude.Home).List(ctx)
+		if err != nil {
+			return false
+		}
+		for _, session := range listing.Sessions {
+			if session.SessionID == conversation {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+func TestSendToAnExitedHostSessionResumesItDeliversAndKeepsItsName(t *testing.T) {
+	c, conversation := exitedHostSession(t)
+	peers := claudetest.ListenPeerManager(t, c.claude.Home)
+	if err := c.r.SetAlias("replacer", conversation); err != nil {
+		t.Fatal(err)
+	}
+	for i, target := range []string{conversation, "claude:" + conversation, "@replacer"} {
+		if i > 0 {
+			end(t, c, conversation)
+		}
+		message := fmt.Sprintf("message %d", i)
+		if output, err := c.run(t, "send", target, message); err != nil {
+			t.Fatalf("target=%s output=%q err=%v", target, output, err)
+		}
+		if delivered := peers.Count(message); delivered != 1 {
+			t.Fatalf("target=%s delivered=%d", target, delivered)
+		}
+		if spawns := c.host.Spawns(t, conversation); len(spawns) != i+2 {
+			t.Fatalf("target=%s spawns=%d, want a resume per send", target, len(spawns))
+		}
+		registered, err := c.r.Session(conversation)
+		if err != nil || registered.Name != "host-replace" {
+			t.Fatalf("target=%s the resumed session lost its name: %+v err=%v spawns=%+v", target, registered, err, c.host.Spawns(t, conversation))
+		}
+	}
+}
+
+func TestSendByTheNameOfAnExitedSessionGivesItsIDAndAlias(t *testing.T) {
+	c, conversation := exitedHostSession(t)
+	for _, alias := range []string{"", "replacer"} {
+		if alias != "" {
+			if err := c.r.SetAlias(alias, conversation); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, target := range []string{"host-replace", "claude:host-replace"} {
+			_, err := c.run(t, "send", target, "by name")
+			want := conversation
+			if alias != "" {
+				want += " (@" + alias + ")"
+			}
+			if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "a name does not resume") {
+				t.Fatalf("alias=%q target=%s err=%v", alias, target, err)
+			}
+		}
+	}
+	if spawns := c.host.Spawns(t, conversation); len(spawns) != 1 {
+		t.Fatalf("a name resumed the session: spawns=%d", len(spawns))
+	}
+}
+
+// An older host still on the socket after an update cannot take this build's
+// resume, so the message waits in the queue for the daemon's new host rather
+// than failing.
+func TestSendToAnExitedSessionWhileAnOlderHostRunsWaitsForTheNewHost(t *testing.T) {
+	c, conversation := exitedHostSession(t)
+	c.host.KillHost(t)
+	c.host.StartProtocol1Host(t, "0.2.44")
+	output, err := c.run(t, "send", conversation, "after the update")
+	if err != nil || !strings.Contains(output, "queued #1") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	queue, err := c.r.ListQueue(false, nil)
+	if err != nil || len(queue) != 1 || queue[0].SessionID != conversation || queue[0].Message != "after the update" {
+		t.Fatalf("queue=%+v err=%v", queue, err)
+	}
+	if spawns := c.host.Spawns(t, conversation); len(spawns) != 1 {
+		t.Fatalf("the older host resumed the session: spawns=%d", len(spawns))
 	}
 }

@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -189,7 +190,9 @@ func (c *Claude) resume(ctx context.Context, conversation, cwd string) (*surface
 	if err != nil {
 		return nil, err
 	}
-	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd, ConfigDir: surface.ClaudeLaunchConfigDir(c.home, root)})
+	// Claude restores a resumed conversation's title but names the resumed
+	// process anew, so the title is passed back as its name.
+	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd, ConfigDir: surface.ClaudeLaunchConfigDir(c.home, root), Name: c.conversationTitle(ctx, conversation, root)})
 	if err != nil {
 		return nil, claudeHostResumeError(conversation, err)
 	}
@@ -300,4 +303,62 @@ func claudeTranscriptCwd(path string) string {
 		}
 	}
 	return ""
+}
+
+// conversationTitle is the last title in the conversation's transcript under
+// root, the name a person gave it when it started or renamed it.
+func (c *Claude) conversationTitle(ctx context.Context, conversation, root string) string {
+	roots, err := surface.ClaudeConfigRoots(c.home)
+	if err != nil {
+		return ""
+	}
+	for _, path := range c.transcripts.pass(roots)(conversation) {
+		if root == "" || claudeTranscriptRoot(path) == root {
+			return claudeTranscriptTitle(ctx, path)
+		}
+	}
+	return ""
+}
+
+// maxClaudeTitleRecordBytes bounds a title record: a name reaches Claude in
+// a host request, which is at most 1 MiB.
+const maxClaudeTitleRecordBytes = 1 << 20
+
+// claudeTranscriptTitle reads the last custom-title record of a transcript.
+// A record longer than any title is skipped unread rather than stopping the
+// scan.
+func claudeTranscriptTitle(ctx context.Context, path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	reader := bufio.NewReaderSize(file, 64*1024)
+	title := ""
+	for ctx.Err() == nil {
+		var line []byte
+		part, readErr := reader.ReadSlice('\n')
+		for readErr == bufio.ErrBufferFull && len(line)+len(part) <= maxClaudeTitleRecordBytes {
+			line = append(line, part...)
+			part, readErr = reader.ReadSlice('\n')
+		}
+		line = append(line, part...)
+		if readErr == bufio.ErrBufferFull {
+			for readErr == bufio.ErrBufferFull {
+				_, readErr = reader.ReadSlice('\n')
+			}
+		} else if bytes.Contains(line, []byte(`"custom-title"`)) {
+			var record struct {
+				Type        string `json:"type"`
+				CustomTitle string `json:"customTitle"`
+			}
+			if json.Unmarshal(line, &record) == nil && record.Type == "custom-title" && strings.TrimSpace(record.CustomTitle) != "" {
+				title = record.CustomTitle
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
+	return title
 }
