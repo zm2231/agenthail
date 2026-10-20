@@ -83,6 +83,23 @@ func BackgroundRunning(tasks *BackgroundTasks) bool {
 	return tasks != nil && tasks.Running
 }
 
+// SameBackground reports whether two readings list the same background work.
+func SameBackground(left, right *BackgroundTasks) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	if left.Running != right.Running || left.Source != right.Source || !left.Since.Equal(right.Since) || len(left.Tasks) != len(right.Tasks) {
+		return false
+	}
+	for index, task := range left.Tasks {
+		other := right.Tasks[index]
+		if task.ID != other.ID || task.Kind != other.Kind || task.Description != other.Description || task.ParentID != other.ParentID || task.Ambient != other.Ambient || !task.Since.Equal(other.Since) {
+			return false
+		}
+	}
+	return true
+}
+
 // SameWaiting reports whether two waiting states describe the same question.
 func SameWaiting(left, right *Waiting) bool {
 	if left == nil || right == nil {

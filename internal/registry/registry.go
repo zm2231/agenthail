@@ -54,7 +54,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 25
+	schemaVersion   = 26
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -306,6 +306,7 @@ func migrateTx(tx *sql.Tx) error {
 		{"discovery_failures", `INTEGER NOT NULL DEFAULT 0`},
 		{"waiting_on", `BLOB NOT NULL DEFAULT ''`},
 		{"host_queue_count", `INTEGER NOT NULL DEFAULT 0`},
+		{"background_tasks", `BLOB NOT NULL DEFAULT ''`},
 	} {
 		if err := ensureColumn(tx, "catalog_sessions", column.name, column.decl); err != nil {
 			return err
@@ -853,7 +854,8 @@ CREATE TABLE IF NOT EXISTS catalog_sessions (
 	projection_generation INTEGER NOT NULL DEFAULT 0,
 	discovery_failures INTEGER NOT NULL DEFAULT 0,
 	waiting_on BLOB NOT NULL DEFAULT '',
-	host_queue_count INTEGER NOT NULL DEFAULT 0
+	host_queue_count INTEGER NOT NULL DEFAULT 0,
+	background_tasks BLOB NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS catalog_surfaces (
 	surface TEXT PRIMARY KEY,
@@ -2882,10 +2884,10 @@ func (r *Registry) GetSession(id string) (surface, name, cwd string, err error) 
 }
 
 // sessionSelect reads one session with what its catalog row shows it
-// waiting on, so every API that returns a session agrees with the catalog.
+// waiting on and running in the background, so every API that returns a session agrees with the catalog.
 // status is the column expression for its status.
 func sessionSelect(status string) string {
-	return `SELECT s.id,s.surface,s.name,s.cwd,s.pid,` + status + `,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),COALESCE(cs.waiting_on,X''),` + sessionSubagentSelect
+	return `SELECT s.id,s.surface,s.name,s.cwd,s.pid,` + status + `,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),COALESCE(cs.waiting_on,X''),COALESCE(cs.background_tasks,X''),` + sessionSubagentSelect
 }
 
 const sessionJoins = ` LEFT JOIN session_runtime sr ON sr.session_id=s.id LEFT JOIN catalog_sessions cs ON cs.session_id=s.id`
@@ -2896,10 +2898,10 @@ func scanSession(scanner interface{ Scan(...any) error }) (surface.Session, erro
 	var hasLocal int
 	var lastActiveMS int64
 	var launcher string
-	var location, waitingOn []byte
+	var location, waitingOn, background []byte
 	var focusable int
 	var subagent subagentColumns
-	if err := scanner.Scan(append([]any{&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable, &waitingOn}, subagent.targets()...)...); err != nil {
+	if err := scanner.Scan(append([]any{&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable, &waitingOn, &background}, subagent.targets()...)...); err != nil {
 		return surface.Session{}, err
 	}
 	session.Surface = surface.SurfaceKind(kind)
@@ -2917,6 +2919,9 @@ func scanSession(scanner interface{ Scan(...any) error }) (surface.Session, erro
 	if session.WaitingOn, err = decodeCatalogWaiting(waitingOn); err != nil {
 		return surface.Session{}, err
 	}
+	if session.BackgroundTasks, err = decodeCatalogBackground(background); err != nil {
+		return surface.Session{}, err
+	}
 	return session, nil
 }
 
@@ -2930,6 +2935,27 @@ func decodeCatalogWaiting(raw []byte) (*surface.Waiting, error) {
 		return nil, fmt.Errorf("parse catalog waiting state: %w", err)
 	}
 	return waiting, nil
+}
+
+// decodeCatalogBackground reads a catalog row's background_tasks column.
+func decodeCatalogBackground(raw []byte) (*surface.BackgroundTasks, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var background *surface.BackgroundTasks
+	if err := json.Unmarshal(raw, &background); err != nil {
+		return nil, fmt.Errorf("parse catalog background tasks: %w", err)
+	}
+	return background, nil
+}
+
+// encodeCatalogBackground writes a session's background tasks for its catalog
+// row; none is the empty value.
+func encodeCatalogBackground(background *surface.BackgroundTasks) ([]byte, error) {
+	if background == nil {
+		return []byte{}, nil
+	}
+	return json.Marshal(background)
 }
 
 func scanSessions(rows *sql.Rows) ([]surface.Session, error) {
