@@ -447,7 +447,7 @@ struct SessionScreen: View {
                                 Text("Older or oversized messages were shortened.").font(.footnote).foregroundStyle(.secondary)
                             }
                             ForEach(Array(detail.exchanges.enumerated()), id: \.offset) { _, exchange in
-                                if !exchange.user.isEmpty { IOSMessage(label: "You", text: exchange.user, color: orange, timestamp: exchange.timestamp) }
+                                if !exchange.user.isEmpty { IOSMessage(label: exchange.promptLabel, text: exchange.user, color: orange, timestamp: exchange.timestamp) }
                                 if !exchange.assistant.isEmpty { IOSMessage(label: "Assistant", text: exchange.assistant, color: .secondary, timestamp: exchange.timestamp) }
                             }
                             if detail.exchanges.isEmpty {

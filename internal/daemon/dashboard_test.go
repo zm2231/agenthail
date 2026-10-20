@@ -287,13 +287,14 @@ func TestDashboardSessionReadDoesNotNegotiateWritableAccess(t *testing.T) {
 	}
 }
 
-func TestSessionTranscriptIsBoundedFromNewestExchange(t *testing.T) {
-	exchanges := make([]surface.Exchange, 40)
+func TestSessionTranscriptIsBoundedWithoutDroppingAnExchange(t *testing.T) {
+	exchanges := make([]surface.Exchange, 50)
 	for index := range exchanges {
 		exchanges[index] = surface.Exchange{User: strings.Repeat("\x01", 1<<20), Assistant: strings.Repeat("answer", 1<<18), Timestamp: time.Unix(int64(index), 0)}
 	}
+	exchanges[0] = surface.Exchange{User: "short", Assistant: "reply", Timestamp: time.Unix(0, 0)}
 	bounded, metadata := truncateSessionExchanges(exchanges)
-	if !metadata.Truncated || len(bounded) >= len(exchanges) {
+	if !metadata.Truncated || len(bounded) != len(exchanges) || bounded[0].User != "short" || bounded[0].Assistant != "reply" {
 		t.Fatalf("metadata=%+v exchanges=%d", metadata, len(bounded))
 	}
 	body, err := json.Marshal(map[string]any{"exchanges": bounded})
@@ -303,8 +304,10 @@ func TestSessionTranscriptIsBoundedFromNewestExchange(t *testing.T) {
 	if len(body) > sessionTranscriptJSONBudget+(32<<10) {
 		t.Fatalf("encoded transcript response is %d bytes", len(body))
 	}
-	if bounded[len(bounded)-1].Timestamp != exchanges[len(exchanges)-1].Timestamp {
-		t.Fatal("newest exchange was not preserved")
+	for index, exchange := range bounded {
+		if exchange.Timestamp != exchanges[index].Timestamp || exchange.User == "" || exchange.Assistant == "" {
+			t.Fatalf("exchange %d lost its prompt, reply or time: %+v", index, exchange.Timestamp)
+		}
 	}
 }
 

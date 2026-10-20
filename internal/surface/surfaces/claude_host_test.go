@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -266,6 +267,32 @@ func TestWithoutAHostOnlyARecordedProcessThatStillRunsCountsAsHosted(t *testing.
 		c.host.forget()
 		if got := c.host.runs(context.Background(), live, conversation) || c.host.runs(context.Background(), 999999, conversation); got != want {
 			t.Fatalf("%s hosted=%v, want %v", conversation, got, want)
+		}
+	}
+}
+
+func TestTheClaudeHostInheritsAConfiguredPrimaryConfigDirAndDropsABlankOne(t *testing.T) {
+	fixture := claudetest.New(t)
+	script := filepath.Join(fixture.Home, "host.mjs")
+	if err := os.WriteFile(script, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CLAUDE_HOST", script)
+	configured := filepath.Join(fixture.Home, "claude-main")
+	for value, want := range map[string][]string{"": nil, "  ": nil, configured: {"CLAUDE_CONFIG_DIR=" + configured}} {
+		t.Setenv("CLAUDE_CONFIG_DIR", value)
+		launch, err := ClaudeHostLaunch(fixture.Home, "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, entry := range launch.Env {
+			if strings.HasPrefix(entry, "CLAUDE_CONFIG_DIR=") {
+				got = append(got, entry)
+			}
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("CLAUDE_CONFIG_DIR=%q: host env has %q, want %q", value, got, want)
 		}
 	}
 }
