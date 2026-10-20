@@ -1152,6 +1152,23 @@ func (r *Registry) resolveTarget(target, kind string) (string, error) {
 	return ids[0], nil
 }
 
+// NamesSession reports whether selector identifies session on its own rather
+// than as a name or cwd fragment: an alias, an ID or ID prefix, a Claude
+// conversation ID or PID, or @<parent>/<nickname> under such a parent.
+func (r *Registry) NamesSession(session surface.Session, selector string) bool {
+	if path, ok := strings.CutPrefix(selector, "@"); ok {
+		if parent, _, isPath := strings.Cut(path, "/"); isPath {
+			_, err := r.ExactTarget("", parent)
+			return err == nil
+		}
+	}
+	if surface.IdentifiedBy(session, strings.TrimPrefix(selector, "@")) {
+		return true
+	}
+	sid, err := r.ExactTarget(session.Surface, strings.TrimPrefix(selector, "@"))
+	return err == nil && sid == session.ID
+}
+
 // FragmentMatches lists the local sessions target matches by ID prefix or
 // name/cwd fragment, newest first; an empty kind means every surface.
 func (r *Registry) FragmentMatches(kind surface.SurfaceKind, target string, limit int) ([]string, error) {

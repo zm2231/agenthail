@@ -40,6 +40,7 @@ type remoteTarget struct {
 	Name    string              `json:"name"`
 	Alias   string              `json:"alias,omitempty"`
 	Host    hostRef             `json:"host"`
+	Exact   bool                `json:"exact"`
 }
 
 func (t remoteTarget) label() string {
@@ -215,7 +216,7 @@ func (a *App) remoteMatches(ctx context.Context, hostID, target string) ([]remot
 	matches := make([]remoteTarget, 0, len(found))
 	for _, match := range found {
 		host := names[match.HostID]
-		matches = append(matches, remoteTarget{ID: hosts.Qualify(match.HostID, match.ID), Surface: match.Surface, Name: match.Name, Alias: match.Alias, Host: hostRef{ID: host.ID, Name: host.Name, State: host.State}})
+		matches = append(matches, remoteTarget{ID: hosts.Qualify(match.HostID, match.ID), Surface: match.Surface, Name: match.Name, Alias: match.Alias, Host: hostRef{ID: host.ID, Name: host.Name, State: host.State}, Exact: true})
 	}
 	return matches, nil
 }

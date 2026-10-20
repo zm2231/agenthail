@@ -3,8 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/hosts"
@@ -42,11 +40,7 @@ func (e inexactTargetError) Error() string {
 func (a *App) resolveDeliveryTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, *remoteTarget, error) {
 	session, adapter, remote, err := a.resolveAnyTarget(ctx, target)
 	if err == nil {
-		exact, exactErr := a.namesExactly(ctx, target, session, remote)
-		if exactErr != nil {
-			return nil, nil, nil, exactErr
-		}
-		if exact {
+		if a.namesExactly(target, session, remote) {
 			return session, adapter, remote, nil
 		}
 		matches := a.labels(a.fragmentCandidates(target))
@@ -65,63 +59,28 @@ func (a *App) resolveDeliveryTarget(ctx context.Context, target string) (*surfac
 	return nil, nil, nil, err
 }
 
-func (a *App) namesExactly(ctx context.Context, target string, session *surface.Session, remote *remoteTarget) (bool, error) {
+// namesExactly judges a paired host's match by that host's answer, since only
+// it knows the session's PID, transcript and subagents.
+func (a *App) namesExactly(target string, session *surface.Session, remote *remoteTarget) bool {
+	if remote != nil {
+		return remote.Exact
+	}
 	if _, rest, qualified := hosts.Split(target); qualified {
 		target = rest
 	}
-	if remote != nil {
-		return a.namesRemoteExactly(ctx, target, *remote)
-	}
 	if kind, selector, ok := a.surfaceQualified(target); ok {
 		if session.Surface != kind {
-			return false, nil
+			return false
 		}
 		if session.ID == selector {
-			return true, nil
+			return true
 		}
 		target = selector
-	}
-	if parent, isPath := subagentParent(target); isPath {
-		if a.registry() == nil {
-			return false, nil
-		}
-		_, err := a.registry().ExactTarget("", parent)
-		return err == nil, nil
-	}
-	name := strings.TrimPrefix(target, "@")
-	if name != "" && strings.HasPrefix(session.ID, name) || (session.PID > 0 && name == strconv.Itoa(session.PID)) {
-		return true, nil
-	}
-	if session.Transcript != "" && name == strings.TrimSuffix(filepath.Base(session.Transcript), ".jsonl") {
-		return true, nil
 	}
 	if a.registry() == nil {
-		return false, nil
+		return surface.IdentifiedBy(*session, strings.TrimPrefix(target, "@"))
 	}
-	sid, err := a.registry().ExactTarget(session.Surface, name)
-	return err == nil && sid == session.ID, nil
-}
-
-// namesRemoteExactly judges a paired host's match by the identity that host
-// reported. A subagent path is exact when its parent segment resolves on that
-// host as an alias or session ID.
-func (a *App) namesRemoteExactly(ctx context.Context, target string, remote remoteTarget) (bool, error) {
-	if kind, selector, ok := a.surfaceQualified(target); ok {
-		if kind != remote.Surface {
-			return false, nil
-		}
-		target = selector
-	}
-	if parent, isPath := subagentParent(target); isPath {
-		matches, err := a.remoteMatches(ctx, remote.Host.ID, "@"+parent)
-		if err != nil {
-			return false, err
-		}
-		return len(matches) == 1, nil
-	}
-	_, raw, _ := hosts.Split(remote.ID)
-	name := strings.TrimPrefix(target, "@")
-	return name != "" && strings.HasPrefix(raw, name) || (remote.Alias != "" && name == remote.Alias), nil
+	return a.registry().NamesSession(*session, target)
 }
 
 func (a *App) surfaceQualified(target string) (surface.SurfaceKind, string, bool) {
@@ -134,15 +93,6 @@ func (a *App) surfaceQualified(target string) (surface.SurfaceKind, string, bool
 		return "", "", false
 	}
 	return kind, selector, true
-}
-
-func subagentParent(target string) (string, bool) {
-	path, ok := strings.CutPrefix(target, "@")
-	if !ok {
-		return "", false
-	}
-	parent, _, isPath := strings.Cut(path, "/")
-	return parent, isPath
 }
 
 func (a *App) registeredExactly(target string) bool {

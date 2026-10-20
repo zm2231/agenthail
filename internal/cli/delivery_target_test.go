@@ -71,3 +71,19 @@ func TestDeliveryCommandsRefuseANameFragmentAndListWhatItMatched(t *testing.T) {
 		t.Fatalf("channel add by alias err=%v", err)
 	}
 }
+
+func TestDeliveryToAPairedHostNeedsThatHostToCallTheMatchExact(t *testing.T) {
+	app, _, _, api := federatedCLIFixture(t, true)
+	byName := forgeBuilder
+	byName.Exact = false
+	api.matches["work"] = []remoteTarget{byName}
+	for _, args := range [][]string{{"send", "forge::work", "hello"}, {"steer", "work", "hello"}, {"queue", "forge::work", "hello"}} {
+		_, err := captureStdout(t, func() error { return app.Run(args) })
+		if err == nil || !strings.Contains(err.Error(), "nothing was delivered") || !strings.Contains(err.Error(), "forge::@builder") {
+			t.Fatalf("%v err=%v, want a refusal naming forge::@builder", args, err)
+		}
+	}
+	if actions, _ := api.recorded(); len(actions) != 0 {
+		t.Fatalf("a fragment reached the paired host: %v", actions)
+	}
+}
