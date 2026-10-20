@@ -2999,10 +2999,13 @@ func (a *App) cmdDoctor(args []string) error {
 	if claudeRootsErr != nil {
 		failures++
 	}
-	promptHook := map[string]bool{}
+	promptHook := map[string]string{}
 	for _, root := range claudeRoots {
-		installed, err := claudePromptHookInstalled(filepath.Join(root, "settings.json"))
-		promptHook[root] = err == nil && installed
+		state, err := claudePromptHookState(filepath.Join(root, "settings.json"))
+		if err != nil {
+			state = claudePromptHookMissing
+		}
+		promptHook[root] = state
 	}
 	claudeAccounts, _ := surface.ClaudeAccounts(home)
 	service := a.service()
@@ -3045,8 +3048,11 @@ func (a *App) cmdDoctor(args []string) error {
 			if account, ok := surface.ClaudeAccountForRoot(claudeAccounts, root); ok {
 				fmt.Printf("  account: %s\n", describeClaudeAccount(account, time.Now()))
 			}
-			if !promptHook[root] {
+			switch promptHook[root] {
+			case claudePromptHookMissing:
 				fmt.Printf("  prompt hook: missing; terminal prompts can't be answered from Agenthail until you run: agenthail hooks install\n")
+			case claudePromptHookOutdated:
+				fmt.Printf("  prompt hook: outdated; terminal prompts may not reach Agenthail until you run: agenthail hooks install\n")
 			}
 		}
 		if len(serviceProblems) > 0 {
