@@ -26,6 +26,14 @@ func (d *Daemon) drainSteerMessageQueue(ctx context.Context, adapter surface.Sur
 	})
 }
 
+// drainPeerMessageQueue sends the session's next peer message over its Claude
+// peer socket while a turn runs or waits on its user.
+func (d *Daemon) drainPeerMessageQueue(ctx context.Context, adapter surface.Surface, session *surface.Session) {
+	d.drainClaimedMessage(ctx, adapter, session, func(now time.Time) (*registry.QueuedMessage, error) {
+		return d.Registry.ClaimNextPeerMessage(session.ID, now)
+	})
+}
+
 func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surface, session *surface.Session, claim func(time.Time) (*registry.QueuedMessage, error)) {
 	now := time.Now()
 	item, err := claim(now)
@@ -64,7 +72,14 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	var steered *surface.ControlResult
 	route := surface.RouteFor(adapter, session, item.Author)
 	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author, Uploads: item.Uploads}
-	steer := item.BusyDelivery == "steer" && !options.HoldsForQueue() && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer
+	steers, policyErr := d.Registry.Steers(item.BusyDelivery)
+	if policyErr != nil {
+		d.log.Printf("read busy delivery policy for queue item %d: %s", item.ID, policyErr)
+	}
+	if item.BusyDelivery == "" && route == surface.RoutePeer {
+		steers = false
+	}
+	steer := steers && !options.HoldsForQueue() && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer
 	if steer {
 		steered, sendErr = surface.SteerWithEvidence(operationCtx, adapter, session, item.Message)
 		if sendErr == nil {
@@ -168,7 +183,7 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 			d.log.Printf("defer queue item %d: %s", item.ID, err)
 		}
 		if refusal != 0 {
-			d.announceRefusal(session.ID, item.ID, refusal)
+			d.announceRefusal(*session, item.ID, refusal)
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "deferred", SessionID: session.ID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
 		return
@@ -201,12 +216,13 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 }
 
 // announceRefusal tells the user, on the desktop and on paired devices, that a
-// queued message waits because its target refused to start. The queue row and
-// its attention item carry the reason. The refusal is marked announced only
+// queued message waits because its target refused to start, and opens the
+// conversation the user knows the target by. The queue row and its attention
+// item carry the reason. The refusal is marked announced only
 // after both were attempted, so a daemon stopped in between announces it on
 // the next refused attempt rather than never; both carry a key per message, so
 // a repeat replaces the one already shown.
-func (d *Daemon) announceRefusal(sessionID string, queueID, refusal int64) {
+func (d *Daemon) announceRefusal(session surface.Session, queueID, refusal int64) {
 	d.announceMu.Lock()
 	if d.announcingRefusal == nil {
 		d.announcingRefusal = map[int64]int64{}
@@ -217,7 +233,8 @@ func (d *Daemon) announceRefusal(sessionID string, queueID, refusal int64) {
 	}
 	d.announcingRefusal[queueID] = refusal
 	d.announceMu.Unlock()
-	desktopMessage := fmt.Sprintf("%s refused to start; a queued message is waiting", d.resolveDisplay(sessionID))
+	conversationID := session.ConversationID()
+	desktopMessage := fmt.Sprintf("%s refused to start; a queued message is waiting", d.resolveDisplay(conversationID))
 	key := fmt.Sprintf("refused-%d", queueID)
 	go func() {
 		defer func() {
@@ -227,12 +244,12 @@ func (d *Daemon) announceRefusal(sessionID string, queueID, refusal int64) {
 			}
 			d.announceMu.Unlock()
 		}()
-		if err := Notify("Agenthail", desktopMessage, sessionID, "agenthail-"+key); err != nil {
+		if err := d.notifyDesktop("Agenthail", desktopMessage, conversationID, "agenthail-"+key, "", nil); err != nil {
 			d.log.Printf("desktop notification: %s", err)
 		}
 		notificationCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		d.notifyPairedDevices(notificationCtx, mobileNotification{Title: "Agenthail", Message: "A session refused to start; a queued message is waiting", SessionID: sessionID, EventType: "delivery.refused", CollapseID: key})
+		d.notifyPairedDevices(notificationCtx, mobileNotification{Title: "Agenthail", Message: "A session refused to start; a queued message is waiting", SessionID: conversationID, EventType: "delivery.refused", CollapseID: key})
 		if err := d.Registry.MarkRefusalAnnounced(queueID, refusal); err != nil {
 			d.log.Printf("mark refusal announced %d: %s", queueID, err)
 		}

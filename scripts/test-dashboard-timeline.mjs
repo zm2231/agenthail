@@ -29,6 +29,7 @@ const elements = {
   "#composer-note": { textContent: "" },
   "#chat-subtitle": { textContent: "" },
   "#thread-count": { textContent: "" },
+  "#request-panel": { hidden: false, innerHTML: "stale" },
   "#chat-body": {
     innerHTML: "",
     scrollTop: 0,
@@ -124,6 +125,7 @@ context.app.history = {
 };
 context.renderChat();
 assert(elements["#chat-body"].innerHTML.includes("job-writable"), "writable Claude sessions should render supplied run observations");
+assert(elements["#request-panel"].hidden && elements["#request-panel"].innerHTML === "", "a session that takes no answers here shows no request panel");
 assert(elements["#chat-body"].innerHTML.includes("agent-writable"), "writable Claude sessions should render supplied subagent observations");
 
 context.app.transcriptSignature = null;

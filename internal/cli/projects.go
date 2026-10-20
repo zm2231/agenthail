@@ -12,13 +12,18 @@ import (
 )
 
 const projectUsage = `usage: agenthail project list [--all] [--json]
-       agenthail project add <path> [--host <host>] [--json]
-       agenthail project <archive|unarchive> <name|id> [--json]
+       agenthail project add <path> [--name <title>] [--host <host>] [--json]
+       agenthail project remove <name|id|path> [--json]
+       agenthail project <archive|unarchive> <name|id|path> [--json]
 
-A Git repository is one project, including its worktrees and subfolders. A
-folder outside Git becomes a project once it is added. Archiving hides a
-project and its sessions until it is unarchived or one of its sessions shows
-new activity.`
+A project is a folder you add, and it may be a folder inside a repository. A
+session belongs to the deepest added project that holds its folder, reading a
+worktree as its main checkout. A repository with no added project around the
+session is a project of its own. Projects in the same place of a repository
+with a remote are one project on every paired host. Archiving hides a project
+and its sessions until it is unarchived or one of its sessions shows new
+activity; removing an added project moves its sessions to the next project
+that holds them.`
 
 type projectHost struct {
 	ID    string `json:"id"`
@@ -26,25 +31,56 @@ type projectHost struct {
 	State string `json:"state,omitempty"`
 }
 
-type projectRow struct {
-	ID           string       `json:"id"`
-	DisplayName  string       `json:"displayName"`
-	RootPath     string       `json:"rootPath"`
-	Kind         string       `json:"kind"`
-	Host         *projectHost `json:"host,omitempty"`
-	LastActive   time.Time    `json:"lastActive,omitempty"`
-	SessionCount int          `json:"sessionCount"`
-	Archived     bool         `json:"archived"`
-	Coordinator  *struct {
-		Name string `json:"name"`
-	} `json:"coordinator,omitempty"`
+type projectCheckout struct {
+	Host         projectHost `json:"host"`
+	ProjectID    string      `json:"projectId"`
+	RootPath     string      `json:"rootPath"`
+	Added        bool        `json:"added"`
+	SessionCount int         `json:"sessionCount"`
+	Archived     bool        `json:"archived"`
 }
 
-func (p projectRow) hostName() string {
-	if p.Host == nil {
+type projectRow struct {
+	ID           string            `json:"id"`
+	DisplayName  string            `json:"displayName"`
+	Kind         string            `json:"kind"`
+	Checkouts    []projectCheckout `json:"checkouts"`
+	LastActive   time.Time         `json:"lastActive,omitempty"`
+	SessionCount int               `json:"sessionCount"`
+	Archived     bool              `json:"archived"`
+}
+
+func (p projectRow) hostNames() string {
+	names := make([]string, 0, len(p.Checkouts))
+	for _, checkout := range p.Checkouts {
+		names = append(names, checkout.Host.Name)
+	}
+	return strings.Join(names, ",")
+}
+
+// checkoutNamed finds the checkout a selector names by its id, or by its
+// folder on this host.
+func (p projectRow) checkoutNamed(selector string) (projectCheckout, bool) {
+	folder, _ := filepath.Abs(selector)
+	for _, checkout := range p.Checkouts {
+		if checkout.ProjectID == selector || (checkout.Host.State == "local" && checkout.RootPath == folder) {
+			return checkout, true
+		}
+	}
+	return projectCheckout{}, false
+}
+
+// rootPath is this host's checkout, else the first one listed.
+func (p projectRow) rootPath() string {
+	for _, checkout := range p.Checkouts {
+		if checkout.Host.State == "local" {
+			return checkout.RootPath
+		}
+	}
+	if len(p.Checkouts) == 0 {
 		return ""
 	}
-	return p.Host.Name
+	return p.Checkouts[0].RootPath
 }
 
 func (a *App) cmdProject(args []string) error {
@@ -82,17 +118,13 @@ func (a *App) cmdProject(args []string) error {
 			fmt.Println("no projects found")
 			return nil
 		}
-		fmt.Printf("%-24s %-12s %-8s %-10s %-24s %s\n", "PROJECT", "HOST", "SESSIONS", "LAST", "LEAD", "ROOT")
+		fmt.Printf("%-24s %-20s %-8s %-10s %s\n", "PROJECT", "HOSTS", "SESSIONS", "LAST", "ROOT")
 		for _, project := range projects {
 			name := project.DisplayName
 			if project.Archived {
 				name += " (archived)"
 			}
-			lead := "-"
-			if project.Coordinator != nil {
-				lead = "@" + project.Coordinator.Name
-			}
-			fmt.Printf("%-24s %-12s %-8d %-10s %-24s %s\n", truncate(name, 24), truncate(project.hostName(), 12), project.SessionCount, relTime(project.LastActive), truncate(lead, 24), project.RootPath)
+			fmt.Printf("%-24s %-20s %-8d %-10s %s\n", truncate(name, 24), truncate(project.hostNames(), 20), project.SessionCount, relTime(project.LastActive), project.rootPath())
 		}
 		return nil
 	case "add":
@@ -100,13 +132,20 @@ func (a *App) cmdProject(args []string) error {
 			return fmt.Errorf("%s", projectUsage)
 		}
 		payload := map[string]any{"action": "project-add", "path": positional[1]}
+		if title := strings.TrimSpace(flagVal(args, "--name")); title != "" {
+			payload["title"] = title
+		}
 		if host := strings.TrimSpace(flagVal(args, "--host")); host != "" {
 			payload["host"] = host
 		} else if absolute, err := filepath.Abs(positional[1]); err == nil {
 			payload["path"] = absolute
 		}
 		var answer struct {
-			Project projectRow `json:"project"`
+			Project struct {
+				DisplayName string `json:"displayName"`
+				RootPath    string `json:"rootPath"`
+				Kind        string `json:"kind"`
+			} `json:"project"`
 		}
 		if err := projectAction(ctx, client, payload, &answer); err != nil {
 			return err
@@ -114,11 +153,28 @@ func (a *App) cmdProject(args []string) error {
 		if jsonOut {
 			return json.NewEncoder(os.Stdout).Encode(answer)
 		}
-		if answer.Project.Kind == "git" {
-			fmt.Printf("%s is part of the Git project %s (%s)\n", positional[1], answer.Project.DisplayName, answer.Project.RootPath)
-			return nil
-		}
 		fmt.Printf("added project %s (%s)\n", answer.Project.DisplayName, answer.Project.RootPath)
+		return nil
+	case "remove", "rm":
+		if len(positional) != 2 {
+			return fmt.Errorf("%s", projectUsage)
+		}
+		projects, err := daemonProjects(ctx, client)
+		if err != nil {
+			return err
+		}
+		checkout, err := resolveAddedCheckout(projects, positional[1])
+		if err != nil {
+			return err
+		}
+		var answer map[string]any
+		if err := projectAction(ctx, client, map[string]any{"action": "project-remove", "projectId": checkout.ProjectID}, &answer); err != nil {
+			return err
+		}
+		if jsonOut {
+			return json.NewEncoder(os.Stdout).Encode(answer)
+		}
+		fmt.Printf("removed project %s on %s\n", checkout.RootPath, checkout.Host.Name)
 		return nil
 	case "archive", "unarchive":
 		if len(positional) != 2 {
@@ -133,7 +189,11 @@ func (a *App) cmdProject(args []string) error {
 			return err
 		}
 		var answer map[string]any
-		if err := projectAction(ctx, client, map[string]any{"action": "project-" + positional[0], "projectId": project.ID}, &answer); err != nil {
+		target := project.ID
+		if checkout, found := project.checkoutNamed(positional[1]); found {
+			target = checkout.ProjectID
+		}
+		if err := projectAction(ctx, client, map[string]any{"action": "project-" + positional[0], "projectId": target}, &answer); err != nil {
 			return err
 		}
 		if jsonOut {
@@ -156,14 +216,20 @@ func daemonProjects(ctx context.Context, client *daemonAPIClient) ([]projectRow,
 	return snapshot.Projects, nil
 }
 
-// resolveProject matches a project id exactly, then a display name ignoring
-// case. A name shared by several projects is an error, never a pick.
+// resolveProject matches a project id or one of its checkouts' ids exactly,
+// then this host's checkout folder, then a display name ignoring case. A name
+// shared by several projects is an error, never a pick.
 func resolveProject(projects []projectRow, selector string) (projectRow, error) {
-	var named []projectRow
 	for _, project := range projects {
 		if project.ID == selector {
 			return project, nil
 		}
+		if _, found := project.checkoutNamed(selector); found {
+			return project, nil
+		}
+	}
+	var named []projectRow
+	for _, project := range projects {
 		if strings.EqualFold(project.DisplayName, selector) {
 			named = append(named, project)
 		}
@@ -176,7 +242,7 @@ func resolveProject(projects []projectRow, selector string) (projectRow, error) 
 	}
 	labels := make([]string, 0, len(named))
 	for _, project := range named {
-		labels = append(labels, fmt.Sprintf("%s on %s (%s)", project.RootPath, project.hostName(), project.ID))
+		labels = append(labels, fmt.Sprintf("%s on %s (%s)", project.rootPath(), project.hostNames(), project.ID))
 	}
 	return projectRow{}, fmt.Errorf("project %q is ambiguous: %s; use its id", selector, strings.Join(labels, ", "))
 }
@@ -222,4 +288,43 @@ func (a *App) cmdThreadArchive(args []string) error {
 	}
 	fmt.Printf("%sd %s\n", positional[0], positional[1])
 	return nil
+}
+
+// resolveAddedCheckout picks the one added checkout a selector names: the
+// checkout itself by id or folder, else the project's only added checkout,
+// preferring this host's.
+func resolveAddedCheckout(projects []projectRow, selector string) (projectCheckout, error) {
+	project, err := resolveProject(projects, selector)
+	if err != nil {
+		return projectCheckout{}, err
+	}
+	if checkout, found := project.checkoutNamed(selector); found && checkout.Added {
+		return checkout, nil
+	}
+	var local, remote []projectCheckout
+	for _, checkout := range project.Checkouts {
+		if !checkout.Added {
+			continue
+		}
+		if checkout.Host.State == "local" {
+			local = append(local, checkout)
+		} else {
+			remote = append(remote, checkout)
+		}
+	}
+	candidates := local
+	if len(candidates) == 0 {
+		candidates = remote
+	}
+	switch len(candidates) {
+	case 0:
+		return projectCheckout{}, fmt.Errorf("project %s was not added, so it cannot be removed; archive it to hide it", project.DisplayName)
+	case 1:
+		return candidates[0], nil
+	}
+	labels := make([]string, 0, len(candidates))
+	for _, checkout := range candidates {
+		labels = append(labels, fmt.Sprintf("%s on %s (%s)", checkout.RootPath, checkout.Host.Name, checkout.ProjectID))
+	}
+	return projectCheckout{}, fmt.Errorf("project %s is added in several folders: %s; remove one by its id or folder", project.DisplayName, strings.Join(labels, ", "))
 }

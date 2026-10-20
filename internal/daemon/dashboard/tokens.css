@@ -877,26 +877,6 @@ select {
   font-family: var(--mono);
   font-size: 10px;
 }
-.lead-chip {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0 6px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--raised);
-  color: var(--ink);
-  font-family: var(--mono);
-  font-size: 10px;
-  cursor: pointer;
-}
-.lead-chip.idle {
-  color: var(--quiet);
-  cursor: default;
-}
 .host-badge.unavailable {
   color: var(--warn);
 }
@@ -2142,4 +2122,88 @@ select {
   .project-header .link-button {
     opacity: 1;
   }
+}
+
+.request-panel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.composer .request-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent);
+  border-radius: calc(var(--radius) - 4px);
+  background: var(--accent-soft);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.request-card h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+.request-card p {
+  margin: 0;
+  color: var(--muted);
+}
+.request-card pre {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--code);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.request-card fieldset {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.request-card legend {
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+.request-card label {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.request-card label small {
+  color: var(--quiet);
+}
+.request-card input[type="text"] {
+  min-width: 0;
+  flex: 1;
+}
+.request-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.composer .request-mode {
+  display: flex;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.composer .request-mode select {
+  width: auto;
+  flex: 0 1 240px;
 }

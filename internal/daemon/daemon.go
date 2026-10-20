@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudehost"
+	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/uploads"
@@ -26,6 +27,7 @@ const (
 
 type Daemon struct {
 	Registry          *registry.Registry
+	coordinatorMu     sync.Mutex
 	pollInterval      time.Duration
 	Surfaces          []surface.Surface
 	log               *log.Logger
@@ -46,7 +48,10 @@ type Daemon struct {
 	catalogSelected func(sessionID string)
 	// waitingContended, when set, runs when a session's waiting lock is held
 	// by another caller and this one is about to wait for it.
-	waitingContended  func(sessionID string)
+	waitingContended func(sessionID string)
+	// notifyDesktop shows a desktop notification; it is NotifyRequest outside
+	// tests.
+	notifyDesktop     func(title, message, sessionID, identifier, requestID string, actions []surface.RequestAction) error
 	queueWorkers      sync.WaitGroup
 	events            *eventHub
 	catalog           *catalogHub
@@ -97,6 +102,9 @@ func (d *Daemon) resolveDisplay(sessionID string) string {
 }
 
 func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
+	if reg != nil {
+		reg.SetBusyPolicy(deliverypolicy.Load)
+	}
 	d := &Daemon{
 		Registry:          reg,
 		pollInterval:      defaultPollInterval,
@@ -106,6 +114,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		pendingAliasWarns: map[int64]bool{},
 		observeRetry:      map[string]observeRetry{},
 		notificationArmed: map[string]bool{},
+		notifyDesktop:     NotifyRequest,
 		events:            newEventHub(reg),
 		sources:           newSessionSourceManager(reg),
 		sourceHolds:       map[string]map[string]func(){},

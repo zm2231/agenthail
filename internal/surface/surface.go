@@ -112,6 +112,33 @@ type Subagent struct {
 	Role     string `json:"role,omitempty"`
 }
 
+// Delegated reports whether an agent, not the user, started the session: a
+// spawned subagent, a `codex exec` run, or one of Codex's own review and
+// compaction threads.
+func (s Session) Delegated() bool {
+	return s.Subagent != nil || s.Source == codexSourceExec || s.Source == codexSourceSubagent
+}
+
+// Session.Source holds a Codex source string, or the key of an object source.
+const (
+	codexSourceExec     = "exec"
+	codexSourceSubagent = "subAgent"
+)
+
+// ConversationID is the root of a subagent's family, or the session itself.
+func (s Session) ConversationID() string {
+	if s.Subagent == nil {
+		return s.ID
+	}
+	if s.Subagent.RootID != "" {
+		return s.Subagent.RootID
+	}
+	if s.Subagent.ParentID != "" {
+		return s.Subagent.ParentID
+	}
+	return s.ID
+}
+
 // SubagentRollup summarizes subagents a provider observes for a session
 // without exposing them as sessions of their own (Claude Code subagents).
 type SubagentRollup struct {
@@ -617,6 +644,13 @@ type Capabilities struct {
 	Interrupt bool `json:"interrupt"`
 	Steer     bool `json:"steer"`
 	Attach    bool `json:"attach"`
+	// Respond and PermissionMode are a session whose open requests a person
+	// answers here and whose permission mode changes while it runs.
+	Respond        bool `json:"respond"`
+	PermissionMode bool `json:"permissionMode"`
+	// Commands is a session that takes Claude Remote Control's context, usage,
+	// status, effort and rename commands.
+	Commands bool `json:"commands"`
 }
 
 type SessionCapabilities struct {

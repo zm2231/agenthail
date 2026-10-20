@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -428,9 +429,19 @@ func TestQueueListFiltersByTargetMineAndWorkspaceAncestry(t *testing.T) {
 		{ID: "nested", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: "/work/root/nested"},
 		{ID: "other", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: "/work/other"},
 	}
+	if err := r.AddProject(registry.ProjectRecord{ID: "p-root", WorkspaceRoot: "/work/root", Title: "root"}); err != nil {
+		t.Fatal(err)
+	}
 	for _, session := range sessions {
 		fake.sessions[session.ID] = session
 		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+		projection := `{}`
+		if session.ID != "other" {
+			projection = `{"project":{"id":"p-root","displayName":"root"}}`
+		}
+		if _, _, err := r.RecordCatalogSession(registry.CatalogSessionState{Session: session, Project: json.RawMessage(`null`), Checkout: json.RawMessage(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: projection}, registry.CatalogEvent{DedupeKey: "session:" + session.ID, Type: "session.upserted", EntityID: session.ID, Payload: json.RawMessage(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -468,8 +479,11 @@ func TestQueueListFiltersByTargetMineAndWorkspaceAncestry(t *testing.T) {
 	if got := list("--mine"); strings.Join(got, ",") != "inbound,outbound" {
 		t.Fatalf("mine=%v", got)
 	}
-	if got := list("--cwd", "/work/root"); strings.Join(got, ",") != "inbound,outbound" {
+	if got := list("--cwd", "/work/root/nested"); strings.Join(got, ",") != "inbound,outbound" {
 		t.Fatalf("workspace=%v", got)
+	}
+	if got := list("--project", "root"); strings.Join(got, ",") != "inbound,outbound" {
+		t.Fatalf("project=%v", got)
 	}
 	if got := list("--target", "codex:nested"); strings.Join(got, ",") != "outbound" {
 		t.Fatalf("target=%v", got)
@@ -802,52 +816,61 @@ func TestListJSONUsesDefaultLimit(t *testing.T) {
 	}
 }
 
-func TestListCwdFiltersByCanonicalAncestryInTextAndJSON(t *testing.T) {
-	root := t.TempDir()
-	project := filepath.Join(root, "project")
-	nested := filepath.Join(project, "nested")
-	other := filepath.Join(root, "project-other")
-	if err := os.MkdirAll(nested, 0700); err != nil {
+func TestListCwdListsTheProjectOfAWorktreeOutsideTheRepository(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "merchantry")
+	if err := os.MkdirAll(filepath.Join(repo, "apps", "web", "src"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(other, 0700); err != nil {
-		t.Fatal(err)
-	}
-	alias := filepath.Join(root, "alias")
-	if err := os.Symlink(project, alias); err != nil {
-		t.Fatal(err)
-	}
-	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{
-		{ID: "root", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "root", Cwd: project},
-		{ID: "nested", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "nested", Cwd: nested},
-		{ID: "other", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "other", Cwd: other},
-	}}
-	app, _ := cliFixture(t, fake)
-	text, err := captureStdout(t, func() error { return app.Run([]string{"list", "--cwd", alias}) })
-	if err != nil || !strings.Contains(text, "root") || !strings.Contains(text, "nested") || strings.Contains(text, "other") {
-		t.Fatalf("text=%q err=%v", text, err)
-	}
-	jsonText, err := captureStdout(t, func() error { return app.Run([]string{"list", "--cwd", alias, "--json"}) })
-	if err != nil {
-		t.Fatal(err)
-	}
-	var document struct {
-		Sessions []surface.Session `json:"sessions"`
-	}
-	if err := json.Unmarshal([]byte(jsonText), &document); err != nil {
-		t.Fatal(err)
-	}
-	if len(document.Sessions) != 2 || document.Sessions[0].ID == "other" || document.Sessions[1].ID == "other" {
-		t.Fatalf("sessions=%+v", document.Sessions)
-	}
-	canonicalProject, err := filepath.EvalSymlinks(project)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, session := range document.Sessions {
-		if session.ID == "root" && session.Cwd != canonicalProject {
-			t.Fatalf("root cwd=%q want=%q", session.Cwd, canonicalProject)
+	git := func(dir string, args ...string) {
+		t.Helper()
+		if output, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, output)
 		}
+	}
+	git(repo, "init", "-q", "-b", "main")
+	git(repo, "-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "-q", "--allow-empty", "-m", "base")
+	git(repo, "remote", "add", "origin", "https://github.com/example/merchantry.git")
+	worktree := filepath.Join(t.TempDir(), "merchantry-task")
+	git(repo, "worktree", "add", "-q", "-b", "task", worktree)
+	repo, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(repo, alias); err != nil {
+		t.Fatal(err)
+	}
+	web := "repo:github.com/example/merchantry::apps/web"
+	fake := &cliSurface{kind: surface.KindCodex}
+	app, store := cliFixture(t, fake)
+	app.catalogDaemonRunning = func() bool { return true }
+	if err := store.AddProject(registry.ProjectRecord{ID: "p-web", WorkspaceRoot: filepath.Join(repo, "apps", "web"), Title: "web", Key: web}); err != nil {
+		t.Fatal(err)
+	}
+	observedAt := time.Now().UTC()
+	for _, row := range []struct {
+		session    surface.Session
+		projection string
+	}{
+		{surface.Session{ID: "worktree-web", Cwd: filepath.Join(worktree, "apps", "web", "src")}, `{"project":{"id":"` + web + `","displayName":"web"}}`},
+		{surface.Session{ID: "repo-root", Cwd: repo}, `{"project":{"id":"repo:github.com/example/merchantry","displayName":"merchantry"}}`},
+	} {
+		row.session.Surface, row.session.RuntimeKind, row.session.Name, row.session.LastActive = surface.KindCodex, surface.RuntimeCodexDesktop, row.session.ID, observedAt
+		if _, _, err := store.RecordCatalogSession(registry.CatalogSessionState{Session: row.session, Project: json.RawMessage(`null`), Checkout: json.RawMessage(`{}`), ObservedAt: observedAt, ProjectionFingerprint: row.projection}, registry.CatalogEvent{DedupeKey: "session:" + row.session.ID, Type: "session.upserted", EntityID: row.session.ID, Payload: json.RawMessage(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, folder := range []string{filepath.Join(repo, "apps", "web"), filepath.Join(alias, "apps", "web", "src"), filepath.Join(worktree, "apps", "web")} {
+		output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all", "--cwd", folder, "--json"}) })
+		var document struct {
+			Sessions []surface.Session `json:"sessions"`
+		}
+		if err != nil || json.Unmarshal([]byte(output), &document) != nil || len(document.Sessions) != 1 || document.Sessions[0].ID != "worktree-web" {
+			t.Fatalf("--cwd %s: output=%s err=%v", folder, output, err)
+		}
+	}
+	if err := app.Run([]string{"list", "--all", "--cwd", t.TempDir()}); err == nil || !strings.Contains(err.Error(), "no project holds") {
+		t.Fatalf("a folder outside every project: err=%v", err)
 	}
 }
 
@@ -864,6 +887,13 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "provider-call-would-be-a-bug", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}}}
 	app, store := cliFixture(t, fake)
 	app.catalogDaemonRunning = func() bool { return true }
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddProject(registry.ProjectRecord{ID: "p-root", WorkspaceRoot: canonicalRoot, Title: "root"}); err != nil {
+		t.Fatal(err)
+	}
 	observedAt := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
 	for _, item := range []surface.Session{
 		{ID: "catalog-root", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "root", Cwd: root, LastActive: observedAt},
@@ -875,7 +905,7 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 			Project:               json.RawMessage(`{}`),
 			Checkout:              json.RawMessage(`{}`),
 			ObservedAt:            observedAt,
-			ProjectionFingerprint: item.ID,
+			ProjectionFingerprint: map[bool]string{true: `{"project":{"id":"p-root"}}`, false: `{}`}[item.ID != "catalog-other"],
 		}, registry.CatalogEvent{DedupeKey: "session:" + item.ID, Type: "session.upserted", EntityID: item.ID, Payload: json.RawMessage(`{}`)}); err != nil {
 			t.Fatal(err)
 		}

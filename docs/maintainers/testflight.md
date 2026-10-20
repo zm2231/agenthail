@@ -49,7 +49,32 @@ The management workflow uses these repository secrets:
 
 Despite the `NOTARY` names, these credentials are also used for App Store Connect. They are distinct from the APNs notification key. Keep private keys out of the repository and logs. The workflow creates short-lived JWTs in the runner; operators do not need the Apple private key locally when dispatching through GitHub.
 
-The iOS archive additionally needs `APPLE_TEAM_ID`, `APPLE_IOS_SIGNING_IDENTITIES_P12_BASE64`, `APPLE_IOS_SIGNING_IDENTITIES_P12_PASSWORD`, and `APPLE_IOS_PROVISIONING_PROFILE_BASE64`. The combined release also needs its Mac signing and relay configuration; the [release workflow](../../.github/workflows/release.yml) is the authoritative list. After rotating credentials, run a read-only management status check. Signing/profile changes also require archive validation; a status check cannot validate signing assets.
+The iOS archive additionally needs `APPLE_TEAM_ID`, `APPLE_IOS_SIGNING_IDENTITIES_P12_BASE64`, `APPLE_IOS_SIGNING_IDENTITIES_P12_PASSWORD`, `APPLE_IOS_PROVISIONING_PROFILE_BASE64`, and `APPLE_IOS_NOTIFICATION_SERVICE_PROVISIONING_PROFILE_BASE64`. The combined release also needs its Mac signing and relay configuration; the [release workflow](../../.github/workflows/release.yml) is the authoritative list. After rotating credentials, run a read-only management status check. Signing/profile changes also require archive validation; a status check cannot validate signing assets.
+
+The app embeds a notification service, `<bundle ID>.NotificationService`. The app and the service share the keychain group `<team ID>.<bundle ID>.shared`, which holds only the paired Mac's address and token.
+
+The archive is signed automatically for development. The App Store export signs manually with two App Store distribution profiles, one per bundle, because the App Store Connect key cannot create distribution profiles through cloud signing:
+
+| Secret | Profile |
+| --- | --- |
+| `APPLE_IOS_PROVISIONING_PROFILE_BASE64` | App Store profile for `<bundle ID>` |
+| `APPLE_IOS_NOTIFICATION_SERVICE_PROVISIONING_PROFILE_BASE64` | App Store profile for `<bundle ID>.NotificationService` |
+
+Both must be created manually in Certificates, Identifiers & Profiles; a profile Xcode manages (named `iOS Team Store Provisioning Profile: …`) is refused by a manual export. To create the service's profile, register the App ID `<bundle ID>.NotificationService`, then create an App Store distribution profile for it with the same Apple Distribution certificate as the app's profile. Store the downloaded `.mobileprovision` base64-encoded in the secret. Renew both profiles together when the certificate is replaced.
+
+[`scripts/ios-sign.sh`](../../scripts/ios-sign.sh) imports the signing identities and both profiles, and refuses a profile managed by Xcode, one for the wrong team or bundle, one that lists devices or allows debugging, one without the team's keychain groups, an expired one, or one that does not include the Apple Distribution certificate. It then archives, exports with each bundle mapped to its profile, and verifies both bundles' identifiers and entitlements. Release runs it before uploading, and the `ios-release` pull request check runs it without uploading, so a signing or provisioning mismatch fails the pull request first.
+
+## Device acceptance for notification answers
+
+A release that changes request notifications, the notification service or the relay is accepted on a physical iPhone after the relay deploys, alongside the physical voice check. On the TestFlight build, with the phone locked, answer from the notification:
+
+- a tool approval with **Allow** or **Deny**, and another with **Deny with message…** and a typed reason;
+- a single question with one of its options, and another with **Reply…** and a typed answer;
+- a question with four options, after confirming the expanded notification shows all four options and **Reply…**;
+- a typed reply while the Mac is unreachable, after confirming the failure notification repeats what you typed;
+- a request with two questions, after confirming the alert shows the first question and opening it shows the request in the session.
+
+Record the build, that each alert showed what was asked, and that the session continued with that answer, with the typed text for a reply.
 
 ## Set up internal access
 

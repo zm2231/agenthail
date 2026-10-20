@@ -26,7 +26,11 @@ const TAKE_TIMEOUT_MS = 10_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PERMISSION_MODES = new Set(['default', 'manual', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']);
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
-const DENIED = 'Agenthail cannot answer permission prompts for this session; allow the tool through its permission mode or Claude settings.';
+const MAX_REQUEST_INPUT = 16 << 10;
+const MAX_REQUEST_TEXT = 2000;
+const MAX_SETTINGS = 2000;
+const DECLINED = 'The person declined this request.';
+const WITHDRAWN = 'The request was withdrawn before anyone answered it.';
 
 const { values: args } = parseArgs({
   options: {
@@ -43,6 +47,7 @@ holdLock(path.join(args.state, 'lock'));
 
 const sessions = new Map();
 const orphans = loadOrphans(path.join(args.state, 'state.json'));
+const settings = loadSettings(path.join(args.state, 'settings.json'));
 const events = [];
 const subscribers = new Set();
 let seq = 0;
@@ -68,9 +73,12 @@ class StartError extends Error {
 }
 
 class Session {
-  constructor(id, cwd) {
+  constructor(id, cwd, permissionMode, model) {
     this.id = id;
     this.cwd = cwd;
+    this.permissionMode = permissionMode;
+    this.model = model;
+    this.pending = new Map();
     this.pid = 0;
     this.started = '';
     this.state = 'starting';
@@ -115,8 +123,42 @@ class Session {
     if (draining && state === 'idle') this.end();
   }
 
+  // ask holds a permission request or question until a person answers it.
+  // It has no deadline: it ends only with an answer, Claude withdrawing it
+  // (an interrupt or a turn that ended), or the session's end.
+  ask(tool, input, options) {
+    const request = permissionRequest(tool, input, options);
+    return new Promise((resolve) => {
+      const withdraw = () => settle('withdrawn', { behavior: 'deny', message: WITHDRAWN });
+      const settle = (outcome, result) => {
+        if (!this.pending.delete(request.requestId)) return;
+        options.signal?.removeEventListener('abort', withdraw);
+        emit(this.id, 'request_resolved', { requestId: request.requestId, outcome });
+        resolve(result);
+      };
+      this.pending.set(request.requestId, { request, input, suggestions: options.suggestions, settle });
+      emit(this.id, 'request_opened', { request });
+      if (options.signal?.aborted) withdraw();
+      else options.signal?.addEventListener('abort', withdraw, { once: true });
+    });
+  }
+
+  remember() {
+    settings.set(this.id, { permissionMode: this.permissionMode, model: this.model, updatedAt: new Date().toISOString() });
+    writeSettings();
+  }
+
   describe() {
-    return { sessionId: this.id, pid: this.pid, cwd: this.cwd, state: this.state, openedAt: this.openedAt };
+    return {
+      sessionId: this.id,
+      pid: this.pid,
+      cwd: this.cwd,
+      state: this.state,
+      openedAt: this.openedAt,
+      permissionMode: this.permissionMode,
+      model: this.model,
+      requests: [...this.pending.values()].map((p) => p.request),
+    };
   }
 }
 
@@ -127,6 +169,31 @@ const methods = {
   interrupt: async ({ sessionId }) => {
     await session(sessionId).query.interrupt();
     return {};
+  },
+  respond: ({ sessionId, requestId, decision }) => {
+    const s = session(sessionId);
+    const pending = s.pending.get(requestId);
+    if (!pending) throw new HostError('stale', `request ${requestId} is not open in session ${sessionId}: it was answered or withdrawn`);
+    const { outcome, result } = decide(pending, decision);
+    pending.settle(outcome, result);
+    return { outcome };
+  },
+  setModel: async ({ sessionId, model }) => {
+    if (typeof model !== 'string' || model === '' || /\s/.test(model)) throw new HostError('invalid', 'model must be one model name');
+    const s = session(sessionId);
+    await s.query.setModel(model);
+    s.model = model;
+    s.remember();
+    return s.describe();
+  },
+  setPermissionMode: async ({ sessionId, permissionMode }) => {
+    if (!PERMISSION_MODES.has(permissionMode)) throw new HostError('invalid', `unknown permission mode: ${permissionMode}`);
+    const s = session(sessionId);
+    await s.query.setPermissionMode(permissionMode);
+    s.permissionMode = permissionMode;
+    s.remember();
+    emit(s.id, 'permission_mode', { permissionMode });
+    return s.describe();
   },
   close: async ({ sessionId }) => {
     const s = session(sessionId);
@@ -175,7 +242,12 @@ async function open(params) {
   if (existing) return existing.describe();
   refuseOrphaned(id);
 
-  const s = new Session(id, cwd);
+  // Claude starts a resumed conversation in the settings' default mode and
+  // model, so a resume without them reopens in the ones it last ran with here.
+  const kept = params.resume ? settings.get(id) : undefined;
+  const permissionMode = params.permissionMode || kept?.permissionMode || '';
+  const model = params.model || kept?.model || '';
+  const s = new Session(id, cwd, permissionMode, model);
   sessions.set(id, s);
   let exited;
   const exit = new Promise((resolve) => (exited = resolve));
@@ -187,20 +259,16 @@ async function open(params) {
         env: params.configDir ? { ...process.env, CLAUDE_CONFIG_DIR: params.configDir } : process.env,
         pathToClaudeCodeExecutable: args.claude,
         ...(params.resume ? { resume: id } : { sessionId: id }),
-        ...(params.permissionMode ? { permissionMode: params.permissionMode } : {}),
-        ...(params.model ? { model: params.model } : {}),
+        ...(permissionMode ? { permissionMode } : {}),
+        ...(model ? { model } : {}),
         ...(params.effort ? { effort: params.effort } : {}),
         ...(params.agent ? { agent: params.agent } : {}),
         extraArgs,
-        // bypassPermissions approves every tool before canUseTool is consulted.
-        ...(params.permissionMode === 'bypassPermissions'
-          ? { allowDangerouslySkipPermissions: true }
-          : {
-              canUseTool: async (toolName, _input, { toolUseID }) => {
-                emit(id, 'permission_denied', { tool: toolName, toolUseId: toolUseID, reason: DENIED });
-                return { behavior: 'deny', message: DENIED };
-              },
-            }),
+        // Every session may be switched into bypassPermissions later, which
+        // Claude allows only when it started with consent to it. Claude still
+        // asks canUseTool for questions in bypassPermissions.
+        allowDangerouslySkipPermissions: true,
+        canUseTool: (toolName, input, options) => s.ask(toolName, input, options),
         spawnClaudeCodeProcess: (options) => spawnDetached(s, options, exited),
       },
     });
@@ -216,8 +284,64 @@ async function open(params) {
     if (!s.done) sessions.delete(id);
     throw new HostError(error instanceof StartError && error.refused ? 'refused' : 'open_failed', error.message);
   }
+  if (params.permissionMode || params.model) s.remember();
   s.setState('idle');
   return s.describe();
+}
+
+function permissionRequest(tool, input, options) {
+  const request = {
+    requestId: typeof options.requestId === 'string' && options.requestId ? options.requestId : randomUUID(),
+    toolUseId: options.toolUseID ?? '',
+    tool,
+    kind: tool === 'AskUserQuestion' ? 'question' : 'approval',
+    createdAt: new Date().toISOString(),
+    alwaysAllow: Array.isArray(options.suggestions) && options.suggestions.length > 0 && !options.suppressAlwaysAllowRule,
+  };
+  for (const name of ['title', 'displayName', 'description', 'decisionReason', 'blockedPath']) {
+    if (typeof options[name] === 'string' && options[name] !== '') request[name] = options[name].slice(0, MAX_REQUEST_TEXT);
+  }
+  if (typeof options.agentID === 'string' && options.agentID !== '') request.agentId = options.agentID;
+  if (request.kind === 'question') {
+    request.questions = (Array.isArray(input?.questions) ? input.questions : []).map((q) => ({
+      question: String(q?.question ?? ''),
+      header: String(q?.header ?? ''),
+      multiSelect: q?.multiSelect === true,
+      options: (Array.isArray(q?.options) ? q.options : []).map((o) => ({ label: String(o?.label ?? ''), description: String(o?.description ?? '') })),
+    }));
+  } else {
+    const text = JSON.stringify(input ?? {});
+    request.input = text.length <= MAX_REQUEST_INPUT ? (input ?? {}) : { truncated: text.slice(0, MAX_REQUEST_INPUT) };
+  }
+  return request;
+}
+
+// decide turns a person's decision into Claude's permission result. A question
+// is answered only with an answer to each of its questions, keyed by the
+// question's text; a free-text answer stands for Claude's own "Other".
+function decide({ request, input, suggestions }, decision) {
+  if (decision?.behavior === 'deny') {
+    const message = typeof decision.message === 'string' && decision.message.trim() !== '' ? decision.message.trim() : DECLINED;
+    return { outcome: 'denied', result: { behavior: 'deny', message } };
+  }
+  if (decision?.behavior !== 'allow') throw new HostError('invalid', 'decision.behavior must be allow or deny');
+  if (request.kind === 'question') {
+    const answers = decision.answers;
+    if (!answers || typeof answers !== 'object' || Array.isArray(answers)) throw new HostError('invalid', 'a question is answered with answers');
+    for (const key of Object.keys(answers)) {
+      if (!request.questions.some((q) => q.question === key)) throw new HostError('invalid', `not a question of this request: ${key}`);
+    }
+    for (const q of request.questions) {
+      if (typeof answers[q.question] !== 'string' || answers[q.question].trim() === '') throw new HostError('invalid', `no answer to: ${q.question}`);
+    }
+    return { outcome: 'answered', result: { behavior: 'allow', updatedInput: { ...input, answers } } };
+  }
+  if (decision.answers !== undefined) throw new HostError('invalid', 'only a question takes answers');
+  if (decision.always) {
+    if (!request.alwaysAllow) throw new HostError('invalid', 'this request offers no rule to always allow');
+    return { outcome: 'allowed_always', result: { behavior: 'allow', updatedInput: input, updatedPermissions: suggestions } };
+  }
+  return { outcome: 'allowed', result: { behavior: 'allow', updatedInput: input } };
 }
 
 async function send(params) {
@@ -331,6 +455,7 @@ async function run(s, exit) {
     error = e?.message ?? String(e);
   }
   s.ended = true;
+  for (const pending of [...s.pending.values()]) pending.settle('ended', { behavior: 'deny', message: WITHDRAWN });
   const status = await Promise.race([exit, timeout(10_000, 'exit').catch(() => ({ code: null, signal: null }))]);
   sessions.delete(s.id);
   writeState();
@@ -425,6 +550,26 @@ function loadOrphans(statePath) {
     if (runs(entry)) out.set(sessionId, { sessionId, pid: entry.pid, started: entry.started, cwd: entry.cwd, openedAt: entry.openedAt });
   }
   return out;
+}
+
+// settings keeps the permission mode and model each conversation last ran
+// with here, so a resume reopens in them. It is bounded to the most recent.
+function loadSettings(settingsPath) {
+  try {
+    const state = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    return new Map(Object.entries(state.sessions ?? {}));
+  } catch {
+    return new Map();
+  }
+}
+
+function writeSettings() {
+  const entries = [...settings.entries()].sort((a, b) => String(b[1].updatedAt).localeCompare(String(a[1].updatedAt)));
+  for (const [id] of entries.splice(MAX_SETTINGS)) settings.delete(id);
+  const target = path.join(args.state, 'settings.json');
+  const temp = `${target}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify({ sessions: Object.fromEntries(entries) }) + '\n', { mode: 0o600 });
+  fs.renameSync(temp, target);
 }
 
 function refuseOrphaned(id) {

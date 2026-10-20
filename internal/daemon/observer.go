@@ -57,7 +57,10 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 			d.log.Printf("watched session %s: %s", d.resolveDisplay(session.ID), adapterErr)
 			continue
 		}
-		if relayTargetInactive(session) || (queueCounts[session.ID] == 0 && claudeProcessExited(session)) {
+		// An exited Claude session stays a delivery target whatever its stored
+		// status, since a send resumes it; it is observed only to drain its queue.
+		exited := claudeProcessExited(session)
+		if (exited && queueCounts[session.ID] == 0) || (!exited && relayTargetInactive(session)) {
 			d.syncRelays(ctx, adapter, session)
 			continue
 		}
@@ -183,7 +186,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 			}
 		}
 		terminalCompletion := observation.ActiveTurnID == ""
-		if terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && observation.Reply != nil && observation.Reply.Done {
+		if terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && !session.Delegated() && observation.Reply != nil && observation.Reply.Done {
 			desktopNotificationMessage = fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
 			mobileNotificationMessage = fmt.Sprintf("%s finished", notificationSurfaceName(session.Surface))
 			if observation.Reply.Error != "" {
@@ -197,7 +200,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 			}
 		}
 	}
-	if found && observation.Status == surface.StatusBusy && (previous.LastStatus != surface.StatusBusy || previous.ActiveTurnID != observation.ActiveTurnID) {
+	if found && !session.Delegated() && observation.Status == surface.StatusBusy && (previous.LastStatus != surface.StatusBusy || previous.ActiveTurnID != observation.ActiveTurnID) {
 		d.armCompletionNotification(session.ID)
 	}
 	if err := d.Registry.SaveRuntimeState(session.ID, *observation); err != nil {
@@ -213,7 +216,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	}
 	if desktopNotificationMessage != "" {
 		go func(desktopMessage, mobileMessage, sessionID, turnID string) {
-			if err := Notify("Agenthail", desktopMessage, sessionID, ""); err != nil {
+			if err := d.notifyDesktop("Agenthail", desktopMessage, sessionID, "", "", nil); err != nil {
 				d.log.Printf("desktop notification: %s", err)
 			}
 			notificationCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -229,12 +232,18 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	canSteerQueued := steerQueued && surface.EffectiveCapabilities(adapter, session).Steer
 	canDrainQueue := (observation.Status == surface.StatusIdle && observation.ActiveTurnID == "") || canLoadDesktopQueue
 	canDrainSteer := canSteerQueued && observation.Status == surface.StatusBusy && observation.WaitingOn == nil
-	if canDrainQueue || canDrainSteer {
+	canDrainPeer := observation.Status == surface.StatusBusy && surface.RouteFor(adapter, session, "") == surface.RoutePeer
+	if canDrainQueue || canDrainPeer || canDrainSteer {
 		queued := d.Registry.QueueCount(session.ID)
 		if canDrainQueue {
 			d.drainMessageQueue(ctx, adapter, session)
 		} else {
-			d.drainSteerMessageQueue(ctx, adapter, session)
+			if canDrainPeer {
+				d.drainPeerMessageQueue(ctx, adapter, session)
+			}
+			if canDrainSteer {
+				d.drainSteerMessageQueue(ctx, adapter, session)
+			}
 		}
 		if queued > 0 {
 			d.publishEvent("state.changed", session.ID, map[string]string{"source": "queue"})

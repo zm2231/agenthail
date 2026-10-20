@@ -80,31 +80,38 @@ func (c *Claude) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
 		Send: true, Stream: true, Reply: true, Goal: false,
 		Compact: true, Model: true, Interrupt: true, Steer: true,
-		Attach: true,
+		Attach: true, Commands: true,
 	}
 }
 
 // SessionCapabilities narrows Capabilities for a session the host runs, which
-// takes steer and interrupt but no slash commands, and for a CLI session reached
-// over its native peer socket, where steer, compact, model and interrupt need
-// its Remote Control bridge. Both stream only from a local transcript.
+// takes steer, interrupt and model changes but no Remote Control commands, and
+// for any other session Control cannot reach through Remote Control: a CLI
+// session reached only over its native peer socket, or any session on an
+// install without Remote Control. Hosted and socket sessions stream only from
+// a local transcript.
 func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities {
 	capabilities := c.Capabilities()
 	if claudeHosted(sess) {
 		capabilities.Stream = sess.HasLocal && sess.Transcript != ""
 		capabilities.Compact = false
-		capabilities.Model = false
+		capabilities.Commands = false
+		capabilities.Respond = true
+		capabilities.PermissionMode = true
 		return capabilities
 	}
-	if sess == nil || sess.Transport != "uds" {
+	if sess == nil {
 		return capabilities
 	}
-	capabilities.Stream = sess.HasLocal && sess.Transcript != ""
-	if sess.Bridge == "" {
+	if sess.Transport == "uds" {
+		capabilities.Stream = sess.HasLocal && sess.Transcript != ""
+	}
+	if c.localOnly || nativeClaudeOnly(sess) {
 		capabilities.Steer = false
 		capabilities.Compact = false
 		capabilities.Model = false
 		capabilities.Interrupt = false
+		capabilities.Commands = false
 	}
 	return capabilities
 }
@@ -834,15 +841,20 @@ func (c *Claude) applyRecordObservation(sess *surface.Session, observation *surf
 }
 
 // observe reads the turn from the transcript and what it waits on from the
-// process record. Claude writes a pending tool call to the transcript only
-// once it resolves, so the record is the one place a question, a plan
-// approval or a permission prompt shows while it is open.
+// process record, or for a session the host runs, from the host, which holds
+// its open requests. Claude writes a pending tool call to the transcript only
+// once it resolves, so those are the one place a question, a plan approval or
+// a permission prompt shows while it is open.
 func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
 	observation, err := c.observeTurn(ctx, sess)
 	if err != nil {
 		return nil, err
 	}
-	if waiting := c.recordWaiting(sess); waiting != nil && observation.Status != surface.StatusOffline {
+	waiting := c.recordWaiting(sess)
+	if claudeHosted(sess) {
+		waiting = c.hostWaiting(ctx, sess)
+	}
+	if waiting != nil && observation.Status != surface.StatusOffline {
 		observation.Status = surface.StatusBusy
 		observation.WaitingOn = waiting
 	}

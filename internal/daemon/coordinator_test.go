@@ -47,7 +47,7 @@ func newCoordinatorFixture(t *testing.T) *coordinatorFixture {
 	if err := r.RegisterSession(gone); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: "project-fixture", ProjectRoot: f.host.Cwd, Name: "fixture-lead", Surface: string(surface.KindClaude), Cwd: f.host.Cwd, Instructions: "You coordinate fixture workers."}, goneCoordinator); err != nil {
+	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: "project-fixture", ProjectRoot: f.host.Cwd, Name: "fixture-lead", Surface: string(surface.KindClaude), Cwd: f.host.Cwd, Instructions: "You coordinate fixture workers."}, registry.CoordinatorChange{SessionID: goneCoordinator}); err != nil {
 		t.Fatal(err)
 	}
 	posts := &orphanPosts{}

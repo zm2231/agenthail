@@ -27,7 +27,6 @@ import (
 	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/hosts"
-	"github.com/zm2231/agenthail/internal/project"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -108,13 +107,14 @@ type dashboardSession struct {
 	Source            string                     `json:"source,omitempty"`
 	Transport         string                     `json:"transport,omitempty"`
 	ForkedFrom        string                     `json:"forkedFrom,omitempty"`
-	Project           *project.Project           `json:"project,omitempty"`
+	Project           *CatalogProject            `json:"project,omitempty"`
 	Checkout          *catalogCheckout           `json:"checkout,omitempty"`
 	ObservedAt        time.Time                  `json:"observedAt,omitempty"`
 	UnavailableReason string                     `json:"unavailableReason,omitempty"`
 	Runtime           *surface.Runtime           `json:"runtime,omitempty"`
 	Freshness         *registry.CatalogFreshness `json:"freshness,omitempty"`
 	Subagent          *surface.Subagent          `json:"subagent,omitempty"`
+	Delegated         bool                       `json:"delegated,omitempty"`
 	Subagents         *surface.SubagentRollup    `json:"subagents,omitempty"`
 	ObservedSubagents *surface.SubagentRollup    `json:"observedSubagents,omitempty"`
 	HiddenSubagents   *surface.SubagentRollup    `json:"hiddenSubagents,omitempty"`
@@ -123,27 +123,28 @@ type dashboardSession struct {
 }
 
 type dashboardState struct {
-	UpdatedAt          time.Time                  `json:"updatedAt"`
-	EventCursor        uint64                     `json:"eventCursor"`
-	HostEpoch          string                     `json:"hostEpoch"`
-	CatalogSeq         uint64                     `json:"catalogSeq"`
-	Daemon             map[string]any             `json:"daemon"`
-	Surfaces           []dashboardSurface         `json:"surfaces"`
-	Sessions           []dashboardSession         `json:"sessions"`
-	TotalSessions      int                        `json:"totalSessions"`
-	Counts             map[string]int             `json:"counts,omitempty"`
-	Projects           []dashboardProject         `json:"projects,omitempty"`
-	NextCursor         string                     `json:"nextCursor,omitempty"`
-	Queue              []dashboardQueue           `json:"queue"`
-	Channels           []dashboardChannel         `json:"channels"`
-	Relays             []dashboardRelay           `json:"relays"`
-	History            []dashboardHistory         `json:"history"`
-	Attention          []dashboardAttention       `json:"attention"`
-	DeliveryProblems   []registry.DeliveryProblem `json:"deliveryProblems"`
-	CodexRecentHours   int                        `json:"codexRecentHours"`
-	BusyDelivery       string                     `json:"busyDelivery"`
-	Signin             []signin.Status            `json:"signin"`
-	Rekeyed            map[string]string          `json:"rekeyed,omitempty"`
+	UpdatedAt          time.Time                   `json:"updatedAt"`
+	EventCursor        uint64                      `json:"eventCursor"`
+	HostEpoch          string                      `json:"hostEpoch"`
+	CatalogSeq         uint64                      `json:"catalogSeq"`
+	Daemon             map[string]any              `json:"daemon"`
+	Surfaces           []dashboardSurface          `json:"surfaces"`
+	Sessions           []dashboardSession          `json:"sessions"`
+	TotalSessions      int                         `json:"totalSessions"`
+	Counts             map[string]int              `json:"counts,omitempty"`
+	Projects           []dashboardProject          `json:"projects,omitempty"`
+	NextCursor         string                      `json:"nextCursor,omitempty"`
+	Queue              []dashboardQueue            `json:"queue"`
+	Channels           []dashboardChannel          `json:"channels"`
+	Relays             []dashboardRelay            `json:"relays"`
+	History            []dashboardHistory          `json:"history"`
+	Attention          []dashboardAttention        `json:"attention"`
+	DeliveryProblems   []registry.DeliveryProblem  `json:"deliveryProblems"`
+	CodexRecentHours   int                         `json:"codexRecentHours"`
+	BusyDelivery       string                      `json:"busyDelivery"`
+	Signin             []signin.Status             `json:"signin"`
+	Rekeyed            map[string]string           `json:"rekeyed,omitempty"`
+	Coordinators       []registry.CoordinatorEntry `json:"coordinators"`
 	catalogPageApplied bool
 	catalogPageFilter  string
 	catalogPageOffset  int
@@ -282,6 +283,7 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/api/session-attachment", dashboard.guard(d.hostRouted("sessionId", d.apiSessionAttachmentHandler)))
 	mux.HandleFunc("/api/session-stream", dashboard.guard(d.hostRouted("id", d.apiSessionStreamHandler)))
 	mux.HandleFunc("/api/models", dashboard.guard(d.hostRouted("id", d.dashboardModelsHandler)))
+	mux.HandleFunc("/api/requests", dashboard.guard(d.hostRouted("sessionId", d.requestsHandler)))
 	mux.HandleFunc("/api/search", dashboard.guard(d.dashboardSearchHandler))
 	mux.HandleFunc("/api/history", dashboard.guard(d.hostRouted("sessionId", d.dashboardHistoryHandler)))
 	mux.HandleFunc("/api/action", dashboard.guard(d.idempotentActionHandler(d.hostRoutedAction(d.dashboardActionHandler))))
@@ -806,9 +808,17 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read projects: %w", err)
 	}
+	coordinators, err := d.Registry.LocalCoordinators()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read coordinators: %w", err)
+	}
 	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Sessions: []dashboardSession{}, Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Signin: make([]signin.Status, 0, len(signin.Consumers)), Rekeyed: rekeyed}
 	for _, consumer := range signin.Consumers {
 		state.Signin = append(state.Signin, d.signinConsumer(consumer))
+	}
+	state.Coordinators = make([]registry.CoordinatorEntry, 0, len(coordinators))
+	for _, spec := range coordinators {
+		state.Coordinators = append(state.Coordinators, spec.Entry())
 	}
 	if page != nil {
 		state.catalogPageApplied = true
@@ -949,11 +959,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	} else {
 		state.TotalSessions = len(state.Sessions)
 		state.Counts = catalogScopeCounts(state.Sessions)
-		coordinators, err := d.projectCoordinators()
-		if err != nil {
-			return dashboardState{}, err
-		}
-		state.Projects = catalogProjects(state.Sessions, projectRecords, coordinators, d.localHost())
+		state.Projects = catalogProjects(state.Sessions, projectRecords, d.localHost())
 	}
 	return state, nil
 }
@@ -1086,7 +1092,14 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Author          surface.Author             `json:"author"`
 		ProjectID       string                     `json:"projectId"`
 		Path            string                     `json:"path"`
+		Title           string                     `json:"title"`
 		Attachments     []string                   `json:"attachments"`
+		RequestID       string                     `json:"requestId"`
+		Decision        surface.Decision           `json:"decision"`
+		Instructions    *string                    `json:"instructions"`
+		Replace         bool                       `json:"replace"`
+		ChangedAt       time.Time                  `json:"changedAt"`
+		ChangedBy       string                     `json:"changedBy"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid dashboard request", http.StatusBadRequest)
@@ -1097,7 +1110,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if strings.HasPrefix(request.Action, "project-") {
-		d.projectAction(r.Context(), w, request.Action, request.ProjectID, request.Path)
+		d.projectAction(r, w, projectRequest{Action: request.Action, ProjectID: request.ProjectID, Path: request.Path, Title: request.Title})
+		return
+	}
+	if strings.HasPrefix(request.Action, "coordinator-") {
+		d.coordinatorAction(r, w, coordinatorRequest{Action: request.Action, SessionID: request.SessionID, SourceSessionID: request.SourceSessionID, ProjectID: request.ProjectID, Name: request.Name, Surface: request.Surface, Cwd: request.Cwd, Path: request.Path, Model: request.Model, PermissionMode: request.PermissionMode, Instructions: request.Instructions, Replace: request.Replace, ChangedAt: request.ChangedAt, ChangedBy: request.ChangedBy, Message: request.Message})
 		return
 	}
 	if request.Action == "delivery-dismiss" {
@@ -1152,7 +1169,8 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			if err := d.Registry.EnsureAliasAvailable(alias); err != nil {
 				var taken registry.AliasTakenError
-				if errors.As(err, &taken) {
+				var coordinator registry.CoordinatorAliasError
+				if errors.As(err, &taken) || errors.As(err, &coordinator) {
 					http.Error(w, err.Error(), http.StatusBadRequest)
 				} else {
 					http.Error(w, fmt.Sprintf("check conversation name: %s", err), http.StatusInternalServerError)
@@ -1255,7 +1273,8 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@")
 		if err := d.Registry.EnsureAliasAvailable(alias); err != nil {
 			var taken registry.AliasTakenError
-			if errors.As(err, &taken) {
+			var coordinator registry.CoordinatorAliasError
+			if errors.As(err, &taken) || errors.As(err, &coordinator) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 			} else {
 				http.Error(w, fmt.Sprintf("check conversation name: %s", err), http.StatusInternalServerError)
@@ -1813,13 +1832,29 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		result, err = d.control(ctx, adapter, session, surface.ControlRequest{Action: "model", Value: request.Model})
+		if err == nil {
+			d.recordSetting(session, "model", strings.TrimSpace(request.Model), actionActor(r))
+		}
 		if err == nil && session.Surface == surface.KindClaude {
 			if persistErr := d.Registry.RegisterSession(*session); persistErr != nil {
 				err = fmt.Errorf("persist Claude model state: %w", persistErr)
 			}
 		}
+	case "permission-mode":
+		if !effective.PermissionMode {
+			http.Error(w, "this session's permission mode cannot change while it runs", http.StatusBadRequest)
+			return
+		}
+		mode := strings.TrimSpace(request.PermissionMode)
+		result, err = d.control(ctx, adapter, session, surface.ControlRequest{Action: "permission-mode", Value: mode})
+		if err == nil {
+			d.recordSetting(session, "permission-mode", mode, actionActor(r))
+		}
+	case "respond":
+		d.respond(ctx, w, adapter, session, strings.TrimSpace(request.RequestID), request.Decision, actionActor(r))
+		return
 	case "context", "usage", "status", "effort", "rename":
-		if _, ok := adapter.(surface.Controller); !ok || !effective.Model {
+		if _, ok := adapter.(surface.Controller); !ok || !effective.Commands {
 			http.Error(w, "this session does not support Claude Remote Control commands", http.StatusBadRequest)
 			return
 		}
@@ -1937,7 +1972,7 @@ func (d *Daemon) dashboardSearchHandler(w http.ResponseWriter, r *http.Request) 
 		alias, _ := d.Registry.ReverseAlias(result.Session.ID)
 		effective := surface.EffectiveCapabilities(adapter, &result.Session)
 		payload = append(payload, map[string]any{
-			"session": dashboardSession{ID: result.Session.ID, Surface: result.Session.Surface, Name: result.Session.Name, Cwd: result.Session.Cwd, Alias: alias, Status: result.Session.Status, LastActive: result.Session.LastActive, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: result.Session.Source, Transport: result.Session.Transport},
+			"session": dashboardSession{ID: result.Session.ID, Surface: result.Session.Surface, Name: result.Session.Name, Cwd: result.Session.Cwd, Alias: alias, Status: result.Session.Status, LastActive: result.Session.LastActive, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: result.Session.Source, Transport: result.Session.Transport, Subagent: result.Session.Subagent, Delegated: result.Session.Delegated()},
 			"snippet": result.Snippet,
 		})
 	}
