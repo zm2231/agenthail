@@ -54,7 +54,7 @@ func TestTheDashboardReadsAndEditsEachClaudeRootsCompactionSettings(t *testing.T
 	if roots := read(); roots[0].AutoCompactWindow.Tokens != 425000 || roots[1].ModelWindows["claude-opus-5-5"].Tokens != 250000 {
 		t.Fatalf("roots=%+v", roots)
 	}
-	for _, body := range []string{`{"window":"50000"}`, `{"root":"/not/a/root","window":"300000"}`, `{"model":"claude-opus-5-5"}`, `{"window":"300000"} trailing`, `{"window":"300000"}{"window":"auto"}`, `{"window":"300000","idle":false}`} {
+	for _, body := range []string{`{"window":"50000"}`, `{"root":"/not/a/root","window":"300000"}`, `{"model":"claude-opus-5-5"}`, `{"window":"300000"} trailing`, `{"window":"300000"}{"window":"auto"}`, `{"window":"300000","idle":false}`, `{"window":"300000"}` + strings.Repeat(" ", 16<<10) + `{"window":"auto"}`} {
 		if response := serveDashboardRequest(router, http.MethodPost, "/api/claude/compact-settings", body); response.Code != http.StatusBadRequest {
 			t.Fatalf("%s: status=%d body=%s", body, response.Code, response.Body.String())
 		}
