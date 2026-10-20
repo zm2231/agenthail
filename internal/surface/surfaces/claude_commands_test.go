@@ -106,7 +106,7 @@ func TestClaudeCommandMarkupClassifies(t *testing.T) {
 		{"meta peer message without origin", user("Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/x.sock\" from-name=\"operator\">\nReply with exactly: second\n</cross-session-message>", true), []surface.TimelineItem{{Kind: "message", Role: "peer", Origin: claudeOriginPeer, Sender: "operator", Title: "operator", Text: "Reply with exactly: second"}}},
 		{"typed prompt", user("fix the build", false), []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: "fix the build"}}},
 		{"slash command the person typed", typed("<command-message>goal</command-message>\n<command-name>/goal</command-name>\n<command-args>tests pass</command-args>"), []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: "/goal tests pass"}}},
-		{"typed text that quotes command output", typed("<local-command-stdout>Goal set</local-command-stdout>"), []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: "<local-command-stdout>Goal set</local-command-stdout>", Origin: claudeOriginCommand}}},
+		{"typed text that quotes command output", typed("<local-command-stdout>Goal set</local-command-stdout>"), []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: "<local-command-stdout>Goal set</local-command-stdout>"}}},
 		{"markup followed by prose", user("<command-name>example</command-name> what does this tag mean?", false), []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: "<command-name>example</command-name> what does this tag mean?"}}},
 	}
 	for _, tc := range cases {
@@ -161,5 +161,20 @@ func TestClaudeTypedSlashCommandIsAPromptInEveryReading(t *testing.T) {
 	}
 	if prompt.Text != "/goal tests pass" || prompt.TurnID != "typed" || reply.TurnID != "typed" {
 		t.Fatalf("page=%+v", page.Items)
+	}
+}
+
+func TestClaudeTypedTextShapedLikeCommandOutputIsThePersonsPrompt(t *testing.T) {
+	path := timelineFixture(t, `{"type":"user","uuid":"typed","origin":{"kind":"human"},"timestamp":"2026-10-20T18:00:00Z","message":{"role":"user","content":"<local-command-stdout>literal</local-command-stdout>"}}
+{"type":"assistant","uuid":"a","timestamp":"2026-10-20T18:00:05Z","message":{"id":"m","stop_reason":"end_turn","content":[{"type":"text","text":"That is command output markup"}]}}
+{"type":"system","subtype":"stop_hook_summary"}
+`)
+	read, err := timelineClaude().ReadSession(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 5})
+	if err != nil || read.Reply == nil || read.Reply.UserText != "<local-command-stdout>literal</local-command-stdout>" {
+		t.Fatalf("read reply=%+v err=%v", read.Reply, err)
+	}
+	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	if err != nil || len(page.Items) == 0 || page.Items[0].Role != "user" || page.Items[0].Origin != "" || page.Items[0].TurnID != "typed" {
+		t.Fatalf("page=%+v err=%v", page, err)
 	}
 }
