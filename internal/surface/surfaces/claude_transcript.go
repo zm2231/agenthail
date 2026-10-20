@@ -41,7 +41,10 @@ type claudeRecord struct {
 	Subtype   string `json:"subtype"`
 	Content   string `json:"content"`
 	Timestamp string `json:"timestamp"`
-	Message   struct {
+	Origin    struct {
+		Kind string `json:"kind"`
+	} `json:"origin"`
+	Message struct {
 		ID         string `json:"id"`
 		Model      string `json:"model"`
 		StopReason string `json:"stop_reason"`
@@ -139,19 +142,20 @@ func appendClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 		turn := &turns[len(turns)-1]
 		if turn.Closing && !claudeRecordContinuesMessage(record.Type, record.Message.ID, turn.MessageID) {
 			turn.Closing = false
-			turn.Done = record.Type != "user" || !isClaudeInterruptMarker(transcriptText(record.Message.Content))
+			turn.Done = record.Type != "user" || record.Origin.Kind == claudeOriginHuman || !isClaudeInterruptMarker(transcriptText(record.Message.Content))
 		}
 	}
 	switch record.Type {
 	case "user":
 		text := transcriptText(record.Message.Content)
-		if isClaudeInterruptMarker(text) {
+		if record.Origin.Kind != claudeOriginHuman && isClaudeInterruptMarker(text) {
 			if len(turns) > 0 {
 				turns[len(turns)-1].Interrupted = true
 			}
 			return turns
 		}
-		if !isHumanTranscriptText(text) || record.Message.ToolUseID != "" {
+		text, human := claudePromptText(record.Origin.Kind, text)
+		if !human || record.Message.ToolUseID != "" {
 			return turns
 		}
 		startedAt, _ := time.Parse(time.RFC3339Nano, record.Timestamp)
@@ -246,7 +250,7 @@ func readClaudeCompactCompletion(path string, offset int64, requestUUID string) 
 		if matchedRequest && record.Type == "system" && record.Subtype == "compact_boundary" {
 			return true, nil
 		}
-		if matchedRequest && record.Type == "user" && isHumanTranscriptText(transcriptText(record.Message.Content)) {
+		if _, human := claudePromptText(record.Origin.Kind, transcriptText(record.Message.Content)); matchedRequest && record.Type == "user" && human {
 			return false, fmt.Errorf("another prompt arrived before the compact boundary")
 		}
 	}
@@ -285,8 +289,11 @@ func isHumanTranscriptText(text string) bool {
 			return false
 		}
 	}
+	if claudeCommandMarkup(text) {
+		return false
+	}
 	for _, prefix := range []string{
-		"<local-command", "<command-", "<system", "[Request interrupted", "[Request to",
+		"<system", "[Request interrupted", "[Request to",
 		"This session is being continued from a previous conversation that ran out of context.",
 	} {
 		if strings.HasPrefix(text, prefix) {

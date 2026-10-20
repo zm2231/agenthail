@@ -1434,7 +1434,23 @@ type QueueOperation string
 const (
 	QueueOperationMessage QueueOperation = "message"
 	QueueOperationCompact QueueOperation = "compact"
+	QueueOperationGoal    QueueOperation = "goal"
 )
+
+// QueueGoal holds a goal command until the session is idle. Like compact it
+// is a control operation that never drains through a message transport.
+func (r *Registry) QueueGoal(sessionID, command string) (int64, error) {
+	res, err := r.db.Exec(`INSERT INTO message_queue (session_id,message,operation,status,updated_at) VALUES (?,?,?,'pending',datetime('now'))`, sessionID, command, QueueOperationGoal)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: command})
+	return id, nil
+}
 
 // QueueCompact preserves compact as a control operation. It must never be
 // drained through a message transport, where "/compact" would become prompt text.
@@ -1844,7 +1860,7 @@ func queueSteerRow(alias string, mode deliverypolicy.Mode) string {
 	if mode == deliverypolicy.Steer {
 		choice = `(%[1]s.busy_delivery='steer' OR %[1]s.busy_delivery='' AND NOT (` + queueToPeerSocket + `))`
 	}
-	return fmt.Sprintf(choice+` AND %[1]s.model='' AND (%[1]s.turn_options='' OR %[1]s.turn_options='{}')`, alias)
+	return fmt.Sprintf(choice+` AND %[1]s.operation='message' AND %[1]s.model='' AND (%[1]s.turn_options='' OR %[1]s.turn_options='{}')`, alias)
 }
 
 // queueHoldCase derives why a pending message is held by the rules the
@@ -2206,7 +2222,7 @@ func claimCandidateFilter(sessionID, busyDelivery string, mode deliverypolicy.Mo
 
 func claimInflightExpired(status string, operation QueueOperation, inflightAt int64, now time.Time) bool {
 	inflightTimeout := time.Minute
-	if operation == QueueOperationCompact {
+	if operation != QueueOperationMessage {
 		inflightTimeout = 10 * time.Minute
 	}
 	return status == "inflight" && inflightAt > 0 && inflightAt < now.Add(-inflightTimeout).UnixMilli()
@@ -2598,6 +2614,10 @@ type WaitingRecord struct {
 	Announce bool
 	// Changed reports that the record now names a different question or none.
 	Changed bool
+	// Replaced is the question the record named before a change, and
+	// ReplacedAnnounced whether the user was told about it.
+	Replaced          *surface.Waiting
+	ReplacedAnnounced bool
 }
 
 // RecordWaiting stores the question a session waits on. An unchanged state
@@ -2627,7 +2647,7 @@ func (r *Registry) RecordWaiting(sessionID string, waiting *surface.Waiting, now
 		if _, err := tx.Exec(`UPDATE session_runtime SET waiting_kind='',waiting_id='',waiting_since_ms=0,waiting_announced=0 WHERE session_id=?`, sessionID); err != nil {
 			return WaitingRecord{}, err
 		}
-		return WaitingRecord{Changed: true}, tx.Commit()
+		return WaitingRecord{Changed: true, Replaced: stored, ReplacedAnnounced: announced}, tx.Commit()
 	}
 	next := *waiting
 	if next.Since.IsZero() {
@@ -2637,7 +2657,7 @@ func (r *Registry) RecordWaiting(sessionID string, waiting *surface.Waiting, now
 		ON CONFLICT(session_id) DO UPDATE SET waiting_kind=excluded.waiting_kind,waiting_id=excluded.waiting_id,waiting_since_ms=excluded.waiting_since_ms,waiting_announced=0`, sessionID, string(next.Kind), next.ID, next.Since.UnixMilli(), sessionID); err != nil {
 		return WaitingRecord{}, err
 	}
-	return WaitingRecord{Waiting: &next, Announce: true, Changed: true}, tx.Commit()
+	return WaitingRecord{Waiting: &next, Announce: true, Changed: true, Replaced: stored, ReplacedAnnounced: announced}, tx.Commit()
 }
 
 // MarkWaitingAnnounced records that the user was told about question id. A

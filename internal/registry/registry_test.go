@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/surface"
 	_ "modernc.org/sqlite"
 )
@@ -1631,4 +1632,29 @@ func refusalAttentionOpen(t *testing.T, r *Registry, id int64) bool {
 		}
 	}
 	return false
+}
+
+func TestControlOperationsWaitForIdleAndAreNeverSteered(t *testing.T) {
+	r := openTestRegistry(t)
+	r.SetBusyPolicy(func() (deliverypolicy.Mode, error) { return deliverypolicy.Steer, nil })
+	if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusBusy}); err != nil {
+		t.Fatal(err)
+	}
+	goalID, err := r.QueueGoal("target", "/goal tests pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.QueueCompact("target"); err != nil {
+		t.Fatal(err)
+	}
+	if steer, err := r.ClaimNextSteerMessage("target", time.Now()); err != nil || steer != nil {
+		t.Fatalf("a control operation was steer-claimable: item=%+v err=%v", steer, err)
+	}
+	item, err := r.ClaimNextMessage("target", time.Now())
+	if err != nil || item == nil || item.ID != goalID || item.Operation != QueueOperationGoal || item.Message != "/goal tests pass" {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if claimInflightExpired("inflight", QueueOperationGoal, time.Now().Add(-2*time.Minute).UnixMilli(), time.Now()) {
+		t.Fatal("a goal command that is still waiting on its outcome was reclaimed")
+	}
 }

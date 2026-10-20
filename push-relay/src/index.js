@@ -24,7 +24,7 @@ export default {
         const apnsConfigured = Boolean(env.APNS_KEY_P8 && env.APNS_KEY_ID && env.APPLE_TEAM_ID && env.APNS_TOPIC)
         const rateLimitsConfigured = Boolean(env.REGISTER_RATE_LIMITER && env.SEND_RATE_LIMITER)
         const configured = appAttestConfigured && apnsConfigured && rateLimitsConfigured
-        return json({ ok: configured, service: "agenthail-push", version: env.RELAY_VERSION || "dev", protocol: 2, capabilities: ["apns", "app-attest", "credential-auth", "registration-check", "expiring-registration", "rate-limit", "request-id"], appAttest: { required: true, configured: appAttestConfigured }, apns: { configured: apnsConfigured }, rateLimits: { configured: rateLimitsConfigured } })
+        return json({ ok: configured, service: "agenthail-push", version: env.RELAY_VERSION || "dev", protocol: 2, capabilities: ["apns", "app-attest", "credential-auth", "registration-check", "expiring-registration", "rate-limit", "request-id", "withdraw"], appAttest: { required: true, configured: appAttestConfigured }, apns: { configured: apnsConfigured }, rateLimits: { configured: rateLimitsConfigured } })
       }
       if (request.method === "POST" && url.pathname === "/v1/attest/challenge") {
         return await issueChallenge(request, env)
@@ -37,6 +37,9 @@ export default {
       }
       if (request.method === "POST" && url.pathname === "/v1/send") {
         return await send(request, env)
+      }
+      if (request.method === "POST" && url.pathname === "/v1/withdraw") {
+        return await withdraw(request, env)
       }
       if (request.method === "DELETE" && url.pathname === "/v1/register") {
         return await revoke(request, env)
@@ -179,24 +182,12 @@ export class AppAttestChallenge {
 
 export async function send(request, env) {
   const body = await readJSON(request)
-  const id = clean(body?.installationId, 160)
-  const credential = clean(body?.credential, 256)
-  if (!id || !credential) return json({ error: "unauthorized" }, 401)
-  const key = `device:${id}`
-  const stored = await env.PUSH_DEVICES.get(key, "json")
-  if (!stored || !stored.attestedAt || !stored.appAttestKeyHash || !timingSafeEqual(stored.credentialHash, await sha256(credential))) {
-    if (stored) await env.PUSH_DEVICES.delete(key)
-    return json({ error: "unauthorized" }, 401)
-  }
-  if (!env.SEND_RATE_LIMITER) return json({ error: "rate_limiter_unavailable" }, 503)
-  if (!await allowRequest(env.SEND_RATE_LIMITER, `send:${id}`)) {
-    return json({ error: "rate_limited" }, 429)
-  }
+  const device = await sendingDevice(body, env)
+  if (device.refused) return device.refused
   const title = clean(body?.title, 120)
   const message = clean(body?.message, 1200)
   if (!title || !message) return json({ error: "invalid_notification" }, 400)
-  const host = stored.environment === "sandbox" ? "api.sandbox.push.apple.com" : "api.push.apple.com"
-  const providerToken = await apnsProviderToken(env)
+  const collapseID = clean(body?.collapseId, 64)
   const payload = {
     aps: {
       alert: { title, body: message },
@@ -206,20 +197,54 @@ export async function send(request, env) {
     sessionId: clean(body?.sessionId, 240),
     eventType: clean(body?.eventType, 80)
   }
+  if (collapseID) payload.collapseId = collapseID
   const requestId = openRequestId(body)
   if (requestId) {
     payload.aps["mutable-content"] = 1
     payload.requestId = requestId
   }
+  const headers = { "apns-push-type": "alert", "apns-priority": "10" }
+  if (collapseID) headers["apns-collapse-id"] = collapseID
+  return deliver(env, device, headers, payload)
+}
+
+// withdraw asks the app, in the background, to remove the notification it
+// showed under collapseId, such as a question answered somewhere else.
+export async function withdraw(request, env) {
+  const body = await readJSON(request)
+  const device = await sendingDevice(body, env)
+  if (device.refused) return device.refused
+  const collapseID = clean(body?.collapseId, 64)
+  if (!collapseID) return json({ error: "invalid_withdrawal" }, 400)
+  return deliver(env, device, { "apns-push-type": "background", "apns-priority": "5" }, { aps: { "content-available": 1 }, withdraw: collapseID })
+}
+
+async function sendingDevice(body, env) {
+  const id = clean(body?.installationId, 160)
+  const credential = clean(body?.credential, 256)
+  if (!id || !credential) return { refused: json({ error: "unauthorized" }, 401) }
+  const key = `device:${id}`
+  const stored = await env.PUSH_DEVICES.get(key, "json")
+  if (!stored || !stored.attestedAt || !stored.appAttestKeyHash || !timingSafeEqual(stored.credentialHash, await sha256(credential))) {
+    if (stored) await env.PUSH_DEVICES.delete(key)
+    return { refused: json({ error: "unauthorized" }, 401) }
+  }
+  if (!env.SEND_RATE_LIMITER) return { refused: json({ error: "rate_limiter_unavailable" }, 503) }
+  if (!await allowRequest(env.SEND_RATE_LIMITER, `send:${id}`)) {
+    return { refused: json({ error: "rate_limited" }, 429) }
+  }
+  return { key, stored }
+}
+
+async function deliver(env, { key, stored }, pushHeaders, payload) {
+  const host = stored.environment === "sandbox" ? "api.sandbox.push.apple.com" : "api.push.apple.com"
+  const providerToken = await apnsProviderToken(env)
   const headers = {
     authorization: `bearer ${providerToken}`,
     "apns-topic": env.APNS_TOPIC,
-    "apns-push-type": "alert",
-    "apns-priority": "10",
+    ...pushHeaders,
     "content-type": "application/json"
   }
-  const collapseID = clean(body?.collapseId, 64)
-  if (collapseID) headers["apns-collapse-id"] = collapseID
   const response = await fetch(`https://${host}/3/device/${stored.token}`, {
     method: "POST",
     headers,

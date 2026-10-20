@@ -615,7 +615,7 @@ test('drain retires the host: it gives up the socket and lock and serves its ses
   const idleSession = await c.call('open', { sessionId: idle, cwd: f.cwd });
   await c.call('open', { sessionId: busy, cwd: f.cwd });
   const uuid = randomUUID();
-  await c.call('send', { sessionId: busy, uuid, text: 'SLOW 800' });
+  await c.call('send', { sessionId: busy, uuid, text: 'SLOW 60000' });
   await c.event((e) => e.sessionId === busy && e.kind === 'state' && e.state === 'busy');
   assert.equal((await c.call('drain')).sessions >= 1, true);
   assert.ok(!fs.existsSync(f.socket), 'the daemon socket is free for the next host');
@@ -627,8 +627,9 @@ test('drain retires the host: it gives up the socket and lock and serves its ses
   assert.ok(!alive(idleSession.pid), 'an idle session closes at once');
   const late = randomUUID();
   assert.deepEqual(await r.call('send', { sessionId: busy, uuid: late, text: 'late' }), { accepted: true, duplicate: false });
+  await r.call('interrupt', { sessionId: busy });
   assert.equal(await host.exited, 0);
-  assert.deepEqual(transcript(f, busy).map((l) => l.reply), ['slow:800', 'echo:late']);
+  assert.deepEqual(transcript(f, busy).map((l) => l.reply), ['interrupted', 'echo:late']);
   assert.ok(!fs.existsSync(retiringSocket(f, host)));
   c.close();
   r.close();
@@ -643,11 +644,12 @@ test('retiring lets go of subscribers that came in through the daemon socket', a
   const d = new Client(f.socket);
   const id = randomUUID();
   await d.call('open', { sessionId: id, cwd: f.cwd });
-  await d.call('send', { sessionId: id, uuid: randomUUID(), text: 'SLOW 1000' });
+  await d.call('send', { sessionId: id, uuid: randomUUID(), text: 'SLOW 60000' });
   await d.call('drain');
   await closed;
   const r = new Client(retiringSocket(f, host));
   await r.call('subscribe', { after: 0 });
+  await r.call('interrupt', { sessionId: id });
   await r.event((e) => e.sessionId === id && e.kind === 'exited');
   d.close();
   r.close();
@@ -762,14 +764,17 @@ test('a Claude without session state events falls back to turn results and says 
   const id = randomUUID();
   await c.call('open', { sessionId: id, cwd: f.cwd });
   const uuid = randomUUID();
-  await c.call('send', { sessionId: id, uuid, text: 'SLOW 600' });
+  await c.call('send', { sessionId: id, uuid, text: 'SLOW 60000' });
   await c.call('drain');
   await sleep(200);
   assert.equal(host.exitCode, null, 'a busy session is not closed');
+  const r = new Client(retiringSocket(f, host));
+  await r.call('interrupt', { sessionId: id });
   assert.equal(await host.exited, 0);
   assert.match(host.stderrText, /without session state events/);
-  assert.deepEqual(transcript(f, id).map((l) => l.reply), ['slow:600']);
+  assert.deepEqual(transcript(f, id).map((l) => l.reply), ['interrupted']);
   c.close();
+  r.close();
 });
 
 test('closing a session ends its open requests instead of leaving them listed', async () => {

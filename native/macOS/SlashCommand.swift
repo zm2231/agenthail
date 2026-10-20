@@ -26,7 +26,7 @@ enum SlashCommand: String, CaseIterable, Identifiable {
             case .stop: return working && capabilities.interrupt
             case .steer: return working && !waitingOnYou && capabilities.steer
             case .model: return capabilities.model
-            case .goal: return capabilities.goal
+            case .goal: return capabilities.goalSet
             }
         }
     }
