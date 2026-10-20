@@ -508,19 +508,19 @@ struct SessionScreen: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Jump to latest")
                     }
-                    if let detail, !detail.readOnly, let request = model.sessionRequests?.requests.first {
+                    if let detail, let waiting = detail.session.waitingOn, ElsewhereWaitCard.shows(waiting, readOnly: detail.readOnly, respond: detail.capabilities.respond) {
+                        ElsewhereWaitCard(waiting: waiting, surface: session.surface, hostName: session.runtime?.hostName, accent: SessionStyle.accent,
+                                          open: session.runtime?.focusable == true ? { model.focusSession(session) } : nil)
+                            .id(waiting.id)
+                            .padding(.horizontal)
+                            .padding(.top, 6)
+                    } else if let detail, !detail.readOnly, let request = model.sessionRequests?.requests.first {
                         RequestCard(request: request, answering: model.answeringRequest != nil, accent: SessionStyle.accent) { decision in
                             Task { await model.respond(to: request, sessionID: session.id, decision: decision) }
                         }
                         .id(request.id)
                         .padding(.horizontal)
                         .padding(.top, 6)
-                    } else if let detail, let waiting = detail.session.waitingOn, detail.readOnly || !detail.capabilities.respond {
-                        ElsewhereWaitCard(waiting: waiting, surface: session.surface, hostName: session.runtime?.hostName, accent: SessionStyle.accent,
-                                          open: session.runtime?.focusable == true ? { model.focusSession(session) } : nil)
-                            .id(waiting.id)
-                            .padding(.horizontal)
-                            .padding(.top, 6)
                     }
                     if let detail {
                         if detail.readOnly || (!detail.capabilities.send && !detail.capabilities.steer) {

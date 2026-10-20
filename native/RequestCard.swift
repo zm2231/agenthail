@@ -138,18 +138,27 @@ struct ElsewhereWaitCard: View {
     let accent: Color
     let open: (() -> Void)?
 
+    /// Whether a session's wait is shown as this card rather than as a request
+    /// to answer. Claude reports a dialog only when nothing else waits, so a
+    /// request still listed alongside one is stale.
+    static func shows(_ waiting: WaitingState?, readOnly: Bool, respond: Bool) -> Bool {
+        guard let waiting else { return false }
+        return waiting.kind == "dialog" || readOnly || !respond
+    }
+
     static func heading(kind: String, surface: String) -> String {
         let agent = SessionRefinement.surfaceLabel(surface)
         switch kind {
         case "question": return "\(agent) asks you a question"
         case "input": return "\(agent) needs your input"
+        case "dialog": return "\(agent) has a dialog open in its terminal"
         default: return "\(agent) needs your approval"
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(Self.heading(kind: waiting.kind, surface: surface), systemImage: waiting.kind == "approval" ? "hand.raised" : "questionmark.bubble")
+            Label(Self.heading(kind: waiting.kind, surface: surface), systemImage: waiting.kind == "approval" ? "hand.raised" : waiting.kind == "dialog" ? "macwindow" : "questionmark.bubble")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(accent)
             Text("Agenthail can't answer this one. Answer it where the session runs\(hostName.map { ", in \($0)" } ?? ", such as its terminal"). Messages you send wait until then.")

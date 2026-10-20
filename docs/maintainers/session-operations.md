@@ -90,12 +90,17 @@ choice, such as a relay, follows the setting as it stands when the daemon drains
 it, so changing the setting applies to messages already waiting.
 
 A busy target can be waiting on its user. `surface.Waiting` on the session and
-on its turn observation carries the kind (`question`, `approval`, `input`), a
-stable id and when it was first seen. Claude reads it from the live process's
-record, `sessions/<pid>.json`: `"status":"waiting"` with `waitingFor` set to
-`input needed` for `AskUserQuestion` (kind `question`) or `permission prompt`
-for a plan approval or a tool permission (kind `approval`), and
-`statusUpdatedAt` as when it started. The id is
+on its turn observation carries the kind (`question`, `approval`, `input`,
+`dialog`), a stable id and when it was first seen. Claude reads it from the
+live process's record, `sessions/<pid>.json`: `"status":"waiting"` with
+`waitingFor` as Claude itself classes it. `input needed` (`AskUserQuestion`, an
+MCP server's question) is kind `question`. `permission prompt` (a plan approval
+or a tool permission), `sandbox request`, `worker request` and `goal proposal`
+are kind `approval`, as is any value Claude adds later. `dialog open` (a panel
+open in the terminal, such as `/model` or a settings review) is kind `dialog`:
+only the terminal can settle it, so every client shows where to settle it even
+in a session that takes answers through Agenthail. `statusUpdatedAt` is when it
+started. The id is
 `<conversation>:<kind>:<statusUpdatedAt>`. A session the
 [Claude host](claude-host.md#requests) runs reads it from the host instead: its
 oldest open request, under Claude's own request id. Claude 2.1.303 writes a pending tool

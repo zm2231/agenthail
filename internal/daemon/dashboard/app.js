@@ -1462,12 +1462,16 @@ function renderRequests() {
   const panel = $("#request-panel");
   const state = app.requests || { requests: [] };
   const capabilities = app.history?.capabilities || {};
-  const cards = (state.requests || []).map(renderRequestCard);
   const mode = capabilities.permissionMode
     ? `<form class="request-mode" data-permission-mode><label for="permission-mode">Permission mode</label><select id="permission-mode" name="permissionMode">${permissionModes.map(([value, label]) => `<option value="${value}"${value === (state.permissionMode || "") ? " selected" : ""}${value === "" ? " disabled" : ""}>${escape(label)}</option>`).join("")}</select><button class="soft-button" type="submit">Change</button></form>`
     : "";
   const failure = state.error ? `<p role="status">Could not read this session's requests: ${escape(state.error)}</p>` : "";
-  panel.innerHTML = cards.join("") + failure + mode;
+  // Claude reports a dialog only when nothing else waits, so any request
+  // still listed is stale and the panel says where to settle the dialog.
+  const cards = app.selected?.waitingOn?.kind === "dialog"
+    ? renderElsewhereWait(app.selected)
+    : (state.requests || []).map(renderRequestCard).join("");
+  panel.innerHTML = cards + failure + mode;
   panel.hidden = panel.innerHTML === "";
 }
 const backgroundKinds = { shell: "Shell", agent: "Agent", monitor: "Monitor" };
@@ -1496,7 +1500,7 @@ function renderBackgroundTasks(session) {
 }
 // A session waiting on a prompt Agenthail cannot answer shows where to answer it.
 function renderElsewhereWait(session) {
-  const asking = { question: "asks you a question", input: "needs your input" }[session.waitingOn.kind] || "needs your approval";
+  const asking = { question: "asks you a question", input: "needs your input", dialog: "has a dialog open in its terminal" }[session.waitingOn.kind] || "needs your approval";
   const open = session.runtime?.focusable ? '<div class="request-actions"><button class="primary-button" data-action="session-focus" type="button">Open session</button></div>' : "";
   return `<div class="request-card"><h3>${escape(displayName(session))} ${asking}</h3><p>Agenthail can't answer this one. Answer it where the session runs, such as its terminal. Messages you send wait until then.</p>${open}</div>`;
 }
