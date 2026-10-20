@@ -163,6 +163,20 @@ func NotifyRequest(title, message, sessionID, identifier, requestID string, acti
 	return err
 }
 
+// WithdrawNotification removes a delivered desktop notification, such as one
+// for a question that was answered elsewhere.
+func WithdrawNotification(identifier string) error {
+	if runtime.GOOS != "darwin" || identifier == "" {
+		return nil
+	}
+	config, err := LoadNotificationConfig()
+	if err != nil || !config.Enabled {
+		return err
+	}
+	_, err = runNotificationHelper(5*time.Second, "withdraw", "--identifier", identifier)
+	return err
+}
+
 func nativeNotificationStatus(command string, timeout time.Duration) NotificationStatus {
 	if runtime.GOOS != "darwin" {
 		return NotificationStatus{Authorization: "unsupported", Error: "desktop notifications currently support macOS only"}

@@ -46,6 +46,7 @@ type Claude struct {
 	// moveStep, when set, runs at each named step of a move so tests can
 	// act in the gaps a terminal can.
 	moveStep  func(step string)
+	prompts   *claudePrompts
 	request   ClaudeRequest
 	localOnly bool
 }
@@ -60,7 +61,7 @@ func NewClaudeWithRequest(signins signin.Resolver, home string, request ClaudeRe
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(), host: newClaudeHost(home), mcpAdder: surface.ClaudeCLIMCPAdder(home)}
+	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(), host: newClaudeHost(home), mcpAdder: surface.ClaudeCLIMCPAdder(home), prompts: newClaudePrompts()}
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
@@ -111,6 +112,7 @@ func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities
 	if sess.Transport == "uds" {
 		capabilities.Stream = sess.HasLocal && sess.Transcript != ""
 	}
+	capabilities.Respond = c.prompts.any(sess.ID)
 	if c.localOnly || nativeClaudeOnly(sess) {
 		capabilities.Steer = false
 		capabilities.Compact = false
@@ -448,6 +450,7 @@ func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
 	}
 	var out []claudeProcess
 	transcripts := c.transcripts.pass(roots)
+	c.prompts.retain()
 	for _, record := range records {
 		if process, ok := c.process(ctx, record, transcripts); ok {
 			out = append(out, process)
@@ -855,7 +858,10 @@ func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.T
 	if err != nil {
 		return nil, err
 	}
-	waiting := c.recordWaiting(sess)
+	waiting := c.prompts.answeredWait(sess.ID, c.recordWaiting(sess))
+	if held := c.prompts.waiting(sess.ID); held != nil {
+		waiting = held
+	}
 	if claudeHosted(sess) {
 		waiting = c.hostWaiting(ctx, sess)
 	}

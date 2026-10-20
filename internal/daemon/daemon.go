@@ -60,7 +60,10 @@ type Daemon struct {
 	waitingContended func(sessionID string)
 	// notifyDesktop shows a desktop notification; it is NotifyRequest outside
 	// tests.
-	notifyDesktop     func(title, message, sessionID, identifier, requestID string, actions []surface.RequestAction) error
+	notifyDesktop func(title, message, sessionID, identifier, requestID string, actions []surface.RequestAction) error
+	// withdrawDesktop removes a desktop notification; it is
+	// WithdrawNotification outside tests.
+	withdrawDesktop   func(identifier string) error
 	queueWorkers      sync.WaitGroup
 	events            *eventHub
 	catalog           *catalogHub
@@ -123,6 +126,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		observeRetry:      map[string]observeRetry{},
 		notificationArmed: map[string]bool{},
 		notifyDesktop:     NotifyRequest,
+		withdrawDesktop:   WithdrawNotification,
 		events:            newEventHub(reg),
 		sources:           newSessionSourceManager(reg),
 		sourceHolds:       map[string]map[string]func(){},
@@ -146,6 +150,9 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		d.log.Printf("catalog surfaces: %s", err)
 	}
 	d.catalog = newCatalogHub(reg)
+	if prompts := d.claudePrompts(); prompts != nil {
+		prompts.OnPromptChange(d.claudePromptChanged)
+	}
 	return d
 }
 

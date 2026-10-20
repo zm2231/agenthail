@@ -141,7 +141,7 @@ func (f *Fixture) Record(conversation, cwd, bridge string) {
 // since the given time.
 func (f *Fixture) RecordStatus(conversation, cwd, bridge, status, waitingFor string, since time.Time) {
 	f.t.Helper()
-	record := map[string]any{"pid": f.PID, "sessionId": conversation, "cwd": cwd, "status": status, "peerFeatures": []string{"notify_idle"}, "startedAt": time.Now().UnixMilli()}
+	record := map[string]any{"pid": f.PID, "sessionId": conversation, "cwd": cwd, "status": status, "kind": "interactive", "entrypoint": "cli", "peerFeatures": []string{"notify_idle"}, "startedAt": time.Now().UnixMilli()}
 	if waitingFor != "" {
 		record["waitingFor"] = waitingFor
 	}
