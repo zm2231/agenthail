@@ -59,13 +59,23 @@ targets are never messaged, stopped, resumed, or otherwise mutated.
 
 ## Context-window provenance
 
-Transcript `message.model` values are not a configured-window producer. The
-provider therefore leaves `ContextUsage.ContextWindow` at zero unless an
-explicit launch/configuration value is captured for the same session. The
-provider-side validator in
-`internal/surface/surfaces/claude_run_source.go` recognizes an explicit
-`[1m]` launch value as a configured 1,000,000-token window; a plain model name
-and a missing model both produce `source: "unknown"` and no denominator.
+Claude records the window it runs with in two places, and the provider reads
+them in this order for each assistant record:
+
+1. `request`: the newest `api-request` record whose `params.model` has the
+   reply's model base. A `context-1m-*` entry in `params.betas` means a
+   1,000,000-token window; a request without it leaves the window unknown,
+   even after a `[1m]` launch.
+2. `transcript`: the assistant record's `requestedModel`, such as
+   `claude-opus-5-5[1m]`, when its model base matches `message.model`.
+3. `configured`: the launch model Agenthail captured, for transcripts written
+   before Claude recorded either field.
+
+`message.model` never carries the `[1m]` selection, so it only rules out a
+window chosen for another model. The validator in
+`internal/surface/surfaces/claude_run_source.go` recognizes a `[1m]` model; a
+plain model name and a missing model both produce `source: "unknown"` and no
+denominator.
 
 The shared API projection carries the provider source as the typed optional
 field `contextWindowSource`. Native clients show `usedTokens` without a
@@ -92,8 +102,8 @@ session-detail API carries the field without a separate provider endpoint.
 
 Native and dashboard consumers treat a zero window, an estimated window, or
 usage above the denominator as token-only state. They do not show a percentage
-for those cases. A configured `[1m]` value is the only current Claude window
-producer, and it is displayed as configured rather than estimated.
+for those cases. A 1M window from any of the three sources is displayed as
+reported, never as estimated.
 
 ## Journal production wiring
 
