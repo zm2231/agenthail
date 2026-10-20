@@ -23,9 +23,11 @@ const MAX_IMAGE_BYTES = 5 << 20;
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif']);
 const OPEN_TIMEOUT_MS = 60_000;
 const TAKE_TIMEOUT_MS = 10_000;
-// How long close waits for Claude to exit after interrupting its turn and
-// closing its input, before it kills the process.
-const CLOSE_GRACE_MS = Number(process.env.AGENTHAIL_CLAUDE_HOST_CLOSE_GRACE_MS) || 10_000;
+// How long close waits for Claude to stop its turn and exit before it kills
+// the process, and how long it then waits for the killed process to exit. Both
+// together stay well inside the daemon's 20 s deadline for a stop.
+const CLOSE_GRACE_MS = Number(process.env.AGENTHAIL_CLAUDE_HOST_CLOSE_GRACE_MS) || 5_000;
+const KILL_WAIT_MS = 2_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PERMISSION_MODES = new Set(['default', 'manual', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']);
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -55,6 +57,8 @@ const events = [];
 const subscribers = new Set();
 let seq = 0;
 let draining = false;
+// Replies not yet written; a retiring host writes them before it exits.
+let replying = 0;
 let exiting = false;
 let listening = args.socket;
 let retiring = null;
@@ -292,21 +296,22 @@ const methods = {
   },
   // close stops the session now: it interrupts a running turn, closes
   // Claude's input and returns once the process has exited, killing it if it
-  // has not within the grace period.
+  // has not within the grace period. A session that has ended but whose
+  // Claude is still exiting is waited for the same way.
   close: async ({ sessionId }) => {
-    const s = session(sessionId);
-    if (s.state !== 'idle') {
+    const s = sessions.get(sessionId) ?? session(sessionId);
+    const deadline = Date.now() + CLOSE_GRACE_MS;
+    if (!s.ended && s.state !== 'idle') {
       s.endRequests();
-      await s.query?.interrupt().catch(() => {});
+      await by(deadline, s.query?.interrupt());
     }
     s.end();
-    let timer;
-    const exited = await Promise.race([s.done.then(() => true), new Promise((resolve) => (timer = setTimeout(() => resolve(false), CLOSE_GRACE_MS)))]);
-    clearTimeout(timer);
-    if (!exited) {
+    if (!(await by(deadline, s.done.then(() => true)))) {
       process.stderr.write(`claude-host: Claude ${s.pid} for session ${s.id} did not exit ${CLOSE_GRACE_MS} ms after close; killing it\n`);
       killSession(s);
-      await s.done;
+      if (!(await by(Date.now() + KILL_WAIT_MS, s.done.then(() => true)))) {
+        throw new HostError('stuck', `Claude ${s.pid} for session ${s.id} did not exit after it was killed`);
+      }
     }
     // done also settles when Claude ends its output but its process lingers.
     killSession(s);
@@ -656,12 +661,18 @@ function serve(socket) {
     const { id, method, params = {} } = request;
     if (method === 'subscribe') return subscribe(socket, id, params.after);
     const handler = Object.hasOwn(methods, method) ? methods[method] : null;
+    replying++;
+    let reply;
     try {
       if (!handler) throw new HostError('invalid', `unknown method: ${method}`);
-      socket.write(JSON.stringify({ id, result: await handler(params) }) + '\n');
+      reply = { id, result: await handler(params) };
     } catch (error) {
-      socket.write(JSON.stringify({ id, error: { code: error.code ?? 'internal', message: error.message } }) + '\n');
+      reply = { id, error: { code: error.code ?? 'internal', message: error.message } };
     }
+    socket.write(JSON.stringify(reply) + '\n', () => {
+      replying--;
+      exitWhenDrained();
+    });
   });
 }
 
@@ -777,8 +788,18 @@ function timeout(ms, what) {
   return new Promise((_, reject) => setTimeout(() => reject(new Error(`${what} within ${ms / 1000}s`)), ms).unref());
 }
 
+// by settles with the promise's value, or with false once the deadline passes
+// or the promise fails.
+function by(deadline, promise) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise).catch(() => false),
+    new Promise((resolve) => (timer = setTimeout(() => resolve(false), Math.max(0, deadline - Date.now())))),
+  ]).finally(() => clearTimeout(timer));
+}
+
 function exitWhenDrained() {
-  if (draining && sessions.size === 0) shutdown(0);
+  if (draining && sessions.size === 0 && replying === 0) shutdown(0);
 }
 
 function shutdown(code) {

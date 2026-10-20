@@ -113,10 +113,11 @@ func (f *Fixture) StartProtocol1Host(t testing.TB, version string) claudehost.He
 }
 
 // StartProtocol2Host starts the host Agenthail shipped before protocol 3, the
-// way its daemon did. It retires on drain and serves its sessions to the end.
-func (f *Fixture) StartProtocol2Host(t testing.TB, version string) claudehost.Hello {
+// way its daemon did, with env added to its fake Claude's. It retires on drain
+// and serves its sessions to the end.
+func (f *Fixture) StartProtocol2Host(t testing.TB, version string, env ...string) claudehost.Hello {
 	t.Helper()
-	return f.startShippedHost(t, "protocol2-host.mjs", version)
+	return f.startShippedHost(t, "protocol2-host.mjs", version, env...)
 }
 
 // startShippedHost starts a host script an earlier Agenthail shipped the way

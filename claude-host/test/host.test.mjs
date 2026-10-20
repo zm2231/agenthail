@@ -44,6 +44,12 @@ async function startHost(f, { lock = true, version = 'test', env = {}, claude = 
   return host;
 }
 
+// running matches Claude reporting that it is running a turn; the host calls a
+// session busy as soon as it passes a message on, before Claude has read it.
+function running(sessionId) {
+  return (e) => e.sessionId === sessionId && e.kind === 'sdk' && e.message?.subtype === 'session_state_changed' && e.message.state === 'running';
+}
+
 class Client {
   constructor(socket) {
     this.next = 0;
@@ -423,8 +429,7 @@ test('interrupt ends the running turn', async () => {
   await c.call('open', { sessionId: id, cwd: f.cwd });
   const uuid = randomUUID();
   await c.call('send', { sessionId: id, uuid, text: 'SLOW 30000' });
-  await c.event((e) => e.kind === 'state' && e.state === 'busy');
-  await sleep(200);
+  await c.event(running(id));
   await c.call('interrupt', { sessionId: id });
   await c.event(turnResult(id, uuid));
   assert.equal(transcript(f, id)[0].reply, 'interrupted');
@@ -800,13 +805,35 @@ test('close stops a busy session now: it interrupts the turn and returns once Cl
   const { pid } = await c.call('open', { sessionId: id, cwd: f.cwd });
   const uuid = randomUUID();
   await c.call('send', { sessionId: id, uuid, text: 'SLOW 60000' });
-  await c.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'busy');
+  await c.event(running(id));
   const started = Date.now();
   await c.call('close', { sessionId: id });
   assert.ok(Date.now() - started < 5000, `close took ${Date.now() - started} ms`);
   assert.ok(!alive(pid), 'Claude has exited when close returns');
   assert.deepEqual(transcript(f, id).map((l) => l.reply), ['interrupted']);
   c.close();
+});
+
+test('close waits for a session that has ended while its Claude is still exiting', async () => {
+  const f = fixture();
+  const host = await startHost(f, { env: { FAKE_CLAUDE_LINGER_MS: '1500' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const idle = randomUUID();
+  const busy = randomUUID();
+  const { pid } = await c.call('open', { sessionId: idle, cwd: f.cwd });
+  await c.call('open', { sessionId: busy, cwd: f.cwd });
+  await c.call('send', { sessionId: busy, uuid: randomUUID(), text: 'SLOW 60000' });
+  await c.event((e) => e.sessionId === busy && e.kind === 'state' && e.state === 'busy');
+  await c.call('drain');
+  const r = new Client(retiringSocket(f, host));
+  assert.ok(alive(pid), 'the retired Claude is still exiting');
+  await r.call('close', { sessionId: idle });
+  assert.ok(!alive(pid), 'Claude has exited when close returns');
+  await r.call('close', { sessionId: busy });
+  assert.equal(await host.exited, 0);
+  c.close();
+  r.close();
 });
 
 test('close kills a Claude that does not exit within the grace period', async () => {
@@ -818,7 +845,9 @@ test('close kills a Claude that does not exit within the grace period', async ()
   const { pid } = await c.call('open', { sessionId: id, cwd: f.cwd });
   await c.call('send', { sessionId: id, uuid: randomUUID(), text: 'HANG' });
   await c.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'busy');
+  const started = Date.now();
   await c.call('close', { sessionId: id });
+  assert.ok(Date.now() - started < 3000, `close took ${Date.now() - started} ms`);
   assert.ok(!alive(pid), 'Claude has been killed when close returns');
   assert.match(host.stderrText, /did not exit 300 ms after close; killing it/);
   assert.deepEqual((await c.call('list')).sessions, []);

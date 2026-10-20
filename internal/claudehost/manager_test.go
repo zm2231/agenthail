@@ -493,7 +493,9 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 		t.Run(test.name, func(t *testing.T) {
 			f := claudehosttest.New(t, "")
 			ctx := testContext(t)
-			old := f.StartProtocol2Host(t, "0.2.50")
+			// Its Claudes close their output a while before they exit, so a stop
+			// can find the session ended while its Claude still runs.
+			old := f.StartProtocol2Host(t, "0.2.50", "FAKE_CLAUDE_LINGER_MS=1500")
 			if old.Protocol != 2 {
 				t.Fatalf("shipped host hello = %+v, want protocol 2", old)
 			}
@@ -506,10 +508,18 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 			if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: working, UUID: uuid.NewString(), Text: "SLOW 60000"}); err != nil {
 				t.Fatal(err)
 			}
+			retired := uuid.NewString()
+			exiting := f.Open(t, client, retired)
 
 			client, err := f.Manager(t, "1.1.0").Ensure(ctx)
 			if err != nil {
 				t.Fatalf("Ensure after the update = %v", err)
+			}
+			if err := client.Close(ctx, retired); err != nil {
+				t.Fatalf("stopping a session the protocol 2 host retired = %v", err)
+			}
+			if claudehosttest.Alive(exiting.PID) {
+				t.Fatalf("Claude %d still runs after its retired session was stopped", exiting.PID)
 			}
 			if hello, err := client.Hello(ctx); err != nil || hello.Protocol != claudehost.Protocol || hello.PID == old.PID {
 				t.Fatalf("hello after the update = %+v, %v", hello, err)
@@ -538,7 +548,9 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 			if err != nil {
 				t.Fatalf("stopping a busy session through the protocol 2 host = %v", err)
 			}
-			claudehosttest.WaitFor(t, "the stopped session's Claude to exit", func() bool { return !claudehosttest.Alive(busy.PID) })
+			if claudehosttest.Alive(busy.PID) {
+				t.Fatalf("Claude %d still runs after its session was stopped", busy.PID)
+			}
 			if outcome, err := client.Respond(ctx, asking, request.RequestID, test.decision); err != nil || outcome != test.outcome {
 				t.Fatalf("respond after the update = %q, %v; want %s", outcome, err, test.outcome)
 			}

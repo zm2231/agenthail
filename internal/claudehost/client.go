@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -298,18 +299,16 @@ func (c Client) SetPermissionMode(ctx context.Context, sessionID, mode string) (
 	return out, c.sessionCall(ctx, "setPermissionMode", map[string]string{"sessionId": sessionID, "permissionMode": mode}, &out)
 }
 
-// Close stops a session now, on whichever host runs it. A host whose close
-// waits out a running turn is asked to interrupt the turn first; it may then
-// retire the idle session itself before the close arrives, which is the same
-// outcome.
+// Close stops a session now, on whichever host runs it, and returns once its
+// Claude has exited.
 func (c Client) Close(ctx context.Context, sessionID string) error {
 	params := map[string]string{"sessionId": sessionID}
-	err := c.closeOn(ctx, params)
+	err := c.closeOn(ctx, sessionID, params)
 	if !(IsCode(err, "not_open") || IsCode(err, "held") || errors.Is(err, ErrNotRunning)) {
 		return err
 	}
 	for _, host := range c.Retiring() {
-		retiringErr := host.closeOn(ctx, params)
+		retiringErr := host.closeOn(ctx, sessionID, params)
 		if IsCode(retiringErr, "not_open") || errors.Is(retiringErr, ErrNotRunning) {
 			continue
 		}
@@ -318,7 +317,7 @@ func (c Client) Close(ctx context.Context, sessionID string) error {
 	return err
 }
 
-func (c Client) closeOn(ctx context.Context, params map[string]string) error {
+func (c Client) closeOn(ctx context.Context, sessionID string, params map[string]string) error {
 	hello, err := c.Hello(ctx)
 	if err != nil {
 		return err
@@ -326,14 +325,37 @@ func (c Client) closeOn(ctx context.Context, params map[string]string) error {
 	if hello.CloseStops {
 		return c.call(ctx, "close", params, nil)
 	}
-	if err := c.call(ctx, "interrupt", params, nil); err != nil {
+	// Such a host's close waits out a running turn, so the turn is interrupted
+	// first. It can answer, or exit without answering, before its Claude has
+	// exited, so the stop is done once that Claude has.
+	listing, err := c.List(ctx)
+	if err != nil {
 		return err
 	}
-	err = c.call(ctx, "close", params, nil)
-	if IsCode(err, "not_open") || errors.Is(err, ErrNotRunning) {
-		return nil
+	i := slices.IndexFunc(listing.Sessions, func(s Session) bool { return s.SessionID == sessionID })
+	if i < 0 {
+		return &Error{Code: "not_open", Message: fmt.Sprintf("Claude session %s is not open in the host", sessionID)}
 	}
-	return err
+	pid := listing.Sessions[i].PID
+	if err := c.call(ctx, "interrupt", params, nil); err != nil && !IsCode(err, "not_open") {
+		return err
+	}
+	var unknown *OutcomeUnknownError
+	if err := c.call(ctx, "close", params, nil); err != nil && !IsCode(err, "not_open") && !errors.Is(err, ErrNotRunning) && !errors.As(err, &unknown) {
+		return err
+	}
+	return waitExited(ctx, pid)
+}
+
+func waitExited(ctx context.Context, pid int) error {
+	for !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("Claude %d has not exited: %w", pid, ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	return nil
 }
 
 // sessionCall runs a request for one session on the host that runs it. The

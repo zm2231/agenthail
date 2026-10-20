@@ -269,7 +269,8 @@ lines.on('line', (line) => {
 // Claude cannot ask anyone once its input closes: it refuses the prompts
 // still open, finishes its turns and exits. With FAKE_CLAUDE_OUTLIVES_INPUT
 // it keeps running and serving its messaging socket instead, as a Claude
-// whose input an earlier host closed was seen doing.
+// whose input an earlier host closed was seen doing. With FAKE_CLAUDE_LINGER_MS
+// it closes its output and exits that much later.
 lines.on('close', async () => {
   inputClosed = true;
   for (const [id, resolve] of [...pending]) {
@@ -278,6 +279,11 @@ lines.on('close', async () => {
   }
   await turns;
   if (process.env.FAKE_CLAUDE_OUTLIVES_INPUT) return setInterval(() => {}, 1 << 30);
+  const linger = Number(process.env.FAKE_CLAUDE_LINGER_MS);
+  if (linger) {
+    process.stdout.end();
+    return setTimeout(() => process.exit(0), linger);
+  }
   process.exit(0);
 });
 process.on('SIGTERM', () => process.exit(0));
