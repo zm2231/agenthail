@@ -172,11 +172,10 @@ func (s *claudeTaskScan) read(line []byte) {
 		Name      string `json:"name"`
 		ToolUseID string `json:"tool_use_id"`
 		Input     struct {
-			RunInBackground bool   `json:"run_in_background"`
-			Description     string `json:"description"`
-			Command         string `json:"command"`
-			TaskID          string `json:"task_id"`
-			ShellID         string `json:"shell_id"`
+			Description string `json:"description"`
+			Command     string `json:"command"`
+			TaskID      string `json:"task_id"`
+			ShellID     string `json:"shell_id"`
 		} `json:"input"`
 	}
 	if json.Unmarshal(record.Message.Content, &blocks) != nil {
@@ -190,10 +189,14 @@ func (s *claudeTaskScan) read(line []byte) {
 			if description == "" {
 				description = strings.TrimSpace(block.Input.Command)
 			}
+			// The result says whether a call went to the background: a shell
+			// can be moved there while it runs and an agent can be
+			// asynchronous by its definition, so the input's flag is not the
+			// mark.
 			switch {
-			case block.Name == "Bash" && block.Input.RunInBackground:
+			case block.Name == "Bash":
 				s.calls[block.ID] = surface.BackgroundTask{Kind: surface.BackgroundShell, Description: description}
-			case block.Name == "Agent" && block.Input.RunInBackground:
+			case block.Name == "Agent":
 				s.calls[block.ID] = surface.BackgroundTask{Kind: surface.BackgroundAgent, Description: description}
 			case block.Name == "Monitor":
 				s.calls[block.ID] = surface.BackgroundTask{Kind: surface.BackgroundMonitor, Description: description}

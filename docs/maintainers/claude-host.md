@@ -190,10 +190,11 @@ live-update watchers, which it says are not activity. They are listed with
 tool is not ambient. `source` is `host`.
 
 For a terminal session, the daemon reads the tasks from the transcript, counting
-only those started since the live process's `startedAt`. A Bash call with
-`run_in_background` starts a task its result names in
-`toolUseResult.backgroundTaskId`, an async Agent call one named by `agentId`,
-and a Monitor one named by `taskId`. A `<task-id>` in a later record (the task
+only those started since the live process's `startedAt`. The call's result
+says it went to the background, not its input: a Bash result with
+`toolUseResult.backgroundTaskId` (asked for with `run_in_background` or moved
+there while it ran), an Agent result with `isAsync` and `agentId` (asked for or
+asynchronous by the agent's definition), and a Monitor result with `taskId`. A `<task-id>` in a later record (the task
 notification Claude queues) or a TaskStop on the id ends it. A terminal Claude
 writes `shell` as its status while a background shell runs, so a shell the
 transcript leaves open counts only while it does; that covers shells ended

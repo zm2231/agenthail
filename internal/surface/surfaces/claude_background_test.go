@@ -89,7 +89,11 @@ func TestATerminalSessionsBackgroundTasksComeFromItsTranscript(t *testing.T) {
 		backgroundResult(now, "call-shell", map[string]any{"backgroundTaskId": "b-shell"}),
 		backgroundCall(now, "call-fg", "Bash", map[string]any{"command": "ls"}),
 		backgroundResult(now, "call-fg", map[string]any{"stdout": "x"}),
-		backgroundCall(now.Add(time.Second), "call-agent", "Agent", map[string]any{"description": "Review the diff", "run_in_background": true}),
+		backgroundCall(now, "call-sync-agent", "Agent", map[string]any{"description": "Answer inline"}),
+		backgroundResult(now, "call-sync-agent", map[string]any{"status": "completed", "agentId": "a-sync"}),
+		backgroundCall(now.Add(500*time.Millisecond), "call-moved", "Bash", map[string]any{"command": "make build", "description": "Build"}),
+		backgroundResult(now.Add(500*time.Millisecond), "call-moved", map[string]any{"backgroundTaskId": "b-moved"}),
+		backgroundCall(now.Add(time.Second), "call-agent", "Agent", map[string]any{"description": "Review the diff", "subagent_type": "reviewer"}),
 		backgroundResult(now.Add(time.Second), "call-agent", map[string]any{"isAsync": true, "agentId": "a-review"}),
 		backgroundCall(now.Add(2*time.Second), "call-monitor", "Monitor", map[string]any{"description": "Watch CI"}),
 		backgroundResult(now.Add(2*time.Second), "call-monitor", map[string]any{"taskId": "m-ci"}),
@@ -98,11 +102,12 @@ func TestATerminalSessionsBackgroundTasksComeFromItsTranscript(t *testing.T) {
 		backgroundNotification(now.Add(4*time.Second), "b-done"),
 	)
 	background := c.claudeBackground(context.Background(), sess)
-	if background == nil || !background.Running || background.Source != surface.BackgroundSourceTranscript || !background.Since.Equal(now) || len(background.Tasks) != 3 {
+	if background == nil || !background.Running || background.Source != surface.BackgroundSourceTranscript || !background.Since.Equal(now) || len(background.Tasks) != 4 {
 		t.Fatalf("background = %+v", background)
 	}
 	want := []surface.BackgroundTask{
 		{ID: "b-shell", Kind: surface.BackgroundShell, Description: "Run the tests", Since: now},
+		{ID: "b-moved", Kind: surface.BackgroundShell, Description: "Build", Since: now.Add(500 * time.Millisecond)},
 		{ID: "a-review", Kind: surface.BackgroundAgent, Description: "Review the diff", Since: now.Add(time.Second)},
 		{ID: "m-ci", Kind: surface.BackgroundMonitor, Description: "Watch CI", Since: now.Add(2 * time.Second)},
 	}
@@ -113,6 +118,7 @@ func TestATerminalSessionsBackgroundTasksComeFromItsTranscript(t *testing.T) {
 	}
 	appendTranscript(t, path, mustJSON(t, backgroundCall(now.Add(5*time.Second), "call-stop", "TaskStop", map[string]any{"task_id": "m-ci"}))+"\n"+
 		mustJSON(t, backgroundNotification(now.Add(6*time.Second), "a-review"))+"\n"+
+		mustJSON(t, backgroundNotification(now.Add(6*time.Second), "b-moved"))+"\n"+
 		mustJSON(t, map[string]any{"type": "attachment", "attachment": map[string]any{"type": "queued_command", "prompt": "<task-notification>\n<task-id>b-shell</task-id>\n</task-notification>"}})+"\n")
 	if background := c.claudeBackground(context.Background(), sess); background != nil && len(background.Tasks) > 0 {
 		t.Fatalf("every task ended: %+v", background)
