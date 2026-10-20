@@ -84,7 +84,9 @@ from JSON discovery output when reporting partial availability.
 | Stream, interrupt, steer, compact | yes | yes | no |
 | Persistent session model | yes | yes | no |
 | One-message model override | no | yes | yes |
-| Goal tracking | no | yes | no |
+| Goal status | yes | yes | no |
+| Goal set, edit, clear | host or Remote Control | yes | no |
+| Goal pause, resume, token budget | no | yes | no |
 
 Claude's control capabilities depend on its transport. Native UDS messages
 cannot execute slash commands, steer a running turn, or correlate message IDs

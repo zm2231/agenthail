@@ -369,3 +369,20 @@ func TestClaudeGoalCommandWaitsForAnIdleSessionAndItsAnswer(t *testing.T) {
 		t.Fatalf("peer err=%v posts=%d", err, remote.postCount())
 	}
 }
+
+func TestClaudeGoalCommandFindsATranscriptClaudeCreatesAfterTheSend(t *testing.T) {
+	shortControlPoll(t)
+	fixture, session := idleGoalSession(t)
+	session.Transcript = ""
+	remote := newFakeRemoteControl(t)
+	remote.onPost = func(map[string]any) []map[string]any {
+		appendTranscript(t, fixture.Transcript(session.ID, fixture.Home), goalCommandOutput("tests pass", "Goal set: tests pass"))
+		return nil
+	}
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, remote.request)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := claude.GoalSet(ctx, session, "tests pass"); err != nil || remote.postCount() != 1 {
+		t.Fatalf("err=%v posts=%d", err, remote.postCount())
+	}
+}

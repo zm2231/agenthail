@@ -250,12 +250,14 @@ func (c *Claude) RunGoalCommand(ctx context.Context, sess *surface.Session, comm
 	if sent == nil || !sent.Accepted {
 		return surface.DeliveryUnavailable(errors.New("Claude is working; the goal command runs when its turn ends"))
 	}
-	if path, err = c.sessionTranscript(sess); err != nil {
-		return surface.DeliveryOutcomeUnknown(err)
-	}
 	ticker := time.NewTicker(claudeControlPoll)
 	defer ticker.Stop()
 	for {
+		if path == "" {
+			if path, err = c.sessionTranscript(sess); err != nil {
+				return surface.DeliveryOutcomeUnknown(err)
+			}
+		}
 		output, found, err := claudeGoalCommandOutput(ctx, path, &offset, args)
 		if err != nil {
 			return surface.DeliveryOutcomeUnknown(fmt.Errorf("read the outcome of %s: %w", command, err))
@@ -277,6 +279,9 @@ func (c *Claude) RunGoalCommand(ctx context.Context, sess *surface.Session, comm
 // claudeGoalCommandOutput reads what Claude appended after offset for the
 // /goal command with these arguments.
 func claudeGoalCommandOutput(ctx context.Context, path string, offset *int64, args string) (string, bool, error) {
+	if path == "" {
+		return "", false, nil
+	}
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
 		return "", false, nil
@@ -293,10 +298,7 @@ func claudeGoalCommandOutput(ctx context.Context, path string, offset *int64, ar
 		if found || json.Unmarshal(line, &record) != nil || record.Type != "system" || record.Subtype != "local_command" || record.CommandRun == nil || record.CommandRun.Command != "goal" || strings.TrimSpace(record.CommandRun.Args) != args {
 			return nil
 		}
-		output = strings.TrimSpace(record.Content)
-		output = strings.TrimPrefix(output, "<local-command-stdout>")
-		output = strings.TrimSuffix(output, "</local-command-stdout>")
-		output = strings.TrimSpace(ansiEscapeRe.ReplaceAllString(output, ""))
+		output, _ = claudeLocalCommandOutput(record.Content)
 		found = true
 		return nil
 	})
