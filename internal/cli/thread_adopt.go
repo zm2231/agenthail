@@ -15,7 +15,13 @@ import (
 
 const threadAdoptUsage = `usage: agenthail thread adopt <target> [--wait <duration>] [--stop-terminal] [--json]`
 
-func (a *App) cmdThreadAdopt(args []string) error {
+func (a *App) cmdThreadAdopt(args []string) (adoptErr error) {
+	jsonOut := hasFlag(args, "--json")
+	defer func() {
+		if adoptErr != nil && jsonOut {
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": false, "unknown": surface.IsDeliveryOutcomeUnknown(adoptErr), "error": adoptErr.Error()})
+		}
+	}()
 	if err := validateThreadAdoptArgs(args); err != nil {
 		return err
 	}
@@ -51,11 +57,8 @@ func (a *App) cmdThreadAdopt(args []string) error {
 	result, err := adopter.AdoptSession(ctx, session, request)
 	if err != nil {
 		var consent *surface.AdoptConsentError
-		if errors.As(err, &consent) && !hasFlag(args, "--json") {
+		if errors.As(err, &consent) && !jsonOut {
 			return fmt.Errorf("%w; pass --stop-terminal to stop it", err)
-		}
-		if hasFlag(args, "--json") {
-			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": false, "error": err.Error()})
 		}
 		return err
 	}
@@ -65,7 +68,7 @@ func (a *App) cmdThreadAdopt(args []string) error {
 		}
 		_ = a.registry().RecordHistory(registry.HistoryEntry{Kind: "session-operation", SessionID: session.ID, Result: "adopt"})
 	}
-	if hasFlag(args, "--json") {
+	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": true, "result": result})
 	}
 	label := session.ID

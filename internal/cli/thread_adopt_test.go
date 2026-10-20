@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -54,9 +55,19 @@ func TestThreadAdoptOpensASessionInTheHostAndReRegistersIt(t *testing.T) {
 	if err := app.Run([]string{"thread", "adopt", "busy1", "--stop-terminal"}); err == nil || !strings.Contains(err.Error(), "a turn is running") {
 		t.Fatalf("busy adoption: %v", err)
 	}
-	for _, args := range [][]string{{"thread", "adopt"}, {"thread", "adopt", "c1", "--account", "spare"}, {"thread", "adopt", "c1", "--wait", "soon"}} {
+	for _, args := range [][]string{{"thread", "adopt"}, {"thread", "adopt", "c1", "--account", "spare"}, {"thread", "adopt", "c1", "--wait", "soon"}, {"thread", "adopt", "c1", "--stop-terminal", "--wait"}, {"thread", "adopt", "c1", "--stop-terminal", "--timeout"}, {"thread", "adopt", "c1", "--wait", "--stop-terminal"}} {
 		if err := app.Run(args); err == nil {
 			t.Fatalf("%v was accepted", args)
+		}
+	}
+	for _, args := range [][]string{{"thread", "adopt", "c1", "--json", "--account", "spare"}, {"thread", "adopt", "missing", "--json"}, {"thread", "adopt", "busy1", "--stop-terminal", "--json"}} {
+		output, err := captureStdout(t, func() error { return app.Run(args) })
+		var reply struct {
+			OK    bool   `json:"ok"`
+			Error string `json:"error"`
+		}
+		if err == nil || json.Unmarshal([]byte(output), &reply) != nil || reply.OK || reply.Error == "" {
+			t.Fatalf("%v: output=%q err=%v", args, output, err)
 		}
 	}
 	if len(adopter.adopted) != 1 {

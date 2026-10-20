@@ -108,3 +108,17 @@ func TestAdoptRefusesASessionWithABackgroundAgentRunning(t *testing.T) {
 		t.Fatalf("adopting once the agent ended: %v", err)
 	}
 }
+
+func TestAdoptRefusesABackgroundJobThatIsStillStarting(t *testing.T) {
+	fixture, host, c := hostResume(t)
+	fixture.Transcript(fixtureConversation, fixture.Home)
+	fixture.Job("fe758937", fixtureConversation, fixture.Home, "starting", 0)
+	_, err := c.AdoptSession(context.Background(), &surface.Session{ID: fixtureConversation}, surface.AdoptRequest{StopTerminal: true})
+	var busy *surface.AdoptBusyError
+	if !errors.As(err, &busy) || !strings.Contains(busy.Reason, "starting") {
+		t.Fatalf("err=%v", err)
+	}
+	if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 0 {
+		t.Fatalf("a starting job's conversation was resumed again: %+v", spawns)
+	}
+}

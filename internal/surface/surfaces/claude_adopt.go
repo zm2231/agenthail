@@ -39,7 +39,7 @@ func (c *Claude) AdoptSession(ctx context.Context, sess *surface.Session, reques
 	if root == "" {
 		return nil, surface.DeliveryTerminal(fmt.Errorf("Claude conversation %s has no transcript in any config root", conversation), surface.DeliveryTargetMissing)
 	}
-	holder, err := c.adoptHolder(ctx, conversation)
+	holder, err := c.adoptHolder(ctx, conversation, root)
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +76,9 @@ func (c *Claude) AdoptSession(ctx context.Context, sess *surface.Session, reques
 }
 
 type claudeAdoptHolder struct {
+	// starting is a background job Claude lists that has not written its
+	// session record yet.
+	starting   bool
 	session    surface.Session
 	record     map[string]any
 	hosted     bool
@@ -83,7 +86,7 @@ type claudeAdoptHolder struct {
 }
 
 // adoptHolder returns the live process that holds a conversation, or nil.
-func (c *Claude) adoptHolder(ctx context.Context, conversation string) (*claudeAdoptHolder, error) {
+func (c *Claude) adoptHolder(ctx context.Context, conversation, root string) (*claudeAdoptHolder, error) {
 	roots, records, err := c.records()
 	if err != nil {
 		return nil, err
@@ -107,6 +110,17 @@ func (c *Claude) adoptHolder(ctx context.Context, conversation string) (*claudeA
 		holder.hosted = claudeHosted(&holder.session)
 		return holder, nil
 	}
+	// A background job that is still starting holds the conversation before
+	// it writes its session record; only Claude's job catalog shows it.
+	jobs, err := c.backgroundSessions(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	for _, job := range jobs {
+		if job.Kind == "background" && job.SessionID == conversation && (job.State == "starting" || claudeProcessAlive(job.PID)) {
+			return &claudeAdoptHolder{session: surface.Session{ID: conversation, PID: job.PID, Cwd: job.Cwd}, background: true, starting: true}, nil
+		}
+	}
 	return nil, nil
 }
 
@@ -115,6 +129,8 @@ func (c *Claude) adoptHolder(ctx context.Context, conversation string) (*claudeA
 func adoptBusy(holder *claudeAdoptHolder) string {
 	status := str(holder.record, "status")
 	switch {
+	case holder.starting:
+		return "its background job is starting"
 	case status == "waiting" || holder.record["waitingFor"] != nil || holder.session.WaitingOn != nil:
 		return "it is waiting on a question or permission"
 	case status == "busy" || holder.session.Status == surface.StatusBusy:
@@ -143,7 +159,7 @@ func (c *Claude) quiesce(ctx context.Context, conversation, root string, holder 
 			return "", ctx.Err()
 		case <-time.After(claudeAdoptPollEvery):
 		}
-		next, err := c.adoptHolder(ctx, conversation)
+		next, err := c.adoptHolder(ctx, conversation, root)
 		if err != nil {
 			return "", err
 		}
@@ -192,7 +208,7 @@ func (c *Claude) quiesce(ctx context.Context, conversation, root string, holder 
 	stop := time.Now().Add(claudeAdoptStopTimeout)
 	for {
 		c.host.forget()
-		next, err := c.adoptHolder(ctx, conversation)
+		next, err := c.adoptHolder(ctx, conversation, root)
 		if err != nil {
 			return "", err
 		}
