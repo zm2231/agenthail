@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -67,6 +68,12 @@ func New(t testing.TB, home string) *Fixture {
 // which writes its session record and serves its messaging socket.
 func (f *Fixture) Manager(t testing.TB, version string) *claudehost.Manager {
 	t.Helper()
+	launch := f.launch(t, "host.mjs", version)
+	return &claudehost.Manager{Home: f.Home, Launch: func() (claudehost.Launch, error) { return launch, nil }}
+}
+
+func (f *Fixture) launch(t testing.TB, script, version string, env ...string) claudehost.Launch {
+	t.Helper()
 	_, file, _, _ := runtime.Caller(0)
 	hostDir := filepath.Join(filepath.Dir(file), "..", "..", "..", "claude-host")
 	node, err := exec.LookPath("node")
@@ -76,17 +83,76 @@ func (f *Fixture) Manager(t testing.TB, version string) *claudehost.Manager {
 	if _, err := os.Stat(filepath.Join(hostDir, "node_modules", "@anthropic-ai", "claude-agent-sdk")); err != nil {
 		t.Fatalf("install the host's dependencies first (npm ci --prefix claude-host): %v", err)
 	}
-	env := append(os.Environ(), "FAKE_CLAUDE_DIR="+f.ClaudeDir, "FAKE_CLAUDE_RECORD=1", "HOME="+f.Home,
-		"NODE_OPTIONS=--report-on-signal --report-signal=SIGUSR2 --report-directory="+f.reportDir())
-	return &claudehost.Manager{Home: f.Home, Launch: func() (claudehost.Launch, error) {
-		return claudehost.Launch{
-			Node:    node,
-			Script:  filepath.Join(hostDir, "host.mjs"),
-			Claude:  filepath.Join(hostDir, "test", "fake-claude.mjs"),
-			Version: version,
-			Env:     env,
-		}, nil
-	}}
+	env = append(append(os.Environ(), "FAKE_CLAUDE_DIR="+f.ClaudeDir, "FAKE_CLAUDE_RECORD=1", "HOME="+f.Home,
+		"NODE_OPTIONS=--report-on-signal --report-signal=SIGUSR2 --report-directory="+f.reportDir()), env...)
+	return claudehost.Launch{
+		Node:    node,
+		Script:  filepath.Join(hostDir, script),
+		Claude:  filepath.Join(hostDir, "test", "fake-claude.mjs"),
+		Version: version,
+		Env:     env,
+	}
+}
+
+// StartProtocol1Host starts the host Agenthail shipped before hosts could
+// retire, the way its daemon did: in its own session, holding the host lock
+// as fd 3. Its fake Claude keeps running once its input closes, as a real one
+// was seen doing.
+func (f *Fixture) StartProtocol1Host(t testing.TB, version string) claudehost.Hello {
+	t.Helper()
+	launch := f.launch(t, filepath.Join("test", "protocol1-host.mjs"), version, "FAKE_CLAUDE_OUTLIVES_INPUT=1")
+	state := claudehost.StateDir(f.Home)
+	if err := os.MkdirAll(state, 0700); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(filepath.Join(state, "lock"), os.O_CREATE|os.O_RDONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	logFile, err := os.OpenFile(filepath.Join(state, "host.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logFile.Close()
+	cmd := exec.Command(launch.Node, launch.Script, "--socket", claudehost.SocketPath(f.Home), "--state", state, "--claude", launch.Claude, "--version", version)
+	cmd.Env = launch.Env
+	cmd.Dir = state
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.ExtraFiles = []*os.File{lock}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = cmd.Wait() }()
+	client := claudehost.NewClient(f.Home)
+	var hello claudehost.Hello
+	WaitFor(t, "the protocol 1 host", func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		hello, err = client.Hello(ctx)
+		return err == nil
+	})
+	return hello
+}
+
+// Peer sends text to a Claude process over its messaging socket, as another
+// agent does, so Claude starts the turn itself and the host sends nothing.
+func (f *Fixture) Peer(t testing.TB, pid int, text string) {
+	t.Helper()
+	conn, err := net.Dial("unix", filepath.Join("/tmp/cc-socks", strconv.Itoa(pid)+".sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	frame, _ := json.Marshal(map[string]any{"type": "user", "from": "claude:peer", "message": map[string]string{"role": "user", "content": text}})
+	if _, err := conn.Write(append(frame, '\n')); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // Start starts a host and returns its client.

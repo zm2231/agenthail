@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -41,9 +42,10 @@ func (c *Claude) Requests(ctx context.Context, sess *surface.Session) (surface.R
 	return state, nil
 }
 
-// Respond answers one open request of a session the host runs. A request the
-// host no longer holds, because it was answered, withdrawn or its process
-// ended, is stale.
+// Respond answers one open request of a session the host runs. A request no
+// host holds is stale: it was answered or withdrawn, its process ended, or
+// its process runs on without a host, which no answer reaches. A request
+// lives only in the host that holds Claude's prompt, so none outlives it.
 func (c *Claude) Respond(ctx context.Context, sess *surface.Session, requestID string, decision surface.Decision) (string, error) {
 	if !claudeHosted(sess) {
 		return "", fmt.Errorf("%w: Claude answers requests through Agenthail only in sessions its host runs", surface.ErrUnsupported)
@@ -54,7 +56,7 @@ func (c *Claude) Respond(ctx context.Context, sess *surface.Session, requestID s
 	defer c.host.forget()
 	outcome, err := c.host.client.Respond(ctx, sess.ID, requestID, claudehost.Decision{Behavior: decision.Behavior, Always: decision.Always, Message: decision.Message, Answers: decision.Answers})
 	switch {
-	case claudehost.IsCode(err, "stale"), claudehost.IsCode(err, "not_open"):
+	case claudehost.IsCode(err, "stale"), claudehost.IsCode(err, "not_open"), claudehost.IsCode(err, "held"), errors.Is(err, claudehost.ErrNotRunning):
 		return "", fmt.Errorf("%w: %s", surface.ErrRequestStale, err)
 	case err != nil:
 		return "", claudeHostDeliveryError(err)

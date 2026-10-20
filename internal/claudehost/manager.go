@@ -13,9 +13,10 @@ import (
 	"time"
 )
 
-// ErrReplacing means a host of another version is draining; its sessions
-// close once idle and the next Ensure after it exits starts this version.
-var ErrReplacing = errors.New("the Claude host is being replaced by this Agenthail version")
+// retireProtocol is the first protocol whose hosts retire when drained:
+// they give up the socket and lock at once and keep serving their sessions
+// elsewhere. A host of an earlier protocol is stopped instead.
+const retireProtocol = 2
 
 const (
 	startTimeout = 15 * time.Second
@@ -51,10 +52,11 @@ func StateDir(home string) string { return filepath.Join(home, ".agenthail", "cl
 
 // Ensure returns a client for a running host of this build, starting one
 // only when none answers. The host lock decides who starts it: the daemon
-// takes it and hands it to the host, which holds it for its lifetime, so a
-// second daemon or a restarted one attaches to the running host. A daemon
-// that finds the lock taken keeps trying it, so it starts the host itself if
-// the holder exits before its host answers.
+// takes it and hands it to the host, which holds it until it exits or
+// retires, so a second daemon or a restarted one attaches to the running
+// host. A daemon that finds the lock taken keeps trying it, so it starts the
+// host itself if the holder exits before its host answers. A host of another
+// version is retired first and this build's host started in its place.
 func (m *Manager) Ensure(ctx context.Context) (Client, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -75,7 +77,13 @@ func (m *Manager) Ensure(ctx context.Context) (Client, error) {
 		hello, err := client.Hello(attempt)
 		stop()
 		if err == nil {
-			return client, m.current(ctx, client, hello, launch)
+			if current(hello, launch) {
+				return client, nil
+			}
+			if err := retire(ctx, client, hello); err != nil {
+				return Client{}, err
+			}
+			continue
 		}
 		if !errors.Is(err, ErrNotRunning) {
 			return Client{}, err
@@ -109,17 +117,47 @@ func (m *Manager) start(ctx context.Context, client Client, launch Launch, lock 
 	if err != nil {
 		return Client{}, fmt.Errorf("start the Claude host: %w%s", err, m.logTail())
 	}
-	return client, m.current(ctx, client, hello, launch)
+	if !current(hello, launch) {
+		return Client{}, fmt.Errorf("the started Claude host reports %s protocol %d, want %s protocol %d", hello.HostVersion, hello.Protocol, launch.Version, Protocol)
+	}
+	return client, nil
 }
 
-func (m *Manager) current(ctx context.Context, client Client, hello Hello, launch Launch) error {
-	if hello.Protocol == Protocol && hello.HostVersion == launch.Version {
-		return nil
+func current(hello Hello, launch Launch) bool {
+	return hello.Protocol == Protocol && hello.HostVersion == launch.Version
+}
+
+// retire moves a host of another version out of the way. One that retires
+// answers drain only after it has left the socket and released the lock, and
+// keeps serving its sessions on a socket of its own until each one closes. An
+// older host cannot do that and is stopped: the Claude processes it started
+// run on until they exit, held from a new host meanwhile, and the next
+// message after that resumes the conversation on this build's host.
+func retire(ctx context.Context, client Client, hello Hello) error {
+	if hello.Protocol >= retireProtocol {
+		return client.Drain(ctx)
 	}
-	if err := client.Drain(ctx); err != nil {
-		return err
+	if hello.PID <= 0 {
+		return fmt.Errorf("the Claude host %s protocol %d named no pid to stop", hello.HostVersion, hello.Protocol)
 	}
-	return fmt.Errorf("%w (running %s protocol %d)", ErrReplacing, hello.HostVersion, hello.Protocol)
+	if err := syscall.Kill(hello.PID, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return fmt.Errorf("stop the Claude host %s (pid %d): %w", hello.HostVersion, hello.PID, err)
+	}
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		attempt, stop := context.WithTimeout(ctx, time.Second)
+		again, err := client.Hello(attempt)
+		stop()
+		if errors.Is(err, ErrNotRunning) || err == nil && again.PID != hello.PID {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("the Claude host %s (pid %d) did not stop: %w", hello.HostVersion, hello.PID, ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func (m *Manager) lock() (*os.File, error) {

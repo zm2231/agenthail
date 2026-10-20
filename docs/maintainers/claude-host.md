@@ -12,15 +12,49 @@ The daemon owns the host. Every 30 seconds, and once at startup, it calls
 
 1. Dial `~/.agenthail/claude-host.sock` and exchange `hello`
    (`{protocol, hostVersion}`). A host of the daemon's version is used as is.
-2. A host of another protocol or version is asked to drain. It refuses new
-   sessions, closes each session as it goes idle and exits when none remain;
-   the daemon starts the new host after that.
+2. A host of another version is replaced in the same call. One of protocol 2
+   or later is asked to drain, which retires it (below); one of protocol 1
+   cannot retire and is stopped with `SIGTERM`. Its Claude processes run on,
+   held from the new host until they exit, and the next message after that
+   resumes the conversation in the new host. Either way the daemon then starts
+   its own host.
 3. If nothing answers, take an exclusive `flock` on
    `~/.agenthail/claude-host/lock`. If another process holds it, a host is
    starting: wait for its `hello`.
 4. Otherwise start the host in its own session (`setsid`), passing the locked
    file as fd 3. The host checks that fd 3 is that lock file and holds the lock
    for its lifetime, so two hosts can never serve the same home.
+
+## Replacement
+
+An update never moves a running Claude to the new host: the SDK query that
+holds Claude's input, output and open prompts lives in the old host's
+process. The old host keeps serving its sessions instead.
+
+`drain` retires the host. Before it answers, the host listens on
+`~/.agenthail/claude-host.<pid>.sock`, leaves `claude-host.sock`, releases the
+lock and stops writing `state.json`, so the daemon starts the new host at
+once. The retiring host refuses `open` with `draining` and serves everything
+else for its own sessions: `send`, `respond`, `interrupt`, `setModel`,
+`setPermissionMode`, `close`, `list` and `subscribe`. It closes a session once
+Claude reports it idle with no open request and no background task, and exits
+when its last session has closed. The next message resumes that conversation
+in the new host. It never closes the input of a session that is still working,
+because Claude then refuses every prompt it waits on.
+
+The new host loaded the retiring host's sessions from `state.json` as running
+processes, so it answers `held` for them. `claudehost.Client` routes by
+session: a session call goes to the current host and, on `not_open`, `held`
+or no host, to each retiring host; `open` with `resume` returns a retiring
+host's session; `list` merges every host and lists each process once. The
+daemon follows the retiring hosts' events until they exit. A socket nothing
+listens on is removed.
+
+Retiring hosts are bounded by their sessions. A retiring host opens nothing,
+so it holds only sessions it had when it retired, and it exits with the last
+of them. A host retired with no session exits at once. Repeated updates
+therefore leave at most one retiring host per session that has kept working,
+or kept a background task running, since the update that retired its host.
 
 The host and its Claude processes outlive the daemon. The launchd service sets
 `AbandonProcessGroup`, and a restarted daemon attaches to the running host
@@ -46,7 +80,7 @@ past it. A failed request returns `{code, message}`:
 |---|---|---|
 | `not_open` | the host does not run that session | unavailable |
 | `held` | the session's previous process still runs | held, retried |
-| `draining` | the host is being replaced | held, retried |
+| `draining` | `open` on a retiring host | held, retried |
 | `unknown` | the SDK had not taken the message within ten seconds | unknown, never retried |
 | `invalid` | malformed request | terminal |
 | `refused` | `open`: Claude exited with an error before it started, such as a workspace it does not trust | refused, held until a person fixes the cause |
@@ -60,7 +94,13 @@ input, so a success means the message has left the host's queue.
 
 Claude asks the host, through the SDK's `canUseTool`, before a tool its
 permission mode does not allow and for every `AskUserQuestion`, in every mode
-including `bypassPermissions`. The host holds each one as an open request until
+including `bypassPermissions`. Claude's safety checks also ask in
+`bypassPermissions`. One example is the dangerous-removal check on an `rm`
+whose target Claude cannot resolve before it runs, such as a glob after a `cd`
+or a command substitution. In Claude Code 2.1.304 that check returns a
+`safetyCheck` decision with no rule to always allow, and bypass mode allows
+only decisions that are not safety checks. Such a request is Claude's own,
+its `decisionReason` names the check, and Agenthail shows it like any other. The host holds each one as an open request until
 a person answers it. There is no timeout: a request ends only with an answer,
 with Claude withdrawing it (an interrupt or the turn ending, outcome
 `withdrawn`), or with its session (`ended`). Agenthail never answers on a
@@ -82,10 +122,29 @@ person's own text. A request answered twice, for another session, or after it
 was withdrawn is `stale`.
 
 A request lives in the host process that holds Claude's prompt. Clients and the
-daemon can disconnect and come back; the request is still open. The host
-cannot outlive it: when the host exits, Claude's input closes and the Claude
-process ends without running the tool, so a new host lists no such request and
-an answer to it is `stale`. The next message resumes the conversation.
+daemon can disconnect and come back; the request is still open. It cannot
+outlive that process or Claude's input: once the input closes, Claude refuses
+every prompt it still waits on ("Tool permission stream closed before response
+received") and carries on. The host therefore ends a session's open requests
+as `ended` when it closes the session's input, and refuses any request asked
+after that. A request no host holds cannot be answered. That covers a session
+whose process exited, one not open in any host, and one whose Claude runs on
+without a host. Answering it is `stale`.
+
+The daemon derives what a session waits on from the hosts' listings. A
+`stale` answer makes it observe the turn again, which clears
+`session_runtime.waiting_id` and the catalog row's `waiting_on`. The Mac, iOS
+and web clients drop the card on a `409` before reading the requests again.
+
+The host passes `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1`, so Claude reports
+its own `idle`, `running` and `requires_action` states. The SDK sets
+`CLAUDE_CODE_SDK_READS_SESSION_STATE`, under which Claude marks those events
+`sdk_host_only` and the SDK drops them, so without the variable the host
+would see neither a turn Claude starts itself (another agent's message) nor a
+prompt it waits on. Claude also sends `background_tasks_changed`, the whole
+set of live background tasks, on every change. A Claude that sends a turn
+result without state events is logged once. For it, idle is read from turn
+results, and its sessions retire only as a turn ends.
 
 The daemon follows the host's events and asks for a catalog pass when a request
 opens or resolves. For a session the host runs, the oldest open request is what
