@@ -97,6 +97,7 @@ class Session {
     this.guessesIdle = false;
     this.tasks = [];
     this.owed = new Set();
+    this.ambient = new Set();
   }
 
   async *input() {
@@ -498,11 +499,14 @@ async function run(s, exit) {
       } else if (message.type === 'system' && message.subtype === 'background_tasks_changed') {
         const tasks = Array.isArray(message.tasks) ? message.tasks : [];
         const live = new Set(tasks.map((task) => task.task_id));
+        for (const task of tasks) if (task.ambient) s.ambient.add(task.task_id);
         for (const task of s.tasks) if (!task.ambient && !live.has(task.task_id) && s.state === 'idle') s.owe(`task:${task.task_id}`);
         s.tasks = tasks;
         s.retireIfDone();
-      } else if (message.type === 'system' && message.subtype === 'task_notification' && s.state === 'idle') {
-        s.owe(`task:${message.task_id}`);
+      } else if (message.type === 'system' && message.subtype === 'task_notification') {
+        // An ambient task is not activity, so its end owes no turn. Its
+        // notification carries no flag; the live set said so while it ran.
+        if (!s.ambient.delete(message.task_id) && s.state === 'idle') s.owe(`task:${message.task_id}`);
       } else if (message.type === 'result' && !s.stateEvents && s.inbox.length === 0) {
         s.guessesIdle = true;
         s.turnStarted();

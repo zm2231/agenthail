@@ -49,7 +49,8 @@ else for its own sessions: `send`, `respond`, `interrupt`, `setModel`,
 `setPermissionMode`, `close`, `list` and `subscribe`. It closes a session once
 Claude reports it idle with no open request, no background task and no turn
 owed, and exits when its last session has closed. Claude owes a turn for work
-it was handed while idle: a background task that ended, which Claude reports
+it was handed while idle: a background task that ended, unless the live set
+marked it `ambient` (not activity, so no turn follows), which Claude reports
 before it starts the turn telling the model, and a message the host passed it
 that no turn has started on or answered (`user_message_uuids`). Claude reports
 idle only with its queue empty, so the next `running` covers everything it was

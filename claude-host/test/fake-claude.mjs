@@ -120,6 +120,15 @@ async function turn(message) {
     setTasks();
     setTimeout(() => finish(id), ms);
     reply = `background:${ms}`;
+  } else if (text.startsWith('AMBIENT')) {
+    // A task that is not activity, like a live-update watcher: it ends
+    // without a turn telling the model.
+    const ms = Number(text.split(' ')[1] ?? 30000);
+    const id = `ambient-${uuid}`;
+    tasks.set(id, { task_id: id, task_type: 'monitor', description: 'watcher', ambient: true });
+    setTasks();
+    setTimeout(() => finish(id, { turn: false }), ms);
+    reply = `ambient:${ms}`;
   }
   fs.appendFileSync(transcript, JSON.stringify({ uuid, text, reply, origin: message.origin ?? null, priority: message.priority ?? null, pid: process.pid, inputClosed }) + '\n');
   claudeTranscript(uuid, text, reply);
@@ -134,12 +143,13 @@ async function turn(message) {
 // FAKE_CLAUDE_NOTIFY_AFTER_MS later, a turn Claude starts by itself to tell
 // the model. FAKE_CLAUDE_LEVEL_FIRST reverses the first two, which the SDK
 // leaves unordered.
-function finish(id) {
+function finish(id, { turn = true } = {}) {
   const notification = { type: 'system', subtype: 'task_notification', task_id: id, status: 'completed', output_file: '', summary: 'background shell completed', uuid: crypto.randomUUID(), session_id: sessionId };
   tasks.delete(id);
   if (process.env.FAKE_CLAUDE_LEVEL_FIRST) setTasks();
   write(notification);
   if (!process.env.FAKE_CLAUDE_LEVEL_FIRST) setTasks();
+  if (!turn) return;
   const gap = Number(process.env.FAKE_CLAUDE_NOTIFY_AFTER_MS ?? 100);
   turns = turns.then(() => new Promise((resolve) => setTimeout(resolve, gap))).then(() => notified(id));
 }

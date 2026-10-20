@@ -624,6 +624,30 @@ test('a retiring host closes a session only after the turn that reports its fini
 
 test('a retiring host waits for that turn when the task leaves the live set before its notification', () => retiresAfterTheNotificationTurn({ FAKE_CLAUDE_LEVEL_FIRST: '1' }));
 
+// retiresAfterAnAmbientTask drains the host while an ambient task runs. Its
+// end starts no turn, so the session closes once the task leaves the live set.
+async function retiresAfterAnAmbientTask(env) {
+  const f = fixture();
+  const host = await startHost(f, { env });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  const { pid } = await c.call('open', { sessionId: id, cwd: f.cwd });
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'AMBIENT 500' });
+  await c.event(turnResult(id, uuid));
+  await c.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'idle');
+  await c.call('drain');
+  assert.equal(await Promise.race([host.exited, sleep(5000).then(() => 'still running')]), 0);
+  assert.deepEqual(transcript(f, id).map((l) => l.reply), ['ambient:500']);
+  assert.ok(!alive(pid));
+  c.close();
+}
+
+test('a retiring host closes a session once an ambient task ends, since no turn follows it', () => retiresAfterAnAmbientTask({}));
+
+test('a retiring host closes a session once an ambient task ends with the live set changing first', () => retiresAfterAnAmbientTask({ FAKE_CLAUDE_LEVEL_FIRST: '1' }));
+
 test('a retiring host does not close a session on the idle of a turn that ended before a message it passed on', async () => {
   const f = fixture();
   const host = await startHost(f, { env: { FAKE_CLAUDE_IDLE_AFTER_MS: '400' } });
