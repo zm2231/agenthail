@@ -53,6 +53,10 @@ case "${1:-}" in
       test "$(plutil -extract TeamIdentifier.0 raw -o - "$plist")" = "$APPLE_TEAM_ID"
       test "$(plutil -extract Entitlements.application-identifier raw -o - "$plist")" = "$APPLE_TEAM_ID.$bundle"
       test "$(plutil -extract Entitlements.get-task-allow raw -o - "$plist")" = "false"
+      if [[ "$(plutil -extract IsXcodeManaged raw -o - "$plist" 2>/dev/null || echo false)" == true ]]; then
+        echo "$name profile is managed by Xcode; export needs a manually created App Store profile" >&2
+        exit 1
+      fi
       if plutil -extract ProvisionedDevices raw -o - "$plist" >/dev/null 2>&1; then
         echo "$name profile lists devices; an App Store profile is required" >&2
         exit 1
