@@ -12,11 +12,14 @@ import (
 type RuntimeKind string
 
 const (
-	RuntimeClaudeCLI      RuntimeKind = "claude-cli"
-	RuntimeClaudeHost     RuntimeKind = "claude-host"
-	RuntimeCodexDesktop   RuntimeKind = "codex-desktop"
-	RuntimeCodexAppServer RuntimeKind = "codex-app-server"
-	RuntimeNotionWeb      RuntimeKind = "notion-web"
+	RuntimeClaudeCLI  RuntimeKind = "claude-cli"
+	RuntimeClaudeHost RuntimeKind = "claude-host"
+	// RuntimeClaudeBackground is a Claude Code background job (claude --bg),
+	// which Claude's own supervisor runs and reports in claude agents.
+	RuntimeClaudeBackground RuntimeKind = "claude-bg"
+	RuntimeCodexDesktop     RuntimeKind = "codex-desktop"
+	RuntimeCodexAppServer   RuntimeKind = "codex-app-server"
+	RuntimeNotionWeb        RuntimeKind = "notion-web"
 	// RuntimeOperator marks Agenthail's own pseudo-sessions (the operator and
 	// peer bridges), which no adapter serves.
 	RuntimeOperator RuntimeKind = "agenthail"

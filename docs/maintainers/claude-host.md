@@ -183,8 +183,10 @@ those.
 ## Delivery
 
 A Claude process that the host runs for the conversation it lists is
-discovered with runtime kind `claude-host`; the Claude adapter serves both
-`claude-cli` and `claude-host` and decides per session from that kind. The
+discovered with runtime kind `claude-host`; a Claude Code background job
+(`claude --bg`, whose session record has kind `bg`) is `claude-bg`, and any
+other Claude process is `claude-cli`. The Claude adapter serves all three and
+decides per session from that kind. The
 process also serves Claude's native messaging socket, so its transport is
 `uds`. It is open while the host lists it; a CLI session is open while its pid
 is a running `claude` process. When the host stops listing a process that still

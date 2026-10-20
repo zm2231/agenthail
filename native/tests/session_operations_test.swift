@@ -63,6 +63,7 @@ struct SessionOperationsTest {
     static func main() async {
         checkSlashCommands()
         checkQueueOrder()
+        checkLifecycleAvailability()
         await checkRequests()
         await checkNativeQueueController()
         await checkBackgroundController()
@@ -98,6 +99,30 @@ struct SessionOperationsTest {
         check(SlashInput("/stop", available: [.name]) == .unavailable(.stop), "an unavailable command is not sent as text")
         check(SlashInput("/unknown thing", available: all) == .message, "unknown commands send as a message")
         check(SlashInput("see /compact", available: all) == .message, "a command mid-message is plain text")
+    }
+
+    static func lifecycleSession(_ runtime: String?, lifecycle: String?, readOnly: Bool = false) -> SessionState? {
+        let capabilities = #"{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false"# + (lifecycle.map { #","lifecycle":"# + $0 } ?? "") + "}"
+        let runtimeField = runtime.map { #","runtimeKind":"\#($0)""# } ?? ""
+        let json = #"{"id":"S","surface":"claude","name":"n","status":"idle","queueCount":0,"open":true,"current":true,"readOnly":\#(readOnly),"capabilities":\#(capabilities)\#(runtimeField)}"#
+        return try? JSONDecoder().decode(SessionState.self, from: Data(json.utf8))
+    }
+
+    static func checkLifecycleAvailability() {
+        let background = lifecycleSession("claude-bg", lifecycle: #"{"status":true,"logs":true,"stop":true,"resume":true}"#)
+        check(background.map(SessionOperationAvailability.lifecycle) == SessionLifecycle(status: true, logs: true, stop: true, resume: true), "a background job offers all four operations")
+        check(background.map(SessionLifecycleCopy.title) == "Background session", "a background job keeps its label")
+        let hosted = lifecycleSession("claude-host", lifecycle: #"{"status":true,"logs":false,"stop":true,"resume":true}"#)
+        check(hosted.map(SessionOperationAvailability.lifecycle) == SessionLifecycle(status: true, stop: true, resume: true), "a host session offers no logs")
+        check(hosted.map(SessionLifecycleCopy.title) == "Session", "a host session is not labelled a background session")
+        let interactive = lifecycleSession("claude-cli", lifecycle: #"{"status":false,"logs":false,"stop":false,"resume":false}"#)
+        check(interactive.map { SessionOperationAvailability.lifecycle($0).any } == false, "an interactive session offers no lifecycle operation")
+        let older = lifecycleSession(nil, lifecycle: nil)
+        check(older.map { SessionOperationAvailability.lifecycle($0).any } == false, "a host that reports no lifecycle offers none")
+        let extended = lifecycleSession("claude-bg", lifecycle: #"{"status":true,"adopt":true}"#)
+        check(extended.map(SessionOperationAvailability.lifecycle) == SessionLifecycle(status: true), "unknown lifecycle operations are ignored and missing ones are off")
+        let readOnly = lifecycleSession("claude-bg", lifecycle: #"{"status":true,"logs":true,"stop":true,"resume":true}"#, readOnly: true)
+        check(readOnly.map { SessionOperationAvailability.lifecycle($0).any } == false, "a read-only session offers no lifecycle operation")
     }
 
     static func checkQueueOrder() {

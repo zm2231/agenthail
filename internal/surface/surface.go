@@ -666,6 +666,17 @@ type Capabilities struct {
 	// Commands is a session that takes Claude Remote Control's context, usage,
 	// status, effort and rename commands.
 	Commands bool `json:"commands"`
+	// Lifecycle is what the session's runtime does to the session itself.
+	Lifecycle Lifecycle `json:"lifecycle"`
+}
+
+// Lifecycle names the operations on a session's process that its runtime
+// supports: report its state, read its log, stop it, and start it again.
+type Lifecycle struct {
+	Status bool `json:"status"`
+	Logs   bool `json:"logs"`
+	Stop   bool `json:"stop"`
+	Resume bool `json:"resume"`
 }
 
 type SessionCapabilities struct {

@@ -2639,14 +2639,17 @@ $("#session-operation-form").addEventListener("submit", async event => {
 function syncSessionOperationFields() {
   const form = $("#session-operation-form");
   const surface = app.selected?.surface;
-  form.closest("details").hidden = !["codex", "claude"].includes(surface);
+  const lifecycle = app.selected?.capabilities?.lifecycle || {};
+  form.closest("details").hidden = surface === "claude" ? !Object.values(lifecycle).some(Boolean) : surface !== "codex";
   $("#turn-effort").closest("details").hidden = surface !== "codex";
   for (const option of form.elements.operation.options) {
-    const matches = surface === "claude" ? option.value.startsWith("session-lifecycle-") : !option.value.startsWith("session-lifecycle-");
+    const lifecycleOperation = option.value.startsWith("session-lifecycle-") ? option.value.slice("session-lifecycle-".length) : "";
+    const matches = surface === "claude" ? Boolean(lifecycleOperation && lifecycle[lifecycleOperation]) : !lifecycleOperation;
     option.hidden = !matches;
     option.disabled = !matches || (Boolean(app.selected?.readOnly) && option.value !== "native-list");
   }
-  if (form.elements.operation.selectedOptions[0]?.disabled) {
+  const chosen = form.elements.operation.selectedOptions[0];
+  if (!chosen || chosen.disabled) {
     form.elements.operation.value = [...form.elements.operation.options].find(option => !option.disabled)?.value || "";
   }
   const operation = form.elements.operation.value;

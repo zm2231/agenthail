@@ -169,11 +169,25 @@ enum NativeQueueOrder {
     }
 }
 
+enum SessionLifecycleCopy {
+    static func title(_ session: SessionState) -> String {
+        session.runtimeKind == "claude-bg" ? "Background session" : "Session"
+    }
+
+    static func detail(_ session: SessionState) -> String {
+        switch session.runtimeKind {
+        case "claude-bg": return "A Claude Code background job."
+        case "claude-host": return "Agenthail runs this session. Stop closes it; the next message or Resume opens it again."
+        default: return "Controls for this session's process."
+        }
+    }
+}
+
 enum SessionOperationAvailability {
     static func fork(_ session: SessionState) -> Bool { session.surface == "codex" && !session.isReadOnly }
     static func nativeQueue(_ session: SessionState) -> Bool { session.surface == "codex" }
     static func nativeQueueWritable(_ session: SessionState) -> Bool { session.surface == "codex" && !session.isReadOnly }
-    static func lifecycle(_ session: SessionState) -> Bool { session.surface == "claude" && !session.isReadOnly }
+    static func lifecycle(_ session: SessionState) -> SessionLifecycle { session.isReadOnly ? SessionLifecycle() : session.capabilities.lifecycle }
 }
 
 extension AgenthailAPI {
