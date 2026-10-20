@@ -342,7 +342,10 @@ Fixed the export retry and pushed the branch.
 | `paths` | no | Files you changed or produced, relative to the repository, at most 50 |
 | `next` | no | The one action the reader should take, at most 280 characters |
 
-`blocked` means you need something named in `reason` before you can go on.
+`stop` is `complete` exactly when `status` is `done`. A `blocked` report stops
+with `needsInput` or `needsApproval`, a `failed` one with `gaveUp`, and a
+`partial` one with any of those three. `blocked` means you need something named
+in `reason` before you can go on.
 The report is your own account and stays separate from what Agenthail observes
 about the session: its goal (`agenthail goal <target> --json`, where `blocked`
 means the goal was judged impossible), usage limits and turn errors. Do not
