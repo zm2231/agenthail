@@ -96,6 +96,7 @@ class Session {
     this.stateEvents = false;
     this.guessesIdle = false;
     this.tasks = [];
+    this.owed = new Set();
   }
 
   async *input() {
@@ -125,6 +126,19 @@ class Session {
     this.wake?.();
   }
 
+  // owe records work Claude was handed while idle and has yet to start a turn
+  // for: a message the host passed it, or a background task that ended, which
+  // Claude reports idle before it starts the turn telling the model. Claude
+  // reports idle only with its queue empty, so a turn it starts takes all of
+  // it; a message it answers is also known by the uuids its replies carry.
+  owe(key) {
+    this.owed.add(key);
+  }
+
+  turnStarted() {
+    this.owed.clear();
+  }
+
   setState(state) {
     if (this.state === state) return;
     this.state = state;
@@ -133,14 +147,15 @@ class Session {
   }
 
   // A retiring host closes a session only once Claude is idle with no open
-  // request and no background task, since closing ends the process and every
-  // task it runs. The next message resumes the conversation on the new host.
+  // request, no background task and no turn owed, since closing ends the
+  // process and every task it runs. The next message resumes the conversation
+  // on the new host.
   // A Claude that ended a turn without reporting its states leaves idle a
   // guess that a turn it started itself may still be running, so such a
   // session retires only as a turn result arrives.
   retireIfDone({ turnEnded = false } = {}) {
     if (this.guessesIdle && !turnEnded) return;
-    if (!draining || this.ended || !this.query || this.state !== 'idle' || this.pending.size > 0 || this.tasks.length > 0) return;
+    if (!draining || this.ended || !this.query || this.state !== 'idle' || this.pending.size > 0 || this.tasks.length > 0 || this.owed.size > 0) return;
     process.stderr.write(`claude-host: retiring session ${this.id} (pid ${this.pid}), now idle\n`);
     this.end();
     this.query.close();
@@ -395,6 +410,7 @@ async function send(params) {
   }
   if (params.origin) message.origin = origin(params.origin);
   s.accepted.add(params.uuid);
+  s.owe(params.uuid);
   const taken = s.push(message);
   s.setState('busy');
   try {
@@ -474,14 +490,22 @@ async function run(s, exit) {
   let error = '';
   try {
     for await (const message of s.query) {
+      for (const uuid of message.user_message_uuids ?? []) s.owed.delete(uuid);
       if (message.type === 'system' && message.subtype === 'session_state_changed') {
         s.stateEvents = true;
+        if (message.state === 'running') s.turnStarted();
         s.setState(message.state === 'idle' ? 'idle' : 'busy');
       } else if (message.type === 'system' && message.subtype === 'background_tasks_changed') {
-        s.tasks = Array.isArray(message.tasks) ? message.tasks : [];
+        const tasks = Array.isArray(message.tasks) ? message.tasks : [];
+        const live = new Set(tasks.map((task) => task.task_id));
+        for (const task of s.tasks) if (!task.ambient && !live.has(task.task_id) && s.state === 'idle') s.owe(`task:${task.task_id}`);
+        s.tasks = tasks;
         s.retireIfDone();
+      } else if (message.type === 'system' && message.subtype === 'task_notification' && s.state === 'idle') {
+        s.owe(`task:${message.task_id}`);
       } else if (message.type === 'result' && !s.stateEvents && s.inbox.length === 0) {
         s.guessesIdle = true;
+        s.turnStarted();
         if (!stateEventsMissing) {
           stateEventsMissing = true;
           process.stderr.write(`claude-host: Claude ${s.pid} sent a turn result without session state events; idle is read from turn results, which miss turns Claude starts itself\n`);

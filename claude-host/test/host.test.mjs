@@ -589,26 +589,62 @@ test('a retiring host keeps an open request answerable and closes the session on
   r.close();
 });
 
-test('a retiring host does not close an idle session while a background task runs', async () => {
+// retiresAfterTheNotificationTurn drains the host while Claude is idle with a
+// background task running. The task ends and Claude, idle and with no task
+// left, starts the turn telling the model a while later, which the host must
+// let run before it closes the session.
+async function retiresAfterTheNotificationTurn(env) {
   const f = fixture();
-  const host = await startHost(f);
+  const host = await startHost(f, { env: { FAKE_CLAUDE_NOTIFY_AFTER_MS: '600', ...env } });
   const c = new Client(f.socket);
   await c.call('subscribe');
   const id = randomUUID();
   const { pid } = await c.call('open', { sessionId: id, cwd: f.cwd });
   const uuid = randomUUID();
-  await c.call('send', { sessionId: id, uuid, text: 'BACKGROUND 1500' });
+  await c.call('send', { sessionId: id, uuid, text: 'BACKGROUND 800' });
   await c.event(turnResult(id, uuid));
   await c.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'idle');
-  const started = Date.now();
   await c.call('drain');
-  await sleep(700);
-  assert.ok(alive(pid), 'the session runs while its background task does');
-  assert.equal(host.exitCode, null);
+  const r = new Client(retiringSocket(f, host));
+  await r.call('subscribe', { after: 0 });
+  const emptied = await r.event((e) => e.sessionId === id && e.kind === 'sdk' && e.message.subtype === 'background_tasks_changed' && e.message.tasks.length === 0, 5000);
+  await sleep(300);
+  assert.ok(alive(pid), 'the session stays open between the task ending and the turn that reports it');
+  const notified = await r.event((e) => e.sessionId === id && e.kind === 'sdk' && e.message.type === 'result' && e.message.result.startsWith('notified:'), 5000);
+  const exited = await r.event((e) => e.sessionId === id && e.kind === 'exited', 5000);
+  assert.ok(emptied.seq < notified.seq && notified.seq < exited.seq);
   assert.equal(await host.exited, 0);
-  assert.ok(Date.now() - started >= 1000, 'the host waited for the background task');
+  assert.deepEqual(transcript(f, id).map((l) => l.reply), ['background:800', `notified:task-${uuid}`]);
   assert.ok(!alive(pid));
   c.close();
+  r.close();
+}
+
+test('a retiring host closes a session only after the turn that reports its finished background task', () => retiresAfterTheNotificationTurn({}));
+
+test('a retiring host waits for that turn when the task leaves the live set before its notification', () => retiresAfterTheNotificationTurn({ FAKE_CLAUDE_LEVEL_FIRST: '1' }));
+
+test('a retiring host does not close a session on the idle of a turn that ended before a message it passed on', async () => {
+  const f = fixture();
+  const host = await startHost(f, { env: { FAKE_CLAUDE_IDLE_AFTER_MS: '400' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const first = randomUUID();
+  await c.call('send', { sessionId: id, uuid: first, text: 'first' });
+  await c.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'busy');
+  await c.call('drain');
+  const r = new Client(retiringSocket(f, host));
+  await r.call('subscribe', { after: 0 });
+  await r.event(turnResult(id, first));
+  const next = randomUUID();
+  await r.call('send', { sessionId: id, uuid: next, text: 'next' });
+  await r.event(turnResult(id, next), 5000);
+  assert.equal(await host.exited, 0);
+  assert.deepEqual(transcript(f, id).map((l) => l.reply), ['echo:first', 'echo:next']);
+  c.close();
+  r.close();
 });
 
 test('a Claude without session state events falls back to turn results and says so', async () => {

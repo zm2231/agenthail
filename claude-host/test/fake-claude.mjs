@@ -118,16 +118,38 @@ async function turn(message) {
     const id = `task-${uuid}`;
     tasks.set(id, { task_id: id, task_type: 'local_bash', description: 'background shell' });
     setTasks();
-    setTimeout(() => {
-      tasks.delete(id);
-      setTasks();
-    }, ms);
+    setTimeout(() => finish(id), ms);
     reply = `background:${ms}`;
   }
   fs.appendFileSync(transcript, JSON.stringify({ uuid, text, reply, origin: message.origin ?? null, priority: message.priority ?? null, pid: process.pid, inputClosed }) + '\n');
   claudeTranscript(uuid, text, reply);
   write({ type: 'assistant', uuid: crypto.randomUUID(), session_id: sessionId, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: reply }] } });
   write({ type: 'result', subtype: 'success', is_error: false, result: reply, uuid: crypto.randomUUID(), session_id: sessionId, user_message_uuids: [uuid], duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {} });
+  if (process.env.FAKE_CLAUDE_IDLE_AFTER_MS) await new Promise((resolve) => setTimeout(resolve, Number(process.env.FAKE_CLAUDE_IDLE_AFTER_MS)));
+  state('idle');
+}
+
+// finish ends a background task the way Claude 2.1.304 was seen to in SDK
+// streaming mode: the notification, the task leaving the live set, and,
+// FAKE_CLAUDE_NOTIFY_AFTER_MS later, a turn Claude starts by itself to tell
+// the model. FAKE_CLAUDE_LEVEL_FIRST reverses the first two, which the SDK
+// leaves unordered.
+function finish(id) {
+  const notification = { type: 'system', subtype: 'task_notification', task_id: id, status: 'completed', output_file: '', summary: 'background shell completed', uuid: crypto.randomUUID(), session_id: sessionId };
+  tasks.delete(id);
+  if (process.env.FAKE_CLAUDE_LEVEL_FIRST) setTasks();
+  write(notification);
+  if (!process.env.FAKE_CLAUDE_LEVEL_FIRST) setTasks();
+  const gap = Number(process.env.FAKE_CLAUDE_NOTIFY_AFTER_MS ?? 100);
+  turns = turns.then(() => new Promise((resolve) => setTimeout(resolve, gap))).then(() => notified(id));
+}
+
+function notified(id) {
+  state('running');
+  const reply = `notified:${id}`;
+  fs.appendFileSync(transcript, JSON.stringify({ uuid: null, text: '<task-notification>', reply, origin: { kind: 'task-notification' }, priority: null, pid: process.pid, inputClosed }) + '\n');
+  write({ type: 'assistant', uuid: crypto.randomUUID(), session_id: sessionId, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: reply }] } });
+  write({ type: 'result', subtype: 'success', is_error: false, result: reply, uuid: crypto.randomUUID(), session_id: sessionId, duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {} });
   state('idle');
 }
 
