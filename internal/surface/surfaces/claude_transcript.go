@@ -28,9 +28,10 @@ type claudeTurn struct {
 	Done        bool
 	Closing     bool
 	Interrupted bool
-	// UsageLimit is the message Claude Code wrote when the account's usage
-	// limit refused the turn.
-	UsageLimit string
+	// APIError is the message Claude Code wrote in place of a reply the API
+	// refused; UsageLimited marks a refusal by the account's usage limit.
+	APIError     string
+	UsageLimited bool
 }
 
 type claudeRecord struct {
@@ -128,11 +129,15 @@ func claudeAssistantModel(line []byte) string {
 			Model string `json:"model"`
 		} `json:"message"`
 	}
-	if json.Unmarshal(line, &record) != nil || record.Type != "assistant" {
+	if json.Unmarshal(line, &record) != nil || record.Type != "assistant" || record.Message.Model == claudeSyntheticModel {
 		return ""
 	}
 	return record.Message.Model
 }
+
+// claudeSyntheticModel is the model Claude Code names on a message it writes
+// itself, such as an API error in place of a reply.
+const claudeSyntheticModel = "<synthetic>"
 
 // appendClaudeTurn folds one transcript record into turns. Claude Code writes
 // each content block of an API message as its own record, and every block
@@ -179,6 +184,13 @@ func appendClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 		} else if turn.MessageID == "" {
 			turn.MessageID = record.UUID
 		}
+		if record.IsAPIErrorMessage {
+			turn.APIError = strings.TrimSpace(transcriptText(record.Message.Content))
+			turn.UsageLimited = record.Error == "rate_limit" || record.APIError == "usage_limit_reached"
+			turn.Done, turn.Closing, turn.Interrupted = true, false, false
+			turn.TerminalAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
+			return turns
+		}
 		if record.Message.Model != "" {
 			turn.Model = record.Message.Model
 		}
@@ -188,12 +200,6 @@ func appendClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 			} else if turn.Assistant != text && !strings.Contains(turn.Assistant, text) {
 				turn.Assistant += "\n" + text
 			}
-		}
-		if record.IsAPIErrorMessage && (record.Error == "rate_limit" || record.APIError == "usage_limit_reached") {
-			turn.UsageLimit = strings.TrimSpace(transcriptText(record.Message.Content))
-			turn.Done, turn.Closing, turn.Interrupted = true, false, false
-			turn.TerminalAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
-			return turns
 		}
 		turn.Done = false
 		turn.Closing = record.Message.StopReason == "end_turn"
@@ -331,4 +337,15 @@ func claudeForkedFrom(path string) string {
 		return ""
 	}
 	return record.ForkedFrom.SessionID
+}
+
+// claudeTurnError is the error a turn the API refused ends with.
+func claudeTurnError(turn claudeTurn) string {
+	switch {
+	case turn.UsageLimited:
+		return "the Claude account is out of usage (" + turn.APIError + "); move the session to another account with: agenthail thread move <session> --account <name>"
+	case turn.APIError != "":
+		return "Claude API error: " + turn.APIError
+	}
+	return ""
 }

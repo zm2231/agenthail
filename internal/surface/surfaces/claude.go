@@ -934,7 +934,7 @@ func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surfa
 	if state.hasCompleted && state.completed.MessageID != "" {
 		observation.CompletedTurnID = state.completed.MessageID
 		observation.InputTurnID = state.completed.UserID
-		observation.Reply = &surface.ReplyResult{Text: state.completed.Assistant, UserText: state.completed.User, Done: true}
+		observation.Reply = &surface.ReplyResult{Text: state.completed.Assistant, UserText: state.completed.User, Done: true, Error: claudeTurnError(state.completed)}
 	}
 	return observation, nil
 }
@@ -1342,6 +1342,9 @@ func claudeStreamTerminal(record map[string]any) (done, ending, interrupted bool
 	case "system":
 		return str(record, "subtype") == "turn_duration", false, false
 	case "assistant":
+		if apiError, _ := record["isApiErrorMessage"].(bool); apiError {
+			return true, false, false
+		}
 		reason := strNested(record, "message", "stop_reason")
 		return false, reason == "end_turn", claudeTerminalInterruption(reason)
 	case "user":

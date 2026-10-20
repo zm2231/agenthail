@@ -1074,7 +1074,8 @@ final class AgenthailIOSModel: ObservableObject {
         }
         guard var timeline = detail.timeline else { return }
         guard !event.data.itemId.isEmpty else { return }
-        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? (event.data.kind == "attachment" ? "Image" : event.data.kind), text: event.data.body ?? (event.data.kind == "attachment" ? "Image attachment" : ""), timestamp: event.data.ts, callId: event.data.callId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.truncationReason, bodyRef: event.data.bodyRef, attachment: event.data.attachment, sender: event.data.sender, files: event.data.files)
+        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? (event.data.kind == "attachment" ? "Image" : event.data.kind), text: event.data.body ?? (event.data.kind == "attachment" ? "Image attachment" : ""), timestamp: event.data.ts, callId: event.data.callId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.truncationReason, bodyRef: event.data.bodyRef, attachment: event.data.attachment, sender: event.data.sender, files: event.data.files, resetsAt: event.data.resetsAt)
+        let usageChanged = item.status == "usage_limit" || detail.usageLimit != nil && item.kind == "message" && item.role == "assistant"
         if event.data.op == "remove" {
             timeline.items.removeAll { $0.id == event.data.itemId }
         } else if let index = timeline.items.firstIndex(where: { $0.id == event.data.itemId }) {
@@ -1085,6 +1086,7 @@ final class AgenthailIOSModel: ObservableObject {
         detail.timeline = timeline
         selectedDetail = detail
         sessionError = nil
+        if usageChanged { Task { await refreshSession(event.sessionId) } }
     }
 
     func retainedSessionBody(for item: TimelineItem, start: Int = 0) async -> RetainedBodyResult? {

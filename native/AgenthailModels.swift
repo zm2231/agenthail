@@ -1381,6 +1381,7 @@ struct SessionStreamItem: Decodable {
     let sender: String?
     let title: String?
     let status: String?
+    var resetsAt: String? = nil
     let truncated: Bool
     let truncationReason: String?
     let bodyRef: String?
@@ -1452,6 +1453,7 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     var attachment: SessionAttachment? = nil
     var sender: String? = nil
     var files: [AttachedFile]? = nil
+    var resetsAt: String? = nil
 
     var isPeerMessage: Bool { kind == "message" && role == "peer" }
     var peerSender: String { sender.flatMap { $0.isEmpty ? nil : $0 } ?? "another agent" }

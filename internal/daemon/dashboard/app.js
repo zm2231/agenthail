@@ -297,13 +297,14 @@ function startLiveStream() {
     app.history.transcriptWarning = "";
     const items = app.history.timeline?.items || [];
     const index = items.findIndex((value) => value.id === item.itemId);
-    const projected = { id: item.itemId, kind: item.kind, role: item.role, origin: item.origin, sender: item.sender, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, truncated: item.truncated, bodyRef: item.bodyRef, attachment: item.attachment, files: item.files, callId: item.callId, turnId: item.turnId };
+    const projected = { id: item.itemId, kind: item.kind, role: item.role, origin: item.origin, sender: item.sender, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, resetsAt: item.resetsAt, truncated: item.truncated, bodyRef: item.bodyRef, attachment: item.attachment, files: item.files, callId: item.callId, turnId: item.turnId };
     if (item.op === "remove") { if (index >= 0) items.splice(index, 1); }
     else if (index >= 0) items[index] = projected;
     else items.push(projected);
     app.history.timeline = { ...(app.history.timeline || {}), items };
     app.history.exchanges = exchangesFromItems(items);
     renderChat();
+    if (projected.status === "usage_limit" || (app.history.usageLimit && projected.kind === "message" && projected.role === "assistant")) refreshUsageLimit(session.id);
   });
   source.addEventListener("error", () => {
     if (source.readyState !== 2 || app.liveSource !== source || app.selected?.id !== session.id) return;
@@ -1434,6 +1435,16 @@ function renderUsageLimit(limit) {
     ? `<form class="usage-limit-offer" data-tool="move"><select name="account" aria-label="Claude account">${alternatives.map(option => `<option value="${escape(option.root)}">${escape(claudeAccountOption(option))}</option>`).join("")}</select><button class="soft-button" type="submit">Move to this account</button></form>`
     : "<span>No other signed-in Claude account has usage left on this host.</span>";
   return `<div class="usage-limit" role="status"><p>${escape(account)}${escape(until)}</p>${offer}</div>`;
+}
+async function refreshUsageLimit(id) {
+  try {
+    const response = await fetch(`/api/session?id=${encodeURIComponent(id)}&limit=1&timeline=1`);
+    if (!response.ok || app.selected?.id !== id || !app.history) return;
+    const detail = await response.json();
+    if (app.selected?.id !== id || !app.history) return;
+    app.history.usageLimit = detail.usageLimit || null;
+    renderChat();
+  } catch (error) {}
 }
 async function loadMoveAccounts(session) {
   if (!canMoveAccount(session, app.history?.readOnly)) return;

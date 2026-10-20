@@ -680,14 +680,14 @@ func claudeTranscriptReply(records []transcriptRecord, source string, settled fu
 	}
 	reply := &surface.ReplyResult{Done: false, Source: source}
 	for _, turn := range turns {
-		if turn.Assistant != "" || turn.UsageLimit != "" {
+		if turn.Assistant != "" || turn.APIError != "" {
 			done := turn.Done || turn.Closing && settled != nil && settled(turn.TerminalAt)
 			reply = &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: done, Source: source}
 			if turn.Interrupted && !done {
 				reply.Error = "turn interrupted before completion"
 			}
-			if turn.UsageLimit != "" {
-				reply.Error = "the Claude account is out of usage (" + turn.UsageLimit + "); move the session to another account with: agenthail thread move <session> --account <name>"
+			if err := claudeTurnError(turn); err != "" {
+				reply.Error = err
 			}
 		}
 	}
