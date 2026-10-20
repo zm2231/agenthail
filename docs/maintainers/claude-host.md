@@ -108,6 +108,18 @@ past it. A failed request returns `{code, message}`:
 A `send` is answered only after the SDK has taken the message for Claude's
 input, so a success means the message has left the host's queue.
 
+## Context window
+
+After each turn result the host asks Claude for its context report
+(`getContextUsage`) to learn the main model, then records that model's
+`modelUsage[model].contextWindow` from the result. A result counts every model
+the turn called, side queries included, so the report decides which entry is
+the main one. The host lists the window with its session (`contextWindow`,
+`contextModel`; `0` and empty before the first result) and emits a `context`
+event when either changes. Claude writes this figure nowhere on disk, so a
+session the host does not run has no such window. The report's own `maxTokens`
+is the auto-compact window, not the model's, and is not used for it.
+
 ## Requests
 
 Claude asks the host, through the SDK's `canUseTool`, before a tool its

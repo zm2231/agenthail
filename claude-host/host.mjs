@@ -98,6 +98,20 @@ class Session {
     this.tasks = [];
     this.owed = new Set();
     this.ambient = new Set();
+    this.context = null;
+  }
+
+  // measure records the context window Claude runs the main model with. A
+  // turn result counts usage for every model the turn called, side queries
+  // included, so Claude's own context report names which entry is the main
+  // model's. The transcript records no window size.
+  async measure(result) {
+    const usage = await this.query.getContextUsage({ detail: 'summary' });
+    const window = result.modelUsage?.[usage?.model]?.contextWindow;
+    if (!Number.isInteger(window) || window <= 0) return;
+    if (this.context?.window === window && this.context?.model === usage.model) return;
+    this.context = { window, model: usage.model };
+    emit(this.id, 'context', { contextWindow: window, contextModel: usage.model });
   }
 
   async *input() {
@@ -198,6 +212,8 @@ class Session {
       openedAt: this.openedAt,
       permissionMode: this.permissionMode,
       model: this.model,
+      contextWindow: this.context?.window ?? 0,
+      contextModel: this.context?.model ?? '',
       requests: [...this.pending.values()].map((p) => p.request),
     };
   }
@@ -517,6 +533,7 @@ async function run(s, exit) {
         s.setState('idle');
         s.retireIfDone({ turnEnded: true });
       }
+      if (message.type === 'result') s.measure(message).catch(() => {});
       emit(s.id, 'sdk', { message });
     }
   } catch (e) {

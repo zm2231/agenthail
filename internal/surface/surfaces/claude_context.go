@@ -21,6 +21,7 @@ type claudeContextState struct {
 	// oneMRequests records, per model base, whether the newest API request
 	// Claude logged for that model carried the 1M context beta.
 	oneMRequests map[string]bool
+	model        string
 }
 
 type claudeContextRecord struct {
@@ -99,6 +100,7 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 				state.usage.InputTokens = record.Message.Usage.InputTokens
 				state.usage.CachedInputTokens = record.Message.Usage.CacheCreationTokens + record.Message.Usage.CacheReadTokens
 				state.usage.OutputTokens = record.Message.Usage.OutputTokens
+				state.model = record.Message.Model
 				window := observeClaudeCurrentContextWindow(sess.ConfiguredModel, state.oneMRequests, record.RequestedModel, record.Message.Model)
 				state.usage.ContextWindow = window.Window
 				state.usage.ContextWindowSource = window.Source
@@ -168,11 +170,31 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 		completedAt = state.latestCommandDoneAt
 	}
 	state.usage.Compacting = !state.latestCommandAt.IsZero() && state.latestCommandAt.After(completedAt)
-	if state.usage.UsedTokens == 0 && state.usage.ContextWindow == 0 && state.usage.CompactionCount == 0 {
+	usage := state.usage
+	if window, ok := c.providerContextWindow(ctx, sess, state.model); ok {
+		usage.ContextWindow, usage.ContextWindowSource, usage.WindowEstimated = window, ClaudeContextWindowSourceProvider, false
+	}
+	if usage.UsedTokens == 0 && usage.ContextWindow == 0 && usage.CompactionCount == 0 {
 		return nil, nil
 	}
-	usage := state.usage
 	return &usage, nil
+}
+
+// providerContextWindow is the window Claude reported running the session's
+// main model with, which only the host that runs the session hears. It holds
+// while that model is the one the transcript last replied with.
+func (c *Claude) providerContextWindow(ctx context.Context, sess *surface.Session, observedModel string) (int64, bool) {
+	if !claudeHosted(sess) {
+		return 0, false
+	}
+	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
+	if !ok || listed.ContextWindow <= 0 {
+		return 0, false
+	}
+	if observed := claudeModelBase(observedModel); observed != "" && observed != claudeModelBase(listed.ContextModel) {
+		return 0, false
+	}
+	return listed.ContextWindow, true
 }
 
 // observeClaudeCurrentContextWindow reports a 1M window on positive evidence

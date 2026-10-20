@@ -383,6 +383,37 @@ test('model and permission mode change live and a resume keeps them', async () =
   d.close();
 });
 
+test('a turn result gives the session the window Claude runs its main model with', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  const opened = await c.call('open', { sessionId: id, cwd: f.cwd });
+  assert.equal(opened.contextWindow, 0);
+  const listed = async () => (await c.call('list')).sessions.find((s) => s.sessionId === id);
+  await c.call('send', { sessionId: id, uuid: randomUUID(), text: 'hello', origin: { kind: 'human' } });
+  const first = await c.event((e) => e.sessionId === id && e.kind === 'context');
+  assert.deepEqual([first.contextWindow, first.contextModel], [1000000, 'claude-opus-5-5']);
+  assert.deepEqual([(await listed()).contextWindow, (await listed()).contextModel], [1000000, 'claude-opus-5-5']);
+
+  const switchTo = async (model, after) => {
+    await c.call('setModel', { sessionId: id, model });
+    await c.call('send', { sessionId: id, uuid: randomUUID(), text: `on ${model}`, origin: { kind: 'human' } });
+    return c.event((e) => e.sessionId === id && e.kind === 'context' && e.seq > after.seq);
+  };
+  const sameWindow = await switchTo('claude-opus-5-5[1m]', first);
+  assert.deepEqual([sameWindow.contextWindow, sameWindow.contextModel], [1000000, 'claude-opus-5-5[1m]']);
+  const smaller = await switchTo('claude-opus-4-8', sameWindow);
+  assert.deepEqual([smaller.contextWindow, smaller.contextModel], [200000, 'claude-opus-4-8']);
+  const unchanged = randomUUID();
+  await c.call('send', { sessionId: id, uuid: unchanged, text: 'unchanged', origin: { kind: 'human' } });
+  await c.event(turnResult(id, unchanged));
+  await sleep(200);
+  assert.equal(c.events.filter((e) => e.sessionId === id && e.kind === 'context').length, 3);
+  c.close();
+});
+
 test('interrupt ends the running turn', async () => {
   const f = fixture();
   await startHost(f);
