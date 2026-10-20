@@ -276,10 +276,10 @@ final class AgenthailModel: ObservableObject {
 
     private func trackFinishedSessions(from previous: DashboardSnapshot?) {
         guard let previous, let current = snapshot else { return }
-        let wasWorking = Set(previous.sessions.filter(\.isWorking).map(\.id))
+        let wasWorking = Set(previous.sessions.filter { $0.isWorking || $0.isWaitingOnBackground }.map(\.id))
         var next = finishedUnseen
         for session in current.sessions {
-            if session.isWorking {
+            if session.isWorking || session.isWaitingOnBackground {
                 next.remove(session.id)
             } else if wasWorking.contains(session.id), !panes.contains(where: { $0.selectedSessionID == session.id }) {
                 next.insert(session.id)

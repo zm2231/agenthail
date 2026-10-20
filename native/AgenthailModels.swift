@@ -304,6 +304,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var unavailableReason: String? = nil
     var transport: String? = nil
     var waitingOn: WaitingState? = nil
+    var backgroundTasks: BackgroundTasks? = nil
     var claudeAccount: SessionAccount? = nil
 
     var displayName: String {
@@ -313,6 +314,8 @@ struct SessionState: Codable, Identifiable, Hashable {
 
     var isWorking: Bool { status == "busy" }
     var isWaitingOnYou: Bool { waitingOn != nil }
+    /// Between turns with background tasks still running: not finished yet.
+    var isWaitingOnBackground: Bool { !isWorking && backgroundTasks?.running == true }
     var isReadOnly: Bool { readOnly == true }
     var remoteHostName: String? {
         guard let host, host.state != "local" else { return nil }
@@ -353,6 +356,52 @@ struct HostHealth: Decodable, Hashable, Identifiable {
         }
     }
     var isHealthy: Bool { state == "connected" }
+}
+
+/// What a session runs in the background. Ambient tasks, such as file
+/// watchers, are listed but do not keep it running.
+struct BackgroundTasks: Codable, Hashable {
+    let running: Bool
+    var tasks: [BackgroundTask]? = nil
+    var since: String? = nil
+    let source: String
+
+    var activeCount: Int { (tasks ?? []).filter { $0.ambient != true }.count }
+    var summary: String {
+        if !running { return "Only ambient tasks run" }
+        let count = activeCount
+        return count == 0 ? "Background work running" : "\(count) background task\(count == 1 ? "" : "s") running"
+    }
+    /// Where the list came from, when it is not Claude's own report.
+    var sourceNote: String? {
+        switch source {
+        case "transcript": return "Read from the transcript."
+        case "status": return "Claude reports a background shell but not which one."
+        default: return nil
+        }
+    }
+}
+
+struct BackgroundTask: Codable, Hashable, Identifiable {
+    let id: String
+    let kind: String
+    var description: String? = nil
+    var parentId: String? = nil
+    var ambient: Bool? = nil
+    var since: String? = nil
+
+    var kindLabel: String {
+        switch kind {
+        case "shell": return "Shell"
+        case "agent": return "Agent"
+        case "monitor": return "Monitor"
+        default: return kind.capitalized
+        }
+    }
+    var line: String {
+        let text = description.flatMap { $0.isEmpty ? nil : $0 } ?? id
+        return ambient == true ? "\(kindLabel): \(text) (ambient)" : "\(kindLabel): \(text)"
+    }
 }
 
 /// A question, plan or approval the session is waiting on its user to answer.
@@ -979,6 +1028,7 @@ struct RawSession: Decodable {
     let cwd: String?
     let runtime: SessionRuntime?
     var waitingOn: WaitingState? = nil
+    var backgroundTasks: BackgroundTasks? = nil
 }
 
 struct GoalState: Decodable {
