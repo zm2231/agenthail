@@ -1019,6 +1019,7 @@ struct SessionInspector: View {
     @State private var showingModels = false
     @State private var renamingClaude = false
     @State private var claudeName = ""
+    @State private var adopting = false
     private var detail: SessionDetail {
         guard let liveDetail = model.selectedDetail, liveDetail.session.id == session.id else { return initialDetail }
         return liveDetail
@@ -1032,6 +1033,7 @@ struct SessionInspector: View {
                     LabeledContent("Status", value: detail.session.waitingOn != nil ? "Waiting on you" : liveSession.isWaitingOnBackground ? "Waiting on background work" : detail.session.status.capitalized)
                     if let value = detail.model { LabeledContent("Model", value: value) }
                     if let account = liveSession.claudeAccount { LabeledContent("Account", value: account.label) }
+                    if liveSession.canAdopt { Button("Open in Agenthail", systemImage: "arrow.down.app") { adopting = true } }
                     if let value = detail.session.cwd, !value.isEmpty { LabeledContent("Workspace", value: value).textSelection(.enabled) }
                     if let value = detail.session.source { LabeledContent("Source", value: value) }
                     if let value = detail.session.transport { LabeledContent("Connection", value: value) }
@@ -1198,6 +1200,7 @@ struct SessionInspector: View {
                     .disabled(claudeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             } message: { Text("Changes the Claude session name, not its Agenthail alias.") }
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .sheet(isPresented: $adopting) { IOSAdoptSessionSheet(model: model, session: liveSession) }
             .task(id: SubagentFetchKey(liveSession, revision: model.fetchedSubagents.revision(session.id))) { await model.loadSubagents(of: liveSession) }
             .sheet(isPresented: $showingModels) {
                 SearchableModelSelectionSheet(initialOptions: detail.models ?? [], currentSelectedID: detail.model, allowsDefault: false, onSelect: { value in
@@ -1415,5 +1418,65 @@ struct SettingsView: View {
         if model.connectionError != nil { return "wifi.exclamationmark" }
         if model.reconnecting { return "arrow.triangle.2.circlepath" }
         return "lock.shield.fill"
+    }
+}
+
+struct IOSAdoptSessionSheet: View {
+    @ObservedObject var model: AgenthailIOSModel
+    @StateObject private var controller: SessionAdoptController
+    @Environment(\.dismiss) private var dismiss
+
+    init(model: AgenthailIOSModel, session: SessionState) {
+        self.model = model
+        _controller = StateObject(wrappedValue: SessionAdoptController(session: session))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("Agenthail stops the process that runs the conversation once it is idle and continues it in its own host, in the same config folder.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                switch controller.phase {
+                case .ready, .adopting:
+                    EmptyView()
+                case .confirmTerminal(let message):
+                    Section {
+                        Text(message + " Stopping it ends the terminal session; the conversation continues in Agenthail.")
+                        Button("Stop Terminal and Open", role: .destructive) { run(stopTerminal: true) }
+                        Button("Cancel") { controller.cancelConfirmation() }
+                    }
+                case .done(let summary):
+                    Section { Text(summary) }
+                case .failed(let message):
+                    Section { Text(message).foregroundStyle(.red) }
+                }
+            }
+            .navigationTitle("Open in Agenthail")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    if case .done = controller.phase {} else { Button("Cancel") { dismiss() } }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if case .done = controller.phase {
+                        Button("Done") { dismiss() }
+                    } else {
+                        Button(controller.phase == .adopting ? "Opening…" : "Open") { run(stopTerminal: false) }
+                            .disabled(!controller.canAdopt)
+                    }
+                }
+            }
+        }
+    }
+
+    private func run(stopTerminal: Bool) {
+        guard let api = model.api else { return }
+        Task {
+            await controller.adopt(api: api, stopTerminal: stopTerminal)
+            if case .done = controller.phase { _ = await model.refresh(fresh: true) }
+        }
     }
 }

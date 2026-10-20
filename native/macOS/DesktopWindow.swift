@@ -31,6 +31,7 @@ struct DesktopWindow: View {
         .toolbar(removing: .sidebarToggle)
         .environmentObject(model)
         .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
+        .sheet(item: $pane.adoptingSession) { AdoptSessionSheet(model: model, session: $0) }
         .sheet(isPresented: $model.newSessionVisible, onDismiss: {
             if model.newSessionMessage != nil { model.newSessionVisible = true }
         }) {
@@ -360,6 +361,9 @@ extension SessionSidebar {
         .contextMenu {
             Button("Open in New Window") { openWindow(id: "session", value: session.id) }
             Button("Rename…") { pane.renamingSession = session }
+            if session.canAdopt {
+                Button("Open in Agenthail") { pane.adoptingSession = session }
+            }
             Divider()
             Button(session.archived == true ? "Unarchive" : "Archive") { model.setArchived(sessionID: session.id, session.archived != true) }
             if session.project == nil, session.remoteHostName == nil, let cwd = session.cwd, !cwd.isEmpty {
