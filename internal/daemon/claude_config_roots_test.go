@@ -14,7 +14,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
-func TestClaudeAccountsReachSessionOptionsCreationAndTheSessionRow(t *testing.T) {
+func TestClaudeConfigRootsReachSessionOptionsCreationAndTheSessionRow(t *testing.T) {
 	_, registry, _, _, _ := daemonFixture(t)
 	host := claudehosttest.New(t, "")
 	host.Start(t)
@@ -44,17 +44,17 @@ func TestClaudeAccountsReachSessionOptionsCreationAndTheSessionRow(t *testing.T)
 	}
 
 	var options struct {
-		ClaudeAccounts []surface.ClaudeAccount `json:"claudeAccounts"`
+		ClaudeConfigRoots []surface.ClaudeConfigRoot `json:"claudeConfigRoots"`
 	}
 	response := call(http.MethodGet, "/api/v1/session-options", nil)
-	if err := json.Unmarshal(response.Body.Bytes(), &options); err != nil || len(options.ClaudeAccounts) != 2 {
+	if err := json.Unmarshal(response.Body.Bytes(), &options); err != nil || len(options.ClaudeConfigRoots) != 2 {
 		t.Fatalf("options=%s err=%v", response.Body.String(), err)
 	}
-	if work := options.ClaudeAccounts[1]; work.Name != "work" || work.Label != "work@example.com" || work.Primary {
+	if work := options.ClaudeConfigRoots[1]; work.Name != "work" || work.SignedInAs == nil || work.SignedInAs.Email != "work@example.com" || work.Primary {
 		t.Fatalf("work=%+v", work)
 	}
 
-	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "claude", "message": "hello", "cwd": host.Cwd, "account": "work@example.com"})
+	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "claude", "message": "hello", "cwd": host.Cwd, "configRoot": "work"})
 	response = call(http.MethodPost, "/api/v1/actions", body)
 	var receipt struct {
 		Session surface.Session `json:"session"`
@@ -69,11 +69,11 @@ func TestClaudeAccountsReachSessionOptionsCreationAndTheSessionRow(t *testing.T)
 
 	transcript := filepath.Join(second, "projects", "-work", receipt.Session.ID+".jsonl")
 	row := d.catalogSessionProjection(d.Surfaces[0], surface.Session{ID: receipt.Session.ID, Surface: surface.KindClaude, Transcript: transcript}, catalogIdentity{}, receipt.Session.LastActive, "", 0, false, DashboardConfig{})
-	if row.ClaudeAccount == nil || row.ClaudeAccount.Name != "work" || row.ClaudeAccount.Label != "work@example.com" || row.ClaudeAccount.Root != second {
-		t.Fatalf("row account=%+v", row.ClaudeAccount)
+	if row.ClaudeConfigRoot == nil || row.ClaudeConfigRoot.Name != "work" || row.ClaudeConfigRoot.SignedInAs != "work@example.com" || row.ClaudeConfigRoot.Root != second {
+		t.Fatalf("row config root=%+v", row.ClaudeConfigRoot)
 	}
 	codex := d.catalogSessionProjection(d.Surfaces[0], surface.Session{ID: "c", Surface: surface.KindCodex, Transcript: transcript}, catalogIdentity{}, receipt.Session.LastActive, "", 0, false, DashboardConfig{})
-	if codex.ClaudeAccount != nil {
-		t.Fatalf("a Codex row carries a Claude account: %+v", codex.ClaudeAccount)
+	if codex.ClaudeConfigRoot != nil {
+		t.Fatalf("a Codex row carries a Claude config root: %+v", codex.ClaudeConfigRoot)
 	}
 }

@@ -819,11 +819,11 @@ func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surfa
 	current, reason := surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: queueCount, Open: open, Now: observedAt, CodexRecentHours: config.CodexRecentHours})
 	host := d.localHost()
 	effective := surface.EffectiveCapabilities(adapter, &session)
-	var account *surface.SessionAccount
+	var configRoot *surface.SessionConfigRoot
 	if session.Surface == surface.KindClaude {
-		account = surface.ClaudeSessionAccount(d.claudeAccounts(), session.Transcript)
+		configRoot = surface.ClaudeSessionConfigRoot(d.claudeConfigRoots(), session.Transcript)
 	}
-	return dashboardSession{ID: session.ID, Surface: session.Surface, RuntimeKind: session.RuntimeKind, ConfiguredModel: session.ConfiguredModel, ClaudeAccount: account, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, BackgroundTasks: session.BackgroundTasks, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, Project: identity.Project, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Delegated: session.Delegated(), Subagents: session.Subagents, ObservedSubagents: session.Subagents, Host: &host}
+	return dashboardSession{ID: session.ID, Surface: session.Surface, RuntimeKind: session.RuntimeKind, ConfiguredModel: session.ConfiguredModel, ClaudeConfigRoot: configRoot, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, BackgroundTasks: session.BackgroundTasks, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, Project: identity.Project, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Delegated: session.Delegated(), Subagents: session.Subagents, ObservedSubagents: session.Subagents, Host: &host}
 }
 
 type catalogStoredListing struct {

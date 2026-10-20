@@ -55,12 +55,12 @@ func TestThreadAdoptOpensASessionInTheHostAndReRegistersIt(t *testing.T) {
 	if err := app.Run([]string{"thread", "adopt", "busy1", "--stop-terminal"}); err == nil || !strings.Contains(err.Error(), "a turn is running") {
 		t.Fatalf("busy adoption: %v", err)
 	}
-	for _, args := range [][]string{{"thread", "adopt"}, {"thread", "adopt", "c1", "--account", "spare"}, {"thread", "adopt", "c1", "--wait", "soon"}, {"thread", "adopt", "c1", "--stop-terminal", "--wait"}, {"thread", "adopt", "c1", "--stop-terminal", "--timeout"}, {"thread", "adopt", "c1", "--wait", "--stop-terminal"}} {
+	for _, args := range [][]string{{"thread", "adopt"}, {"thread", "adopt", "c1", "--root", "spare"}, {"thread", "adopt", "c1", "--wait", "soon"}, {"thread", "adopt", "c1", "--stop-terminal", "--wait"}, {"thread", "adopt", "c1", "--stop-terminal", "--timeout"}, {"thread", "adopt", "c1", "--wait", "--stop-terminal"}} {
 		if err := app.Run(args); err == nil {
 			t.Fatalf("%v was accepted", args)
 		}
 	}
-	for _, args := range [][]string{{"thread", "adopt", "c1", "--json", "--account", "spare"}, {"thread", "adopt", "missing", "--json"}, {"thread", "adopt", "busy1", "--stop-terminal", "--json"}} {
+	for _, args := range [][]string{{"thread", "adopt", "c1", "--json", "--root", "spare"}, {"thread", "adopt", "missing", "--json"}, {"thread", "adopt", "busy1", "--stop-terminal", "--json"}} {
 		output, err := captureStdout(t, func() error { return app.Run(args) })
 		var reply struct {
 			OK    bool   `json:"ok"`

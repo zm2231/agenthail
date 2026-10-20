@@ -90,7 +90,7 @@ type dashboardSession struct {
 	Surface           surface.SurfaceKind        `json:"surface"`
 	RuntimeKind       surface.RuntimeKind        `json:"runtimeKind,omitempty"`
 	ConfiguredModel   string                     `json:"configuredModel,omitempty"`
-	ClaudeAccount     *surface.SessionAccount    `json:"claudeAccount,omitempty"`
+	ClaudeConfigRoot  *surface.SessionConfigRoot `json:"claudeConfigRoot,omitempty"`
 	Name              string                     `json:"name"`
 	Cwd               string                     `json:"cwd,omitempty"`
 	Alias             string                     `json:"alias,omitempty"`
@@ -1071,7 +1071,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Worktree        string                     `json:"worktree"`
 		Agent           string                     `json:"agent"`
 		PermissionMode  string                     `json:"permissionMode"`
-		Account         string                     `json:"account"`
+		ConfigRoot      string                     `json:"configRoot"`
 		StopTerminal    bool                       `json:"stopTerminal"`
 		Fork            surface.ForkOptions        `json:"fork"`
 		NativeQueue     surface.NativeQueueRequest `json:"nativeQueue"`
@@ -1154,7 +1154,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		startOptions := func(cwd string) surface.SessionStartOptions {
-			return surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode, Account: strings.TrimSpace(request.Account)}
+			return surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode, ConfigRoot: strings.TrimSpace(request.ConfigRoot)}
 		}
 		if request.Launcher != "" {
 			if strings.TrimSpace(request.Message) == "" {

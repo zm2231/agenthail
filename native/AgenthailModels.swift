@@ -7,15 +7,18 @@ struct ClaudeCreationSettings {
     var agent = ""
     var effort = ""
     var permissionMode = ""
-    var account = ""
+    var configRoot = ""
     var fields: [String: String] {
-        ["name": name, "worktree": worktree, "agent": agent, "effort": effort, "permissionMode": permissionMode, "account": account].filter { !$0.value.isEmpty }
+        ["name": name, "worktree": worktree, "agent": agent, "effort": effort, "permissionMode": permissionMode, "configRoot": configRoot].filter { !$0.value.isEmpty }
     }
 }
 
-/// A Claude config directory and the account signed into it. The primary
-/// directory is chosen by sending no account.
-struct ClaudeAccountOption: Decodable, Hashable, Identifiable {
+/// A Claude config directory and the login it holds now. The primary
+/// directory is chosen by sending no config root.
+struct ClaudeConfigRootOption: Decodable, Hashable, Identifiable {
+    struct Login: Decodable, Hashable {
+        var email: String? = nil
+    }
     struct Usage: Decodable, Hashable {
         struct Limit: Decodable, Hashable {
             let kind: String
@@ -26,12 +29,12 @@ struct ClaudeAccountOption: Decodable, Hashable, Identifiable {
     }
     let name: String
     let root: String
-    let label: String
     let primary: Bool
-    let signedIn: Bool
+    var signedInAs: Login? = nil
     var usage: Usage? = nil
     var id: String { root }
     var choice: String { primary ? "" : root }
+    var signedIn: Bool { signedInAs != nil }
 
     func exhaustedUntil(now: Date = Date()) -> Date? {
         let parser = ISO8601DateFormatter()
@@ -44,7 +47,7 @@ struct ClaudeAccountOption: Decodable, Hashable, Identifiable {
     }
 
     var menuLabel: String {
-        var parts = [label]
+        var parts = [name, signedInAs.map { "signed in as \($0.email ?? "unknown")" } ?? "signed out"]
         if let until = exhaustedUntil() {
             parts.append("out of usage until \(until.formatted(date: .abbreviated, time: .shortened))")
         }
@@ -116,11 +119,17 @@ final class SessionAdoptController: ObservableObject {
     func cancelConfirmation() { phase = .ready }
 }
 
-struct SessionAccount: Codable, Hashable {
+/// The config directory holding a Claude session's transcript, with the
+/// login that directory holds now.
+struct SessionConfigRoot: Codable, Hashable {
     let name: String
     let root: String
-    var email: String? = nil
-    let label: String
+    var signedInAs: String? = nil
+
+    var summary: String {
+        guard let signedInAs, !signedInAs.isEmpty else { return name }
+        return "\(name) · currently signed in as \(signedInAs)"
+    }
 }
 
 struct SessionCreationOptions: Decodable {
@@ -129,7 +138,7 @@ struct SessionCreationOptions: Decodable {
     let surfaces: [Surface]
     let projects: [LaunchProject]
     var launchers: [LauncherOption]? = nil
-    var claudeAccounts: [ClaudeAccountOption]? = nil
+    var claudeConfigRoots: [ClaudeConfigRootOption]? = nil
 }
 
 /// A project a new session can start in, most recently active first. The
@@ -174,7 +183,7 @@ struct CreationHostPicker {
     var isLoading: Bool { options == nil && loadError == nil }
     var canStart: Bool { options != nil && (selected.isEmpty || selectedHost?.isAvailable == true) }
     var projects: [LaunchProject] { options?.projects ?? [] }
-    var claudeAccounts: [ClaudeAccountOption] { options?.claudeAccounts ?? [] }
+    var claudeConfigRoots: [ClaudeConfigRootOption] { options?.claudeConfigRoots ?? [] }
 
     mutating func update(daemon: DaemonState?) {
         let paired = daemon?.hosts ?? []
@@ -394,7 +403,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var transport: String? = nil
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
-    var claudeAccount: SessionAccount? = nil
+    var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
     /// A Claude session Agenthail can open in its host: one a terminal or
     /// background job runs.
