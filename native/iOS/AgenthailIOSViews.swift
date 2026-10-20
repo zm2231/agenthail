@@ -993,9 +993,10 @@ struct SessionSummary: View {
         .background(.bar)
         .accessibilityHint("Open session details, context, model and controls")
     }
+    private var backgroundWaiting: Bool { detail.session.status != "busy" && detail.session.backgroundTasks?.running == true }
     private var status: some View {
-        Label(detail.session.waitingOn != nil ? "Waiting on you" : detail.session.status == "busy" ? "Working" : detail.session.status.capitalized,
-              systemImage: detail.session.waitingOn != nil ? "questionmark.bubble" : detail.session.status == "busy" ? "waveform" : "circle")
+        Label(detail.session.waitingOn != nil ? "Waiting on you" : detail.session.status == "busy" ? "Working" : backgroundWaiting ? "Waiting on background work" : detail.session.status.capitalized,
+              systemImage: detail.session.waitingOn != nil ? "questionmark.bubble" : detail.session.status == "busy" ? "waveform" : backgroundWaiting ? "hourglass" : "circle")
         .font(.subheadline)
         .foregroundStyle(detail.session.status == "busy" ? SessionStyle.accent : .secondary)
     }
@@ -1028,7 +1029,7 @@ struct SessionInspector: View {
             List {
                 Section {
                     LabeledContent("Agent", value: detail.session.surface.capitalized)
-                    LabeledContent("Status", value: detail.session.waitingOn != nil ? "Waiting on you" : detail.session.status.capitalized)
+                    LabeledContent("Status", value: detail.session.waitingOn != nil ? "Waiting on you" : liveSession.isWaitingOnBackground ? "Waiting on background work" : detail.session.status.capitalized)
                     if let value = detail.model { LabeledContent("Model", value: value) }
                     if let account = liveSession.claudeAccount { LabeledContent("Account", value: account.label) }
                     if let value = detail.session.cwd, !value.isEmpty { LabeledContent("Workspace", value: value).textSelection(.enabled) }
@@ -1039,6 +1040,15 @@ struct SessionInspector: View {
                     LabeledContent("Session ID", value: detail.session.id).textSelection(.enabled)
                 } header: {
                     Text("Session").accessibilityIdentifier("session-inspector-anchor")
+                }
+                if let background = liveSession.backgroundTasks {
+                    Section("Background work") {
+                        Text(background.summary)
+                        ForEach(background.tasks ?? []) { task in
+                            Text(task.line).foregroundStyle(task.ambient == true ? .secondary : .primary)
+                        }
+                        if let note = background.sourceNote { Text(note).font(.footnote).foregroundStyle(.secondary) }
+                    }
                 }
                 Section("Context") {
                     if let context = detail.context {
@@ -1259,6 +1269,16 @@ struct IOSSessionRow: View {
                     .foregroundStyle(SessionStyle.accent)
                     .lineLimit(1)
                     .fixedSize()
+                } else if session.isWaitingOnBackground {
+                    HStack(spacing: 4) {
+                        Image(systemName: "hourglass")
+                        Text("Background work")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(SessionStyle.accent)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .accessibilityLabel("Waiting on background work")
                 }
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
                 if let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {

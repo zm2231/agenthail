@@ -1401,6 +1401,25 @@ func TestQueueListShowsASendAPairedHostQueuedAsDelivered(t *testing.T) {
 	}
 }
 
+func TestSessionStatusNamesBackgroundWork(t *testing.T) {
+	background := &surface.BackgroundTasks{Running: true, Source: surface.BackgroundSourceHost, Tasks: []surface.BackgroundTask{{ID: "b1", Kind: surface.BackgroundShell}}}
+	ambient := &surface.BackgroundTasks{Source: surface.BackgroundSourceHost, Tasks: []surface.BackgroundTask{{ID: "m1", Kind: surface.BackgroundMonitor, Ambient: true}}}
+	for _, check := range []struct {
+		session surface.Session
+		queued  int
+		want    string
+	}{
+		{surface.Session{Status: surface.StatusIdle, BackgroundTasks: background}, 0, "bg"},
+		{surface.Session{Status: surface.StatusIdle, BackgroundTasks: background}, 2, "bg+q"},
+		{surface.Session{Status: surface.StatusBusy, BackgroundTasks: background}, 0, "run"},
+		{surface.Session{Status: surface.StatusIdle, BackgroundTasks: ambient}, 0, "idle"},
+	} {
+		if got := sessStat(check.session, check.queued); got != check.want {
+			t.Errorf("sessStat(%+v, %d)=%q want %q", check.session.BackgroundTasks, check.queued, got, check.want)
+		}
+	}
+}
+
 func TestListAndQueueShowASessionWaitingOnTheUser(t *testing.T) {
 	waiting := &surface.Waiting{Kind: surface.WaitingQuestion, ID: "toolu_synthetic"}
 	asking := surface.Session{ID: "asking", Name: "asking", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "app-server", Status: surface.StatusBusy, WaitingOn: waiting, LastActive: time.Now()}

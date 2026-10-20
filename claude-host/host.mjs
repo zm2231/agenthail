@@ -96,8 +96,33 @@ class Session {
     this.stateEvents = false;
     this.guessesIdle = false;
     this.tasks = [];
+    this.taskSince = new Map();
     this.owed = new Set();
     this.ambient = new Set();
+    this.context = null;
+    this.measuring = null;
+  }
+
+  // measureAfter records, off the message loop and one result at a time, the
+  // context window Claude runs the main model with. A turn result counts
+  // usage for every model the turn called, side queries included, so Claude's
+  // own context report names which entry is the main model's. The transcript
+  // records no window size.
+  measureAfter(result) {
+    const measuring = (this.measuring ?? Promise.resolve()).then(() => this.measure(result)).catch(() => {});
+    this.measuring = measuring;
+    measuring.then(() => {
+      if (this.measuring === measuring) this.measuring = null;
+    });
+  }
+
+  async measure(result) {
+    const usage = await Promise.race([this.query.getContextUsage({ detail: 'summary' }), timeout(5_000, 'context report')]);
+    const window = result.modelUsage?.[usage?.model]?.contextWindow;
+    if (!Number.isInteger(window) || window <= 0) return;
+    if (this.context?.window === window && this.context?.model === usage.model) return;
+    this.context = { window, model: usage.model };
+    emit(this.id, 'context', { contextWindow: window, contextModel: usage.model });
   }
 
   async *input() {
@@ -157,6 +182,10 @@ class Session {
   retireIfDone({ turnEnded = false } = {}) {
     if (this.guessesIdle && !turnEnded) return;
     if (!draining || this.ended || !this.query || this.state !== 'idle' || this.pending.size > 0 || this.tasks.length > 0 || this.owed.size > 0) return;
+    if (this.measuring) {
+      this.measuring.then(() => this.retireIfDone({ turnEnded }));
+      return;
+    }
     process.stderr.write(`claude-host: retiring session ${this.id} (pid ${this.pid}), now idle\n`);
     this.end();
     this.query.close();
@@ -198,8 +227,24 @@ class Session {
       openedAt: this.openedAt,
       permissionMode: this.permissionMode,
       model: this.model,
+      contextWindow: this.context?.window ?? 0,
+      contextModel: this.context?.model ?? '',
       requests: [...this.pending.values()].map((p) => p.request),
+      tasks: this.describeTasks(),
     };
+  }
+
+  // describeTasks lists the live background tasks Claude last reported, with
+  // when this host first saw each one.
+  describeTasks() {
+    return this.tasks.map((task) => ({
+      id: task.task_id,
+      type: task.task_type ?? '',
+      description: task.description ?? '',
+      parentId: task.parent_task_id ?? '',
+      ambient: task.ambient === true,
+      since: this.taskSince.get(task.task_id),
+    }));
   }
 }
 
@@ -498,6 +543,7 @@ async function run(s, exit) {
   try {
     for await (const message of s.query) {
       for (const uuid of message.user_message_uuids ?? []) s.owed.delete(uuid);
+      if (message.type === 'result') s.measureAfter(message);
       if (message.type === 'system' && message.subtype === 'session_state_changed') {
         s.stateEvents = true;
         if (message.state === 'running') s.turnStarted();
@@ -508,6 +554,9 @@ async function run(s, exit) {
         for (const task of tasks) if (task.ambient) s.ambient.add(task.task_id);
         for (const task of s.tasks) if (!task.ambient && !live.has(task.task_id) && s.state === 'idle') s.owe(`task:${task.task_id}`);
         s.tasks = tasks;
+        for (const id of [...s.taskSince.keys()]) if (!live.has(id)) s.taskSince.delete(id);
+        for (const id of live) if (!s.taskSince.has(id)) s.taskSince.set(id, new Date().toISOString());
+        emit(s.id, 'tasks', { tasks: s.describeTasks() });
         s.retireIfDone();
       } else if (message.type === 'system' && message.subtype === 'task_notification') {
         // An ambient task is not activity, so its end owes no turn. Its

@@ -686,6 +686,64 @@ func TestCompletionNotificationDoesNotSendForBusyBaseline(t *testing.T) {
 	}
 }
 
+func TestCompletionNotificationWaitsForBackgroundWork(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	d, r, fake, from, _ := daemonFixture(t)
+	pairing, err := r.CreateDevicePairing("Phone", []string{"read"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, _, err := r.CompleteDevicePairing(pairing.Secret, "Phone", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SaveDevicePushTarget(device.ID, "installation", "credential"); err != nil {
+		t.Fatal(err)
+	}
+	received := make(chan map[string]string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		var payload map[string]string
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		received <- payload
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", server.URL)
+	running := &surface.BackgroundTasks{Running: true, Source: surface.BackgroundSourceHost, Tasks: []surface.BackgroundTask{{ID: "b1", Kind: surface.BackgroundShell, Description: "build"}}}
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle}
+	d.observeSession(context.Background(), fake, &from)
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}
+	d.observeSession(context.Background(), fake, &from)
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1", Reply: &surface.ReplyResult{Done: true}, BackgroundTasks: running}
+	d.observeSession(context.Background(), fake, &from)
+	if !surface.BackgroundRunning(from.BackgroundTasks) {
+		t.Fatalf("session background=%+v", from.BackgroundTasks)
+	}
+	select {
+	case payload := <-received:
+		t.Fatalf("a turn that left a background shell running notified: %+v", payload)
+	case <-time.After(250 * time.Millisecond):
+	}
+	// The follow-up turn Claude starts when the shell reports is not seen
+	// busy; the arm the first turn left still fires for it.
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-2", Reply: &surface.ReplyResult{Done: true}}
+	d.observeSession(context.Background(), fake, &from)
+	select {
+	case payload := <-received:
+		if payload["turnId"] != "turn-2" {
+			t.Fatalf("payload=%+v", payload)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the follow-up turn that ended the background work did not notify")
+	}
+	if from.BackgroundTasks != nil {
+		t.Fatalf("session background=%+v", from.BackgroundTasks)
+	}
+}
+
 func TestRelayBoundsVerboseCompletionText(t *testing.T) {
 	daemon, r, fake, from, _ := daemonFixture(t)
 	if _, err := r.AddRoute("from", "to", ".*"); err != nil {

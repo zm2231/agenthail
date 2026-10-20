@@ -111,6 +111,20 @@ past it. A failed request returns `{code, message}`:
 A `send` is answered only after the SDK has taken the message for Claude's
 input, so a success means the message has left the host's queue.
 
+## Context window
+
+When a turn result arrives the host asks Claude for its context report
+(`getContextUsage`, at most five seconds) to learn the main model, then records
+that model's `modelUsage[model].contextWindow` from the result. The reports run
+one at a time beside the message loop, so a slow one holds up no turn, and a
+retiring session closes only after its pending report. A result counts every model
+the turn called, side queries included, so the report decides which entry is
+the main one. The host lists the window with its session (`contextWindow`,
+`contextModel`; `0` and empty before the first result) and emits a `context`
+event when either changes. Claude writes this figure nowhere on disk, so a
+session the host does not run has no such window. The report's own `maxTokens`
+is the auto-compact window, not the model's, and is not used for it.
+
 ## Requests
 
 Claude asks the host, through the SDK's `canUseTool`, before a tool its
@@ -171,6 +185,44 @@ The daemon follows the host's events and asks for a catalog pass when a request
 opens or resolves. For a session the host runs, the oldest open request is what
 the session waits on: its `Waiting` id is the `requestId`, so each request is
 announced once.
+
+## Background tasks
+
+A turn can end with work still running: a Bash call run in the background, an
+Agent call run asynchronously, a Monitor. Claude starts a turn of its own when
+one reports, so the session's status is idle but its work is not done. The
+daemon keeps this as a separate fact beside the status,
+`backgroundTasks{running, tasks[{id, kind, description, parentId, ambient,
+since}], since, source}`, on the session, its catalog row
+(`catalog_sessions.background_tasks`) and the dashboard projection, which
+federates it to paired hosts. `kind` is `shell`, `agent` or `monitor`, or
+Claude's own task type for any other.
+
+For a session the host runs, the host lists the tasks from the last
+`background_tasks_changed` and sends a `tasks` event on each change, which asks
+the daemon for a catalog pass. `since` is when the host first saw the task.
+Claude marks some tasks `ambient`: tasks it keeps out of the transcript and
+live-update watchers, which it says are not activity. They are listed with
+`ambient: true` and do not set `running`. A Monitor started with the Monitor
+tool is not ambient. `source` is `host`.
+
+For a terminal session, the daemon reads the tasks from the transcript, counting
+only those started since the live process's `startedAt`. The call's result
+says it went to the background, not its input: a Bash result with
+`toolUseResult.backgroundTaskId` (asked for with `run_in_background` or moved
+there while it ran), an Agent result with `isAsync` and `agentId` (asked for or
+asynchronous by the agent's definition), and a Monitor result with `taskId`. A `<task-id>` in a later record (the task
+notification Claude queues) or a TaskStop on the id ends it. A terminal Claude
+writes `shell` as its status while a background shell runs, so a shell the
+transcript leaves open counts only while it does; that covers shells ended
+without a notification, such as when a process exits. `source` is
+`transcript`. A `shell` status with no shell in the transcript still counts,
+with no tasks and `source` `status`.
+
+The completion alert waits for the work. A turn that completes with
+`running` set does not send "finished" and keeps the alert armed, so the turn
+that completes with nothing left running sends it, including the turn Claude
+starts when the last task reports. Relays follow completed turns as before.
 
 ## Model and permission mode
 

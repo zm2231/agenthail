@@ -206,6 +206,10 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdLaunch(rest)
 	case "doctor":
 		return a.cmdDoctor(rest)
+	case "hook":
+		return a.cmdHook(rest)
+	case "hooks":
+		return a.cmdHooks(rest)
 	case "permissions":
 		return a.cmdPermissions(rest)
 	case "dashboard":
@@ -330,6 +334,11 @@ Background service:
                                 Native macOS completion notifications
   daemon install                Keep Agenthail running after login and restarts
   daemon uninstall              Stop Agenthail from starting automatically
+
+Claude prompt hook (answer terminal Claude prompts from Agenthail):
+  hooks install                 Add the PermissionRequest hook to every Claude config root
+  hooks uninstall               Remove it
+  hooks status                  Show where it is installed
 
 Dashboard (optional):
   dashboard enable              Enable the local dashboard and open it
@@ -643,7 +652,7 @@ func validateCommandFlags(command string, args []string) error {
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
 		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
 		"permission-mode": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "requests": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
-		"answer": {values: map[string]bool{"--timeout": true, "--request": true, "--reason": true, "--answers": true}, bools: map[string]bool{"--json": true}}, "interrupt": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "steer": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "control": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "identify": {}, "coordinator": {values: map[string]bool{"--name": true, "--instructions": true, "--permission-mode": true, "--cwd": true, "--model": true, "--host": true}, bools: map[string]bool{"--json": true, "--replace": true}}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
+		"answer": {values: map[string]bool{"--timeout": true, "--request": true, "--reason": true, "--answers": true}, bools: map[string]bool{"--json": true}}, "interrupt": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "steer": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "control": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "identify": {}, "coordinator": {values: map[string]bool{"--name": true, "--instructions": true, "--permission-mode": true, "--cwd": true, "--model": true, "--host": true}, bools: map[string]bool{"--json": true, "--replace": true}}, "relay": {}, "daemon": {}, "daemon-run": {}, "hook": {}, "hooks": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
 	}
 	spec, known := specs[command]
 	if !known {
@@ -1194,6 +1203,12 @@ func sessStat(s surface.Session, queued int) string {
 			return "run+q"
 		}
 		return "run"
+	}
+	if surface.BackgroundRunning(s.BackgroundTasks) {
+		if queued > 0 {
+			return "bg+q"
+		}
+		return "bg"
 	}
 	if queued > 0 {
 		return "queue"
@@ -2912,6 +2927,9 @@ func (a *App) cmdDoctor(args []string) error {
 		if caps.Goal {
 			enabled = append(enabled, "goal")
 		}
+		if caps.GoalSet {
+			enabled = append(enabled, "goalSet")
+		}
 		if caps.GoalStatus {
 			enabled = append(enabled, "goalStatus")
 		}
@@ -2987,6 +3005,11 @@ func (a *App) cmdDoctor(args []string) error {
 	if claudeRootsErr != nil {
 		failures++
 	}
+	promptHook := map[string]bool{}
+	for _, root := range claudeRoots {
+		installed, err := claudePromptHookInstalled(filepath.Join(root, "settings.json"))
+		promptHook[root] = err == nil && installed
+	}
 	claudeAccounts, _ := surface.ClaudeAccounts(home)
 	service := a.service()
 	serviceProblems := service.Problems()
@@ -3003,7 +3026,7 @@ func (a *App) cmdDoctor(args []string) error {
 		grants = &report
 	}
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "claudeAccounts": claudeAccounts, "signin": signins}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "claudePromptHook": promptHook, "claudeAccounts": claudeAccounts, "signin": signins}
 		if claudeRootsErr != nil {
 			report["claudeConfigError"] = claudeRootsErr.Error()
 		}
@@ -3027,6 +3050,9 @@ func (a *App) cmdDoctor(args []string) error {
 			fmt.Printf("%s: %s\n", label, root)
 			if account, ok := surface.ClaudeAccountForRoot(claudeAccounts, root); ok {
 				fmt.Printf("  account: %s\n", describeClaudeAccount(account, time.Now()))
+			}
+			if !promptHook[root] {
+				fmt.Printf("  prompt hook: missing; terminal prompts can't be answered from Agenthail until you run: agenthail hooks install\n")
 			}
 		}
 		if len(serviceProblems) > 0 {

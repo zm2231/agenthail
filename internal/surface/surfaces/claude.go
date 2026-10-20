@@ -35,6 +35,8 @@ type Claude struct {
 	observeState map[string]*claudeObservationState
 	goalMu       sync.Mutex
 	goals        map[string]*claudeGoalCursor
+	tasksMu      sync.Mutex
+	taskScans    map[string]*claudeTaskScan
 	modelsMu     sync.Mutex
 	modelsCache  []surface.ModelOption
 	modelsAt     time.Time
@@ -42,6 +44,7 @@ type Claude struct {
 	subagents    *claudeSubagentObserver
 	transcripts  *claudeTranscriptIndex
 	host         *claudeHost
+	prompts      *claudePrompts
 	request      ClaudeRequest
 	localOnly    bool
 }
@@ -56,7 +59,7 @@ func NewClaudeWithRequest(signins signin.Resolver, home string, request ClaudeRe
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(), host: newClaudeHost(home)}
+	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(), host: newClaudeHost(home), prompts: newClaudePrompts()}
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
@@ -79,7 +82,7 @@ func (c *Claude) ObserveAllClaudeSubagents(ctx context.Context) ([]surface.Claud
 
 func (c *Claude) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
-		Send: true, Stream: true, Reply: true, GoalStatus: true,
+		Send: true, Stream: true, Reply: true, GoalSet: true, GoalStatus: true,
 		Compact: true, Model: true, Interrupt: true, Steer: true,
 		Attach: true, Commands: true,
 		Lifecycle: surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true},
@@ -91,11 +94,14 @@ func (c *Claude) Capabilities() surface.Capabilities {
 // for any other session Control cannot reach through Remote Control: a CLI
 // session reached only over its native peer socket, or any session on an
 // install without Remote Control. Hosted and socket sessions stream only from
-// a local transcript. Lifecycle follows the runtime: a background job and a
-// host session have status, logs, stop and resume; an interactive session
-// belongs to its terminal.
+// a local transcript. A goal is set only where the session runs /goal as a
+// command: its peer socket hands the text to the model as a message.
+// Lifecycle follows the runtime: a background job and a host session have
+// status, logs, stop and resume; an interactive session belongs to its
+// terminal.
 func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities {
 	capabilities := c.Capabilities()
+	capabilities.GoalSet = sess == nil || c.canSendHumanTurn(sess)
 	if claudeHosted(sess) {
 		capabilities.Stream = sess.HasLocal && sess.Transcript != ""
 		capabilities.Compact = false
@@ -114,6 +120,7 @@ func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities
 	if sess.Transport == "uds" {
 		capabilities.Stream = sess.HasLocal && sess.Transcript != ""
 	}
+	capabilities.Respond = c.prompts.any(sess.ID)
 	if c.localOnly || nativeClaudeOnly(sess) {
 		capabilities.Steer = false
 		capabilities.Compact = false
@@ -451,6 +458,7 @@ func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
 	}
 	var out []claudeProcess
 	transcripts := c.transcripts.pass(roots)
+	c.prompts.retain()
 	for _, record := range records {
 		if process, ok := c.process(ctx, record, transcripts); ok {
 			out = append(out, process)
@@ -641,10 +649,12 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 	}
 	sess.Status = claudePeerStatus(record)
 	sess.WaitingOn = nil
+	sess.BackgroundTasks = nil
 	if sess.HasLocal {
 		if observation, observeErr := c.Observe(ctx, sess); observeErr == nil && observation.Status != surface.StatusUnknown {
 			sess.Status = observation.Status
 			sess.WaitingOn = observation.WaitingOn
+			sess.BackgroundTasks = observation.BackgroundTasks
 		}
 	}
 }
@@ -861,13 +871,19 @@ func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.T
 	if err != nil {
 		return nil, err
 	}
-	waiting := c.recordWaiting(sess)
+	waiting := c.prompts.answeredWait(sess.ID, c.recordWaiting(sess))
+	if held := c.prompts.waiting(sess.ID); held != nil {
+		waiting = held
+	}
 	if claudeHosted(sess) {
 		waiting = c.hostWaiting(ctx, sess)
 	}
 	if waiting != nil && observation.Status != surface.StatusOffline {
 		observation.Status = surface.StatusBusy
 		observation.WaitingOn = waiting
+	}
+	if observation.Status != surface.StatusOffline {
+		observation.BackgroundTasks = c.claudeBackground(ctx, sess)
 	}
 	return observation, nil
 }
@@ -1317,7 +1333,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 }
 
 func claudeRecordStartsTurn(record map[string]any) bool {
-	return str(record, "type") == "user" && str(record, "uuid") != "" && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record)
+	return str(record, "type") == "user" && str(record, "uuid") != "" && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record) && !claudeRecordIsCommand(record)
 }
 
 func claudeRecordHasToolResult(record map[string]any) bool {
@@ -1333,7 +1349,8 @@ func claudeRecordHasToolResult(record map[string]any) bool {
 }
 
 func claudeRecordIsInterrupt(record map[string]any) bool {
-	if str(record, "type") != "user" {
+	origin, _ := record["origin"].(map[string]any)
+	if str(record, "type") != "user" || str(origin, "kind") == claudeOriginHuman {
 		return false
 	}
 	message, _ := record["message"].(map[string]any)
@@ -1360,14 +1377,6 @@ func claudeStreamTerminal(record map[string]any) (done, ending, interrupted bool
 func strNested(record map[string]any, object, field string) string {
 	value, _ := record[object].(map[string]any)
 	return str(value, field)
-}
-
-func (c *Claude) GoalSet(ctx context.Context, sess *surface.Session, text string) error {
-	return surface.ErrUnsupported
-}
-
-func (c *Claude) GoalClear(ctx context.Context, sess *surface.Session) error {
-	return surface.ErrUnsupported
 }
 
 func (c *Claude) Compact(ctx context.Context, sess *surface.Session) error {

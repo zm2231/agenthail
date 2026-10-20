@@ -8,7 +8,11 @@ struct GoalSection: View {
     @State private var text = ""
 
     private var editable: Bool {
-        !session.isReadOnly && session.capabilities.goal && pane.removedSession == nil
+        !session.isReadOnly && session.capabilities.goalSet && pane.removedSession == nil
+    }
+
+    private var controllable: Bool {
+        editable && session.capabilities.goal
     }
 
     var body: some View {
@@ -57,12 +61,14 @@ struct GoalSection: View {
             if editable {
                 HStack(spacing: 8) {
                     Button("Edit") { begin(.editGoal, text: goal.objective) }
-                    if goal.status == "active" {
-                        Button("Pause") { model.perform(action: "goal-pause", sessionID: session.id) }
-                    } else if goal.status == "paused" {
-                        Button("Resume") { model.perform(action: "goal-resume", sessionID: session.id) }
+                    if controllable {
+                        if goal.status == "active" {
+                            Button("Pause") { model.perform(action: "goal-pause", sessionID: session.id) }
+                        } else if goal.status == "paused" {
+                            Button("Resume") { model.perform(action: "goal-resume", sessionID: session.id) }
+                        }
+                        Button(goal.tokenBudget == nil ? "Set budget" : "Budget") { begin(.budget, text: goal.tokenBudget.map(String.init) ?? "") }
                     }
-                    Button(goal.tokenBudget == nil ? "Set budget" : "Budget") { begin(.budget, text: goal.tokenBudget.map(String.init) ?? "") }
                     Button("Clear", role: .destructive) { model.perform(action: "goal-clear", sessionID: session.id) }
                 }
                 .controlSize(.small)

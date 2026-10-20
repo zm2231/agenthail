@@ -272,6 +272,41 @@ func TestQueueMutationsAdvanceCatalogWatermarkWithPageMembership(t *testing.T) {
 	}
 }
 
+func TestCatalogRowKeepsBackgroundTasksUntilTheSessionGoesUnobserved(t *testing.T) {
+	r := openTestRegistry(t)
+	observed := time.Date(2026, 10, 20, 11, 0, 0, 0, time.UTC)
+	background := &surface.BackgroundTasks{Running: true, Since: observed, Source: surface.BackgroundSourceTranscript, Tasks: []surface.BackgroundTask{
+		{ID: "b1", Kind: surface.BackgroundShell, Description: "go test ./...", Since: observed},
+		{ID: "m1", Kind: surface.BackgroundMonitor, Description: "file watcher", Ambient: true, Since: observed},
+	}}
+	session := surface.Session{ID: "claude-bg", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, LastActive: observed, BackgroundTasks: background}
+	projection := `{"id":"claude-bg","surface":"claude","status":"idle","backgroundTasks":{"running":true,"source":"transcript"}}`
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "claude-bg:initial", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := r.Session(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !surface.SameBackground(stored.BackgroundTasks, background) {
+		t.Fatalf("stored background=%+v", stored.BackgroundTasks)
+	}
+	page, err := r.CatalogSnapshotPage(CatalogPageRequest{Limit: 10, Now: observed})
+	if err != nil || len(page.Sessions) != 1 || !surface.SameBackground(page.Sessions[0].Session.BackgroundTasks, background) {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	if _, err := r.RecordCatalogDiscovery(surface.KindClaude, map[string]struct{}{}, observed.Add(time.Hour), true, 2); err != nil {
+		t.Fatal(err)
+	}
+	page, err = r.CatalogSnapshotPage(CatalogPageRequest{Limit: 10, Now: observed.Add(time.Hour)})
+	if err != nil || len(page.Sessions) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	if retired := page.Sessions[0]; retired.Session.BackgroundTasks != nil || strings.Contains(retired.ProjectionFingerprint, "backgroundTasks") {
+		t.Fatalf("offline session still runs background work: %+v", retired)
+	}
+}
+
 func TestSessionMissingFromDiscoveryStopsBeingBusyOrCurrent(t *testing.T) {
 	r := openTestRegistry(t)
 	observed := time.Date(2026, 10, 7, 11, 0, 0, 0, time.UTC)

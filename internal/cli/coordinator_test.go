@@ -39,6 +39,9 @@ func newCoordinatorCLI(t *testing.T) *coordinatorCLI {
 	posts := &claudePosts{}
 	c.app, c.r = cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	lazyRegistry(c.app)
+	// These commands start and resume real host and Claude processes, which
+	// a loaded runner can take well over a second to do.
+	c.app.DefaultTimeout = 15 * time.Second
 	c.app.Surfaces[0].Surface = surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, c.claude.Home, posts.request)
 	for _, key := range []string{"AGENTHAIL_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"} {
 		t.Setenv(key, "")

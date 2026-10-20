@@ -78,6 +78,8 @@ struct SessionOperationsTest {
         capabilities.compact = true
         capabilities.model = true
         capabilities.goal = true
+        check(!SlashCommand.available(capabilities: capabilities, working: false, waitingOnYou: false).contains(.goal), "/goal needs a session whose goal is set here")
+        capabilities.goalSet = true
         capabilities.interrupt = true
         capabilities.steer = true
         check(SlashCommand.available(capabilities: capabilities, working: false, waitingOnYou: false) == [.name, .compact, .model, .goal], "stop and steer need a running turn")

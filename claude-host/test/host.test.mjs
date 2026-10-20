@@ -403,6 +403,37 @@ test('model and permission mode change live and a resume keeps them', async () =
   d.close();
 });
 
+test('a turn result gives the session the window Claude runs its main model with', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  const opened = await c.call('open', { sessionId: id, cwd: f.cwd });
+  assert.equal(opened.contextWindow, 0);
+  const listed = async () => (await c.call('list')).sessions.find((s) => s.sessionId === id);
+  await c.call('send', { sessionId: id, uuid: randomUUID(), text: 'hello', origin: { kind: 'human' } });
+  const first = await c.event((e) => e.sessionId === id && e.kind === 'context');
+  assert.deepEqual([first.contextWindow, first.contextModel], [1000000, 'claude-opus-5-5']);
+  assert.deepEqual([(await listed()).contextWindow, (await listed()).contextModel], [1000000, 'claude-opus-5-5']);
+
+  const switchTo = async (model, after) => {
+    await c.call('setModel', { sessionId: id, model });
+    await c.call('send', { sessionId: id, uuid: randomUUID(), text: `on ${model}`, origin: { kind: 'human' } });
+    return c.event((e) => e.sessionId === id && e.kind === 'context' && e.seq > after.seq);
+  };
+  const sameWindow = await switchTo('claude-opus-5-5[1m]', first);
+  assert.deepEqual([sameWindow.contextWindow, sameWindow.contextModel], [1000000, 'claude-opus-5-5[1m]']);
+  const smaller = await switchTo('claude-opus-4-8', sameWindow);
+  assert.deepEqual([smaller.contextWindow, smaller.contextModel], [200000, 'claude-opus-4-8']);
+  const unchanged = randomUUID();
+  await c.call('send', { sessionId: id, uuid: unchanged, text: 'unchanged', origin: { kind: 'human' } });
+  await c.event(turnResult(id, unchanged));
+  await sleep(200);
+  assert.equal(c.events.filter((e) => e.sessionId === id && e.kind === 'context').length, 3);
+  c.close();
+});
+
 test('interrupt ends the running turn', async () => {
   const f = fixture();
   await startHost(f);
@@ -542,6 +573,58 @@ async function lockReleased(f) {
   return ok;
 }
 
+test('a slow context report does not hold up the turns after it', async () => {
+  const f = fixture();
+  await startHost(f, { env: { FAKE_CLAUDE_CONTEXT_REPORT_MS: '3000' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const first = randomUUID();
+  await c.call('send', { sessionId: id, uuid: first, text: 'hello' });
+  await c.event(turnResult(id, first));
+  const second = randomUUID();
+  const sent = Date.now();
+  await c.call('send', { sessionId: id, uuid: second, text: 'again' });
+  await c.event(turnResult(id, second));
+  assert.ok(Date.now() - sent < 1500, `the next turn waited ${Date.now() - sent}ms`);
+  const context = await c.event((e) => e.sessionId === id && e.kind === 'context', 10000);
+  assert.equal(context.contextWindow, 1000000);
+  c.close();
+});
+
+test('a session retired while its context report is slow still records the window first', async () => {
+  const f = fixture();
+  const host = await startHost(f, { env: { FAKE_CLAUDE_NO_STATE_EVENTS: '1', FAKE_CLAUDE_CONTEXT_REPORT_MS: '1000' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  await c.call('send', { sessionId: id, uuid: randomUUID(), text: 'SLOW 400' });
+  await c.call('drain');
+  const r = new Client(retiringSocket(f, host));
+  await r.call('subscribe', { after: 0 });
+  assert.equal(await host.exited, 0);
+  const kinds = r.events.filter((e) => e.sessionId === id).map((e) => e.kind);
+  assert.ok(kinds.includes('context') && kinds.indexOf('context') < kinds.indexOf('exited'), kinds.join(' '));
+});
+
+test('a session retired on its last turn result still records the window of that turn', async () => {
+  const f = fixture();
+  const host = await startHost(f, { env: { FAKE_CLAUDE_NO_STATE_EVENTS: '1' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  await c.call('send', { sessionId: id, uuid: randomUUID(), text: 'SLOW 400' });
+  await c.call('drain');
+  const r = new Client(retiringSocket(f, host));
+  await r.call('subscribe', { after: 0 });
+  assert.equal(await host.exited, 0);
+  const kinds = r.events.filter((e) => e.sessionId === id).map((e) => e.kind);
+  assert.ok(kinds.includes('context') && kinds.indexOf('context') < kinds.indexOf('exited'), kinds.join(' '));
+});
+
 test('drain retires the host: it gives up the socket and lock and serves its sessions until each is idle', async () => {
   const f = fixture();
   const host = await startHost(f);
@@ -552,7 +635,7 @@ test('drain retires the host: it gives up the socket and lock and serves its ses
   const idleSession = await c.call('open', { sessionId: idle, cwd: f.cwd });
   await c.call('open', { sessionId: busy, cwd: f.cwd });
   const uuid = randomUUID();
-  await c.call('send', { sessionId: busy, uuid, text: 'SLOW 800' });
+  await c.call('send', { sessionId: busy, uuid, text: 'SLOW 60000' });
   await c.event((e) => e.sessionId === busy && e.kind === 'state' && e.state === 'busy');
   assert.equal((await c.call('drain')).sessions >= 1, true);
   assert.ok(!fs.existsSync(f.socket), 'the daemon socket is free for the next host');
@@ -564,8 +647,9 @@ test('drain retires the host: it gives up the socket and lock and serves its ses
   assert.ok(!alive(idleSession.pid), 'an idle session closes at once');
   const late = randomUUID();
   assert.deepEqual(await r.call('send', { sessionId: busy, uuid: late, text: 'late' }), { accepted: true, duplicate: false });
+  await r.call('interrupt', { sessionId: busy });
   assert.equal(await host.exited, 0);
-  assert.deepEqual(transcript(f, busy).map((l) => l.reply), ['slow:800', 'echo:late']);
+  assert.deepEqual(transcript(f, busy).map((l) => l.reply), ['interrupted', 'echo:late']);
   assert.ok(!fs.existsSync(retiringSocket(f, host)));
   c.close();
   r.close();
@@ -580,11 +664,12 @@ test('retiring lets go of subscribers that came in through the daemon socket', a
   const d = new Client(f.socket);
   const id = randomUUID();
   await d.call('open', { sessionId: id, cwd: f.cwd });
-  await d.call('send', { sessionId: id, uuid: randomUUID(), text: 'SLOW 1000' });
+  await d.call('send', { sessionId: id, uuid: randomUUID(), text: 'SLOW 60000' });
   await d.call('drain');
   await closed;
   const r = new Client(retiringSocket(f, host));
   await r.call('subscribe', { after: 0 });
+  await r.call('interrupt', { sessionId: id });
   await r.event((e) => e.sessionId === id && e.kind === 'exited');
   d.close();
   r.close();
@@ -699,14 +784,17 @@ test('a Claude without session state events falls back to turn results and says 
   const id = randomUUID();
   await c.call('open', { sessionId: id, cwd: f.cwd });
   const uuid = randomUUID();
-  await c.call('send', { sessionId: id, uuid, text: 'SLOW 600' });
+  await c.call('send', { sessionId: id, uuid, text: 'SLOW 60000' });
   await c.call('drain');
   await sleep(200);
   assert.equal(host.exitCode, null, 'a busy session is not closed');
+  const r = new Client(retiringSocket(f, host));
+  await r.call('interrupt', { sessionId: id });
   assert.equal(await host.exited, 0);
   assert.match(host.stderrText, /without session state events/);
-  assert.deepEqual(transcript(f, id).map((l) => l.reply), ['slow:600']);
+  assert.deepEqual(transcript(f, id).map((l) => l.reply), ['interrupted']);
   c.close();
+  r.close();
 });
 
 test('closing a session ends its open requests instead of leaving them listed', async () => {
@@ -795,5 +883,32 @@ test('a send with images gives Claude image blocks before the text', async () =>
   await assert.rejects(c.call('send', { sessionId: id, uuid: randomUUID(), text: 'x', images: [{ path: 'shot.png', mediaType: 'image/png' }] }), { code: 'invalid' });
   await assert.rejects(c.call('send', { sessionId: id, uuid: randomUUID(), text: 'x', images: [{ path: image, mediaType: 'image/webp' }] }), { code: 'invalid' });
   await assert.rejects(c.call('send', { sessionId: id, uuid: randomUUID(), text: '' }), { code: 'invalid' });
+  c.close();
+});
+
+test('the host lists and announces the background tasks a session runs, marking ambient ones', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const shell = randomUUID();
+  await c.call('send', { sessionId: id, uuid: shell, text: 'BACKGROUND 1500' });
+  const started = await c.event((e) => e.sessionId === id && e.kind === 'tasks' && e.tasks.length === 1, 5000);
+  assert.equal(started.tasks[0].id, `task-${shell}`);
+  assert.equal(started.tasks[0].type, 'local_bash');
+  assert.equal(started.tasks[0].description, 'background shell');
+  assert.equal(started.tasks[0].ambient, false);
+  assert.ok(!Number.isNaN(Date.parse(started.tasks[0].since)));
+  await c.event(turnResult(id, shell));
+  const watcher = randomUUID();
+  await c.call('send', { sessionId: id, uuid: watcher, text: 'AMBIENT 1500' });
+  await c.event((e) => e.sessionId === id && e.kind === 'tasks' && e.tasks.length === 2, 5000);
+  const listed = (await c.call('list')).sessions.find((s) => s.sessionId === id);
+  assert.deepEqual(listed.tasks.map((t) => [t.id, t.ambient]), [[`task-${shell}`, false], [`ambient-${watcher}`, true]]);
+  assert.equal(listed.tasks[0].since, started.tasks[0].since);
+  await c.event((e) => e.sessionId === id && e.kind === 'tasks' && e.tasks.length === 0, 5000);
+  assert.deepEqual((await c.call('list')).sessions.find((s) => s.sessionId === id).tasks, []);
   c.close();
 });

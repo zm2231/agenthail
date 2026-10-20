@@ -16,11 +16,14 @@ const chatStart = rendererEnd;
 const chatEnd = source.indexOf("function compactTokenCount", chatStart);
 const goalStart = chatEnd;
 const goalEnd = source.indexOf("function renderContextUsage", goalStart);
+const presenceStart = source.indexOf("function statusLabel");
+const presenceEnd = source.indexOf("function conversationMeta", presenceStart);
 assert(markdownStart >= 0 && markdownEnd > markdownStart, "markdown renderer boundary missing");
 assert(messageStart >= 0 && messageEnd > messageStart, "message renderer boundary missing");
 assert(rendererStart >= 0 && rendererEnd > rendererStart, "timeline renderer boundary missing");
 assert(chatEnd > chatStart, "chat renderer boundary missing");
 assert(goalEnd > goalStart, "goal renderer boundary missing");
+assert(presenceStart >= 0 && presenceEnd > presenceStart, "presence label boundary missing");
 
 const elements = {
   "#chat-actions": { innerHTML: "" },
@@ -30,6 +33,7 @@ const elements = {
   "#chat-subtitle": { textContent: "" },
   "#thread-count": { textContent: "" },
   "#request-panel": { hidden: false, innerHTML: "stale" },
+  "#background-panel": { hidden: false, innerHTML: "stale" },
   "#chat-body": {
     innerHTML: "",
     scrollTop: 0,
@@ -67,6 +71,10 @@ globalThis.timelineSignature = timelineSignature;
 globalThis.renderClaudeMetadata = renderClaudeMetadata;
 ${source.slice(chatStart, chatEnd)}
 ${source.slice(goalStart, goalEnd)}
+${source.slice(presenceStart, presenceEnd)}
+globalThis.presenceLabel = presenceLabel;
+globalThis.presenceTone = presenceTone;
+globalThis.renderBackgroundTasks = renderBackgroundTasks;
 globalThis.renderChat = renderChat;
 globalThis.goalStatusLabel = goalStatusLabel;
 globalThis.contextBreakdown = contextBreakdown;`, context);
@@ -117,7 +125,7 @@ assert(!claudeMetadata.includes("wake") && !claudeMetadata.includes("cancel"), "
 context.app.selected = { id: "session-1", surface: "claude", runtime: {}, status: "idle" };
 context.app.history = {
   exchanges: [],
-  capabilities: { goal: true },
+  capabilities: { goal: true, goalSet: true, goalStatus: true },
   readOnly: false,
   timeline: { items: [{ id: "message-2", kind: "message", role: "assistant", text: "Ready" }] },
   claudeRuns: [{ jobId: "job-writable", providerState: "idle" }],
@@ -142,7 +150,7 @@ assert.equal((fallback.match(/data-edit-message=/g) || []).length, 1, "exchange 
 assert(fallback.includes('data-edit-message="Synthetic fallback request"'), "exchange fallback Edit carries the message text");
 context.app.history = {
   exchanges: [],
-  capabilities: { goal: true },
+  capabilities: { goal: true, goalSet: true, goalStatus: true },
   readOnly: false,
   timeline: { items: [{ id: "message-2", kind: "message", role: "assistant", text: "Ready" }] },
 };
@@ -165,6 +173,10 @@ for (const status of ["blocked", "usageLimited", "budgetLimited"]) {
 }
 const complete = renderGoal({ status: "complete", objective: "Investigate" });
 assert(!complete.includes("Needs you:"), "complete goal should not render active attention");
+context.app.history.capabilities = { goal: false, goalSet: true, goalStatus: true };
+const claudeGoal = renderGoal({ status: "active", objective: "Investigate" });
+assert(claudeGoal.includes("Clear") && !claudeGoal.includes("Pause") && !claudeGoal.includes("budget"), "a goal set by command offers clear but no pause or budget");
+context.app.history.capabilities = { goal: true, goalSet: true, goalStatus: true };
 
 const first = [{ id: "call-2", kind: "toolCall", title: "Search", text: "first", callId: "call-8", status: "running" }];
 const refreshed = [{ id: "call-2", kind: "toolCall", title: "Search", text: "second", callId: "call-8", status: "complete" }];
@@ -182,5 +194,25 @@ assert.equal(JSON.stringify(full.map(([label]) => label)), JSON.stringify(["Used
 assert.equal(JSON.stringify(context.contextBreakdown({ usedTokens: 0, contextWindow: 0, compactionCount: 0 }).map(([label, value]) => `${label}=${value}`)), JSON.stringify(["Used tokens=0", "Context window=Unavailable", "Compactions=0"]), "unreported figures are left out and an unknown window says so");
 assert.equal(context.contextBreakdown({ usedTokens: 1, contextWindow: 9, compactionCount: 0, windowEstimated: true })[1][0], "Estimated window", "an estimated window is labeled");
 assert.equal(context.contextBreakdown({ usedTokens: 1, contextWindow: 9, compactionCount: 0, contextWindowSource: "configured" })[1][0], "Configured window", "a configured window is labeled");
+
+assert(elements["#background-panel"].hidden && elements["#background-panel"].innerHTML === "", "a session with no background work shows no background panel");
+const backgroundSession = {
+  id: "session-bg", surface: "claude", status: "idle",
+  backgroundTasks: { running: true, source: "transcript", tasks: [
+    { id: "b1", kind: "shell", description: "go test ./...", since: "2026-10-20T12:00:00Z" },
+    { id: "m1", kind: "monitor", description: "file watcher", ambient: true },
+  ] },
+};
+assert.equal(context.presenceLabel(backgroundSession), "Waiting on background work", "a session between turns with background work says so");
+assert.equal(context.presenceTone(backgroundSession), "background", "background work has its own tone");
+assert.equal(context.presenceLabel({ ...backgroundSession, status: "busy" }), "Working", "a turn in progress still reads as working");
+assert.equal(context.presenceLabel({ ...backgroundSession, waitingOn: { kind: "approval", id: "r1" } }), "Waiting on you", "a question outranks background work");
+assert.notEqual(context.presenceLabel({ ...backgroundSession, backgroundTasks: { running: false, source: "host", tasks: [{ id: "m1", kind: "monitor", ambient: true }] } }), "Waiting on background work", "ambient tasks alone do not hold the session");
+context.renderBackgroundTasks(backgroundSession);
+const backgroundPanel = elements["#background-panel"].innerHTML;
+assert(!elements["#background-panel"].hidden, "background work shows its panel");
+for (const expected of ["1 background task running", "go test ./...", "file watcher", "ambient", "Read from the transcript."]) assert(backgroundPanel.includes(expected), `background panel omitted ${expected}`);
+context.renderBackgroundTasks({ ...backgroundSession, backgroundTasks: { running: true, source: "status" } });
+assert(elements["#background-panel"].innerHTML.includes("Background work running") && elements["#background-panel"].innerHTML.includes("not which one"), "a shell reported without a list says what is known");
 
 console.log("dashboard timeline VM tests passed");

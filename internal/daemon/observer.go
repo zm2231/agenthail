@@ -152,6 +152,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	}
 	session.Status = observation.Status
 	session.WaitingOn = observation.WaitingOn
+	session.BackgroundTasks = observation.BackgroundTasks
 	if session.Source != source || session.Transport != transport {
 		if err := d.Registry.RegisterSession(*session); err != nil {
 			d.log.Printf("persist refreshed session %s: %s", d.resolveDisplay(session.ID), err)
@@ -185,7 +186,10 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 				}
 			}
 		}
-		terminalCompletion := observation.ActiveTurnID == ""
+		// A turn that leaves background tasks running has not finished the
+		// work it started: the notification stays armed for the turn Claude
+		// starts when they report.
+		terminalCompletion := observation.ActiveTurnID == "" && !surface.BackgroundRunning(observation.BackgroundTasks)
 		if terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && !session.Delegated() && observation.Reply != nil && observation.Reply.Done {
 			desktopNotificationMessage = fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
 			mobileNotificationMessage = fmt.Sprintf("%s finished", notificationSurfaceName(session.Surface))

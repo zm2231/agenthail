@@ -6,9 +6,12 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/claudepeer"
 )
 
 func processStartTime(pid int) (time.Time, error) {
@@ -21,4 +24,18 @@ func processStartTime(pid int) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return time.ParseInLocation(claudeProcessStartLayout, strings.TrimSpace(string(output)), time.UTC)
+}
+
+// processIdentity names a running process by its start time, which tells it
+// from a later process given the same pid: in clock ticks on Linux, and to
+// the second from ps elsewhere.
+func processIdentity(pid int) (string, error) {
+	if runtime.GOOS == "linux" {
+		return claudepeer.ProcStartTicks(pid)
+	}
+	started, err := processStartTime(pid)
+	if err != nil {
+		return "", err
+	}
+	return started.UTC().Format(time.RFC3339), nil
 }
