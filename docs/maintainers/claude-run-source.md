@@ -91,7 +91,10 @@ The shared API projection carries the provider source as the typed optional
 field `contextWindowSource`. Native clients show `usedTokens` without a
 percentage when the window is zero or an estimated denominator would exceed
 100 percent. They must not reconstruct a window from transcript model names or
-observed usage.
+observed usage. The optional `autoCompact` object (`enabled`, `window`,
+`threshold`, `decidedBy`, `source: "runtime"`) is when the running Claude
+compacts, as it reports it; clients show it as is and never derive it from
+settings files.
 
 The captured launch model is not authoritative forever. A confirmed `/model`
 control result updates the in-memory session model; a provider assistant record

@@ -515,6 +515,21 @@
               </form>
               <div class="setting-row"><div><strong>Local listener</strong><p id="settings-listener">127.0.0.1</p></div><span class="status-pill idle">Private</span></div>
             </section>
+            <section class="settings-card">
+              <div class="settings-card-heading">
+                <h2>Claude compaction</h2>
+                <p>When Claude compacts a conversation, per Claude config folder. Applies to Claude sessions started after the change.</p>
+              </div>
+              <div id="claude-compact-roots" class="claude-compact-roots"><div class="empty-card">Reading Claude settings.</div></div>
+              <form class="settings-form" id="claude-compact-form">
+                <label><span>Config folder</span><select id="claude-compact-root" name="root"></select></label>
+                <label><span>Model (blank for every model)</span><input id="claude-compact-model" name="model" placeholder="claude-opus-5-5" autocomplete="off"></label>
+                <label><span>Window</span><input id="claude-compact-window" name="window" placeholder="tokens, auto, or unset" autocomplete="off"></label>
+                <label><span>Autocompact</span><select id="claude-compact-enabled" name="enabled"><option value="">Leave as is</option><option value="on">On</option><option value="off">Off</option></select></label>
+                <label><span>Idle compaction</span><select id="claude-compact-idle" name="idle"><option value="">Leave as is</option><option value="on">On</option><option value="off">Off</option></select></label>
+                <button class="soft-button" type="submit">Save</button>
+              </form>
+            </section>
           </div>
         </section>
       </section>

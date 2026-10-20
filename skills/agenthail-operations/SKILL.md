@@ -83,6 +83,19 @@ cached usage, and which roots share one account. `thread create claude
 --account <name|email|dir>` starts the session under that root; `list --wide`
 shows each Claude session's account.
 
+`agenthail claude settings compact [--json]` shows each root's compaction
+settings as its `settings.json` holds them: `autoCompactWindow`, each
+`modelSettings.<model>.autoCompactWindow`, `autoCompactEnabled` and
+`idleCompaction`, plus `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `DISABLE_AUTO_COMPACT`
+or `DISABLE_COMPACT` when set in this environment, since they take precedence.
+`agenthail claude settings compact [--root <root>] [--model <model>]
+<tokens|auto|unset> [--enabled on|off] [--idle on|off]` edits only those keys
+in that root's file (the primary root by default). Tokens run from 100000 to
+1000000; `auto` is Claude's window for the model; `unset` removes the key. A
+running Claude does not reread the file: a change applies to sessions started
+after it. A hosted session's `contextUsage.autoCompact` is what the running
+Claude reports (`source: "runtime"`), the value actually in effect.
+
 One unhealthy surface does not block the others. Preserve the `errors` object
 from JSON discovery output when reporting partial availability.
 

@@ -670,23 +670,37 @@ func StreamEventDelta(event StreamEvent, previous string) string {
 }
 
 type ContextUsage struct {
-	UsedTokens            int64     `json:"usedTokens"`
-	ContextWindow         int64     `json:"contextWindow"`
-	CumulativeTokens      int64     `json:"cumulativeTokens,omitempty"`
-	InputTokens           int64     `json:"inputTokens,omitempty"`
-	CachedInputTokens     int64     `json:"cachedInputTokens,omitempty"`
-	OutputTokens          int64     `json:"outputTokens,omitempty"`
-	ReasoningOutputTokens int64     `json:"reasoningOutputTokens,omitempty"`
-	Compacting            bool      `json:"compacting"`
-	CompactionCount       int       `json:"compactionCount"`
-	LastCompactedAt       time.Time `json:"lastCompactedAt,omitempty"`
-	PreCompactTokens      int64     `json:"preCompactTokens,omitempty"`
-	PostCompactTokens     int64     `json:"postCompactTokens,omitempty"`
-	ReclaimedTokens       int64     `json:"reclaimedTokens,omitempty"`
-	WindowEstimated       bool      `json:"windowEstimated,omitempty"`
-	ContextWindowSource   string    `json:"contextWindowSource,omitempty"`
-	UpdatedAt             time.Time `json:"updatedAt,omitempty"`
+	UsedTokens            int64        `json:"usedTokens"`
+	ContextWindow         int64        `json:"contextWindow"`
+	CumulativeTokens      int64        `json:"cumulativeTokens,omitempty"`
+	InputTokens           int64        `json:"inputTokens,omitempty"`
+	CachedInputTokens     int64        `json:"cachedInputTokens,omitempty"`
+	OutputTokens          int64        `json:"outputTokens,omitempty"`
+	ReasoningOutputTokens int64        `json:"reasoningOutputTokens,omitempty"`
+	Compacting            bool         `json:"compacting"`
+	CompactionCount       int          `json:"compactionCount"`
+	LastCompactedAt       time.Time    `json:"lastCompactedAt,omitempty"`
+	PreCompactTokens      int64        `json:"preCompactTokens,omitempty"`
+	PostCompactTokens     int64        `json:"postCompactTokens,omitempty"`
+	ReclaimedTokens       int64        `json:"reclaimedTokens,omitempty"`
+	WindowEstimated       bool         `json:"windowEstimated,omitempty"`
+	ContextWindowSource   string       `json:"contextWindowSource,omitempty"`
+	AutoCompact           *AutoCompact `json:"autoCompact,omitempty"`
+	UpdatedAt             time.Time    `json:"updatedAt,omitempty"`
 }
+
+// AutoCompact is when the running agent compacts its context, as it
+// reports it. Window and Threshold are absent while autocompact is off;
+// DecidedBy is the agent's own name for the input that set the window.
+type AutoCompact struct {
+	Enabled   bool   `json:"enabled"`
+	Window    int64  `json:"window,omitempty"`
+	Threshold int64  `json:"threshold,omitempty"`
+	DecidedBy string `json:"decidedBy,omitempty"`
+	Source    string `json:"source"`
+}
+
+const AutoCompactSourceRuntime = "runtime"
 
 type ContextUsageProvider interface {
 	ContextUsage(ctx context.Context, sess *Session) (*ContextUsage, error)

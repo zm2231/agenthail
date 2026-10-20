@@ -187,32 +187,11 @@ func isClaudePromptHook(command string) bool {
 	return filepath.IsAbs(path) && filepath.Base(path) == "agenthail"
 }
 
-func readClaudeSettings(path string) ([]byte, os.FileMode, error) {
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return []byte("{}\n"), 0600, nil
-	}
-	if err != nil {
-		return nil, 0, err
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, 0, err
-	}
-	if strings.TrimSpace(string(data)) == "" {
-		data = []byte("{}\n")
-	}
-	if !gjson.ValidBytes(data) || !gjson.ParseBytes(data).IsObject() {
-		return nil, 0, fmt.Errorf("%s is not a JSON object; fix it before installing the hook", path)
-	}
-	return data, info.Mode().Perm(), nil
-}
-
 // installClaudePromptHook adds Agenthail's PermissionRequest hook to one
 // settings file, or points an earlier one at this binary, and leaves every
 // other setting as written.
 func installClaudePromptHook(path, command string) (bool, error) {
-	data, mode, err := readClaudeSettings(path)
+	data, mode, err := surface.ReadClaudeSettingsFile(path)
 	if err != nil {
 		return false, err
 	}
@@ -246,14 +225,14 @@ func installClaudePromptHook(path, command string) (bool, error) {
 	if string(updated) == string(data) {
 		return false, nil
 	}
-	return true, writeClaudeSettings(path, updated, mode)
+	return true, surface.WriteClaudeSettingsFile(path, updated, mode)
 }
 
 func uninstallClaudePromptHook(path string) (bool, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return false, nil
 	}
-	data, mode, err := readClaudeSettings(path)
+	data, mode, err := surface.ReadClaudeSettingsFile(path)
 	if err != nil {
 		return false, err
 	}
@@ -280,7 +259,7 @@ func uninstallClaudePromptHook(path string) (bool, error) {
 	if string(updated) == string(data) {
 		return false, nil
 	}
-	return true, writeClaudeSettings(path, updated, mode)
+	return true, surface.WriteClaudeSettingsFile(path, updated, mode)
 }
 
 // The states of the prompt hook in a settings file. An outdated hook is one
@@ -314,27 +293,4 @@ func claudePromptHookState(path string) (string, error) {
 		}
 	}
 	return state, nil
-}
-
-func writeClaudeSettings(path string, data []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".settings-*.json")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(temporary.Name())
-	if err := temporary.Chmod(mode); err != nil {
-		temporary.Close()
-		return err
-	}
-	if _, err := temporary.Write(data); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporary.Name(), path)
 }

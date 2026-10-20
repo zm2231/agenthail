@@ -309,6 +309,7 @@ func TestAPIV1RoutesRejectUnauthorizedRequestsWithTypedJSON(t *testing.T) {
 		{http.MethodGet, "/api/v1/history"},
 		{http.MethodPost, "/api/v1/actions"},
 		{http.MethodGet, "/api/v1/settings"},
+		{http.MethodGet, "/api/v1/claude/compact-settings"},
 		{http.MethodPost, "/api/v1/pairings"},
 		{http.MethodGet, "/api/v1/devices"},
 	}
@@ -459,6 +460,7 @@ func TestAPIV1RoutesRejectUnsupportedMethodsWithTypedJSON(t *testing.T) {
 		"/api/v1/history",
 		"/api/v1/actions",
 		"/api/v1/settings",
+		"/api/v1/claude/compact-settings",
 		"/api/v1/pairings",
 		"/api/v1/devices",
 		"/api/v1/device",

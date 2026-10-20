@@ -19,6 +19,7 @@ The web calls the unversioned routes and the Mac calls `/api/v1/*`. Each pair sh
 | GET /api/history | GET /api/v1/history |
 | GET, POST /api/settings | GET, POST /api/v1/settings |
 | GET /api/settings/remote-qr | none (the Mac draws the QR locally) |
+| GET, POST /api/claude/compact-settings | GET, POST /api/v1/claude/compact-settings (settings scope) |
 | GET, POST /api/voice | GET, POST /api/v1/voice (same voice service) |
 | GET /voice-peer.js (browser WebRTC script, `voicePeerScriptHandler`, internal/daemon/voice.go:152-161) | no twin. The Mac loads GET /api/v1/voice/peer instead, an authenticated HTML page with its own handler (`voicePeerHandler`, internal/daemon/voice.go:163-177), in its WebKit bridge (native/VoiceAudioBridge.swift). The Mac reaches it over loopback HTTP with the dashboard token. iOS runs a native WebRTC peer under CallKit (native/iOS/NativeVoiceAudio.swift) and loads no page |
 | GET /api/v1/session-options | same route |
@@ -31,7 +32,7 @@ Status: **present** means the Mac covers the behavior; **partial** means part of
 | --- | --- |
 | Present | 40 |
 | Partial | 10 |
-| Missing | 5 |
+| Missing | 6 |
 | Decided | 1 |
 | n/a | 1 |
 
@@ -108,6 +109,7 @@ Open gaps are tracked as td stories under td-5f222f (listed at the end). Each on
 | Phone access: enable, disable, QR reveal with auto-hide, copy link | index.html:473-481; app.js:748-800, 1927-1955 | GET /api/settings `remoteAccess`; POST /api/settings `remote-enable`, `remote-disable`; GET /api/settings/remote-qr | present (QR made locally) | macOS/DesktopSettings.swift:115-133; macOS/OverviewSettings.swift:137-191 |
 | Codex recent window and busy delivery | index.html:487-491; app.js:1960-1969 | GET /api/settings `dashboard`; POST /api/settings `dashboard-config` | present | macOS/DesktopSettings.swift:68-91 |
 | Local listener | index.html:492 | GET /api/settings | present | macOS/DesktopSettings.swift:58-62 |
+| Claude compaction per config folder: window, per-model windows, autocompact, idle compaction, environment overrides, edit | index.html Claude compaction card; app.js `loadClaudeCompact`, `renderClaudeCompact` | GET, POST /api/claude/compact-settings | missing | No Mac view reads /api/v1/claude/compact-settings yet |
 
 ## iOS where web and Mac differ
 
