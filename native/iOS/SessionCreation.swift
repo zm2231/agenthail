@@ -85,6 +85,15 @@ struct NewSessionSheet: View {
                         if selectedSurface == "codex" {
                             TurnSettingsView(settings: $turnSettings, modelOption: selectedModelOption, enabled: selectedLauncher?.isTerminal != true)
                         }
+                        if selectedSurface == "claude", hosts.claudeAccounts.count > 1 {
+                            Section {
+                                Picker("Account", selection: $claude.account) {
+                                    ForEach(hosts.claudeAccounts) { account in
+                                        Text(account.menuLabel).tag(account.choice).selectionDisabled(!account.signedIn)
+                                    }
+                                }
+                            }
+                        }
                         Section("First instruction") {
                             TextField("What would you like the agent to do?", text: $message, axis: .vertical).lineLimit(4...12)
                         }
@@ -163,7 +172,7 @@ struct NewSessionSheet: View {
             .onChange(of: selectedLauncher) { _, launcher in
                 guard launcher?.isTerminal == true else { return }
                 turnSettings = .init()
-                claude = .init()
+                claude = ClaudeCreationSettings(account: claude.account)
             }
         }
     }

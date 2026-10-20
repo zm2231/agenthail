@@ -22,10 +22,11 @@ type listProject struct {
 }
 
 type listCatalogView struct {
-	Project   *listProject            `json:"project,omitempty"`
-	Subagents *surface.SubagentRollup `json:"-"`
-	Current   bool                    `json:"current"`
-	Archived  bool                    `json:"archived,omitempty"`
+	Project       *listProject            `json:"project,omitempty"`
+	ClaudeAccount *surface.SessionAccount `json:"claudeAccount,omitempty"`
+	Subagents     *surface.SubagentRollup `json:"-"`
+	Current       bool                    `json:"current"`
+	Archived      bool                    `json:"archived,omitempty"`
 }
 
 func catalogListView(record registry.CatalogSessionState) listCatalogView {

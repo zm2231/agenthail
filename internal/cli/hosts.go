@@ -396,7 +396,7 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, a
 	if err != nil {
 		return err
 	}
-	fields := map[string]string{"action": "session-create", "host": hostText, "surface": string(request.surface), "message": request.message, "cwd": request.cwd, "alias": request.alias, "model": request.model, "approvalPolicy": request.approval, "name": request.options.Name, "worktree": request.options.Worktree, "agent": request.options.Agent, "permissionMode": request.options.PermissionMode}
+	fields := map[string]string{"action": "session-create", "host": hostText, "surface": string(request.surface), "message": request.message, "cwd": request.cwd, "alias": request.alias, "model": request.model, "approvalPolicy": request.approval, "name": request.options.Name, "worktree": request.options.Worktree, "agent": request.options.Agent, "permissionMode": request.options.PermissionMode, "account": request.options.Account}
 	for key, value := range fields {
 		if value != "" {
 			payload[key] = value

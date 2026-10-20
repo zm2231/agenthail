@@ -34,6 +34,9 @@ const (
 
 type Daemon struct {
 	Registry          *registry.Registry
+	claudeAccountsMu  sync.Mutex
+	claudeAccountsAt  time.Time
+	claudeAccountList []surface.ClaudeAccount
 	coordinatorMu     sync.Mutex
 	pollInterval      time.Duration
 	Surfaces          []surface.Surface

@@ -34,7 +34,7 @@ Before writing anything, install refuses a `CODEX_HOME` or `~/.agenthail` that c
 
 ## Doctor
 
-`doctor --json` adds `daemon: {supervisor, problems}` and `claudeConfigDirs`, every Claude config root Agenthail reads with the primary one first (`claudeConfigError` when `~/.agenthail/config.json` cannot be read). Under systemd each problem carries `problem`, `detail` and `fix`:
+`doctor --json` adds `daemon: {supervisor, problems}` and `claudeConfigDirs`, every Claude config root Agenthail reads with the primary one first (`claudeConfigError` when `~/.agenthail/config.json` cannot be read), and `claudeAccounts`, the account signed into each. Under systemd each problem carries `problem`, `detail` and `fix`:
 
 | problem | fix |
 |---|---|
