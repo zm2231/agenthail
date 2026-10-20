@@ -1081,6 +1081,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Author          surface.Author             `json:"author"`
 		ProjectID       string                     `json:"projectId"`
 		Path            string                     `json:"path"`
+		Title           string                     `json:"title"`
 		Attachments     []string                   `json:"attachments"`
 		RequestID       string                     `json:"requestId"`
 		Decision        surface.Decision           `json:"decision"`
@@ -1094,7 +1095,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if strings.HasPrefix(request.Action, "project-") {
-		d.projectAction(r.Context(), w, request.Action, request.ProjectID, request.Path)
+		d.projectAction(r, w, projectRequest{Action: request.Action, ProjectID: request.ProjectID, Path: request.Path, Title: request.Title})
 		return
 	}
 	if request.Action == "delivery-dismiss" {

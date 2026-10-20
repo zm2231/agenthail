@@ -376,7 +376,8 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 	if projects, err := d.Registry.ListProjects(); err != nil {
 		d.log.Printf("catalog projects: %s", err)
 	} else {
-		d.catalogIdentities.setFolders(projects)
+		d.refreshProjectRepositories(ctx, projects, time.Now())
+		d.catalogIdentities.setProjects(projects)
 	}
 	for _, adapter := range d.Surfaces {
 		priorStamps := map[string]catalogLiveSession{}
@@ -801,7 +802,7 @@ func (d *Daemon) storedCatalogProject(sessionID string) *catalogProject {
 		return nil
 	}
 	var project *catalogProject
-	if json.Unmarshal(raw, &project) != nil || project == nil || project.ID == "" || project.Kind == "" {
+	if json.Unmarshal(raw, &project) != nil || project == nil || project.ID == "" || project.LocalID == "" {
 		return nil
 	}
 	return project

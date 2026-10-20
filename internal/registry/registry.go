@@ -767,10 +767,12 @@ CREATE TABLE IF NOT EXISTS catalog_surfaces (
 );
 CREATE TABLE IF NOT EXISTS projects (
 	id TEXT PRIMARY KEY,
-	kind TEXT NOT NULL,
-	root_path TEXT NOT NULL,
-	display_name TEXT NOT NULL,
-	registered INTEGER NOT NULL DEFAULT 0,
+	workspace_root TEXT NOT NULL UNIQUE,
+	title TEXT NOT NULL,
+	added INTEGER NOT NULL DEFAULT 0,
+	project_key TEXT NOT NULL DEFAULT '',
+	repository BLOB NOT NULL DEFAULT '',
+	created_at_ms INTEGER NOT NULL DEFAULT 0,
 	archived_at_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS session_archive (

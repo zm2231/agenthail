@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -9,6 +10,7 @@ import (
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/workspace"
 )
 
 type listProject struct {
@@ -123,4 +125,28 @@ func listProjectColumn(view listCatalogView) string {
 		return "-"
 	}
 	return view.Project.DisplayName
+}
+
+// selectedProject is the project --project names, or the project whose
+// sessions a session working in --cwd would join, so a worktree session
+// counts for the project its folder belongs to. It is "" when neither is set.
+func (a *App) selectedProject(ctx context.Context, views map[string]listCatalogView, selector, cwd string) (string, error) {
+	if selector != "" {
+		return resolveListProject(views, selector)
+	}
+	if cwd == "" {
+		return "", nil
+	}
+	folder, err := workspace.NormalizeCWD(cwd)
+	if err != nil {
+		return "", fmt.Errorf("normalize --cwd: %w", err)
+	}
+	projectID, err := daemon.ResolvePathProject(ctx, a.registry(), folder)
+	if err != nil {
+		return "", err
+	}
+	if projectID == "" {
+		return "", fmt.Errorf("no project holds %s; add it with 'agenthail project add %s'", folder, folder)
+	}
+	return projectID, nil
 }
