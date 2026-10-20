@@ -349,3 +349,16 @@ func TestAWaitingHostRequestPushNamesOnlyTheRequestAndTheButtonsComeFromTheMac(t
 		t.Fatalf("a reply to two questions status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestElsewhereWaitingMessageNamesEachKind(t *testing.T) {
+	for kind, want := range map[surface.WaitingKind]string{
+		surface.WaitingQuestion: "builder asks you a question",
+		surface.WaitingInput:    "builder needs your input",
+		surface.WaitingApproval: "builder needs your approval",
+		surface.WaitingDialog:   "builder has a dialog open in its terminal",
+	} {
+		if got := elsewhereWaitingMessage("builder", kind); got != want {
+			t.Errorf("%s: %q, want %q", kind, got, want)
+		}
+	}
+}

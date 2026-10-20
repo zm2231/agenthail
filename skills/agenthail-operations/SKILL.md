@@ -83,6 +83,10 @@ cached usage, and which roots share one account. `thread create claude
 --account <name|email|dir>` starts the session under that root; `list --wide`
 shows each Claude session's account.
 
+`thread adopt <target>` takes a terminal or background Claude conversation
+into the Agenthail host. A busy session is refused (or waited on with
+`--wait`); a terminal is stopped only with `--stop-terminal`.
+
 One unhealthy surface does not block the others. Preserve the `errors` object
 from JSON discovery output when reporting partial availability.
 
@@ -497,8 +501,8 @@ is a send a paired host accepted into its own queue. `refused` means the target
 refused to start, for example Claude failing to resume the conversation; the
 row's last error says why, and the sender receives one
 `[agenthail delivery held ...]` notice. It needs a person, not a resend. A
-target whose turn is waiting on its user (a Claude question, plan approval or
-permission prompt, a Codex approval or
+target whose turn is waiting on its user (a Claude question, plan approval,
+permission prompt or dialog open in its terminal, a Codex approval or
 input request) carries `waitingOn` and lists as `wait`; messages to it,
 including steers, are queued until the user answers. Do not interrupt it to get
 a message through. A Claude session between turns whose background tasks

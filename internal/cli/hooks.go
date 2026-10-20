@@ -26,6 +26,8 @@ const claudePromptHookTimeout = 86400
 
 const claudePromptHookArgs = "hook permission-request"
 
+const claudePromptHookExec = "exec "
+
 const claudePromptHookInputLimit = 1 << 20
 
 // A daemon restarting, as it does on update, drops the held prompt's
@@ -140,11 +142,14 @@ func (a *App) cmdHooks(args []string) error {
 			}
 			fmt.Printf("%s: %s\n", path, map[bool]string{true: "removed", false: "not installed"}[changed])
 		case "status":
-			installed, err := claudePromptHookInstalled(path)
+			state, err := claudePromptHookState(path)
 			if err != nil {
 				return err
 			}
-			fmt.Printf("%s: %s\n", path, map[bool]string{true: "installed", false: "missing"}[installed])
+			if state == claudePromptHookOutdated {
+				state += "; run: agenthail hooks install"
+			}
+			fmt.Printf("%s: %s\n", path, state)
 		}
 	}
 	return nil
@@ -155,14 +160,23 @@ func claudePromptHookCommand() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("locate agenthail binary: %w", err)
 	}
-	return "'" + strings.ReplaceAll(executable, "'", `'\''`) + "' " + claudePromptHookArgs, nil
+	return claudePromptHookCommandFor(executable), nil
+}
+
+// claudePromptHookCommandFor is the hook command that runs executable. Claude
+// runs hook commands with /bin/sh -c, and the hook finds its Claude process as
+// its parent; exec keeps a shell such as dash, which does not replace itself
+// with a lone command, from becoming that parent.
+func claudePromptHookCommandFor(executable string) string {
+	return claudePromptHookExec + "'" + strings.ReplaceAll(executable, "'", `'\''`) + "' " + claudePromptHookArgs
 }
 
 // isClaudePromptHook reports whether a hook command is one `hooks install`
 // wrote: this executable, or another agenthail executable, quoted as install
 // quotes it and followed by exactly the hook's arguments.
 func isClaudePromptHook(command string) bool {
-	if own, err := claudePromptHookCommand(); err == nil && command == own {
+	command = strings.TrimPrefix(command, claudePromptHookExec)
+	if own, err := claudePromptHookCommand(); err == nil && command == strings.TrimPrefix(own, claudePromptHookExec) {
 		return true
 	}
 	executable, found := strings.CutSuffix(command, " "+claudePromptHookArgs)
@@ -269,22 +283,37 @@ func uninstallClaudePromptHook(path string) (bool, error) {
 	return true, writeClaudeSettings(path, updated, mode)
 }
 
-func claudePromptHookInstalled(path string) (bool, error) {
+// The states of the prompt hook in a settings file. An outdated hook is one
+// install wrote before it ran the hook with exec, or with another timeout;
+// install brings it up to date.
+const (
+	claudePromptHookMissing   = "missing"
+	claudePromptHookOutdated  = "outdated"
+	claudePromptHookInstalled = "installed"
+)
+
+func claudePromptHookState(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return false, nil
+		return claudePromptHookMissing, nil
 	}
 	if err != nil {
-		return false, err
+		return "", err
 	}
+	state := claudePromptHookMissing
 	for _, entry := range gjson.GetBytes(data, "hooks.PermissionRequest").Array() {
 		for _, hook := range entry.Get("hooks").Array() {
-			if isClaudePromptHook(hook.Get("command").String()) {
-				return true, nil
+			command := hook.Get("command").String()
+			if !isClaudePromptHook(command) {
+				continue
 			}
+			if strings.HasPrefix(command, claudePromptHookExec) && hook.Get("timeout").Int() == claudePromptHookTimeout {
+				return claudePromptHookInstalled, nil
+			}
+			state = claudePromptHookOutdated
 		}
 	}
-	return false, nil
+	return state, nil
 }
 
 func writeClaudeSettings(path string, data []byte, mode os.FileMode) error {

@@ -32,6 +32,9 @@ const (
 	WaitingQuestion WaitingKind = "question"
 	WaitingApproval WaitingKind = "approval"
 	WaitingInput    WaitingKind = "input"
+	// WaitingDialog is a dialog open in the session's own interface, such as
+	// a settings panel, which only that interface can settle.
+	WaitingDialog WaitingKind = "dialog"
 )
 
 // Waiting marks a busy turn that cannot continue until its user answers. ID

@@ -889,24 +889,34 @@ func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.T
 }
 
 // recordWaiting reads what the session's live process reports it is waiting
-// on: "status":"waiting" with waitingFor "input needed" for AskUserQuestion,
-// and "permission prompt" for a plan approval or a tool permission.
-// statusUpdatedAt is when it started waiting, so it names one question.
+// on: "status":"waiting" with the waitingFor Claude classes itself. Its
+// permission prompts, sandbox, worker and goal requests ask for approval;
+// "input needed" (AskUserQuestion, an MCP server's question) is a question;
+// "dialog open" is a panel only its terminal can settle. statusUpdatedAt is
+// when it started waiting, so it names one question.
 func (c *Claude) recordWaiting(sess *surface.Session) *surface.Waiting {
 	record, live := c.liveRecord(*sess)
 	if !live || str(record, "status") != "waiting" {
 		return nil
 	}
-	kind := surface.WaitingApproval
-	if str(record, "waitingFor") == "input needed" {
-		kind = surface.WaitingQuestion
-	}
+	kind := claudeWaitingKind(str(record, "waitingFor"))
 	since, _ := record["statusUpdatedAt"].(float64)
 	waiting := &surface.Waiting{Kind: kind, ID: fmt.Sprintf("%s:%s:%d", sess.ID, kind, int64(since))}
 	if since > 0 {
 		waiting.Since = time.UnixMilli(int64(since)).UTC()
 	}
 	return waiting
+}
+
+func claudeWaitingKind(waitingFor string) surface.WaitingKind {
+	switch waitingFor {
+	case "input needed":
+		return surface.WaitingQuestion
+	case "dialog open":
+		return surface.WaitingDialog
+	default:
+		return surface.WaitingApproval
+	}
 }
 
 func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {

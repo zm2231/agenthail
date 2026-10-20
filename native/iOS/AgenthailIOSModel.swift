@@ -68,7 +68,7 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var showForgetMacConfirmation = false
     @Published var showPairingConfirmation = false
 
-    private var api: AgenthailAPI?
+    private(set) var api: AgenthailAPI?
     @Published var creatingSession = false
     @Published var creationError: String?
     @Published var creationWarning: String?
