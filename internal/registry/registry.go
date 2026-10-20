@@ -54,7 +54,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 22
+	schemaVersion   = 23
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -147,7 +147,13 @@ func migrateTx(tx *sql.Tx) error {
 	if version > schemaVersion {
 		return &NewerSchemaError{Found: version, Supported: schemaVersion}
 	}
+	if err := setAsideReleasedProjectsTable(tx); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(schema); err != nil {
+		return err
+	}
+	if err := upgradeReleasedProjectsTable(tx); err != nil {
 		return err
 	}
 	if err := ensureHostIdentity(tx); err != nil {
@@ -403,6 +409,39 @@ func dropQueueExpiry(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// setAsideReleasedProjectsTable renames the projects table that v0.2.43 and
+// v0.2.44 created (kind, root_path, display_name, registered) so the schema can
+// create the current one.
+func setAsideReleasedProjectsTable(tx *sql.Tx) error {
+	released, err := columnExists(tx, "projects", "root_path")
+	if err != nil || !released {
+		return err
+	}
+	_, err = tx.Exec(`ALTER TABLE projects RENAME TO projects_released`)
+	return err
+}
+
+// upgradeReleasedProjectsTable carries the released table's rows into the
+// current one: a registered folder becomes an added project, and an archived
+// repository becomes the archive row of its implicit project.
+func upgradeReleasedProjectsTable(tx *sql.Tx) error {
+	var name string
+	err := tx.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='projects_released'`).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO projects(id,workspace_root,title,added,archived_at_ms)
+		SELECT CASE WHEN registered=1 THEN 'p-' || id ELSE 'implicit:' || root_path END, root_path, display_name, registered, archived_at_ms
+		FROM projects_released WHERE registered=1 OR archived_at_ms>0`); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`DROP TABLE projects_released`)
+	return err
 }
 
 func columnExists(tx *sql.Tx, table, name string) (bool, error) {
