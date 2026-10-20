@@ -1132,16 +1132,14 @@ func (r *Registry) resolveTarget(target, kind string) (string, error) {
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
-	prefix := escapeLike(target) + "%"
-	if ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE host_id='' AND id LIKE ? ESCAPE '\' AND (? = '' OR surface = ?) ORDER BY updated_at DESC, id LIMIT 2`, prefix, kind, kind); err != nil {
+	if ids, err := r.idPrefixMatches(target, kind, 2); err != nil {
 		return "", err
 	} else if len(ids) == 1 {
 		return ids[0], nil
 	} else if len(ids) > 1 {
 		return "", fmt.Errorf("ambiguous session id prefix %q matches %s", target, strings.Join(ids, ", "))
 	}
-	contains := "%" + escapeLike(target) + "%"
-	ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE host_id='' AND parent_session_id='' AND (name LIKE ? ESCAPE '\' OR cwd LIKE ? ESCAPE '\') AND (? = '' OR surface = ?) ORDER BY updated_at DESC, id LIMIT 2`, contains, contains, kind, kind)
+	ids, err := r.nameOrCwdMatches(target, kind, 2)
 	if err != nil {
 		return "", err
 	}
@@ -1152,6 +1150,59 @@ func (r *Registry) resolveTarget(target, kind string) (string, error) {
 		return "", fmt.Errorf("ambiguous session target %q matches %s", target, strings.Join(ids, ", "))
 	}
 	return ids[0], nil
+}
+
+// NamesSession reports whether selector identifies session on its own rather
+// than as a name or cwd fragment: an alias, an ID or ID prefix, a Claude
+// conversation ID or PID, or @<parent>/<nickname> under such a parent.
+func (r *Registry) NamesSession(session surface.Session, selector string) bool {
+	if path, ok := strings.CutPrefix(selector, "@"); ok {
+		if parent, _, isPath := strings.Cut(path, "/"); isPath {
+			_, err := r.ExactTarget("", parent)
+			return err == nil
+		}
+	}
+	if surface.IdentifiedBy(session, strings.TrimPrefix(selector, "@")) {
+		return true
+	}
+	sid, err := r.ExactTarget(session.Surface, strings.TrimPrefix(selector, "@"))
+	return err == nil && sid == session.ID
+}
+
+// FragmentMatches lists the local sessions target matches by ID prefix or
+// name/cwd fragment, newest first; an empty kind means every surface.
+func (r *Registry) FragmentMatches(kind surface.SurfaceKind, target string, limit int) ([]string, error) {
+	if target == "" {
+		return nil, nil
+	}
+	prefixed, err := r.idPrefixMatches(target, string(kind), limit)
+	if err != nil {
+		return nil, err
+	}
+	named, err := r.nameOrCwdMatches(target, string(kind), limit)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	seen := map[string]bool{}
+	for _, id := range append(prefixed, named...) {
+		if !seen[id] && len(ids) < limit {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+func (r *Registry) idPrefixMatches(target, kind string, limit int) ([]string, error) {
+	return r.matchingIDs(`SELECT id FROM sessions WHERE host_id='' AND id LIKE ? ESCAPE '\' AND (? = '' OR surface = ?) ORDER BY updated_at DESC, id LIMIT ?`, escapeLike(target)+"%", kind, kind, limit)
+}
+
+// nameOrCwdMatches matches only family roots, so a fragment never picks a
+// subagent.
+func (r *Registry) nameOrCwdMatches(target, kind string, limit int) ([]string, error) {
+	contains := "%" + escapeLike(target) + "%"
+	return r.matchingIDs(`SELECT id FROM sessions WHERE host_id='' AND parent_session_id='' AND (name LIKE ? ESCAPE '\' OR cwd LIKE ? ESCAPE '\') AND (? = '' OR surface = ?) ORDER BY updated_at DESC, id LIMIT ?`, contains, contains, kind, kind, limit)
 }
 
 func (r *Registry) localSessionSurface(id string) (string, bool) {

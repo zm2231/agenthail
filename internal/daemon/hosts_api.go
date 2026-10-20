@@ -289,6 +289,9 @@ type resolveMatch struct {
 	Name    string              `json:"name,omitempty"`
 	Alias   string              `json:"alias,omitempty"`
 	Host    dashboardHost       `json:"host"`
+	// Exact reports that the target identifies the session rather than
+	// matching its name or folder; deliveries go only to exact matches.
+	Exact bool `json:"exact"`
 }
 
 type resolveResponse struct {
@@ -350,7 +353,7 @@ func (d *Daemon) resolveLocal(ctx context.Context, target string) ([]resolveMatc
 			return nil, lookupErr
 		}
 		alias, _ := d.Registry.ReverseAlias(sid)
-		return []resolveMatch{{ID: sid, Surface: session.Surface, Name: session.Name, Alias: alias, Host: host}}, nil
+		return []resolveMatch{{ID: sid, Surface: session.Surface, Name: session.Name, Alias: alias, Host: host, Exact: named || d.Registry.NamesSession(*session, target)}}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
@@ -365,7 +368,7 @@ func (d *Daemon) resolveLocal(ctx context.Context, target string) ([]resolveMatc
 			continue
 		}
 		alias, _ := d.Registry.ReverseAlias(session.ID)
-		matches = append(matches, resolveMatch{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Host: host})
+		matches = append(matches, resolveMatch{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Host: host, Exact: d.Registry.NamesSession(*session, lookup)})
 	}
 	return matches, nil
 }
@@ -404,7 +407,7 @@ func (d *Daemon) resolveMirrored(host *pairedHost, target string) []resolveMatch
 	}
 	matches := []resolveMatch{}
 	for _, match := range found {
-		matches = append(matches, resolveMatch{ID: hosts.Qualify(host.record.ID, match.ID), Surface: match.Surface, Name: match.Name, Alias: match.Alias, Host: host.ref()})
+		matches = append(matches, resolveMatch{ID: hosts.Qualify(host.record.ID, match.ID), Surface: match.Surface, Name: match.Name, Alias: match.Alias, Host: host.ref(), Exact: true})
 	}
 	return matches
 }

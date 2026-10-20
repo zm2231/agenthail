@@ -36,8 +36,10 @@ the Tailscale ranges (`100.64.0.0/10` or `fd7a:115c:a1e0::/48`); anything else
 is refused before dialing. `GET /api/v1/version` also reports the federation range
 (`minimumFederation`, `maximumFederation`): the version of what one daemon
 serves another beyond the client API, such as the launch catalog, history
-filtered by session, and project coordinators (version 3, see
-[coordinator](coordinator.md)). If the remote's protocol or federation range does not
+filtered by session, project coordinators (version 3, see
+[coordinator](coordinator.md)), and whether each `/api/v1/resolve` match
+identifies its session rather than matching its name or folder, which decides
+whether a CLI delivery may go to it (version 4). If the remote's protocol or federation range does not
 include this daemon's, pairing fails and the device it just issued is revoked.
 A paired host that later reports a range without this daemon's is
 `incompatible` (shown as needing an update), and nothing is forwarded to it
