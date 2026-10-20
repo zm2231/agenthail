@@ -282,14 +282,36 @@ func TestSubscribeStreamsEventsBoundToTheMessage(t *testing.T) {
 	if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: sessionID, UUID: message, Text: "TOOL"}); err != nil {
 		t.Fatal(err)
 	}
-	var denied, result bool
-	for !denied || !result {
+	var request *claudehost.Request
+	for request == nil {
 		select {
 		case e := <-events:
-			denied = denied || (e.Kind == "permission_denied" && e.Tool == "Bash" && e.SessionID == sessionID)
+			if e.Kind == "request_opened" && e.SessionID == sessionID {
+				request = e.Request
+			}
+		case <-ctx.Done():
+			t.Fatal("no request_opened event")
+		}
+	}
+	listing, err := client.List(ctx)
+	if err != nil || len(listing.Sessions) != 1 || len(listing.Sessions[0].Requests) != 1 || listing.Sessions[0].Requests[0].RequestID != request.RequestID || request.Tool != "Bash" {
+		t.Fatalf("listing = %+v, %v; request = %+v", listing, err, request)
+	}
+	outcome, err := client.Respond(ctx, sessionID, request.RequestID, claudehost.Decision{Behavior: "allow"})
+	if err != nil || outcome != "allowed" {
+		t.Fatalf("respond = %q, %v", outcome, err)
+	}
+	if _, err := client.Respond(ctx, sessionID, request.RequestID, claudehost.Decision{Behavior: "allow"}); !claudehost.IsCode(err, "stale") {
+		t.Fatalf("second respond = %v, want stale", err)
+	}
+	var resolved, result bool
+	for !resolved || !result {
+		select {
+		case e := <-events:
+			resolved = resolved || (e.Kind == "request_resolved" && e.RequestID == request.RequestID && e.Outcome == "allowed")
 			result = result || (e.Kind == "sdk" && strings.Contains(string(e.Message), `"type":"result"`) && strings.Contains(string(e.Message), message))
 		case <-ctx.Done():
-			t.Fatalf("events: denied=%v result=%v", denied, result)
+			t.Fatalf("events: resolved=%v result=%v", resolved, result)
 		}
 	}
 }

@@ -42,6 +42,9 @@ func (m *Manager) Client() Client { return NewClient(m.Home) }
 
 func (m *Manager) stateDir() string { return StateDir(m.Home) }
 
+// LogPath is the host's stdout and stderr.
+func (m *Manager) LogPath() string { return filepath.Join(m.stateDir(), "host.log") }
+
 // StateDir holds the host's lock, log and state.json, the record of the Claude
 // processes it started, which outlives the host.
 func StateDir(home string) string { return filepath.Join(home, ".agenthail", "claude-host") }
@@ -136,7 +139,7 @@ func (m *Manager) lock() (*os.File, error) {
 // fd 3. The daemon's copy of the lock is closed once the host has it.
 func (m *Manager) spawn(launch Launch, lock *os.File) (<-chan error, error) {
 	defer lock.Close()
-	logPath := filepath.Join(m.stateDir(), "host.log")
+	logPath := m.LogPath()
 	if info, err := os.Stat(logPath); err == nil && info.Size() > maxLogBytes {
 		_ = os.Rename(logPath, logPath+".1")
 	}
@@ -187,7 +190,7 @@ func (m *Manager) awaitHello(ctx context.Context, client Client, exited <-chan e
 }
 
 func (m *Manager) logTail() string {
-	data, err := os.ReadFile(filepath.Join(m.stateDir(), "host.log"))
+	data, err := os.ReadFile(m.LogPath())
 	if err != nil || len(data) == 0 {
 		return ""
 	}

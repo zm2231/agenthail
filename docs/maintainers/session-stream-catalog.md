@@ -14,22 +14,22 @@ change.
 and `q` filters plus a stable page cursor, and returns saved rows plus
 `hostEpoch` and `catalogSeq`, captured in the same registry read transaction.
 Each row retains the existing session summary fields and adds
-`project` (`id`, `displayName`, `rootPath`, `kind`), `checkout`
+`project` (`id`, `localId`, `displayName`, `rootPath`, `kind`, `added`, and
+`key` and `repository` when it has a key), `checkout`
 (`id`, `path`, `branch` or `detachedHead`, `isMain`, and `dirty`), and
 `freshness` (`generation`, `observedAt`, and `stale`). A Claude branch adds
 `forkedFrom`, the session it was branched from.
 
-The owning host resolves `project` from the session's working directory. In
-a Git repository the project is the main checkout: a linked worktree and a
-subfolder both map to the repository whose common directory they share, and
-`id` is derived from that common directory. A directory that no longer exists
-resolves from its nearest existing ancestor, so a session keeps its project
-after its worktree is removed. Outside Git, a session belongs to the nearest
-folder registered as a project (`kind` `folder`) and otherwise has no
-`project`. A Git failure other than "not a repository" keeps the session's
-last known project and records `unavailableReason`; it never moves the
-session to another project. A mirrored row's project `id` is qualified with
-its host like the session id. A
+The owning host resolves `project` from the session's working directory: the
+deepest added project holding the folder, read in a worktree as the same
+folder of the main checkout, else the repository's implicit project at its
+main checkout, else none (see `projects.md`). A directory that no longer
+exists resolves from its nearest existing ancestor, so a session keeps its
+project after its worktree is removed. A Git failure other than "not a
+repository" keeps the session's last known project and records
+`unavailableReason`; it never moves the session to another project. A
+mirrored row keeps a project `id` that is a key and qualifies its `localId`,
+and an `id` without a key, with its host like the session id. A
 surface discoverer performs provider `List` calls in the background and emits
 full-row `session.upserted`, `session.removed`, `session.unavailable`, and
 `surface.health` catalog deltas. A status pass publishes a session's busy or

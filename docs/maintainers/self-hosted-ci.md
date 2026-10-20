@@ -57,3 +57,15 @@ The App private key is read from setec over the tailnet when a token is needed a
 2. Clone this repository on the host and run `ci/vm/build-image.sh` from it.
 3. Create a LaunchAgent that runs `/bin/bash <clone>/ci/vm/supervisor.sh` with `RunAtLoad`, `KeepAlive` set to restart only after an unsuccessful exit (`SuccessfulExit` false), an `ExitTimeOut` of 60 seconds and a log file, then load it with `launchctl bootstrap gui/$(id -u) <plist>`.
 4. Turn off system sleep on the host: `sudo pmset -a sleep 0 disksleep 0 powernap 0`.
+
+## Stacked pull requests
+
+A GitHub stack is a chain of dependent pull requests; position 1 is the bottom and the top contains every change in the stack. Pull requests below the top skip `verify`, `native`, `installer`, `package`, `ios` and `ios-release`. The top runs them all. A skipped job reports as skipped, which branch protection accepts, so the required checks keep their names. `changes` and `verify-linux` run on every pull request. Pull requests outside a stack are unaffected.
+
+For a stacked pull request, the `changes` gate diffs against the merge base with the stack's base branch, not the pull request below. The top therefore runs `ios` when any pull request in the stack changes an iOS input. If the event has no stack base branch, the gate runs `ios`.
+
+Because only the top runs the expensive jobs, three rules apply:
+
+1. Merge a whole stack at once. GitHub lets a lower pull request merge on its own once the pull requests below it pass, but their expensive jobs were skipped, so that code would reach `main` without them.
+2. After removing or closing the top pull request, push a commit to the new top before merging (`git commit --allow-empty` is enough). Its last run was below the top and skipped the expensive jobs. Re-running that run does not help: a re-run replays the original event, including the old stack position.
+3. Stacks are a GitHub preview. If the `stack` field disappears from the event, every pull request runs every job.

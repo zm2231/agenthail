@@ -26,6 +26,7 @@ type claudeHost struct {
 	mu       sync.Mutex
 	listed   time.Time
 	sessions map[string]int
+	open     map[string]claudehost.Session
 }
 
 // claudeHosted reports whether the host runs the session's conversation. Its
@@ -68,9 +69,11 @@ func (h *claudeHost) listing(ctx context.Context) map[string]int {
 		listing, err := h.client.List(listCtx)
 		cancel()
 		h.sessions = map[string]int{}
+		h.open = map[string]claudehost.Session{}
 		if err == nil {
 			for _, session := range listing.Sessions {
 				h.sessions[session.SessionID] = session.PID
+				h.open[session.SessionID] = session
 			}
 			for _, orphan := range listing.Orphans {
 				h.sessions[orphan.SessionID] = orphan.PID
@@ -81,6 +84,19 @@ func (h *claudeHost) listing(ctx context.Context) map[string]int {
 		h.listed = time.Now()
 	}
 	return h.sessions
+}
+
+// session is the host's listing of the conversation it runs as process pid.
+// An orphan, or any process while the host does not answer, has none.
+func (h *claudeHost) session(ctx context.Context, conversation string, pid int) (claudehost.Session, bool) {
+	if h == nil || pid <= 0 {
+		return claudehost.Session{}, false
+	}
+	h.listing(ctx)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	session, ok := h.open[conversation]
+	return session, ok && session.PID == pid
 }
 
 // readState reads the processes the host recorded starting. One counts only

@@ -8,7 +8,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -138,12 +137,6 @@ func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, fro
 						err = fmt.Errorf("destination is read-only: %s", surface.ReadOnlySessionReason(target))
 						break
 					}
-					policy, policyErr := deliverypolicy.Load()
-					if policyErr != nil {
-						err = policyErr
-						break
-					}
-					busy = string(policy)
 					text := event.Message
 					if len(text) > maxRelayText {
 						text = text[:maxRelayText] + "\n[relay text truncated by agenthail]"

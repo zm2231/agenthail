@@ -15,7 +15,12 @@ mkdir -p "$DEST"
 # macOS temporary directories under /var do.
 DEST="$(cd "$DEST" && pwd -P)"
 cp "$ROOT/claude-host/host.mjs" "$ROOT/claude-host/package.json" "$ROOT/claude-host/package-lock.json" "$DEST/"
-"$NPM" ci --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund --prefix "$DEST" >/dev/null
+"$NPM" ci --omit=dev --omit=optional --ignore-scripts --no-bin-links --no-audit --no-fund --prefix "$DEST" >/dev/null
+# agenthail update extracts only directories and regular files.
+if find "$DEST" ! -type d ! -type f -print -quit | grep -q .; then
+	echo "error: the staged Claude host contains entries that are not directories or regular files" >&2
+	exit 1
+fi
 if find "$DEST/node_modules" -name '*.node' -print -quit | grep -q .; then
 	echo "error: the Claude host gained a native dependency; it can no longer ship as one tree" >&2
 	exit 1

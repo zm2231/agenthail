@@ -52,8 +52,8 @@ func (d *Daemon) sessionOptionsHandler(w http.ResponseWriter, r *http.Request) {
 
 const launchProjectLimit = 12
 
-// launchProject is a project a new session can start in: the root of its main
-// checkout, or the registered folder.
+// launchProject is a project of this host a new session can start in: an
+// added folder, or a repository's main checkout.
 type launchProject struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"displayName"`
@@ -62,7 +62,7 @@ type launchProject struct {
 }
 
 // launchProjects lists this host's projects, the most recently active first,
-// followed by registered folders without sessions. Archived projects are left
+// followed by added projects without sessions. Archived projects are left
 // out.
 func (d *Daemon) launchProjects() ([]launchProject, error) {
 	snapshot, err := d.Registry.CatalogSnapshot()
@@ -87,26 +87,27 @@ func (d *Daemon) launchProjects() ([]launchProject, error) {
 			continue
 		}
 		var project catalogProject
-		if json.Unmarshal(record.Project, &project) != nil || project.ID == "" || project.RootPath == "" {
+		if json.Unmarshal(record.Project, &project) != nil || project.LocalID == "" || project.RootPath == "" {
 			continue
 		}
-		if _, archived := archive.Projects[project.ID]; archived {
+		if _, archived := archive.Projects[project.LocalID]; archived {
 			continue
 		}
-		entry, found := byID[project.ID]
+		entry, found := byID[project.LocalID]
 		if !found {
-			entry = &candidate{project: launchProject{ID: project.ID, DisplayName: project.DisplayName, RootPath: project.RootPath, Kind: project.Kind}}
-			byID[project.ID] = entry
+			entry = &candidate{project: launchProject{ID: project.LocalID, DisplayName: project.DisplayName, RootPath: project.RootPath, Kind: project.Kind}}
+			byID[project.LocalID] = entry
 		}
 		if record.Session.LastActive.After(entry.lastActive) {
 			entry.lastActive = record.Session.LastActive
 		}
 	}
 	for _, record := range records {
-		if _, found := byID[record.ID]; found || !record.Registered || !record.ArchivedAt.IsZero() {
+		if _, found := byID[record.ID]; found || !record.Added || !record.ArchivedAt.IsZero() {
 			continue
 		}
-		byID[record.ID] = &candidate{project: launchProject{ID: record.ID, DisplayName: record.DisplayName, RootPath: record.RootPath, Kind: record.Kind}}
+		added := addedCatalogProject(record, false)
+		byID[record.ID] = &candidate{project: launchProject{ID: added.LocalID, DisplayName: added.DisplayName, RootPath: added.RootPath, Kind: added.Kind}}
 	}
 	candidates := make([]*candidate, 0, len(byID))
 	for _, entry := range byID {
