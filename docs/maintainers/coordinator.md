@@ -45,6 +45,7 @@ A host serves its own coordinators in `coordinators[]` of `/api/v1/snapshot` and
 - `@lead` reaches the coordinator of the sender's project: the project of the calling session's folder when the registry knows that session, otherwise the current folder.
 - A paired host's coordinator is reached through its owner with the routed action `coordinator-send`, which delivers or starts it there. `--stream` and `--reply` need its conversation, so they follow its current session once it has one.
 - `lead` is reserved and cannot name a session.
+- A coordinator cannot take a name held by a conversation still starting, and a conversation cannot start under a coordinator's name. See [launchers](launchers.md#names).
 
 A worker reports with `agenthail send @lead "..."`. Its host needs to have paired the coordinator's host to see it.
 

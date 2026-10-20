@@ -1167,16 +1167,16 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				http.Error(w, "surface is not configured", http.StatusConflict)
 				return
 			}
-			if err := d.Registry.EnsureAliasAvailable(alias); err != nil {
-				var taken registry.AliasTakenError
-				var coordinator registry.CoordinatorAliasError
-				if errors.As(err, &taken) || errors.As(err, &coordinator) {
-					http.Error(w, err.Error(), http.StatusBadRequest)
-				} else {
-					http.Error(w, fmt.Sprintf("check conversation name: %s", err), http.StatusInternalServerError)
-				}
+			reservation, reserved := d.reserveStartName(w, alias)
+			if !reserved {
 				return
 			}
+			keepReservation := false
+			defer func() {
+				if !keepReservation {
+					_ = d.Registry.ReleaseAliasReservation(reservation)
+				}
+			}()
 			if d.transportResolver == nil {
 				http.Error(w, "launcher transport is unavailable", http.StatusConflict)
 				return
@@ -1221,12 +1221,12 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 					d.writeAcceptedLaunch(w, request.Launcher, nil, "location is unresolved")
 					return
 				}
-				pendingID, err := d.Registry.RecordPendingLaunch(request.Launcher, surface.SurfaceKind(request.Surface), cwd, request.Name, alias, *location)
-				if err != nil {
+				launchedAt := time.Now()
+				if _, err := d.Registry.RecordPendingLaunch(request.Launcher, surface.SurfaceKind(request.Surface), cwd, request.Name, reservation, *location, launchedAt, launchedAt.Add(pendingLaunchLifetime)); err != nil {
 					d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("persist pending correlation: %s", err))
 					return
 				}
-				_ = pendingID
+				keepReservation = true
 				writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "launcher": request.Launcher, "location": location})
 				return
 			}
@@ -1240,11 +1240,9 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("register session: %s", err))
 				return
 			}
-			if alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"); alias != "" {
-				if err := d.Registry.SetAlias(alias, session.ID); err != nil {
-					d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("persist session name: %s", err))
-					return
-				}
+			if err := d.Registry.BindReservedAlias(reservation, session.ID); err != nil {
+				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("persist session name: %s", err))
+				return
 			}
 			launchFields := map[string]any{"launcher": request.Launcher, "location": location, "sessionId": session.ID}
 			if launchResult.Session != nil {
@@ -1271,16 +1269,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@")
-		if err := d.Registry.EnsureAliasAvailable(alias); err != nil {
-			var taken registry.AliasTakenError
-			var coordinator registry.CoordinatorAliasError
-			if errors.As(err, &taken) || errors.As(err, &coordinator) {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-			} else {
-				http.Error(w, fmt.Sprintf("check conversation name: %s", err), http.StatusInternalServerError)
-			}
+		reservation, reserved := d.reserveStartName(w, alias)
+		if !reserved {
 			return
 		}
+		defer func() { _ = d.Registry.ReleaseAliasReservation(reservation) }()
 		ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 		defer cancel()
 		messageUUID := uuid.NewString()
@@ -1292,11 +1285,9 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but local registration failed: %s; do not retry automatically", registerErr), nil)
 				return
 			}
-			if alias != "" {
-				if aliasErr := d.Registry.SetAlias(alias, session.ID); aliasErr != nil {
-					writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but its name could not be persisted: %s; do not retry automatically", aliasErr), nil)
-					return
-				}
+			if aliasErr := d.Registry.BindReservedAlias(reservation, session.ID); aliasErr != nil {
+				writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but its name could not be persisted: %s; do not retry automatically", aliasErr), nil)
+				return
 			}
 			d.writeStartedSessionOutcome(w, session, alias, messageUUID, request.Message, sent, startErr, nil)
 			return
@@ -1319,9 +1310,14 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if request.Action == "notion-create" {
+		name, reserved := d.reserveStartName(w, strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"))
+		if !reserved {
+			return
+		}
+		defer func() { _ = d.Registry.ReleaseAliasReservation(name) }()
 		ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 		defer cancel()
-		receipt, createErr := d.createNotionThread(ctx, request.Message, request.Alias, request.Model)
+		receipt, createErr := d.createNotionThread(ctx, request.Message, name, request.Model)
 		if createErr != nil {
 			http.Error(w, createErr.Error(), http.StatusBadGateway)
 			return
@@ -1676,8 +1672,13 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		if err := d.Registry.SetAlias(alias, session.ID); err != nil {
 			var taken registry.AliasTakenError
+			var reserved registry.AliasReservedError
 			if errors.As(err, &taken) {
 				http.Error(w, fmt.Sprintf("@%s is already used by another session", alias), http.StatusConflict)
+				return
+			}
+			if errors.As(err, &reserved) {
+				http.Error(w, reserved.Error(), http.StatusConflict)
 				return
 			}
 			http.Error(w, fmt.Sprintf("name conversation: %s", err), http.StatusBadRequest)
@@ -1693,7 +1694,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if request.Action == "session-fork" || request.Action == "native-queue" || strings.HasPrefix(request.Action, "session-lifecycle-") {
-		d.dashboardSessionOperation(w, r, adapter, session, request.Action, request.Fork, request.NativeQueue)
+		d.dashboardSessionOperation(w, r, adapter, session, request.Action, request.Fork, strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"), request.NativeQueue)
 		return
 	}
 	if err := d.ensureDashboardWritable(r.Context(), adapter, session); err != nil {
@@ -2345,4 +2346,19 @@ func (d *Daemon) writeAcceptedLaunch(w http.ResponseWriter, launcher string, loc
 		body["location"] = location
 	}
 	writeDashboardJSON(w, http.StatusAccepted, body)
+}
+
+// reserveStartName holds a new session's name from before it starts until it
+// is registered, refusing a name another session, coordinator or start holds.
+func (d *Daemon) reserveStartName(w http.ResponseWriter, name string) (registry.AliasReservation, bool) {
+	reservation, err := d.Registry.ReserveAlias(name, time.Now().Add(surfaceOperationTimeout+startNameMargin))
+	if err == nil {
+		return reservation, true
+	}
+	if registry.AliasRefused(err) {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	} else {
+		http.Error(w, fmt.Sprintf("reserve conversation name: %s", err), http.StatusInternalServerError)
+	}
+	return registry.AliasReservation{}, false
 }

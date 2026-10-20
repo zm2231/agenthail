@@ -68,6 +68,28 @@ their location contains only the workspace and surface handles.
 `Focuser` is implemented by cmux and tmux. Focus is an explicit caller action,
 not a side effect of `Launch`.
 
+## Names
+
+A conversation started with a name holds that name from before it starts
+until it is registered. The registry's `alias_reservations` table holds it, so
+no other session, coordinator, start or fork can take it in the meantime; they
+are refused with "@name is the name of a conversation being started". Every
+path that starts or forks a conversation under a name reserves it first: CLI
+`thread create`, `thread fork --alias` and `send` to a new Notion thread, and the
+dashboard's `session-create` (direct and launcher), `session-fork` and
+`notion-create`. A routed create or fork reserves on the host that starts the
+conversation. A start that fails releases the name. A reservation lapses on
+its own, so a starter that crashed frees its name: after the command timeout
+plus 30 seconds for the CLI, and after the surface operation timeout plus 30
+seconds for the daemon.
+
+A terminal launch that returns no session waits for discovery, which runs
+every 30 seconds. Its name is held for 5 minutes after the launch. The daemon
+logs each pending launch's delay when discovery finds it. A launch found after
+its name lapsed takes the name only if nothing else took it in the meantime,
+and otherwise is registered without a name and logged. A launch not found
+within 24 hours after its name lapsed is dropped and logged.
+
 `claude-sdk` is the default Claude launcher: it opens the session in the
 [Claude host](claude-host.md) through `Claude.StartSession`. `claude-bg` starts
 a `claude --bg` background job, and only when a client selects it; it is never
