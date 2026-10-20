@@ -143,13 +143,14 @@ struct ElsewhereWaitCard: View {
         switch kind {
         case "question": return "\(agent) asks you a question"
         case "input": return "\(agent) needs your input"
+        case "dialog": return "\(agent) has a dialog open in its terminal"
         default: return "\(agent) needs your approval"
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(Self.heading(kind: waiting.kind, surface: surface), systemImage: waiting.kind == "approval" ? "hand.raised" : "questionmark.bubble")
+            Label(Self.heading(kind: waiting.kind, surface: surface), systemImage: waiting.kind == "approval" ? "hand.raised" : waiting.kind == "dialog" ? "macwindow" : "questionmark.bubble")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(accent)
             Text("Agenthail can't answer this one. Answer it where the session runs\(hostName.map { ", in \($0)" } ?? ", such as its terminal"). Messages you send wait until then.")

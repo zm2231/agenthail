@@ -496,8 +496,8 @@ is a send a paired host accepted into its own queue. `refused` means the target
 refused to start, for example Claude failing to resume the conversation; the
 row's last error says why, and the sender receives one
 `[agenthail delivery held ...]` notice. It needs a person, not a resend. A
-target whose turn is waiting on its user (a Claude question, plan approval or
-permission prompt, a Codex approval or
+target whose turn is waiting on its user (a Claude question, plan approval,
+permission prompt or dialog open in its terminal, a Codex approval or
 input request) carries `waitingOn` and lists as `wait`; messages to it,
 including steers, are queued until the user answers. Do not interrupt it to get
 a message through. A Claude session between turns whose background tasks

@@ -49,6 +49,21 @@ func TestClaudeObserveReadsWaitingFromTheProcessRecord(t *testing.T) {
 			fields: map[string]any{"status": "waiting", "waitingFor": "permission prompt", "statusUpdatedAt": asked.UnixMilli()},
 			want:   &surface.Waiting{Kind: surface.WaitingApproval, ID: fmt.Sprintf("conversation:approval:%d", asked.UnixMilli()), Since: asked},
 		},
+		{
+			name:   "sandboxed command wants network",
+			fields: map[string]any{"status": "waiting", "waitingFor": "sandbox request", "statusUpdatedAt": asked.UnixMilli()},
+			want:   &surface.Waiting{Kind: surface.WaitingApproval, ID: fmt.Sprintf("conversation:approval:%d", asked.UnixMilli()), Since: asked},
+		},
+		{
+			name:   "goal proposal",
+			fields: map[string]any{"status": "waiting", "waitingFor": "goal proposal", "statusUpdatedAt": asked.UnixMilli()},
+			want:   &surface.Waiting{Kind: surface.WaitingApproval, ID: fmt.Sprintf("conversation:approval:%d", asked.UnixMilli()), Since: asked},
+		},
+		{
+			name:   "a dialog open in the terminal",
+			fields: map[string]any{"status": "waiting", "waitingFor": "dialog open", "statusUpdatedAt": asked.UnixMilli()},
+			want:   &surface.Waiting{Kind: surface.WaitingDialog, ID: fmt.Sprintf("conversation:dialog:%d", asked.UnixMilli()), Since: asked},
+		},
 		{name: "working", fields: map[string]any{"status": "busy", "statusUpdatedAt": asked.UnixMilli()}},
 		{name: "answered and finished", fields: map[string]any{"status": "idle", "statusUpdatedAt": asked.Add(time.Minute).UnixMilli()}},
 	} {

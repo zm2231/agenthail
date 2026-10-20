@@ -10,6 +10,7 @@ struct ElsewhereWaitCardTest {
             ("question", "claude", "Claude asks you a question"),
             ("input", "codex", "Codex needs your input"),
             ("approval", "codex", "Codex needs your approval"),
+            ("dialog", "claude", "Claude has a dialog open in its terminal"),
         ]
         for test in cases {
             let heading = ElsewhereWaitCard.heading(kind: test.kind, surface: test.surface)

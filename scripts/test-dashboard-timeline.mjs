@@ -51,6 +51,7 @@ const context = {
   syncComposerAction: () => {},
   renderSlashMenu: () => {},
   conversationMeta: () => "Claude Code",
+  displayName: (session) => session.name || session.id,
   remoteHostName: () => "",
   renderContextUsage: () => {},
   startLiveStream: () => {},
@@ -75,6 +76,7 @@ ${source.slice(presenceStart, presenceEnd)}
 globalThis.presenceLabel = presenceLabel;
 globalThis.presenceTone = presenceTone;
 globalThis.renderBackgroundTasks = renderBackgroundTasks;
+globalThis.renderRequests = renderRequests;
 globalThis.renderChat = renderChat;
 globalThis.goalStatusLabel = goalStatusLabel;
 globalThis.contextBreakdown = contextBreakdown;`, context);
@@ -214,5 +216,14 @@ assert(!elements["#background-panel"].hidden, "background work shows its panel")
 for (const expected of ["1 background task running", "go test ./...", "file watcher", "ambient", "Read from the transcript."]) assert(backgroundPanel.includes(expected), `background panel omitted ${expected}`);
 context.renderBackgroundTasks({ ...backgroundSession, backgroundTasks: { running: true, source: "status" } });
 assert(elements["#background-panel"].innerHTML.includes("Background work running") && elements["#background-panel"].innerHTML.includes("not which one"), "a shell reported without a list says what is known");
+
+context.app.selected = { id: "session-dialog", name: "builder", surface: "claude", status: "busy", runtime: {}, waitingOn: { kind: "dialog", id: "session-dialog:dialog:1" } };
+context.app.history = { capabilities: { respond: true } };
+context.app.requests = { requests: [] };
+context.renderRequests();
+assert(elements["#request-panel"].innerHTML.includes("builder has a dialog open in its terminal") && !elements["#request-panel"].hidden, "a dialog says where to settle it even in a session that takes answers");
+context.app.selected.waitingOn = { kind: "approval", id: "session-dialog:approval:1" };
+context.renderRequests();
+assert(elements["#request-panel"].hidden, "an approval with no request yet shows no card until its request is read");
 
 console.log("dashboard timeline VM tests passed");
