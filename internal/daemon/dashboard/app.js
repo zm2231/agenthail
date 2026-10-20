@@ -192,6 +192,14 @@ function handoffMessage(value) {
   }
   return { label, text };
 }
+function exchangePrompt(exchange) {
+  const message = handoffMessage(exchange.user);
+  if (exchange.origin === "peer") return { ...message, label: exchange.sender ? `From ${exchange.sender}` : "From an agent" };
+  if (exchange.origin === "task-notification") return { ...message, label: "Task notification" };
+  if (exchange.origin === "auto-continuation") return { ...message, label: "Continued" };
+  if (exchange.origin) return { ...message, label: exchange.origin };
+  return message;
+}
 function renderMessage(text, kind, label, turnKey, files = []) {
   const safeText = String(text || "");
   const editable = kind === "user" && label === "Conversation input";
@@ -303,15 +311,29 @@ function startLiveStream() {
     selectSession(session.id);
   });
 }
+function promptOrigin(value) {
+  if (value.role === "peer") return "peer";
+  return value.origin || "";
+}
 function exchangesFromItems(items) {
   const exchanges = [];
   let turn = "";
   let open = false;
   for (const value of items) {
+    if (value.kind === "done") {
+      if (open && (!value.turnId || value.turnId === turn)) open = false;
+      continue;
+    }
     if (!value.text) continue;
-    const prompt = ["message", "text"].includes(value.kind) && ["user", "peer"].includes(value.role);
+    const prompt = (["message", "text"].includes(value.kind) && ["user", "peer"].includes(value.role)) || (value.kind === "event" && Boolean(value.origin));
     if (prompt) {
-      exchanges.push({ user: value.text, timestamp: value.timestamp });
+      if (open && turn && value.turnId === turn) {
+        const last = exchanges.at(-1);
+        if (!last.user) Object.assign(last, { user: value.text, origin: promptOrigin(value), sender: value.sender || "" });
+        else if (last.origin === promptOrigin(value) && last.sender === (value.sender || "")) last.user += `\n\n${value.text}`;
+        continue;
+      }
+      exchanges.push({ user: value.text, origin: promptOrigin(value), sender: value.sender || "", timestamp: value.timestamp });
       turn = value.turnId || "";
       open = true;
       continue;
@@ -1316,7 +1338,7 @@ function renderChat() {
     ? renderTimeline(timeline, session)
     : exchanges
     .flatMap((exchange, index) => {
-      const user = handoffMessage(exchange.user);
+      const user = exchangePrompt(exchange);
       const assistant = String(exchange.assistant || "");
       return [
         exchange.user

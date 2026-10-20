@@ -411,6 +411,41 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 	result.CodexPendingEventUser = projection.pending
 	result.CodexPendingEventTurn = projection.turnID
 	result.CodexCurrentTurnID = currentTurnID
+	var claudeEnds map[int][]claudeTurnEnd
+	var claudeInterrupts map[int]bool
+	if source == "claude" {
+		turns, err := claudeTurnStateAt(ctx, file, start)
+		if err != nil {
+			return nil, err
+		}
+		claudeEnds = map[int][]claudeTurnEnd{}
+		claudeInterrupts = map[int]bool{}
+		lineOffset, last := start, -1
+		for index, line := range lines {
+			recordOffset := lineOffset
+			lineOffset += int64(len(line))
+			var record map[string]any
+			if json.Unmarshal(line, &record) != nil {
+				continue
+			}
+			turnID, ended, interrupted := turns.observe(record, recordOffset, line, len(claudeTimelineItems(record)))
+			recordTurnIDs[index] = turnID
+			claudeEnds[index] = ended
+			claudeInterrupts[index] = interrupted
+			last = index
+		}
+		if before <= 0 && last >= 0 {
+			claudeEnds[last] = append(claudeEnds[last], turns.settle(settled)...)
+		}
+		if before <= 0 && turns.closing.TurnID != "" {
+			// A stream resuming at the page's end finishes the turn the page saw closing.
+			closing := turns.closing
+			if closing.Anchor, err = completionAnchor(path, completeEnd); err != nil {
+				return nil, err
+			}
+			result.ClaudeClosingTurn = closing
+		}
+	}
 	offset := start + int64(len(data))
 	budget := 512 << 10
 	var groups [][]surface.TimelineItem
@@ -432,7 +467,10 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		}
 		var items []surface.TimelineItem
 		if source == "claude" {
-			items = claudeTimelineItems(record)
+			items, err = claudeRecordTimelineItems(ctx, record, offset, line, recordTurnIDs[index], claudeEnds[index], claudeInterrupts[index])
+			if err != nil {
+				return nil, err
+			}
 		} else {
 			items = codexTimelineItems(record)
 			if len(items) == 0 {
@@ -445,38 +483,24 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 					items[itemIndex].TurnID = turnID
 				}
 			}
-		}
-		if err := decorateTimelineAttachments(ctx, items, record, source, offset); err != nil {
-			return nil, err
-		}
-		if source == "codex" && skipResponseUsers[index] {
-			continue
+			if err := decorateTimelineAttachments(ctx, items, record, source, offset); err != nil {
+				return nil, err
+			}
+			if skipResponseUsers[index] {
+				continue
+			}
+			for i := range items {
+				items[i].ID = codexTranscriptItemKey(record, items[i], i)
+				if items[i].Kind == "event" || items[i].ID == "" {
+					items[i].ID = codexTranscriptFallbackKey(offset, line, i)
+				}
+				items[i].Timestamp = str(record, "timestamp")
+			}
 		}
 		if len(items) == 0 {
 			// Records without items still close a Claude turn whose last block was written.
 			records = append(records, transcriptRecord{offset: offset, line: line})
 			continue
-		}
-		for i := range items {
-			if source == "claude" {
-				if items[i].ID == "" {
-					items[i].ID = stableTimelineItemID(offset, line, i)
-				}
-			} else if source == "codex" {
-				items[i].ID = codexTranscriptItemKey(record, items[i], i)
-				if items[i].Kind == "event" {
-					items[i].ID = codexTranscriptFallbackKey(offset, line, i)
-				}
-			}
-			if items[i].ID == "" {
-				if source == "codex" {
-					items[i].ID = codexTranscriptFallbackKey(offset, line, i)
-				} else {
-					digest := fmt.Sprintf("%x", sha256.Sum256(line))[:12]
-					items[i].ID = fmt.Sprintf("%d-%s-%d", offset, digest, i)
-				}
-			}
-			items[i].Timestamp = str(record, "timestamp")
 		}
 		full := slices.Clone(items)
 		for i := range items {
@@ -529,7 +553,25 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 	slices.Reverse(records)
 	var exchangeOffsets []int64
 	if source == "claude" {
-		result.Exchanges, exchangeOffsets, result.Reply = claudeTranscriptExchanges(records, result.Source, settled)
+		var items []surface.TimelineItem
+		var itemOffsets []int64
+		seen := map[string]bool{}
+		for i := len(records) - 1; i >= 0; i-- {
+			for j := len(records[i].items) - 1; j >= 0; j-- {
+				if item := records[i].items[j]; !seen[item.ID] {
+					seen[item.ID] = true
+					items = append(items, item)
+					itemOffsets = append(itemOffsets, records[i].offset)
+				}
+			}
+		}
+		slices.Reverse(items)
+		slices.Reverse(itemOffsets)
+		result.Exchanges = surface.ExchangesFromItems(items, "")
+		for _, start := range surface.ExchangeStarts(items) {
+			exchangeOffsets = append(exchangeOffsets, itemOffsets[start])
+		}
+		result.Reply = claudeTranscriptReply(records, result.Source, settled)
 	} else {
 		result.Exchanges, exchangeOffsets = codexTranscriptExchanges(records)
 	}
@@ -539,20 +581,51 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		pageStart = exchangeOffsets[len(exchangeOffsets)-limit]
 		result.NextBefore = pageStart
 	}
+	// An item recorded twice, as a queued and a delivered prompt, keeps its
+	// newest copy, as the journal does.
 	seen := map[string]bool{}
-	for i := len(groups) - 1; i >= 0; i-- {
+	for i := 0; i < len(groups); i++ {
 		if groupOffsets[i] < pageStart {
 			continue
 		}
-		for _, item := range groups[i] {
-			if seen[item.ID] {
-				continue
+		for j := len(groups[i]) - 1; j >= 0; j-- {
+			if item := groups[i][j]; !seen[item.ID] {
+				seen[item.ID] = true
+				result.Items = append(result.Items, item)
 			}
-			seen[item.ID] = true
-			result.Items = append(result.Items, item)
 		}
 	}
+	slices.Reverse(result.Items)
 	return result, nil
+}
+
+// claudeRecordTimelineItems returns the timeline items of one transcript
+// record at offset, in its turn, after the done items of the turns it ended.
+// The live stream ends an interrupted turn with its cancelled done alone.
+func claudeRecordTimelineItems(ctx context.Context, record map[string]any, offset int64, line []byte, turnID string, ended []claudeTurnEnd, interrupted bool) ([]surface.TimelineItem, error) {
+	var items []surface.TimelineItem
+	if !interrupted {
+		items = claudeTimelineItems(record)
+	}
+	if err := decorateTimelineAttachments(ctx, items, record, "claude", offset); err != nil {
+		return nil, err
+	}
+	at := str(record, "timestamp")
+	for i := range items {
+		if items[i].ID == "" {
+			items[i].ID = stableTimelineItemID(offset, line, i)
+		}
+		items[i].TurnID = turnID
+		items[i].Timestamp = at
+	}
+	if len(ended) == 0 {
+		return items, nil
+	}
+	done := make([]surface.TimelineItem, 0, len(ended)+len(items))
+	for _, end := range ended {
+		done = append(done, surface.TimelineItem{ID: end.Key, Kind: "done", TurnID: end.TurnID, Status: end.Status, Timestamp: at})
+	}
+	return append(done, items...), nil
 }
 
 func codexTranscriptFallbackKey(offset int64, line []byte, index int) string {
@@ -597,28 +670,16 @@ func codexTranscriptItemKey(record map[string]any, item surface.TimelineItem, in
 	return codexDesktopStreamKey(turnID, kind, semanticID)
 }
 
-func claudeTranscriptExchanges(records []transcriptRecord, source string, settled func(time.Time) bool) ([]surface.Exchange, []int64, *surface.ReplyResult) {
+func claudeTranscriptReply(records []transcriptRecord, source string, settled func(time.Time) bool) *surface.ReplyResult {
 	var turns []claudeTurn
-	var turnOffsets []int64
 	for _, record := range records {
 		var parsed claudeRecord
-		if json.Unmarshal(record.line, &parsed) != nil {
-			continue
-		}
-		turns = appendClaudeTurn(turns, parsed)
-		for len(turnOffsets) < len(turns) {
-			turnOffsets = append(turnOffsets, record.offset)
+		if json.Unmarshal(record.line, &parsed) == nil {
+			turns = appendClaudeTurn(turns, parsed)
 		}
 	}
-	exchanges := make([]surface.Exchange, 0, len(turns))
-	offsets := make([]int64, 0, len(turns))
 	reply := &surface.ReplyResult{Done: false, Source: source}
-	for index, turn := range turns {
-		if turn.User == "" && turn.Assistant == "" {
-			continue
-		}
-		exchanges = append(exchanges, surface.Exchange{User: turn.User, Assistant: turn.Assistant, Timestamp: turn.StartedAt})
-		offsets = append(offsets, turnOffsets[index])
+	for _, turn := range turns {
 		if turn.Assistant != "" {
 			done := turn.Done || turn.Closing && settled != nil && settled(turn.TerminalAt)
 			reply = &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: done, Source: source}
@@ -627,7 +688,7 @@ func claudeTranscriptExchanges(records []transcriptRecord, source string, settle
 			}
 		}
 	}
-	return exchanges, offsets, reply
+	return reply
 }
 
 func codexTranscriptExchanges(records []transcriptRecord) ([]surface.Exchange, []int64) {
@@ -809,7 +870,11 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 		if callID := str(message, "tool_use_id"); callID != "" {
 			return []surface.TimelineItem{{Kind: "toolResult", Title: "Tool result", Text: text, CallID: callID}}
 		}
-		return []surface.TimelineItem{{Kind: "message", Role: kind, Title: kind, Text: text}}
+		item := surface.TimelineItem{Kind: "message", Role: kind, Title: kind, Text: text}
+		if kind == "user" {
+			item.Origin = claudeRecordedOrigin(text)
+		}
+		return []surface.TimelineItem{item}
 	}
 	blocks, _ := message["content"].([]any)
 	var items []surface.TimelineItem
@@ -821,6 +886,9 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 			item.Kind = "message"
 			item.Title = kind
 			item.Text = str(block, "text")
+			if kind == "user" {
+				item.Origin = claudeRecordedOrigin(item.Text)
+			}
 		case "thinking":
 			item.Kind = "reasoning"
 			item.Title = "Thinking"

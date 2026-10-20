@@ -165,6 +165,9 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureColumn(tx, "routes", "active", `INTEGER NOT NULL DEFAULT 1`); err != nil {
 		return err
 	}
+	if err := ensureColumn(tx, "session_journal_state", "derived_version", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	for _, column := range []struct {
 		name string
 		decl string
@@ -696,7 +699,8 @@ CREATE TABLE IF NOT EXISTS session_journal_state (
 	seed_status TEXT NOT NULL DEFAULT 'unknown',
 	seed_seq INTEGER NOT NULL DEFAULT 0,
 	seed_identity TEXT NOT NULL DEFAULT '',
-	history_before INTEGER NOT NULL DEFAULT -1
+	history_before INTEGER NOT NULL DEFAULT -1,
+	derived_version INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS session_journal_bodies (
 	ref TEXT PRIMARY KEY,

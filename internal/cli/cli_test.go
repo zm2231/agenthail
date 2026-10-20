@@ -1116,6 +1116,27 @@ func TestLastLabelsTranscriptSourceInTextAndJSON(t *testing.T) {
 	}
 }
 
+func TestLastShowsEachExchangeTimeAndWhoSentItsPrompt(t *testing.T) {
+	session := surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
+	at := time.Date(2026, 10, 19, 10, 0, 0, 0, time.Local)
+	fake := &cliSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{"s": session}, tail: []surface.Exchange{
+		{User: "question", Assistant: "answer", Timestamp: at},
+		{User: "build finished", Origin: "task-notification", Assistant: "noted", Timestamp: at.Add(time.Minute)},
+		{User: "rebase", Origin: "peer", Sender: "reviewer", Assistant: "done", Timestamp: at.Add(2 * time.Minute)},
+		{Assistant: "unprompted", Timestamp: at.Add(3 * time.Minute)},
+	}}
+	app, _ := cliFixture(t, fake)
+	text, err := captureStdout(t, func() error { return app.Run([]string{"last", "claude:s", "4"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"2026-10-19 10:00:00\nyou  ▸ question", "2026-10-19 10:01:00\ntask notification ▸ build finished", "2026-10-19 10:02:00\nfrom reviewer ▸ rebase", "2026-10-19 10:03:00\n ai  ▸ unprompted"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("output lacks %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestLastPassesExplicitOlderCursorAndReportsNextPage(t *testing.T) {
 	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}}
