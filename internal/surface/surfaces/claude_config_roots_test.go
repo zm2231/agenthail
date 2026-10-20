@@ -66,6 +66,49 @@ func TestClaudeSessionInASecondConfigRootIsListedReadSentStoppedAndResumed(t *te
 	if len(spawns) != 1 || spawns[0].ConfigDir != root {
 		t.Fatalf("spawns=%+v, want one resume in %s", spawns, root)
 	}
+	for _, dir := range fixture.ConfigDirs() {
+		if dir != root {
+			t.Fatalf("claude ran with CLAUDE_CONFIG_DIR=%v, want %s", fixture.ConfigDirs(), root)
+		}
+	}
+}
+
+func TestClaudeSessionInThePrimaryConfigRootIsStoppedAndResumedWithoutNamingIt(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	fixture, host, c := hostResume(t)
+	fixture.AddRoot("claude-work")
+	fixture.Root = filepath.Join(fixture.Home, ".claude")
+	fixture.Transcript(fixtureConversation, fixture.Home)
+	fixture.Record(fixtureConversation, fixture.Home, "")
+	ctx := context.Background()
+
+	fixture.Job("fe758937", fixtureConversation, fixture.Home, "working", fixture.PID)
+	if _, err := c.SessionAction(ctx, &surface.Session{ID: fixtureConversation}, "stop"); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.InvocationsIn(fixture.Root, "stop", "fe758937") != 1 {
+		t.Fatal("stop did not run against the primary config root")
+	}
+
+	fixture.RemoveRecord()
+	fixture.Job("fe758937", fixtureConversation, fixture.Home, "done", 0)
+	result, err := c.SessionAction(ctx, &surface.Session{ID: fixtureConversation}, "resume")
+	if err != nil || result["unchanged"] != false {
+		t.Fatalf("result=%v err=%v", result, err)
+	}
+	spawns := host.Spawns(t, fixtureConversation)
+	if len(spawns) != 1 || spawns[0].ConfigDir != "" {
+		t.Fatalf("spawns=%+v, want one resume without a config dir", spawns)
+	}
+	dirs := fixture.ConfigDirs()
+	if len(dirs) == 0 {
+		t.Fatal("claude never ran")
+	}
+	for _, dir := range dirs {
+		if dir != "" {
+			t.Fatalf("claude ran with CLAUDE_CONFIG_DIR=%v, want it unset for the primary root", dirs)
+		}
+	}
 }
 
 func TestClaudeConversationInTwoConfigRootsIsRefused(t *testing.T) {

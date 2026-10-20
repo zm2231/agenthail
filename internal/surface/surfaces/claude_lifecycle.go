@@ -30,6 +30,7 @@ type claudeBackground struct {
 }
 
 // backgroundCommand runs claude against one config root; "" is the primary.
+// Only a root other than the primary is named in the command's environment.
 func (c *Claude) backgroundCommand(ctx context.Context, root, cwd string, args ...string) ([]byte, error) {
 	binary, err := surface.ClaudeBinary(c.home)
 	if err != nil {
@@ -39,8 +40,8 @@ func (c *Claude) backgroundCommand(ctx context.Context, root, cwd string, args .
 	cmd.WaitDelay = time.Second
 	cmd.Dir = cwd
 	cmd.Env = claudeCommandEnv(c.home)
-	if root != "" {
-		cmd.Env = append(cmd.Env, "CLAUDE_CONFIG_DIR="+root)
+	if dir := surface.ClaudeLaunchConfigDir(c.home, root); dir != "" {
+		cmd.Env = append(cmd.Env, "CLAUDE_CONFIG_DIR="+dir)
 	}
 	return cmd.CombinedOutput()
 }

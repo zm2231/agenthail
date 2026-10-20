@@ -21,6 +21,7 @@ root="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 mkdir -p "$root"
 printf '%s\n' "$*" >> "$HOME/argv"
 printf '%s\n' "$*" >> "$root/argv"
+printf '%s\n' "${CLAUDE_CONFIG_DIR-}" >> "$HOME/configdirs"
 case "$1" in
 agents)
  cat "$root/agents.json" 2>/dev/null || printf '[]\n'
@@ -212,6 +213,20 @@ func (f *Fixture) Invocations(args ...string) int {
 func (f *Fixture) InvocationsIn(root string, args ...string) int {
 	f.t.Helper()
 	return f.count(filepath.Join(root, "argv"), args)
+}
+
+// ConfigDirs are the CLAUDE_CONFIG_DIR values the claude binary ran with, in
+// order; "" is a run without the variable.
+func (f *Fixture) ConfigDirs() []string {
+	f.t.Helper()
+	data, err := os.ReadFile(filepath.Join(f.Home, "configdirs"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
 }
 
 func (f *Fixture) count(path string, args []string) int {
