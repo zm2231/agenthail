@@ -20,9 +20,9 @@ Each runner is a separate service under the same macOS user, in `~/actions-runne
 
 ## Job isolation
 
-`scripts/ci-self-hosted.sh prepare` gives `verify` and `native` a scratch `HOME`, `CFFIXED_USER_HOME` and `TMPDIR` inside the job temp directory, and keeps the Go and npm caches per runner. The iOS jobs keep the real `HOME` because the simulator service uses it. Each runner uses its own simulator, named `Agenthail CI <runner name>`, and its own DerivedData next to its workspace.
+`scripts/ci-self-hosted.sh prepare` gives `verify` and `native` a scratch `HOME` and `CFFIXED_USER_HOME` inside the job temp directory, and keeps the Go and npm caches per runner. `TMPDIR` and `GOTMPDIR` point to a per-runner directory under the user's own temp directory in `/var/folders`, the same place hosted runners and users' Macs use, so tests see that `/var` resolves to `/private/var`. `prepare` empties that directory first, which also clears what a killed runner left behind. The iOS jobs keep the real `HOME` because the simulator service uses it. Each runner uses its own simulator, named `Agenthail CI <runner name>`, and its own DerivedData next to its workspace.
 
-`scripts/ci-self-hosted.sh cleanup` runs after every self-hosted job, including failed and cancelled ones. It stops processes started from the job's workspace or temp directory, erases the job's simulator, and resets the workspace.
+`scripts/ci-self-hosted.sh cleanup` runs after every self-hosted job, including failed and cancelled ones. It stops processes started from the job's workspace or temp directories, erases the job's simulator, resets the workspace, and deletes the scratch `HOME` and the per-runner temp directory.
 
 ## Disposable VM runners
 

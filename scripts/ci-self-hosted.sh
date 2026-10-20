@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${RUNNER_TEMP:?}" "${RUNNER_TOOL_CACHE:?}" "${GITHUB_WORKSPACE:?}"
+: "${RUNNER_TEMP:?}" "${RUNNER_TOOL_CACHE:?}" "${GITHUB_WORKSPACE:?}" "${RUNNER_NAME:?}"
+
+# The job temp directory lives in the user's own temp directory, as it does
+# on hosted runners and users' Macs: /var/folders resolves to /private/var,
+# and tests must see that symlink.
+user_tmp="$(getconf DARWIN_USER_TEMP_DIR)"
+tmp="${user_tmp:?}agenthail-ci/$RUNNER_NAME"
 
 prepare() {
-	local home="$RUNNER_TEMP/home" tmp="$RUNNER_TEMP/tmp" cache="$RUNNER_TOOL_CACHE/agenthail-cache"
+	local home="$RUNNER_TEMP/home" cache="$RUNNER_TOOL_CACHE/agenthail-cache"
+	rm -rf "$tmp"
 	mkdir -p "$home" "$tmp" "$cache/go-build" "$cache/go-mod" "$cache/npm"
 	cat <<EOF
 HOME=$home
@@ -28,7 +35,7 @@ ancestors() {
 job_pids() {
 	local keep pid
 	keep=" $(ancestors | tr '\n' ' ') "
-	{ pgrep -u "$(id -u)" -f "$RUNNER_TEMP/" || true; pgrep -u "$(id -u)" -f "$GITHUB_WORKSPACE/" || true; } | sort -u |
+	{ pgrep -u "$(id -u)" -f "$RUNNER_TEMP/" || true; pgrep -u "$(id -u)" -f "$tmp/" || true; pgrep -u "$(id -u)" -f "$GITHUB_WORKSPACE/" || true; } | sort -u |
 		while read -r pid; do
 			[[ "$keep" == *" $pid "* ]] || echo "$pid"
 		done
@@ -52,7 +59,7 @@ cleanup() {
 		git -C "$GITHUB_WORKSPACE" reset --hard -q
 		git -C "$GITHUB_WORKSPACE" clean -ffdxq
 	fi
-	rm -rf "$RUNNER_TEMP/home" "$RUNNER_TEMP/tmp"
+	rm -rf "${RUNNER_TEMP:?}/home" "$tmp"
 }
 
 case "${1:-}" in
