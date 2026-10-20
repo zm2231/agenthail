@@ -44,7 +44,7 @@ The script refuses to start with less than 60 GB free. It flushes the guest disk
 2. A worker refuses to clone when less than 25 GB is free, clones the newest image (an APFS clone, so it takes no time or space up front), sets its CPU and memory (`AGENTHAIL_CI_VM_CPU`, `AGENTHAIL_CI_VM_MEMORY_MB`), boots it, mints a GitHub App installation token on the host and generates a just-in-time runner configuration for one job.
 3. Only that configuration enters the guest. The runner exits after one job.
 4. The worker then stops and deletes the VM and removes the runner registration, whether the job passed or failed. A VM whose runner gets no job within 5 minutes is discarded the same way.
-5. The supervisor kills any VM older than 50 minutes (the longest job timeout plus 5 minutes). On start and on exit it stops every worker and deletes every `agenthail-ci-slot-*` VM, so restarting the LaunchAgent leaves nothing behind.
+5. The supervisor kills any VM older than 50 minutes (the longest job timeout plus 5 minutes). On start and on exit it stops every worker and deletes every `agenthail-ci-slot-*` VM, so restarting the LaunchAgent leaves nothing behind. Every 10 minutes it also deletes offline runner registrations left by VMs that were stopped mid-job, once GitHub has finished those jobs.
 6. If a slot's runner exits twice in a row without taking a job, the supervisor logs the last runner output, writes the reason to `~/Library/Caches/agenthail-ci-vm/tripped`, deletes its VMs and exits. It will not start again until that file is removed. A worker that fails for any other reason pauses its slot for 5 minutes.
 
 Runner output and the runner's diagnostic log for each slot are kept in `~/Library/Logs/agenthail-ci-vm/`.

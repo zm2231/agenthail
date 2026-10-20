@@ -86,6 +86,17 @@ queued_jobs() {
 	echo "$count"
 }
 
+remove_lost_runners() {
+	local token ids id
+	token="$(installation_token '{"administration":"write"}')" || return 1
+	ids="$(all_pages "$token" "/repos/$repo/actions/runners?" runners |
+		jq -r 'select((.name | startswith("agenthail-ci-slot-")) and .status == "offline" and (.busy | not)) | .id')" || return 1
+	for id in $ids; do
+		github "$token" DELETE "/repos/$repo/actions/runners/$id" >/dev/null || return 1
+		log "removed offline runner $id"
+	done
+}
+
 finish_slot() {
 	tart exec "$vm" /bin/bash -c 'tail -n 200 ~/actions-runner/_diag/*.log' >"$logs/slot-$slot-diag.log" 2>&1 || true
 	discard_vm "$vm"
@@ -204,8 +215,13 @@ log "supervising $slots slots ($cpu CPU, $memory_mb MB each)"
 
 poll_token=""
 poll_token_at=0
+runners_swept_at=0
 while true; do
 	now="$(date +%s)"
+	if [ $((now - runners_swept_at)) -gt 600 ]; then
+		remove_lost_runners || log "could not remove offline runners"
+		runners_swept_at="$now"
+	fi
 	free_slots=""
 	unclaimed=0
 	for slot in $(seq 1 "$slots"); do
