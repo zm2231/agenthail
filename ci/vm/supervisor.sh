@@ -14,6 +14,7 @@ max_vm_minutes=50
 idle_minutes=5
 poll_seconds=20
 state="$HOME/Library/Caches/agenthail-ci-vm"
+logs="$HOME/Library/Logs/agenthail-ci-vm"
 self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
@@ -77,6 +78,7 @@ queued_jobs() {
 }
 
 finish_slot() {
+	tart exec "$vm" /bin/bash -c 'tail -n 200 ~/actions-runner/_diag/*.log' >"$logs/slot-$slot-diag.log" 2>&1 || true
 	discard_vm "$vm"
 	if [ -n "$runner_id" ]; then
 		github "$token" DELETE "/repos/$repo/actions/runners/$runner_id" >/dev/null 2>&1 || true
@@ -92,7 +94,7 @@ run_slot() {
 	discard_vm "$vm"
 	tart clone "$base" "$vm"
 	tart set "$vm" --cpu "$cpu" --memory "$memory_mb"
-	tart run --no-graphics --net-softnet "$vm" >/dev/null 2>&1 &
+	tart run --no-graphics --net-softnet --net-softnet-block=192.168.0.0/16 "$vm" >/dev/null 2>&1 &
 	run_pid=$!
 	for _ in $(seq 1 60); do
 		tart exec "$vm" true >/dev/null 2>&1 && break
@@ -109,7 +111,7 @@ run_slot() {
 	echo waiting >"$state/slot-$slot.phase"
 	log "slot $slot: $base booted, runner $runner_id waiting for a job"
 
-	printf '%s\n' "$jit" | tart exec -i "$vm" /bin/bash -c 'read -r jit; PATH="$(cat ~/actions-runner/.path)" exec ~/actions-runner/run.sh --jitconfig "$jit"' >/dev/null 2>&1 &
+	printf '%s\n' "$jit" | tart exec -i "$vm" /bin/bash -c 'read -r jit; p="$(cat ~/actions-runner/.path)" && [ -n "$p" ] || exit 1; PATH="$p" exec ~/actions-runner/run.sh --jitconfig "$jit"' >"$logs/slot-$slot-runner.log" 2>&1 &
 	exec_pid=$!
 	unset jit
 	started="$(date +%s)"
@@ -125,10 +127,16 @@ run_slot() {
 		fi
 		sleep 10
 	done
-	log "slot $slot: runner exited"
+	if [ "$phase" = busy ]; then
+		log "slot $slot: job finished"
+		return
+	fi
+	log "slot $slot: runner exited without taking a job"
+	exit 3
 }
 
 if [ "${1:-}" = run-slot ]; then
+	mkdir -p "$state" "$logs"
 	slot="$2"
 	vm="agenthail-ci-slot-$slot"
 	token=""
@@ -139,7 +147,7 @@ if [ "${1:-}" = run-slot ]; then
 	exit
 fi
 
-declare -a worker_pid worker_started
+declare -a worker_pid worker_started worker_cooldown no_job_exits
 
 reap() {
 	local vm
@@ -160,7 +168,17 @@ shutdown() {
 	exit 0
 }
 
-mkdir -p "$state"
+trip() {
+	log "stopping: $1"
+	echo "$(date -u +%FT%TZ) $1" >"$state/tripped"
+	shutdown
+}
+
+mkdir -p "$state" "$logs"
+if [ -f "$state/tripped" ]; then
+	log "not starting, the circuit breaker tripped: $(cat "$state/tripped"). Remove $state/tripped after fixing the cause."
+	exit 0
+fi
 reap
 trap shutdown TERM INT
 log "supervising $slots slots ($cpu CPU, $memory_mb MB each)"
@@ -187,11 +205,27 @@ while true; do
 			fi
 		else
 			if [ -n "$pid" ]; then
-				wait "$pid" 2>/dev/null || log "slot $slot: worker exited with an error"
+				status=0
+				wait "$pid" 2>/dev/null || status=$?
 				discard_vm "agenthail-ci-slot-$slot"
 				worker_pid[slot]=""
+				case "$status" in
+				0) no_job_exits[slot]=0 ;;
+				3)
+					no_job_exits[slot]=$((${no_job_exits[slot]:-0} + 1))
+					if [ "${no_job_exits[slot]}" -ge 2 ]; then
+						log "slot $slot: last runner output:"
+						tail -n 20 "$logs/slot-$slot-runner.log" 2>/dev/null || true
+						trip "slot $slot runner exited twice in a row without taking a job"
+					fi
+					;;
+				*)
+					log "slot $slot: worker failed with status $status, pausing the slot for 5 minutes"
+					worker_cooldown[slot]=$((now + 300))
+					;;
+				esac
 			fi
-			free_slots="$free_slots $slot"
+			[ "$now" -lt "${worker_cooldown[slot]:-0}" ] || free_slots="$free_slots $slot"
 		fi
 	done
 

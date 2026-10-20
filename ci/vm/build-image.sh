@@ -21,21 +21,32 @@ if tart list --source local --format json | jq -e --arg name "$name" 'any(.[]; .
 	name="$name-$(date +%H%M)"
 fi
 build="$name-building"
+check="$name-checking"
+
+discard() {
+	tart stop "$1" >/dev/null 2>&1 || true
+	tart delete "$1" >/dev/null 2>&1 || true
+}
+
+boot() {
+	tart run --no-graphics "$@" >/dev/null 2>&1 &
+	for _ in $(seq 1 90); do
+		tart exec "${@: -1}" true >/dev/null 2>&1 && return
+		sleep 2
+	done
+	tart exec "${@: -1}" true >/dev/null
+}
 
 cleanup() {
-	tart stop "$build" >/dev/null 2>&1 || true
-	tart delete "$build" >/dev/null 2>&1 || true
+	discard "$check"
+	discard "$build"
 }
 trap cleanup EXIT
 
 tart pull "$base_image"
 tart clone "$base_image" "$build"
 tart set "$build" --cpu 5 --memory 12288 --disk-size 80
-tart run --no-graphics --dir="xcode:$xcode_app:ro" --dir="scripts:$scripts:ro" "$build" >/dev/null 2>&1 &
-for _ in $(seq 1 90); do
-	tart exec "$build" true >/dev/null 2>&1 && break
-	sleep 2
-done
+boot --dir="xcode:$xcode_app:ro" --dir="scripts:$scripts:ro" "$build"
 
 tart exec "$build" /bin/bash -euo pipefail -c "
 shared='/Volumes/My Shared Files'
@@ -47,6 +58,7 @@ sudo xcodebuild -license accept
 sudo xcodebuild -runFirstLaunch
 sudo pmset -a sleep 0 disksleep 0 displaysleep 0 powernap 0
 sudo mdutil -a -i off >/dev/null
+networksetup -listallnetworkservices | tail -n +2 | while read -r service; do sudo networksetup -setdnsservers \"\$service\" 1.1.1.1 8.8.8.8; done
 mkdir -p ~/actions-runner ~/actions-runner-hooks
 curl -fsSL -o /tmp/runner.tgz https://github.com/actions/runner/releases/download/v$runner_version/actions-runner-osx-arm64-$runner_version.tar.gz
 echo '$runner_sha256  /tmp/runner.tgz' | shasum -a 256 -c
@@ -58,9 +70,27 @@ echo /opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin
 test \"\$(defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser)\" = admin
 sudo -n true
 xcodebuild -version
+sync
 "
-
 tart stop "$build"
+
+tart clone "$build" "$check"
+boot "$check"
+if ! tart exec "$check" /bin/bash -euo pipefail -c "
+test -s ~/actions-runner/.path
+grep -qx \"ACTIONS_RUNNER_HOOK_JOB_STARTED=\$HOME/actions-runner-hooks/job-started.sh\" ~/actions-runner/.env
+test -x ~/actions-runner-hooks/job-started.sh
+test -x ~/actions-runner/run.sh
+export PATH=\"\$(cat ~/actions-runner/.path)\"
+test \"\$(~/actions-runner/config.sh --version)\" = $runner_version
+python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))'
+xcodebuild -version >/dev/null
+scutil --dns | grep -q 'nameserver\\[0\\] : 1.1.1.1'
+"; then
+	echo "The new image failed its checks in a fresh clone; not publishing it." >&2
+	exit 1
+fi
+discard "$check"
 tart rename "$build" "$name"
 trap - EXIT
 

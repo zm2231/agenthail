@@ -28,13 +28,13 @@ Each runner is a separate service under the same macOS user, in `~/actions-runne
 
 `package` and `installer` install the package system-wide with `sudo`, register a LaunchAgent and launch the app, so they run in a macOS virtual machine that is created for one job and deleted afterwards. The host is never modified. macOS allows two macOS virtual machines per host, so there are at most two slots.
 
-The VMs use [Tart](https://tart.run). The guest reaches the internet but not the host, the local network or the tailnet (Tart's Softnet networking).
+The VMs use [Tart](https://tart.run) with Softnet networking. Softnet blocks private address ranges except the VM gateway, which is the host, so the supervisor also blocks `192.168.0.0/16`, and the image resolves DNS through public resolvers instead of the gateway. The guest reaches the internet but not the host, the local network or the tailnet.
 
 ### Image
 
-`ci/vm/build-image.sh` builds `agenthail-ci-YYYYMMDD` from `ghcr.io/cirruslabs/macos-tahoe-base:latest`: an 80 GB disk, the host's Xcode copied in through a read-only shared folder, sleep and Spotlight off, and the GitHub Actions runner with the same job-started hook as the host runners. The base image's `admin` user logs in automatically and has passwordless `sudo`, which the install tests use. Provisioning runs through `tart exec`, which talks to the guest agent rather than the network.
+`ci/vm/build-image.sh` builds `agenthail-ci-YYYYMMDD` from `ghcr.io/cirruslabs/macos-tahoe-base:latest`: an 80 GB disk, the host's Xcode copied in through a read-only shared folder, sleep and Spotlight off, public DNS resolvers, and the GitHub Actions runner with the same job-started hook as the host runners. The base image's `admin` user logs in automatically and has passwordless `sudo`, which the install tests use. Provisioning runs through `tart exec`, which talks to the guest agent rather than the network.
 
-The script refuses to start with less than 60 GB free. After a successful build it deletes older `agenthail-ci-*` images and the cached base image. Rebuild it after updating Xcode or the runner version in the script, or monthly to pick up base image updates. Slots pick up the newest image on their next job.
+The script refuses to start with less than 60 GB free. It flushes the guest disk before shutting the VM down, then boots a fresh clone of the new image and checks the runner files, the hook, Python 3.10 or newer, Xcode and DNS. It publishes the image only if every check passes. After publishing it deletes older `agenthail-ci-*` images and the cached base image. Rebuild it after updating Xcode or the runner version in the script, or monthly to pick up base image updates. Slots pick up the newest image on their next job.
 
 ### Supervisor
 
@@ -45,6 +45,9 @@ The script refuses to start with less than 60 GB free. After a successful build 
 3. Only that configuration enters the guest. The runner exits after one job.
 4. The worker then stops and deletes the VM and removes the runner registration, whether the job passed or failed. A VM whose runner gets no job within 5 minutes is discarded the same way.
 5. The supervisor kills any VM older than 50 minutes (the longest job timeout plus 5 minutes). On start and on exit it stops every worker and deletes every `agenthail-ci-slot-*` VM, so restarting the LaunchAgent leaves nothing behind.
+6. If a slot's runner exits twice in a row without taking a job, the supervisor logs the last runner output, writes the reason to `~/Library/Caches/agenthail-ci-vm/tripped`, deletes its VMs and exits. It will not start again until that file is removed. A worker that fails for any other reason pauses its slot for 5 minutes.
+
+Runner output and the runner's diagnostic log for each slot are kept in `~/Library/Logs/agenthail-ci-vm/`.
 
 The App private key is read from setec over the tailnet when a token is needed and is never written to disk or passed to the guest.
 
@@ -52,5 +55,5 @@ The App private key is read from setec over the tailnet when a token is needed a
 
 1. Install Tart and Softnet with Homebrew, and let Softnet run as root without a password: add `<user> ALL=(root) NOPASSWD: <homebrew prefix>/bin/softnet` to a file in `/etc/sudoers.d/` and check it with `sudo visudo -cf <file>`.
 2. Clone this repository on the host and run `ci/vm/build-image.sh` from it.
-3. Create a LaunchAgent that runs `/bin/bash <clone>/ci/vm/supervisor.sh` with `RunAtLoad`, `KeepAlive`, an `ExitTimeOut` of 60 seconds and a log file, then load it with `launchctl bootstrap gui/$(id -u) <plist>`.
+3. Create a LaunchAgent that runs `/bin/bash <clone>/ci/vm/supervisor.sh` with `RunAtLoad`, `KeepAlive` set to restart only after an unsuccessful exit (`SuccessfulExit` false), an `ExitTimeOut` of 60 seconds and a log file, then load it with `launchctl bootstrap gui/$(id -u) <plist>`.
 4. Turn off system sleep on the host: `sudo pmset -a sleep 0 disksleep 0 powernap 0`.
