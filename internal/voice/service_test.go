@@ -1080,22 +1080,30 @@ func (l heldLeads) SendToLead(_ context.Context, project, message, _ string) (Le
 	return LeadReceipt{Ref: "@" + project + "-lead"}, nil
 }
 
-func TestALeadSendAnsweredAfterTheCallEndedKeepsCodexsRefusalAcrossARestart(t *testing.T) {
-	f, p := fixture(t)
-	leads := heldLeads{sent: make(chan string, 1), release: make(chan string)}
-	f.service.SetProjects(leads)
-	connectFixture(t, f)
-	p.mu.Lock()
-	p.respondErr = errors.New("renderer gone")
-	p.mu.Unlock()
-	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-a", "threadId": "operator", "namespace": "agenthail", "tool": "voice_send_to_lead", "arguments": map[string]any{"project": "widget", "message": "ship it"}}})
-	if got := <-leads.sent; got != "ship it" {
-		t.Fatalf("sent=%q", got)
-	}
-	hangUp(t, f)
-	close(leads.release)
-	waitFor(t, "the refused answer", func() bool { return strings.Contains(f.View().Message, "renderer gone") })
-	if got := New(f.path, p, nil, "/fixture/agenthail").View("phone").Message; !strings.Contains(got, "Voice tool response could not be returned to Codex: renderer gone") {
-		t.Fatalf("after restart message=%q", got)
+func TestALeadSendAnsweredAfterTheCallEndedReportsCodexsRefusalToItsOwnOperator(t *testing.T) {
+	for _, replaced := range []bool{false, true} {
+		t.Run(map[bool]string{false: "kept across a restart", true: "not on a newer operator"}[replaced], func(t *testing.T) {
+			f, p := fixture(t)
+			leads := heldLeads{sent: make(chan string, 1), release: make(chan string)}
+			f.service.SetProjects(leads)
+			connectFixture(t, f)
+			p.mu.Lock()
+			p.respondErr = errors.New("renderer gone")
+			p.mu.Unlock()
+			f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-a", "threadId": "operator", "namespace": "agenthail", "tool": "voice_send_to_lead", "arguments": map[string]any{"project": "widget", "message": "ship it"}}})
+			if got := <-leads.sent; got != "ship it" {
+				t.Fatalf("sent=%q", got)
+			}
+			hangUp(t, f)
+			if replaced {
+				apply(t, f, Action{Action: "new"})
+			}
+			close(leads.release)
+			f.service.Close()
+			const refusal = "Voice tool response could not be returned to Codex: renderer gone"
+			if got := New(f.path, p, nil, "/fixture/agenthail").View("phone").Message; strings.Contains(got, refusal) == replaced {
+				t.Fatalf("after restart message=%q", got)
+			}
+		})
 	}
 }

@@ -159,6 +159,10 @@ func (s *Service) sendToLead(responder DynamicToolResponder, requestID string, a
 		}
 		if err := responder.RespondDynamicToolCall(ctx, requestID, true, answer); err != nil {
 			s.mu.Lock()
+			if s.state.State.Session == nil || s.state.State.Session.ID != source {
+				s.mu.Unlock()
+				return
+			}
 			s.state.State.Message = "Voice tool response could not be returned to Codex: " + err.Error()
 			if err := s.save(); err != nil {
 				s.loadErr = err
