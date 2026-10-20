@@ -79,10 +79,9 @@ type claudePrompts struct {
 	// Agenthail answered. The record goes on showing it until Claude acts on
 	// the answer, and that is no longer a wait.
 	answered map[string]claudeAnswer
-	// alive reports whether the process with this pid that started then is
-	// still running; an answer is forgotten once the process that asked has
-	// exited.
-	alive func(pid int, started time.Time) bool
+	// alive reports whether the process with this pid and identity is still
+	// running; an answer is forgotten once the process that asked has exited.
+	alive func(pid int, identity string) bool
 	// ended keeps, per session, the holds that ended lately, so a duplicate
 	// hook call that arrives after its prompt was settled takes that outcome
 	// rather than holding the prompt again.
@@ -94,9 +93,9 @@ type claudePrompts struct {
 }
 
 type claudeAnswer struct {
-	shownMS int64
-	pid     int
-	started time.Time
+	shownMS  int64
+	pid      int
+	identity string
 }
 
 type claudePrompt struct {
@@ -112,9 +111,9 @@ type claudePrompt struct {
 	// passes the same prompt more than once; those calls share one hold.
 	key     string
 	holders int
-	// pid and started identify the asking Claude process across pid reuse.
-	pid     int
-	started time.Time
+	// pid and identity name the asking Claude process across pid reuse.
+	pid      int
+	identity string
 	// recordMS is the statusUpdatedAt of the wait the record showed when the
 	// hook called.
 	recordMS int64
@@ -159,7 +158,7 @@ func (c *Claude) HoldPrompt(ctx context.Context, prompt ClaudePermissionPrompt) 
 	created := time.Now().UTC()
 	canonical, _ := json.Marshal(input)
 	held := &claudePrompt{input: input, suggestions: prompt.Suggestions, createdMS: created.UnixMilli(), key: prompt.ToolName + "\x00" + string(canonical), holders: 1, pid: pid, done: make(chan struct{})}
-	held.started, _ = processStartTime(pid)
+	held.identity, _ = processIdentity(pid)
 	kind := surface.WaitingApproval
 	if prompt.ToolName == "AskUserQuestion" {
 		kind = surface.WaitingQuestion
@@ -214,15 +213,15 @@ func (c *Claude) terminalProcess(sessionID string) (int, bool) {
 	return 0, false
 }
 
-// sameProcessRunning reports whether pid is still the process that started
-// at started. A pid whose start time was never read cannot be told from a
-// reused one, so it does not count.
-func sameProcessRunning(pid int, started time.Time) bool {
-	if started.IsZero() || !claudeProcessAlive(pid) {
+// sameProcessRunning reports whether pid is still the process with this
+// identity. A process whose identity was never read cannot be told from a
+// later one given its pid, so it does not count.
+func sameProcessRunning(pid int, identity string) bool {
+	if identity == "" || !claudeProcessAlive(pid) {
 		return false
 	}
-	actual, err := processStartTime(pid)
-	return err == nil && actual.Equal(started)
+	actual, err := processIdentity(pid)
+	return err == nil && actual == identity
 }
 
 func (c *Claude) awaitRecordWaiting(ctx context.Context, session surface.Session) *surface.Waiting {
@@ -337,7 +336,7 @@ func (p *claudePrompts) endLocked(sessionID string, held *claudePrompt, decision
 	p.ended[sessionID] = append(p.ended[sessionID], held)
 	time.AfterFunc(p.forgetAfter, func() { p.forget(sessionID, held) })
 	if decision != nil && held.shownMS != 0 {
-		p.answered[sessionID] = claudeAnswer{shownMS: held.shownMS, pid: held.pid, started: held.started}
+		p.answered[sessionID] = claudeAnswer{shownMS: held.shownMS, pid: held.pid, identity: held.identity}
 	}
 	p.open[sessionID] = slices.DeleteFunc(p.open[sessionID], func(open *claudePrompt) bool { return open == held })
 	if len(p.open[sessionID]) == 0 {
@@ -415,7 +414,7 @@ func (p *claudePrompts) retain() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for sessionID, answered := range p.answered {
-		if !p.alive(answered.pid, answered.started) {
+		if !p.alive(answered.pid, answered.identity) {
 			delete(p.answered, sessionID)
 		}
 	}

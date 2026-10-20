@@ -394,11 +394,14 @@ func TestAnAnswerIsForgottenWhenItsSessionExits(t *testing.T) {
 		t.Fatal("the answer was forgotten while its Claude process is still running")
 	}
 	// The asking process exited and its pid now belongs to a process that
-	// started at another time. The record names no procStart, as Claude's
-	// records need not.
+	// started later, within the same second. The record names no procStart,
+	// as Claude's records need not.
 	claude.prompts.mu.Lock()
 	answer := claude.prompts.answered["conversation"]
-	answer.started = answer.started.Add(-time.Hour)
+	if answer.identity == "" {
+		t.Fatal("the asking process has no identity")
+	}
+	answer.identity += "0"
 	claude.prompts.answered["conversation"] = answer
 	claude.prompts.mu.Unlock()
 	if _, err := claude.List(context.Background()); err != nil {
