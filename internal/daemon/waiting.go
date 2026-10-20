@@ -115,8 +115,8 @@ func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waitin
 	d.announcing[session.ID] = waiting.ID
 	d.announceMu.Unlock()
 	conversationID := session.ConversationID()
-	desktopMessage := fmt.Sprintf("%s is waiting on you", d.resolveDisplay(conversationID))
-	mobileMessage := fmt.Sprintf("%s is waiting on you", notificationSurfaceName(session.Surface))
+	desktopMessage := elsewhereWaitingMessage(d.resolveDisplay(conversationID), waiting.Kind)
+	mobileMessage := elsewhereWaitingMessage(notificationSurfaceName(session.Surface), waiting.Kind)
 	key := waitingNotificationKey(session.ID, waiting.ID)
 	go func(sessionID, questionID string) {
 		defer func() {
@@ -168,6 +168,19 @@ func (d *Daemon) waitingRequest(ctx context.Context, session surface.Session, wa
 		return surface.Request{}, false
 	}
 	return openRequest(state, waiting.ID)
+}
+
+// elsewhereWaitingMessage says what a session waits on when Agenthail
+// cannot read the prompt itself.
+func elsewhereWaitingMessage(name string, kind surface.WaitingKind) string {
+	switch kind {
+	case surface.WaitingQuestion:
+		return fmt.Sprintf("%s asks you a question", name)
+	case surface.WaitingInput:
+		return fmt.Sprintf("%s needs your input", name)
+	default:
+		return fmt.Sprintf("%s needs your approval", name)
+	}
 }
 
 // waitingNotificationKey names one question's notifications within the 64

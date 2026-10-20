@@ -129,3 +129,42 @@ struct RequestCard: View {
         respond(decision)
     }
 }
+
+/// A session waiting on a prompt Agenthail cannot answer, with where to answer it.
+struct ElsewhereWaitCard: View {
+    let waiting: WaitingState
+    let surface: String
+    let hostName: String?
+    let accent: Color
+    let open: (() -> Void)?
+
+    static func heading(kind: String, surface: String) -> String {
+        let agent = SessionRefinement.surfaceLabel(surface)
+        switch kind {
+        case "question": return "\(agent) asks you a question"
+        case "input": return "\(agent) needs your input"
+        default: return "\(agent) needs your approval"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(Self.heading(kind: waiting.kind, surface: surface), systemImage: waiting.kind == "approval" ? "hand.raised" : "questionmark.bubble")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(accent)
+            Text("Agenthail can't answer this one. Answer it where the session runs\(hostName.map { ", in \($0)" } ?? ", such as its terminal"). Messages you send wait until then.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let open {
+                Button("Open in \(hostName ?? "terminal")", systemImage: "arrow.up.forward.app", action: open)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("waiting-elsewhere-\(waiting.id)")
+    }
+}

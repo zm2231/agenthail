@@ -1293,6 +1293,31 @@ func escapeLike(value string) string {
 	return strings.ReplaceAll(value, `_`, `\_`)
 }
 
+// NamedSession is a session of this host and the alias it answers to, if any.
+type NamedSession struct {
+	ID    string
+	Alias string
+}
+
+// SessionsNamed lists this host's top-level sessions of a surface whose name
+// is exactly name, most recently updated first.
+func (r *Registry) SessionsNamed(kind surface.SurfaceKind, name string) ([]NamedSession, error) {
+	rows, err := r.read.Query(`SELECT s.id, COALESCE((SELECT a.name FROM aliases a WHERE a.session_id = s.id ORDER BY a.created_at LIMIT 1),'') FROM sessions s WHERE s.host_id='' AND s.parent_session_id='' AND s.surface = ? AND s.name = ? ORDER BY s.updated_at DESC, s.id`, string(kind), name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []NamedSession
+	for rows.Next() {
+		var session NamedSession
+		if err := rows.Scan(&session.ID, &session.Alias); err != nil {
+			return nil, err
+		}
+		out = append(out, session)
+	}
+	return out, rows.Err()
+}
+
 func (r *Registry) matchingIDs(query string, args ...any) ([]string, error) {
 	rows, err := r.read.Query(query, args...)
 	if err != nil {
@@ -2836,20 +2861,26 @@ func (r *Registry) GetSession(id string) (surface, name, cwd string, err error) 
 	return
 }
 
-func (r *Registry) Session(id string) (*surface.Session, error) {
+// sessionSelect reads one session with what its catalog row shows it
+// waiting on, so every API that returns a session agrees with the catalog.
+// status is the column expression for its status.
+func sessionSelect(status string) string {
+	return `SELECT s.id,s.surface,s.name,s.cwd,s.pid,` + status + `,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),COALESCE(cs.waiting_on,X''),` + sessionSubagentSelect
+}
+
+const sessionJoins = ` LEFT JOIN session_runtime sr ON sr.session_id=s.id LEFT JOIN catalog_sessions cs ON cs.session_id=s.id`
+
+func scanSession(scanner interface{ Scan(...any) error }) (surface.Session, error) {
 	var session surface.Session
 	var kind, status string
 	var hasLocal int
 	var lastActiveMS int64
 	var launcher string
-	var location []byte
+	var location, waitingOn []byte
 	var focusable int
 	var subagent subagentColumns
-	err := r.read.QueryRow(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.id = ?`, id).Scan(append([]any{
-		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable,
-	}, subagent.targets()...)...)
-	if err != nil {
-		return nil, err
+	if err := scanner.Scan(append([]any{&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable, &waitingOn}, subagent.targets()...)...); err != nil {
+		return surface.Session{}, err
 	}
 	session.Surface = surface.SurfaceKind(kind)
 	session.Status = surface.SessionStatus(status)
@@ -2858,10 +2889,52 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 		session.LastActive = time.UnixMilli(lastActiveMS)
 	}
 	subagent.apply(&session)
-	if runtime, err := runtimeFromColumns(launcher, location, focusable); err != nil {
+	runtime, err := runtimeFromColumns(launcher, location, focusable)
+	if err != nil {
+		return surface.Session{}, err
+	}
+	session.Runtime = runtime
+	if session.WaitingOn, err = decodeCatalogWaiting(waitingOn); err != nil {
+		return surface.Session{}, err
+	}
+	return session, nil
+}
+
+// decodeCatalogWaiting reads a catalog row's waiting_on column.
+func decodeCatalogWaiting(raw []byte) (*surface.Waiting, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var waiting *surface.Waiting
+	if err := json.Unmarshal(raw, &waiting); err != nil {
+		return nil, fmt.Errorf("parse catalog waiting state: %w", err)
+	}
+	return waiting, nil
+}
+
+func scanSessions(rows *sql.Rows) ([]surface.Session, error) {
+	defer rows.Close()
+	results := make([]surface.Session, 0)
+	for rows.Next() {
+		session, err := scanSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, session)
+	}
+	if err := rows.Err(); err != nil {
 		return nil, err
-	} else {
-		session.Runtime = runtime
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+func (r *Registry) Session(id string) (*surface.Session, error) {
+	session, err := scanSession(r.read.QueryRow(sessionSelect(`s.status`)+` FROM sessions s`+sessionJoins+` WHERE s.id = ?`, id))
+	if err != nil {
+		return nil, err
 	}
 	return &session, nil
 }
@@ -2875,54 +2948,20 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		limit = 20
 	}
 	pattern := "%" + escapeLike(query) + "%"
-	rows, err := r.read.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+`
-		FROM sessions s LEFT JOIN aliases a ON a.session_id=s.id LEFT JOIN session_runtime sr ON sr.session_id=s.id
-		WHERE s.surface=? AND s.host_id='' AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR a.name LIKE ? ESCAPE '\')
+	rows, err := r.read.Query(sessionSelect(`s.status`)+`
+		FROM sessions s`+sessionJoins+`
+		WHERE s.surface=? AND s.host_id='' AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR EXISTS (SELECT 1 FROM aliases a WHERE a.session_id=s.id AND a.name LIKE ? ESCAPE '\'))
 		ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id LIMIT ?`, string(kind), pattern, pattern, pattern, pattern, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	results := make([]surface.Session, 0)
-	for rows.Next() {
-		var session surface.Session
-		var kindText, status string
-		var hasLocal int
-		var lastActiveMS int64
-		var launcher string
-		var location []byte
-		var focusable int
-		var subagent subagentColumns
-		if err := rows.Scan(append([]any{&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
-			return nil, err
-		}
-		subagent.apply(&session)
-		session.Surface = surface.SurfaceKind(kindText)
-		session.Status = surface.SessionStatus(status)
-		session.HasLocal = hasLocal != 0
-		if lastActiveMS > 0 {
-			session.LastActive = time.UnixMilli(lastActiveMS)
-		}
-		if runtime, err := runtimeFromColumns(launcher, location, focusable); err != nil {
-			return nil, err
-		} else {
-			session.Runtime = runtime
-		}
-		results = append(results, session)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	return results, nil
+	return scanSessions(rows)
 }
 
 // ListSessions reports a session the catalog no longer holds as offline: its
 // stored status is the last observation, not a running process.
 func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
-	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,CASE WHEN EXISTS (SELECT 1 FROM catalog_sessions cs WHERE cs.session_id=s.id) THEN s.status ELSE ? END,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + ` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.host_id='' ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
+	query := sessionSelect(`CASE WHEN cs.session_id IS NOT NULL THEN s.status ELSE ? END`) + ` FROM sessions s` + sessionJoins + ` WHERE s.host_id='' ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
 	args := []any{string(surface.StatusOffline)}
 	if limit > 0 {
 		query += ` LIMIT ?`
@@ -2932,41 +2971,7 @@ func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	results := make([]surface.Session, 0)
-	for rows.Next() {
-		var session surface.Session
-		var kindText, status string
-		var hasLocal int
-		var lastActiveMS int64
-		var launcher string
-		var location []byte
-		var focusable int
-		var subagent subagentColumns
-		if err := rows.Scan(append([]any{&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
-			return nil, err
-		}
-		subagent.apply(&session)
-		session.Surface = surface.SurfaceKind(kindText)
-		session.Status = surface.SessionStatus(status)
-		session.HasLocal = hasLocal != 0
-		if lastActiveMS > 0 {
-			session.LastActive = time.UnixMilli(lastActiveMS)
-		}
-		if runtime, err := runtimeFromColumns(launcher, location, focusable); err != nil {
-			return nil, err
-		} else {
-			session.Runtime = runtime
-		}
-		results = append(results, session)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	return results, nil
+	return scanSessions(rows)
 }
 
 func (r *Registry) SessionUpdatedBefore(id string, before time.Time) (bool, error) {

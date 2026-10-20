@@ -1273,13 +1273,45 @@ func (a *App) resolveSession(ctx context.Context, kind surface.SurfaceKind, adap
 	}
 	sid, exactErr := a.registry().ExactTarget(kind, target)
 	if exactErr != nil || (selector != target && sid != selector) {
-		return nil, false, err
+		return nil, false, a.exitedNameError(kind, target, err)
 	}
 	registered, lookupErr := a.registry().Session(sid)
 	if lookupErr != nil || registered.Surface != kind {
 		return nil, false, err
 	}
 	return registered, false, nil
+}
+
+// exitedNamedSession refuses a target that is exactly the name of sessions the
+// surface no longer lists. A name never resumes a session, so the refusal
+// gives each one's id and alias to address it by.
+type exitedNamedSession struct {
+	kind     surface.SurfaceKind
+	target   string
+	sessions []registry.NamedSession
+	cause    error
+}
+
+func (e exitedNamedSession) Error() string {
+	handles := make([]string, 0, len(e.sessions))
+	for _, session := range e.sessions {
+		handle := session.ID
+		if session.Alias != "" {
+			handle += " (@" + session.Alias + ")"
+		}
+		handles = append(handles, handle)
+	}
+	return fmt.Sprintf("%q is the name of an exited %s session, and a name does not resume one; address it by id or alias: %s", e.target, e.kind, strings.Join(handles, ", "))
+}
+
+func (e exitedNamedSession) Unwrap() error { return e.cause }
+
+func (a *App) exitedNameError(kind surface.SurfaceKind, target string, cause error) error {
+	sessions, err := a.registry().SessionsNamed(kind, strings.TrimPrefix(target, "@"))
+	if err != nil || len(sessions) == 0 {
+		return cause
+	}
+	return exitedNamedSession{kind: kind, target: target, sessions: sessions, cause: cause}
 }
 
 func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, error) {
@@ -1337,6 +1369,10 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 					return nil, nil, adapterErr
 				}
 				session, live, resolveErr := a.resolveSession(ctx, registered.Surface, adapter, sid, target)
+				var exitedName exitedNamedSession
+				if errors.As(resolveErr, &exitedName) {
+					return nil, nil, resolveErr
+				}
 				if resolveErr != nil {
 					return nil, nil, fmt.Errorf("resolve registered %s session: %w", adapter.Name(), resolveErr)
 				}

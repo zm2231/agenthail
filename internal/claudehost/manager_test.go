@@ -471,3 +471,87 @@ func TestDiagnoseSignalsOnlyTheHost(t *testing.T) {
 		t.Fatalf("Diagnose did not report on the host %d:\n%s", hello.PID, report)
 	}
 }
+
+// An update to a later protocol retires a protocol 2 host like any other, and
+// this build's client keeps reaching the sessions it serves: their prompts
+// are listed and answered, messages, mode changes and closes reach them (a
+// close lets the running turn finish), and a
+// resume returns the process it still runs. Once it leaves, the next resume
+// opens the conversation on this build's host.
+func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.T) {
+	for _, test := range []struct {
+		name, prompt, reply string
+		decision            claudehost.Decision
+		outcome             string
+	}{
+		{name: "approval", prompt: "TOOL", decision: claudehost.Decision{Behavior: "allow"}, outcome: "allowed", reply: "tool:allow:"},
+		{name: "question", prompt: "QUESTION", decision: claudehost.Decision{Behavior: "allow", Answers: map[string]string{"Which color?": "Blue"}}, outcome: "answered", reply: `question:allow:{"Which color?":"Blue"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := claudehosttest.New(t, "")
+			ctx := testContext(t)
+			old := f.StartProtocol2Host(t, "0.2.50")
+			if old.Protocol != 2 {
+				t.Fatalf("shipped host hello = %+v, want protocol 2", old)
+			}
+			client := claudehost.NewClient(f.Home)
+			asking, working := uuid.NewString(), uuid.NewString()
+			opened := f.Open(t, client, asking)
+			f.Peer(t, opened.PID, test.prompt)
+			request := listed(t, client, asking, 1).Requests[0]
+			busy := f.Open(t, client, working)
+			if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: working, UUID: uuid.NewString(), Text: "SLOW 1500"}); err != nil {
+				t.Fatal(err)
+			}
+
+			client, err := f.Manager(t, "1.1.0").Ensure(ctx)
+			if err != nil {
+				t.Fatalf("Ensure after the update = %v", err)
+			}
+			if hello, err := client.Hello(ctx); err != nil || hello.Protocol != claudehost.Protocol || hello.PID == old.PID {
+				t.Fatalf("hello after the update = %+v, %v", hello, err)
+			}
+			if retiring := client.Retiring(); len(retiring) != 1 {
+				t.Fatalf("retiring hosts = %v, want the protocol 2 host", retiring)
+			}
+			if got := listed(t, client, asking, 1); got.PID != opened.PID || got.Requests[0].RequestID != request.RequestID {
+				t.Fatalf("listing after the update = %+v, want pid %d still asking %s", got, opened.PID, request.RequestID)
+			}
+			if resumed, err := client.Open(ctx, claudehost.OpenRequest{Resume: asking, Cwd: f.Cwd, Name: "kept"}); err != nil || resumed.PID != opened.PID {
+				t.Fatalf("resume while the protocol 2 host runs it = %+v, %v; want pid %d", resumed, err, opened.PID)
+			}
+			if _, err := client.SetPermissionMode(ctx, asking, "plan"); err != nil {
+				t.Fatalf("permission mode through the protocol 2 host = %v", err)
+			}
+			if result, err := client.Send(ctx, claudehost.SendRequest{SessionID: asking, UUID: uuid.NewString(), Text: "after the update", Origin: &claudehost.Origin{Kind: "human"}}); err != nil || !result.Accepted {
+				t.Fatalf("send after the update = %+v, %v", result, err)
+			}
+			if err := client.Close(ctx, working); err != nil {
+				t.Fatalf("close through the protocol 2 host = %v", err)
+			}
+			claudehosttest.WaitFor(t, "the closed session's Claude to exit", func() bool { return !claudehosttest.Alive(busy.PID) })
+			if outcome, err := client.Respond(ctx, asking, request.RequestID, test.decision); err != nil || outcome != test.outcome {
+				t.Fatalf("respond after the update = %q, %v; want %s", outcome, err, test.outcome)
+			}
+			claudehosttest.WaitFor(t, "the protocol 2 host to finish the turns and leave", func() bool {
+				return !claudehosttest.Alive(old.PID) && !claudehosttest.Alive(opened.PID)
+			})
+			if got := replies(f.Turns(t, asking)); !slices.Equal(got, []string{test.reply, "echo:after the update"}) {
+				t.Fatalf("turns = %v, want the answer to reach Claude and then the message", got)
+			}
+			controls, err := os.ReadFile(filepath.Join(f.ClaudeDir, "controls.jsonl"))
+			if err != nil || !strings.Contains(string(controls), `"mode":"plan"`) || !strings.Contains(string(controls), asking) {
+				t.Fatalf("controls = %s, %v; want the mode change at the protocol 2 host's Claude", controls, err)
+			}
+
+			resumed, err := client.Open(ctx, claudehost.OpenRequest{Resume: asking, Cwd: f.Cwd})
+			if err != nil || resumed.PID == opened.PID {
+				t.Fatalf("resume on this build's host = %+v, %v", resumed, err)
+			}
+			if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: asking, UUID: uuid.NewString(), Text: "on the new host"}); err != nil {
+				t.Fatal(err)
+			}
+			claudehosttest.WaitFor(t, "the turn on the new host", func() bool { return len(f.Turns(t, asking)) == 3 })
+		})
+	}
+}

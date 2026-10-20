@@ -271,14 +271,15 @@ func TestAWaitingHostRequestPushNamesOnlyTheRequestAndTheButtonsComeFromTheMac(t
 		t.Fatalf("request %s is not open: %s", requestID, response.Body.String())
 		return openRequestView{}
 	}
-	generic := notificationSurfaceName(surface.KindClaude) + " is waiting on you"
+	asked := notificationSurfaceName(surface.KindClaude) + " asks you a question"
+	approvalAsked := notificationSurfaceName(surface.KindClaude) + " needs your approval"
 	reply := func(requestID, choice, message string) *httptest.ResponseRecorder {
 		return apiCall(t, handler, http.MethodPost, "/api/v1/actions", phone, map[string]any{"action": "respond", "sessionId": id, "requestId": requestID, "decision": map[string]string{"choice": choice, "message": message}})
 	}
 	choose := func(requestID, choice string) *httptest.ResponseRecorder { return reply(requestID, choice, "") }
 
 	push := ask("QUESTION")
-	if push["requestId"] == "" || push["message"] != generic || push["actions"] != "" {
+	if push["requestId"] == "" || push["message"] != asked || push["actions"] != "" {
 		t.Fatalf("question push = %+v", push)
 	}
 	for field, value := range push {
@@ -303,7 +304,7 @@ func TestAWaitingHostRequestPushNamesOnlyTheRequestAndTheButtonsComeFromTheMac(t
 	})
 
 	push = ask("TOOL")
-	if push["requestId"] == "" || push["message"] != generic || push["actions"] != "" {
+	if push["requestId"] == "" || push["message"] != approvalAsked || push["actions"] != "" {
 		t.Fatalf("approval push = %+v", push)
 	}
 	if approval := fetch(push["requestId"]); len(approval.Actions) != 3 || approval.Actions[0].ID != "allow" || approval.Actions[1].ID != "deny" || approval.Actions[2].ID != "reply" || approval.Prompt == "" {
@@ -338,7 +339,7 @@ func TestAWaitingHostRequestPushNamesOnlyTheRequestAndTheButtonsComeFromTheMac(t
 	})
 
 	push = ask("QUESTIONS")
-	if push["requestId"] == "" || push["message"] != generic {
+	if push["requestId"] == "" || push["message"] != asked {
 		t.Fatalf("two-question push = %+v", push)
 	}
 	if questions := fetch(push["requestId"]); questions.Prompt != "Which color?" || len(questions.Actions) != 0 {

@@ -395,3 +395,32 @@ func TestHostFlagsStayScopedToTheirCommands(t *testing.T) {
 		}
 	}
 }
+
+// A local session that exited under a name a paired host's session answers to
+// does not hide that session; qualified to this host, the name says how to
+// reach the exited one.
+func TestAnExitedLocalNameLeavesAPairedHostsMatch(t *testing.T) {
+	app, reg, fake, api := federatedCLIFixture(t, true)
+	fake.resolveErr = surface.ErrSessionNotFound
+	if err := reg.RegisterSession(surface.Session{ID: "local-exited", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "builder"}); err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "builder", "to forge"}) })
+	if err != nil || !strings.Contains(output, "sent to forge::@builder") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	if actions, _ := api.recorded(); len(actions) != 1 || actions[0]["sessionId"] != forgeBuilder.ID {
+		t.Fatalf("actions=%v", actions)
+	}
+	identity, err := reg.HostIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = app.Run([]string{"send", identity.Name + "::builder", "to the exited one"})
+	if err == nil || !strings.Contains(err.Error(), "local-exited") || !strings.Contains(err.Error(), "a name does not resume") {
+		t.Fatalf("err=%v", err)
+	}
+	if len(fake.sent) != 0 {
+		t.Fatalf("local surface received %v", fake.sent)
+	}
+}

@@ -2,7 +2,6 @@ package registry
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -165,11 +164,11 @@ func scanCatalogSession(scanner interface{ Scan(...any) error }) (CatalogSession
 	if err := scanner.Scan(append([]any{&state.Session.ID, &state.HostID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.RuntimeKind, &state.Session.ConfiguredModel, &state.Session.Bridge, &state.Session.ForkedFrom, &lastActiveMS, &state.Project, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &waitingOn, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 		return CatalogSessionState{}, err
 	}
-	if len(waitingOn) > 0 {
-		if err := json.Unmarshal(waitingOn, &state.Session.WaitingOn); err != nil {
-			return CatalogSessionState{}, fmt.Errorf("parse catalog waiting state: %w", err)
-		}
+	waiting, err := decodeCatalogWaiting(waitingOn)
+	if err != nil {
+		return CatalogSessionState{}, err
 	}
+	state.Session.WaitingOn = waiting
 	subagent.apply(&state.Session)
 	state.Session.Surface = surface.SurfaceKind(kind)
 	state.Session.Status = surface.SessionStatus(status)

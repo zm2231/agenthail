@@ -14,6 +14,7 @@ SOURCES=(
   EventRetryBackoff.swift
   OperationsRefreshPolicy.swift
   RequestAnswer.swift
+  RequestCard.swift
   RequestNotifications.swift
   SessionSelection.swift
   SessionTree.swift

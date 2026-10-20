@@ -144,7 +144,7 @@ func (a *App) resolveAnyTarget(ctx context.Context, target string) (*surface.Ses
 		return session, adapter, nil, localErr
 	}
 	var notFound targetNotFoundError
-	if localErr != nil && !errors.As(localErr, &notFound) && !errors.Is(localErr, sql.ErrNoRows) {
+	if localErr != nil && !errors.As(localErr, &notFound) && !errors.Is(localErr, sql.ErrNoRows) && !errors.Is(localErr, surface.ErrSessionNotFound) {
 		return nil, nil, nil, localErr
 	}
 	matches, err := a.remoteMatches(ctx, "", target)
