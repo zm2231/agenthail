@@ -102,10 +102,19 @@ func newPushRecorder(t *testing.T, store *registry.Registry) *pushRecorder {
 	t.Helper()
 	recorder := &pushRecorder{events: map[string][]map[string]string{}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		var fields map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+		payload := map[string]string{}
+		for name, value := range fields {
+			var text string
+			if json.Unmarshal(value, &text) == nil {
+				payload[name] = text
+				continue
+			}
+			payload[name] = string(value)
 		}
 		recorder.mu.Lock()
 		recorder.events[payload["eventType"]] = append(recorder.events[payload["eventType"]], payload)

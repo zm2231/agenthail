@@ -43,7 +43,20 @@ func (d *Daemon) requestsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"sessionId": session.ID, "permissionMode": state.PermissionMode, "requests": state.Requests})
+	requests := make([]openRequestView, 0, len(state.Requests))
+	for _, request := range state.Requests {
+		requests = append(requests, openRequestView{Request: request, Prompt: request.Prompt(), Actions: request.Actions()})
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"sessionId": session.ID, "permissionMode": state.PermissionMode, "requests": requests})
+}
+
+// openRequestView is a request with the line and buttons a notification shows
+// for it, so a phone builds its notification from this Mac rather than from
+// the push.
+type openRequestView struct {
+	surface.Request
+	Prompt  string                  `json:"prompt"`
+	Actions []surface.RequestAction `json:"actions,omitempty"`
 }
 
 // respond answers one open request and records who answered it. A request
@@ -55,9 +68,25 @@ func (d *Daemon) respond(ctx context.Context, w http.ResponseWriter, adapter sur
 		http.Error(w, "this session's requests are not answered through Agenthail", http.StatusBadRequest)
 		return
 	}
+	if decision.Choice != "" {
+		state, err := responder.Requests(ctx, session)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		request, open := openRequest(state, requestID)
+		if !open {
+			writeStaleRequest(w)
+			return
+		}
+		if decision, err = request.Choose(decision.Choice, decision.Message); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
 	outcome, err := responder.Respond(ctx, session, requestID, decision)
 	if errors.Is(err, surface.ErrRequestStale) {
-		writeDashboardJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": map[string]string{"code": "stale", "message": surface.ErrRequestStale.Error()}})
+		writeStaleRequest(w)
 		return
 	}
 	if err != nil {
@@ -71,6 +100,22 @@ func (d *Daemon) respond(ctx context.Context, w http.ResponseWriter, adapter sur
 	}
 	cancel()
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": map[string]string{"requestId": requestID, "outcome": outcome}})
+}
+
+// openRequest finds a request that is still open. A notification button's
+// choice is resolved against it as it is now; one no longer open is stale like
+// any other late answer.
+func openRequest(state surface.RequestState, requestID string) (surface.Request, bool) {
+	for _, request := range state.Requests {
+		if request.ID == requestID {
+			return request, true
+		}
+	}
+	return surface.Request{}, false
+}
+
+func writeStaleRequest(w http.ResponseWriter) {
+	writeDashboardJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": map[string]string{"code": "stale", "message": surface.ErrRequestStale.Error()}})
 }
 
 // recordSetting writes a model or permission-mode change into the session's

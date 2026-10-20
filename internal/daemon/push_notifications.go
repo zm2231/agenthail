@@ -40,9 +40,11 @@ func PushRelayURL() string {
 
 // mobileNotification is one push to every paired device. CollapseID, when
 // set, makes a repeat of the same notification replace the earlier one on the
-// device instead of adding a second.
+// device instead of adding a second. RequestID, when set, names the open
+// request the device fetches from this Mac to show what it asks and offer
+// any buttons; what the request asks never goes through the relay.
 type mobileNotification struct {
-	Title, Message, SessionID, TurnID, EventType, CollapseID string
+	Title, Message, SessionID, TurnID, EventType, CollapseID, RequestID string
 }
 
 func (d *Daemon) notifyPairedDevices(ctx context.Context, notification mobileNotification) {
@@ -111,7 +113,7 @@ func sendDevicePush(ctx context.Context, target registry.DevicePushTarget, notif
 	if relayURL == "" {
 		return errors.New("push relay is not configured")
 	}
-	payload, err := json.Marshal(map[string]string{
+	body := map[string]any{
 		"installationId": target.InstallationID,
 		"credential":     target.Credential,
 		"title":          boundedNotificationText(notification.Title, 120),
@@ -120,7 +122,11 @@ func sendDevicePush(ctx context.Context, target registry.DevicePushTarget, notif
 		"turnId":         boundedNotificationText(notification.TurnID, 240),
 		"eventType":      boundedNotificationText(notification.EventType, 80),
 		"collapseId":     boundedNotificationText(notification.CollapseID, 64),
-	})
+	}
+	if notification.RequestID != "" {
+		body["requestId"] = boundedNotificationText(notification.RequestID, 240)
+	}
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}

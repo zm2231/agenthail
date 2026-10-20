@@ -220,3 +220,131 @@ func TestTheDashboardOffersAHostSessionNoRemoteControlCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestAWaitingHostRequestPushNamesOnlyTheRequestAndTheButtonsComeFromTheMac(t *testing.T) {
+	fixture := claudehosttest.New(t, "")
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	claude := surfaces.NewClaude(nil, fixture.Home)
+	session := hostedSession(t, claude, id)
+	r := hostRegistry(t)
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	pushes := newPushRecorder(t, r)
+	d := New(r, []surface.Surface{claude})
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	phone := deviceToken(t, r, "Phone", "read", "control")
+	ask := func(message string) map[string]string {
+		t.Helper()
+		before := pushes.count("session.waiting")
+		if response := apiCall(t, handler, http.MethodPost, "/api/v1/actions", phone, map[string]any{"action": "send", "sessionId": id, "message": message, "author": "person"}); response.Code != http.StatusOK {
+			t.Fatalf("send status=%d body=%s", response.Code, response.Body.String())
+		}
+		claudehosttest.WaitFor(t, "the waiting push", func() bool {
+			stored, err := r.Session(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.observeTurn(context.Background(), claude, stored); err != nil {
+				t.Fatal(err)
+			}
+			return pushes.count("session.waiting") > before
+		})
+		return pushes.all("session.waiting")[before]
+	}
+	fetch := func(requestID string) openRequestView {
+		t.Helper()
+		response := apiCall(t, handler, http.MethodGet, "/api/v1/requests?sessionId="+id, phone, nil)
+		var state struct {
+			Requests []openRequestView `json:"requests"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &state) != nil {
+			t.Fatalf("requests status=%d body=%s", response.Code, response.Body.String())
+		}
+		for _, request := range state.Requests {
+			if request.ID == requestID {
+				return request
+			}
+		}
+		t.Fatalf("request %s is not open: %s", requestID, response.Body.String())
+		return openRequestView{}
+	}
+	generic := notificationSurfaceName(surface.KindClaude) + " is waiting on you"
+	reply := func(requestID, choice, message string) *httptest.ResponseRecorder {
+		return apiCall(t, handler, http.MethodPost, "/api/v1/actions", phone, map[string]any{"action": "respond", "sessionId": id, "requestId": requestID, "decision": map[string]string{"choice": choice, "message": message}})
+	}
+	choose := func(requestID, choice string) *httptest.ResponseRecorder { return reply(requestID, choice, "") }
+
+	push := ask("QUESTION")
+	if push["requestId"] == "" || push["message"] != generic || push["actions"] != "" {
+		t.Fatalf("question push = %+v", push)
+	}
+	for field, value := range push {
+		if strings.Contains(value, "color") || strings.Contains(value, "Blue") {
+			t.Fatalf("the push carries what the request asks in %s: %q", field, value)
+		}
+	}
+	question := fetch(push["requestId"])
+	if question.Prompt != "Which color?" || len(question.Actions) != 3 || question.Actions[1] != (surface.RequestAction{ID: "o1", Title: "Blue"}) || question.Actions[2].ID != "reply" {
+		t.Fatalf("question = %+v", question)
+	}
+	if response := choose(push["requestId"], "allow"); response.Code != http.StatusBadRequest {
+		t.Fatalf("a choice the question does not offer status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := choose(push["requestId"], "o1"); response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"outcome":"answered"`)) {
+		t.Fatalf("o1 status=%d body=%s", response.Code, response.Body.String())
+	}
+	assertAPIV1Error(t, choose(push["requestId"], "o0"), http.StatusConflict, "stale")
+	claudehosttest.WaitFor(t, "the answered turn", func() bool {
+		turns := fixture.Turns(t, id)
+		return len(turns) == 1 && turns[0].Reply == `question:allow:{"Which color?":"Blue"}`
+	})
+
+	push = ask("TOOL")
+	if push["requestId"] == "" || push["message"] != generic || push["actions"] != "" {
+		t.Fatalf("approval push = %+v", push)
+	}
+	if approval := fetch(push["requestId"]); len(approval.Actions) != 3 || approval.Actions[0].ID != "allow" || approval.Actions[1].ID != "deny" || approval.Actions[2].ID != "reply" || approval.Prompt == "" {
+		t.Fatalf("approval = %+v", approval)
+	}
+	if response := choose(push["requestId"], "deny"); response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"outcome":"denied"`)) {
+		t.Fatalf("deny status=%d body=%s", response.Code, response.Body.String())
+	}
+	if denied := historyOf(t, r, id, "request-denied"); len(denied) != 1 || denied[0].Result != "answered by device Phone" {
+		t.Fatalf("history = %+v", denied)
+	}
+
+	push = ask("QUESTION typed")
+	if response := reply(push["requestId"], "reply", " "); response.Code != http.StatusBadRequest {
+		t.Fatalf("an empty reply status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := reply(push["requestId"], "reply", "Green"); response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"outcome":"answered"`)) {
+		t.Fatalf("reply status=%d body=%s", response.Code, response.Body.String())
+	}
+	claudehosttest.WaitFor(t, "the typed answer", func() bool {
+		turns := fixture.Turns(t, id)
+		return len(turns) == 3 && turns[2].Reply == `question:allow:{"Which color?":"Green"}`
+	})
+
+	push = ask("TOOL typed")
+	if response := reply(push["requestId"], "reply", "use the staging host"); response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"outcome":"denied"`)) {
+		t.Fatalf("deny with a message status=%d body=%s", response.Code, response.Body.String())
+	}
+	claudehosttest.WaitFor(t, "the denied turn", func() bool {
+		turns := fixture.Turns(t, id)
+		return len(turns) == 4 && turns[3].Reply == "tool:deny:use the staging host"
+	})
+
+	push = ask("QUESTIONS")
+	if push["requestId"] == "" || push["message"] != generic {
+		t.Fatalf("two-question push = %+v", push)
+	}
+	if questions := fetch(push["requestId"]); questions.Prompt != "Which color?" || len(questions.Actions) != 0 {
+		t.Fatalf("two questions = %+v", questions)
+	}
+	if response := reply(push["requestId"], "reply", "Green"); response.Code != http.StatusBadRequest {
+		t.Fatalf("a reply to two questions status=%d body=%s", response.Code, response.Body.String())
+	}
+}
