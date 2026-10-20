@@ -55,6 +55,35 @@ boundary, and records the original size; `--report` replaces the text with the
 parsed completion report (`internal/report`) and cannot be combined with it.
 Both run in the CLI on whatever page the reader returned, so the daemon page,
 paired-host reads and offline provider reads behave the same.
+
+Each exchange carries `turn` (`surface.TurnMetadata`, version 1). The done item
+that ends a turn carries what the provider recorded, through the journal like
+any other field, and `surface.BoundSessionRead` gives an exchange that no done
+item ended `running` (the newest exchange of a busy session) or `unknown`.
+`unavailable` names each field the provider did not record.
+
+- Codex: a meter reads the rollout. `turn_context` gives the model,
+  `task_complete.duration_ms` the duration, and `token_count.last_token_usage`
+  each request's tokens. Codex repeats a `token_count` without a new request; a
+  record that leaves `total_token_usage` unchanged is not counted again. A
+  managed session read from the app server takes the rollout turn whose reply
+  matches, and the app server's turn status otherwise.
+- Claude: the turn tracker sums each assistant message's usage, from the
+  message's last record, since earlier records hold partial counts.
+  `inputTokens` adds `cache_read_input_tokens` and
+  `cache_creation_input_tokens` to `input_tokens`, so both providers count
+  input the same way. `durationMs` is the wall time from the prompt record to
+  the turn's last record.
+- Notion: nothing is recorded, so every field is unavailable.
+
+A reader that starts mid-turn, a page or a stream window, replays from the
+record that started the turn, at most 64 MiB back. A turn that started further
+back reports usage and model as unavailable rather than a partial count.
+
+These numbers are accounting inputs, not a bill. They omit subagent turns,
+which run in their own transcripts, and a request cancelled before the provider
+recorded its usage. They do not price cached or cache-written tokens. Claude's
+duration includes tool runs and permission waits; Codex's is the provider's own.
 With the daemon running, phone detail, `last`, and `reply` read the same bounded
 per-session journal page. CLI JSON includes `journalSeq`; an active-daemon read
 error does not fall back to a second provider reader. Metadata loads independently.

@@ -1205,13 +1205,14 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		return err
 	}
 	turns := newClaudeTurnTracker(replayed.current, closing)
+	turns.meter = replayed.meter
 	completed := false
 	finish := func(ended []claudeTurnEnd) {
 		for _, end := range ended {
 			if uuid != "" && end.TurnID != uuid && end.Status == "" {
 				continue
 			}
-			onEvent(surface.StreamEvent{ID: end.Key, ProviderKey: "timeline:" + end.Key, Version: 1, Operation: "phase", TurnID: end.TurnID, Kind: "done", Status: end.Status})
+			onEvent(surface.StreamEvent{ID: end.Key, ProviderKey: "timeline:" + end.Key, Version: 1, Operation: "phase", TurnID: end.TurnID, Kind: "done", Status: end.Status, Turn: end.Turn})
 			if uuid != "" && end.TurnID == uuid && end.Status == "" {
 				completed = true
 			}

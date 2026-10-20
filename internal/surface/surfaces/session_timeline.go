@@ -53,6 +53,7 @@ func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, reque
 	}
 	remote, remoteErr := c.readSessionFromRPC(ctx, session, request.Limit)
 	if remoteErr == nil {
+		codexManagedTurns(remote.Exchanges, local.Exchanges)
 		remote.Items = local.Items
 		remote.NextBefore = local.NextBefore
 		remote.Truncated = local.Truncated
@@ -151,6 +152,10 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 	if fileInfo.Size() < offset {
 		return fmt.Errorf("Codex transcript changed during stream: %w", surface.ErrTranscriptUnavailable)
 	}
+	meter, err := codexStreamTurnMeter(ctx, path, offset)
+	if err != nil {
+		return err
+	}
 	deadline := time.Now().Add(timeout)
 	currentTurnID := session.CodexCurrentTurnID
 	for time.Now().Before(deadline) {
@@ -169,11 +174,15 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 			if turnID := codexRecordTurnID(record); turnID != "" {
 				currentTurnID = turnID
 			}
+			turn := meter.observe(record)
 			items := codexTimelineItems(record)
 			effectiveTurnID := currentTurnID
-			if effectiveTurnID != "" {
-				for index := range items {
+			for index := range items {
+				if effectiveTurnID != "" {
 					items[index].TurnID = effectiveTurnID
+				}
+				if items[index].Kind == "done" {
+					items[index].Turn = turn
 				}
 			}
 			projection := codexUserProjection{pending: session.CodexPendingEventUser, turnID: session.CodexPendingEventTurn}
@@ -188,6 +197,9 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 			session.CodexCurrentTurnID = currentTurnID
 			if len(items) == 0 {
 				if opaque := codexOpaqueTimelineItem(record); opaque != nil {
+					if opaque.Kind == "done" {
+						opaque.Turn = turn
+					}
 					emitCodexTranscriptItem(session, uuid, record, line, recordOffset, 0, *opaque, currentTurnID, onEvent)
 				}
 				return nil
@@ -232,7 +244,7 @@ func emitCodexTranscriptItem(session *surface.Session, uuid string, record map[s
 	if item.Kind == "done" {
 		operation = "phase"
 	}
-	onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: operation, Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Files: item.Files, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
+	onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: operation, Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Files: item.Files, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text, Turn: item.Turn})
 }
 
 func codexRecordTurnID(record map[string]any) string {
@@ -393,11 +405,19 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 	skipResponseUsers := map[int]bool{}
 	recordTurnIDs := map[int]string{}
 	currentTurnID := ""
+	codexTurns := map[int]*surface.TurnMetadata{}
 	if source == "codex" {
+		meter, err := codexTurnMeterAt(ctx, file, start)
+		if err != nil {
+			return nil, err
+		}
 		for index, line := range lines {
 			var record map[string]any
 			if json.Unmarshal(line, &record) != nil {
 				continue
+			}
+			if turn := meter.observe(record); turn != nil {
+				codexTurns[index] = turn
 			}
 			if turnID := codexRecordTurnID(record); turnID != "" {
 				currentTurnID = turnID
@@ -478,9 +498,12 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 					items = []surface.TimelineItem{*opaque}
 				}
 			}
-			if turnID := recordTurnIDs[index]; turnID != "" {
-				for itemIndex := range items {
+			for itemIndex := range items {
+				if turnID := recordTurnIDs[index]; turnID != "" {
 					items[itemIndex].TurnID = turnID
+				}
+				if items[itemIndex].Kind == "done" {
+					items[itemIndex].Turn = codexTurns[index]
 				}
 			}
 			if err := decorateTimelineAttachments(ctx, items, record, source, offset); err != nil {
@@ -623,7 +646,7 @@ func claudeRecordTimelineItems(ctx context.Context, record map[string]any, offse
 	}
 	done := make([]surface.TimelineItem, 0, len(ended)+len(items))
 	for _, end := range ended {
-		done = append(done, surface.TimelineItem{ID: end.Key, Kind: "done", TurnID: end.TurnID, Status: end.Status, Timestamp: at})
+		done = append(done, surface.TimelineItem{ID: end.Key, Kind: "done", TurnID: end.TurnID, Status: end.Status, Timestamp: at, Turn: end.Turn})
 	}
 	return append(done, items...), nil
 }
@@ -694,8 +717,17 @@ func claudeTranscriptReply(records []transcriptRecord, source string, settled fu
 func codexTranscriptExchanges(records []transcriptRecord) ([]surface.Exchange, []int64) {
 	exchanges := make([]surface.Exchange, 0)
 	offsets := make([]int64, 0)
+	turnIDs := make([]string, 0)
 	for _, record := range records {
 		for _, item := range record.items {
+			if item.Kind == "done" && len(exchanges) > 0 && exchanges[len(exchanges)-1].Turn == nil && (item.TurnID == "" || turnIDs[len(turnIDs)-1] == "" || item.TurnID == turnIDs[len(turnIDs)-1]) {
+				ended := item.Turn
+				if ended == nil {
+					ended = surface.NewTurnMetadata(surface.TurnStateOfDone(item.Status), "", nil, nil)
+				}
+				exchanges[len(exchanges)-1].Turn = ended
+				continue
+			}
 			if item.Kind != "message" || (item.Text == "" && len(item.Files) == 0) {
 				continue
 			}
@@ -704,10 +736,12 @@ func codexTranscriptExchanges(records []transcriptRecord) ([]surface.Exchange, [
 			case "user":
 				exchanges = append(exchanges, surface.Exchange{User: item.Text, Timestamp: timestamp})
 				offsets = append(offsets, record.offset)
+				turnIDs = append(turnIDs, item.TurnID)
 			case "assistant":
 				if len(exchanges) == 0 || exchanges[len(exchanges)-1].Assistant != "" {
 					exchanges = append(exchanges, surface.Exchange{Assistant: item.Text, Timestamp: timestamp})
 					offsets = append(offsets, record.offset)
+					turnIDs = append(turnIDs, item.TurnID)
 				} else {
 					exchanges[len(exchanges)-1].Assistant = item.Text
 				}

@@ -1111,7 +1111,7 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 				if hasAssistant {
 					version = uint64(len(assistant.Text))
 				}
-				onEvent(surface.StreamEvent{ID: key + ":done", ProviderKey: key + ":done", Version: version, Operation: "phase", TurnID: turn.ID, Kind: "done"})
+				onEvent(surface.StreamEvent{ID: key + ":done", ProviderKey: key + ":done", Version: version, Operation: "phase", TurnID: turn.ID, Kind: "done", Turn: codexRolloutTurnMetadata(ctx, codexTranscriptPath(sess), turn.ID)})
 				return nil
 			}
 		}
@@ -1357,7 +1357,7 @@ func (c *Codex) readSessionFromRPC(ctx context.Context, sess *surface.Session, n
 	var exchanges []surface.Exchange
 	for _, turn := range thread.Turns {
 		if turn.User != "" || turn.Assistant != "" {
-			exchanges = append(exchanges, surface.Exchange{User: turn.User, Assistant: turn.Assistant, Source: "rpc"})
+			exchanges = append(exchanges, surface.Exchange{User: turn.User, Assistant: turn.Assistant, Source: "rpc", Turn: codexRPCTurnMetadata(turn)})
 		}
 	}
 

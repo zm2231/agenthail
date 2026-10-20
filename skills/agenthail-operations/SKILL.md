@@ -320,6 +320,24 @@ without splitting a character. A cut field says so: JSON adds `truncated` and
 text output ends it with `[truncated: shown of total bytes]`. It cannot be
 combined with `--report`.
 
+Each exchange in `last --json` and `last --report`, and the reply in
+`reply --json` and `reply --report`, carries `turn`, what the provider recorded
+about that turn:
+
+```json
+{"v":1,"state":"completed","model":"gpt-5.6-terra","durationMs":4200,"usage":{"inputTokens":250,"cachedInputTokens":140,"cacheWriteTokens":5,"outputTokens":50,"reasoningTokens":10}}
+```
+
+`state` is `completed`, `interrupted`, `failed`, `running` or `unknown`.
+`inputTokens` includes the cached and cache-written input, and `outputTokens`
+includes the reasoning output. `unavailable` lists each field the provider did
+not record for that turn, such as `["model","durationMs","usage"]`; a listed
+field is absent, never zero. Codex rollouts record every field. A Codex turn
+read from the app server without its rollout has only its state. Claude
+transcripts record every field, with `usage.reasoningTokens` only when Claude
+wrote thinking-token counts. Notion records none, so its state is `unknown`.
+Tokens are not cost: they cover the agent's own model requests, not subagents.
+
 Use `--model` only for a one-message Codex or Notion override. Use `--from` when
 the receiving agent needs a human-readable sender label. Long content should go
 through stdin.

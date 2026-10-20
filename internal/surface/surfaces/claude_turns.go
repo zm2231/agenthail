@@ -17,6 +17,7 @@ type claudeTurnEnd struct {
 	TurnID string
 	Key    string
 	Status string
+	Turn   *surface.TurnMetadata
 }
 
 // claudeTurnTracker derives, one transcript record at a time, the turn each
@@ -27,6 +28,18 @@ type claudeTurnTracker struct {
 	current  string
 	closing  surface.ClaudeClosingTurn
 	terminal map[string]bool
+	meter    claudeTurnMeter
+}
+
+// claudeTurnMeter accumulates the turn whose start record the tracker saw.
+// Claude writes a message's usage on each of its records, partial first, so
+// the last record of each message counts.
+type claudeTurnMeter struct {
+	turnID    string
+	startedAt time.Time
+	lastAt    time.Time
+	model     string
+	usage     map[string]surface.TurnUsage
 }
 
 func newClaudeTurnTracker(current string, closing surface.ClaudeClosingTurn) *claudeTurnTracker {
@@ -47,8 +60,12 @@ func (t *claudeTurnTracker) observe(record map[string]any, offset int64, line []
 	}
 	if claudeRecordStartsTurn(record) {
 		t.current = str(record, "uuid")
+		t.meter = claudeTurnMeter{turnID: t.current, usage: map[string]surface.TurnUsage{}}
 	}
 	turnID := t.current
+	if turnID != "" && turnID == t.meter.turnID {
+		t.meter.observe(record)
+	}
 	done, ending, interrupted := claudeStreamTerminal(record)
 	if interrupted {
 		if turnID != "" {
@@ -85,32 +102,102 @@ func (t *claudeTurnTracker) finish(ended []claudeTurnEnd, turnID, key, status st
 		return ended
 	}
 	t.terminal[turnID] = true
-	return append(ended, claudeTurnEnd{TurnID: turnID, Key: key, Status: status})
+	turn := surface.NewTurnMetadata(surface.TurnStateOfDone(status), "", nil, nil)
+	if turnID == t.meter.turnID {
+		turn = t.meter.metadata(status)
+	}
+	return append(ended, claudeTurnEnd{TurnID: turnID, Key: key, Status: status, Turn: turn})
 }
 
-// claudeTurnScanLimit bounds how far back a reader looks for the record that
+func (m *claudeTurnMeter) observe(record map[string]any) {
+	if at, err := time.Parse(time.RFC3339Nano, str(record, "timestamp")); err == nil {
+		if m.startedAt.IsZero() {
+			m.startedAt = at
+		}
+		m.lastAt = at
+	}
+	if str(record, "type") != "assistant" {
+		return
+	}
+	message, _ := record["message"].(map[string]any)
+	if model := str(message, "model"); model != "" && model != "<synthetic>" {
+		m.model = model
+	}
+	usage, _ := message["usage"].(map[string]any)
+	id := str(message, "id")
+	if usage == nil || id == "" {
+		return
+	}
+	cacheRead := int64Value(usage["cache_read_input_tokens"])
+	cacheWrite := int64Value(usage["cache_creation_input_tokens"])
+	counted := surface.TurnUsage{
+		InputTokens:       int64Value(usage["input_tokens"]) + cacheRead + cacheWrite,
+		CachedInputTokens: cacheRead,
+		CacheWriteTokens:  cacheWrite,
+		OutputTokens:      int64Value(usage["output_tokens"]),
+	}
+	details, _ := usage["output_tokens_details"].(map[string]any)
+	if thinking, ok := details["thinking_tokens"]; ok {
+		reasoning := int64Value(thinking)
+		counted.ReasoningTokens = &reasoning
+	}
+	m.usage[id] = counted
+}
+
+func (m *claudeTurnMeter) metadata(status string) *surface.TurnMetadata {
+	var duration *int64
+	if !m.startedAt.IsZero() {
+		ms := m.lastAt.Sub(m.startedAt).Milliseconds()
+		duration = &ms
+	}
+	var usage *surface.TurnUsage
+	if len(m.usage) > 0 {
+		usage = &surface.TurnUsage{}
+		reasoningKnown := true
+		var reasoning int64
+		for _, counted := range m.usage {
+			usage.InputTokens += counted.InputTokens
+			usage.CachedInputTokens += counted.CachedInputTokens
+			usage.CacheWriteTokens += counted.CacheWriteTokens
+			usage.OutputTokens += counted.OutputTokens
+			if counted.ReasoningTokens == nil {
+				reasoningKnown = false
+			} else {
+				reasoning += *counted.ReasoningTokens
+			}
+		}
+		if reasoningKnown {
+			usage.ReasoningTokens = &reasoning
+		}
+	}
+	return surface.NewTurnMetadata(surface.TurnStateOfDone(status), m.model, duration, usage)
+}
+
+// turnScanLimit bounds how far back a reader looks for the record that
 // started the turn in progress at an offset.
-var claudeTurnScanLimit int64 = 64 << 20
+var turnScanLimit int64 = 64 << 20
 
 // claudeTurnStateAt returns the tracker as it stands just before offset: the
 // turn in progress there and any turn still closing. It replays from the
-// record that started that turn, at most claudeTurnScanLimit bytes back; a
+// record that started that turn, at most turnScanLimit bytes back; a
 // turn that started further back is unknown and leaves the tracker empty.
 func claudeTurnStateAt(ctx context.Context, file *os.File, offset int64) (*claudeTurnTracker, error) {
 	tracker := newClaudeTurnTracker("", surface.ClaudeClosingTurn{})
-	from, found, err := claudeTurnStartBefore(ctx, file, offset)
+	from, found, err := transcriptRecordBefore(ctx, file, offset, []byte(`"user"`), claudeRecordStartsTurn)
 	if err != nil || !found {
 		return tracker, err
 	}
-	err = scanClaudeRecords(ctx, file, from, offset, func(record map[string]any, recordOffset int64, line []byte) {
+	err = scanTranscriptRecords(ctx, file, from, offset, func(record map[string]any, recordOffset int64, line []byte) {
 		tracker.observe(record, recordOffset, line, len(claudeTimelineItems(record)))
 	})
 	return tracker, err
 }
 
-func claudeTurnStartBefore(ctx context.Context, file *os.File, offset int64) (int64, bool, error) {
+// transcriptRecordBefore returns the offset of the last record before offset
+// that match accepts, looking only at lines containing needle.
+func transcriptRecordBefore(ctx context.Context, file *os.File, offset int64, needle []byte, match func(map[string]any) bool) (int64, bool, error) {
 	const chunk = 1 << 20
-	floor := max(0, offset-claudeTurnScanLimit)
+	floor := max(0, offset-turnScanLimit)
 	end := offset
 	var carry []byte
 	for end > floor {
@@ -130,9 +217,9 @@ func claudeTurnStartBefore(ctx context.Context, file *os.File, offset int64) (in
 				break
 			}
 			line := buf[previous+1 : next]
-			if bytes.Contains(line, []byte(`"user"`)) {
+			if bytes.Contains(line, needle) {
 				var record map[string]any
-				if json.Unmarshal(line, &record) == nil && claudeRecordStartsTurn(record) {
+				if json.Unmarshal(line, &record) == nil && match(record) {
 					return start + int64(previous+1), true, nil
 				}
 			}
@@ -144,7 +231,7 @@ func claudeTurnStartBefore(ctx context.Context, file *os.File, offset int64) (in
 	return 0, false, nil
 }
 
-func scanClaudeRecords(ctx context.Context, file *os.File, from, to int64, visit func(record map[string]any, offset int64, line []byte)) error {
+func scanTranscriptRecords(ctx context.Context, file *os.File, from, to int64, visit func(record map[string]any, offset int64, line []byte)) error {
 	reader := bufio.NewReaderSize(io.NewSectionReader(file, from, to-from), 1<<20)
 	offset := from
 	for {
@@ -197,7 +284,7 @@ func (c *Claude) TranscriptItems(ctx context.Context, session *surface.Session, 
 	}
 	var items []surface.TimelineItem
 	var itemErr error
-	err = scanClaudeRecords(ctx, file, from, end, func(record map[string]any, offset int64, line []byte) {
+	err = scanTranscriptRecords(ctx, file, from, end, func(record map[string]any, offset int64, line []byte) {
 		if itemErr != nil {
 			return
 		}
@@ -221,7 +308,7 @@ func (c *Claude) TranscriptItems(ctx context.Context, session *surface.Session, 
 			at = items[len(items)-1].Timestamp
 		}
 		for _, end := range ended {
-			items = append(items, surface.TimelineItem{ID: end.Key, Kind: "done", TurnID: end.TurnID, Status: end.Status, Timestamp: at})
+			items = append(items, surface.TimelineItem{ID: end.Key, Kind: "done", TurnID: end.TurnID, Status: end.Status, Timestamp: at, Turn: end.Turn})
 		}
 	}
 	seen := map[string]bool{}
