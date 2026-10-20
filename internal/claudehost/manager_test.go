@@ -308,7 +308,7 @@ func TestRetiredHostsLeaveWithTheirSessions(t *testing.T) {
 	first, _ := client.Hello(ctx)
 	sessionID := uuid.NewString()
 	opened := f.Open(t, client, sessionID)
-	if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: sessionID, UUID: uuid.NewString(), Text: "SLOW 1500"}); err != nil {
+	if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: sessionID, UUID: uuid.NewString(), Text: "SLOW 60000"}); err != nil {
 		t.Fatal(err)
 	}
 	if client, err = f.Manager(t, "2").Ensure(ctx); err != nil {
@@ -324,6 +324,9 @@ func TestRetiredHostsLeaveWithTheirSessions(t *testing.T) {
 	}
 	if retiring := client.Retiring(); len(retiring) != 1 {
 		t.Fatalf("retiring hosts = %v, want only the one with a busy session", retiring)
+	}
+	if err := client.Interrupt(ctx, sessionID); err != nil {
+		t.Fatalf("interrupt the turn through the retiring host = %v", err)
 	}
 	claudehosttest.WaitFor(t, "the first host to leave after the turn", func() bool {
 		return !claudehosttest.Alive(first.PID) && !claudehosttest.Alive(opened.PID)
