@@ -134,7 +134,7 @@ test('open, send and stream a turn bound to the message uuid', async () => {
   const f = fixture();
   await startHost(f, { version: '1.2.3' });
   const c = new Client(f.socket);
-  assert.deepEqual(await c.call('hello'), { protocol: 1, hostVersion: '1.2.3', pid: (await c.call('hello')).pid });
+  assert.deepEqual(await c.call('hello'), { protocol: 2, hostVersion: '1.2.3', pid: (await c.call('hello')).pid });
   await c.call('subscribe', { after: 0 });
   const id = randomUUID();
   const opened = await c.call('open', { sessionId: id, cwd: f.cwd, permissionMode: 'acceptEdits', model: 'opus', effort: 'high', agent: 'reviewer', name: 'Review the parser' });
@@ -494,7 +494,7 @@ test('a Claude that cannot be started fails the open and leaves the host running
   await assert.rejects(c.call('open', { sessionId: randomUUID(), cwd: f.cwd }), { code: 'open_failed' });
   await sleep(200);
   assert.equal(host.exitCode, null, host.stderrText);
-  assert.equal((await new Client(f.socket).call('hello')).protocol, 1);
+  assert.equal((await new Client(f.socket).call('hello')).protocol, 2);
   c.close();
 });
 
@@ -509,23 +509,137 @@ test('a Claude that exits with an error before it starts refuses the open with i
   c.close();
 });
 
-test('drain closes sessions once idle and exits the host', async () => {
+const retiringSocket = (f, host) => f.socket.replace(/\.sock$/, `.${host.pid}.sock`);
+
+// takeLock reports whether another host could start now: a second host is
+// started with the lock, which it can hold only once the first let it go.
+async function lockReleased(f) {
+  const probe = { ...f, socket: path.join(f.root, 'probe.sock') };
+  const host = await startHost(probe);
+  const ok = host.exitCode === null && host.stderrText.includes('listening');
+  host.kill('SIGKILL');
+  await host.exited;
+  return ok;
+}
+
+test('drain retires the host: it gives up the socket and lock and serves its sessions until each is idle', async () => {
   const f = fixture();
   const host = await startHost(f);
   const c = new Client(f.socket);
   await c.call('subscribe');
   const idle = randomUUID();
   const busy = randomUUID();
-  await c.call('open', { sessionId: idle, cwd: f.cwd });
+  const idleSession = await c.call('open', { sessionId: idle, cwd: f.cwd });
   await c.call('open', { sessionId: busy, cwd: f.cwd });
   const uuid = randomUUID();
-  await c.call('send', { sessionId: busy, uuid, text: 'SLOW 500' });
-  assert.deepEqual(await c.call('drain'), { sessions: 2 });
-  await assert.rejects(c.call('open', { sessionId: randomUUID(), cwd: f.cwd }), { code: 'draining' });
-  await assert.rejects(c.call('send', { sessionId: busy, uuid: randomUUID(), text: 'late' }), { code: 'draining' });
+  await c.call('send', { sessionId: busy, uuid, text: 'SLOW 800' });
+  await c.event((e) => e.sessionId === busy && e.kind === 'state' && e.state === 'busy');
+  assert.equal((await c.call('drain')).sessions >= 1, true);
+  assert.ok(!fs.existsSync(f.socket), 'the daemon socket is free for the next host');
+  assert.ok(await lockReleased(f), 'the lock is free for the next host');
+  const r = new Client(retiringSocket(f, host));
+  assert.equal((await r.call('hello')).pid, host.pid);
+  await assert.rejects(r.call('open', { sessionId: randomUUID(), cwd: f.cwd }), { code: 'draining' });
+  for (let i = 0; i < 100 && alive(idleSession.pid); i++) await sleep(50);
+  assert.ok(!alive(idleSession.pid), 'an idle session closes at once');
+  const late = randomUUID();
+  assert.deepEqual(await r.call('send', { sessionId: busy, uuid: late, text: 'late' }), { accepted: true, duplicate: false });
   assert.equal(await host.exited, 0);
-  assert.equal(transcript(f, busy)[0].reply, 'slow:500');
-  assert.ok(!fs.existsSync(f.socket));
+  assert.deepEqual(transcript(f, busy).map((l) => l.reply), ['slow:800', 'echo:late']);
+  assert.ok(!fs.existsSync(retiringSocket(f, host)));
+  c.close();
+  r.close();
+});
+
+test('retiring lets go of subscribers that came in through the daemon socket', async () => {
+  const f = fixture();
+  const host = await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const closed = new Promise((resolve) => c.conn.once('close', resolve));
+  const d = new Client(f.socket);
+  const id = randomUUID();
+  await d.call('open', { sessionId: id, cwd: f.cwd });
+  await d.call('send', { sessionId: id, uuid: randomUUID(), text: 'SLOW 1000' });
+  await d.call('drain');
+  await closed;
+  const r = new Client(retiringSocket(f, host));
+  await r.call('subscribe', { after: 0 });
+  await r.event((e) => e.sessionId === id && e.kind === 'exited');
+  d.close();
+  r.close();
+});
+
+test('a retiring host keeps an open request answerable and closes the session only after its turn', async () => {
+  const f = fixture();
+  const host = await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const { id, uuid, request } = await openPending(f, c, 'TOOL');
+  await c.call('drain');
+  await sleep(300);
+  const r = new Client(retiringSocket(f, host));
+  const listed = (await r.call('list')).sessions.find((s) => s.sessionId === id);
+  assert.equal(listed.state, 'busy');
+  assert.deepEqual(listed.requests.map((q) => q.requestId), [request.requestId]);
+  assert.deepEqual(await r.call('respond', { sessionId: id, requestId: request.requestId, decision: { behavior: 'allow' } }), { outcome: 'allowed' });
+  assert.equal(await host.exited, 0);
+  assert.deepEqual(transcript(f, id).map((l) => [l.uuid, l.reply]), [[uuid, 'tool:allow:']]);
+  c.close();
+  r.close();
+});
+
+test('a retiring host does not close an idle session while a background task runs', async () => {
+  const f = fixture();
+  const host = await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  const { pid } = await c.call('open', { sessionId: id, cwd: f.cwd });
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'BACKGROUND 1500' });
+  await c.event(turnResult(id, uuid));
+  await c.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'idle');
+  const started = Date.now();
+  await c.call('drain');
+  await sleep(700);
+  assert.ok(alive(pid), 'the session runs while its background task does');
+  assert.equal(host.exitCode, null);
+  assert.equal(await host.exited, 0);
+  assert.ok(Date.now() - started >= 1000, 'the host waited for the background task');
+  assert.ok(!alive(pid));
+  c.close();
+});
+
+test('a Claude without session state events falls back to turn results and says so', async () => {
+  const f = fixture();
+  const host = await startHost(f, { env: { FAKE_CLAUDE_NO_STATE_EVENTS: '1' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'SLOW 600' });
+  await c.call('drain');
+  await sleep(200);
+  assert.equal(host.exitCode, null, 'a busy session is not closed');
+  assert.equal(await host.exited, 0);
+  assert.match(host.stderrText, /without session state events/);
+  assert.deepEqual(transcript(f, id).map((l) => l.reply), ['slow:600']);
+  c.close();
+});
+
+test('closing a session ends its open requests instead of leaving them listed', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const { id, request } = await openPending(f, c, 'TOOL');
+  await c.call('close', { sessionId: id });
+  assert.equal((await c.event((e) => e.kind === 'request_resolved' && e.requestId === request.requestId)).outcome, 'ended');
+  assert.deepEqual((await c.call('list')).sessions, []);
+  await assert.rejects(c.call('respond', { sessionId: id, requestId: request.requestId, decision: { behavior: 'allow' } }), { code: 'not_open' });
+  c.close();
 });
 
 test('close ends the session and a send to it is refused', async () => {

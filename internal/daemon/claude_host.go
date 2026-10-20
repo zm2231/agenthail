@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudehost"
@@ -19,22 +20,43 @@ func (d *Daemon) SetClaudeHost(manager *claudehost.Manager) {
 
 // superviseClaudeHost keeps one host of this build running: it attaches to a
 // running host on start, starts one when none answers, and after an update
-// starts this build's host once the older one has drained.
+// retires the older host and starts this build's at once. A retiring host
+// keeps serving its sessions, so its requests are followed until it exits.
 func (d *Daemon) superviseClaudeHost(ctx context.Context) {
 	if d.claudeHost == nil {
 		return
 	}
-	watched := make(chan struct{})
+	var watchers sync.WaitGroup
+	defer watchers.Wait()
+	watchers.Add(1)
 	go func() {
-		defer close(watched)
+		defer watchers.Done()
 		d.watchClaudeHostRequests(ctx)
 	}()
-	defer func() { <-watched }()
+	retiring := map[string]bool{}
+	var retiringMu sync.Mutex
 	ticker := time.NewTicker(claudeHostCheckInterval)
 	defer ticker.Stop()
 	var last claudeHostCheck
 	for {
 		last = d.checkClaudeHost(ctx, last)
+		for _, host := range d.claudeHost.Client().Retiring() {
+			retiringMu.Lock()
+			watching := retiring[host.Socket]
+			retiring[host.Socket] = true
+			retiringMu.Unlock()
+			if watching {
+				continue
+			}
+			watchers.Add(1)
+			go func(host claudehost.Client) {
+				defer watchers.Done()
+				d.watchRetiringClaudeHost(ctx, host)
+				retiringMu.Lock()
+				delete(retiring, host.Socket)
+				retiringMu.Unlock()
+			}(host)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -67,6 +89,21 @@ func (d *Daemon) watchClaudeHostRequests(ctx context.Context) {
 		case <-ctx.Done():
 		case <-time.After(claudeHostWatchRetryWait):
 		}
+	}
+}
+
+// watchRetiringClaudeHost follows a retiring host's requests until it exits.
+// Its exit ends the requests it held, so the catalog is read again then.
+func (d *Daemon) watchRetiringClaudeHost(ctx context.Context, host claudehost.Client) {
+	d.log.Printf("Claude host: following the retiring host on %s until its sessions close", host.Socket)
+	_, _ = host.Subscribe(ctx, 0, func(event claudehost.Event) {
+		if event.Kind == "request_opened" || event.Kind == "request_resolved" || event.Kind == "exited" {
+			d.requestCatalogDiscovery()
+		}
+	})
+	if ctx.Err() == nil {
+		d.log.Printf("Claude host: the retiring host on %s has exited", host.Socket)
+		d.requestCatalogDiscovery()
 	}
 }
 

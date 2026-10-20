@@ -441,6 +441,7 @@ final class SessionPane: ObservableObject, Identifiable {
             _ = try await api.respond(sessionID: id, requestID: request.id, decision: decision)
             requestError = nil
         } catch AgenthailAPIError.request(409, _) {
+            requests = requests?.removing(request.id)
             requestError = "That request was already answered or has expired."
         } catch {
             requestError = error.localizedDescription
