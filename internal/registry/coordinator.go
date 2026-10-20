@@ -226,7 +226,24 @@ func (r *Registry) checkCoordinatorTx(tx *sql.Tx, spec CoordinatorSpec, change C
 	if owner != "" && owner != change.SessionID && !freed {
 		return nil, AliasTakenError{Name: spec.Name, Owner: owner}
 	}
+	var launching bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM launcher_pending WHERE alias=?)`, spec.Name).Scan(&launching); err != nil {
+		return nil, err
+	}
+	if launching && !freed {
+		return nil, CoordinatorNameLaunchingError{Name: spec.Name}
+	}
 	return previous, nil
+}
+
+// CoordinatorNameLaunchingError refuses a name that a launched conversation,
+// not yet found in its launcher, will take.
+type CoordinatorNameLaunchingError struct {
+	Name string
+}
+
+func (e CoordinatorNameLaunchingError) Error() string {
+	return fmt.Sprintf("@%s is the name of a conversation that is still starting", e.Name)
 }
 
 // SetCoordinator makes spec this host's coordinator of its project. It

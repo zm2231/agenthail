@@ -322,6 +322,7 @@ func writeCoordinatorError(w http.ResponseWriter, r *http.Request, d *Daemon, er
 	var exists registry.CoordinatorExistsError
 	var nameTaken registry.CoordinatorNameTakenError
 	var aliasTaken registry.AliasTakenError
+	var launching registry.CoordinatorNameLaunchingError
 	switch {
 	case errors.As(err, &exists):
 		writeAPIError(w, http.StatusConflict, "coordinator_exists", fmt.Sprintf("the project already has coordinator %s; use --replace to take over", d.coordinatorRefs(r, exists.Existing)))
@@ -329,6 +330,8 @@ func writeCoordinatorError(w http.ResponseWriter, r *http.Request, d *Daemon, er
 		writeAPIError(w, http.StatusConflict, "name_taken", fmt.Sprintf("%s already coordinates %s; choose another --name", d.coordinatorRef(r, registry.CoordinatorSpec{Name: nameTaken.Name, HostID: nameTaken.HostID}), nameTaken.ProjectRoot))
 	case errors.As(err, &aliasTaken):
 		writeAPIError(w, http.StatusConflict, "name_taken", fmt.Sprintf("@%s already names session %s; choose another --name", aliasTaken.Name, aliasTaken.Owner))
+	case errors.As(err, &launching):
+		writeAPIError(w, http.StatusConflict, "name_taken", launching.Error()+"; choose another --name")
 	case errors.Is(err, registry.ErrReservedAlias):
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 	case errors.Is(err, registry.ErrNoCoordinator):
