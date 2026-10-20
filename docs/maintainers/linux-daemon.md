@@ -62,8 +62,8 @@ Claude Remote Control and Notion depend on the Python sidecar and a signed-in de
 
 `agenthail update` treats a Linux build with a release version as an archive install. It:
 
-1. refuses to run unless the install directory holds only archive entries (`agenthail`, `skills`, `README.md`, `LICENSE`, `COMMERCIAL.md`)
-2. downloads the arch archive and checksum, verifies the checksum, and extracts only regular files and directories under the archive root
+1. refuses to run unless the install directory holds only archive entries (`agenthail`, `claude-host`, `skills`, `README.md`, `LICENSE`, `COMMERCIAL.md`)
+2. downloads the arch archive and checksum, verifies the checksum, and extracts only regular files and directories under the archive root (release packaging refuses any other entry type, so npm bin links are not staged)
 3. checks that the new binary's `version --json` reports the release tag
 4. renames the install directory to `<dir>.previous` and moves the new one into place
 5. when a daemon is running or a service is installed, runs `<dir>/agenthail daemon restart` with the new binary and waits up to 20 seconds for `/api/v1/version` to answer (or, with the dashboard disabled, for the daemon to stay up for 2 seconds)
