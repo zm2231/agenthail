@@ -618,6 +618,60 @@ func TestOpenAddsQueueUploadsToARegistryAtTheVersionBefore(t *testing.T) {
 	}
 }
 
+func TestOpenUpgradesTheProjectsTableReleasedBeforeAddedProjects(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`DROP TABLE projects`,
+		`CREATE TABLE projects (id TEXT PRIMARY KEY, kind TEXT NOT NULL, root_path TEXT NOT NULL, display_name TEXT NOT NULL, registered INTEGER NOT NULL DEFAULT 0, archived_at_ms INTEGER NOT NULL DEFAULT 0)`,
+		`INSERT INTO projects VALUES('project-aaa','folder','/work/notes','notes',1,0)`,
+		`INSERT INTO projects VALUES('project-bbb','repo','/work/app','app',0,1760000000000)`,
+		`INSERT INTO projects VALUES('project-ccc','repo','/work/lib','lib',0,0)`,
+		`INSERT INTO projects VALUES('project-ddd','folder','/work/site','site',1,0)`,
+		`INSERT INTO projects VALUES('project-eee','repo','/work/site','site',0,1761000000000)`,
+		`PRAGMA user_version=22`,
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	projects, err := r.ListProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]ProjectRecord{}
+	for _, project := range projects {
+		got[project.WorkspaceRoot] = project
+	}
+	if len(got) != 3 || len(projects) != 3 {
+		t.Fatalf("projects=%+v", projects)
+	}
+	if site := got["/work/site"]; site.ID != "p-project-ddd" || !site.Added || site.ArchivedAt.UnixMilli() != 1761000000000 {
+		t.Fatalf("folder sharing a root with an archived repository=%+v", site)
+	}
+	if notes := got["/work/notes"]; notes.ID != "p-project-aaa" || !notes.Added || notes.Title != "notes" || !notes.ArchivedAt.IsZero() {
+		t.Fatalf("registered folder=%+v", notes)
+	}
+	if app := got["/work/app"]; app.ID != "implicit:/work/app" || app.Added || app.ArchivedAt.UnixMilli() != 1760000000000 {
+		t.Fatalf("archived repository=%+v", app)
+	}
+	var leftover int
+	if err := r.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='projects_released'`).Scan(&leftover); err != nil || leftover != 0 {
+		t.Fatalf("leftover=%d err=%v", leftover, err)
+	}
+}
+
 func TestOpenRefusesARegistryANewerAgenthailMigrated(t *testing.T) {
 	for _, journal := range []string{"WAL", "DELETE"} {
 		t.Run(journal, func(t *testing.T) {
