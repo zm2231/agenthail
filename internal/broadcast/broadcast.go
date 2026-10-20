@@ -228,9 +228,14 @@ func (b Broadcaster) members(target Target, now time.Time) ([]string, []registry
 	}
 	coordinated := map[string]bool{}
 	for _, spec := range coordinators {
-		if spec.SessionID != "" {
-			coordinated[spec.SessionID] = true
+		if spec.SessionID == "" {
+			continue
 		}
+		rawID := spec.SessionID
+		if spec.HostID != "" {
+			_, rawID, _ = hosts.Split(spec.SessionID)
+		}
+		coordinated[spec.HostID+"\x00"+rawID] = true
 	}
 	snapshot, err := b.Registry.CatalogSnapshot()
 	if err != nil {
@@ -243,7 +248,7 @@ func (b Broadcaster) members(target Target, now time.Time) ([]string, []registry
 	var members []string
 	for _, record := range snapshot.Sessions {
 		item, ok := sessionProject(record)
-		if !ok || item.ID != target.ProjectID || record.Freshness.Stale || coordinated[record.Session.ID] {
+		if !ok || item.ID != target.ProjectID || record.Freshness.Stale || coordinated[record.HostID+"\x00"+record.Session.ID] {
 			continue
 		}
 		if !surface.RecentlyActive(record.Session, now) {

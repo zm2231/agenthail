@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -45,12 +46,16 @@ func TestAProjectChannelReachesItsActiveConversationsOnEveryHost(t *testing.T) {
 	if _, err := local.reg.SetCoordinator(registry.CoordinatorSpec{ProjectID: "repo:github.com/example/widget", ProjectRoot: localRepo, Name: "widget-lead", Surface: "codex", Cwd: localRepo}, registry.CoordinatorChange{SessionID: "lead", ChangedBy: "fixture"}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := remote.reg.SetCoordinator(registry.CoordinatorSpec{ProjectID: "repo:github.com/example/widget", ProjectRoot: remoteRepo, Name: "forge-lead", Surface: "codex", Cwd: remoteRepo}, registry.CoordinatorChange{SessionID: "remote-a", ChangedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	moveSession(t, remote, "remote-c", remoteRepo, time.Now())
 	remote.daemon.discoverCatalog(context.Background())
 	local.daemon.discoverCatalog(context.Background())
-	awaitFederation(t, "the remote conversations mirrored in the project", func() bool {
+	awaitFederation(t, "the remote conversations and coordinator mirrored in the project", func() bool {
 		for _, project := range local.snapshot(t).Projects {
 			if project.ID == "repo:github.com/example/widget" {
-				return project.SessionCount >= 4
+				return project.SessionCount >= 5 && len(project.Coordinators) == 2
 			}
 		}
 		return false
@@ -64,19 +69,29 @@ func TestAProjectChannelReachesItsActiveConversationsOnEveryHost(t *testing.T) {
 	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &answer) != nil {
 		t.Fatalf("send status=%d body=%s", response.Code, response.Body)
 	}
-	if answer.Target.ProjectID != "repo:github.com/example/widget" || len(answer.Recipients) != 2 {
+	if answer.Target.ProjectID != "repo:github.com/example/widget" || len(answer.Recipients) != 3 {
 		t.Fatalf("answer=%+v", answer)
 	}
-	lead, member := answer.Recipients[0], answer.Recipients[1]
-	if lead.Coordinator != "@widget-lead" || lead.Outcome != broadcast.OutcomeSent {
-		t.Fatalf("the coordinator outside the active window was not reached: %+v", lead)
+	byRef := map[string]broadcast.Recipient{}
+	for _, recipient := range answer.Recipients {
+		ref := recipient.Coordinator
+		if ref == "" {
+			ref = recipient.SessionID
+		}
+		byRef[ref] = recipient
 	}
-	if member.SessionID != hosts.Qualify(record.ID, "remote-a") || member.Outcome != broadcast.OutcomeQueued {
-		t.Fatalf("member=%+v", member)
+	if lead := byRef["@widget-lead"]; lead.Outcome != broadcast.OutcomeSent {
+		t.Fatalf("the coordinator outside the active window was not reached: %+v", answer.Recipients)
+	}
+	if lead := byRef[record.ID+"::@forge-lead"]; lead.Outcome != broadcast.OutcomeQueued {
+		t.Fatalf("the paired host's coordinator was not reached once as its coordinator: %+v", answer.Recipients)
+	}
+	if member := byRef[hosts.Qualify(record.ID, "remote-c")]; member.Outcome != broadcast.OutcomeQueued {
+		t.Fatalf("recipients=%+v", answer.Recipients)
 	}
 	awaitFederation(t, "the remote member received the message", func() bool {
 		for _, message := range remote.fake.delivered() {
-			if strings.HasSuffix(message, " via #widget] standup") {
+			if strings.HasSuffix(message, " via #widget] standup") && len(remote.fake.delivered()) == 2 {
 				return true
 			}
 		}
@@ -143,5 +158,20 @@ func TestAProjectNameSeveralProjectsShareIsRefused(t *testing.T) {
 	byID := runDashboardAction(t, d, `{"action":"channel-send","channel":"#repo:github.com/beta/widget","message":"standup"}`)
 	if byID.Code != http.StatusOK || !strings.Contains(byID.Body.String(), `"sessionId":"to"`) || len(fake.sent) != 1 {
 		t.Fatalf("send by project id: %d %s sent=%q", byID.Code, byID.Body, fake.sent)
+	}
+}
+
+func TestAChannelSendThatFailsForAMemberNamesEveryRecipient(t *testing.T) {
+	d, r, fake, _, to := daemonFixture(t)
+	if _, err := r.CreateChannel("reviewers"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddToChannel("reviewers", to.ID); err != nil {
+		t.Fatal(err)
+	}
+	fake.sendErr = errors.New("model rejected")
+	response := runDashboardAction(t, d, `{"action":"channel-send","channel":"reviewers","message":"handoff"}`)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "0 sent, 0 queued, 0 submitted, 1 failed ("+d.resolveDisplay(to.ID)+" failed: ") || !strings.Contains(response.Body.String(), "model rejected") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
 	}
 }

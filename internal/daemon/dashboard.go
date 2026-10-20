@@ -1431,7 +1431,19 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		sent, queued, submitted, failed := result.Count(broadcast.OutcomeSent), result.Count(broadcast.OutcomeQueued), result.Count(broadcast.OutcomeSubmitted), result.Count(broadcast.OutcomeFailed)
 		if failed > 0 {
-			http.Error(w, fmt.Sprintf("channel delivery: %d sent, %d queued, %d submitted, %d failed", sent, queued, submitted, failed), http.StatusConflict)
+			outcomes := make([]string, 0, len(result.Recipients))
+			for _, recipient := range result.Recipients {
+				label := recipient.Coordinator
+				if label == "" {
+					label = d.resolveDisplay(recipient.SessionID)
+				}
+				outcome := label + " " + recipient.Outcome
+				if recipient.Outcome == broadcast.OutcomeFailed && recipient.Detail != "" {
+					outcome += ": " + recipient.Detail
+				}
+				outcomes = append(outcomes, outcome)
+			}
+			http.Error(w, fmt.Sprintf("channel delivery: %d sent, %d queued, %d submitted, %d failed (%s)", sent, queued, submitted, failed, strings.Join(outcomes, "; ")), http.StatusConflict)
 			return
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "target": result.Target, "recipients": result.Recipients, "sent": sent, "queued": queued, "submitted": submitted, "failed": failed})
