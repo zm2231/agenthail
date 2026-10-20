@@ -7,6 +7,9 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import readline from 'node:readline';
+// The Agent SDK drops NODE_OPTIONS when it starts Claude, so the owner
+// watchdog the host preloads has to be loaded here.
+import './owner-watchdog.cjs';
 
 const argv = process.argv.slice(2);
 const flag = (name) => {

@@ -174,7 +174,7 @@ test('a host and its Claude exit once the test process that owns them is gone', 
   const f = fixture();
   const owner = spawn('sleep', ['60'], { stdio: 'ignore' });
   after(() => owner.kill('SIGKILL'));
-  const host = await startHost(f, { env: { AGENTHAIL_TEST_OWNER_PIDS: String(owner.pid) } });
+  const host = await startHost(f, { env: { AGENTHAIL_TEST_OWNER_PIDS: String(owner.pid), FAKE_CLAUDE_OUTLIVES_INPUT: '1' } });
   const c = new Client(f.socket);
   const opened = await c.call('open', { sessionId: randomUUID(), cwd: f.cwd });
   c.close();
