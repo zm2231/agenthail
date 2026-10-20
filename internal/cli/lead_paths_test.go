@@ -53,6 +53,23 @@ func TestLeadPathAddressesTheCoordinatorsSubagents(t *testing.T) {
 	if count := r.QueueCount(decoy) + r.QueueCount(lead); count != 0 {
 		t.Fatalf("a lead path reached the session named lead or the coordinator itself: %d", count)
 	}
+
+	identity, err := r.HostIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for target, want := range map[string]string{identity.Name + "::@lead": lead, identity.Name + "::@lead/Ada": ada} {
+		before := r.QueueCount(want)
+		if _, err := captureStdout(t, func() error { return app.Run([]string{"queue", target, "this host"}) }); err != nil {
+			t.Fatalf("%s: err=%v", target, err)
+		}
+		if r.QueueCount(want) != before+1 {
+			t.Fatalf("%s did not queue for %s", target, want)
+		}
+	}
+	if count := r.QueueCount(decoy); count != 0 {
+		t.Fatalf("this host's @lead reached the session named lead: %d", count)
+	}
 }
 
 func TestLeadPathOnAPairedHostIsResolvedThere(t *testing.T) {
