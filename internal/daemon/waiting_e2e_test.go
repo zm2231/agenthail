@@ -315,7 +315,7 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 	if got := pushes.count("session.waiting"); got != 1 {
 		t.Fatalf("one question notified %d times", got)
 	}
-	if push := pushes.first("session.waiting"); push["sessionId"] != session.ID || push["turnId"] != questionID || push["message"] != "Claude Code agent is waiting on you" {
+	if push := pushes.first("session.waiting"); push["sessionId"] != session.ID || push["turnId"] != questionID || push["message"] != "Claude Code agent asks you a question" {
 		t.Fatalf("push=%v", push)
 	}
 

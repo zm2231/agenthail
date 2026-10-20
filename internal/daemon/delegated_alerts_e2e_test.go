@@ -135,12 +135,12 @@ func TestCodexSubagentTurnsRaiseNoCompletionAlertAndItsApprovalOpensTheRoot(t *t
 	})
 	lifecycle.Daemon().SetActiveFlags(child, "waitingOnApproval")
 	eventually(t, "the subagent's approval alert", func() bool {
-		return pushes.count("session.waiting") == 1 && len(desktop.matching(" is waiting on you")) == 1
+		return pushes.count("session.waiting") == 1 && len(desktop.matching(" needs your approval")) == 1
 	})
 	if push := pushes.first("session.waiting"); push["sessionId"] != root {
 		t.Fatalf("the approval push opens %q, not the root %q", push["sessionId"], root)
 	}
-	if alert := desktop.matching(" is waiting on you")[0]; alert.sessionID != root {
+	if alert := desktop.matching(" needs your approval")[0]; alert.sessionID != root {
 		t.Fatalf("the desktop approval alert opens %q, not the root %q", alert.sessionID, root)
 	}
 

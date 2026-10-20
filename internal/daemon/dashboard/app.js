@@ -1424,8 +1424,8 @@ async function syncRequests() {
   if (!session || !capabilities.respond || app.history?.readOnly) {
     app.requests = null;
     app.requestsKey = "";
-    panel.hidden = true;
-    panel.innerHTML = "";
+    panel.innerHTML = session?.waitingOn ? renderElsewhereWait(session) : "";
+    panel.hidden = panel.innerHTML === "";
     return;
   }
   const key = `${session.id}|${session.waitingOn?.id || ""}`;
@@ -1453,6 +1453,12 @@ function renderRequests() {
   const failure = state.error ? `<p role="status">Could not read this session's requests: ${escape(state.error)}</p>` : "";
   panel.innerHTML = cards.join("") + failure + mode;
   panel.hidden = panel.innerHTML === "";
+}
+// A session waiting on a prompt Agenthail cannot answer shows where to answer it.
+function renderElsewhereWait(session) {
+  const asking = session.waitingOn.kind === "question" ? "asks you a question" : "needs your approval";
+  const open = session.runtime?.focusable ? '<div class="request-actions"><button class="primary-button" data-action="session-focus" type="button">Open session</button></div>' : "";
+  return `<div class="request-card"><h3>${escape(displayName(session))} ${asking}</h3><p>Agenthail can't answer this one. Answer it where the session runs, such as its terminal. Messages you send wait until then.</p>${open}</div>`;
 }
 function renderRequestCard(request) {
   const created = request.createdAt ? ` · <time datetime="${escape(request.createdAt)}">${escape(new Date(request.createdAt).toLocaleTimeString())}</time>` : "";

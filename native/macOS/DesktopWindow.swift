@@ -631,6 +631,13 @@ struct ConversationPane: View {
                                 .frame(maxWidth: 720)
                                 .padding(.horizontal, 16)
                                 .padding(.top, 8)
+                            } else if let waiting = session.waitingOn, pane.detail?.readOnly == true || !session.capabilities.respond {
+                                ElsewhereWaitCard(waiting: waiting, hostName: session.runtime?.hostName, accent: DesktopPalette.accentText,
+                                                  open: session.runtime?.focusable == true ? { model.focusInTerminal(session) } : nil)
+                                    .id(waiting.id)
+                                    .frame(maxWidth: 720)
+                                    .padding(.horizontal, 16)
+                                    .padding(.top, 8)
                             }
                             if let error = pane.requestError {
                                 Text(error).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 4)
