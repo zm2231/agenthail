@@ -1984,6 +1984,10 @@ struct DetailsTab: View {
                     }
                 }
                 detailRow("Surface", session.surface.capitalized)
+                if let account = session.claudeAccount {
+                    detailRow("Account", account.label)
+                        .help(account.root)
+                }
                 if let detail = pane.detail {
                     detailRow("Exchanges", SessionFacts.exchangeLabel(detail.exchanges.count))
                 }

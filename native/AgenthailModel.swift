@@ -26,6 +26,8 @@ final class AgenthailModel: ObservableObject {
     private var searchTask: Task<Void, Never>?
     @Published var devices: [DeviceState] = []
     @Published var signin: SigninState?
+    @Published var permissions: PermissionsState?
+    @Published var permissionsError: String?
     @Published var signinError: String?
     @Published var pairing: PairingResponse?
     @Published var settings: DashboardSettingsState?
@@ -523,6 +525,28 @@ final class AgenthailModel: ObservableObject {
             } catch {
                 operationError = AgenthailAPIError.userMessage(error)
             }
+        }
+    }
+
+    func loadPermissions() async {
+        guard let api else { return }
+        do {
+            permissions = try await api.permissions()
+            permissionsError = nil
+        } catch {
+            permissionsError = AgenthailAPIError.userMessage(error)
+        }
+    }
+
+    /// Has macOS ask for each grant the daemon lacks; the prompts show on
+    /// this Mac, and the grants are read again once the person is back.
+    func requestPermissions() async {
+        guard let api else { return }
+        do {
+            try await api.requestPermissions()
+            permissionsError = nil
+        } catch {
+            permissionsError = AgenthailAPIError.userMessage(error)
         }
     }
 

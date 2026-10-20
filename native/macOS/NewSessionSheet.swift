@@ -30,6 +30,7 @@ struct NewSessionSheet: View {
     }
 
     private var projects: [LaunchProject] { hosts.projects }
+    private var claudeAccounts: [ClaudeAccountOption] { form.agent == "claude" ? hosts.claudeAccounts : [] }
     private var startsOnThisMac: Bool { hosts.hostQuery == nil }
 
     private var agentModels: [ModelOption] { hosts.models[form.agent] ?? [] }
@@ -93,6 +94,16 @@ struct NewSessionSheet: View {
                                 }
                             }
                             Button("Choose…", action: chooseFolder)
+                        }
+                    }
+                    if claudeAccounts.count > 1 {
+                        Picker("Account", selection: $form.account) {
+                            ForEach(claudeAccounts) { account in
+                                Text(account.menuLabel)
+                                    .tag(account.choice)
+                                    .selectionDisabled(!account.signedIn)
+                                    .help(account.root)
+                            }
                         }
                     }
                     if form.listsModels {

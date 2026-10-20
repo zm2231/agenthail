@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/zm2231/agenthail/internal/coordinator"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"sort"
 	"strconv"
@@ -19,12 +19,16 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/coordinator"
+	"github.com/zm2231/agenthail/internal/permissions"
+
 	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/report"
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -144,6 +148,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdClaudeRuns(rest)
 	case "whoami":
 		return a.cmdWhoami(rest)
+	case "accounts":
+		return a.cmdAccounts(rest)
 	case "search":
 		return a.cmdSearch(rest)
 	case "send":
@@ -200,6 +206,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdLaunch(rest)
 	case "doctor":
 		return a.cmdDoctor(rest)
+	case "permissions":
+		return a.cmdPermissions(rest)
 	case "dashboard":
 		return a.cmdDashboard(rest)
 	case "version", "--version":
@@ -235,11 +243,12 @@ Session commands:
                                  List, add or remove project folders, or hide a project
   runs [--json]                  Read verified Claude job and subagent records
   whoami [--json]                Show the caller session bound to this process
+  accounts [--json]              List each Claude config directory and the account it is signed into
   search codex <query>           Search older Codex conversation history on demand
   send <target> "msg"|-       Send now when idle; queue when busy (use --no-queue to refuse delay)
   stream <target>               Tail live activity
-  reply <target> [--before cursor] [--json] [--timeout 30s]  Fetch last assistant reply
-  last <target> [count] [--before cursor] [--full] [--json] [--timeout 30s]  Show a bounded exchange page
+  reply <target> [--before cursor] [--json] [--max-bytes N | --report] [--timeout 30s]  Fetch last assistant reply, capped or as its completion report
+  last <target> [count] [--before cursor] [--full] [--json] [--max-bytes N | --report] [--timeout 30s]  Show a bounded exchange page
   goal <target> [set|edit|pause|resume|budget|clear] [value] [--json]
                                  Read goal usage or control its objective, status and budget
   compact <target>              Compress context (typed control; unsupported for socket-only Claude peers)
@@ -336,6 +345,8 @@ Dashboard (optional):
 Other:
   launch <surface>              Launch a surface app with debug settings
   doctor [--json]               Health check (nonzero when any surface is unhealthy)
+  permissions [--json]          The daemon's macOS privacy grants and where to change them
+  permissions request           Have macOS ask for the grants the daemon lacks
   update [--check] [--json]     Install the latest Agenthail release
   upgrade [--check] [--json]    Alias for update
   version [--json]              Build and revision information
@@ -589,7 +600,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--request": true, "--reason": true, "--answers": true, "--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--project": true, "--instructions": true, "--permission-mode": true}
+	valueFlags := map[string]bool{"--request": true, "--reason": true, "--answers": true, "--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--max-bytes": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--project": true, "--instructions": true, "--permission-mode": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -619,16 +630,16 @@ func validateCommandFlags(command string, args []string) error {
 		bools  map[string]bool
 	}
 	specs := map[string]flagSpec{
-		"list": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--wide": true, "--json": true}}, "runs": {bools: map[string]bool{"--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
+		"list": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--wide": true, "--json": true}}, "runs": {bools: map[string]bool{"--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "accounts": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
-		"reply": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
+		"reply": {values: map[string]bool{"--before": true, "--timeout": true, "--max-bytes": true}, bools: map[string]bool{"--json": true, "--report": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true, "--max-bytes": true}, bools: map[string]bool{"--full": true, "--json": true, "--report": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true, "--max-bytes": true}, bools: map[string]bool{"--full": true, "--json": true, "--report": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
-		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--host": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true}, bools: map[string]bool{"--json": true, "--help": true}},
+		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--account": true, "--host": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"channel": {},
 		"project": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}}, "projects": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}},
 		"hosts":  {values: map[string]bool{"--address": true, "--name": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"signin": {values: map[string]bool{"--label": true}, bools: map[string]bool{"--json": true, "--help": true}},
-		"doctor": {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
+		"doctor": {bools: map[string]bool{"--json": true}}, "permissions": {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
 		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
 		"permission-mode": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "requests": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
@@ -941,11 +952,19 @@ func (a *App) cmdList(args []string) error {
 	if showHost {
 		fmt.Printf("%-12s ", "HOST")
 	}
-	fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n", "SURFACE", "STAT", "AGENT", "SESSION", projectWidth, projectHeading, "LAST")
+	var accounts []surface.ClaudeAccount
+	accountWidth := 0
+	if wide {
+		accountWidth = 28
+		if home, err := os.UserHomeDir(); err == nil {
+			accounts, _ = surface.ClaudeAccounts(home)
+		}
+	}
+	fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n", "SURFACE", "STAT", "AGENT", "SESSION", projectWidth, projectHeading, listAccountCell(wide, accountWidth, "ACCOUNT")+"LAST")
 	if showHost {
 		fmt.Printf("%-12s ", "------------")
 	}
-	fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n", "-------", "-----", "--------------", "----------------------------", projectWidth, strings.Repeat("-", len(projectHeading)), "----------")
+	fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n", "-------", "-----", "--------------", "----------------------------", projectWidth, strings.Repeat("-", len(projectHeading)), listAccountCell(wide, accountWidth, strings.Repeat("-", accountWidth))+"----------")
 	queueCounts := map[string]int{}
 	if a.registry() != nil {
 		var err error
@@ -987,13 +1006,30 @@ func (a *App) cmdList(args []string) error {
 		if s.Subagents != nil {
 			last += fmt.Sprintf("  %d subagents, %d working", s.Subagents.Count, s.Subagents.Working)
 		}
+		account := ""
+		if wide && s.Surface == surface.KindClaude {
+			if view := views[s.ID].ClaudeAccount; view != nil {
+				account = view.Label
+			} else if !remote {
+				if derived := surface.ClaudeSessionAccount(accounts, s.Transcript); derived != nil {
+					account = derived.Label
+				}
+			}
+		}
 		fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n",
-			s.Surface, stat, truncate(agent, 14), truncate(name, 28), projectWidth, project, last)
+			s.Surface, stat, truncate(agent, 14), truncate(name, 28), projectWidth, project, listAccountCell(wide, accountWidth, truncate(account, accountWidth))+last)
 	}
 	if successfulSurfaces == 0 && len(surfaceErrors) > 0 {
 		return fmt.Errorf("%d surface(s) failed discovery", len(surfaceErrors))
 	}
 	return nil
+}
+
+func listAccountCell(wide bool, width int, value string) string {
+	if !wide {
+		return ""
+	}
+	return fmt.Sprintf("%-*s ", width, value)
 }
 
 type listCatalogSurface struct {
@@ -1961,7 +1997,11 @@ func sessionReadBefore(args []string) (int64, error) {
 func (a *App) cmdReply(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) != 1 {
-		return fmt.Errorf("usage: agenthail reply <target> [--before cursor] [--json] [--timeout 30s]")
+		return fmt.Errorf("usage: agenthail reply <target> [--before cursor] [--json] [--max-bytes N | --report] [--timeout 30s]")
+	}
+	mode, err := readModeFlags(args)
+	if err != nil {
+		return err
 	}
 	timeout, err := commandTimeout(args, a.DefaultTimeout)
 	if err != nil {
@@ -1996,14 +2036,29 @@ func (a *App) cmdReply(args []string) error {
 	if reply.Error != "" {
 		return fmt.Errorf("latest %s turn did not complete successfully: %s", sess.Surface, reply.Error)
 	}
+	if mode.report {
+		parsed, err := report.Parse(reply.Text)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "done": reply.Done, "report": parsed})
+	}
+	text, cut := capBytes(reply.Text, mode.maxBytes)
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "text": reply.Text, "done": reply.Done, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning})
+		document := map[string]any{"surface": sess.Surface, "session": sess.ID, "text": text, "done": reply.Done, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning}
+		if cut {
+			document["truncated"], document["textBytes"] = true, len(reply.Text)
+		}
+		return json.NewEncoder(os.Stdout).Encode(document)
 	} else {
 		printSessionReadWarning(read)
 		if read.Source != "" {
 			fmt.Printf("[%s]\n", read.Source)
 		}
-		fmt.Println(reply.Text)
+		fmt.Println(text)
+		if cut {
+			fmt.Println(truncationNote(len(text), len(reply.Text)))
+		}
 		if read.NextBefore > 0 {
 			fmt.Printf("older cursor: %d\n", read.NextBefore)
 		}
@@ -2014,7 +2069,11 @@ func (a *App) cmdReply(args []string) error {
 func (a *App) cmdLast(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) < 1 || len(positional) > 2 {
-		return fmt.Errorf("usage: agenthail last <target> [count] [--before cursor] [--full] [--json] [--timeout 30s]")
+		return fmt.Errorf("usage: agenthail last <target> [count] [--before cursor] [--full] [--json] [--max-bytes N | --report] [--timeout 30s]")
+	}
+	mode, err := readModeFlags(args)
+	if err != nil {
+		return err
 	}
 	timeout, err := commandTimeout(args, a.DefaultTimeout)
 	if err != nil {
@@ -2060,8 +2119,15 @@ func (a *App) cmdLast(args []string) error {
 	if read.UnavailableReason != "" && len(exchanges) == 0 {
 		return fmt.Errorf("session read unavailable from %s: %s", read.Source, read.UnavailableReason)
 	}
+	if mode.report {
+		return printExchangeReports(sess, read, exchanges)
+	}
+	capped := make([]cappedExchange, len(exchanges))
+	for i, exchange := range exchanges {
+		capped[i] = capExchange(exchange, mode.maxBytes)
+	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning, "exchanges": exchanges})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning, "exchanges": capped})
 	}
 	printSessionReadWarning(read)
 	if len(exchanges) == 0 {
@@ -2078,21 +2144,27 @@ func (a *App) cmdLast(args []string) error {
 	} else {
 		fmt.Printf("── %s ──\n", label)
 	}
-	full := hasFlag(args, "--full")
-	for _, ex := range exchanges {
+	full := hasFlag(args, "--full") || mode.maxBytes > 0
+	for _, ex := range capped {
 		if !ex.Timestamp.IsZero() {
 			fmt.Printf("%s\n", ex.Timestamp.Local().Format("2006-01-02 15:04:05"))
 		}
-		if ex.User != "" {
+		if ex.User != "" || ex.UserTruncated {
 			if full {
-				fmt.Printf("%s ▸ %s\n", promptLabel(ex), ex.User)
+				fmt.Printf("%s ▸ %s\n", promptLabel(ex.Exchange), ex.User)
+				if ex.UserTruncated {
+					fmt.Println(truncationNote(len(ex.User), ex.UserBytes))
+				}
 			} else {
-				fmt.Printf("%s ▸ %s\n", promptLabel(ex), truncate(strings.ReplaceAll(ex.User, "\n", " "), 200))
+				fmt.Printf("%s ▸ %s\n", promptLabel(ex.Exchange), truncate(strings.ReplaceAll(ex.User, "\n", " "), 200))
 			}
 		}
-		if ex.Assistant != "" {
+		if ex.Assistant != "" || ex.AssistantTruncated {
 			if full {
 				fmt.Printf(" ai  ▸ %s\n", ex.Assistant)
+				if ex.AssistantTruncated {
+					fmt.Println(truncationNote(len(ex.Assistant), ex.AssistantBytes))
+				}
 			} else {
 				fmt.Printf(" ai  ▸ %s\n", truncate(strings.ReplaceAll(ex.Assistant, "\n", " "), 200))
 			}
@@ -2918,15 +2990,30 @@ func (a *App) cmdDoctor(args []string) error {
 	if claudeRootsErr != nil {
 		failures++
 	}
+	claudeAccounts, _ := surface.ClaudeAccounts(home)
 	service := a.service()
 	serviceProblems := service.Problems()
 	if serviceProblems == nil {
 		serviceProblems = []serviceProblem{}
 	}
+	var grants *permissions.Report
+	var grantsErr error
+	if runtime.GOOS == "darwin" {
+		var report permissions.Report
+		callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		report, grantsErr = a.daemonPermissions(callCtx)
+		cancel()
+		grants = &report
+	}
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "signin": signins}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "claudeAccounts": claudeAccounts, "signin": signins}
 		if claudeRootsErr != nil {
 			report["claudeConfigError"] = claudeRootsErr.Error()
+		}
+		if grantsErr != nil {
+			report["permissionsError"] = grantsErr.Error()
+		} else if grants != nil {
+			report["permissions"] = grants
 		}
 		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
 			return err
@@ -2941,6 +3028,9 @@ func (a *App) cmdDoctor(args []string) error {
 				label = "claude config (claudeConfigDirs)"
 			}
 			fmt.Printf("%s: %s\n", label, root)
+			if account, ok := surface.ClaudeAccountForRoot(claudeAccounts, root); ok {
+				fmt.Printf("  account: %s\n", describeClaudeAccount(account, time.Now()))
+			}
 		}
 		if len(serviceProblems) > 0 {
 			fmt.Printf("[daemon] supervisor: %s\n", service.Name())
@@ -2948,6 +3038,11 @@ func (a *App) cmdDoctor(args []string) error {
 				fmt.Printf("  problem: %s\n", problem.Detail)
 				fmt.Printf("  fix: %s\n", problem.Fix)
 			}
+		}
+		if grantsErr != nil {
+			fmt.Printf("[permissions] unknown: %s\n", grantsErr)
+		} else if grants != nil {
+			printPermissions(*grants)
 		}
 		for _, status := range signins {
 			fmt.Printf("[sign-in] %s: %s\n", status.ID, describeSignin(status))

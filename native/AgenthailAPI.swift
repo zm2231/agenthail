@@ -219,7 +219,7 @@ final class AgenthailAPI: @unchecked Sendable {
     }
 
     static func creationBody(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, host: String? = nil) throws -> Data {
-        if launcher?.isTerminal == true && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
+        if launcher?.isTerminal == true && (!turnSettings.isEmpty || !claude.fields.filter({ $0.key != "account" }).isEmpty) {
             throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
         }
         var body: [String: Any] = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
@@ -309,6 +309,14 @@ final class AgenthailAPI: @unchecked Sendable {
             throw AgenthailAPIError.request(response.statusCode, message)
         }
         return try JSONDecoder().decode(PairedDeviceResponse.self, from: data)
+    }
+
+    func permissions() async throws -> PermissionsState {
+        try await get("/api/v1/permissions")
+    }
+
+    func requestPermissions() async throws {
+        let _: PermissionsRequestResponse = try await post("/api/v1/permissions/request", body: [:])
     }
 
     func signin() async throws -> SigninState {

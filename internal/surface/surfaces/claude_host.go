@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/claudepeer"
+	"github.com/zm2231/agenthail/internal/installdir"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -187,7 +188,7 @@ func ClaudeHostLaunch(home, version string) (claudehost.Launch, error) {
 		if err != nil {
 			return claudehost.Launch{}, err
 		}
-		script = filepath.Join(filepath.Dir(executable), "claude-host", "host.mjs")
+		script = filepath.Join(installdir.Of(executable), "claude-host", "host.mjs")
 	}
 	if _, err := os.Stat(script); err != nil {
 		return claudehost.Launch{}, fmt.Errorf("the Claude host script is missing (set AGENTHAIL_CLAUDE_HOST): %w", err)

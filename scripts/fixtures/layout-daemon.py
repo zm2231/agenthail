@@ -1,4 +1,5 @@
 import json
+import socketserver
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -36,6 +37,14 @@ RESPONSES = {
 }
 
 
+class Server(ThreadingHTTPServer):
+    # HTTPServer resolves the bound address's hostname, a reverse DNS lookup
+    # that can stall for the resolver timeout; the fixture needs no name.
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         body = RESPONSES.get(self.path.split("?", 1)[0])
@@ -54,7 +63,22 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    if sys.argv[1:] in (["waiting"], ["waiting-queued"]):
+        # A terminal session waiting on a question Agenthail can't answer.
+        SESSION["waitingOn"] = {"kind": "question", "id": "fixture-session:question:1", "since": NOW}
+        SESSION["runtime"] = {"focusable": True, "launcher": "cmux", "hostName": "cmux"}
+    if sys.argv[1:] == ["waiting-queued"]:
+        # Messages sent to a waiting session hold until it is answered, and
+        # fill the composer's docks above the card.
+        message = "Once you have an answer, rebase the release branch, rerun the full suite and post what changed. " * 3
+        RESPONSES["/api/v1/snapshot"]["queue"] = [
+            {"id": n, "sessionId": SESSION["id"], "target": "@fixture", "message": message, "status": "pending", "attempts": 0, "queuedAt": NOW, "evidence": "queued", "operation": "message"}
+            for n in range(1, 9)
+        ]
+        RESPONSES["/api/v1/snapshot"]["deliveryProblems"] = [
+            {"deliveryId": 1, "sessionId": SESSION["id"], "message": message, "reason": "session_waiting_on_you", "status": "failed", "at": NOW}
+        ]
+    server = Server(("127.0.0.1", 0), Handler)
     print(server.server_address[1], flush=True)
     sys.stdout.close()
     server.serve_forever()

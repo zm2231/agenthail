@@ -468,6 +468,7 @@ function conversationMeta(session, model = "") {
   const parts = [session.waitingOn ? "Waiting on you" : statusLabel(session.status), `${session.queueCount || 0} queued`];
   if (session.status !== "busy") parts.push(`last active ${timeAgo(session.lastActive)}`);
   if (model) parts.push(model);
+  if (session.claudeAccount?.label) parts.push(session.claudeAccount.label);
   return parts.join(" · ");
 }
 function surfaceIcon(name) {
@@ -2269,6 +2270,8 @@ function syncStartForm() {
     document.querySelectorAll(`[${attribute}]`).forEach(field => { field.hidden = !enabled; field.querySelectorAll("input,select,textarea").forEach(input => input.disabled = !enabled); });
   }
   $("[data-start-folder]").hidden = selected === "notion" || $("#new-conversation-project").value !== "";
+  const account = $("[data-claude-account]");
+  if (account.dataset.single === "true") account.hidden = true;
   document.querySelectorAll("[data-codex-start]").forEach((field) => {
     field.hidden = !isCodex;
     field.querySelectorAll("input,select,textarea").forEach((input) => {
@@ -2276,6 +2279,26 @@ function syncStartForm() {
     });
   });
   renderStartLaunchers();
+}
+function renderStartAccounts(accounts) {
+  const select = $("#new-conversation-account");
+  select.innerHTML = accounts.map(account =>
+    `<option value="${account.primary ? "" : escape(account.root)}"${account.signedIn ? "" : " disabled"}>${escape(claudeAccountOption(account))}</option>`,
+  ).join("");
+  select.closest("[data-claude-account]").dataset.single = accounts.length < 2 ? "true" : "";
+  syncStartForm();
+}
+function claudeAccountOption(account) {
+  const parts = [account.label];
+  const exhausted = claudeAccountExhausted(account);
+  if (exhausted) parts.push(`out of usage until ${new Date(exhausted).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`);
+  if (account.primary) parts.push("default");
+  return parts.join(" · ");
+}
+function claudeAccountExhausted(account) {
+  const now = Date.now();
+  const resets = (account.usage?.limits || []).filter(limit => limit.percent >= 100 && Date.parse(limit.resetsAt) > now).map(limit => Date.parse(limit.resetsAt));
+  return resets.length ? Math.max(...resets) : 0;
 }
 function renderStartLaunchers() {
   const select = $("#new-conversation-launcher");
@@ -2300,6 +2323,7 @@ async function loadStartOptions() {
   if (host !== app.startHost) return;
   app.startOptions = options;
   app.launchers = options.launchers || [];
+  renderStartAccounts(options.claudeAccounts || []);
   renderStartSurfaceOptions();
 }
 async function loadStartModels() {

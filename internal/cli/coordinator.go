@@ -124,7 +124,7 @@ func (a *App) leadTarget(target string) (string, *registry.CoordinatorSpec, erro
 	case 1:
 		return target, &named[0], nil
 	}
-	return "", nil, fmt.Errorf("@%s names coordinators on several hosts: %s; send to one as <host>::@%s", name, a.coordinatorRefs(named), name)
+	return "", nil, fmt.Errorf("@%s names coordinators on several hosts: %s; send to one as <host>::@%s", name, a.coordinator().Refs(named), name)
 }
 
 // expandLead resolves @lead and a paired host's @name to a target the
@@ -142,10 +142,10 @@ func (a *App) expandLead(target string) (string, error) {
 		return resolved, err
 	}
 	if remote.SessionID == "" {
-		return "", fmt.Errorf("%s has no conversation yet; send to it first, which starts one", a.coordinatorRef(*remote))
+		return "", fmt.Errorf("%s has no conversation yet; send to it first, which starts one", a.coordinator().Ref(*remote))
 	}
 	_, raw, _ := hosts.Split(remote.SessionID)
-	return a.hostName(remote.HostID) + hosts.Separator + raw, nil
+	return a.coordinator().HostName(remote.HostID) + hosts.Separator + raw, nil
 }
 
 func (a *App) expandLeadPath(nicknames string) (string, error) {
@@ -155,17 +155,17 @@ func (a *App) expandLeadPath(nicknames string) (string, error) {
 	}
 	if spec.HostID != "" {
 		if spec.SessionID == "" {
-			return "", fmt.Errorf("%s has no conversation yet; send to it first, which starts one", a.coordinatorRef(spec))
+			return "", fmt.Errorf("%s has no conversation yet; send to it first, which starts one", a.coordinator().Ref(spec))
 		}
 		_, raw, _ := hosts.Split(spec.SessionID)
-		return a.hostName(spec.HostID) + hosts.Separator + "@" + raw + "/" + nicknames, nil
+		return a.coordinator().HostName(spec.HostID) + hosts.Separator + "@" + raw + "/" + nicknames, nil
 	}
 	id, err := a.registry().CoordinatorSessionID(spec)
 	if err != nil {
 		return "", err
 	}
 	if id == "" {
-		return "", fmt.Errorf("%s has no conversation yet; send to it first, which starts one", a.coordinatorRef(spec))
+		return "", fmt.Errorf("%s has no conversation yet; send to it first, which starts one", a.coordinator().Ref(spec))
 	}
 	return "@" + id + "/" + nicknames, nil
 }
@@ -184,17 +184,7 @@ func (a *App) callerLead() (registry.CoordinatorSpec, error) {
 	if err != nil {
 		return registry.CoordinatorSpec{}, err
 	}
-	specs, err := a.registry().ProjectCoordinators(found.ID)
-	if err != nil {
-		return registry.CoordinatorSpec{}, err
-	}
-	switch len(specs) {
-	case 0:
-		return registry.CoordinatorSpec{}, fmt.Errorf("%s has no coordinator; use 'agenthail coordinator new' or 'agenthail coordinator set'", found.RootPath)
-	case 1:
-		return specs[0], nil
-	}
-	return registry.CoordinatorSpec{}, fmt.Errorf("%s has coordinators %s; resolve it with 'agenthail coordinator set --replace' on one host", found.RootPath, a.coordinatorRefs(specs))
+	return a.coordinator().ProjectLead(found.ID, found.RootPath)
 }
 
 func (a *App) callerSession() *surface.Session {
@@ -211,30 +201,6 @@ func (a *App) callerSession() *surface.Session {
 		break
 	}
 	return nil
-}
-
-func (a *App) hostName(hostID string) string {
-	if host, err := a.registry().Host(hostID); err == nil && host.Name != "" {
-		return host.Name
-	}
-	return hostID
-}
-
-// coordinatorRef is how a person names a coordinator: @name on this host,
-// host::@name on a paired host.
-func (a *App) coordinatorRef(spec registry.CoordinatorSpec) string {
-	if identity, err := a.registry().HostIdentity(); spec.HostID == "" || err == nil && spec.HostID == identity.ID {
-		return "@" + spec.Name
-	}
-	return a.hostName(spec.HostID) + hosts.Separator + "@" + spec.Name
-}
-
-func (a *App) coordinatorRefs(specs []registry.CoordinatorSpec) string {
-	refs := make([]string, 0, len(specs))
-	for _, spec := range specs {
-		refs = append(refs, a.coordinatorRef(spec))
-	}
-	return strings.Join(refs, " and ")
 }
 
 func (a *App) coordinatorShow(path string, jsonOut bool) error {
@@ -256,7 +222,7 @@ func (a *App) coordinatorShow(path string, jsonOut bool) error {
 		fmt.Printf("%s has %d coordinators; resolve it with 'agenthail coordinator set --replace' on one host\n", found.RootPath, len(specs))
 	}
 	for _, spec := range specs {
-		fmt.Printf("coordinator %s of %s\n", a.coordinatorRef(spec), spec.ProjectRoot)
+		fmt.Printf("coordinator %s of %s\n", a.coordinator().Ref(spec), spec.ProjectRoot)
 		if spec.SessionID == "" {
 			fmt.Println("  session:      none yet; the next message starts one")
 		} else {
@@ -294,7 +260,7 @@ func (a *App) coordinatorList(jsonOut bool) error {
 	}
 	rows := make([]row, 0, len(specs))
 	for _, spec := range specs {
-		entry := row{CoordinatorSpec: spec, Host: a.hostName(spec.HostID), ProjectSeen: true}
+		entry := row{CoordinatorSpec: spec, Host: a.coordinator().HostName(spec.HostID), ProjectSeen: true}
 		if spec.HostID == "" {
 			entry.Host = "local"
 			found, err := a.projectOf(spec.ProjectRoot)
@@ -446,7 +412,7 @@ func (a *App) runCoordinatorChange(ctx context.Context, payload map[string]any, 
 	}
 	spec := answer.Coordinator
 	for _, previous := range answer.Replaced {
-		fmt.Printf("replaced %s\n", a.coordinatorRef(previous))
+		fmt.Printf("replaced %s\n", a.coordinator().Ref(previous))
 	}
 	if spec.SessionID == "" {
 		fmt.Printf("@%s coordinates %s; the first message to it starts its conversation in %s\n", spec.Name, spec.ProjectRoot, spec.Cwd)
@@ -480,7 +446,7 @@ func (a *App) coordinatorClear(path string, jsonOut bool) error {
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(answer)
 	}
-	fmt.Printf("cleared coordinator %s of %s; its session and name are unchanged\n", a.coordinatorRef(answer.Cleared), found.RootPath)
+	fmt.Printf("cleared coordinator %s of %s; its session and name are unchanged\n", a.coordinator().Ref(answer.Cleared), found.RootPath)
 	return nil
 }
 
@@ -516,7 +482,7 @@ func (a *App) peerCoordinatorSend(ctx context.Context, spec registry.Coordinator
 // that host, which starts its conversation when it has none.
 func (a *App) sendToPeerCoordinator(ctx context.Context, spec registry.CoordinatorSpec, message string, args []string) error {
 	if hasFlag(args, "--no-queue") {
-		return fmt.Errorf("--no-queue is not available for %s: the daemon holds a send to another host until that host answers", a.coordinatorRef(spec))
+		return fmt.Errorf("--no-queue is not available for %s: the daemon holds a send to another host until that host answers", a.coordinator().Ref(spec))
 	}
 	source, err := a.sourceSessionID(ctx, flagVal(args, "--from"))
 	if err != nil {
@@ -531,7 +497,7 @@ func (a *App) sendToPeerCoordinator(ctx context.Context, spec registry.Coordinat
 	}
 	fmt.Println(answer.Result.Detail)
 	if answer.Started {
-		fmt.Printf("read its reply with 'agenthail last %s'\n", a.coordinatorRef(spec))
+		fmt.Printf("read its reply with 'agenthail last %s'\n", a.coordinator().Ref(spec))
 	}
 	return nil
 }

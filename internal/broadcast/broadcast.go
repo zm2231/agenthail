@@ -32,14 +32,14 @@ func (t Target) Label() string {
 	return t.Name
 }
 
-type project struct {
+type Project struct {
 	ID          string `json:"id"`
 	LocalID     string `json:"localId"`
 	DisplayName string `json:"displayName"`
 }
 
-func projects(reg *registry.Registry) (map[string]project, error) {
-	found := map[string]project{}
+func projects(reg *registry.Registry) (map[string]Project, error) {
+	found := map[string]Project{}
 	snapshot, err := reg.CatalogSnapshot()
 	if err != nil {
 		return nil, err
@@ -62,7 +62,7 @@ func projects(reg *registry.Registry) (map[string]project, error) {
 			id = record.Key
 		}
 		if _, ok := found[id]; !ok {
-			found[id] = project{ID: id, LocalID: record.ID, DisplayName: record.Title}
+			found[id] = Project{ID: id, LocalID: record.ID, DisplayName: record.Title}
 		}
 	}
 	coordinators, err := reg.Coordinators()
@@ -71,16 +71,16 @@ func projects(reg *registry.Registry) (map[string]project, error) {
 	}
 	for _, spec := range coordinators {
 		if _, ok := found[spec.ProjectID]; !ok {
-			found[spec.ProjectID] = project{ID: spec.ProjectID, DisplayName: filepath.Base(spec.ProjectRoot)}
+			found[spec.ProjectID] = Project{ID: spec.ProjectID, DisplayName: filepath.Base(spec.ProjectRoot)}
 		}
 	}
 	return found, nil
 }
 
-func sessionProject(record registry.CatalogSessionState) (project, bool) {
-	var item project
+func sessionProject(record registry.CatalogSessionState) (Project, bool) {
+	var item Project
 	if len(record.Project) == 0 || json.Unmarshal(record.Project, &item) != nil || item.ID == "" {
-		return project{}, false
+		return Project{}, false
 	}
 	return item, true
 }
@@ -116,17 +116,7 @@ func Resolve(reg *registry.Registry, name string) (Target, error) {
 	if err != nil {
 		return Target{}, err
 	}
-	var matches []project
-	if item, ok := known[name]; ok {
-		matches = append(matches, item)
-	} else {
-		for _, item := range known {
-			if item.DisplayName == name {
-				matches = append(matches, item)
-			}
-		}
-	}
-	sort.Slice(matches, func(i, j int) bool { return matches[i].ID < matches[j].ID })
+	matches := matchProjects(known, name)
 	switch {
 	case stored && len(matches) > 0:
 		return Target{}, fmt.Errorf("#%s is both a channel and project %s; rename the channel with 'agenthail channel rename %s <new-name>', or address the project by its id #%s", name, describe(matches), name, matches[0].ID)
@@ -140,7 +130,59 @@ func Resolve(reg *registry.Registry, name string) (Target, error) {
 	return Target{}, fmt.Errorf("no channel or project is named #%s", name)
 }
 
-func describe(items []project) string {
+func matchProjects(known map[string]Project, name string) []Project {
+	if item, ok := known[name]; ok {
+		return []Project{item}
+	}
+	var matches []Project
+	for _, item := range known {
+		if item.DisplayName == name {
+			matches = append(matches, item)
+		}
+	}
+	sort.Slice(matches, func(i, j int) bool { return matches[i].ID < matches[j].ID })
+	return matches
+}
+
+// Projects lists every project this host knows, its own and those of paired
+// hosts' sessions and coordinators, by name.
+func Projects(reg *registry.Registry) ([]Project, error) {
+	known, err := projects(reg)
+	if err != nil {
+		return nil, err
+	}
+	list := make([]Project, 0, len(known))
+	for _, item := range known {
+		list = append(list, item)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].DisplayName != list[j].DisplayName {
+			return list[i].DisplayName < list[j].DisplayName
+		}
+		return list[i].ID < list[j].ID
+	})
+	return list, nil
+}
+
+// FindProject resolves a project by its exact id or name. A name several
+// projects share is refused with their ids, never picked.
+func FindProject(reg *registry.Registry, name string) (Project, error) {
+	name = strings.TrimPrefix(strings.TrimSpace(name), "#")
+	known, err := projects(reg)
+	if err != nil {
+		return Project{}, err
+	}
+	matches := matchProjects(known, name)
+	switch len(matches) {
+	case 0:
+		return Project{}, fmt.Errorf("no project is named %q", name)
+	case 1:
+		return matches[0], nil
+	}
+	return Project{}, fmt.Errorf("%q names several projects: %s; address one by its id", name, describe(matches))
+}
+
+func describe(items []Project) string {
 	parts := make([]string, 0, len(items))
 	for _, item := range items {
 		parts = append(parts, fmt.Sprintf("%s (#%s)", item.DisplayName, item.ID))
@@ -264,7 +306,7 @@ func (b Broadcaster) members(target Target, now time.Time) ([]string, []registry
 }
 
 // A paired host's row carries that host's archive flags in its projection.
-func archived(record registry.CatalogSessionState, item project, archive registry.ArchiveState) bool {
+func archived(record registry.CatalogSessionState, item Project, archive registry.ArchiveState) bool {
 	if record.HostID != "" {
 		var mirrored struct {
 			Archived bool `json:"archived"`
