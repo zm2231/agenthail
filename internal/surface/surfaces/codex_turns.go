@@ -20,7 +20,9 @@ type codexTurnMeter struct {
 	lastTotal int64
 	// context is the latest request's size, which outlives the turn so a
 	// compaction at the start of the next one knows what it compacted.
-	context          *int64
+	context *int64
+	// measured holds when context was measured after the latest compaction.
+	measured         bool
 	compactions      []surface.TurnCompaction
 	compactionsKnown bool
 	awaitPost        bool
@@ -51,16 +53,16 @@ func codexRecordEndsTurn(record map[string]any) (string, bool) {
 func (m *codexTurnMeter) observe(record map[string]any) *surface.TurnMetadata {
 	payload, _ := record["payload"].(map[string]any)
 	if codexRecordStartsTurn(record) {
-		*m = codexTurnMeter{started: true, turnID: codexRecordTurnID(record), lastTotal: m.lastTotal, context: m.context, compactions: m.compactions, compactionsKnown: m.between, awaitPost: m.awaitPost}
+		*m = codexTurnMeter{started: true, turnID: codexRecordTurnID(record), lastTotal: m.lastTotal, context: m.context, measured: m.measured, compactions: m.compactions, compactionsKnown: m.between, awaitPost: m.awaitPost}
 		return nil
 	}
 	if str(record, "type") == "compacted" {
 		compaction := surface.TurnCompaction{Trigger: surface.CompactionUnknown, PreTokens: m.context}
-		if m.awaitPost {
+		if !m.measured {
 			compaction.PreTokens = nil
 		}
 		m.compactions = append(m.compactions, compaction)
-		m.awaitPost = true
+		m.awaitPost, m.measured = true, false
 		return nil
 	}
 	if str(record, "type") == "turn_context" {
@@ -90,7 +92,7 @@ func (m *codexTurnMeter) observe(record map[string]any) *surface.TurnMetadata {
 			measure.Compactions = append([]surface.TurnCompaction{}, m.compactions...)
 		}
 	}
-	*m = codexTurnMeter{lastTotal: m.lastTotal, context: m.context, awaitPost: m.awaitPost, between: true}
+	*m = codexTurnMeter{lastTotal: m.lastTotal, context: m.context, measured: m.measured, awaitPost: m.awaitPost, between: true}
 	return surface.NewTurnMetadata(surface.TurnStateOfDone(status), measure)
 }
 
@@ -105,7 +107,7 @@ func (m *codexTurnMeter) count(payload map[string]any) {
 	}
 	if value, ok := last["total_tokens"]; ok {
 		size := int64Value(value)
-		m.context = &size
+		m.context, m.measured = &size, true
 		if n := len(m.compactions); m.awaitPost && n > 0 && (m.compactions[n-1].PreTokens == nil || size < *m.compactions[n-1].PreTokens) {
 			m.compactions[n-1].PostTokens = &size
 			m.awaitPost = false

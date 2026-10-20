@@ -370,21 +370,36 @@ func TestATurnWhoseEarlierHistoryIsOutOfReachDoesNotClaimItHadNoCompactions(t *t
 }
 
 func TestCodexCompactionsBackToBackLeaveTheSizeBetweenThemUnknown(t *testing.T) {
-	path := timelineFixture(t, `{"timestamp":"2026-10-19T10:00:00Z","type":"session_meta","payload":{"id":"thread"}}
+	for _, between := range []struct {
+		name    string
+		records string
+		pre     *int64
+	}{
+		{name: "nothing measured"},
+		{name: "a request no smaller", records: `{"timestamp":"2026-10-19T10:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":1000},"last_token_usage":{"input_tokens":490,"output_tokens":10,"total_tokens":500}}}}
+`, pre: count(500)},
+	} {
+		t.Run(between.name, func(t *testing.T) {
+			path := timelineFixture(t, `{"timestamp":"2026-10-19T10:00:00Z","type":"session_meta","payload":{"id":"thread"}}
 {"timestamp":"2026-10-19T10:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}
 {"timestamp":"2026-10-19T10:00:00Z","type":"turn_context","payload":{"turn_id":"turn-1","model":"gpt-fixture"}}
 {"timestamp":"2026-10-19T10:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"build it"}}
 {"timestamp":"2026-10-19T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":500},"last_token_usage":{"input_tokens":480,"output_tokens":20,"total_tokens":500}}}}
 {"timestamp":"2026-10-19T10:00:02Z","type":"compacted","payload":{"message":"","window_number":1,"window_id":"window-1"}}
-{"timestamp":"2026-10-19T10:00:03Z","type":"compacted","payload":{"message":"","window_number":2,"window_id":"window-2"}}
-{"timestamp":"2026-10-19T10:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":540},"last_token_usage":{"input_tokens":40,"total_tokens":40}}}}
+`+between.records+`{"timestamp":"2026-10-19T10:00:03Z","type":"compacted","payload":{"message":"","window_number":2,"window_id":"window-2"}}
+{"timestamp":"2026-10-19T10:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":1040},"last_token_usage":{"input_tokens":40,"total_tokens":40}}}}
 {"timestamp":"2026-10-19T10:00:05Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"built"}]}}
 {"timestamp":"2026-10-19T10:00:05Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1","duration_ms":5000}}
 `)
-	read, err := (&Codex{desktopURL: "ws://127.0.0.1:1"}).ReadSession(context.Background(), &surface.Session{ID: "thread", Transport: codexTransportDesktop, Transcript: path, Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 5})
-	if err != nil || len(read.Exchanges) != 1 {
-		t.Fatalf("read=%+v err=%v", read, err)
+			read, err := (&Codex{desktopURL: "ws://127.0.0.1:1"}).ReadSession(context.Background(), &surface.Session{ID: "thread", Transport: codexTransportDesktop, Transcript: path, Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 5})
+			if err != nil || len(read.Exchanges) != 1 {
+				t.Fatalf("read=%+v err=%v", read, err)
+			}
+			turn := read.Exchanges[0].Turn
+			want := []surface.TurnCompaction{{Trigger: "unknown", PreTokens: count(500)}, {Trigger: "unknown", PreTokens: between.pre, PostTokens: count(40)}}
+			if !reflect.DeepEqual(turn.Compactions, want) || *turn.ContextTokens != 40 {
+				t.Fatalf("turn=%s", turnJSON(t, turn))
+			}
+		})
 	}
-	wantTurn(t, "back to back", read.Exchanges[0].Turn, &surface.TurnMetadata{V: 1, State: "completed", Model: "gpt-fixture", DurationMs: count(5000), Usage: &surface.TurnUsage{InputTokens: 520, OutputTokens: 20}, ContextTokens: count(40),
-		Compactions: []surface.TurnCompaction{{Trigger: "unknown", PreTokens: count(500)}, {Trigger: "unknown", PostTokens: count(40)}}, Unavailable: []string{"usage.reasoningTokens"}})
 }
