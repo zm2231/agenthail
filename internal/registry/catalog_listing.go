@@ -51,7 +51,7 @@ func catalogListingTx(q catalogQuerier) (CatalogListing, error) {
 		}
 		busy := status == string(surface.StatusBusy)
 		retired := status == string(surface.StatusOffline) && !current
-		byID[id] = catalogListingRow{entity: hosts.Qualify(hostID, id), parent: parent, subagent: parent != "" || source == "subAgent", active: busy || current, busy: busy, retired: retired}
+		byID[id] = catalogListingRow{entity: hosts.Qualify(hostID, id), parent: parent, subagent: delegatedColumns(parent, source), active: busy || current, busy: busy, retired: retired}
 	}
 	if err := rows.Close(); err != nil {
 		return CatalogListing{}, err
@@ -169,4 +169,12 @@ func (l CatalogListing) hiddenJSON() string {
 	}
 	encoded, _ := json.Marshal(ids)
 	return string(encoded)
+}
+
+func delegatedColumns(parent, source string) bool {
+	session := surface.Session{Source: source}
+	if parent != "" {
+		session.Subagent = &surface.Subagent{ParentID: parent}
+	}
+	return session.Delegated()
 }
