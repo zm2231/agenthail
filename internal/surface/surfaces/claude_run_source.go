@@ -32,13 +32,15 @@ type ClaudeContextWindowObservation struct {
 
 const (
 	ClaudeContextWindowSourceConfigured = "configured"
+	ClaudeContextWindowSourceRequest    = "request"
+	ClaudeContextWindowSourceTranscript = "transcript"
 	ClaudeContextWindowSourceProvider   = "provider"
 	ClaudeContextWindowSourceUnknown    = "unknown"
 )
 
-// ObserveClaudeConfiguredContextWindow validates an explicit launch/config
-// value. Transcript model names must not be passed here: they do not preserve
-// the per-session context-window selection reliably.
+// ObserveClaudeConfiguredContextWindow validates an explicit launch value or a
+// transcript's requestedModel. A transcript's message.model must not be passed
+// here: it omits the [1m] selection.
 func ObserveClaudeConfiguredContextWindow(model string) ClaudeContextWindowObservation {
 	model = strings.TrimSpace(model)
 	if model == "" {
