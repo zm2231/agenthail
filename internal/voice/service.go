@@ -290,8 +290,8 @@ func (s *Service) capture() *snapshot {
 		v.Phase = "blocked"
 		v.Message = "Codex Desktop voice is not configured on this host."
 	}
-	if v.Message == "" && s.toolsOutdated() {
-		v.Message = toolsOutdatedNotice
+	if s.toolsOutdated() {
+		v.Message = strings.TrimSpace(v.Message + "\n\n" + toolsOutdatedNotice)
 	}
 	// HTTP encoding must not race the observer's mutation of the retained events.
 	data, _ := json.Marshal(v)

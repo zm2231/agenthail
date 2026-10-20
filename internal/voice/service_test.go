@@ -1053,12 +1053,16 @@ func TestAnOperatorCreatedWithOtherToolsSaysOnceThatANewConversationGetsTheCurre
 	if v := older.View(); v.Message != toolsOutdatedNotice {
 		t.Fatalf("message during the call=%q", v.Message)
 	}
+	older.observe(Event{Method: "thread/realtime/error", Params: map[string]any{"message": "Realtime audio failed."}})
+	if v := older.View(); !strings.HasPrefix(v.Message, "Realtime audio failed.") || !strings.HasSuffix(v.Message, toolsOutdatedNotice) {
+		t.Fatalf("another message hid the notice: %q", v.Message)
+	}
 	hangUp(t, older)
-	if v := older.View(); v.Message == toolsOutdatedNotice {
+	if v := older.View(); strings.Contains(v.Message, toolsOutdatedNotice) {
 		t.Fatal("the notice outlived the call it was shown in")
 	}
 	older.service.Close()
-	if v := newFixture(t, fixtureOptions{path: f.path}).View(); v.Message == toolsOutdatedNotice {
+	if v := newFixture(t, fixtureOptions{path: f.path}).View(); strings.Contains(v.Message, toolsOutdatedNotice) {
 		t.Fatal("the notice came back after a restart")
 	}
 }
