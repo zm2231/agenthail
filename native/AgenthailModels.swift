@@ -392,14 +392,13 @@ struct SessionState: Codable, Identifiable, Hashable {
     var host: SessionHost? = nil
     var unavailableReason: String? = nil
     var transport: String? = nil
-    var runtimeKind: String? = nil
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
     var claudeAccount: SessionAccount? = nil
     var runtimeKind: String? = nil
     /// A Claude session Agenthail can open in its host: one a terminal or
     /// background job runs.
-    var canAdopt: Bool { surface == "claude" && runtimeKind == "claude-cli" && !isReadOnly }
+    var canAdopt: Bool { surface == "claude" && (runtimeKind == "claude-cli" || runtimeKind == "claude-bg") && !isReadOnly }
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }

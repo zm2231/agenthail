@@ -125,6 +125,10 @@ struct SessionOperationsTest {
         check(extended.map(SessionOperationAvailability.lifecycle) == SessionLifecycle(status: true), "unknown lifecycle operations are ignored and missing ones are off")
         let readOnly = lifecycleSession("claude-bg", lifecycle: #"{"status":true,"logs":true,"stop":true,"resume":true}"#, readOnly: true)
         check(readOnly.map { SessionOperationAvailability.lifecycle($0).any } == false, "a read-only session offers no lifecycle operation")
+        check(background?.canAdopt == true, "a background job can be opened in Agenthail")
+        check(interactive?.canAdopt == true, "a terminal session can be opened in Agenthail")
+        check(hosted?.canAdopt == false, "a session Agenthail already runs is not offered for adoption")
+        check(readOnly?.canAdopt == false, "a read-only session is not offered for adoption")
     }
 
     static func checkQueueOrder() {

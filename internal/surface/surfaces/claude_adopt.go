@@ -99,7 +99,7 @@ func (c *Claude) adoptHolder(ctx context.Context, conversation, root string) (*c
 		if pid, _ := record.fields["pid"].(float64); pid <= 0 {
 			continue
 		}
-		holder := &claudeAdoptHolder{record: record.fields, background: str(record.fields, "kind") == "background"}
+		holder := &claudeAdoptHolder{record: record.fields, background: str(record.fields, "kind") == "bg"}
 		if process, ok := c.process(ctx, record, transcripts); ok {
 			holder.session = process.session
 		} else {
