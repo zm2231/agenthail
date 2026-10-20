@@ -285,27 +285,55 @@ func (d *Daemon) assignCoordinator(r *http.Request, w http.ResponseWriter, reque
 		writeAPIError(w, http.StatusConflict, "coordinator_exists", fmt.Sprintf("%s already has coordinator %s; use --replace to take over", spec.ProjectRoot, d.coordinatorRefs(r, existing)))
 		return
 	}
-	change := registry.CoordinatorChange{SessionID: sessionID, Replace: request.Replace, ChangedBy: changedBy}
-	if err := d.Registry.CheckCoordinator(spec, change); err != nil {
-		writeCoordinatorError(w, r, d, err)
-		return
-	}
-	for _, current := range existing {
-		if current.HostID == "" {
-			continue
-		}
-		if err := d.clearPeerCoordinator(r.Context(), current, changedBy); err != nil {
-			writeAPIError(w, http.StatusConflict, "coordinator_not_replaced", fmt.Sprintf("cannot replace %s: %s; nothing changed", d.coordinatorRef(r, current), err))
-			return
+	var previous *registry.CoordinatorSpec
+	for index := range existing {
+		if existing[index].HostID == "" {
+			previous = &existing[index]
 		}
 	}
+	change := registry.CoordinatorChange{SessionID: sessionID, Replace: request.Replace, OverPeers: true, ChangedBy: changedBy}
 	stored, err := d.Registry.SetCoordinator(spec, change)
 	if err != nil {
 		writeCoordinatorError(w, r, d, err)
 		return
 	}
 	d.flushCatalog("coordinator " + spec.ProjectID)
+	cleared := 0
+	for _, current := range existing {
+		if current.HostID == "" {
+			continue
+		}
+		if err := d.clearPeerCoordinator(r.Context(), current, changedBy); err != nil {
+			message := fmt.Sprintf("cannot replace %s: %s", d.coordinatorRef(r, current), err)
+			if cleared > 0 {
+				writeAPIError(w, http.StatusConflict, "coordinator_conflict", message+fmt.Sprintf("; @%s now coordinates the project here alongside it, and another --replace resolves it", stored.Name))
+				return
+			}
+			if undoErr := d.undoCoordinator(stored, previous, changedBy); undoErr != nil {
+				writeAPIError(w, http.StatusConflict, "coordinator_conflict", message+fmt.Sprintf("; @%s could not be withdrawn here (%s), so both coordinate the project until another --replace", stored.Name, undoErr))
+				return
+			}
+			writeAPIError(w, http.StatusConflict, "coordinator_not_replaced", message+"; nothing changed")
+			return
+		}
+		cleared++
+	}
+	d.flushCatalog("coordinator " + spec.ProjectID)
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "coordinator": stored, "replaced": existing})
+}
+
+// undoCoordinator withdraws a coordinator this host recorded for a replace
+// whose paired host refused to clear its own, restoring the one it replaced.
+func (d *Daemon) undoCoordinator(stored registry.CoordinatorSpec, previous *registry.CoordinatorSpec, changedBy string) error {
+	defer d.flushCatalog("coordinator " + stored.ProjectID)
+	if _, err := d.Registry.ClearCoordinator(stored.ProjectID, changedBy, stored.ChangedAt); err != nil {
+		return err
+	}
+	if previous == nil {
+		return nil
+	}
+	_, err := d.Registry.SetCoordinator(*previous, registry.CoordinatorChange{SessionID: previous.SessionID, Replace: true, OverPeers: true, ChangedBy: changedBy})
+	return err
 }
 
 func writeCoordinatorError(w http.ResponseWriter, r *http.Request, d *Daemon, err error) {

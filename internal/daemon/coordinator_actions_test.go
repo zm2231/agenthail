@@ -3,8 +3,10 @@ package daemon
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/hosts"
@@ -167,5 +169,54 @@ func TestReplacingAPeerCoordinatorIsRefusedWhileItsHostIsUnreachable(t *testing.
 	}
 	if owned, err := forge.reg.Coordinator(project); err != nil || owned.Name != "gadget-lead" {
 		t.Fatalf("forge coordinator=%+v err=%v", owned, err)
+	}
+}
+
+func TestANameClaimedWhileAPeerClearsItsCoordinatorCannotStrandTheProject(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	upstream := catalogTestRepo(t)
+	mac := newFederationNode(t, "mac-a", "mac-other")
+	forge := newFederationNode(t, "forge-a")
+	moveSessions(t, mac, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "mac-gadget")), "src"))
+	moveSessions(t, forge, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "forge-gadget")), "src"))
+	forge.serve(t, nil)
+	mac.start(t, testRoots(forge.server))
+	record := mac.pair(t, forge, "forge")
+	const project = "repo:github.com/example/gadget"
+	if response := forge.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "forge-a", "name": "gadget-lead"}); response.Code != http.StatusOK {
+		t.Fatalf("set on forge: %d %s", response.Code, response.Body)
+	}
+	awaitFederation(t, "mac mirrors forge's coordinator", func() bool {
+		mirrored, _ := mac.reg.ProjectCoordinators(project)
+		return len(mirrored) == 1 && mirrored[0].HostID == record.ID
+	})
+
+	hold := &snapshotHold{release: make(chan struct{})}
+	forge.gate.actions.Store(hold)
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			forge.gate.actions.Store(nil)
+			close(hold.release)
+		})
+	}
+	t.Cleanup(release)
+	answered := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		answered <- mac.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "mac-a", "name": "race-lead", "replace": true})
+	}()
+	awaitFederation(t, "the clear reaching forge", func() bool { return hold.waiting.Load() == 1 })
+	if err := mac.reg.SetAlias("race-lead", "mac-other"); err == nil {
+		t.Fatal("another session took the name while forge was clearing its coordinator")
+	}
+	release()
+	if response := <-answered; response.Code != http.StatusOK {
+		t.Fatalf("replace: %d %s", response.Code, response.Body)
+	}
+	if lead, err := mac.reg.Coordinator(project); err != nil || lead.Name != "race-lead" || lead.SessionID != "mac-a" {
+		t.Fatalf("mac coordinator=%+v err=%v", lead, err)
+	}
+	if _, err := forge.reg.Coordinator(project); err == nil {
+		t.Fatal("forge kept its coordinator after confirming the clear")
 	}
 }

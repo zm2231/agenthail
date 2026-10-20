@@ -63,10 +63,13 @@ func (spec CoordinatorSpec) Entry() CoordinatorEntry {
 // CoordinatorChange is who changes a coordinator, and how. SessionID names
 // the conversation that becomes the coordinator, "" for one the first message
 // starts. Without Replace a project that already has a coordinator on any
-// host is refused.
+// host is refused. OverPeers records it while paired hosts' coordinators of
+// the project remain, for a replace that asks their owners to clear them
+// next.
 type CoordinatorChange struct {
 	SessionID string
 	Replace   bool
+	OverPeers bool
 	ChangedBy string
 }
 
@@ -169,19 +172,6 @@ func (r *Registry) CoordinatorsNamed(name string) ([]CoordinatorSpec, error) {
 	return r.queryCoordinators(r.read, `c.name=?`, name)
 }
 
-// CheckCoordinator reports whether SetCoordinator would accept spec once a
-// replace has cleared the paired hosts' coordinators of its project, so a
-// replace asks no host to clear one before every local check passes.
-func (r *Registry) CheckCoordinator(spec CoordinatorSpec, change CoordinatorChange) error {
-	tx, err := r.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	_, err = r.checkCoordinatorTx(tx, spec, change, change.Replace)
-	return err
-}
-
 func (r *Registry) checkCoordinatorTx(tx *sql.Tx, spec CoordinatorSpec, change CoordinatorChange, peersCleared bool) (*CoordinatorSpec, error) {
 	if spec.ProjectID == "" || spec.ProjectRoot == "" || spec.Name == "" || spec.Surface == "" || spec.Cwd == "" {
 		return nil, fmt.Errorf("a coordinator needs a project, a name, an agent and a working directory")
@@ -224,8 +214,7 @@ func (r *Registry) checkCoordinatorTx(tx *sql.Tx, spec CoordinatorSpec, change C
 
 // SetCoordinator makes spec this host's coordinator of its project. It
 // refuses a project that has a coordinator on any host unless change.Replace
-// is set, and a paired host's coordinator even then: its owner clears it
-// first. A name any host's other coordinator uses, or another session's
+// is set, and a paired host's coordinator unless change.OverPeers is set too. A name any host's other coordinator uses, or another session's
 // name, is refused.
 func (r *Registry) SetCoordinator(spec CoordinatorSpec, change CoordinatorChange) (CoordinatorSpec, error) {
 	tx, err := r.db.Begin()
@@ -233,7 +222,7 @@ func (r *Registry) SetCoordinator(spec CoordinatorSpec, change CoordinatorChange
 		return spec, err
 	}
 	defer tx.Rollback()
-	previous, err := r.checkCoordinatorTx(tx, spec, change, false)
+	previous, err := r.checkCoordinatorTx(tx, spec, change, change.Replace && change.OverPeers)
 	if err != nil {
 		return spec, err
 	}
