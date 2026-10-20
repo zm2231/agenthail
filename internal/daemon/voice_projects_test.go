@@ -25,6 +25,7 @@ type toolVoice struct {
 	polled  bool
 	pending []voice.Batch
 	answers map[string]toolAnswer
+	asked   int
 }
 
 func (c *toolVoice) Create(_ context.Context, cwd, _ string) (*surface.Session, error) {
@@ -66,14 +67,24 @@ func (c *toolVoice) RespondDynamicToolCall(_ context.Context, requestID string, 
 	return nil
 }
 
-func (c *toolVoice) call(t *testing.T, tool string, arguments map[string]any) toolAnswer {
-	t.Helper()
+func (c *toolVoice) ask(tool string, arguments map[string]any) string {
 	c.mu.Lock()
-	id := fmt.Sprintf("tool-%d", len(c.answers)+len(c.pending))
+	defer c.mu.Unlock()
+	c.asked++
+	id := fmt.Sprintf("tool-%d", c.asked)
 	c.pending = append(c.pending, voice.Batch{Cursor: voice.Cursor{Source: "fixture", Position: 30}, Events: []voice.Event{
 		{Method: "item/tool/call", Params: map[string]any{"requestId": id, "threadId": "operator", "namespace": "agenthail", "tool": tool, "arguments": arguments}},
 	}})
-	c.mu.Unlock()
+	return id
+}
+
+func (c *toolVoice) call(t *testing.T, tool string, arguments map[string]any) toolAnswer {
+	t.Helper()
+	return c.await(t, tool, c.ask(tool, arguments))
+}
+
+func (c *toolVoice) await(t *testing.T, tool, id string) toolAnswer {
+	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		c.mu.Lock()
@@ -202,9 +213,10 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 	if transferred := call.call(t, "voice_transfer", map[string]any{"project": "widget"}); !transferred.success {
 		t.Fatalf("voice_transfer widget: %+v", transferred)
 	}
-	if target := service.View("phone").Target; target == nil || target.ID != "lead" {
-		t.Fatalf("target=%+v", target)
-	}
+	awaitFederation(t, "the call moved to the widget lead", func() bool {
+		target := service.View("phone").Target
+		return target != nil && target.ID == "lead"
+	})
 
 	sent := call.call(t, "voice_send_to_lead", map[string]any{"project": "widget", "message": "ship the widget"})
 	var receipt voice.LeadReceipt
@@ -229,4 +241,27 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 		delivered := remote.fake.delivered()
 		return len(delivered) == remoteSent+1 && strings.HasSuffix(delivered[len(delivered)-1], "ship the gadget")
 	})
+
+	hold := &snapshotHold{release: make(chan struct{})}
+	remote.gate.actions.Store(hold)
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			remote.gate.actions.Store(nil)
+			close(hold.release)
+		})
+	}
+	t.Cleanup(release)
+	held := call.ask("voice_send_to_lead", map[string]any{"project": "gadget", "message": "while held"})
+	awaitFederation(t, "the relay to the paired host is held", func() bool { return hold.waiting.Load() == 1 })
+	if listed := call.call(t, "voice_projects", map[string]any{}); !listed.success {
+		t.Fatalf("voice_projects while a relay is held: %+v", listed)
+	}
+	if _, err := service.Apply(context.Background(), "phone", voice.Action{Action: "heartbeat", AttemptID: "call-a"}); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if answer := call.await(t, "voice_send_to_lead", held); !answer.success || !strings.Contains(answer.text, "forge::@gadget-lead") {
+		t.Fatalf("the held send: %+v", answer)
+	}
 }

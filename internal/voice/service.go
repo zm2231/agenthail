@@ -1117,6 +1117,10 @@ func (s *Service) handleDynamicToolCall(ctx context.Context, e Event) {
 		return
 	}
 	arguments, _ := e.Params["arguments"].(map[string]any)
+	if tool == "voice_send_to_lead" {
+		s.sendToLead(responder, requestID, arguments)
+		return
+	}
 	message, err := s.callTool(ctx, tool, arguments)
 	if err != nil {
 		_ = responder.RespondDynamicToolCall(ctx, requestID, false, err.Error())

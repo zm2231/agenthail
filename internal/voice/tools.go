@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/delivery"
 )
@@ -121,22 +122,47 @@ func (s *Service) callTool(ctx context.Context, tool string, arguments map[strin
 		}
 		data, err := json.Marshal(map[string]any{"projects": list})
 		return string(data), err
-	case "voice_send_to_lead":
-		project, message := text("project"), text("message")
+	}
+	return "", errors.New("unsupported Agenthail voice tool")
+}
+
+const leadSendTimeout = 30 * time.Second
+
+// sendToLead answers voice_send_to_lead off the service lock: a relay to a
+// slow paired host must not stall the call's other events.
+func (s *Service) sendToLead(responder DynamicToolResponder, requestID string, arguments map[string]any) {
+	project, _ := arguments["project"].(string)
+	message, _ := arguments["message"].(string)
+	projects, source := s.projects, s.state.State.Session.ID
+	send := func(ctx context.Context) (string, error) {
+		project, message := strings.TrimSpace(project), strings.TrimSpace(message)
 		if project == "" || message == "" {
 			return "", errors.New("a project and a message are required")
 		}
-		if s.projects == nil {
+		if projects == nil {
 			return "", errors.New("projects are unavailable on this host")
 		}
-		receipt, err := s.projects.SendToLead(ctx, project, message, s.state.State.Session.ID)
+		receipt, err := projects.SendToLead(ctx, project, message, source)
 		if err != nil {
 			return "", err
 		}
 		data, err := json.Marshal(receipt)
 		return string(data), err
 	}
-	return "", errors.New("unsupported Agenthail voice tool")
+	s.spawn(func() {
+		ctx, cancel := context.WithTimeout(s.background, leadSendTimeout)
+		defer cancel()
+		answer, err := send(ctx)
+		if err != nil {
+			_ = responder.RespondDynamicToolCall(ctx, requestID, false, err.Error())
+			return
+		}
+		if err := responder.RespondDynamicToolCall(ctx, requestID, true, answer); err != nil {
+			s.mu.Lock()
+			s.state.State.Message = "Voice tool response could not be returned to Codex: " + err.Error()
+			s.unlock()
+		}
+	})
 }
 
 // SetProjects gives the operator's project tools their resolver. The daemon
