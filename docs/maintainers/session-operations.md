@@ -66,8 +66,8 @@ item ended `running` (the newest exchange of a busy session) or `unknown`.
   `task_complete.duration_ms` the duration, and `token_count.last_token_usage`
   each request's tokens. Codex repeats a `token_count` without a new request; a
   record that leaves `total_token_usage` unchanged is not counted again. A
-  managed session read from the app server takes the rollout turn whose reply
-  matches, and the app server's turn status otherwise.
+  managed session read from the app server takes the rollout turn with the
+  same turn ID, and the app server's turn status otherwise.
 - Claude: the turn tracker sums each assistant message's usage, from the
   message's last record, since earlier records hold partial counts.
   `inputTokens` adds `cache_read_input_tokens` and

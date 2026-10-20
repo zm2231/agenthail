@@ -51,9 +51,8 @@ func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, reque
 	if !c.managed {
 		return local, nil
 	}
-	remote, remoteErr := c.readSessionFromRPC(ctx, session, request.Limit)
+	remote, remoteErr := c.readSessionFromRPC(ctx, session, request.Limit, codexRecordedTurns(local.Items))
 	if remoteErr == nil {
-		codexManagedTurns(remote.Exchanges, local.Exchanges)
 		remote.Items = local.Items
 		remote.NextBefore = local.NextBefore
 		remote.Truncated = local.Truncated

@@ -332,10 +332,11 @@ about that turn:
 `inputTokens` includes the cached and cache-written input, and `outputTokens`
 includes the reasoning output. `unavailable` lists each field the provider did
 not record for that turn, such as `["model","durationMs","usage"]`; a listed
-field is absent, never zero. Codex rollouts record every field. A Codex turn
-read from the app server without its rollout has only its state. Claude
-transcripts record every field, with `usage.reasoningTokens` only when Claude
-wrote thinking-token counts. Notion records none, so its state is `unknown`.
+field is absent, never zero. Codex rollouts record every field for a finished
+turn, except the duration of an aborted one and reasoning tokens Codex did not
+count. A Codex turn read from the app server without its rollout has only its
+state. Claude transcripts record every field, with `usage.reasoningTokens` only
+when Claude wrote thinking-token counts. Notion records none, so its state is `unknown`.
 Tokens are not cost: they cover the agent's own model requests, not subagents.
 
 Use `--model` only for a one-message Codex or Notion override. Use `--from` when

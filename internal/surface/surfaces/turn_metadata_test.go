@@ -65,28 +65,33 @@ func TestCodexTranscriptReportsEachTurnsModelUsageAndDuration(t *testing.T) {
 }
 
 func TestCodexStreamResumedMidTurnCountsTheWholeTurn(t *testing.T) {
-	path := timelineFixture(t, codexTurnRecords)
-	offset := int64(len(codexTurnRecords))
-	appendRecords(t, path, codexTurnRest)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	var turns []*surface.TurnMetadata
-	err := (&Codex{}).Stream(ctx, &surface.Session{ID: "thread", Transcript: path, TranscriptOffset: offset, TranscriptOffsetSet: true}, "", func(event surface.StreamEvent) {
-		if event.Kind == "done" {
-			turns = append(turns, event.Turn)
-			if len(turns) == 2 {
-				cancel()
+	for _, start := range []string{"task_started", "turn_started"} {
+		t.Run(start, func(t *testing.T) {
+			head := strings.ReplaceAll(codexTurnRecords, `"task_started"`, `"`+start+`"`)
+			path := timelineFixture(t, head)
+			offset := int64(len(head))
+			appendRecords(t, path, strings.ReplaceAll(codexTurnRest, `"task_started"`, `"`+start+`"`))
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			var turns []*surface.TurnMetadata
+			err := (&Codex{}).Stream(ctx, &surface.Session{ID: "thread", Transcript: path, TranscriptOffset: offset, TranscriptOffsetSet: true}, "", func(event surface.StreamEvent) {
+				if event.Kind == "done" {
+					turns = append(turns, event.Turn)
+					if len(turns) == 2 {
+						cancel()
+					}
+				}
+			}, 2*time.Second)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Fatal(err)
 			}
-		}
-	}, 2*time.Second)
-	if err != nil && !errors.Is(err, context.Canceled) {
-		t.Fatal(err)
+			if len(turns) != 2 {
+				t.Fatalf("done turns=%d", len(turns))
+			}
+			wantTurn(t, "completed", turns[0], codexCompletedTurn)
+			wantTurn(t, "aborted", turns[1], codexAbortedTurn)
+		})
 	}
-	if len(turns) != 2 {
-		t.Fatalf("done turns=%d", len(turns))
-	}
-	wantTurn(t, "completed", turns[0], codexCompletedTurn)
-	wantTurn(t, "aborted", turns[1], codexAbortedTurn)
 }
 
 func TestCodexTurnWhoseStartIsOutOfReachHasNoUsage(t *testing.T) {
@@ -193,7 +198,8 @@ func TestATurnStillInProgressIsRunningAndOneWithoutAnEndIsUnknown(t *testing.T) 
 }
 
 func TestManagedCodexTurnsCarryWhatTheirRolloutRecorded(t *testing.T) {
-	path := timelineFixture(t, codexTurnRecords+codexTurnRest+`{"timestamp":"2026-10-19T10:02:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-3"}}
+	rollout := strings.ReplaceAll(codexTurnRecords+strings.ReplaceAll(codexTurnRest, `"text":"stopping"`, `"text":"built"`), `"task_started"`, `"turn_started"`)
+	path := timelineFixture(t, rollout+`{"timestamp":"2026-10-19T10:02:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-3"}}
 {"timestamp":"2026-10-19T10:02:00Z","type":"event_msg","payload":{"type":"user_message","message":"one more"}}
 {"timestamp":"2026-10-19T10:02:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"no end in the rollout"}]}}
 `)
@@ -204,7 +210,7 @@ func TestManagedCodexTurnsCarryWhatTheirRolloutRecorded(t *testing.T) {
 	}
 	newestFirst := []any{
 		turn("turn-3", "failed", "no end in the rollout"),
-		turn("turn-2", "interrupted", "stopping"),
+		turn("turn-2", "interrupted", "built"),
 		turn("turn-1", "completed", "built"),
 	}
 	startManagedCodex(t, func(method string, _ map[string]any) map[string]any {

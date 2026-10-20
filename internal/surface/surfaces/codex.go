@@ -1343,7 +1343,7 @@ func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surfa
 	return read.Exchanges, nil
 }
 
-func (c *Codex) readSessionFromRPC(ctx context.Context, sess *surface.Session, n int) (*surface.SessionReadResult, error) {
+func (c *Codex) readSessionFromRPC(ctx context.Context, sess *surface.Session, n int, recorded map[string]*surface.TurnMetadata) (*surface.SessionReadResult, error) {
 	conn, err := c.openReader(ctx, sess)
 	if err != nil {
 		return nil, err
@@ -1357,7 +1357,11 @@ func (c *Codex) readSessionFromRPC(ctx context.Context, sess *surface.Session, n
 	var exchanges []surface.Exchange
 	for _, turn := range thread.Turns {
 		if turn.User != "" || turn.Assistant != "" {
-			exchanges = append(exchanges, surface.Exchange{User: turn.User, Assistant: turn.Assistant, Source: "rpc", Turn: codexRPCTurnMetadata(turn)})
+			metadata := recorded[turn.ID]
+			if metadata == nil {
+				metadata = codexRPCTurnMetadata(turn)
+			}
+			exchanges = append(exchanges, surface.Exchange{User: turn.User, Assistant: turn.Assistant, Source: "rpc", Turn: metadata})
 		}
 	}
 

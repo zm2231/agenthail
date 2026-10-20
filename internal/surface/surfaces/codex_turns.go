@@ -104,7 +104,7 @@ func (m *codexTurnMeter) count(payload map[string]any) {
 
 func codexTurnMeterAt(ctx context.Context, file *os.File, offset int64) (*codexTurnMeter, error) {
 	meter := newCodexTurnMeter()
-	from, found, err := transcriptRecordBefore(ctx, file, offset, []byte(`"task_started"`), codexRecordStartsTurn)
+	from, found, err := transcriptRecordBefore(ctx, file, offset, []byte(`_started"`), codexRecordStartsTurn)
 	if err != nil || !found {
 		return meter, err
 	}
@@ -169,18 +169,14 @@ func codexRolloutTurnMetadata(ctx context.Context, path, turnID string) *surface
 	return turn
 }
 
-// codexManagedTurns gives each app-server exchange the turn its local rollout
-// recorded with the same reply, since app-server turns carry no usage.
-func codexManagedTurns(remote, local []surface.Exchange) {
+// codexRecordedTurns maps each turn a transcript page saw end to what its
+// rollout recorded, since app-server turns carry no usage.
+func codexRecordedTurns(items []surface.TimelineItem) map[string]*surface.TurnMetadata {
 	recorded := map[string]*surface.TurnMetadata{}
-	for _, exchange := range local {
-		if exchange.Assistant != "" && exchange.Turn != nil && exchange.Turn.State != surface.TurnUnknown {
-			recorded[exchange.Assistant] = exchange.Turn
+	for _, item := range items {
+		if item.Kind == "done" && item.TurnID != "" && item.Turn != nil {
+			recorded[item.TurnID] = item.Turn
 		}
 	}
-	for index := range remote {
-		if turn, ok := recorded[remote[index].Assistant]; ok && remote[index].Assistant != "" {
-			remote[index].Turn = turn
-		}
-	}
+	return recorded
 }
