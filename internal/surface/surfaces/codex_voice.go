@@ -29,7 +29,7 @@ func (v *CodexVoice) Create(ctx context.Context, cwd, instructions string) (*sur
 func createVoiceOperator(ctx context.Context, client codexClient, cwd, instructions string) (*surface.Session, error) {
 	response, err := client.Request(ctx, "thread/start", map[string]any{
 		"cwd": cwd, "developerInstructions": instructions, "ephemeral": false,
-		"threadSource": "agenthail", "serviceName": "agenthail-voice", "dynamicTools": voiceDynamicTools(),
+		"threadSource": "agenthail", "serviceName": "agenthail-voice", "dynamicTools": voice.DynamicTools(),
 	}, 15*time.Second)
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(err)
@@ -45,16 +45,6 @@ func createVoiceOperator(ctx context.Context, client codexClient, cwd, instructi
 		HasLocal: true, Status: surface.StatusIdle, Transcript: str(thread, "path"), LastActive: time.Now()}
 	setCodexTransport(session, codexTransportDesktop)
 	return session, nil
-}
-
-func voiceDynamicTools() []map[string]any {
-	return []map[string]any{{
-		"type": "namespace", "name": "agenthail", "description": "Agenthail operations available to the persistent voice orchestrator.",
-		"tools": []map[string]any{
-			{"type": "function", "name": "voice_transfer", "description": "Transfer the connected voice call to one exact existing Codex or Claude session.", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"targetId": map[string]any{"type": "string", "description": "Exact Agenthail session ID or alias."}}, "required": []string{"targetId"}, "additionalProperties": false}},
-			{"type": "function", "name": "voice_return_to_orchestrator", "description": "Return the connected voice call to Agenthail's normal orchestration workflow.", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}},
-		},
-	}}
 }
 
 func (v *CodexVoice) Request(ctx context.Context, s *surface.Session, method string, params map[string]any) error {
