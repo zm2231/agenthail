@@ -91,11 +91,11 @@ func (d *Daemon) catalogWaiting(ctx context.Context, adapter surface.Surface, se
 }
 
 // announceWaiting tells the user, on the desktop and on paired devices, that
-// a session is waiting on them. The record is marked announced only after
-// both were attempted, so a daemon stopped in between announces the question
-// again after it restarts rather than never. Both notifications carry a key
-// derived from the question, so a repeat replaces the one already shown
-// instead of adding a second.
+// a session is waiting on them, and opens the conversation they know it by.
+// The record is marked announced only after both were attempted, so a daemon
+// stopped in between announces the question again after it restarts rather
+// than never. Both notifications carry a key derived from the question, so a
+// repeat replaces the one already shown instead of adding a second.
 func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waiting) {
 	d.announceMu.Lock()
 	if d.announcing == nil {
@@ -114,7 +114,8 @@ func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waitin
 	}
 	d.announcing[session.ID] = waiting.ID
 	d.announceMu.Unlock()
-	desktopMessage := fmt.Sprintf("%s is waiting on you", d.resolveDisplay(session.ID))
+	conversationID := session.ConversationID()
+	desktopMessage := fmt.Sprintf("%s is waiting on you", d.resolveDisplay(conversationID))
 	mobileMessage := fmt.Sprintf("%s is waiting on you", notificationSurfaceName(session.Surface))
 	key := waitingNotificationKey(session.ID, waiting.ID)
 	go func(sessionID, questionID string) {
@@ -127,14 +128,17 @@ func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waitin
 		}()
 		notificationCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		mobile := mobileNotification{Title: "Agenthail", Message: mobileMessage, SessionID: sessionID, TurnID: questionID, EventType: "session.waiting", CollapseID: key}
+		mobile := mobileNotification{Title: "Agenthail", Message: mobileMessage, SessionID: conversationID, TurnID: questionID, EventType: "session.waiting", CollapseID: key}
 		var actions []surface.RequestAction
 		if request, open := d.waitingRequest(notificationCtx, session, waiting); open {
+			// A notification's buttons answer the session it names, so one
+			// that carries a request names the session that holds it.
+			mobile.SessionID = sessionID
 			desktopMessage = fmt.Sprintf("%s: %s", d.resolveDisplay(sessionID), request.Prompt())
 			mobile.RequestID = request.ID
 			actions = request.Actions()
 		}
-		if err := NotifyRequest("Agenthail", desktopMessage, sessionID, "agenthail-"+key, mobile.RequestID, actions); err != nil {
+		if err := d.notifyDesktop("Agenthail", desktopMessage, mobile.SessionID, "agenthail-"+key, mobile.RequestID, actions); err != nil {
 			d.log.Printf("desktop notification: %s", err)
 		}
 		d.notifyPairedDevices(notificationCtx, mobile)

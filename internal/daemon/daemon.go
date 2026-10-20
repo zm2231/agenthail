@@ -47,7 +47,10 @@ type Daemon struct {
 	catalogSelected func(sessionID string)
 	// waitingContended, when set, runs when a session's waiting lock is held
 	// by another caller and this one is about to wait for it.
-	waitingContended  func(sessionID string)
+	waitingContended func(sessionID string)
+	// notifyDesktop shows a desktop notification; it is NotifyRequest outside
+	// tests.
+	notifyDesktop     func(title, message, sessionID, identifier, requestID string, actions []surface.RequestAction) error
 	queueWorkers      sync.WaitGroup
 	events            *eventHub
 	catalog           *catalogHub
@@ -110,6 +113,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		pendingAliasWarns: map[int64]bool{},
 		observeRetry:      map[string]observeRetry{},
 		notificationArmed: map[string]bool{},
+		notifyDesktop:     NotifyRequest,
 		events:            newEventHub(reg),
 		sources:           newSessionSourceManager(reg),
 		sourceHolds:       map[string]map[string]func(){},
