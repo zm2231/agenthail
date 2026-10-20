@@ -57,6 +57,9 @@ type Hello struct {
 	Protocol    int    `json:"protocol"`
 	HostVersion string `json:"hostVersion"`
 	PID         int    `json:"pid"`
+	// CloseStops is set by hosts whose close interrupts a running turn and
+	// returns once Claude has exited.
+	CloseStops bool `json:"closeStops"`
 }
 
 type OpenRequest struct {
@@ -295,8 +298,42 @@ func (c Client) SetPermissionMode(ctx context.Context, sessionID, mode string) (
 	return out, c.sessionCall(ctx, "setPermissionMode", map[string]string{"sessionId": sessionID, "permissionMode": mode}, &out)
 }
 
+// Close stops a session now, on whichever host runs it. A host whose close
+// waits out a running turn is asked to interrupt the turn first; it may then
+// retire the idle session itself before the close arrives, which is the same
+// outcome.
 func (c Client) Close(ctx context.Context, sessionID string) error {
-	return c.sessionCall(ctx, "close", map[string]string{"sessionId": sessionID}, nil)
+	params := map[string]string{"sessionId": sessionID}
+	err := c.closeOn(ctx, params)
+	if !(IsCode(err, "not_open") || IsCode(err, "held") || errors.Is(err, ErrNotRunning)) {
+		return err
+	}
+	for _, host := range c.Retiring() {
+		retiringErr := host.closeOn(ctx, params)
+		if IsCode(retiringErr, "not_open") || errors.Is(retiringErr, ErrNotRunning) {
+			continue
+		}
+		return retiringErr
+	}
+	return err
+}
+
+func (c Client) closeOn(ctx context.Context, params map[string]string) error {
+	hello, err := c.Hello(ctx)
+	if err != nil {
+		return err
+	}
+	if hello.CloseStops {
+		return c.call(ctx, "close", params, nil)
+	}
+	if err := c.call(ctx, "interrupt", params, nil); err != nil {
+		return err
+	}
+	err = c.call(ctx, "close", params, nil)
+	if IsCode(err, "not_open") || errors.Is(err, ErrNotRunning) {
+		return nil
+	}
+	return err
 }
 
 // sessionCall runs a request for one session on the host that runs it. The

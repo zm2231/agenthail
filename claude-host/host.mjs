@@ -23,6 +23,9 @@ const MAX_IMAGE_BYTES = 5 << 20;
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif']);
 const OPEN_TIMEOUT_MS = 60_000;
 const TAKE_TIMEOUT_MS = 10_000;
+// How long close waits for Claude to exit after interrupting its turn and
+// closing its input, before it kills the process.
+const CLOSE_GRACE_MS = Number(process.env.AGENTHAIL_CLAUDE_HOST_CLOSE_GRACE_MS) || 10_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PERMISSION_MODES = new Set(['default', 'manual', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']);
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -148,8 +151,12 @@ class Session {
   // waits on, so those requests end here rather than stay listed unanswerable.
   end() {
     this.ended = true;
-    for (const pending of [...this.pending.values()]) pending.settle('ended', { behavior: 'deny', message: WITHDRAWN });
+    this.endRequests();
     this.wake?.();
+  }
+
+  endRequests() {
+    for (const pending of [...this.pending.values()]) pending.settle('ended', { behavior: 'deny', message: WITHDRAWN });
   }
 
   // owe records work Claude was handed while idle and has yet to start a turn
@@ -249,7 +256,9 @@ class Session {
 }
 
 const methods = {
-  hello: () => ({ protocol: PROTOCOL, hostVersion: args.version, pid: process.pid }),
+  // closeStops tells clients that close interrupts a running turn, so they need
+  // not interrupt first.
+  hello: () => ({ protocol: PROTOCOL, hostVersion: args.version, pid: process.pid, closeStops: true }),
   open,
   send,
   interrupt: async ({ sessionId }) => {
@@ -281,10 +290,26 @@ const methods = {
     emit(s.id, 'permission_mode', { permissionMode });
     return s.describe();
   },
+  // close stops the session now: it interrupts a running turn, closes
+  // Claude's input and returns once the process has exited, killing it if it
+  // has not within the grace period.
   close: async ({ sessionId }) => {
     const s = session(sessionId);
+    if (s.state !== 'idle') {
+      s.endRequests();
+      await s.query?.interrupt().catch(() => {});
+    }
     s.end();
-    await s.done;
+    let timer;
+    const exited = await Promise.race([s.done.then(() => true), new Promise((resolve) => (timer = setTimeout(() => resolve(false), CLOSE_GRACE_MS)))]);
+    clearTimeout(timer);
+    if (!exited) {
+      process.stderr.write(`claude-host: Claude ${s.pid} for session ${s.id} did not exit ${CLOSE_GRACE_MS} ms after close; killing it\n`);
+      killSession(s);
+      await s.done;
+    }
+    // done also settles when Claude ends its output but its process lingers.
+    killSession(s);
     return {};
   },
   list: () => ({
@@ -721,6 +746,21 @@ function runs(entry) {
 function processStart(pid) {
   const ps = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC0' } });
   return ps.status === 0 ? ps.stdout.trim() : '';
+}
+
+// killSession kills a session's Claude process and the processes it started
+// in its group, such as background shells, if Claude still runs; its start
+// time tells it from a later process given the same pid. Claude is spawned
+// detached, so it leads its own process group.
+function killSession(s) {
+  if (!runs({ pid: s.pid, started: s.started })) return;
+  try {
+    process.kill(-s.pid, 'SIGKILL');
+  } catch {
+    try {
+      process.kill(s.pid, 'SIGKILL');
+    } catch {}
+  }
 }
 
 function alive(pid) {

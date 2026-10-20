@@ -503,7 +503,7 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 			f.Peer(t, opened.PID, test.prompt)
 			request := listed(t, client, asking, 1).Requests[0]
 			busy := f.Open(t, client, working)
-			if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: working, UUID: uuid.NewString(), Text: "SLOW 1500"}); err != nil {
+			if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: working, UUID: uuid.NewString(), Text: "SLOW 60000"}); err != nil {
 				t.Fatal(err)
 			}
 
@@ -529,10 +529,16 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 			if result, err := client.Send(ctx, claudehost.SendRequest{SessionID: asking, UUID: uuid.NewString(), Text: "after the update", Origin: &claudehost.Origin{Kind: "human"}}); err != nil || !result.Accepted {
 				t.Fatalf("send after the update = %+v, %v", result, err)
 			}
-			if err := client.Close(ctx, working); err != nil {
-				t.Fatalf("close through the protocol 2 host = %v", err)
+			if state := listed(t, client, working, 0).State; state != "busy" {
+				t.Fatalf("the session to stop is %q, want it busy", state)
 			}
-			claudehosttest.WaitFor(t, "the closed session's Claude to exit", func() bool { return !claudehosttest.Alive(busy.PID) })
+			closeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			err = client.Close(closeCtx, working)
+			cancel()
+			if err != nil {
+				t.Fatalf("stopping a busy session through the protocol 2 host = %v", err)
+			}
+			claudehosttest.WaitFor(t, "the stopped session's Claude to exit", func() bool { return !claudehosttest.Alive(busy.PID) })
 			if outcome, err := client.Respond(ctx, asking, request.RequestID, test.decision); err != nil || outcome != test.outcome {
 				t.Fatalf("respond after the update = %q, %v; want %s", outcome, err, test.outcome)
 			}

@@ -134,7 +134,7 @@ test('open, send and stream a turn bound to the message uuid', async () => {
   const f = fixture();
   await startHost(f, { version: '1.2.3' });
   const c = new Client(f.socket);
-  assert.deepEqual(await c.call('hello'), { protocol: 3, hostVersion: '1.2.3', pid: (await c.call('hello')).pid });
+  assert.deepEqual(await c.call('hello'), { protocol: 3, hostVersion: '1.2.3', pid: (await c.call('hello')).pid, closeStops: true });
   await c.call('subscribe', { after: 0 });
   const id = randomUUID();
   const opened = await c.call('open', { sessionId: id, cwd: f.cwd, permissionMode: 'acceptEdits', model: 'opus', effort: 'high', agent: 'reviewer', name: 'Review the parser' });
@@ -787,6 +787,62 @@ test('closing a session ends its open requests instead of leaving them listed', 
   assert.equal((await c.event((e) => e.kind === 'request_resolved' && e.requestId === request.requestId)).outcome, 'ended');
   assert.deepEqual((await c.call('list')).sessions, []);
   await assert.rejects(c.call('respond', { sessionId: id, requestId: request.requestId, decision: { behavior: 'allow' } }), { code: 'not_open' });
+  c.close();
+});
+
+test('close stops a busy session now: it interrupts the turn and returns once Claude has exited', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  assert.equal((await c.call('hello')).closeStops, true);
+  const id = randomUUID();
+  const { pid } = await c.call('open', { sessionId: id, cwd: f.cwd });
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'SLOW 60000' });
+  await c.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'busy');
+  const started = Date.now();
+  await c.call('close', { sessionId: id });
+  assert.ok(Date.now() - started < 5000, `close took ${Date.now() - started} ms`);
+  assert.ok(!alive(pid), 'Claude has exited when close returns');
+  assert.deepEqual(transcript(f, id).map((l) => l.reply), ['interrupted']);
+  c.close();
+});
+
+test('close kills a Claude that does not exit within the grace period', async () => {
+  const f = fixture();
+  const host = await startHost(f, { env: { AGENTHAIL_CLAUDE_HOST_CLOSE_GRACE_MS: '300' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  const { pid } = await c.call('open', { sessionId: id, cwd: f.cwd });
+  await c.call('send', { sessionId: id, uuid: randomUUID(), text: 'HANG' });
+  await c.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'busy');
+  await c.call('close', { sessionId: id });
+  assert.ok(!alive(pid), 'Claude has been killed when close returns');
+  assert.match(host.stderrText, /did not exit 300 ms after close; killing it/);
+  assert.deepEqual((await c.call('list')).sessions, []);
+  c.close();
+});
+
+test('close stops an idle Claude that outlives its input, with the shells it started', async () => {
+  const f = fixture();
+  await startHost(f, { env: { AGENTHAIL_CLAUDE_HOST_CLOSE_GRACE_MS: '300', FAKE_CLAUDE_OUTLIVES_INPUT: '1' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  const { pid } = await c.call('open', { sessionId: id, cwd: f.cwd });
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'SHELL' });
+  await c.event(turnResult(id, uuid));
+  const shell = Number(transcript(f, id)[0].reply.split(':')[1]);
+  assert.ok(alive(shell), 'the shell runs');
+  const started = Date.now();
+  await c.call('close', { sessionId: id });
+  assert.ok(Date.now() - started < 5000, `close took ${Date.now() - started} ms`);
+  assert.ok(!alive(pid), 'Claude has exited when close returns');
+  for (let i = 0; i < 40 && alive(shell); i++) await sleep(50);
+  assert.ok(!alive(shell), 'the shell Claude started is gone');
   c.close();
 });
 

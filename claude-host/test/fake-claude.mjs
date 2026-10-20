@@ -3,6 +3,7 @@
 // control requests and runs each user message as a turn. FAKE_CLAUDE_DIR
 // holds its transcript, one JSON line per turn, which also deduplicates
 // message uuids across processes the way the real transcript does.
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -117,6 +118,14 @@ async function turn(message) {
     });
     interrupt = null;
     reply = interrupted ? 'interrupted' : `slow:${ms}`;
+  } else if (text.startsWith('SHELL')) {
+    // A background shell Claude started, in its process group.
+    const shell = spawn('sleep', ['600'], { stdio: 'ignore' });
+    reply = `shell:${shell.pid}`;
+  } else if (text.startsWith('HANG')) {
+    // A turn that ignores interrupts and the end of its input, like a wedged
+    // Claude: only a kill ends it.
+    await new Promise(() => {});
   } else if (text.startsWith('BACKGROUND')) {
     // A background shell that outlives the turn, like run_in_background.
     const ms = Number(text.split(' ')[1] ?? 30000);
