@@ -40,7 +40,7 @@ b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
 app_jwt() {
 	local key header payload now signature
-	key="$(curl -fsS -X POST -H 'Sec-X-Tailscale-No-Browsers: setec' -H 'Content-Type: application/json' \
+	key="$(curl -fsS --max-time 30 -X POST -H 'Sec-X-Tailscale-No-Browsers: setec' -H 'Content-Type: application/json' \
 		-d "{\"Name\":\"$key_name\"}" "$setec_url/api/get" | jq -er .Value | base64 -d)" || return 1
 	now="$(date +%s)"
 	header="$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)"
@@ -51,7 +51,7 @@ app_jwt() {
 
 github() {
 	local token="$1" method="$2" path="$3" body="${4:-}"
-	curl -fsS -X "$method" -H "Authorization: Bearer $token" -H 'Accept: application/vnd.github+json' \
+	curl -fsS --max-time 30 -X "$method" -H "Authorization: Bearer $token" -H 'Accept: application/vnd.github+json' \
 		${body:+-d "$body"} "https://api.github.com$path"
 }
 
@@ -63,15 +63,24 @@ installation_token() {
 		"{\"repositories\":[\"${repo#*/}\"],\"permissions\":$permissions}" | jq -er .token
 }
 
+all_pages() {
+	local token="$1" path="$2" field="$3" page=1 body
+	while :; do
+		body="$(github "$token" GET "$path&per_page=100&page=$page")" || return 1
+		jq -c ".${field}[]" <<<"$body"
+		[ "$(jq ".${field} | length" <<<"$body")" -eq 100 ] || return 0
+		page=$((page + 1))
+	done
+}
+
 queued_jobs() {
-	local token="$1" runs run count=0 n
-	runs="$({
-		github "$token" GET "/repos/$repo/actions/runs?status=queued&per_page=100"
-		github "$token" GET "/repos/$repo/actions/runs?status=in_progress&per_page=100"
-	} | jq -r '.workflow_runs[].id')" || return 1
+	local token="$1" runs run jobs status n count=0
+	runs="$(for status in queued in_progress; do
+		all_pages "$token" "/repos/$repo/actions/runs?status=$status" workflow_runs || exit 1
+	done | jq -r .id)" || return 1
 	for run in $runs; do
-		n="$(github "$token" GET "/repos/$repo/actions/runs/$run/jobs?filter=latest&per_page=100" |
-			jq --arg label "$label" '[.jobs[] | select(.status == "queued" and (.labels | index($label)))] | length')" || return 1
+		jobs="$(all_pages "$token" "/repos/$repo/actions/runs/$run/jobs?filter=latest" jobs)" || return 1
+		n="$(jq -s --arg label "$label" '[.[] | select(.status == "queued" and (.labels | index($label)))] | length' <<<"$jobs")" || return 1
 		count=$((count + n))
 	done
 	echo "$count"
@@ -135,6 +144,11 @@ run_slot() {
 	exit 3
 }
 
+if [ "${1:-}" = queued ]; then
+	queued_jobs "$(installation_token '{"actions":"read"}')"
+	exit
+fi
+
 if [ "${1:-}" = run-slot ]; then
 	mkdir -p "$state" "$logs"
 	slot="$2"
@@ -152,6 +166,11 @@ declare -a worker_pid worker_started worker_cooldown no_job_exits
 reap() {
 	local vm
 	pkill -f "$self run-slot" 2>/dev/null || true
+	for _ in $(seq 1 20); do
+		pgrep -f "$self run-slot" >/dev/null || break
+		sleep 1
+	done
+	pkill -9 -f "$self run-slot" 2>/dev/null || true
 	for vm in $(slot_vms); do
 		discard_vm "$vm"
 	done

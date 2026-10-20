@@ -76,16 +76,17 @@ tart stop "$build"
 
 tart clone "$build" "$check"
 boot "$check"
-if ! tart exec "$check" /bin/bash -euo pipefail -c "
-test -s ~/actions-runner/.path
-grep -qx \"ACTIONS_RUNNER_HOOK_JOB_STARTED=\$HOME/actions-runner-hooks/job-started.sh\" ~/actions-runner/.env
-test -x ~/actions-runner-hooks/job-started.sh
-test -x ~/actions-runner/run.sh
+if ! tart exec "$check" /bin/bash -uo pipefail -c "
+fail() { echo \"image check failed: \$1\" >&2; exit 1; }
+test -s ~/actions-runner/.path || fail 'runner PATH file'
+grep -qx \"ACTIONS_RUNNER_HOOK_JOB_STARTED=\$HOME/actions-runner-hooks/job-started.sh\" ~/actions-runner/.env || fail 'runner .env hook setting'
+test -x ~/actions-runner-hooks/job-started.sh || fail 'job-started hook'
+test -x ~/actions-runner/run.sh || fail 'runner'
 export PATH=\"\$(cat ~/actions-runner/.path)\"
-test \"\$(~/actions-runner/config.sh --version)\" = $runner_version
-python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))'
-xcodebuild -version >/dev/null
-scutil --dns | grep -q 'nameserver\\[0\\] : 1.1.1.1'
+test \"\$(~/actions-runner/config.sh --version)\" = $runner_version || fail 'runner version'
+python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' || fail 'python3 3.10 or newer'
+xcodebuild -version >/dev/null || fail 'xcodebuild'
+networksetup -listallnetworkservices | tail -n +2 | while read -r service; do networksetup -getdnsservers \"\$service\" | head -1 | grep -qx 1.1.1.1 || fail \"public DNS resolver for \$service\"; done || exit 1
 "; then
 	echo "The new image failed its checks in a fresh clone; not publishing it." >&2
 	exit 1
