@@ -13,8 +13,11 @@ struct GoalStateTest {
         let codex = try JSONDecoder().decode(GoalState.self, from: Data(#"{"objective":"Ship","status":"active","timeUsedSeconds":0,"tokensUsed":0,"tokenBudget":500,"createdAt":"2026-10-20T16:07:30Z","updatedAt":"2026-10-20T16:07:30Z"}"#.utf8))
         check(codex.reason == nil && codex.tokenBudget == 500, "a goal without a reason still decodes")
 
-        let claude = try JSONDecoder().decode(Capabilities.self, from: Data(#"{"send":true,"stream":true,"reply":true,"goal":false,"goalStatus":true,"compact":true,"model":true,"interrupt":true,"steer":true}"#.utf8))
-        check(!claude.goal, "a session that only reports its goal offers no goal controls")
+        let claude = try JSONDecoder().decode(Capabilities.self, from: Data(#"{"send":true,"stream":true,"reply":true,"goal":false,"goalSet":true,"goalStatus":true,"compact":true,"model":true,"interrupt":true,"steer":true}"#.utf8))
+        check(claude.goalSet && !claude.goal, "a Claude session sets and clears its goal but has no pause or budget")
+
+        let peer = try JSONDecoder().decode(Capabilities.self, from: Data(#"{"send":true,"stream":true,"reply":true,"goal":false,"goalStatus":true,"compact":false,"model":false,"interrupt":false,"steer":false}"#.utf8))
+        check(!peer.goalSet && !peer.goal, "a session that only reports its goal offers no goal controls")
         print("ok")
     }
 

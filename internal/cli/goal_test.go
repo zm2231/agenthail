@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -71,9 +72,61 @@ func TestGoalShowsAReportedGoalButRefusesControlsTheSessionLacks(t *testing.T) {
 	if err != nil || !strings.Contains(output, "tests pass [blocked]") || !strings.Contains(output, "Needs you") || !strings.Contains(output, "Reason: the test binary cannot be built here") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
-	for _, action := range [][]string{{"set", "lint"}, {"clear"}, {"pause"}} {
-		if err := app.Run(append([]string{"goal", "claude:g"}, action...)); err == nil || !strings.Contains(err.Error(), "does not support goal management") {
+	for _, action := range [][]string{{"set", "lint"}, {"clear"}} {
+		if err := app.Run(append([]string{"goal", "claude:g"}, action...)); err == nil || !strings.Contains(err.Error(), "cannot set or clear this session's goal") {
 			t.Fatalf("%v err=%v", action, err)
 		}
+	}
+	for _, action := range [][]string{{"pause"}, {"resume"}, {"budget", "10"}} {
+		if err := app.Run(append([]string{"goal", "claude:g"}, action...)); err == nil || !strings.Contains(err.Error(), "does not support goal "+action[0]) {
+			t.Fatalf("%v err=%v", action, err)
+		}
+	}
+}
+
+type goalCommandCLISurface struct {
+	*cliSurface
+	ran []string
+}
+
+func (s *goalCommandCLISurface) GoalCommand(_ *surface.Session, objective string) (string, error) {
+	if objective == "" {
+		return "/goal clear", nil
+	}
+	return "/goal " + objective, nil
+}
+
+func (s *goalCommandCLISurface) RunGoalCommand(_ context.Context, _ *surface.Session, command string) error {
+	s.ran = append(s.ran, command)
+	return nil
+}
+
+func TestGoalSetAndClearAreHeldForASessionThatRunsGoalCommands(t *testing.T) {
+	fake := &goalCommandCLISurface{cliSurface: &cliSurface{
+		kind:     surface.KindClaude,
+		sessions: map[string]surface.Session{"g": {ID: "g", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}},
+		caps:     surface.Capabilities{GoalSet: true, GoalStatus: true},
+	}}
+	app, registry := cliFixture(t, fake.cliSurface)
+	app.Surfaces = []SurfaceEntry{{Name: string(surface.KindClaude), Surface: fake}}
+	for _, action := range [][]string{{"set", "tests", "pass"}, {"edit", "lint", "is", "clean"}, {"clear"}} {
+		output, err := captureStdout(t, func() error { return app.Run(append([]string{"goal", "claude:g"}, action...)) })
+		if err != nil || !strings.Contains(output, "queued for") || !strings.Contains(output, "will run when the target is idle") {
+			t.Fatalf("%v output=%q err=%v", action, output, err)
+		}
+	}
+	items, err := registry.ListQueue(false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var commands []string
+	for _, item := range items {
+		commands = append(commands, item.Message)
+	}
+	if strings.Join(commands, "|") != "/goal tests pass|/goal lint is clean|/goal clear" || len(fake.ran) != 0 {
+		t.Fatalf("queued=%v ran=%v", commands, fake.ran)
+	}
+	if err := app.Run([]string{"goal", "claude:g", "pause"}); err == nil {
+		t.Fatal("pause ran on a session without goal controls")
 	}
 }

@@ -146,8 +146,9 @@ final class AgenthailIOSModel: ObservableObject {
         guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
         guard !pendingControls.contains(id) else { throw AgenthailAPIError.unavailable("An update is already in progress.") }
         if action != "alias" {
-            guard let detail = selectedDetail, detail.session.id == id, !detail.readOnly, detail.capabilities.goal,
-                  ["goal-set", "goal-edit", "goal-clear", "goal-pause", "goal-resume", "goal-budget"].contains(action) else { throw AgenthailAPIError.unavailable("This session cannot change goals.") }
+            let settable = ["goal-set", "goal-edit", "goal-clear"].contains(action)
+            guard let detail = selectedDetail, detail.session.id == id, !detail.readOnly,
+                  settable ? detail.capabilities.goalSet : detail.capabilities.goal && ["goal-pause", "goal-resume", "goal-budget"].contains(action) else { throw AgenthailAPIError.unavailable("This session cannot change goals.") }
         }
         pendingControls.insert(id)
         defer { pendingControls.remove(id) }

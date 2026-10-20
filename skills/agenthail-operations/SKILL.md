@@ -282,6 +282,11 @@ agenthail goal @builder budget clear
 agenthail goal @builder clear
 ```
 
+Goals: Codex takes every goal subcommand. A Claude session takes `set`, `edit`
+and `clear`, which run Claude's `/goal` once the session is idle and are
+confirmed by Claude's answer; it has no `pause`, `resume` or `budget`, and a
+session reached only through its peer socket cannot set a goal.
+
 Claude controls over Remote Control report request-linked evidence. `model` and
 `interrupt` wait for Claude's `control_response` to their own request id;
 `interrupt` also waits for the active turn to end. A steer is only

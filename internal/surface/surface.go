@@ -645,12 +645,26 @@ type GoalController interface {
 	UpdateGoal(context.Context, *Session, GoalUpdate) error
 }
 
+// GoalCommandRunner is a surface whose session sets and clears its goal by
+// running a command as its own turn, so a busy session takes it once idle.
+type GoalCommandRunner interface {
+	// GoalCommand is the command that sets objective on the session, or clears
+	// its goal when objective is empty, or why the session would refuse it.
+	GoalCommand(sess *Session, objective string) (string, error)
+	// RunGoalCommand runs command on an idle session and returns once the
+	// session reports its outcome.
+	RunGoalCommand(ctx context.Context, sess *Session, command string) error
+}
+
 type Capabilities struct {
 	Send   bool `json:"send"`
 	Stream bool `json:"stream"`
 	Reply  bool `json:"reply"`
-	// Goal is a session whose goal is set, edited, paused and budgeted here.
+	// Goal is a session whose goal is paused, resumed and budgeted here, and
+	// whose goal events relay.
 	Goal bool `json:"goal"`
+	// GoalSet is a session whose goal is set, replaced and cleared here.
+	GoalSet bool `json:"goalSet"`
 	// GoalStatus is a session whose goal status GoalGet reads.
 	GoalStatus bool `json:"goalStatus"`
 	Compact    bool `json:"compact"`

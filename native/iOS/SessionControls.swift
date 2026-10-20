@@ -12,10 +12,10 @@ struct SessionEditingControls: View {
     var body: some View {
         Section("Organize conversation") {
             Button("Name conversation", systemImage: "pencil") { text = detail.alias ?? ""; editingName = true }
-            if !detail.readOnly && detail.capabilities.goal {
+            if !detail.readOnly && detail.capabilities.goalSet {
                 Button(detail.goal?.objective.isEmpty == false ? "Edit goal" : "Set goal", systemImage: "target") { text = detail.goal?.objective ?? ""; editingGoal = true }
                 if detail.goal?.objective.isEmpty == false { Button("Clear goal", role: .destructive) { Task { await save("goal-clear") } } }
-                if let goal = detail.goal {
+                if detail.capabilities.goal, let goal = detail.goal {
                     if goal.status == "active" {
                         Button("Pause goal", systemImage: "pause.fill") { Task { await save("goal-pause") } }
                     } else if goal.status == "paused" {

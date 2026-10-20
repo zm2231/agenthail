@@ -1434,7 +1434,23 @@ type QueueOperation string
 const (
 	QueueOperationMessage QueueOperation = "message"
 	QueueOperationCompact QueueOperation = "compact"
+	QueueOperationGoal    QueueOperation = "goal"
 )
+
+// QueueGoal holds a goal command until the session is idle. Like compact it
+// is a control operation that never drains through a message transport.
+func (r *Registry) QueueGoal(sessionID, command string) (int64, error) {
+	res, err := r.db.Exec(`INSERT INTO message_queue (session_id,message,operation,status,updated_at) VALUES (?,?,?,'pending',datetime('now'))`, sessionID, command, QueueOperationGoal)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: command})
+	return id, nil
+}
 
 // QueueCompact preserves compact as a control operation. It must never be
 // drained through a message transport, where "/compact" would become prompt text.
@@ -1844,7 +1860,7 @@ func queueSteerRow(alias string, mode deliverypolicy.Mode) string {
 	if mode == deliverypolicy.Steer {
 		choice = `(%[1]s.busy_delivery='steer' OR %[1]s.busy_delivery='' AND NOT (` + queueToPeerSocket + `))`
 	}
-	return fmt.Sprintf(choice+` AND %[1]s.model='' AND (%[1]s.turn_options='' OR %[1]s.turn_options='{}')`, alias)
+	return fmt.Sprintf(choice+` AND %[1]s.operation='message' AND %[1]s.model='' AND (%[1]s.turn_options='' OR %[1]s.turn_options='{}')`, alias)
 }
 
 // queueHoldCase derives why a pending message is held by the rules the
@@ -2206,7 +2222,7 @@ func claimCandidateFilter(sessionID, busyDelivery string, mode deliverypolicy.Mo
 
 func claimInflightExpired(status string, operation QueueOperation, inflightAt int64, now time.Time) bool {
 	inflightTimeout := time.Minute
-	if operation == QueueOperationCompact {
+	if operation != QueueOperationMessage {
 		inflightTimeout = 10 * time.Minute
 	}
 	return status == "inflight" && inflightAt > 0 && inflightAt < now.Add(-inflightTimeout).UnixMilli()

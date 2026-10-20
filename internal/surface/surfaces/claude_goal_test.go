@@ -2,12 +2,16 @@ package surfaces
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
 const (
@@ -252,5 +256,116 @@ func TestClaudeReportsGoalStatusWithoutGoalControls(t *testing.T) {
 	capabilities := NewClaude(nil, t.TempDir()).Capabilities()
 	if !capabilities.GoalStatus || capabilities.Goal {
 		t.Fatalf("capabilities=%+v", capabilities)
+	}
+}
+
+func idleGoalSession(t *testing.T) (*claudetest.Fixture, *surface.Session) {
+	fixture := claudetest.New(t)
+	fixture.RecordStatus("conversation-test", fixture.Home, "session_test", "idle", "", time.Time{})
+	path := writeTranscript(t, `{"type":"user","uuid":"u1","timestamp":"2026-10-20T16:00:00Z","message":{"content":"hello"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-10-20T16:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"hi"}]}}
+{"type":"system","subtype":"stop_hook_summary"}`)
+	return fixture, &surface.Session{ID: "conversation-test", Surface: surface.KindClaude, Bridge: "session_test", PID: fixture.PID, Status: surface.StatusIdle, Transcript: path}
+}
+
+func goalCommandOutput(args, output string) string {
+	record, _ := json.Marshal(map[string]any{"type": "system", "subtype": "local_command", "uuid": newUUID(), "commandRun": map[string]any{"command": "goal", "args": args}, "content": "<local-command-stdout>" + output + "</local-command-stdout>"})
+	return string(record) + "\n"
+}
+
+func postedText(payload map[string]any) string {
+	message, _ := payload["message"].(map[string]any)
+	text, _ := message["content"].(string)
+	return text
+}
+
+func TestClaudeGoalCommandIsWhatClaudeAccepts(t *testing.T) {
+	fixture, session := idleGoalSession(t)
+	claude := NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)
+	for objective, want := range map[string]string{"  tests pass \n": "/goal tests pass", "": "/goal clear", strings.Repeat("é", claudeGoalConditionLimit): "/goal " + strings.Repeat("é", claudeGoalConditionLimit)} {
+		if command, err := claude.GoalCommand(session, objective); err != nil || command != want {
+			t.Fatalf("GoalCommand(%.20q) = %.30q, %v", objective, command, err)
+		}
+	}
+	for _, objective := range []string{"Stop", "cancel", strings.Repeat("😀", claudeGoalConditionLimit/2+1)} {
+		if command, err := claude.GoalCommand(session, objective); surface.DeliveryTerminalReason(err) != surface.DeliveryInvalidRequest {
+			t.Fatalf("GoalCommand(%.20q) = %q, %v", objective, command, err)
+		}
+	}
+	peer := &surface.Session{ID: "conversation-test", Surface: surface.KindClaude, Transport: "uds", PID: fixture.PID, Transcript: session.Transcript}
+	if _, err := claude.GoalCommand(peer, "tests pass"); !errors.Is(err, errClaudeGoalPeer) {
+		t.Fatalf("peer socket err=%v", err)
+	}
+}
+
+func TestClaudeGoalSetIsOfferedWhereClaudeRunsCommands(t *testing.T) {
+	fixture, session := idleGoalSession(t)
+	claude := NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)
+	hosted := &surface.Session{ID: "hosted", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: fixture.PID}
+	peer := &surface.Session{ID: "peer", Surface: surface.KindClaude, Transport: "uds", PID: fixture.PID}
+	if !claude.SessionCapabilities(session).GoalSet || !claude.SessionCapabilities(hosted).GoalSet || claude.SessionCapabilities(peer).GoalSet {
+		t.Fatal("goalSet must follow where /goal runs as a command")
+	}
+	if capabilities := claude.SessionCapabilities(session); capabilities.Goal {
+		t.Fatalf("Claude has no goal pause or budget: %+v", capabilities)
+	}
+}
+
+func TestClaudeGoalRunsAsACommandAndReportsClaudesAnswer(t *testing.T) {
+	shortControlPoll(t)
+	cases := []struct {
+		name, objective, args, output string
+		clear                         bool
+		check                         func(error) bool
+	}{
+		{name: "set", objective: "tests pass", args: "tests pass", output: "Goal set: tests pass", check: func(err error) bool { return err == nil }},
+		{name: "cleared", clear: true, args: "clear", output: "Goal cleared: tests pass", check: func(err error) bool { return err == nil }},
+		{name: "nothing to clear", clear: true, args: "clear", output: "No goal set", check: func(err error) bool { return err == nil }},
+		{name: "refused", objective: "tests pass", args: "tests pass", output: "Hooks are disabled by policy", check: func(err error) bool {
+			return surface.DeliveryTerminalReason(err) == surface.DeliveryInvalidRequest && strings.Contains(err.Error(), "Hooks are disabled by policy")
+		}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			fixture, session := idleGoalSession(t)
+			remote := newFakeRemoteControl(t)
+			remote.onPost = func(payload map[string]any) []map[string]any {
+				appendTranscript(t, session.Transcript, goalCommandOutput("other", "Goal set: other")+goalCommandOutput(test.args, test.output))
+				return nil
+			}
+			claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, remote.request)
+			var err error
+			if test.clear {
+				err = claude.GoalClear(context.Background(), session)
+			} else {
+				err = claude.GoalSet(context.Background(), session, test.objective)
+			}
+			if !test.check(err) || remote.postCount() != 1 || postedText(remote.posts[0]) != "/goal "+test.args {
+				t.Fatalf("err=%v posts=%v", err, remote.posts)
+			}
+		})
+	}
+}
+
+func TestClaudeGoalCommandWaitsForAnIdleSessionAndItsAnswer(t *testing.T) {
+	shortControlPoll(t)
+	fixture, session := idleGoalSession(t)
+	remote := newFakeRemoteControl(t)
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, remote.request)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := claude.GoalSet(ctx, session, "tests pass"); !surface.IsDeliveryOutcomeUnknown(err) || remote.postCount() != 1 {
+		t.Fatalf("unanswered err=%v posts=%d", err, remote.postCount())
+	}
+
+	fixture.RecordStatus("conversation-test", fixture.Home, "session_test", "busy", "", time.Time{})
+	appendTranscript(t, session.Transcript, `{"type":"user","uuid":"u2","message":{"content":"working"}}`+"\n")
+	if err := claude.GoalSet(context.Background(), session, "tests pass"); !surface.IsDeliveryUnavailable(err) || remote.postCount() != 1 {
+		t.Fatalf("busy err=%v posts=%d", err, remote.postCount())
+	}
+
+	peer := &surface.Session{ID: "conversation-test", Surface: surface.KindClaude, Transport: "uds", PID: fixture.PID, Transcript: session.Transcript}
+	if err := claude.GoalClear(context.Background(), peer); !errors.Is(err, errClaudeGoalPeer) || remote.postCount() != 1 {
+		t.Fatalf("peer err=%v posts=%d", err, remote.postCount())
 	}
 }

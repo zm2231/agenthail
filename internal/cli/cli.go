@@ -2840,6 +2840,9 @@ func (a *App) cmdDoctor(args []string) error {
 		if caps.Goal {
 			enabled = append(enabled, "goal")
 		}
+		if caps.GoalSet {
+			enabled = append(enabled, "goalSet")
+		}
 		if caps.GoalStatus {
 			enabled = append(enabled, "goalStatus")
 		}

@@ -14,6 +14,8 @@ const maxDeliveryAttempts = 5
 
 const compactOperationTimeout = 5 * time.Minute
 
+const goalOperationTimeout = 2 * time.Minute
+
 func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface, session *surface.Session) {
 	d.drainClaimedMessage(ctx, adapter, session, func(now time.Time) (*registry.QueuedMessage, error) {
 		return d.Registry.ClaimNextMessage(session.ID, now)
@@ -53,6 +55,15 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		go func() {
 			defer d.queueWorkers.Done()
 			d.runQueuedCompact(ctx, adapter, &compacting, item)
+		}()
+		return
+	}
+	if item.Operation == registry.QueueOperationGoal {
+		commanding := *session
+		d.queueWorkers.Add(1)
+		go func() {
+			defer d.queueWorkers.Done()
+			d.runQueuedGoal(ctx, adapter, &commanding, item)
 		}()
 		return
 	}
@@ -162,6 +173,36 @@ func (d *Daemon) runQueuedCompact(ctx context.Context, adapter surface.Surface, 
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, QueueID: item.ID, Message: "compact", Evidence: surface.EvidenceDelivered})
 }
 
+// runQueuedGoal runs a held goal command once the session is idle and
+// settles the item by the outcome the session reports.
+func (d *Daemon) runQueuedGoal(ctx context.Context, adapter surface.Surface, session *surface.Session, item *registry.QueuedMessage) {
+	defer d.publishEvent("state.changed", session.ID, map[string]string{"source": "goal"})
+	runner, ok := adapter.(surface.GoalCommandRunner)
+	if !ok {
+		d.finishQueueFailure(item, session, surface.DeliveryTerminal(fmt.Errorf("%s does not run goal commands", adapter.Name()), surface.DeliveryInvalidRequest), time.Now())
+		return
+	}
+	operationCtx, cancel := context.WithTimeout(ctx, goalOperationTimeout)
+	defer cancel()
+	addressed := *session
+	err := runner.RunGoalCommand(operationCtx, session, item.Message)
+	if ownedErr := d.dispatcher().RegisterReached(&addressed, session); ownedErr != nil {
+		d.finishReachedHostOwned(item, &addressed, item.Message, ownedErr)
+		return
+	}
+	if err != nil {
+		d.finishQueueFailure(item, session, err, time.Now())
+		return
+	}
+	if err := d.Registry.AckMessageWithEvidence(item.ID, session.ID, item.RelayHops, surface.EvidenceDelivered, ""); err != nil {
+		d.log.Printf("ack goal queue item %d: %s", item.ID, err)
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "ack-error", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: err.Error()})
+		return
+	}
+	d.log.Printf("ran goal queue item %d for %s", item.ID, d.resolveDisplay(session.ID))
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Evidence: surface.EvidenceDelivered})
+}
+
 // finishReachedHostOwned settles a queue item whose send resumed into a
 // session a paired host owns. The provider took it, so it is never retried,
 // and it is recorded only under the session it was addressed to.
@@ -174,7 +215,7 @@ func (d *Daemon) finishReachedHostOwned(item *registry.QueuedMessage, addressed 
 
 func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surface.Session, sendErr error, now time.Time) {
 	message := item.Message
-	if item.Operation != registry.QueueOperationMessage {
+	if item.Operation == registry.QueueOperationCompact {
 		message = string(item.Operation)
 	}
 	if surface.IsDeliveryUnavailable(sendErr) {

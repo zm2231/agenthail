@@ -1267,6 +1267,7 @@ function timelineSignature(session, exchanges, goal, capabilities, transcriptWar
     exchanges,
     JSON.stringify(goal || null),
     Boolean(capabilities.goal),
+    Boolean(capabilities.goalSet),
     Boolean(capabilities.goalStatus),
     transcriptWarning,
     timeline,
@@ -1310,7 +1311,7 @@ function renderChat() {
     session.status === "busy" && capabilities.interrupt && ["/stop", "Stop the current turn"],
     session.status === "busy" && !session.waitingOn && capabilities.steer && ["/steer", "Redirect the current turn"],
     capabilities.model && ["/model", "Choose the active model"],
-    capabilities.goal && ["/goal", "Set the session goal"],
+    capabilities.goalSet && ["/goal", "Set the session goal"],
   ].filter(Boolean);
   if (readOnly) {
     $("#message").disabled = true;
@@ -1327,15 +1328,15 @@ function renderChat() {
   renderContextUsage(context);
   startLiveStream();
   const settings = [`<form class="session-tools" data-tool="alias"><label><span>Conversation name</span><input name="alias" value="${escape(session.alias || "")}" maxlength="80" placeholder="research"></label><div class="session-tool-actions"><button class="soft-button" type="submit">Save name</button></div></form>`];
-  if (capabilities.goal) {
+  if (capabilities.goalSet) {
     const goalActions = [];
-    if (goal?.status === "active") goalActions.push('<button class="soft-button" data-action="goal-pause" type="button">Pause</button>');
-    if (goal?.status === "paused") goalActions.push('<button class="soft-button" data-action="goal-resume" type="button">Resume</button>');
+    if (capabilities.goal && goal?.status === "active") goalActions.push('<button class="soft-button" data-action="goal-pause" type="button">Pause</button>');
+    if (capabilities.goal && goal?.status === "paused") goalActions.push('<button class="soft-button" data-action="goal-resume" type="button">Resume</button>');
     if (goal?.objective) goalActions.push('<button class="soft-button" data-action="goal-clear" type="button">Clear</button>');
-    if (goal?.tokenBudget != null) goalActions.push('<button class="soft-button" data-action="goal-budget" data-goal-budget-clear="true" type="button">Clear budget</button>');
+    if (capabilities.goal && goal?.tokenBudget != null) goalActions.push('<button class="soft-button" data-action="goal-budget" data-goal-budget-clear="true" type="button">Clear budget</button>');
     const metrics = goalMetrics(goal);
     settings.push(`<form class="session-tools" data-tool="goal"><label><span>Goal</span><input name="goal" value="${escape(goal?.objective || "")}" placeholder="Set a focused goal"></label>${metrics}<div class="session-tool-actions"><button class="soft-button" type="submit">${goal?.objective ? "Edit goal" : "Save goal"}</button>${goalActions.join("")}</div></form>`);
-    settings.push(`<form class="session-tools" data-tool="goal-budget"><label><span>Token budget</span><input name="tokenBudget" type="number" min="0" step="1" value="${goal?.tokenBudget ?? ""}" placeholder="Optional"></label><div class="session-tool-actions"><button class="soft-button" type="submit">Save budget</button></div></form>`);
+    if (capabilities.goal) settings.push(`<form class="session-tools" data-tool="goal-budget"><label><span>Token budget</span><input name="tokenBudget" type="number" min="0" step="1" value="${goal?.tokenBudget ?? ""}" placeholder="Optional"></label><div class="session-tool-actions"><button class="soft-button" type="submit">Save budget</button></div></form>`);
   } else if (capabilities.goalStatus && goal?.objective) {
     settings.push(`<div class="session-tools session-goal-status" data-tool="goal-status"><label><span>Goal</span><input value="${escape(goal.objective)}" readonly></label>${goalMetrics(goal)}</div>`);
   }
@@ -1806,7 +1807,7 @@ async function send(requestedAction = "send") {
     const status = deliveryStatusLabel(result);
     const target = sessionTarget(app.selected);
     toast(
-      result?.result?.waitingOn || result?.result?.evidence === "transport_accepted"
+      result?.result?.waitingOn || result?.result?.evidence === "transport_accepted" || commandAction && result?.result?.evidence === "queued"
         ? result.result.detail
         : composerAction === "steer"
         ? "Current turn redirected."
@@ -2063,8 +2064,8 @@ document.addEventListener("submit", async (event) => {
       await action("goal-budget", { message: value });
       toast(value ? "Token budget saved." : "Token budget cleared.");
     } else {
-      await action(app.history?.goal?.objective ? "goal-edit" : "goal-set", { message: input.value.trim() });
-      toast("Goal saved.");
+      const result = await action(app.history?.goal?.objective ? "goal-edit" : "goal-set", { message: input.value.trim() });
+      toast(result?.result?.evidence === "queued" ? result.result.detail : "Goal saved.");
     }
     await selectSession(app.selected.id);
   } catch (error) {

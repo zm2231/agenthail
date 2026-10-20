@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -18,6 +22,14 @@ import (
 // unrecoverable error {met:true, sentinel:true}. A paused goal writes no
 // goal_status record, only a "Goal paused" notice, so it reads as active.
 var claudeGoalMarker = []byte(`"goal_status"`)
+
+// Claude 2.1.304 refuses a condition longer than this many UTF-16 units, and
+// reads any of the clear words as a request to clear the goal.
+const claudeGoalConditionLimit = 4000
+
+var claudeGoalClearWords = map[string]bool{"clear": true, "stop": true, "off": true, "reset": true, "none": true, "cancel": true}
+
+var errClaudeGoalPeer = errors.New("Claude's peer socket hands /goal to the model as a message; reach the session through the Agenthail host or Remote Control to set its goal")
 
 type claudeGoalRecord struct {
 	Type       string `json:"type"`
@@ -175,4 +187,119 @@ func cloneGoal(goal *surface.GoalState) *surface.GoalState {
 		copied.TokenBudget = &budget
 	}
 	return &copied
+}
+
+// GoalSet sets or replaces the session's goal with /goal. Claude starts a
+// turn toward a goal as soon as it is set.
+func (c *Claude) GoalSet(ctx context.Context, sess *surface.Session, text string) error {
+	command, err := c.GoalCommand(sess, text)
+	if err != nil {
+		return err
+	}
+	return c.RunGoalCommand(ctx, sess, command)
+}
+
+func (c *Claude) GoalClear(ctx context.Context, sess *surface.Session) error {
+	command, err := c.GoalCommand(sess, "")
+	if err != nil {
+		return err
+	}
+	return c.RunGoalCommand(ctx, sess, command)
+}
+
+func (c *Claude) GoalCommand(sess *surface.Session, objective string) (string, error) {
+	if sess == nil || !c.canSendHumanTurn(sess) {
+		return "", surface.DeliveryTerminal(errClaudeGoalPeer, surface.DeliveryInvalidRequest)
+	}
+	condition := strings.TrimSpace(objective)
+	if condition == "" {
+		return "/goal clear", nil
+	}
+	if units := len(utf16.Encode([]rune(condition))); units > claudeGoalConditionLimit {
+		return "", surface.DeliveryTerminal(fmt.Errorf("Claude limits a goal to %d characters; this one has %d", claudeGoalConditionLimit, units), surface.DeliveryInvalidRequest)
+	}
+	if claudeGoalClearWords[strings.ToLower(condition)] {
+		return "", surface.DeliveryTerminal(fmt.Errorf("Claude reads the goal %q as a request to clear the goal", condition), surface.DeliveryInvalidRequest)
+	}
+	return "/goal " + condition, nil
+}
+
+// RunGoalCommand sends command as the session's own turn and waits for the
+// output Claude records for it: "Goal set", "Goal cleared" and "No goal set"
+// are what Claude asked for, and any other output is its refusal.
+func (c *Claude) RunGoalCommand(ctx context.Context, sess *surface.Session, command string) error {
+	args, ok := strings.CutPrefix(command, "/goal ")
+	if !ok || args == "" {
+		return surface.DeliveryTerminal(fmt.Errorf("not a Claude goal command: %q", command), surface.DeliveryInvalidRequest)
+	}
+	if sess == nil || !c.canSendHumanTurn(sess) {
+		return surface.DeliveryTerminal(errClaudeGoalPeer, surface.DeliveryInvalidRequest)
+	}
+	path, err := c.sessionTranscript(sess)
+	if err != nil {
+		return err
+	}
+	var offset int64
+	if info, statErr := os.Stat(path); statErr == nil {
+		offset = info.Size()
+	}
+	sent, err := c.SendHumanTurn(ctx, sess, command, nil)
+	if err != nil {
+		return err
+	}
+	if sent == nil || !sent.Accepted {
+		return surface.DeliveryUnavailable(errors.New("Claude is working; the goal command runs when its turn ends"))
+	}
+	if path, err = c.sessionTranscript(sess); err != nil {
+		return surface.DeliveryOutcomeUnknown(err)
+	}
+	ticker := time.NewTicker(claudeControlPoll)
+	defer ticker.Stop()
+	for {
+		output, found, err := claudeGoalCommandOutput(ctx, path, &offset, args)
+		if err != nil {
+			return surface.DeliveryOutcomeUnknown(fmt.Errorf("read the outcome of %s: %w", command, err))
+		}
+		if found {
+			if strings.HasPrefix(output, "Goal set:") || strings.HasPrefix(output, "Goal cleared:") || output == "No goal set" {
+				return nil
+			}
+			return surface.DeliveryTerminal(fmt.Errorf("Claude did not run %s: %s", command, output), surface.DeliveryInvalidRequest)
+		}
+		select {
+		case <-ctx.Done():
+			return surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude accepted %s but its outcome was not observed: %w", command, ctx.Err()))
+		case <-ticker.C:
+		}
+	}
+}
+
+// claudeGoalCommandOutput reads what Claude appended after offset for the
+// /goal command with these arguments.
+func claudeGoalCommandOutput(ctx context.Context, path string, offset *int64, args string) (string, bool, error) {
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if info.Size() < *offset {
+		return "", false, errors.New("the transcript was truncated")
+	}
+	output, found := "", false
+	next, err := scanAppendedJSONL(ctx, path, *offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+		var record claudeRecord
+		if found || json.Unmarshal(line, &record) != nil || record.Type != "system" || record.Subtype != "local_command" || record.CommandRun == nil || record.CommandRun.Command != "goal" || strings.TrimSpace(record.CommandRun.Args) != args {
+			return nil
+		}
+		output = strings.TrimSpace(record.Content)
+		output = strings.TrimPrefix(output, "<local-command-stdout>")
+		output = strings.TrimSuffix(output, "</local-command-stdout>")
+		output = strings.TrimSpace(ansiEscapeRe.ReplaceAllString(output, ""))
+		found = true
+		return nil
+	})
+	*offset = next
+	return output, found, err
 }

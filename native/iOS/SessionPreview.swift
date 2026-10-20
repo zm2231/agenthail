@@ -56,13 +56,26 @@ struct SessionPreview: View {
     nonisolated static let previewWaiting: [String: String] = ["kind": "question", "id": "preview-question"]
 
     /// With --preview-waiting the detail reports the question too; with
-    /// --preview-waiting-catalog-only only the catalog does.
+    /// --preview-waiting-catalog-only only the catalog does. With
+    /// --preview-claude-goal the session reports a blocked goal it sets and
+    /// clears but cannot pause or budget.
     nonisolated static var previewDetailJSON: String {
-        guard ProcessInfo.processInfo.arguments.contains("--preview-waiting") else { return basePreviewDetailJSON }
+        let arguments = ProcessInfo.processInfo.arguments
+        guard arguments.contains("--preview-waiting") || arguments.contains("--preview-claude-goal") else { return basePreviewDetailJSON }
         var detail = try! JSONSerialization.jsonObject(with: Data(basePreviewDetailJSON.utf8)) as! [String: Any]
-        var session = detail["session"] as! [String: Any]
-        session["waitingOn"] = previewWaiting
-        detail["session"] = session
+        if arguments.contains("--preview-waiting") {
+            var session = detail["session"] as! [String: Any]
+            session["waitingOn"] = previewWaiting
+            detail["session"] = session
+        }
+        if arguments.contains("--preview-claude-goal") {
+            var capabilities = detail["capabilities"] as! [String: Any]
+            capabilities["goal"] = false
+            capabilities["goalSet"] = true
+            capabilities["goalStatus"] = true
+            detail["capabilities"] = capabilities
+            detail["goal"] = ["objective": "Make the release build pass on a clean checkout", "status": "blocked", "timeUsedSeconds": 540, "tokensUsed": 1078, "tokenBudget": NSNull(), "reason": "The signing certificate is not installed on this machine, so the release build cannot pass here.", "createdAt": "2026-09-07T12:00:00Z", "updatedAt": "2026-09-07T12:09:00Z"]
+        }
         return String(data: try! JSONSerialization.data(withJSONObject: detail), encoding: .utf8)!
     }
 

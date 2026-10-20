@@ -1788,7 +1788,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		result, err = d.dispatcher().Compact(ctx, adapter, session)
-	case "goal-set", "goal-edit", "goal-pause", "goal-resume", "goal-budget":
+	case "goal-set", "goal-edit":
+		result, err = d.dispatcher().GoalSet(ctx, adapter, session, request.Message, request.Action == "goal-edit")
+	case "goal-clear":
+		result, err = d.dispatcher().GoalClear(ctx, adapter, session)
+	case "goal-pause", "goal-resume", "goal-budget":
 		controller, ok := adapter.(surface.GoalController)
 		if !effective.Goal || !ok {
 			http.Error(w, "this session does not support typed goal controls", http.StatusBadRequest)
@@ -1796,21 +1800,6 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		var update surface.GoalUpdate
 		switch request.Action {
-		case "goal-set":
-			objective := strings.TrimSpace(request.Message)
-			if objective == "" {
-				http.Error(w, "goal objective is required", http.StatusBadRequest)
-				return
-			}
-			status := surface.GoalStatusActive
-			update = surface.GoalUpdate{Objective: &objective, Status: &status}
-		case "goal-edit":
-			objective := strings.TrimSpace(request.Message)
-			if objective == "" {
-				http.Error(w, "goal objective is required", http.StatusBadRequest)
-				return
-			}
-			update = surface.GoalUpdate{Objective: &objective}
 		case "goal-pause", "goal-resume":
 			status := surface.GoalStatusPaused
 			if request.Action == "goal-resume" {
@@ -1831,12 +1820,6 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			update = surface.GoalUpdate{TokenBudget: &value}
 		}
 		err = controller.UpdateGoal(ctx, session, update)
-	case "goal-clear":
-		if !effective.Goal {
-			http.Error(w, "this session does not support goals", http.StatusBadRequest)
-			return
-		}
-		err = adapter.GoalClear(ctx, session)
 	case "model":
 		if !effective.Model {
 			http.Error(w, "this session does not support model switching", http.StatusBadRequest)
@@ -1881,6 +1864,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		if control, ok := result.(*surface.ControlResult); ok && control != nil {
 			writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "result": control, "error": map[string]string{"code": "control_failed", "message": err.Error()}})
+			return
+		}
+		if surface.DeliveryTerminalReason(err) == surface.DeliveryInvalidRequest {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		http.Error(w, err.Error(), http.StatusBadGateway)

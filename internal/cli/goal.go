@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -44,34 +45,34 @@ func (a *App) cmdGoal(args []string) error {
 		fmt.Print(formatGoalState(goal))
 		return nil
 	}
-	if !capabilities.Goal {
-		return fmt.Errorf("%s does not support goal management", surf.Name())
+	action := positional[1]
+	switch action {
+	case "set", "edit", "clear":
+	case "pause", "resume", "budget":
+		if !capabilities.Goal {
+			return fmt.Errorf("%s does not support goal %s", surf.Name(), action)
+		}
+	default:
+		return fmt.Errorf("unknown goal action %q", action)
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
+	dispatcher := delivery.Dispatcher{Registry: a.registry()}
 	controller, typed := surf.(surface.GoalController)
-	action := positional[1]
 	switch action {
 	case "clear":
 		if len(positional) != 2 {
 			return fmt.Errorf("usage: agenthail goal <target> clear")
 		}
-		return surf.GoalClear(ctx, sess)
+		receipt, err := dispatcher.GoalClear(ctx, surf, sess)
+		return a.printGoalReceipt(receipt, err, sess)
 	case "set", "edit":
 		if len(positional) < 3 {
 			return fmt.Errorf("usage: agenthail goal <target> %s <objective>", action)
 		}
-		text := strings.Join(positional[2:], " ")
-		if typed {
-			update := surface.GoalUpdate{Objective: &text}
-			if action == "set" {
-				status := surface.GoalStatusActive
-				update.Status = &status
-			}
-			return controller.UpdateGoal(ctx, sess, update)
-		}
-		return surf.GoalSet(ctx, sess, text)
+		receipt, err := dispatcher.GoalSet(ctx, surf, sess, strings.Join(positional[2:], " "), action == "edit")
+		return a.printGoalReceipt(receipt, err, sess)
 	case "pause", "resume":
 		if !typed || len(positional) != 2 {
 			return fmt.Errorf("%s does not support typed goal status controls", surf.Name())
@@ -93,9 +94,18 @@ func (a *App) cmdGoal(args []string) error {
 			return fmt.Errorf("goal token budget must be a non-negative integer")
 		}
 		return controller.UpdateGoal(ctx, sess, surface.GoalUpdate{TokenBudget: &budget})
-	default:
-		return fmt.Errorf("unknown goal action %q", action)
 	}
+	return nil
+}
+
+func (a *App) printGoalReceipt(receipt *delivery.Receipt, err error, sess *surface.Session) error {
+	if err != nil {
+		return err
+	}
+	if receipt != nil && receipt.Evidence == surface.EvidenceQueued {
+		fmt.Printf("queued for %s as #%d: %s\n", a.resolveDisplay(sess.ID), receipt.QueueID, receipt.Detail)
+	}
+	return nil
 }
 
 func formatGoalState(goal *surface.GoalState) string {
