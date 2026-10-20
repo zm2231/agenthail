@@ -144,6 +144,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdClaudeRuns(rest)
 	case "whoami":
 		return a.cmdWhoami(rest)
+	case "accounts":
+		return a.cmdAccounts(rest)
 	case "search":
 		return a.cmdSearch(rest)
 	case "send":
@@ -235,6 +237,7 @@ Session commands:
                                  List, add or remove project folders, or hide a project
   runs [--json]                  Read verified Claude job and subagent records
   whoami [--json]                Show the caller session bound to this process
+  accounts [--json]              List each Claude config directory and the account it is signed into
   search codex <query>           Search older Codex conversation history on demand
   send <target> "msg"|-       Send now when idle; queue when busy (use --no-queue to refuse delay)
   stream <target>               Tail live activity
@@ -619,11 +622,11 @@ func validateCommandFlags(command string, args []string) error {
 		bools  map[string]bool
 	}
 	specs := map[string]flagSpec{
-		"list": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--wide": true, "--json": true}}, "runs": {bools: map[string]bool{"--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
+		"list": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--wide": true, "--json": true}}, "runs": {bools: map[string]bool{"--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "accounts": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
-		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--host": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true}, bools: map[string]bool{"--json": true, "--help": true}},
+		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--account": true, "--host": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"channel": {},
 		"project": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}}, "projects": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}},
 		"hosts":  {values: map[string]bool{"--address": true, "--name": true}, bools: map[string]bool{"--json": true, "--help": true}},
@@ -941,11 +944,19 @@ func (a *App) cmdList(args []string) error {
 	if showHost {
 		fmt.Printf("%-12s ", "HOST")
 	}
-	fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n", "SURFACE", "STAT", "AGENT", "SESSION", projectWidth, projectHeading, "LAST")
+	var accounts []surface.ClaudeAccount
+	accountWidth := 0
+	if wide {
+		accountWidth = 28
+		if home, err := os.UserHomeDir(); err == nil {
+			accounts, _ = surface.ClaudeAccounts(home)
+		}
+	}
+	fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n", "SURFACE", "STAT", "AGENT", "SESSION", projectWidth, projectHeading, listAccountCell(wide, accountWidth, "ACCOUNT")+"LAST")
 	if showHost {
 		fmt.Printf("%-12s ", "------------")
 	}
-	fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n", "-------", "-----", "--------------", "----------------------------", projectWidth, strings.Repeat("-", len(projectHeading)), "----------")
+	fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n", "-------", "-----", "--------------", "----------------------------", projectWidth, strings.Repeat("-", len(projectHeading)), listAccountCell(wide, accountWidth, strings.Repeat("-", accountWidth))+"----------")
 	queueCounts := map[string]int{}
 	if a.registry() != nil {
 		var err error
@@ -987,13 +998,30 @@ func (a *App) cmdList(args []string) error {
 		if s.Subagents != nil {
 			last += fmt.Sprintf("  %d subagents, %d working", s.Subagents.Count, s.Subagents.Working)
 		}
+		account := ""
+		if wide && s.Surface == surface.KindClaude {
+			if view := views[s.ID].ClaudeAccount; view != nil {
+				account = view.Label
+			} else if !remote {
+				if derived := surface.ClaudeSessionAccount(accounts, s.Transcript); derived != nil {
+					account = derived.Label
+				}
+			}
+		}
 		fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n",
-			s.Surface, stat, truncate(agent, 14), truncate(name, 28), projectWidth, project, last)
+			s.Surface, stat, truncate(agent, 14), truncate(name, 28), projectWidth, project, listAccountCell(wide, accountWidth, truncate(account, accountWidth))+last)
 	}
 	if successfulSurfaces == 0 && len(surfaceErrors) > 0 {
 		return fmt.Errorf("%d surface(s) failed discovery", len(surfaceErrors))
 	}
 	return nil
+}
+
+func listAccountCell(wide bool, width int, value string) string {
+	if !wide {
+		return ""
+	}
+	return fmt.Sprintf("%-*s ", width, value)
 }
 
 type listCatalogSurface struct {
@@ -2915,13 +2943,14 @@ func (a *App) cmdDoctor(args []string) error {
 	if claudeRootsErr != nil {
 		failures++
 	}
+	claudeAccounts, _ := surface.ClaudeAccounts(home)
 	service := a.service()
 	serviceProblems := service.Problems()
 	if serviceProblems == nil {
 		serviceProblems = []serviceProblem{}
 	}
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "signin": signins}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "claudeAccounts": claudeAccounts, "signin": signins}
 		if claudeRootsErr != nil {
 			report["claudeConfigError"] = claudeRootsErr.Error()
 		}
@@ -2938,6 +2967,9 @@ func (a *App) cmdDoctor(args []string) error {
 				label = "claude config (claudeConfigDirs)"
 			}
 			fmt.Printf("%s: %s\n", label, root)
+			if account, ok := surface.ClaudeAccountForRoot(claudeAccounts, root); ok {
+				fmt.Printf("  account: %s\n", describeClaudeAccount(account, time.Now()))
+			}
 		}
 		if len(serviceProblems) > 0 {
 			fmt.Printf("[daemon] supervisor: %s\n", service.Name())

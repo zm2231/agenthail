@@ -70,6 +70,10 @@ overrides in the service; rerun it after changing them. Claude Code state is
 read from `CLAUDE_CONFIG_DIR` when it is set, otherwise `~/.claude`, plus every
 root listed as `claudeConfigDirs` in `~/.agenthail/config.json`. `doctor` shows
 each root. A conversation present in two roots is refused rather than guessed.
+`agenthail accounts [--json]` shows the account signed into each root, its
+cached usage, and which roots share one account. `thread create claude
+--account <name|email|dir>` starts the session under that root; `list --wide`
+shows each Claude session's account.
 
 One unhealthy surface does not block the others. Preserve the `errors` object
 from JSON discovery output when reporting partial availability.

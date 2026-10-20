@@ -411,6 +411,7 @@ type SessionStartOptions struct {
 	Worktree       string `json:"worktree,omitempty"`
 	Agent          string `json:"agent,omitempty"`
 	PermissionMode string `json:"permissionMode,omitempty"`
+	Account        string `json:"account,omitempty"`
 	Message        string `json:"message"`
 	Cwd            string `json:"cwd,omitempty"`
 	Model          string `json:"model,omitempty"`
