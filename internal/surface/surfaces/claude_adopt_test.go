@@ -128,9 +128,16 @@ func TestAdoptStopsARunningBackgroundJobThroughClaudeWithoutAskingAboutATerminal
 	fixture.Transcript(fixtureConversation, fixture.Home)
 	fixture.BackgroundRecord(fixtureConversation, fixture.Home)
 	fixture.Job("fe758937", fixtureConversation, fixture.Home, "running", 0)
+	done, stopped := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(done); <-stopped })
 	go func() {
+		defer close(stopped)
 		for fixture.Invocations("stop", "fe758937") == 0 {
-			time.Sleep(20 * time.Millisecond)
+			select {
+			case <-done:
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
 		}
 		fixture.RemoveRecord()
 	}()
