@@ -80,6 +80,8 @@ type Session struct {
 	OpenedAt       string    `json:"openedAt"`
 	PermissionMode string    `json:"permissionMode"`
 	Model          string    `json:"model"`
+	ContextWindow  int64     `json:"contextWindow"`
+	ContextModel   string    `json:"contextModel"`
 	Requests       []Request `json:"requests"`
 	// Tasks are the live background tasks Claude last reported. A host that
 	// predates them leaves it nil.

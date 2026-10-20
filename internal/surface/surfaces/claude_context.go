@@ -21,6 +21,7 @@ type claudeContextState struct {
 	// oneMRequests records, per model base, whether the newest API request
 	// Claude logged for that model carried the 1M context beta.
 	oneMRequests map[string]bool
+	model        string
 }
 
 type claudeContextRecord struct {
@@ -50,16 +51,32 @@ type claudeContextRecord struct {
 }
 
 func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surface.ContextUsage, error) {
+	usage, model, err := c.transcriptContextUsage(ctx, sess)
+	if err != nil {
+		return nil, err
+	}
+	if window, ok := c.providerContextWindow(ctx, sess, model); ok {
+		usage.ContextWindow, usage.ContextWindowSource, usage.WindowEstimated = window, ClaudeContextWindowSourceProvider, false
+	}
+	if usage.UsedTokens == 0 && usage.ContextWindow == 0 && usage.CompactionCount == 0 {
+		return nil, nil
+	}
+	return &usage, nil
+}
+
+// transcriptContextUsage is what the transcript records about the session's
+// context, and the model of its latest reply.
+func (c *Claude) transcriptContextUsage(ctx context.Context, sess *surface.Session) (surface.ContextUsage, string, error) {
 	path, err := c.sessionTranscript(sess)
 	if err != nil || path == "" {
-		return nil, err
+		return surface.ContextUsage{}, "", err
 	}
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return surface.ContextUsage{}, "", nil
 		}
-		return nil, err
+		return surface.ContextUsage{}, "", err
 	}
 	c.contextMu.Lock()
 	defer c.contextMu.Unlock()
@@ -93,6 +110,9 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 				state.oneMRequests[base] = oneM
 			}
 		case record.Type == "assistant":
+			if record.Message.Model != "<synthetic>" {
+				state.model = record.Message.Model
+			}
 			used := record.Message.Usage.InputTokens + record.Message.Usage.CacheCreationTokens + record.Message.Usage.CacheReadTokens
 			if used > 0 && contextEventIsCurrent(at, state.usage.UpdatedAt) {
 				state.usage.UsedTokens = used
@@ -146,11 +166,11 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 	if state.offset == 0 {
 		lines, offset, readErr := readRecentJSONLLines(ctx, path, 0, initialClaudeObservationBytes, maxClaudeTranscriptRecordBytes)
 		if readErr != nil {
-			return nil, readErr
+			return surface.ContextUsage{}, "", readErr
 		}
 		for _, line := range lines {
 			if err := visit(line); err != nil {
-				return nil, err
+				return surface.ContextUsage{}, "", err
 			}
 		}
 		state.offset = offset
@@ -160,7 +180,7 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 		state.offset = offset
 		state.fileInfo = info
 		if scanErr != nil {
-			return nil, scanErr
+			return surface.ContextUsage{}, "", scanErr
 		}
 	}
 	completedAt := state.usage.LastCompactedAt
@@ -168,11 +188,22 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 		completedAt = state.latestCommandDoneAt
 	}
 	state.usage.Compacting = !state.latestCommandAt.IsZero() && state.latestCommandAt.After(completedAt)
-	if state.usage.UsedTokens == 0 && state.usage.ContextWindow == 0 && state.usage.CompactionCount == 0 {
-		return nil, nil
+	return state.usage, state.model, nil
+}
+
+// providerContextWindow is the window Claude reported running the session's
+// main model with, which only the host that runs the session hears. It holds
+// while that model is the one the transcript last replied with.
+func (c *Claude) providerContextWindow(ctx context.Context, sess *surface.Session, observedModel string) (int64, bool) {
+	observed := claudeModelBase(observedModel)
+	if !claudeHosted(sess) || observed == "" {
+		return 0, false
 	}
-	usage := state.usage
-	return &usage, nil
+	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
+	if !ok || listed.ContextWindow <= 0 || observed != claudeModelBase(listed.ContextModel) {
+		return 0, false
+	}
+	return listed.ContextWindow, true
 }
 
 // observeClaudeCurrentContextWindow reports a 1M window on positive evidence

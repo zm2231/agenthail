@@ -16,6 +16,11 @@ const flag = (name) => {
   return at >= 0 ? argv[at + 1] : '';
 };
 const sessionId = flag('session-id') || flag('resume');
+let model = flag('model') || 'claude-opus-5-5';
+// Claude reports each model's window in a turn result's modelUsage; a side
+// query's model appears beside the main one.
+const windows = { 'claude-opus-4-8': 200000 };
+const modelUsage = () => ({ 'claude-haiku-5-5': { contextWindow: 64000 }, [model]: { contextWindow: windows[model] ?? 1000000 } });
 const dir = process.env.FAKE_CLAUDE_DIR;
 const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME, '.claude');
 const transcript = path.join(dir, `${sessionId}.jsonl`);
@@ -133,7 +138,7 @@ async function turn(message) {
   fs.appendFileSync(transcript, JSON.stringify({ uuid, text, reply, origin: message.origin ?? null, priority: message.priority ?? null, pid: process.pid, inputClosed }) + '\n');
   claudeTranscript(uuid, text, reply);
   write({ type: 'assistant', uuid: crypto.randomUUID(), session_id: sessionId, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: reply }] } });
-  write({ type: 'result', subtype: 'success', is_error: false, result: reply, uuid: crypto.randomUUID(), session_id: sessionId, user_message_uuids: [uuid], duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {} });
+  write({ type: 'result', subtype: 'success', is_error: false, result: reply, uuid: crypto.randomUUID(), session_id: sessionId, user_message_uuids: [uuid], duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, modelUsage: modelUsage() });
   if (process.env.FAKE_CLAUDE_IDLE_AFTER_MS) await new Promise((resolve) => setTimeout(resolve, Number(process.env.FAKE_CLAUDE_IDLE_AFTER_MS)));
   state('idle');
 }
@@ -159,7 +164,7 @@ function notified(id) {
   const reply = `notified:${id}`;
   fs.appendFileSync(transcript, JSON.stringify({ uuid: null, text: '<task-notification>', reply, origin: { kind: 'task-notification' }, priority: null, pid: process.pid, inputClosed }) + '\n');
   write({ type: 'assistant', uuid: crypto.randomUUID(), session_id: sessionId, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: reply }] } });
-  write({ type: 'result', subtype: 'success', is_error: false, result: reply, uuid: crypto.randomUUID(), session_id: sessionId, duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {} });
+  write({ type: 'result', subtype: 'success', is_error: false, result: reply, uuid: crypto.randomUUID(), session_id: sessionId, duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, modelUsage: modelUsage() });
   state('idle');
 }
 
@@ -185,7 +190,7 @@ function claudeTranscript(uuid, text, reply) {
   const base = { sessionId, cwd: process.cwd(), timestamp: at };
   const records = [
     { ...base, type: 'user', uuid, message: { role: 'user', content: text } },
-    { ...base, type: 'assistant', uuid: crypto.randomUUID(), message: { id: `msg-${uuid}`, role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: reply }] } },
+    { ...base, type: 'assistant', uuid: crypto.randomUUID(), message: { id: `msg-${uuid}`, model: model.replace(/\[.*$/, ''), role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: reply }], usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 990, output_tokens: 5 } } },
     { ...base, type: 'system', subtype: 'turn_duration' },
   ];
   fs.appendFileSync(file, records.map((r) => JSON.stringify(r)).join('\n') + '\n');
@@ -233,11 +238,19 @@ lines.on('line', (line) => {
   if (message.type === 'control_request') {
     const subtype = message.request.subtype;
     if (subtype === 'interrupt') interrupt?.();
+    if (subtype === 'set_model') model = message.request.model || 'claude-opus-5-5';
     if (subtype === 'set_model' || subtype === 'set_permission_mode') {
       fs.appendFileSync(path.join(dir, 'controls.jsonl'), JSON.stringify({ sessionId, pid: process.pid, ...message.request }) + '\n');
     }
-    const response = subtype === 'initialize' ? { commands: [], models: [], account: {}, output_style: 'default', available_output_styles: [] } : {};
-    write({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response } });
+    const responses = {
+      initialize: { commands: [], models: [], account: {}, output_style: 'default', available_output_styles: [] },
+      get_context_usage: { model, maxTokens: 425000, rawMaxTokens: 425000, totalTokens: 1000, categories: [] },
+    };
+    const response = responses[subtype] ?? {};
+    const answer = () => write({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response } });
+    // FAKE_CLAUDE_CONTEXT_REPORT_MS delays the context report, as a busy Claude may.
+    if (subtype === 'get_context_usage' && process.env.FAKE_CLAUDE_CONTEXT_REPORT_MS) setTimeout(answer, Number(process.env.FAKE_CLAUDE_CONTEXT_REPORT_MS));
+    else answer();
   } else if (message.type === 'control_response') {
     pending.get(message.response.request_id)?.(message.response.response);
   } else if (message.type === 'user') {

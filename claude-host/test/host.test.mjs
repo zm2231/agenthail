@@ -383,6 +383,37 @@ test('model and permission mode change live and a resume keeps them', async () =
   d.close();
 });
 
+test('a turn result gives the session the window Claude runs its main model with', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  const opened = await c.call('open', { sessionId: id, cwd: f.cwd });
+  assert.equal(opened.contextWindow, 0);
+  const listed = async () => (await c.call('list')).sessions.find((s) => s.sessionId === id);
+  await c.call('send', { sessionId: id, uuid: randomUUID(), text: 'hello', origin: { kind: 'human' } });
+  const first = await c.event((e) => e.sessionId === id && e.kind === 'context');
+  assert.deepEqual([first.contextWindow, first.contextModel], [1000000, 'claude-opus-5-5']);
+  assert.deepEqual([(await listed()).contextWindow, (await listed()).contextModel], [1000000, 'claude-opus-5-5']);
+
+  const switchTo = async (model, after) => {
+    await c.call('setModel', { sessionId: id, model });
+    await c.call('send', { sessionId: id, uuid: randomUUID(), text: `on ${model}`, origin: { kind: 'human' } });
+    return c.event((e) => e.sessionId === id && e.kind === 'context' && e.seq > after.seq);
+  };
+  const sameWindow = await switchTo('claude-opus-5-5[1m]', first);
+  assert.deepEqual([sameWindow.contextWindow, sameWindow.contextModel], [1000000, 'claude-opus-5-5[1m]']);
+  const smaller = await switchTo('claude-opus-4-8', sameWindow);
+  assert.deepEqual([smaller.contextWindow, smaller.contextModel], [200000, 'claude-opus-4-8']);
+  const unchanged = randomUUID();
+  await c.call('send', { sessionId: id, uuid: unchanged, text: 'unchanged', origin: { kind: 'human' } });
+  await c.event(turnResult(id, unchanged));
+  await sleep(200);
+  assert.equal(c.events.filter((e) => e.sessionId === id && e.kind === 'context').length, 3);
+  c.close();
+});
+
 test('interrupt ends the running turn', async () => {
   const f = fixture();
   await startHost(f);
@@ -521,6 +552,58 @@ async function lockReleased(f) {
   await host.exited;
   return ok;
 }
+
+test('a slow context report does not hold up the turns after it', async () => {
+  const f = fixture();
+  await startHost(f, { env: { FAKE_CLAUDE_CONTEXT_REPORT_MS: '3000' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const first = randomUUID();
+  await c.call('send', { sessionId: id, uuid: first, text: 'hello' });
+  await c.event(turnResult(id, first));
+  const second = randomUUID();
+  const sent = Date.now();
+  await c.call('send', { sessionId: id, uuid: second, text: 'again' });
+  await c.event(turnResult(id, second));
+  assert.ok(Date.now() - sent < 1500, `the next turn waited ${Date.now() - sent}ms`);
+  const context = await c.event((e) => e.sessionId === id && e.kind === 'context', 10000);
+  assert.equal(context.contextWindow, 1000000);
+  c.close();
+});
+
+test('a session retired while its context report is slow still records the window first', async () => {
+  const f = fixture();
+  const host = await startHost(f, { env: { FAKE_CLAUDE_NO_STATE_EVENTS: '1', FAKE_CLAUDE_CONTEXT_REPORT_MS: '1000' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  await c.call('send', { sessionId: id, uuid: randomUUID(), text: 'SLOW 400' });
+  await c.call('drain');
+  const r = new Client(retiringSocket(f, host));
+  await r.call('subscribe', { after: 0 });
+  assert.equal(await host.exited, 0);
+  const kinds = r.events.filter((e) => e.sessionId === id).map((e) => e.kind);
+  assert.ok(kinds.includes('context') && kinds.indexOf('context') < kinds.indexOf('exited'), kinds.join(' '));
+});
+
+test('a session retired on its last turn result still records the window of that turn', async () => {
+  const f = fixture();
+  const host = await startHost(f, { env: { FAKE_CLAUDE_NO_STATE_EVENTS: '1' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  await c.call('send', { sessionId: id, uuid: randomUUID(), text: 'SLOW 400' });
+  await c.call('drain');
+  const r = new Client(retiringSocket(f, host));
+  await r.call('subscribe', { after: 0 });
+  assert.equal(await host.exited, 0);
+  const kinds = r.events.filter((e) => e.sessionId === id).map((e) => e.kind);
+  assert.ok(kinds.includes('context') && kinds.indexOf('context') < kinds.indexOf('exited'), kinds.join(' '));
+});
 
 test('drain retires the host: it gives up the socket and lock and serves its sessions until each is idle', async () => {
   const f = fixture();

@@ -59,9 +59,13 @@ targets are never messaged, stopped, resumed, or otherwise mutated.
 
 ## Context-window provenance
 
+A session the Claude host runs reports the window Claude itself says it runs
+the main model with (`provider`, see `claude-host.md`), while that model is the
+one the transcript last replied with. That outranks everything below.
+
 Claude's transcript records no window size, only evidence of a 1M selection.
-The provider reports a 1,000,000-token window from the first of these that
-holds for an assistant record, and an unknown window otherwise:
+Otherwise the provider reports a 1,000,000-token window from the first of
+these that holds for an assistant record, and an unknown window otherwise:
 
 1. `request`: the newest `api-request` record for the reply's model base
    carried a `context-1m-*` entry in `params.betas`.
@@ -75,7 +79,8 @@ Missing evidence never means a smaller window. Claude runs some models at
 1,000,000 tokens without the beta or the tag: Claude Code 2.1.304 reports
 `contextWindow: 1000000` in the `modelUsage` of a plain `claude-opus-5-5` run
 whose request had no 1M beta. That figure exists only in Claude's runtime
-output, not on disk, so a session without 1M evidence shows tokens only.
+output, not on disk, so a session outside the host without 1M evidence shows
+tokens only.
 `message.model` never carries the `[1m]` selection, so it only rules out a
 window chosen for another model. The validator in
 `internal/surface/surfaces/claude_run_source.go` recognizes a `[1m]` model; a
