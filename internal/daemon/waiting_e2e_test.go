@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -648,5 +650,53 @@ func TestQueuedPeerMessageReachesARunningOrWaitingClaudeTurnOverItsSocket(t *tes
 			q.process.RecordStatus("conversation-question", q.process.Home, "session_question", "idle", "", questionAsked.Add(2*time.Hour))
 			eventually(t, "the explicit queue once the turn ends", func() bool { return manager.Count("after the turn") == 1 })
 		}
+	}
+}
+
+// detailWaiting is what /api/session reports the session waiting on.
+func (h *runningDaemon) detailWaiting(id string) *surface.Waiting {
+	h.t.Helper()
+	request, err := http.NewRequest(http.MethodGet, h.server.URL+"/api/session?id="+url.QueryEscape(id), nil)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	request.Header.Set("Origin", h.server.URL)
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: e2eToken})
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer response.Body.Close()
+	payload, err := io.ReadAll(response.Body)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		h.t.Fatalf("session status=%d body=%s", response.StatusCode, payload)
+	}
+	var decoded struct {
+		Session struct {
+			Status    surface.SessionStatus `json:"status"`
+			WaitingOn *surface.Waiting      `json:"waitingOn"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		h.t.Fatal(err)
+	}
+	return decoded.Session.WaitingOn
+}
+
+func TestSessionDetailShowsTheQuestionTheCatalogShows(t *testing.T) {
+	q := newClaudeQuestion(t)
+	h, _ := runDaemon(t, q.store, q.claude)
+	eventually(t, "the catalog to show the question", func() bool { return h.sessionWaiting(q.session.ID) != nil })
+	waiting := h.detailWaiting(q.session.ID)
+	if waiting == nil || waiting.ID != questionID || waiting.Kind != surface.WaitingQuestion {
+		t.Fatalf("detail waiting=%+v, catalog waiting=%+v", waiting, h.sessionWaiting(q.session.ID))
+	}
+	q.answer(t)
+	eventually(t, "the answered question to leave the catalog", func() bool { return h.sessionWaiting(q.session.ID) == nil })
+	if waiting := h.detailWaiting(q.session.ID); waiting != nil {
+		t.Fatalf("detail still waiting on %+v after the catalog cleared it", waiting)
 	}
 }
