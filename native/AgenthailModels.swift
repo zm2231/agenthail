@@ -30,7 +30,7 @@ struct ClaudeAccountOption: Decodable, Hashable, Identifiable {
     let signedIn: Bool
     var usage: Usage? = nil
     var id: String { root }
-    var choice: String { primary ? "" : name }
+    var choice: String { primary ? "" : root }
 
     func exhaustedUntil(now: Date = Date()) -> Date? {
         let parser = ISO8601DateFormatter()

@@ -2276,7 +2276,7 @@ function syncStartForm() {
 function renderStartAccounts(accounts) {
   const select = $("#new-conversation-account");
   select.innerHTML = accounts.map(account =>
-    `<option value="${account.primary ? "" : escape(account.name)}"${account.signedIn ? "" : " disabled"}>${escape(claudeAccountOption(account))}</option>`,
+    `<option value="${account.primary ? "" : escape(account.root)}"${account.signedIn ? "" : " disabled"}>${escape(claudeAccountOption(account))}</option>`,
   ).join("");
   select.closest("[data-claude-account]").dataset.single = accounts.length < 2 ? "true" : "";
   syncStartForm();

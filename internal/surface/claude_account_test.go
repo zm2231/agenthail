@@ -180,3 +180,29 @@ func TestTerminalClaudeLaunchRunsUnderTheChosenAccount(t *testing.T) {
 		t.Fatal("a Codex launch accepted a Claude account")
 	}
 }
+
+func TestClaudeRootsWithOneFolderNameGetDistinctNames(t *testing.T) {
+	home := claudeAccountHome(t, "personal/claude", "work/claude", "work/.claude/../x/claude")
+	accounts, err := ClaudeAccounts(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]string{}
+	for _, account := range accounts {
+		if other, taken := names[account.Name]; taken {
+			t.Fatalf("%s and %s share the name %q", other, account.Root, account.Name)
+		}
+		names[account.Name] = account.Root
+		if got, err := ResolveClaudeAccountRoot(home, account.Name); err != nil || got != account.Root {
+			t.Fatalf("name %q resolved to %q err=%v, want %s", account.Name, got, err, account.Root)
+		}
+		if !account.Primary {
+			if got, err := ResolveClaudeAccountRoot(home, account.Root); err != nil || got != account.Root {
+				t.Fatalf("root %q resolved to %q err=%v", account.Root, got, err)
+			}
+		}
+	}
+	if accounts[1].Name != "personal/claude" || accounts[2].Name != "work/claude" {
+		t.Fatalf("accounts=%+v", accounts)
+	}
+}

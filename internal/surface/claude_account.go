@@ -84,6 +84,7 @@ func ClaudeAccounts(home string) ([]ClaudeAccount, error) {
 		account.Name = claudeRootName(root, i == 0)
 		accounts = append(accounts, account)
 	}
+	uniqueClaudeRootNames(accounts)
 	for i := range accounts {
 		accounts[i].Label = ClaudeAccountLabel(accounts, accounts[i])
 		for j := range accounts {
@@ -161,6 +162,41 @@ func claudeRootName(root string, primary bool) string {
 		name = filepath.Base(filepath.Dir(root))
 	}
 	return strings.TrimLeft(name, ".")
+}
+
+// uniqueClaudeRootNames prefixes a name two roots share with their parent
+// folders until each is distinct, so /a/work/.claude and /b/work/.claude are
+// a/work and b/work.
+func uniqueClaudeRootNames(accounts []ClaudeAccount) {
+	for depth := 1; depth < 64; depth++ {
+		count := map[string]int{}
+		for _, account := range accounts {
+			count[account.Name]++
+		}
+		changed := false
+		for i := range accounts {
+			if count[accounts[i].Name] > 1 && !accounts[i].Primary {
+				accounts[i].Name = claudeRootNameAt(accounts[i].Root, depth)
+				changed = true
+			}
+		}
+		if !changed {
+			return
+		}
+	}
+}
+
+func claudeRootNameAt(root string, depth int) string {
+	dir := root
+	if filepath.Base(dir) == ".claude" {
+		dir = filepath.Dir(dir)
+	}
+	parts := []string{strings.TrimLeft(filepath.Base(dir), ".")}
+	for i := 0; i < depth && filepath.Dir(dir) != dir; i++ {
+		dir = filepath.Dir(dir)
+		parts = append([]string{strings.TrimLeft(filepath.Base(dir), ".")}, parts...)
+	}
+	return strings.Join(parts, "/")
 }
 
 func claudeAccountChoices(accounts []ClaudeAccount) string {
