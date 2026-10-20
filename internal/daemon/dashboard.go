@@ -9,13 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/zm2231/agenthail/internal/broadcast"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1080,6 +1080,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		BusyDelivery    string                     `json:"busyDelivery"`
 		QueueID         int64                      `json:"queueId"`
 		Channel         string                     `json:"channel"`
+		NewChannel      string                     `json:"newChannel"`
 		TargetID        string                     `json:"targetId"`
 		FromID          string                     `json:"fromId"`
 		ToID            string                     `json:"toId"`
@@ -1398,7 +1399,12 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "channel name is required", http.StatusBadRequest)
 			return
 		}
-		if _, err := d.Registry.CreateChannel(strings.TrimPrefix(strings.TrimSpace(request.Channel), "#")); err != nil {
+		name := strings.TrimPrefix(strings.TrimSpace(request.Channel), "#")
+		if err := broadcast.ValidateChannelName(d.Registry, name); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if _, err := d.Registry.CreateChannel(name); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -1414,73 +1420,60 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if request.Action == "channel-send" {
-		channel := strings.TrimPrefix(strings.TrimSpace(request.Channel), "#")
-		if channel == "" || strings.TrimSpace(request.Message) == "" {
+		if strings.TrimSpace(request.Channel) == "" || strings.TrimSpace(request.Message) == "" {
 			http.Error(w, "channel and message are required", http.StatusBadRequest)
 			return
 		}
-		members, membersErr := d.Registry.ChannelMembers(channel)
-		if membersErr != nil {
-			http.Error(w, membersErr.Error(), http.StatusBadRequest)
-			return
-		}
-		sender := coordinator.Sender{Service: d.coordinator()}
-		if request.SourceSessionID != "" {
-			request.SourceSessionID = sender.Canonical(request.SourceSessionID)
-		}
-		members = slices.DeleteFunc(members, func(member string) bool { return request.SourceSessionID != "" && member == request.SourceSessionID })
-		if len(members) == 0 {
-			http.Error(w, "channel has no members other than the sender", http.StatusBadRequest)
+		target, err := broadcast.Resolve(d.Registry, request.Channel)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		operationCtx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 		defer cancel()
-		sent, queued, submitted, failed := 0, 0, 0, 0
-		for _, member := range members {
-			session, sessionErr := d.Registry.Session(member)
-			if sessionErr != nil {
-				failed++
-				continue
-			}
-			if owner, ownerErr := d.Registry.SessionHost(session.ID); ownerErr != nil {
-				failed++
-				continue
-			} else if owner != "" {
-				if _, err := d.Registry.QueueHostSend(registry.HostSend{SessionID: session.ID, Message: request.Message, Key: "channel:" + channel + ":" + session.ID + ":" + uuid.NewString(), SourceSessionID: request.SourceSessionID}); err != nil {
-					failed++
-				} else {
-					queued++
-				}
-				continue
-			}
-			adapter, adapterErr := d.adapters().For(session)
-			if adapterErr != nil {
-				failed++
-				continue
-			}
-			if err := d.ensureDashboardWritable(operationCtx, adapter, session); err != nil {
-				failed++
-				continue
-			}
-			receipt, deliverErr := sender.DeliverWithOptions(operationCtx, adapter, session, request.Message, "", surface.SendOptions{SourceSessionID: request.SourceSessionID})
-			if deliverErr != nil {
-				failed++
-				continue
-			}
-			switch receipt.Evidence {
-			case surface.EvidenceQueued:
-				queued++
-			case surface.EvidenceSubmitted:
-				submitted++
-			default:
-				sent++
-			}
+		service := d.coordinator()
+		label := "the dashboard"
+		if request.SourceSessionID != "" {
+			label = d.resolveDisplay(service.Canonical(request.SourceSessionID))
 		}
-		if failed > 0 {
-			http.Error(w, fmt.Sprintf("channel delivery: %d sent, %d queued, %d submitted, %d failed", sent, queued, submitted, failed), http.StatusConflict)
+		broadcaster := broadcast.Broadcaster{Registry: d.Registry, Coordinators: service, Delivery: daemonBroadcastDelivery{d: d, sender: coordinator.Sender{Service: service}}}
+		result, err := broadcaster.Send(operationCtx, target, request.Message, label, request.SourceSessionID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "sent": sent, "queued": queued, "submitted": submitted, "failed": failed})
+		sent, queued, submitted, failed := result.Count(broadcast.OutcomeSent), result.Count(broadcast.OutcomeQueued), result.Count(broadcast.OutcomeSubmitted), result.Count(broadcast.OutcomeFailed)
+		if failed > 0 {
+			outcomes := make([]string, 0, len(result.Recipients))
+			for _, recipient := range result.Recipients {
+				label := recipient.Coordinator
+				if label == "" {
+					label = d.resolveDisplay(recipient.SessionID)
+				}
+				outcome := label + " " + recipient.Outcome
+				if recipient.Outcome == broadcast.OutcomeFailed && recipient.Detail != "" {
+					outcome += ": " + recipient.Detail
+				}
+				outcomes = append(outcomes, outcome)
+			}
+			http.Error(w, fmt.Sprintf("channel delivery: %d sent, %d queued, %d submitted, %d failed (%s)", sent, queued, submitted, failed, strings.Join(outcomes, "; ")), http.StatusConflict)
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "target": result.Target, "recipients": result.Recipients, "sent": sent, "queued": queued, "submitted": submitted, "failed": failed})
+		return
+	}
+	if request.Action == "channel-rename" {
+		name := strings.TrimPrefix(strings.TrimSpace(request.Channel), "#")
+		newName := strings.TrimPrefix(strings.TrimSpace(request.NewChannel), "#")
+		if err := broadcast.ValidateChannelName(d.Registry, newName); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := d.Registry.RenameChannel(name, newName); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
 	if request.Action == "channel-add" || request.Action == "channel-remove" {

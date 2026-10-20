@@ -67,3 +67,19 @@ func DefaultPresence(session Session, input PresenceInput) (bool, string) {
 	}
 	return false, ""
 }
+
+// ActiveWindow is how long after its last activity an idle session still
+// counts as active for peer advertising and project channels.
+const ActiveWindow = 24 * time.Hour
+
+// RecentlyActive reports a session that is working, or idle and active
+// within ActiveWindow. An offline session never is.
+func RecentlyActive(session Session, now time.Time) bool {
+	if session.ID == "" || session.Status == StatusOffline {
+		return false
+	}
+	if session.Status == StatusBusy {
+		return true
+	}
+	return !session.LastActive.IsZero() && now.Sub(session.LastActive) <= ActiveWindow
+}

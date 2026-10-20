@@ -204,6 +204,14 @@ agenthail channel add launch @builder
 agenthail channel send launch "The release date moved to Friday"
 ```
 
+To reach every conversation in a project, address the project by name or id instead of a channel; you need no channel for it:
+
+```bash
+agenthail channel send '#agenthail' "Main is frozen until the release is tagged"
+```
+
+The message goes to the project's conversations on every paired host that are working or were active in the last day, plus the project's coordinator, and not to the sender. The output lists who got it. The dashboard's project row has a Message button that does the same. A channel cannot take a project's name. If a project appears with the name of an existing channel, sends to that name are refused until you rename the channel with `agenthail channel rename <channel> <new-name>`.
+
 ## Start work without opening another window
 
 An agent or script can start a Codex thread or Claude session directly:

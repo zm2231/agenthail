@@ -259,7 +259,7 @@ func TestFederationChannelReachesAMemberOnAnotherHost(t *testing.T) {
 	}
 	awaitFederation(t, "the forge member received the channel message", func() bool {
 		for _, message := range forge.fake.delivered() {
-			if message == "standup" {
+			if strings.HasPrefix(message, "[from ") && strings.HasSuffix(message, " via #crew] standup") {
 				return true
 			}
 		}
