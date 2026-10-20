@@ -106,6 +106,6 @@ func (c *daemonAPIClient) getJSON(ctx context.Context, path string, query url.Va
 // daemon can hold and replay it toward a paired host without applying it
 // twice.
 func (c *daemonAPIClient) action(ctx context.Context, payload map[string]any) ([]byte, int, error) {
-	header := http.Header{"Idempotency-Key": []string{"cli-" + uuid.NewString()}}
+	header := http.Header{"Idempotency-Key": []string{"cli-" + uuid.NewString()}, daemon.ActionActorHeader: []string{daemon.CLIActor}}
 	return c.call(ctx, http.MethodPost, "/api/v1/actions", nil, payload, header)
 }

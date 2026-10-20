@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	claudeHostCheckInterval = 30 * time.Second
-	claudeHostEnsureTimeout = 20 * time.Second
+	claudeHostCheckInterval  = 30 * time.Second
+	claudeHostEnsureTimeout  = 20 * time.Second
+	claudeHostWatchRetryWait = 2 * time.Second
 )
 
 func (d *Daemon) SetClaudeHost(manager *claudehost.Manager) {
@@ -23,6 +24,12 @@ func (d *Daemon) superviseClaudeHost(ctx context.Context) {
 	if d.claudeHost == nil {
 		return
 	}
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		d.watchClaudeHostRequests(ctx)
+	}()
+	defer func() { <-watched }()
 	ticker := time.NewTicker(claudeHostCheckInterval)
 	defer ticker.Stop()
 	var last claudeHostCheck
@@ -32,6 +39,33 @@ func (d *Daemon) superviseClaudeHost(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		}
+	}
+}
+
+// watchClaudeHostRequests asks for a catalog pass whenever the host opens or
+// resolves a request, so a session shows what it waits on as soon as Claude
+// asks rather than at the next scheduled pass. A dropped subscription may
+// mean a new host, which numbers its events from the start again, so the
+// next one reads the host's whole buffer; repeated passes coalesce.
+func (d *Daemon) watchClaudeHostRequests(ctx context.Context) {
+	client := claudehost.NewClient(d.claudeHost.Home)
+	var after uint64
+	for ctx.Err() == nil {
+		start, _ := client.Subscribe(ctx, after, func(event claudehost.Event) {
+			if event.Kind == "request_opened" || event.Kind == "request_resolved" {
+				d.requestCatalogDiscovery()
+			}
+		})
+		if start.Gap {
+			after = start.Seq
+			d.requestCatalogDiscovery()
+			continue
+		}
+		after = 0
+		select {
+		case <-ctx.Done():
+		case <-time.After(claudeHostWatchRetryWait):
 		}
 	}
 }

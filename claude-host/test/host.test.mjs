@@ -164,16 +164,21 @@ test('open, send and stream a turn bound to the message uuid', async () => {
   c.close();
 });
 
-test('bypassPermissions opens with explicit consent to skip permissions', async () => {
+test('every session opens with consent to bypassPermissions and asks the host about tools', async () => {
   const f = fixture();
   await startHost(f);
   const c = new Client(f.socket);
-  const id = randomUUID();
-  await c.call('open', { sessionId: id, cwd: f.cwd, permissionMode: 'bypassPermissions' });
-  const spawnRecord = JSON.parse(fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim());
-  assert.ok(spawnRecord.argv.some((a) => a.includes('bypassPermissions')), spawnRecord.argv.join(' '));
-  assert.ok(spawnRecord.argv.includes('--allow-dangerously-skip-permissions'), spawnRecord.argv.join(' '));
-  assert.ok(!spawnRecord.argv.some((a) => a.startsWith('--permission-prompt-tool')), spawnRecord.argv.join(' '));
+  for (const permissionMode of ['bypassPermissions', 'acceptEdits']) {
+    await c.call('open', { sessionId: randomUUID(), cwd: f.cwd, permissionMode });
+  }
+  const spawns = fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(spawns.length, 2);
+  for (const [i, mode] of ['bypassPermissions', 'acceptEdits'].entries()) {
+    const argv = spawns[i].argv;
+    assert.ok(argv.some((a) => a.includes(mode)), argv.join(' '));
+    assert.ok(argv.includes('--allow-dangerously-skip-permissions'), argv.join(' '));
+    assert.ok(argv.includes('--permission-prompt-tool=stdio'), argv.join(' '));
+  }
   c.close();
 });
 
@@ -229,21 +234,153 @@ test('a duplicate uuid runs once', async () => {
   c.close();
 });
 
-test('every permission request is answered with a denial and an event', async () => {
+async function openPending(f, c, text) {
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text });
+  const opened = await c.event((e) => e.kind === 'request_opened' && e.sessionId === id);
+  return { id, uuid, request: opened.request };
+}
+
+test('a permission request waits in the listing until a person allows it', async () => {
   const f = fixture();
   await startHost(f);
   const c = new Client(f.socket);
   await c.call('subscribe');
-  const id = randomUUID();
-  await c.call('open', { sessionId: id, cwd: f.cwd });
-  const uuid = randomUUID();
-  await c.call('send', { sessionId: id, uuid, text: 'TOOL' });
+  const { id, uuid, request } = await openPending(f, c, 'TOOL');
+  assert.equal(request.tool, 'Bash');
+  assert.equal(request.kind, 'approval');
+  assert.equal(request.toolUseId, 'toolu_fake');
+  assert.equal(request.title, 'Claude wants to run true');
+  assert.deepEqual(request.input, { command: 'true' });
+  assert.equal(request.alwaysAllow, false);
+  await sleep(300);
+  const listed = (await c.call('list')).sessions.find((s) => s.sessionId === id);
+  assert.equal(listed.state, 'busy');
+  assert.deepEqual(listed.requests.map((r) => r.requestId), [request.requestId]);
+  await assert.rejects(c.call('respond', { sessionId: id, requestId: request.requestId, decision: { behavior: 'allow', always: true } }), { code: 'invalid' });
+  assert.deepEqual(await c.call('respond', { sessionId: id, requestId: request.requestId, decision: { behavior: 'allow' } }), { outcome: 'allowed' });
   await c.event(turnResult(id, uuid));
-  const denied = await c.event((e) => e.kind === 'permission_denied');
-  assert.equal(denied.tool, 'Bash');
-  assert.equal(denied.toolUseId, 'toolu_fake');
-  assert.match(transcript(f, id)[0].reply, /^tool:deny:Agenthail cannot answer permission prompts/);
+  assert.equal(transcript(f, id)[0].reply, 'tool:allow:');
+  assert.equal((await c.event((e) => e.kind === 'request_resolved')).outcome, 'allowed');
+  assert.deepEqual((await c.call('list')).sessions.find((s) => s.sessionId === id).requests, []);
+  await assert.rejects(c.call('respond', { sessionId: id, requestId: request.requestId, decision: { behavior: 'allow' } }), { code: 'stale' });
   c.close();
+});
+
+test('a denial carries its reason and always-allow applies the suggested rule', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const denied = await openPending(f, c, 'TOOL');
+  await c.call('respond', { sessionId: denied.id, requestId: denied.request.requestId, decision: { behavior: 'deny', message: 'not now' } });
+  await c.event(turnResult(denied.id, denied.uuid));
+  assert.equal(transcript(f, denied.id)[0].reply, 'tool:deny:not now');
+
+  const always = await openPending(f, c, 'TOOL ALWAYS');
+  assert.equal(always.request.alwaysAllow, true);
+  assert.deepEqual(await c.call('respond', { sessionId: always.id, requestId: always.request.requestId, decision: { behavior: 'allow', always: true } }), { outcome: 'allowed_always' });
+  await c.event(turnResult(always.id, always.uuid));
+  assert.equal(transcript(f, always.id)[0].reply, 'tool:allow::always');
+  c.close();
+});
+
+test('a question is answered with an answer to each of its questions', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const { id, uuid, request } = await openPending(f, c, 'QUESTION');
+  assert.equal(request.kind, 'question');
+  assert.deepEqual(request.questions, [{ question: 'Which color?', header: 'Color', multiSelect: false, options: [{ label: 'Red', description: 'Warm' }, { label: 'Blue', description: 'Cool' }] }]);
+  const respond = (decision) => c.call('respond', { sessionId: id, requestId: request.requestId, decision });
+  await assert.rejects(respond({ behavior: 'allow' }), { code: 'invalid' });
+  await assert.rejects(respond({ behavior: 'allow', answers: {} }), { code: 'invalid' });
+  await assert.rejects(respond({ behavior: 'allow', answers: { 'Which color?': 'Blue', 'Which size?': 'Big' } }), { code: 'invalid' });
+  assert.deepEqual(await respond({ behavior: 'allow', answers: { 'Which color?': 'Blue' } }), { outcome: 'answered' });
+  await c.event(turnResult(id, uuid));
+  assert.equal(transcript(f, id)[0].reply, 'question:allow:{"Which color?":"Blue"}');
+  c.close();
+});
+
+test('a request answered for another session or one never asked is refused', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const { id, request } = await openPending(f, c, 'TOOL');
+  const other = randomUUID();
+  await c.call('open', { sessionId: other, cwd: f.cwd });
+  await assert.rejects(c.call('respond', { sessionId: other, requestId: request.requestId, decision: { behavior: 'allow' } }), { code: 'stale' });
+  await assert.rejects(c.call('respond', { sessionId: randomUUID(), requestId: request.requestId, decision: { behavior: 'allow' } }), { code: 'not_open' });
+  await assert.rejects(c.call('respond', { sessionId: id, requestId: randomUUID(), decision: { behavior: 'allow' } }), { code: 'stale' });
+  await assert.rejects(c.call('respond', { sessionId: id, requestId: request.requestId, decision: { behavior: 'maybe' } }), { code: 'invalid' });
+  assert.equal((await c.call('list')).sessions.find((s) => s.sessionId === id).requests.length, 1);
+  c.close();
+});
+
+test('an interrupt withdraws an open request', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const { id, uuid, request } = await openPending(f, c, 'TOOL');
+  await c.call('interrupt', { sessionId: id });
+  assert.equal((await c.event((e) => e.kind === 'request_resolved' && e.requestId === request.requestId)).outcome, 'withdrawn');
+  await c.event(turnResult(id, uuid));
+  await assert.rejects(c.call('respond', { sessionId: id, requestId: request.requestId, decision: { behavior: 'allow' } }), { code: 'stale' });
+  c.close();
+});
+
+test('a request does not outlive its host', async () => {
+  const f = fixture();
+  const first = await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const { id, request } = await openPending(f, c, 'TOOL');
+  const { pid } = (await c.call('list')).sessions.find((s) => s.sessionId === id);
+  first.kill('SIGKILL');
+  await first.exited;
+  c.close();
+  for (let i = 0; i < 100 && alive(pid); i++) await sleep(50);
+  assert.ok(!alive(pid), 'Claude exits once nobody can answer its prompt');
+  await startHost(f);
+  const d = new Client(f.socket);
+  assert.deepEqual((await d.call('list')).sessions, []);
+  await d.call('open', { resume: id, cwd: f.cwd });
+  await assert.rejects(d.call('respond', { sessionId: id, requestId: request.requestId, decision: { behavior: 'allow' } }), { code: 'stale' });
+  d.close();
+});
+
+test('model and permission mode change live and a resume keeps them', async () => {
+  const f = fixture();
+  const first = await startHost(f);
+  const c = new Client(f.socket);
+  const id = randomUUID();
+  const opened = await c.call('open', { sessionId: id, cwd: f.cwd, permissionMode: 'acceptEdits' });
+  assert.equal(opened.permissionMode, 'acceptEdits');
+  assert.equal((await c.call('setPermissionMode', { sessionId: id, permissionMode: 'bypassPermissions' })).permissionMode, 'bypassPermissions');
+  assert.equal((await c.call('setModel', { sessionId: id, model: 'opus' })).model, 'opus');
+  await assert.rejects(c.call('setPermissionMode', { sessionId: id, permissionMode: 'yolo' }), { code: 'invalid' });
+  await assert.rejects(c.call('setModel', { sessionId: id, model: '' }), { code: 'invalid' });
+  await assert.rejects(c.call('setModel', { sessionId: randomUUID(), model: 'opus' }), { code: 'not_open' });
+  const controls = fs.readFileSync(path.join(f.claudeDir, 'controls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(controls.map((r) => [r.subtype, r.mode ?? r.model]), [['set_permission_mode', 'bypassPermissions'], ['set_model', 'opus']]);
+  await c.call('close', { sessionId: id });
+  c.close();
+  first.kill('SIGKILL');
+  await first.exited;
+
+  await startHost(f);
+  const d = new Client(f.socket);
+  const resumed = await d.call('open', { resume: id, cwd: f.cwd });
+  assert.equal(resumed.permissionMode, 'bypassPermissions');
+  assert.equal(resumed.model, 'opus');
+  const argv = fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).at(-1).argv;
+  assert.ok(argv.includes('--permission-mode=bypassPermissions') && argv.includes('--model=opus'), argv.join(' '));
+  d.close();
 });
 
 test('interrupt ends the running turn', async () => {
