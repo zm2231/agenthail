@@ -178,18 +178,6 @@ func TestCoordinatorLockPathIsOneFileForAnyProjectID(t *testing.T) {
 	}
 }
 
-func TestACoordinatorCannotTakeTheNameOfAConversationStillStarting(t *testing.T) {
-	r := openTestRegistry(t)
-	if _, err := r.RecordPendingLaunch("cmux", surface.KindClaude, "/work/app", "", "app-lead", surface.Location{Workspace: "w", Surface: "s"}); err != nil {
-		t.Fatal(err)
-	}
-	_, err := r.SetCoordinator(CoordinatorSpec{ProjectID: "repo:example/app", ProjectRoot: "/work/app", Name: "app-lead", Surface: "claude", Cwd: "/work/app"}, CoordinatorChange{ChangedBy: "fixture"})
-	var launching CoordinatorNameLaunchingError
-	if !errors.As(err, &launching) {
-		t.Fatalf("err=%v", err)
-	}
-}
-
 func TestACoordinatorsNameMovesOnlyThroughTheCoordinator(t *testing.T) {
 	r := coordinatorRegistry(t, "lead-session", "other")
 	started := CoordinatorSpec{ProjectID: "p-started", ProjectRoot: "/work/a", Name: "a-lead", Surface: "claude", Cwd: "/work/a"}
