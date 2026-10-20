@@ -27,7 +27,7 @@ enum RequestNotifications {
     static let categoryPrefix = "AGENTHAIL_REQ_"
     static let replyChoice = "reply"
     static let choices: Set<String> = ["allow", "always", "deny", "o0", "o1", "o2", "o3", replyChoice]
-    static let maxActions = 4
+    static let maxActions = 5
     static let retainedRequests = 32
 
     static func categoryIdentifier(requestID: String) -> String { categoryPrefix + requestID }

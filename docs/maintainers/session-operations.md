@@ -106,9 +106,9 @@ already shown rather than adding a second. When the session's provider takes
 answers through Agenthail, the announcement reads the open request at that
 moment. The desktop notification shows its prompt, the first question's for a
 request with several, and its buttons: `allow`, `always`, `deny` and `reply`
-for an approval, or `o0` to `o2` for a single question's options when there
-are at most three, and `reply`. At most four buttons are offered; Apple
-documents only that a banner shows the first two. Several questions, or one
+for an approval, or `o0` to `o3` for a single question's options and `reply`.
+Apple documents only that a banner shows the first two actions; what the
+expanded view shows of five is checked on a device. Several questions, or one
 that takes several answers, get no buttons, since a notification answer
 carries one choice or one line of text; opening the notification opens the
 session with the request above its message box. The push stays generic and

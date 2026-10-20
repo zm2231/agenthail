@@ -7,10 +7,9 @@ import (
 	"unicode/utf8"
 )
 
-// MaxRequestActions is the most buttons a notification offers for a request,
-// its reply included. Apple documents only that a banner shows the first two
-// actions and gives no limit for the expanded view, so this stays small.
-const MaxRequestActions = 4
+// maxQuestionOptions is the most options AskUserQuestion gives a question,
+// each of which gets a button.
+const maxQuestionOptions = 4
 
 const maxRequestActionTitle = 40
 
@@ -28,7 +27,7 @@ type RequestAction struct {
 // approval gets allow, always allow when the request offers it, deny, and a
 // reply that denies it with the person's message. A question that is the
 // request's only question and takes one answer gets a reply that answers it
-// in the person's own words, after one button per option when they fit. A
+// in the person's own words, after one button per option. A
 // notification answer carries one choice or one line of text, so several
 // questions, or one that takes several answers, are answered in the app and
 // get none.
@@ -44,8 +43,8 @@ func (r Request) Actions() []RequestAction {
 	if !ok {
 		return nil
 	}
-	actions := make([]RequestAction, 0, MaxRequestActions)
-	if len(question.Options) < MaxRequestActions {
+	actions := make([]RequestAction, 0, maxQuestionOptions+1)
+	if len(question.Options) <= maxQuestionOptions {
 		for index, option := range question.Options {
 			actions = append(actions, RequestAction{ID: "o" + strconv.Itoa(index), Title: actionTitle(option.Label)})
 		}

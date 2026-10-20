@@ -50,13 +50,15 @@ struct RequestNotificationsTest {
         let notice = RequestNotifications.notice(from: Data(body.utf8), requestID: "req-1")
         check(notice == RequestNotice(prompt: "Which color?", actions: [RequestNotificationAction(id: "o0", title: "Red"), RequestNotificationAction(id: "o1", title: "Blue")]), "notice \(String(describing: notice))")
         check(RequestNotifications.notice(from: Data(body.utf8), requestID: "gone") == nil, "a request no longer open offers nothing")
+        let four = #"{"requests":[{"id":"r","prompt":"Ask","actions":[{"id":"o0","title":"A"},{"id":"o1","title":"B"},{"id":"o2","title":"C"},{"id":"o3","title":"D"},{"id":"reply","title":"Reply…"}]}]}"#
+        check(RequestNotifications.notice(from: Data(four.utf8), requestID: "r")?.actions.map(\.id) == ["o0", "o1", "o2", "o3", "reply"], "four options and a reply are all offered")
         for appOnly in [#"{"requests":[{"id":"r","prompt":"Which color?","actions":[]}]}"#, #"{"requests":[{"id":"r","prompt":"Which color?"}]}"#] {
             check(RequestNotifications.notice(from: Data(appOnly.utf8), requestID: "r") == RequestNotice(prompt: "Which color?", actions: []), "a request answered in the app still shows its prompt: \(appOnly)")
         }
         for bad in [
             #"{"requests":[{"id":"r","prompt":"Ask","actions":[{"id":"o9","title":"Nine"}]}]}"#,
             #"{"requests":[{"id":"r","prompt":"Ask","actions":[{"id":"o0","title":"A"},{"id":"o0","title":"B"}]}]}"#,
-            #"{"requests":[{"id":"r","prompt":"Ask","actions":[{"id":"o0","title":"A"},{"id":"o1","title":"B"},{"id":"o2","title":"C"},{"id":"o3","title":"D"},{"id":"reply","title":"Reply…"}]}]}"#,
+            #"{"requests":[{"id":"r","prompt":"Ask","actions":[{"id":"o0","title":"A"},{"id":"o1","title":"B"},{"id":"o2","title":"C"},{"id":"o3","title":"D"},{"id":"reply","title":"Reply…"},{"id":"deny","title":"Deny"}]}]}"#,
             #"{"requests":[{"id":"r","prompt":" ","actions":[{"id":"allow","title":"Allow"}]}]}"#,
             "not json"
         ] {

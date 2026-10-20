@@ -51,9 +51,13 @@ func TestARequestOffersOnlyTheButtonsItCanBeAnsweredWith(t *testing.T) {
 	if _, err := question.Choose("reply", ""); err == nil {
 		t.Fatal("an empty reply answered the question")
 	}
-	many := Request{ID: "r3", Kind: WaitingQuestion, Questions: []Question{{Question: "Which?", Options: make([]QuestionOption, MaxRequestActions)}}}
+	four := Request{ID: "r4", Kind: WaitingQuestion, Questions: []Question{{Question: "Which?", Options: []QuestionOption{{Label: "a"}, {Label: "b"}, {Label: "c"}, {Label: "d"}}}}}
+	if actions := four.Actions(); len(actions) != 5 || actions[3] != (RequestAction{ID: "o3", Title: "d"}) || actions[4].ID != "reply" {
+		t.Fatalf("a four-option question offers %+v", actions)
+	}
+	many := Request{ID: "r3", Kind: WaitingQuestion, Questions: []Question{{Question: "Which?", Options: make([]QuestionOption, maxQuestionOptions+1)}}}
 	if actions := many.Actions(); len(actions) != 1 || actions[0].ID != "reply" {
-		t.Fatalf("a question whose options and reply do not fit offers %+v", actions)
+		t.Fatalf("a question with more options than AskUserQuestion gives offers %+v", actions)
 	}
 	if _, err := many.Choose("o0", ""); err == nil {
 		t.Fatal("a question took an option it offered no button for")

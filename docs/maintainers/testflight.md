@@ -66,7 +66,15 @@ Both must be created manually in Certificates, Identifiers & Profiles; a profile
 
 ## Device acceptance for notification answers
 
-A release that changes request notifications, the notification service or the relay is accepted on a physical iPhone after the relay deploys, alongside the physical voice check. On the TestFlight build, with the phone locked, answer a tool approval with **Allow** or **Deny** and a single question with one of its options from the notification. Record the build, that each alert showed what was asked, and that the session continued with that answer.
+A release that changes request notifications, the notification service or the relay is accepted on a physical iPhone after the relay deploys, alongside the physical voice check. On the TestFlight build, with the phone locked, answer from the notification:
+
+- a tool approval with **Allow** or **Deny**, and another with **Deny with message…** and a typed reason;
+- a single question with one of its options, and another with **Reply…** and a typed answer;
+- a question with four options, after confirming the expanded notification shows all four options and **Reply…**;
+- a typed reply while the Mac is unreachable, after confirming the failure notification repeats what you typed;
+- a request with two questions, after confirming the alert shows the first question and opening it shows the request in the session.
+
+Record the build, that each alert showed what was asked, and that the session continued with that answer, with the typed text for a reply.
 
 ## Set up internal access
 
