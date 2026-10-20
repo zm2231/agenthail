@@ -54,7 +54,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 23
+	schemaVersion   = 24
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -506,6 +506,37 @@ CREATE TABLE IF NOT EXISTS sessions (
 	subagent_depth INTEGER NOT NULL DEFAULT 0,
 	agent_nickname TEXT NOT NULL DEFAULT '', agent_role TEXT NOT NULL DEFAULT '',
 	host_id TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS coordinators (
+	project_id TEXT NOT NULL,
+	host_id TEXT NOT NULL DEFAULT '',
+	project_root TEXT NOT NULL DEFAULT '',
+	name TEXT NOT NULL,
+	surface TEXT NOT NULL,
+	cwd TEXT NOT NULL DEFAULT '',
+	model TEXT NOT NULL DEFAULT '',
+	permission_mode TEXT NOT NULL DEFAULT '',
+	instructions TEXT NOT NULL DEFAULT '',
+	session_id TEXT NOT NULL DEFAULT '',
+	changed_by TEXT NOT NULL DEFAULT '',
+	changed_at_ms INTEGER NOT NULL,
+	PRIMARY KEY (project_id, host_id),
+	UNIQUE (name, host_id)
+);
+CREATE TABLE IF NOT EXISTS coordinator_history (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	project_id TEXT NOT NULL,
+	action TEXT NOT NULL CHECK (action IN ('set','replaced','cleared')),
+	name TEXT NOT NULL,
+	session_id TEXT NOT NULL DEFAULT '',
+	previous_name TEXT NOT NULL DEFAULT '',
+	previous_session_id TEXT NOT NULL DEFAULT '',
+	changed_by TEXT NOT NULL DEFAULT '',
+	at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS coordinator_replaced (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	project_id TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS session_rekeys (
 	old_id TEXT PRIMARY KEY, new_id TEXT NOT NULL,
@@ -975,6 +1006,16 @@ func (r *Registry) EnsureAliasAvailable(name string) error {
 	if name == "" {
 		return nil
 	}
+	if strings.EqualFold(name, LeadAlias) {
+		return ErrReservedAlias
+	}
+	var coordinator bool
+	if err := r.read.QueryRow(`SELECT EXISTS(SELECT 1 FROM coordinators WHERE host_id='' AND name=?)`, name).Scan(&coordinator); err != nil {
+		return err
+	}
+	if coordinator {
+		return CoordinatorAliasError{Name: name}
+	}
 	var owner string
 	err := r.read.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&owner)
 	if err == sql.ErrNoRows {
@@ -1007,7 +1048,38 @@ func (e AliasTakenError) Error() string {
 	return fmt.Sprintf("alias %q is already assigned to session %q", e.Name, e.Owner)
 }
 
+// setAliasTx names a session. A coordinator's name moves only through the
+// coordinator, so it is neither given to another session nor taken from the
+// session it names.
 func setAliasTx(tx *sql.Tx, name, sessionID string) error {
+	if strings.EqualFold(name, LeadAlias) {
+		return ErrReservedAlias
+	}
+	var current string
+	err := tx.QueryRow(`SELECT name FROM aliases WHERE session_id=?`, sessionID).Scan(&current)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if current == name {
+		return nil
+	}
+	for _, held := range []string{name, current} {
+		if held == "" {
+			continue
+		}
+		if coordinated, err := coordinatorNamedTx(tx, held); err != nil {
+			return err
+		} else if coordinated {
+			return CoordinatorAliasError{Name: held}
+		}
+	}
+	return bindAliasTx(tx, name, sessionID)
+}
+
+func bindAliasTx(tx *sql.Tx, name, sessionID string) error {
+	if strings.EqualFold(name, LeadAlias) {
+		return ErrReservedAlias
+	}
 	var owner string
 	err := tx.QueryRow(`SELECT session_id FROM aliases WHERE name=?`, name).Scan(&owner)
 	if err != nil && err != sql.ErrNoRows {
@@ -1045,6 +1117,14 @@ func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error)
 		if n > 0 {
 			candidate = fmt.Sprintf("%s-%d", base, n+1)
 		}
+		if candidate == LeadAlias {
+			continue
+		}
+		if coordinated, err := coordinatorNamedTx(tx, candidate); err != nil {
+			return "", err
+		} else if coordinated {
+			continue
+		}
 		if _, err := tx.Exec(`INSERT INTO aliases(name,session_id) VALUES(?,?)`, candidate, sessionID); err == nil {
 			return candidate, tx.Commit()
 		} else if !strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -1055,13 +1135,18 @@ func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error)
 }
 
 // ResolveTarget resolves an alias, an exact ID, a unique ID prefix, or a
-// name/cwd fragment. Name and cwd fragments match only family roots, so a
+// name/cwd fragment; "@<name>" resolves only an alias or exact ID, so a
+// name never reaches another session by substring. Name and cwd fragments
+// match only family roots, so a
 // family resolves to its root. "@<parent>/<child>[/<child>...]" walks
 // subagents: <parent> is any other target form and each <child> is a direct
 // subagent's nickname (case-insensitive), ID, or unique ID prefix.
 func (r *Registry) ResolveTarget(target string) (string, error) {
-	if path, ok := strings.CutPrefix(target, "@"); ok && strings.Contains(path, "/") {
-		return r.resolveSubagentPath(path)
+	if path, ok := strings.CutPrefix(target, "@"); ok {
+		if strings.Contains(path, "/") {
+			return r.resolveSubagentPath(path)
+		}
+		return r.ExactTarget("", path)
 	}
 	return r.resolveTarget(target, "")
 }
@@ -1069,6 +1154,9 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 // ResolveSurfaceTarget resolves a target like ResolveTarget, but matches and
 // judges ambiguity only among sessions of the given surface.
 func (r *Registry) ResolveSurfaceTarget(kind surface.SurfaceKind, target string) (string, error) {
+	if name, ok := strings.CutPrefix(target, "@"); ok {
+		return r.ExactTarget(kind, name)
+	}
 	return r.resolveTarget(target, string(kind))
 }
 
@@ -2877,14 +2965,24 @@ func (r *Registry) ReverseAlias(sessionID string) (string, error) {
 }
 
 func (r *Registry) RemoveAlias(name string) error {
-	res, err := r.db.Exec(`DELETE FROM aliases WHERE name = ?`, name)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if coordinated, err := coordinatorNamedTx(tx, name); err != nil {
+		return err
+	} else if coordinated {
+		return CoordinatorAliasError{Name: name}
+	}
+	res, err := tx.Exec(`DELETE FROM aliases WHERE name = ?`, name)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
 		return fmt.Errorf("alias %q does not exist", name)
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (r *Registry) RemoveFromChannel(channelName, sessionID string) error {

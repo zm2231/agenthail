@@ -22,7 +22,7 @@ func registerFamily(t *testing.T, r *Registry) {
 			t.Fatal(err)
 		}
 	}
-	if err := r.SetAlias("lead", "root-thread"); err != nil {
+	if err := r.SetAlias("chief", "root-thread"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -62,7 +62,7 @@ func TestRegistryPersistsSubagentIdentity(t *testing.T) {
 func TestResolveTargetSendsFamilyFragmentsToTheRoot(t *testing.T) {
 	r := openTestRegistry(t)
 	registerFamily(t, r)
-	for _, target := range []string{"Build the parser", "/repo/app", "lead", "@lead"} {
+	for _, target := range []string{"Build the parser", "/repo/app", "chief", "@chief"} {
 		got, err := r.ResolveTarget(target)
 		if err != nil || got != "root-thread" {
 			t.Fatalf("%q resolved to %q, %v; want the family root", target, got, err)
@@ -77,18 +77,18 @@ func TestResolveTargetWalksSubagentPaths(t *testing.T) {
 	r := openTestRegistry(t)
 	registerFamily(t, r)
 	for target, want := range map[string]string{
-		"@lead/ada":                  "child-ada",
-		"@lead/ADA/cy":               "grandchild-cy",
+		"@chief/ada":                 "child-ada",
+		"@chief/ADA/cy":              "grandchild-cy",
 		"@root-thread/child-bo-2":    "child-bo-2",
 		"@Build the parser/Ada/Cy":   "grandchild-cy",
-		"@lead/grandchild":           "",
-		"@lead/nobody":               "",
-		"@lead/bo":                   "",
-		"@lead/":                     "",
+		"@chief/grandchild":          "",
+		"@chief/nobody":              "",
+		"@chief/bo":                  "",
+		"@chief/":                    "",
 		"@missing/ada":               "",
 		"@root-thread/child-a":       "child-ada",
 		"@child-ada/grandchild-cy/x": "",
-		"@lead/child-bo":             "child-bo",
+		"@chief/child-bo":            "child-bo",
 	} {
 		got, err := r.ResolveTarget(target)
 		if want == "" {
@@ -101,7 +101,7 @@ func TestResolveTargetWalksSubagentPaths(t *testing.T) {
 			t.Fatalf("%q resolved to %q, %v; want %q", target, got, err, want)
 		}
 	}
-	_, err := r.ResolveTarget("@lead/bo")
+	_, err := r.ResolveTarget("@chief/bo")
 	if err == nil || !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), "child-bo, child-bo-2") {
 		t.Fatalf("a nickname shared by two siblings is ambiguous: %v", err)
 	}

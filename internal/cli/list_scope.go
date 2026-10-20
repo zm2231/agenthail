@@ -141,12 +141,12 @@ func (a *App) selectedProject(ctx context.Context, views map[string]listCatalogV
 	if err != nil {
 		return "", fmt.Errorf("normalize --cwd: %w", err)
 	}
-	projectID, err := daemon.ResolvePathProject(ctx, a.registry(), folder)
+	found, err := daemon.ResolvePathProject(ctx, a.registry(), folder)
 	if err != nil {
 		return "", err
 	}
-	if projectID == "" {
+	if found == nil {
 		return "", fmt.Errorf("no project holds %s; add it with 'agenthail project add %s'", folder, folder)
 	}
-	return projectID, nil
+	return found.ID, nil
 }

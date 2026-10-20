@@ -192,7 +192,7 @@ func TestAddingAFolderProjectClaimsItsSessions(t *testing.T) {
 		t.Fatalf("add: %d %s", response.Code, response.Body)
 	}
 	var added struct {
-		Project catalogProject `json:"project"`
+		Project CatalogProject `json:"project"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &added); err != nil || added.Project.Kind != catalogProjectFolder || added.Project.DisplayName != "notes" {
 		t.Fatalf("added=%+v err=%v", added, err)
@@ -246,7 +246,7 @@ func TestAWorktreeSessionLandsInTheDeepestAddedProject(t *testing.T) {
 	}
 	web := add(filepath.Join(worktree, "apps", "web"))
 	var added struct {
-		Project catalogProject `json:"project"`
+		Project CatalogProject `json:"project"`
 	}
 	if web.Code != http.StatusOK || json.Unmarshal(web.Body.Bytes(), &added) != nil {
 		t.Fatalf("add web: %d %s", web.Code, web.Body)
@@ -306,7 +306,7 @@ func TestFederationProjectsStayOnTheirHostAndArchiveRoutesThere(t *testing.T) {
 	cwd := remote.fake.sessions["remote-a"].Cwd
 	added := remote.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-add", "path": cwd})
 	var answer struct {
-		Project catalogProject `json:"project"`
+		Project CatalogProject `json:"project"`
 	}
 	if added.Code != http.StatusOK || json.Unmarshal(added.Body.Bytes(), &answer) != nil {
 		t.Fatalf("add status=%d body=%s", added.Code, added.Body.String())
@@ -449,8 +449,8 @@ func TestTheCatalogAndPathResolutionAgreeRightAfterOriginChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored := storedProjection(t, r, "from").Project.ID; stored != "repo:github.com/another-owner/widget-renamed" || resolved != stored {
-		t.Fatalf("catalog=%s resolved=%s", stored, resolved)
+	if stored := storedProjection(t, r, "from").Project.ID; stored != "repo:github.com/another-owner/widget-renamed" || resolved == nil || resolved.ID != stored {
+		t.Fatalf("catalog=%s resolved=%+v", stored, resolved)
 	}
 
 	if response := runDashboardAction(t, d, `{"action":"project-add","path":"`+filepath.Join(repo, "src")+`"}`); response.Code != http.StatusOK {

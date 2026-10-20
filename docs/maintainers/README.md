@@ -15,4 +15,5 @@ These notes cover Agenthail's implementation, packaging, release automation, and
 - [Projects, scopes and archive](projects.md)
 - [Paired hosts: pairing, ownership, routing, and unreachable delivery](hosts.md)
 - [Registry migrations: adding a table, column, index or data step](registry-migrations.md)
+- [Coordinator: one per project, its saved spec, @lead, and how a send always lands](coordinator.md)
 - [Dashboard design reference](../../design.md)

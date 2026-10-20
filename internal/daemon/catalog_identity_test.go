@@ -13,7 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/workspace"
 )
 
-func noStoredProject() *catalogProject { return nil }
+func noStoredProject() *CatalogProject { return nil }
 
 func catalogTestRepo(t *testing.T) string {
 	t.Helper()
@@ -138,8 +138,8 @@ func TestCatalogIdentityKeepsTheKnownProjectWhenGitFails(t *testing.T) {
 	if failed.UnavailableReason == "" || failed.Project == nil || failed.Project.ID != resolved.Project.ID {
 		t.Fatalf("failed=%+v resolved=%+v", failed, resolved.Project)
 	}
-	stored := &catalogProject{ID: "project-stored", DisplayName: "widget", RootPath: repo, Kind: catalogProjectGit}
-	fresh := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, later, func() *catalogProject { return stored })
+	stored := &CatalogProject{ID: "project-stored", DisplayName: "widget", RootPath: repo, Kind: catalogProjectGit}
+	fresh := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, later, func() *CatalogProject { return stored })
 	if fresh.UnavailableReason == "" || fresh.Project != stored {
 		t.Fatalf("fresh=%+v", fresh)
 	}
@@ -172,7 +172,7 @@ func gitRun(t *testing.T, dir string, args ...string) {
 	}
 }
 
-func catalogProjectAt(t *testing.T, cache *catalogIdentityCache, path string) *catalogProject {
+func catalogProjectAt(t *testing.T, cache *catalogIdentityCache, path string) *CatalogProject {
 	t.Helper()
 	identity := cache.identity(context.Background(), surface.Session{Cwd: path}, time.Now(), noStoredProject)
 	if identity.UnavailableReason != "" || identity.Project == nil {

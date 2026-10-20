@@ -56,6 +56,9 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		}()
 		return
 	}
+	if d.restartCoordinator(ctx, session, item, now) {
+		return
+	}
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	operationCtx = surface.WithSourceSessionID(operationCtx, item.SourceSessionID)
 	if messageUUID, err := d.Registry.DeliveryIntentUUIDForQueue(item.ID); err != nil {

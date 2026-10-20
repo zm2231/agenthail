@@ -237,6 +237,22 @@ func TestSessionCreateRejectsAliasCollisionBeforeLaunch(t *testing.T) {
 	}
 }
 
+func TestSessionCreateRejectsAnUnstartedCoordinatorsNameBeforeLaunch(t *testing.T) {
+	d, r, fake, _, _ := daemonFixture(t)
+	fake.kind = surface.KindClaude
+	d.Surfaces = []surface.Surface{fake}
+	cwd := t.TempDir()
+	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: "project-fixture", ProjectRoot: cwd, Name: "fixture-lead", Surface: string(surface.KindClaude), Cwd: cwd}, registry.CoordinatorChange{}); err != nil {
+		t.Fatal(err)
+	}
+	launcher := &launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}}
+	d.SetLaunchers([]surface.Launcher{launcher})
+	w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello","alias":"fixture-lead"}`)
+	if w.Code != http.StatusBadRequest || launcher.launches != 0 || !strings.Contains(w.Body.String(), "coordinator") {
+		t.Fatalf("status=%d launches=%d body=%s", w.Code, launcher.launches, w.Body.String())
+	}
+}
+
 func TestSessionCreateRejectsMissingLauncherSurfaceBeforeLaunch(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
 	fake.kind = surface.KindCodex

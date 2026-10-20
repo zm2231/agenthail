@@ -434,7 +434,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			}
 			seen[session.ID] = struct{}{}
 			identityCtx, identityCancel := context.WithTimeout(ctx, 3*time.Second)
-			identity := d.catalogIdentities.identity(identityCtx, session, observedAt, func() *catalogProject { return d.storedCatalogProject(session.ID) })
+			identity := d.catalogIdentities.identity(identityCtx, session, observedAt, func() *CatalogProject { return d.storedCatalogProject(session.ID) })
 			identityCancel()
 			open := openSessions[session.ID]
 			alias := aliasByID[session.ID]
@@ -739,7 +739,8 @@ func (d *Daemon) correlatePendingLaunches(ctx context.Context, sessions []surfac
 				candidate.Runtime = &surface.Runtime{Launcher: item.Launcher, Location: &locationsCopy, Focusable: true}
 				if err := d.Registry.RegisterSessionAndDeletePending(candidate, item.ID, item.Alias); err != nil {
 					var aliasErr registry.AliasTakenError
-					if errors.As(err, &aliasErr) {
+					var coordinatorErr registry.CoordinatorAliasError
+					if errors.As(err, &aliasErr) || errors.As(err, &coordinatorErr) {
 						d.errorMu.Lock()
 						first := !d.pendingAliasWarns[item.ID]
 						d.pendingAliasWarns[item.ID] = true
@@ -796,12 +797,12 @@ func (d *Daemon) correlateObservedTerminalLaunches(ctx context.Context, sessions
 	}
 }
 
-func (d *Daemon) storedCatalogProject(sessionID string) *catalogProject {
+func (d *Daemon) storedCatalogProject(sessionID string) *CatalogProject {
 	raw, err := d.Registry.CatalogSessionProject(sessionID)
 	if err != nil || len(raw) == 0 {
 		return nil
 	}
-	var project *catalogProject
+	var project *CatalogProject
 	if json.Unmarshal(raw, &project) != nil || project == nil || project.ID == "" || project.LocalID == "" {
 		return nil
 	}

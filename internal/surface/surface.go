@@ -431,6 +431,12 @@ type Waker interface {
 	NeedsWake(ctx context.Context, sess *Session) bool
 }
 
+// ConversationKeeper is a surface that can tell a conversation it would
+// resume from one whose history is gone.
+type ConversationKeeper interface {
+	ConversationExists(ctx context.Context, sess *Session) (bool, error)
+}
+
 type SessionAccessChecker interface {
 	EnsureWritable(ctx context.Context, sess *Session) error
 }

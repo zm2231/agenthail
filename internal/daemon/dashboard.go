@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -106,7 +107,7 @@ type dashboardSession struct {
 	Source            string                     `json:"source,omitempty"`
 	Transport         string                     `json:"transport,omitempty"`
 	ForkedFrom        string                     `json:"forkedFrom,omitempty"`
-	Project           *catalogProject            `json:"project,omitempty"`
+	Project           *CatalogProject            `json:"project,omitempty"`
 	Checkout          *catalogCheckout           `json:"checkout,omitempty"`
 	ObservedAt        time.Time                  `json:"observedAt,omitempty"`
 	UnavailableReason string                     `json:"unavailableReason,omitempty"`
@@ -122,27 +123,28 @@ type dashboardSession struct {
 }
 
 type dashboardState struct {
-	UpdatedAt          time.Time                  `json:"updatedAt"`
-	EventCursor        uint64                     `json:"eventCursor"`
-	HostEpoch          string                     `json:"hostEpoch"`
-	CatalogSeq         uint64                     `json:"catalogSeq"`
-	Daemon             map[string]any             `json:"daemon"`
-	Surfaces           []dashboardSurface         `json:"surfaces"`
-	Sessions           []dashboardSession         `json:"sessions"`
-	TotalSessions      int                        `json:"totalSessions"`
-	Counts             map[string]int             `json:"counts,omitempty"`
-	Projects           []dashboardProject         `json:"projects,omitempty"`
-	NextCursor         string                     `json:"nextCursor,omitempty"`
-	Queue              []dashboardQueue           `json:"queue"`
-	Channels           []dashboardChannel         `json:"channels"`
-	Relays             []dashboardRelay           `json:"relays"`
-	History            []dashboardHistory         `json:"history"`
-	Attention          []dashboardAttention       `json:"attention"`
-	DeliveryProblems   []registry.DeliveryProblem `json:"deliveryProblems"`
-	CodexRecentHours   int                        `json:"codexRecentHours"`
-	BusyDelivery       string                     `json:"busyDelivery"`
-	Signin             []signin.Status            `json:"signin"`
-	Rekeyed            map[string]string          `json:"rekeyed,omitempty"`
+	UpdatedAt          time.Time                   `json:"updatedAt"`
+	EventCursor        uint64                      `json:"eventCursor"`
+	HostEpoch          string                      `json:"hostEpoch"`
+	CatalogSeq         uint64                      `json:"catalogSeq"`
+	Daemon             map[string]any              `json:"daemon"`
+	Surfaces           []dashboardSurface          `json:"surfaces"`
+	Sessions           []dashboardSession          `json:"sessions"`
+	TotalSessions      int                         `json:"totalSessions"`
+	Counts             map[string]int              `json:"counts,omitempty"`
+	Projects           []dashboardProject          `json:"projects,omitempty"`
+	NextCursor         string                      `json:"nextCursor,omitempty"`
+	Queue              []dashboardQueue            `json:"queue"`
+	Channels           []dashboardChannel          `json:"channels"`
+	Relays             []dashboardRelay            `json:"relays"`
+	History            []dashboardHistory          `json:"history"`
+	Attention          []dashboardAttention        `json:"attention"`
+	DeliveryProblems   []registry.DeliveryProblem  `json:"deliveryProblems"`
+	CodexRecentHours   int                         `json:"codexRecentHours"`
+	BusyDelivery       string                      `json:"busyDelivery"`
+	Signin             []signin.Status             `json:"signin"`
+	Rekeyed            map[string]string           `json:"rekeyed,omitempty"`
+	Coordinators       []registry.CoordinatorEntry `json:"coordinators"`
 	catalogPageApplied bool
 	catalogPageFilter  string
 	catalogPageOffset  int
@@ -806,9 +808,17 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read projects: %w", err)
 	}
+	coordinators, err := d.Registry.LocalCoordinators()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read coordinators: %w", err)
+	}
 	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Sessions: []dashboardSession{}, Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Signin: make([]signin.Status, 0, len(signin.Consumers)), Rekeyed: rekeyed}
 	for _, consumer := range signin.Consumers {
 		state.Signin = append(state.Signin, d.signinConsumer(consumer))
+	}
+	state.Coordinators = make([]registry.CoordinatorEntry, 0, len(coordinators))
+	for _, spec := range coordinators {
+		state.Coordinators = append(state.Coordinators, spec.Entry())
 	}
 	if page != nil {
 		state.catalogPageApplied = true
@@ -1086,6 +1096,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Attachments     []string                   `json:"attachments"`
 		RequestID       string                     `json:"requestId"`
 		Decision        surface.Decision           `json:"decision"`
+		Instructions    *string                    `json:"instructions"`
+		Replace         bool                       `json:"replace"`
+		ChangedAt       time.Time                  `json:"changedAt"`
+		ChangedBy       string                     `json:"changedBy"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid dashboard request", http.StatusBadRequest)
@@ -1097,6 +1111,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if strings.HasPrefix(request.Action, "project-") {
 		d.projectAction(r, w, projectRequest{Action: request.Action, ProjectID: request.ProjectID, Path: request.Path, Title: request.Title})
+		return
+	}
+	if strings.HasPrefix(request.Action, "coordinator-") {
+		d.coordinatorAction(r, w, coordinatorRequest{Action: request.Action, SessionID: request.SessionID, SourceSessionID: request.SourceSessionID, ProjectID: request.ProjectID, Name: request.Name, Surface: request.Surface, Cwd: request.Cwd, Path: request.Path, Model: request.Model, PermissionMode: request.PermissionMode, Instructions: request.Instructions, Replace: request.Replace, ChangedAt: request.ChangedAt, ChangedBy: request.ChangedBy, Message: request.Message})
 		return
 	}
 	if request.Action == "delivery-dismiss" {
@@ -1151,7 +1169,8 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			if err := d.Registry.EnsureAliasAvailable(alias); err != nil {
 				var taken registry.AliasTakenError
-				if errors.As(err, &taken) {
+				var coordinator registry.CoordinatorAliasError
+				if errors.As(err, &taken) || errors.As(err, &coordinator) {
 					http.Error(w, err.Error(), http.StatusBadRequest)
 				} else {
 					http.Error(w, fmt.Sprintf("check conversation name: %s", err), http.StatusInternalServerError)
@@ -1254,7 +1273,8 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@")
 		if err := d.Registry.EnsureAliasAvailable(alias); err != nil {
 			var taken registry.AliasTakenError
-			if errors.As(err, &taken) {
+			var coordinator registry.CoordinatorAliasError
+			if errors.As(err, &taken) || errors.As(err, &coordinator) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 			} else {
 				http.Error(w, fmt.Sprintf("check conversation name: %s", err), http.StatusInternalServerError)
@@ -1387,6 +1407,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, membersErr.Error(), http.StatusBadRequest)
 			return
 		}
+		sender := coordinator.Sender{Service: d.coordinator()}
+		if request.SourceSessionID != "" {
+			request.SourceSessionID = sender.Canonical(request.SourceSessionID)
+		}
 		members = slices.DeleteFunc(members, func(member string) bool { return request.SourceSessionID != "" && member == request.SourceSessionID })
 		if len(members) == 0 {
 			http.Error(w, "channel has no members other than the sender", http.StatusBadRequest)
@@ -1421,7 +1445,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				failed++
 				continue
 			}
-			receipt, deliverErr := d.dispatcher().DeliverWithOptions(operationCtx, adapter, session, request.Message, "", surface.SendOptions{SourceSessionID: request.SourceSessionID})
+			receipt, deliverErr := sender.DeliverWithOptions(operationCtx, adapter, session, request.Message, "", surface.SendOptions{SourceSessionID: request.SourceSessionID})
 			if deliverErr != nil {
 				failed++
 				continue
@@ -1717,7 +1741,8 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			d.queueHostRelay(w, r, session, request.Message, request.SourceSessionID, request.BusyDelivery, request.RelayHops)
 			return
 		}
-		receipt, actionErr := d.dispatcher().DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, Uploads: attached})
+		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, Uploads: attached}
+		receipt, actionErr := coordinator.Sender{Service: d.coordinator()}.DeliverWithOptions(ctx, adapter, session, request.Message, "", options)
 		if actionErr != nil {
 			http.Error(w, actionErr.Error(), http.StatusBadGateway)
 			return

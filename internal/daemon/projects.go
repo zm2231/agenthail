@@ -192,7 +192,7 @@ func catalogScopeCounts(rows []dashboardSession) map[string]int {
 func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, local dashboardHost) []dashboardProject {
 	byID := map[string]*dashboardProject{}
 	order := []string{}
-	entry := func(found *catalogProject) *dashboardProject {
+	entry := func(found *CatalogProject) *dashboardProject {
 		project, ok := byID[found.ID]
 		if !ok {
 			project = &dashboardProject{ID: found.ID, DisplayName: found.DisplayName, Kind: found.Kind, Key: found.Key, Repository: found.Repository}
@@ -201,7 +201,7 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 		}
 		return project
 	}
-	checkout := func(project *dashboardProject, host dashboardHost, found *catalogProject) *dashboardProjectCheckout {
+	checkout := func(project *dashboardProject, host dashboardHost, found *CatalogProject) *dashboardProjectCheckout {
 		for index := range project.Checkouts {
 			if project.Checkouts[index].Host.ID == host.ID && project.Checkouts[index].ProjectID == found.LocalID {
 				return &project.Checkouts[index]
@@ -381,7 +381,7 @@ func (d *Daemon) localProjectCheckouts(projectID string) ([]registry.ProjectReco
 		return nil, err
 	}
 	for _, raw := range raws {
-		var found catalogProject
+		var found CatalogProject
 		if json.Unmarshal(raw, &found) != nil || found.LocalID == "" || seen[found.LocalID] {
 			continue
 		}
@@ -481,16 +481,16 @@ func (d *Daemon) sessionArchiveAction(w http.ResponseWriter, action, sessionID s
 // addProject adds a folder as a project of this host. A folder in a linked
 // worktree is added at the same place in the main checkout, so the project
 // holds that folder in every worktree.
-func (d *Daemon) addProject(ctx context.Context, path, title string) (catalogProject, error) {
+func (d *Daemon) addProject(ctx context.Context, path, title string) (CatalogProject, error) {
 	path, err := workspace.NormalizeCWD(path)
 	if err != nil || path == "" {
-		return catalogProject{}, fmt.Errorf("a folder path is required")
+		return CatalogProject{}, fmt.Errorf("a folder path is required")
 	}
 	if info, err := os.Stat(path); err != nil || !info.IsDir() {
-		return catalogProject{}, fmt.Errorf("%s is not a folder", path)
+		return CatalogProject{}, fmt.Errorf("%s is not a folder", path)
 	}
 	if path, err = canonicalCatalogPath(path); err != nil {
-		return catalogProject{}, err
+		return CatalogProject{}, err
 	}
 	record := registry.ProjectRecord{ID: "p-" + uuid.NewString(), WorkspaceRoot: path, Title: strings.TrimSpace(title), CreatedAt: time.Now().UTC()}
 	repository, notRepository, err := resolveCatalogRepository(ctx, path, nil)
@@ -502,29 +502,29 @@ func (d *Daemon) addProject(ctx context.Context, path, title string) (catalogPro
 			record.Repository, _ = json.Marshal(repository.repository)
 		}
 	case !notRepository:
-		return catalogProject{}, fmt.Errorf("read repository for %s: %w", path, err)
+		return CatalogProject{}, fmt.Errorf("read repository for %s: %w", path, err)
 	}
 	if record.Title == "" {
 		record.Title = filepath.Base(record.WorkspaceRoot)
 	}
 	if err := d.Registry.AddProject(record); err != nil {
-		return catalogProject{}, err
+		return CatalogProject{}, err
 	}
 	d.requestCatalogDiscovery()
 	return *addedCatalogProject(record, inRepository), nil
 }
 
-// ResolvePathProject names the project a session working in path belongs
-// to, resolved the way the catalog resolves sessions. It is "" when no
+// ResolvePathProject finds the project a session working in path belongs
+// to, resolved the way the catalog resolves sessions. It is nil when no
 // project holds the folder.
-func ResolvePathProject(ctx context.Context, reg *registry.Registry, path string) (string, error) {
+func ResolvePathProject(ctx context.Context, reg *registry.Registry, path string) (*CatalogProject, error) {
 	path, err := catalogSessionPath(path)
 	if err != nil || path == "" {
-		return "", fmt.Errorf("a folder path is required")
+		return nil, fmt.Errorf("a folder path is required")
 	}
 	records, err := reg.ListProjects()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	added := records[:0]
 	for _, record := range records {
@@ -534,12 +534,9 @@ func ResolvePathProject(ctx context.Context, reg *registry.Registry, path string
 	}
 	identity, _, transient := resolveCatalogIdentity(ctx, path, added, nil)
 	if transient {
-		return "", fmt.Errorf("resolve the project of %s: %s", path, identity.UnavailableReason)
+		return nil, fmt.Errorf("resolve the project of %s: %s", path, identity.UnavailableReason)
 	}
-	if identity.Project == nil {
-		return "", nil
-	}
-	return identity.Project.ID, nil
+	return identity.Project, nil
 }
 
 // refreshProjectRepositories keeps each added project's key current with its

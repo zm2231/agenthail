@@ -203,6 +203,9 @@ func ClaimSocket(t testing.TB, pid int) string {
 	return path
 }
 
+// AgentsUnreadable makes claude agents print a catalog Agenthail cannot parse.
+func (f *Fixture) AgentsUnreadable() { f.write("agents.json", "{") }
+
 // Invocations counts claude invocations whose arguments equal args.
 func (f *Fixture) Invocations(args ...string) int {
 	f.t.Helper()

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/zm2231/agenthail/internal/coordinator"
 	"io"
 	"os"
 	"os/exec"
@@ -185,6 +186,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdSignin(rest)
 	case "identify":
 		return a.cmdIdentify(rest)
+	case "coordinator":
+		return a.cmdCoordinator(rest)
 	case "channel":
 		return a.cmdChannel(rest)
 	case "relay":
@@ -265,6 +268,18 @@ Identity:
   identify <target> <name>      Name a session (henceforth @name resolves to it)
   identify rm <name>             Remove an alias
   identify list                 Show all names
+
+Coordinator (one per project; a message to it always lands):
+  coordinator [--cwd <path>] [--json]  Show the coordinator of this folder's project
+  coordinator list [--json]     Show every project's coordinator
+  coordinator set <target> [--name <name>] [--instructions <file>] [--permission-mode <mode>]
+                                 Make an existing session its project's coordinator
+  coordinator new <claude|codex> [--cwd <path>] [--name <name>] [--model <model>] [--instructions <file>] [--permission-mode <mode>]
+                                 Define this folder's project coordinator (default @<project>-lead); the first message starts it
+  coordinator clear [--cwd <path>]  Stop treating any session as this project's coordinator
+  @lead addresses the coordinator of the sender's project. A send to a coordinator
+  steers it when busy, resumes it when ended, and starts a new conversation from
+  its saved instructions when its conversation is gone.
 
 Channels:
   channel create <name>         Create a channel
@@ -571,7 +586,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--request": true, "--reason": true, "--answers": true, "--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--project": true}
+	valueFlags := map[string]bool{"--request": true, "--reason": true, "--answers": true, "--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--project": true, "--instructions": true, "--permission-mode": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -614,7 +629,7 @@ func validateCommandFlags(command string, args []string) error {
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
 		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
 		"permission-mode": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "requests": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
-		"answer": {values: map[string]bool{"--timeout": true, "--request": true, "--reason": true, "--answers": true}, bools: map[string]bool{"--json": true}}, "interrupt": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "steer": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "control": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
+		"answer": {values: map[string]bool{"--timeout": true, "--request": true, "--reason": true, "--answers": true}, bools: map[string]bool{"--json": true}}, "interrupt": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "steer": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "control": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "identify": {}, "coordinator": {values: map[string]bool{"--name": true, "--instructions": true, "--permission-mode": true, "--cwd": true, "--model": true, "--host": true}, bools: map[string]bool{"--json": true, "--replace": true}}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
 	}
 	spec, known := specs[command]
 	if !known {
@@ -1290,7 +1305,12 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 		}
 		return session, adapter, nil
 	}
+	target, err := a.expandLead(target)
+	if err != nil {
+		return nil, nil, err
+	}
 	subagentPath := strings.HasPrefix(target, "@") && strings.Contains(target, "/")
+	named := strings.HasPrefix(target, "@") && !subagentPath && a.registry() != nil
 	if !subagentPath {
 		target = strings.TrimPrefix(target, "@")
 	}
@@ -1298,7 +1318,11 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 		return nil, nil, fmt.Errorf("subagent target %q needs the session registry", target)
 	}
 	if a.registry() != nil {
-		sid, err := a.registry().ResolveTarget(target)
+		resolve := a.registry().ResolveTarget
+		if named {
+			resolve = func(name string) (string, error) { return a.registry().ExactTarget("", name) }
+		}
+		sid, err := resolve(target)
 		if err != nil && subagentPath {
 			return nil, nil, err
 		}
@@ -1323,6 +1347,9 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, err
 		}
+	}
+	if named {
+		return nil, nil, targetNotFoundError{target: "@" + target}
 	}
 	type resolvedMatch struct {
 		session *surface.Session
@@ -1619,12 +1646,33 @@ func (a *App) cmdSend(args []string) error {
 		message = fmt.Sprintf("[from %s] %s", fromLabel, message)
 	}
 
+	_, peerLead, err := a.leadTarget(target)
+	if err != nil {
+		return err
+	}
+	if peerLead != nil && !hasFlag(args, "--stream") && !hasFlag(args, "--reply") {
+		return a.sendToPeerCoordinator(ctx, *peerLead, message, args)
+	}
+	if target, err = a.expandLead(target); err != nil {
+		return err
+	}
+	coord := a.coordinator()
+	_, byName := coord.Named(target)
+	if spec, named := coord.Named(target); named && !coord.Started(spec) {
+		return a.startCoordinator(ctx, coord, spec, message, args)
+	}
 	sess, surf, remote, err := a.resolveAnyTarget(ctx, target)
 	if err != nil {
 		return err
 	}
 	if remote != nil {
 		return a.sendRemote(ctx, remote, message, args, timeout)
+	}
+	spec, coordinated := coord.Of(sess.ID)
+	if current, replaced := coord.ReplacedBy(sess.ID); replaced {
+		if sess, surf, _, err = a.resolveAnyTarget(ctx, current); err != nil {
+			return err
+		}
 	}
 	if !surf.Capabilities().Send {
 		return fmt.Errorf("%s does not support send", surf.Name())
@@ -1676,7 +1724,29 @@ func (a *App) cmdSend(args []string) error {
 	if syntheticNotion {
 		syntheticNotionName = sess.Name
 	}
-	if hasFlag(args, "--no-queue") || syntheticNotion {
+	if coordinated {
+		deliver := coord.Deliver
+		if hasFlag(args, "--no-queue") {
+			deliver = coord.DeliverWithoutQueue
+		}
+		var outcome *coordinator.Outcome
+		if outcome, err = deliver(ctx, spec, message, options); err == nil {
+			if outcome.Started {
+				if !byName {
+					return printCoordinatorStart(outcome, outcome.Session.ID, jsonOut)
+				}
+				return printCoordinatorStart(outcome, target, jsonOut)
+			}
+			receipt = outcome.Receipt
+			if outcome.Session != nil && outcome.Session.ID != addressed.ID {
+				if wantStream || wantReply {
+					fmt.Fprintf(os.Stderr, "the coordinator moved to %s while this message was sent, so this send cannot follow its turns; read the reply with 'agenthail last %s'\n", outcome.Session.ID, outcome.Session.ID)
+					wantStream, wantReply = false, false
+				}
+				sess = outcome.Session
+			}
+		}
+	} else if hasFlag(args, "--no-queue") || syntheticNotion {
 		receipt, err = dispatcher.DeliverWithoutQueue(ctx, surf, sess, message, "", options)
 	} else {
 		receipt, err = dispatcher.DeliverWithOptions(ctx, surf, sess, message, "", options)
@@ -1698,7 +1768,11 @@ func (a *App) cmdSend(args []string) error {
 			if receipt.WaitingOn != nil {
 				fmt.Printf("queued #%d for %s, which is waiting on you; it delivers after you answer\n", receipt.QueueID, a.resolveDisplay(sess.ID))
 			} else {
-				fmt.Printf("target is active; queued #%d for %s and will deliver when the current turn finishes (use 'agenthail steer %s \"message\"' to affect the current turn)\n", receipt.QueueID, a.resolveDisplay(sess.ID), target)
+				steerTarget := target
+				if coordinated && !byName {
+					steerTarget = sess.ID
+				}
+				fmt.Printf("target is active; queued #%d for %s and will deliver when the current turn finishes (use 'agenthail steer %s \"message\"' to affect the current turn)\n", receipt.QueueID, a.resolveDisplay(sess.ID), steerTarget)
 			}
 		}
 		return nil

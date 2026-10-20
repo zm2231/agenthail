@@ -146,6 +146,10 @@ func seedVersion13(t *testing.T, r *Registry) {
 		t.Fatal(err)
 	}
 	exec(`INSERT INTO channel_members(channel_id,session_id) VALUES(?,?),(?,?)`, channel, rekeyedBridge, channel, collidedBridge)
+	exec(`INSERT INTO coordinators(project_id,project_root,name,surface,cwd,changed_at_ms) VALUES('project-work','/work','work-lead','claude','/work',1)`)
+	exec(`INSERT INTO coordinators(project_id,host_id,name,surface,session_id,changed_at_ms) VALUES('repo:github.com/example/work','h0123456789ab','remote-lead','claude',?,1)`, rekeyedBridge)
+	exec(`INSERT INTO coordinator_history(project_id,action,name,session_id,previous_session_id,at_ms) VALUES('project-work','replaced','work-lead',?,?,1)`, rekeyedBridge, collidedBridge)
+	exec(`INSERT INTO coordinator_replaced(session_id,project_id) VALUES(?,'project-work')`, rekeyedBridge)
 	if _, err := r.AddRoute(rekeyedBridge, "codex-peer", ".*"); err != nil {
 		t.Fatal(err)
 	}

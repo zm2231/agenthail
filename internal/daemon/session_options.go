@@ -86,7 +86,7 @@ func (d *Daemon) launchProjects() ([]launchProject, error) {
 		if record.HostID != "" || record.Session.Subagent != nil {
 			continue
 		}
-		var project catalogProject
+		var project CatalogProject
 		if json.Unmarshal(record.Project, &project) != nil || project.LocalID == "" || project.RootPath == "" {
 			continue
 		}
