@@ -425,6 +425,33 @@ func TestQuestionRecordedButNotAnnouncedIsAnnouncedAfterRestart(t *testing.T) {
 	}
 }
 
+func TestACallerThatReadTheQuestionBeforeItsAnnouncementFinishedDoesNotAnnounceItAgain(t *testing.T) {
+	q := newClaudeQuestion(t)
+	waiting := surface.Waiting{Kind: surface.WaitingQuestion, ID: questionID, Since: questionAsked}
+	if record, err := q.store.RecordWaiting(q.session.ID, &waiting, questionAsked); err != nil || !record.Announce {
+		t.Fatalf("record=%+v err=%v", record, err)
+	}
+	d := New(q.store, []surface.Surface{q.claude})
+	d.announceWaiting(q.session, waiting)
+	eventually(t, "the announcement to finish", func() bool {
+		_, announced, err := q.store.WaitingState(q.session.ID)
+		d.announceMu.Lock()
+		inFlight := d.announcing[q.session.ID]
+		d.announceMu.Unlock()
+		return err == nil && announced && inFlight == ""
+	})
+	d.announceWaiting(q.session, waiting)
+	d.announceMu.Lock()
+	inFlight := d.announcing[q.session.ID]
+	d.announceMu.Unlock()
+	if inFlight != "" {
+		t.Fatalf("a question already announced started announcing again (%s)", inFlight)
+	}
+	if got := q.pushes.count("session.waiting"); got != 1 {
+		t.Fatalf("one question notified %d times", got)
+	}
+}
+
 func TestQuestionAnnouncedAgainAfterAStopMidDeliveryCollapsesIntoOne(t *testing.T) {
 	q := newClaudeQuestion(t)
 	stall := make(chan struct{})
