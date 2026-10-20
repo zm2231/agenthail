@@ -865,7 +865,12 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 				return []surface.TimelineItem{claudeInjectedItem(injected, origin, text)}
 			}
 			if claudeCommandMarkup(text) {
-				return claudeCommandItems(text)
+				if str(origin, "kind") != claudeOriginHuman {
+					return claudeCommandItems(text)
+				}
+				if claudeCommandInvocation(text) {
+					return []surface.TimelineItem{{Kind: "message", Role: kind, Title: kind, Text: claudeCommandLine(text)}}
+				}
 			}
 		}
 		// Claude Code writes its own instructions to the model, such as a

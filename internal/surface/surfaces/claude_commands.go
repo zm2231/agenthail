@@ -10,15 +10,34 @@ import (
 var (
 	claudeCommandNameTag = regexp.MustCompile(`(?s)<command-name>(.*?)</command-name>`)
 	claudeCommandArgsTag = regexp.MustCompile(`(?s)<command-args>(.*?)</command-args>`)
+	claudeCommandElement = regexp.MustCompile(`(?s)<command-(?:name|message|args)>.*?</command-(?:name|message|args)>`)
 	claudeCommandOutput  = regexp.MustCompile(`(?s)^<local-command-(stdout|stderr)>(.*)</local-command-(?:stdout|stderr)>$`)
+	claudeCommandCaveat  = regexp.MustCompile(`(?s)^<local-command-caveat>.*</local-command-caveat>$`)
 )
 
-// claudeCommandMarkup reports text Claude Code writes around a slash command
-// it ran itself: the invocation, its output, or the caveat before them. No
-// person typed it as a prompt, and no model turn starts at it.
+// claudeCommandMarkup reports text that is wholly the markup Claude Code writes
+// for a slash command: the invocation, its output, or the caveat before them.
 func claudeCommandMarkup(text string) bool {
 	text = strings.TrimSpace(text)
-	return strings.HasPrefix(text, "<command-") || strings.HasPrefix(text, "<local-command-")
+	return claudeCommandInvocation(text) || claudeCommandOutput.MatchString(text) || claudeCommandCaveat.MatchString(text)
+}
+
+func claudeCommandInvocation(text string) bool {
+	text = strings.TrimSpace(text)
+	return claudeCommandNameTag.MatchString(text) && strings.TrimSpace(claudeCommandElement.ReplaceAllString(text, "")) == ""
+}
+
+// claudeCommandLine returns an invocation as it is typed: "/goal tests pass".
+func claudeCommandLine(text string) string {
+	name := claudeCommandNameTag.FindStringSubmatch(text)
+	if name == nil {
+		return ""
+	}
+	command := strings.TrimSpace(name[1])
+	if args := claudeCommandArgsTag.FindStringSubmatch(text); args != nil && strings.TrimSpace(args[1]) != "" {
+		command += " " + strings.TrimSpace(args[1])
+	}
+	return command
 }
 
 // claudeLocalCommandOutput returns what a slash command printed, from the
@@ -38,14 +57,10 @@ func claudeLocalCommandOutput(content string) (string, bool) {
 // so it renders nothing.
 func claudeCommandItems(text string) []surface.TimelineItem {
 	text = strings.TrimSpace(text)
-	if name := claudeCommandNameTag.FindStringSubmatch(text); name != nil {
-		command := strings.TrimSpace(name[1])
-		if args := claudeCommandArgsTag.FindStringSubmatch(text); args != nil && strings.TrimSpace(args[1]) != "" {
-			command += " " + strings.TrimSpace(args[1])
-		}
-		return []surface.TimelineItem{{Kind: "event", Title: "Command", Text: command}}
+	if claudeCommandInvocation(text) {
+		return []surface.TimelineItem{{Kind: "event", Title: "Command", Text: claudeCommandLine(text)}}
 	}
-	if strings.HasPrefix(text, "<local-command-stdout>") || strings.HasPrefix(text, "<local-command-stderr>") {
+	if claudeCommandOutput.MatchString(text) {
 		return []surface.TimelineItem{claudeLocalCommandItem(text)}
 	}
 	return nil
@@ -60,9 +75,12 @@ func claudeLocalCommandItem(content string) surface.TimelineItem {
 	return item
 }
 
-// claudeRecordIsCommand reports a user record that holds only command markup.
+// claudeRecordIsCommand reports a user record that holds only command markup
+// Claude Code wrote itself. A slash command the person typed carries
+// origin.kind human and stays their prompt.
 func claudeRecordIsCommand(record map[string]any) bool {
-	if str(record, "type") != "user" {
+	origin, _ := record["origin"].(map[string]any)
+	if str(record, "type") != "user" || str(origin, "kind") == claudeOriginHuman {
 		return false
 	}
 	message, _ := record["message"].(map[string]any)

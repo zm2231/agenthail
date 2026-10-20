@@ -58,7 +58,9 @@ refuses such a request with that reason.
 In the session timeline, the command shows as a `Command` event and its output
 as a `Local command` event. The Stop hook instruction Claude adds for the model
 shows as one `Claude Code instructions` line; it starts the model's turn
-toward the goal. None of them are shown as something the user said.
+toward the goal. None of them are shown as something the user said. A slash
+command typed in Claude itself, which Claude records with a human origin,
+stays the person's message and shows as typed, such as `/goal tests pass`.
 
 Claude has no settable pause or token budget for a goal. The command takes only
 `[<condition> | clear]`; Claude pauses a goal itself, and any message

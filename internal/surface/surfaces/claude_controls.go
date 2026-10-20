@@ -367,7 +367,12 @@ func (c *Claude) commandControl(ctx context.Context, sess *surface.Session, acti
 	}
 	result := &surface.ControlResult{SessionID: sess.ID, RequestID: sent.UUID, Action: action, Evidence: surface.EvidenceTransportAccepted, Source: "claude-command-transcript"}
 	offset := info.Size()
-	candidates := map[string]string{}
+	type answer struct {
+		output string
+		failed bool
+	}
+	candidates := map[string]answer{}
+	failed := false
 	cloudEvents := map[string]bool{}
 	after := sent.UUID
 	ticker := time.NewTicker(claudeControlPoll)
@@ -390,10 +395,10 @@ func (c *Claude) commandControl(ctx context.Context, sess *surface.Session, acti
 			if json.Unmarshal(line, &record) != nil || record.Type != "system" || record.Subtype != "local_command" || record.CommandRun == nil || record.CommandRun.Command != action || record.CommandRun.Args != value {
 				return nil
 			}
-			output, _ := claudeLocalCommandOutput(record.Content)
-			candidates[record.UUID] = output
+			output, stderr := claudeLocalCommandOutput(record.Content)
+			candidates[record.UUID] = answer{output, stderr}
 			if record.ParentUUID == sent.UUID {
-				result.Output = output
+				result.Output, failed = output, stderr
 				found = true
 			}
 			return nil
@@ -424,9 +429,9 @@ func (c *Claude) commandControl(ctx context.Context, sess *surface.Session, acti
 				}
 				after = last
 			}
-			for uuid, output := range candidates {
+			for uuid, candidate := range candidates {
 				if cloudEvents[uuid] {
-					result.Output = output
+					result.Output, failed = candidate.output, candidate.failed
 					result.Source = "claude-cloud-command+transcript"
 					found = true
 					break
@@ -436,8 +441,7 @@ func (c *Claude) commandControl(ctx context.Context, sess *surface.Session, acti
 		if !found {
 			continue
 		}
-		if strings.HasPrefix(result.Output, "<local-command-stderr>") {
-			result.Output = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(result.Output, "<local-command-stderr>"), "</local-command-stderr>"))
+		if failed {
 			result.Evidence = surface.EvidenceFailed
 			return result, fmt.Errorf("Claude rejected /%s: %s", action, result.Output)
 		}

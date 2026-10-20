@@ -85,6 +85,11 @@ func TestClaudeCommandMarkupClassifies(t *testing.T) {
 		}
 		return record
 	}
+	typed := func(text string) map[string]any {
+		record := user(text, false)
+		record["origin"] = map[string]any{"kind": claudeOriginHuman}
+		return record
+	}
 	cases := []struct {
 		name   string
 		record map[string]any
@@ -100,6 +105,9 @@ func TestClaudeCommandMarkupClassifies(t *testing.T) {
 		{"meta skill body", user([]any{map[string]any{"type": "text", "text": "Base directory for this skill: /x"}}, true), []surface.TimelineItem{{Kind: "event", Title: "Claude Code instructions"}}},
 		{"meta peer message without origin", user("Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/x.sock\" from-name=\"operator\">\nReply with exactly: second\n</cross-session-message>", true), []surface.TimelineItem{{Kind: "message", Role: "peer", Origin: claudeOriginPeer, Sender: "operator", Title: "operator", Text: "Reply with exactly: second"}}},
 		{"typed prompt", user("fix the build", false), []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: "fix the build"}}},
+		{"slash command the person typed", typed("<command-message>goal</command-message>\n<command-name>/goal</command-name>\n<command-args>tests pass</command-args>"), []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: "/goal tests pass"}}},
+		{"typed text that quotes command output", typed("<local-command-stdout>Goal set</local-command-stdout>"), []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: "<local-command-stdout>Goal set</local-command-stdout>", Origin: claudeOriginCommand}}},
+		{"markup followed by prose", user("<command-name>example</command-name> what does this tag mean?", false), []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: "<command-name>example</command-name> what does this tag mean?"}}},
 	}
 	for _, tc := range cases {
 		got := claudeTimelineItems(tc.record)
@@ -111,6 +119,12 @@ func TestClaudeCommandMarkupClassifies(t *testing.T) {
 		if isHumanTranscriptText(text) || !claudeRecordIsCommand(user(text, false)) || claudeRecordStartsTurn(user(text, false)) {
 			t.Fatalf("%q is command markup, not a human turn", text)
 		}
+	}
+	if !claudeRecordStartsTurn(typed("<command-name>/goal</command-name><command-args>tests pass</command-args>")) {
+		t.Fatal("a slash command the person typed starts their turn")
+	}
+	if !claudeRecordStartsTurn(user("<command-name>example</command-name> what does this tag mean?", false)) || !isHumanTranscriptText("<command-name>example</command-name> what does this tag mean?") {
+		t.Fatal("a prompt that only begins with command markup is the person's")
 	}
 	if !claudeRecordStartsTurn(user("A session-scoped Stop hook is now active", true)) {
 		t.Fatal("a meta instruction still starts the model's turn")
