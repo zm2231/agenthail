@@ -110,10 +110,11 @@ input, so a success means the message has left the host's queue.
 
 ## Context window
 
-When a turn result arrives, before acting on it (an idle retiring session is
-closed on its result), the host asks Claude for its context report
+When a turn result arrives the host asks Claude for its context report
 (`getContextUsage`, at most five seconds) to learn the main model, then records
-that model's `modelUsage[model].contextWindow` from the result. A result counts every model
+that model's `modelUsage[model].contextWindow` from the result. The reports run
+one at a time beside the message loop, so a slow one holds up no turn, and a
+retiring session closes only after its pending report. A result counts every model
 the turn called, side queries included, so the report decides which entry is
 the main one. The host lists the window with its session (`contextWindow`,
 `contextModel`; `0` and empty before the first result) and emits a `context`

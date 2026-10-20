@@ -46,17 +46,18 @@ func TestAHostedClaudeSessionReportsTheWindowClaudeRunsItsModelWith(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = file.WriteString(`{"type":"assistant","timestamp":"2099-01-01T00:00:00Z","message":{"id":"switched","model":"claude-sonnet-5-5","content":[{"type":"text","text":"from another model"}]}}` + "\n")
-	file.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
+	appendTestTranscript(t, path, `{"type":"assistant","timestamp":"2099-01-01T00:00:00Z","message":{"id":"switched","model":"claude-sonnet-5-5","content":[{"type":"text","text":"from another model"}]}}`)
 	if usage, err := c.ContextUsage(ctx, session); err != nil || usage == nil || usage.UsedTokens != 1000 || usage.ContextWindow != 0 || usage.ContextWindowSource != ClaudeContextWindowSourceUnknown {
 		t.Fatalf("a window reported for another model was kept: usage=%+v err=%v", usage, err)
+	}
+	appendTestTranscript(t, path, `{"type":"assistant","timestamp":"2099-01-01T00:00:01Z","message":{"id":"modelless","content":[{"type":"text","text":"no model named"}]}}`)
+	appendTestTranscript(t, path, `{"type":"assistant","timestamp":"2099-01-01T00:00:02Z","message":{"id":"back","model":"claude-opus-5-5","content":[{"type":"text","text":"back"}]}}`)
+	if usage, err := c.ContextUsage(ctx, session); err != nil || usage == nil || usage.ContextWindowSource != ClaudeContextWindowSourceProvider {
+		t.Fatalf("the window was not restored for the model it was reported for: usage=%+v err=%v", usage, err)
+	}
+	appendTestTranscript(t, path, `{"type":"assistant","timestamp":"2099-01-01T00:00:03Z","message":{"id":"modelless-2","content":[{"type":"text","text":"no model named"}]}}`)
+	if usage, err := c.ContextUsage(ctx, session); err != nil || usage == nil || usage.ContextWindowSource == ClaudeContextWindowSourceProvider {
+		t.Fatalf("a reply that names no model kept the window: usage=%+v err=%v", usage, err)
 	}
 }
 
@@ -95,6 +96,11 @@ func TestAHostThatDoesNotAnswerDelaysOnlyTheSessionsItRuns(t *testing.T) {
 	}()
 	conn := <-asked
 	defer conn.Close()
+	replyless := &surface.Session{ID: "replyless", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: os.Getpid(), Transcript: filepath.Join(home, "absent.jsonl")}
+	started := time.Now()
+	if usage, err := c.ContextUsage(context.Background(), replyless); err != nil || usage != nil || time.Since(started) > 250*time.Millisecond {
+		t.Fatalf("a hosted session with no reply asked the host: usage=%+v err=%v after %s", usage, err, time.Since(started))
+	}
 	if usage, err := c.ContextUsage(context.Background(), terminal); err != nil || usage == nil || usage.UsedTokens != 1000 {
 		t.Fatalf("usage=%+v err=%v", usage, err)
 	}

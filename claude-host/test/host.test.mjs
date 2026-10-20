@@ -553,6 +553,42 @@ async function lockReleased(f) {
   return ok;
 }
 
+test('a slow context report does not hold up the turns after it', async () => {
+  const f = fixture();
+  await startHost(f, { env: { FAKE_CLAUDE_CONTEXT_REPORT_MS: '3000' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const first = randomUUID();
+  await c.call('send', { sessionId: id, uuid: first, text: 'hello' });
+  await c.event(turnResult(id, first));
+  const second = randomUUID();
+  const sent = Date.now();
+  await c.call('send', { sessionId: id, uuid: second, text: 'again' });
+  await c.event(turnResult(id, second));
+  assert.ok(Date.now() - sent < 1500, `the next turn waited ${Date.now() - sent}ms`);
+  const context = await c.event((e) => e.sessionId === id && e.kind === 'context', 10000);
+  assert.equal(context.contextWindow, 1000000);
+  c.close();
+});
+
+test('a session retired while its context report is slow still records the window first', async () => {
+  const f = fixture();
+  const host = await startHost(f, { env: { FAKE_CLAUDE_NO_STATE_EVENTS: '1', FAKE_CLAUDE_CONTEXT_REPORT_MS: '1000' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  await c.call('send', { sessionId: id, uuid: randomUUID(), text: 'SLOW 400' });
+  await c.call('drain');
+  const r = new Client(retiringSocket(f, host));
+  await r.call('subscribe', { after: 0 });
+  assert.equal(await host.exited, 0);
+  const kinds = r.events.filter((e) => e.sessionId === id).map((e) => e.kind);
+  assert.ok(kinds.includes('context') && kinds.indexOf('context') < kinds.indexOf('exited'), kinds.join(' '));
+});
+
 test('a session retired on its last turn result still records the window of that turn', async () => {
   const f = fixture();
   const host = await startHost(f, { env: { FAKE_CLAUDE_NO_STATE_EVENTS: '1' } });

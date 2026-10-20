@@ -99,13 +99,22 @@ class Session {
     this.owed = new Set();
     this.ambient = new Set();
     this.context = null;
+    this.measuring = null;
   }
 
-  // measure records the context window Claude runs the main model with. A
-  // turn result counts usage for every model the turn called, side queries
-  // included, so Claude's own context report names which entry is the main
-  // model's. The transcript records no window size. It runs before the
-  // result is acted on, since an idle session may be closed on it.
+  // measureAfter records, off the message loop and one result at a time, the
+  // context window Claude runs the main model with. A turn result counts
+  // usage for every model the turn called, side queries included, so Claude's
+  // own context report names which entry is the main model's. The transcript
+  // records no window size.
+  measureAfter(result) {
+    const measuring = (this.measuring ?? Promise.resolve()).then(() => this.measure(result)).catch(() => {});
+    this.measuring = measuring;
+    measuring.then(() => {
+      if (this.measuring === measuring) this.measuring = null;
+    });
+  }
+
   async measure(result) {
     const usage = await Promise.race([this.query.getContextUsage({ detail: 'summary' }), timeout(5_000, 'context report')]);
     const window = result.modelUsage?.[usage?.model]?.contextWindow;
@@ -172,6 +181,10 @@ class Session {
   retireIfDone({ turnEnded = false } = {}) {
     if (this.guessesIdle && !turnEnded) return;
     if (!draining || this.ended || !this.query || this.state !== 'idle' || this.pending.size > 0 || this.tasks.length > 0 || this.owed.size > 0) return;
+    if (this.measuring) {
+      this.measuring.then(() => this.retireIfDone({ turnEnded }));
+      return;
+    }
     process.stderr.write(`claude-host: retiring session ${this.id} (pid ${this.pid}), now idle\n`);
     this.end();
     this.query.close();
@@ -509,7 +522,7 @@ async function run(s, exit) {
   try {
     for await (const message of s.query) {
       for (const uuid of message.user_message_uuids ?? []) s.owed.delete(uuid);
-      if (message.type === 'result') await s.measure(message).catch(() => {});
+      if (message.type === 'result') s.measureAfter(message);
       if (message.type === 'system' && message.subtype === 'session_state_changed') {
         s.stateEvents = true;
         if (message.state === 'running') s.turnStarted();

@@ -247,7 +247,10 @@ lines.on('line', (line) => {
       get_context_usage: { model, maxTokens: 425000, rawMaxTokens: 425000, totalTokens: 1000, categories: [] },
     };
     const response = responses[subtype] ?? {};
-    write({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response } });
+    const answer = () => write({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response } });
+    // FAKE_CLAUDE_CONTEXT_REPORT_MS delays the context report, as a busy Claude may.
+    if (subtype === 'get_context_usage' && process.env.FAKE_CLAUDE_CONTEXT_REPORT_MS) setTimeout(answer, Number(process.env.FAKE_CLAUDE_CONTEXT_REPORT_MS));
+    else answer();
   } else if (message.type === 'control_response') {
     pending.get(message.response.request_id)?.(message.response.response);
   } else if (message.type === 'user') {

@@ -110,8 +110,8 @@ func (c *Claude) transcriptContextUsage(ctx context.Context, sess *surface.Sessi
 				state.oneMRequests[base] = oneM
 			}
 		case record.Type == "assistant":
-			if model := record.Message.Model; model != "" && model != "<synthetic>" {
-				state.model = model
+			if record.Message.Model != "<synthetic>" {
+				state.model = record.Message.Model
 			}
 			used := record.Message.Usage.InputTokens + record.Message.Usage.CacheCreationTokens + record.Message.Usage.CacheReadTokens
 			if used > 0 && contextEventIsCurrent(at, state.usage.UpdatedAt) {
@@ -195,11 +195,12 @@ func (c *Claude) transcriptContextUsage(ctx context.Context, sess *surface.Sessi
 // main model with, which only the host that runs the session hears. It holds
 // while that model is the one the transcript last replied with.
 func (c *Claude) providerContextWindow(ctx context.Context, sess *surface.Session, observedModel string) (int64, bool) {
-	if !claudeHosted(sess) {
+	observed := claudeModelBase(observedModel)
+	if !claudeHosted(sess) || observed == "" {
 		return 0, false
 	}
 	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
-	if !ok || listed.ContextWindow <= 0 || claudeModelBase(observedModel) != claudeModelBase(listed.ContextModel) {
+	if !ok || listed.ContextWindow <= 0 || observed != claudeModelBase(listed.ContextModel) {
 		return 0, false
 	}
 	return listed.ContextWindow, true
