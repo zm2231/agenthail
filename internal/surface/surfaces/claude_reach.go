@@ -189,7 +189,7 @@ func (c *Claude) resume(ctx context.Context, conversation, cwd string) (*surface
 	if err != nil {
 		return nil, err
 	}
-	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd, ConfigDir: root})
+	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd, ConfigDir: surface.ClaudeLaunchConfigDir(c.home, root)})
 	if err != nil {
 		return nil, claudeHostResumeError(conversation, err)
 	}
