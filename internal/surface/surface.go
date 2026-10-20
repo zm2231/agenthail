@@ -607,6 +607,7 @@ type StreamEvent struct {
 	Sender           string         `json:"sender,omitempty"`
 	Title            string         `json:"title,omitempty"`
 	Status           string         `json:"status,omitempty"`
+	ResetsAt         string         `json:"resetsAt,omitempty"`
 	CallID           string         `json:"callId,omitempty"`
 	Attachment       *Attachment    `json:"attachment,omitempty"`
 	Files            []AttachedFile `json:"files,omitempty"`
@@ -662,6 +663,17 @@ func (e StreamEvent) Failed() bool {
 	default:
 		return e.Kind == "source-error"
 	}
+}
+
+// FailureReason is why a failed terminal event failed: the text a failed
+// turn's end carries, such as an API refusal, else its status.
+func (e StreamEvent) FailureReason() string {
+	for _, reason := range []string{e.Text, e.Status} {
+		if reason != "" {
+			return reason
+		}
+	}
+	return "terminal failure"
 }
 
 func StreamEventDelta(event StreamEvent, previous string) string {

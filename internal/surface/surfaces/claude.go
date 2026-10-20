@@ -966,7 +966,7 @@ func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surfa
 	if state.hasCompleted && state.completed.MessageID != "" {
 		observation.CompletedTurnID = state.completed.MessageID
 		observation.InputTurnID = state.completed.UserID
-		observation.Reply = &surface.ReplyResult{Text: state.completed.Assistant, UserText: state.completed.User, Done: true}
+		observation.Reply = &surface.ReplyResult{Text: state.completed.Assistant, UserText: state.completed.User, Done: true, Error: claudeTurnError(state.completed)}
 	}
 	return observation, nil
 }
@@ -1248,8 +1248,8 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			if uuid != "" && end.TurnID != uuid && end.Status == "" {
 				continue
 			}
-			onEvent(surface.StreamEvent{ID: end.Key, ProviderKey: "timeline:" + end.Key, Version: 1, Operation: "phase", TurnID: end.TurnID, Kind: "done", Status: end.Status, Turn: end.Turn})
-			if uuid != "" && end.TurnID == uuid && end.Status == "" {
+			onEvent(surface.StreamEvent{ID: end.Key, ProviderKey: "timeline:" + end.Key, Version: 1, Operation: "phase", TurnID: end.TurnID, Kind: "done", Status: end.Status, Text: end.Reason, Turn: end.Turn})
+			if uuid != "" && end.TurnID == uuid && (end.Status == "" || end.Status == "failed") {
 				completed = true
 			}
 		}
@@ -1304,7 +1304,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 					version = 1
 				}
 				at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
-				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Files: item.Files, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
+				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, ResetsAt: item.ResetsAt, Attachment: item.Attachment, Files: item.Files, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
 			}
 			return nil
 		})
@@ -1377,6 +1377,9 @@ func claudeStreamTerminal(record map[string]any) (done, ending, interrupted bool
 	case "system":
 		return str(record, "subtype") == "turn_duration", false, false
 	case "assistant":
+		if apiError, _ := record["isApiErrorMessage"].(bool); apiError {
+			return true, false, false
+		}
 		reason := strNested(record, "message", "stop_reason")
 		return false, reason == "end_turn", claudeTerminalInterruption(reason)
 	case "user":

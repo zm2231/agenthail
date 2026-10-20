@@ -848,8 +848,16 @@ struct IOSTimelineRow: View {
 	@State private var retainedBody: RetainedBodyResult?
 
     var body: some View {
-        if compactContext, let title = TranscriptContext.title(for: item) {
+        if item.kind == "done" {
+            EmptyView()
+        } else if compactContext, let title = TranscriptContext.title(for: item) {
             ContextRecordRow(title: title, item: item)
+        } else if item.kind == "notice" {
+            Label("\(item.title): \(item.noticeText)", systemImage: item.status == "usage_limit" ? "gauge.with.dots.needle.100percent" : "exclamationmark.triangle")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 4)
+                .textSelection(.enabled)
         } else if item.kind == "message" {
             IOSMessage(label: messageLabel, text: item.text, color: .secondary, timestamp: item.timestamp, files: item.files ?? [])
             if item.truncated { shortened }

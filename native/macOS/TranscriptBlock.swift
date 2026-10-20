@@ -47,7 +47,7 @@ struct TranscriptBlock: Identifiable, Equatable {
                 }
             case "notice":
                 flushTools()
-                let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let text = item.noticeText
                 if !text.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .notice(text), source: item)) }
             case "event" where item.title == "Turn duration":
                 flushTools()

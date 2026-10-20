@@ -1576,11 +1576,7 @@ func directStreamTerminalError(event surface.StreamEvent, turnID string) error {
 	if !event.Failed() {
 		return nil
 	}
-	reason := event.Status
-	if reason == "" {
-		reason = "terminal failure"
-	}
-	return fmt.Errorf("turn %s did not complete successfully: %s", turnID, reason)
+	return fmt.Errorf("turn %s did not complete successfully: %s", turnID, event.FailureReason())
 }
 
 func streamDirectOutput(ctx context.Context, surf surface.Surface, sess *surface.Session, turnID string, timeout time.Duration) error {
@@ -1652,7 +1648,7 @@ func consumeSessionReply(ctx context.Context, subscription sessionstream.Subscri
 			}
 			if event.Terminal() {
 				if event.Failed() {
-					return nil, fmt.Errorf("turn %s did not complete successfully: %s", turnID, event.Reason)
+					return nil, fmt.Errorf("turn %s did not complete successfully: %s", turnID, event.FailureReason())
 				}
 				return &surface.ReplyResult{Text: latest, Done: true, Source: "daemon-journal"}, nil
 			}
@@ -1679,14 +1675,7 @@ func consumeDaemonStreamOutput(ctx context.Context, subscription sessionstream.S
 			}
 			if event.Kind == "done" {
 				if event.Failed() {
-					reason := event.Reason
-					if reason == "" {
-						reason = event.Status
-					}
-					if reason == "" {
-						reason = "terminal failure"
-					}
-					return fmt.Errorf("turn %s did not complete successfully: %s", turnID, reason)
+					return fmt.Errorf("turn %s did not complete successfully: %s", turnID, event.FailureReason())
 				}
 				fmt.Println()
 				return nil
