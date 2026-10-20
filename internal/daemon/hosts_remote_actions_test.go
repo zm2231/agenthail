@@ -117,7 +117,7 @@ func TestFederationLaunchCatalogComesFromTheNamedHost(t *testing.T) {
 	local, remote, record := pairedFederation(t)
 	remote.fake.modelOptions = []surface.ModelOption{{ID: "remote-model", SupportedReasoningEfforts: []string{"low", "high"}}}
 	project := surface.Session{ID: "remote-project", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "project work", Cwd: "/srv/remote-project", Status: surface.StatusIdle, LastActive: time.Now()}
-	if _, _, err := remote.reg.RecordCatalogSession(registry.CatalogSessionState{Session: project, Project: []byte(`{"id":"project-remote","displayName":"remote-project","rootPath":"/srv/remote-project","kind":"git"}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:" + project.ID, Type: "session.upserted", EntityID: project.ID, Payload: []byte(`{}`)}); err != nil {
+	if _, _, err := remote.reg.RecordCatalogSession(registry.CatalogSessionState{Session: project, Project: []byte(`{"id":"project-remote","localId":"project-remote","displayName":"remote-project","rootPath":"/srv/remote-project","kind":"git"}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:" + project.ID, Type: "session.upserted", EntityID: project.ID, Payload: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 	var options struct {
