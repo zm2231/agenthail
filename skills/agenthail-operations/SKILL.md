@@ -335,12 +335,18 @@ Each exchange in `last --json` and `last --report`, and the reply in
 about that turn:
 
 ```json
-{"v":1,"state":"completed","model":"gpt-5.6-terra","durationMs":4200,"usage":{"inputTokens":250,"cachedInputTokens":140,"cacheWriteTokens":5,"outputTokens":50,"reasoningTokens":10}}
+{"v":1,"state":"completed","model":"gpt-5.6-terra","durationMs":4200,"usage":{"inputTokens":250,"cachedInputTokens":140,"cacheWriteTokens":5,"outputTokens":50,"reasoningTokens":10},"contextTokens":180,"compactions":[{"trigger":"threshold","preTokens":1103,"postTokens":200}]}
 ```
 
 `state` is `completed`, `interrupted`, `failed`, `running` or `unknown`.
 `inputTokens` includes the cached and cache-written input, and `outputTokens`
-includes the reasoning output. `unavailable` lists each field the provider did
+includes the reasoning output. `contextTokens` is how full the context was when
+the turn ended. `compactions` lists, oldest first, each compaction since the
+previous turn ended, so one Claude ran while the session sat idle, or a
+`/compact` between turns, shows on the turn after it. `trigger` is `threshold`
+(the context reached the autocompact window), `idle`, `manual`, or `unknown`;
+Codex does not record why it compacted, so its compactions are `unknown`. No
+`compactions` field, and none listed in `unavailable`, means there were none. `unavailable` lists each field the provider did
 not record for that turn, such as `["model","durationMs","usage"]`; a listed
 field is absent, never zero. Codex rollouts record every field for a finished
 turn, except the duration of an aborted one and reasoning tokens Codex did not

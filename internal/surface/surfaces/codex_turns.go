@@ -18,6 +18,15 @@ type codexTurnMeter struct {
 	model     string
 	usage     surface.TurnUsage
 	lastTotal int64
+	// context is the latest request's size, which outlives the turn so a
+	// compaction at the start of the next one knows what it compacted.
+	context          *int64
+	compactions      []surface.TurnCompaction
+	compactionsKnown bool
+	awaitPost        bool
+	// between is set once the meter saw a turn end or read from the start,
+	// so the compactions before the next start are all known and its own.
+	between bool
 }
 
 func newCodexTurnMeter() *codexTurnMeter {
@@ -42,7 +51,12 @@ func codexRecordEndsTurn(record map[string]any) (string, bool) {
 func (m *codexTurnMeter) observe(record map[string]any) *surface.TurnMetadata {
 	payload, _ := record["payload"].(map[string]any)
 	if codexRecordStartsTurn(record) {
-		*m = codexTurnMeter{started: true, turnID: codexRecordTurnID(record), lastTotal: m.lastTotal}
+		*m = codexTurnMeter{started: true, turnID: codexRecordTurnID(record), lastTotal: m.lastTotal, context: m.context, compactions: m.compactions, compactionsKnown: m.between, awaitPost: m.awaitPost}
+		return nil
+	}
+	if str(record, "type") == "compacted" {
+		m.compactions = append(m.compactions, surface.TurnCompaction{Trigger: surface.CompactionUnknown, PreTokens: m.context})
+		m.awaitPost = true
 		return nil
 	}
 	if str(record, "type") == "turn_context" {
@@ -64,14 +78,16 @@ func (m *codexTurnMeter) observe(record map[string]any) *surface.TurnMetadata {
 		ms := int64Value(value)
 		duration = &ms
 	}
-	var usage *surface.TurnUsage
-	model := ""
+	measure := surface.TurnMeasure{DurationMs: duration}
 	if m.started {
 		measured := m.usage
-		usage, model = &measured, m.model
+		measure.Model, measure.Usage, measure.ContextTokens = m.model, &measured, m.context
+		if m.compactionsKnown {
+			measure.Compactions = append([]surface.TurnCompaction{}, m.compactions...)
+		}
 	}
-	*m = codexTurnMeter{lastTotal: m.lastTotal}
-	return surface.NewTurnMetadata(surface.TurnStateOfDone(status), model, duration, usage)
+	*m = codexTurnMeter{lastTotal: m.lastTotal, context: m.context, awaitPost: m.awaitPost, between: true}
+	return surface.NewTurnMetadata(surface.TurnStateOfDone(status), measure)
 }
 
 // count adds one model request. Codex repeats a token_count record without a
@@ -82,6 +98,13 @@ func (m *codexTurnMeter) count(payload map[string]any) {
 	last, _ := info["last_token_usage"].(map[string]any)
 	if last == nil {
 		return
+	}
+	if size := int64Value(last["total_tokens"]); size > 0 {
+		m.context = &size
+		if n := len(m.compactions); m.awaitPost && n > 0 && (m.compactions[n-1].PreTokens == nil || size < *m.compactions[n-1].PreTokens) {
+			m.compactions[n-1].PostTokens = &size
+			m.awaitPost = false
+		}
 	}
 	if total != nil {
 		running := int64Value(total["total_tokens"])
@@ -104,10 +127,11 @@ func (m *codexTurnMeter) count(payload map[string]any) {
 
 func codexTurnMeterAt(ctx context.Context, file *os.File, offset int64) (*codexTurnMeter, error) {
 	meter := newCodexTurnMeter()
-	from, found, err := transcriptRecordBefore(ctx, file, offset, []byte(`_started"`), codexRecordStartsTurn)
+	from, found, err := turnReplayStart(ctx, file, offset, []byte(`_started"`), codexRecordStartsTurn)
 	if err != nil || !found {
 		return meter, err
 	}
+	meter.between = from == 0
 	err = scanTranscriptRecords(ctx, file, from, offset, func(record map[string]any, _ int64, _ []byte) {
 		meter.observe(record)
 	})
@@ -131,7 +155,7 @@ func codexRPCTurnMetadata(turn codexTurn) *surface.TurnMetadata {
 	case turn.Done:
 		state = surface.TurnStateOfDone(strings.TrimPrefix(turn.Error, "turn "))
 	}
-	return surface.NewTurnMetadata(state, "", nil, nil)
+	return surface.NewTurnMetadata(state, surface.TurnMeasure{})
 }
 
 // codexRolloutTurnMetadata reads what the rollout recorded about a finished

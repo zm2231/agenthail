@@ -110,5 +110,5 @@ func replyTurn(exchanges []surface.Exchange, reply *surface.ReplyResult) *surfac
 			return exchanges[index].Turn
 		}
 	}
-	return surface.NewTurnMetadata(surface.TurnUnknown, "", nil, nil)
+	return surface.NewTurnMetadata(surface.TurnUnknown, surface.TurnMeasure{})
 }

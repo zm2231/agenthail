@@ -121,7 +121,7 @@ func BoundSessionRead(session *Session, result *SessionReadResult) *SessionReadR
 			if index == len(result.Exchanges)-1 && session != nil && session.Status == StatusBusy {
 				state = TurnRunning
 			}
-			result.Exchanges[index].Turn = NewTurnMetadata(state, "", nil, nil)
+			result.Exchanges[index].Turn = NewTurnMetadata(state, TurnMeasure{})
 		}
 	}
 	if result.Reply == nil {
@@ -206,7 +206,7 @@ func groupExchanges(items []TimelineItem, source string) ([]Exchange, []int) {
 				open = false
 				ended := item.Turn
 				if ended == nil {
-					ended = NewTurnMetadata(TurnStateOfDone(item.Status), "", nil, nil)
+					ended = NewTurnMetadata(TurnStateOfDone(item.Status), TurnMeasure{})
 				}
 				exchanges[len(exchanges)-1].Turn = ended
 			}

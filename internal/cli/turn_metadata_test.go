@@ -8,10 +8,11 @@ import (
 )
 
 func TestReadsReportEachTurnsMetadataAndNameWhatTheSurfaceDidNotRecord(t *testing.T) {
-	duration, reasoning := int64(4200), int64(10)
-	recorded := surface.NewTurnMetadata(surface.TurnCompleted, "gpt-fixture", &duration, &surface.TurnUsage{InputTokens: 250, CachedInputTokens: 140, CacheWriteTokens: 5, OutputTokens: 50, ReasoningTokens: &reasoning})
-	const wantRecorded = `{"v":1,"state":"completed","model":"gpt-fixture","durationMs":4200,"usage":{"inputTokens":250,"cachedInputTokens":140,"cacheWriteTokens":5,"outputTokens":50,"reasoningTokens":10}}`
-	const wantUnrecorded = `{"v":1,"state":"unknown","unavailable":["state","model","durationMs","usage"]}`
+	duration, reasoning, context, pre, post := int64(4200), int64(10), int64(180), int64(900), int64(120)
+	recorded := surface.NewTurnMetadata(surface.TurnCompleted, surface.TurnMeasure{Model: "gpt-fixture", DurationMs: &duration, Usage: &surface.TurnUsage{InputTokens: 250, CachedInputTokens: 140, CacheWriteTokens: 5, OutputTokens: 50, ReasoningTokens: &reasoning},
+		ContextTokens: &context, Compactions: []surface.TurnCompaction{{Trigger: surface.CompactionIdle, PreTokens: &pre, PostTokens: &post}}})
+	const wantRecorded = `{"v":1,"state":"completed","model":"gpt-fixture","durationMs":4200,"usage":{"inputTokens":250,"cachedInputTokens":140,"cacheWriteTokens":5,"outputTokens":50,"reasoningTokens":10},"contextTokens":180,"compactions":[{"trigger":"idle","preTokens":900,"postTokens":120}]}`
+	const wantUnrecorded = `{"v":1,"state":"unknown","unavailable":["state","model","durationMs","usage","contextTokens","compactions"]}`
 	exchanges := []surface.Exchange{
 		{User: "first", Assistant: "no metadata"},
 		{User: "second", Assistant: reportReply("Done.", `{"v":1,"status":"done","stop":"complete"}`), Turn: recorded},

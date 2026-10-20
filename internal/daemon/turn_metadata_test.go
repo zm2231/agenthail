@@ -12,8 +12,8 @@ func TestAJournalPageCarriesTheMetadataOfEachTurn(t *testing.T) {
 	d, reg, fake, from, _ := daemonFixture(t)
 	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "turns", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
 	duration := int64(4200)
-	live := surface.NewTurnMetadata(surface.TurnCompleted, "gpt-fixture", &duration, &surface.TurnUsage{InputTokens: 250, OutputTokens: 50})
-	seeded := surface.NewTurnMetadata(surface.TurnInterrupted, "gpt-fixture", nil, nil)
+	live := surface.NewTurnMetadata(surface.TurnCompleted, surface.TurnMeasure{Model: "gpt-fixture", DurationMs: &duration, Usage: &surface.TurnUsage{InputTokens: 250, OutputTokens: 50}})
+	seeded := surface.NewTurnMetadata(surface.TurnInterrupted, surface.TurnMeasure{Model: "gpt-fixture"})
 	for _, turn := range []struct {
 		id, status string
 		meta       *surface.TurnMetadata
@@ -23,7 +23,7 @@ func TestAJournalPageCarriesTheMetadataOfEachTurn(t *testing.T) {
 		source.append(surface.StreamEvent{ID: turn.id + ":done", ProviderKey: "timeline:" + turn.id + ":done", Operation: "phase", Kind: "done", Status: turn.status, TurnID: turn.id, Turn: turn.meta})
 	}
 	source.appendSeedItems([]surface.TimelineItem{{ID: "turn-2:done", Kind: "done", Status: "turn_aborted", TurnID: "turn-2", Turn: seeded}})
-	history := surface.NewTurnMetadata(surface.TurnCompleted, "gpt-history", nil, nil)
+	history := surface.NewTurnMetadata(surface.TurnCompleted, surface.TurnMeasure{Model: "gpt-history"})
 	source.appendSeedItems([]surface.TimelineItem{
 		{ID: "turn-3:prompt", Kind: "message", Role: "user", Text: "prompt turn-3", TurnID: "turn-3"},
 		{ID: "turn-3:answer", Kind: "message", Role: "assistant", Text: "answer turn-3", TurnID: "turn-3"},

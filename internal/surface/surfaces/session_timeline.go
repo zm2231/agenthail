@@ -722,7 +722,7 @@ func codexTranscriptExchanges(records []transcriptRecord) ([]surface.Exchange, [
 			if item.Kind == "done" && len(exchanges) > 0 && exchanges[len(exchanges)-1].Turn == nil && (item.TurnID == "" || turnIDs[len(turnIDs)-1] == "" || item.TurnID == turnIDs[len(turnIDs)-1]) {
 				ended := item.Turn
 				if ended == nil {
-					ended = surface.NewTurnMetadata(surface.TurnStateOfDone(item.Status), "", nil, nil)
+					ended = surface.NewTurnMetadata(surface.TurnStateOfDone(item.Status), surface.TurnMeasure{})
 				}
 				exchanges[len(exchanges)-1].Turn = ended
 				continue
@@ -890,6 +890,9 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 	message, _ := record["message"].(map[string]any)
 	if kind == "user" && claudeImageSourceCompanion(record, message) {
 		return nil
+	}
+	if summary, _ := record["isCompactSummary"].(bool); summary && kind == "user" {
+		return []surface.TimelineItem{{Kind: "event", Title: "Compaction summary", Text: claudeMessageText(message["content"])}}
 	}
 	if kind == "user" {
 		origin, _ := record["origin"].(map[string]any)

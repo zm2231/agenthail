@@ -14,12 +14,45 @@ const (
 // names each field the provider did not record, so a missing value is never
 // read as zero.
 type TurnMetadata struct {
-	V           int        `json:"v"`
-	State       string     `json:"state"`
-	Model       string     `json:"model,omitempty"`
-	DurationMs  *int64     `json:"durationMs,omitempty"`
-	Usage       *TurnUsage `json:"usage,omitempty"`
-	Unavailable []string   `json:"unavailable,omitempty"`
+	V          int        `json:"v"`
+	State      string     `json:"state"`
+	Model      string     `json:"model,omitempty"`
+	DurationMs *int64     `json:"durationMs,omitempty"`
+	Usage      *TurnUsage `json:"usage,omitempty"`
+	// ContextTokens is how much of the context window the conversation filled
+	// when the turn ended.
+	ContextTokens *int64 `json:"contextTokens,omitempty"`
+	// Compactions lists, oldest first, each compaction from the end of the
+	// previous turn to the end of this one. Absent and not unavailable means
+	// there were none.
+	Compactions []TurnCompaction `json:"compactions,omitempty"`
+	Unavailable []string         `json:"unavailable,omitempty"`
+}
+
+const (
+	CompactionIdle      = "idle"
+	CompactionThreshold = "threshold"
+	CompactionManual    = "manual"
+	CompactionUnknown   = "unknown"
+)
+
+// TurnCompaction is one compaction of the conversation: what triggered it and
+// the context it left. A size the provider did not record is absent.
+type TurnCompaction struct {
+	Trigger    string `json:"trigger"`
+	PreTokens  *int64 `json:"preTokens,omitempty"`
+	PostTokens *int64 `json:"postTokens,omitempty"`
+}
+
+// TurnMeasure is what a provider measured about a turn. A nil field was not
+// measured; a nil Compactions means the provider could not tell, an empty one
+// that there were none.
+type TurnMeasure struct {
+	Model         string
+	DurationMs    *int64
+	Usage         *TurnUsage
+	ContextTokens *int64
+	Compactions   []TurnCompaction
 }
 
 // TurnUsage counts every model request in the turn. InputTokens includes the
@@ -32,25 +65,34 @@ type TurnUsage struct {
 	ReasoningTokens   *int64 `json:"reasoningTokens,omitempty"`
 }
 
-func NewTurnMetadata(state, model string, durationMs *int64, usage *TurnUsage) *TurnMetadata {
-	turn := &TurnMetadata{V: TurnMetadataVersion, State: state, Model: model, DurationMs: durationMs, Usage: usage}
+func NewTurnMetadata(state string, measure TurnMeasure) *TurnMetadata {
+	turn := &TurnMetadata{V: TurnMetadataVersion, State: state, Model: measure.Model, DurationMs: measure.DurationMs, Usage: measure.Usage, ContextTokens: measure.ContextTokens}
+	if len(measure.Compactions) > 0 {
+		turn.Compactions = measure.Compactions
+	}
 	if turn.State == "" {
 		turn.State = TurnUnknown
 	}
 	if turn.State == TurnUnknown {
 		turn.Unavailable = append(turn.Unavailable, "state")
 	}
-	if model == "" {
+	if measure.Model == "" {
 		turn.Unavailable = append(turn.Unavailable, "model")
 	}
-	if durationMs == nil {
+	if measure.DurationMs == nil {
 		turn.Unavailable = append(turn.Unavailable, "durationMs")
 	}
 	switch {
-	case usage == nil:
+	case measure.Usage == nil:
 		turn.Unavailable = append(turn.Unavailable, "usage")
-	case usage.ReasoningTokens == nil:
+	case measure.Usage.ReasoningTokens == nil:
 		turn.Unavailable = append(turn.Unavailable, "usage.reasoningTokens")
+	}
+	if measure.ContextTokens == nil {
+		turn.Unavailable = append(turn.Unavailable, "contextTokens")
+	}
+	if measure.Compactions == nil {
+		turn.Unavailable = append(turn.Unavailable, "compactions")
 	}
 	return turn
 }

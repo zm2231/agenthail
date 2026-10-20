@@ -73,12 +73,26 @@ item ended `running` (the newest exchange of a busy session) or `unknown`.
   `inputTokens` adds `cache_read_input_tokens` and
   `cache_creation_input_tokens` to `input_tokens`, so both providers count
   input the same way. `durationMs` is the wall time from the prompt record to
-  the turn's last record.
+  the turn's last record. `contextTokens` is the last assistant record's input,
+  or the `postTokens` of a compaction after it. Each `compact_boundary` gives
+  a compaction: `compactMetadata.trigger` `auto` is `threshold` and `manual` is
+  `manual`, and an informational record starting "Compacted while idle" or
+  "Compacted after an hour idle", which Claude writes just after the boundary,
+  makes it `idle`. The compaction summary Claude writes as a user record
+  neither starts a turn nor is a prompt; it shows as a `Compaction summary`
+  event.
+- Codex compactions: a `compacted` record is one compaction. `preTokens` is the
+  size of the request before it and `postTokens` the next `token_count` that is
+  smaller; `contextTokens` is the last `token_count`'s `total_tokens`. The
+  rollout does not say why Codex compacted, so `trigger` is `unknown`.
 - Notion: nothing is recorded, so every field is unavailable.
 
 A reader that starts mid-turn, a page or a stream window, replays from the
-record that started the turn, at most 64 MiB back. A turn that started further
-back reports usage and model as unavailable rather than a partial count.
+record that started the turn before it, at most 64 MiB back, so it holds the
+compactions since that turn ended and the context size they started from. A
+turn that started further back reports usage and model as unavailable rather
+than a partial count, and a turn whose predecessor is out of reach reports
+`compactions` as unavailable.
 
 These numbers are accounting inputs, not a bill. They omit subagent turns,
 which run in their own transcripts, and a request cancelled before the provider
