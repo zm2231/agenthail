@@ -640,16 +640,11 @@ func TestAnAddedProjectsCoordinatorStaysOneProjectAfterTheOriginChanges(t *testi
 	if offered != 1 {
 		t.Fatalf("session options=%+v", options)
 	}
-	response := runDashboardAction(t, d, `{"action":"project-archive","projectId":"`+added.Key+`"}`)
-	if response.Code == http.StatusOK {
-		var result struct {
-			Checkouts []map[string]any `json:"checkouts"`
-		}
-		_ = json.Unmarshal(response.Body.Bytes(), &result)
-		for _, checkout := range result.Checkouts {
-			if checkout["projectId"] != added.ID {
-				t.Fatalf("archived %v instead of the added project %s", checkout["projectId"], added.ID)
-			}
-		}
+	if response := runDashboardAction(t, d, `{"action":"project-archive","projectId":"`+added.Key+`"}`); response.Code != http.StatusNotFound {
+		t.Fatalf("archive by the id the project no longer has: %d %s", response.Code, response.Body)
+	}
+	archive, err := r.ArchiveState()
+	if err != nil || len(archive.Projects) != 0 {
+		t.Fatalf("archived=%v err=%v", archive.Projects, err)
 	}
 }
