@@ -73,7 +73,8 @@ item ended `running` (the newest exchange of a busy session) or `unknown`.
   `inputTokens` adds `cache_read_input_tokens` and
   `cache_creation_input_tokens` to `input_tokens`, so both providers count
   input the same way. `durationMs` is the wall time from the prompt record to
-  the turn's last record. `contextTokens` is the last assistant record's input,
+  the turn's last record. `contextTokens` is the last assistant record's input
+  (`<synthetic>` records are not requests and are skipped),
   or the `postTokens` of a compaction after it. Each `compact_boundary` gives
   a compaction: `compactMetadata.trigger` `auto` is `threshold` and `manual` is
   `manual`, and an informational record starting "Compacted while idle" or
@@ -83,8 +84,10 @@ item ended `running` (the newest exchange of a busy session) or `unknown`.
   event.
 - Codex compactions: a `compacted` record is one compaction. `preTokens` is the
   size of the request before it and `postTokens` the next `token_count` that is
-  smaller; `contextTokens` is the last `token_count`'s `total_tokens`. The
-  rollout does not say why Codex compacted, so `trigger` is `unknown`.
+  smaller; `contextTokens` is the last `token_count`'s `total_tokens`. Two
+  compactions with no `token_count` between them leave the size between them
+  unrecorded, so the first has no `postTokens` and the second no `preTokens`.
+  The rollout does not say why Codex compacted, so `trigger` is `unknown`.
 - Notion: nothing is recorded, so every field is unavailable.
 
 A reader that starts mid-turn, a page or a stream window, replays from the

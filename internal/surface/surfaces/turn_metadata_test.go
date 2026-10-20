@@ -141,6 +141,7 @@ const claudeTurnTail = `{"type":"system","subtype":"compact_boundary","uuid":"cb
 {"type":"assistant","uuid":"a4","timestamp":"2026-10-19T10:01:02Z","message":{"id":"m3","model":"claude-fixture","content":[{"type":"text","text":"writing"}],"usage":{"input_tokens":7,"cache_creation_input_tokens":0,"cache_read_input_tokens":50,"output_tokens":9}}}
 {"type":"assistant","uuid":"a5","timestamp":"2026-10-19T10:01:04Z","message":{"id":"m4","model":"<synthetic>","content":[{"type":"text","text":"API Error: overloaded"}]}}
 {"type":"system","subtype":"compact_boundary","uuid":"cb4","timestamp":"2026-10-19T10:01:04.5Z","content":"Conversation compacted","compactMetadata":{"trigger":"auto","preTokens":57,"postTokens":30}}
+{"type":"assistant","uuid":"a6","timestamp":"2026-10-19T10:01:04.6Z","message":{"id":"m5","model":"<synthetic>","content":[{"type":"text","text":"No response requested."}],"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}
 {"type":"user","uuid":"interrupt","timestamp":"2026-10-19T10:01:05Z","message":{"content":"[Request interrupted by user]"}}
 `
 
@@ -366,4 +367,24 @@ func TestATurnWhoseEarlierHistoryIsOutOfReachDoesNotClaimItHadNoCompactions(t *t
 	if turn == nil || turn.Compactions != nil || !slices.Contains(turn.Unavailable, "compactions") {
 		t.Fatalf("claude turn=%s, want its compactions unavailable", turnJSON(t, turn))
 	}
+}
+
+func TestCodexCompactionsBackToBackLeaveTheSizeBetweenThemUnknown(t *testing.T) {
+	path := timelineFixture(t, `{"timestamp":"2026-10-19T10:00:00Z","type":"session_meta","payload":{"id":"thread"}}
+{"timestamp":"2026-10-19T10:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}
+{"timestamp":"2026-10-19T10:00:00Z","type":"turn_context","payload":{"turn_id":"turn-1","model":"gpt-fixture"}}
+{"timestamp":"2026-10-19T10:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"build it"}}
+{"timestamp":"2026-10-19T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":500},"last_token_usage":{"input_tokens":480,"output_tokens":20,"total_tokens":500}}}}
+{"timestamp":"2026-10-19T10:00:02Z","type":"compacted","payload":{"message":"","window_number":1,"window_id":"window-1"}}
+{"timestamp":"2026-10-19T10:00:03Z","type":"compacted","payload":{"message":"","window_number":2,"window_id":"window-2"}}
+{"timestamp":"2026-10-19T10:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":540},"last_token_usage":{"input_tokens":40,"total_tokens":40}}}}
+{"timestamp":"2026-10-19T10:00:05Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"built"}]}}
+{"timestamp":"2026-10-19T10:00:05Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1","duration_ms":5000}}
+`)
+	read, err := (&Codex{desktopURL: "ws://127.0.0.1:1"}).ReadSession(context.Background(), &surface.Session{ID: "thread", Transport: codexTransportDesktop, Transcript: path, Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 5})
+	if err != nil || len(read.Exchanges) != 1 {
+		t.Fatalf("read=%+v err=%v", read, err)
+	}
+	wantTurn(t, "back to back", read.Exchanges[0].Turn, &surface.TurnMetadata{V: 1, State: "completed", Model: "gpt-fixture", DurationMs: count(5000), Usage: &surface.TurnUsage{InputTokens: 520, OutputTokens: 20}, ContextTokens: count(40),
+		Compactions: []surface.TurnCompaction{{Trigger: "unknown", PreTokens: count(500)}, {Trigger: "unknown", PostTokens: count(40)}}, Unavailable: []string{"usage.reasoningTokens"}})
 }

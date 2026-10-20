@@ -55,7 +55,11 @@ func (m *codexTurnMeter) observe(record map[string]any) *surface.TurnMetadata {
 		return nil
 	}
 	if str(record, "type") == "compacted" {
-		m.compactions = append(m.compactions, surface.TurnCompaction{Trigger: surface.CompactionUnknown, PreTokens: m.context})
+		compaction := surface.TurnCompaction{Trigger: surface.CompactionUnknown, PreTokens: m.context}
+		if m.awaitPost {
+			compaction.PreTokens = nil
+		}
+		m.compactions = append(m.compactions, compaction)
 		m.awaitPost = true
 		return nil
 	}
@@ -99,7 +103,8 @@ func (m *codexTurnMeter) count(payload map[string]any) {
 	if last == nil {
 		return
 	}
-	if size := int64Value(last["total_tokens"]); size > 0 {
+	if value, ok := last["total_tokens"]; ok {
+		size := int64Value(value)
 		m.context = &size
 		if n := len(m.compactions); m.awaitPost && n > 0 && (m.compactions[n-1].PreTokens == nil || size < *m.compactions[n-1].PreTokens) {
 			m.compactions[n-1].PostTokens = &size

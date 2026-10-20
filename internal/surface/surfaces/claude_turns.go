@@ -185,7 +185,11 @@ func (m *claudeTurnMeter) observe(record map[string]any) {
 		return
 	}
 	message, _ := record["message"].(map[string]any)
-	if model := str(message, "model"); model != "" && model != "<synthetic>" {
+	model := str(message, "model")
+	if model == "<synthetic>" {
+		return
+	}
+	if model != "" {
 		m.model = model
 	}
 	usage, _ := message["usage"].(map[string]any)
@@ -207,9 +211,8 @@ func (m *claudeTurnMeter) observe(record map[string]any) {
 		counted.ReasoningTokens = &reasoning
 	}
 	m.usage[id] = counted
-	if context := counted.InputTokens; context > 0 {
-		m.context = &context
-	}
+	context := counted.InputTokens
+	m.context = &context
 }
 
 func (m *claudeTurnMeter) metadata(status string) *surface.TurnMetadata {
