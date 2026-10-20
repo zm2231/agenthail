@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -162,11 +163,32 @@ func (a *App) requestState(ctx context.Context, target string) (surface.RequestS
 		return state, remote.label(), nil
 	}
 	responder, ok := surf.(surface.Responder)
-	if !ok || !surface.EffectiveCapabilities(surf, sess).Respond {
-		return surface.RequestState{}, "", fmt.Errorf("%s does not take answers through Agenthail", a.resolveDisplay(sess.ID))
+	if ok && surface.EffectiveCapabilities(surf, sess).Respond {
+		state, err := responder.Requests(ctx, sess)
+		return state, a.resolveDisplay(sess.ID), err
 	}
-	state, err := responder.Requests(ctx, sess)
-	return state, a.resolveDisplay(sess.ID), err
+	if state, held := a.daemonHeldRequests(ctx, sess.ID); held {
+		return state, a.resolveDisplay(sess.ID), nil
+	}
+	return surface.RequestState{}, "", fmt.Errorf("%s does not take answers through Agenthail", a.resolveDisplay(sess.ID))
+}
+
+// daemonHeldRequests reads the requests the daemon holds for a session this
+// process cannot answer itself, such as a terminal Claude prompt passed to
+// the daemon by its hook.
+func (a *App) daemonHeldRequests(ctx context.Context, sessionID string) (surface.RequestState, bool) {
+	if !a.daemonIsRunning() {
+		return surface.RequestState{}, false
+	}
+	client, err := a.daemonAPI()
+	if err != nil {
+		return surface.RequestState{}, false
+	}
+	var state surface.RequestState
+	if err := client.getJSON(ctx, "/api/v1/requests", url.Values{"sessionId": []string{sessionID}}, &state); err != nil {
+		return surface.RequestState{}, false
+	}
+	return state, true
 }
 
 func (a *App) respond(ctx context.Context, target, requestID string, decision surface.Decision) (string, error) {
@@ -193,12 +215,39 @@ func (a *App) respond(ctx context.Context, target, requestID string, decision su
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return "", err
 	}
-	outcome, err := surf.(surface.Responder).Respond(ctx, sess, requestID, decision)
+	responder, ok := surf.(surface.Responder)
+	if !ok || !surface.EffectiveCapabilities(surf, sess).Respond {
+		return a.respondThroughDaemon(ctx, sess.ID, requestID, decision)
+	}
+	outcome, err := responder.Respond(ctx, sess, requestID, decision)
 	if err != nil {
 		return "", err
 	}
 	a.recordHistory(registry.HistoryEntry{Kind: "request-" + outcome, SessionID: sess.ID, Message: requestID, Result: "answered by " + daemon.CLIActor})
 	return outcome, nil
+}
+
+func (a *App) respondThroughDaemon(ctx context.Context, sessionID, requestID string, decision surface.Decision) (string, error) {
+	client, err := a.daemonAPI()
+	if err != nil {
+		return "", err
+	}
+	data, status, err := client.action(ctx, map[string]any{"action": "respond", "sessionId": sessionID, "requestId": requestID, "decision": decision})
+	if status == http.StatusConflict {
+		return "", surface.ErrRequestStale
+	}
+	if err != nil {
+		return "", err
+	}
+	var response struct {
+		Result struct {
+			Outcome string `json:"outcome"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		return "", fmt.Errorf("decode the answer for %s: %w", a.resolveDisplay(sessionID), err)
+	}
+	return response.Result.Outcome, nil
 }
 
 func (a *App) recordHistory(entry registry.HistoryEntry) {

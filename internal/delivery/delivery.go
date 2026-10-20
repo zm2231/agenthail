@@ -64,6 +64,88 @@ func (d Dispatcher) Compact(ctx context.Context, adapter surface.Surface, sessio
 	return &Receipt{Evidence: surface.EvidenceDelivered, SessionID: session.ID}, nil
 }
 
+// GoalSet sets the session's goal, or with replace changes only its
+// objective. A session that sets its goal by command holds it until idle.
+func (d Dispatcher) GoalSet(ctx context.Context, adapter surface.Surface, session *surface.Session, objective string, replace bool) (*Receipt, error) {
+	objective = strings.TrimSpace(objective)
+	if objective == "" {
+		return nil, surface.DeliveryTerminal(errors.New("goal objective is required"), surface.DeliveryInvalidRequest)
+	}
+	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
+		return nil, err
+	}
+	if err := goalSettable(adapter, session); err != nil {
+		return nil, err
+	}
+	if receipt, held, err := d.holdGoalCommand(adapter, session, objective); held {
+		return receipt, err
+	}
+	var err error
+	if controller, ok := adapter.(surface.GoalController); ok {
+		update := surface.GoalUpdate{Objective: &objective}
+		if !replace {
+			status := surface.GoalStatusActive
+			update.Status = &status
+		}
+		err = controller.UpdateGoal(ctx, session, update)
+	} else {
+		err = adapter.GoalSet(ctx, session, objective)
+	}
+	return d.goalReceipt(session, "goal "+objective, err)
+}
+
+func (d Dispatcher) GoalClear(ctx context.Context, adapter surface.Surface, session *surface.Session) (*Receipt, error) {
+	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
+		return nil, err
+	}
+	if err := goalSettable(adapter, session); err != nil {
+		return nil, err
+	}
+	if receipt, held, err := d.holdGoalCommand(adapter, session, ""); held {
+		return receipt, err
+	}
+	return d.goalReceipt(session, "goal clear", adapter.GoalClear(ctx, session))
+}
+
+// goalSettable refuses a session whose goal is not set here, with the
+// surface's own reason when it has one.
+func goalSettable(adapter surface.Surface, session *surface.Session) error {
+	if surface.EffectiveCapabilities(adapter, session).GoalSet {
+		return nil
+	}
+	if runner, ok := adapter.(surface.GoalCommandRunner); ok {
+		if _, err := runner.GoalCommand(session, ""); err != nil {
+			return err
+		}
+	}
+	return surface.DeliveryTerminal(fmt.Errorf("%s cannot set or clear this session's goal", adapter.Name()), surface.DeliveryInvalidRequest)
+}
+
+func (d Dispatcher) holdGoalCommand(adapter surface.Surface, session *surface.Session, objective string) (*Receipt, bool, error) {
+	runner, ok := adapter.(surface.GoalCommandRunner)
+	if !ok || d.Registry == nil {
+		return nil, false, nil
+	}
+	command, err := runner.GoalCommand(session, objective)
+	if err != nil {
+		return nil, true, err
+	}
+	queueID, err := d.Registry.QueueGoal(session.ID, command)
+	if err != nil {
+		return nil, true, err
+	}
+	return &Receipt{Evidence: surface.EvidenceQueued, SessionID: session.ID, QueueID: queueID, Detail: command + " will run when the target is idle"}, true, nil
+}
+
+func (d Dispatcher) goalReceipt(session *surface.Session, label string, err error) (*Receipt, error) {
+	if err != nil {
+		d.record(registry.HistoryEntry{Kind: failureKind(err, "control-failed"), SessionID: session.ID, Message: label, Error: err.Error()})
+		return nil, err
+	}
+	d.record(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, Message: label, Evidence: surface.EvidenceDelivered})
+	return &Receipt{Evidence: surface.EvidenceDelivered, SessionID: session.ID}, nil
+}
+
 func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session *surface.Session, message string) (*Receipt, error) {
 	target := session.Name
 	if target == "" {

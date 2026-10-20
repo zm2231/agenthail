@@ -96,7 +96,9 @@ from JSON discovery output when reporting partial availability.
 | Stream, interrupt, steer, compact | yes | yes | no |
 | Persistent session model | yes | yes | no |
 | One-message model override | no | yes | yes |
-| Goal tracking | no | yes | no |
+| Goal status | yes | yes | no |
+| Goal set, edit, clear | host or Remote Control | yes | no |
+| Goal pause, resume, token budget | no | yes | no |
 
 Claude's control capabilities depend on its transport. Native UDS messages
 cannot execute slash commands, steer a running turn, or correlate message IDs
@@ -233,6 +235,9 @@ has no Remote Control. A tool its permission mode does not allow, and every
 question it asks, waits for a person: `agenthail requests <target>` lists them
 and `agenthail answer <target> allow|always|deny|"answer"` answers the oldest.
 Do not answer them yourself unless your user asked you to.
+A Claude CLI in a terminal shows its prompts the same way once
+`agenthail hooks install` has added the PermissionRequest hook; the daemon
+holds the prompt, so `requests` and `answer` need it running.
 `agenthail permission-mode <target> <mode>` changes the mode while it runs.
 A Claude session ID is the conversation ID (the transcript name). The process,
 messaging socket and Remote Control session are attachments; Remote Control is
@@ -294,6 +299,11 @@ agenthail goal @builder budget 50000
 agenthail goal @builder budget clear
 agenthail goal @builder clear
 ```
+
+Goals: Codex takes every goal subcommand. A Claude session takes `set`, `edit`
+and `clear`, which run Claude's `/goal` once the session is idle and are
+confirmed by Claude's answer; it has no `pause`, `resume` or `budget`, and a
+session reached only through its peer socket cannot set a goal.
 
 Claude controls over Remote Control report request-linked evidence. `model` and
 `interrupt` wait for Claude's `control_response` to their own request id;

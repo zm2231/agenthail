@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -428,4 +429,48 @@ func stringsJoinLines(records []string) string {
 		result += record + "\n"
 	}
 	return result
+}
+
+func TestClaudeContextUsageReadsTheWindowClaudeRequested(t *testing.T) {
+	request := func(model string, betas ...string) string {
+		encoded, _ := json.Marshal(map[string]any{"type": "api-request", "timestamp": "2026-10-20T10:00:00Z", "querySource": "repl_main_thread", "params": map[string]any{"model": model, "betas": append([]string{"claude-code-20250219"}, betas...)}})
+		return string(encoded)
+	}
+	reply := func(requested, model string) string {
+		record := map[string]any{"type": "assistant", "timestamp": "2026-10-20T10:00:01Z", "message": map[string]any{"model": model, "usage": map[string]any{"input_tokens": 1000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 299000, "output_tokens": 500}}}
+		if requested != "" {
+			record["requestedModel"] = requested
+		}
+		encoded, _ := json.Marshal(record)
+		return string(encoded)
+	}
+	for _, test := range []struct {
+		name       string
+		configured string
+		records    []string
+		window     int64
+		source     string
+	}{
+		{"requested 1M model", "", []string{reply("claude-opus-5-5[1m]", "claude-opus-5-5")}, 1_000_000, ClaudeContextWindowSourceTranscript},
+		{"requested plain model", "", []string{reply("claude-opus-5-5", "claude-opus-5-5")}, 0, ClaudeContextWindowSourceUnknown},
+		{"requested plain model after a 1M launch", "claude-opus-5-5[1m]", []string{reply("claude-opus-5-5", "claude-opus-5-5")}, 0, ClaudeContextWindowSourceUnknown},
+		{"requested 1M for another model", "", []string{reply("claude-sonnet-5-5[1m]", "claude-opus-5-5")}, 0, ClaudeContextWindowSourceUnknown},
+		{"request with the 1M beta", "", []string{request("claude-opus-5-5", "context-1m-2025-08-07"), reply("claude-opus-5-5", "claude-opus-5-5")}, 1_000_000, ClaudeContextWindowSourceRequest},
+		{"request without the 1M beta", "", []string{request("claude-opus-5-5"), reply("claude-opus-5-5", "claude-opus-5-5")}, 0, ClaudeContextWindowSourceUnknown},
+		{"request without the 1M beta after a 1M launch", "claude-opus-5-5[1m]", []string{request("claude-opus-5-5"), reply("", "claude-opus-5-5")}, 1_000_000, ClaudeContextWindowSourceConfigured},
+		{"newer request without the 1M beta", "", []string{request("claude-opus-5-5", "context-1m-2025-08-07"), request("claude-opus-5-5"), reply("claude-opus-5-5", "claude-opus-5-5")}, 0, ClaudeContextWindowSourceUnknown},
+		{"side request after the 1M request", "", []string{request("claude-opus-5-5", "context-1m-2025-08-07"), request("claude-haiku-5-5"), reply("", "claude-opus-5-5")}, 1_000_000, ClaudeContextWindowSourceRequest},
+		{"1M side request", "", []string{request("claude-haiku-5-5", "context-1m-2025-08-07"), request("claude-opus-5-5"), reply("claude-opus-5-5", "claude-opus-5-5")}, 0, ClaudeContextWindowSourceUnknown},
+		{"reply without a model", "", []string{request("claude-opus-5-5", "context-1m-2025-08-07"), reply("claude-opus-5-5[1m]", "")}, 0, ClaudeContextWindowSourceUnknown},
+		{"no requested model", "claude-opus-5-5[1m]", []string{reply("", "claude-opus-5-5")}, 1_000_000, ClaudeContextWindowSourceConfigured},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "claude.jsonl")
+			writeTestTranscript(t, path, test.records...)
+			usage, err := NewClaude(nil, t.TempDir()).ContextUsage(context.Background(), &surface.Session{ID: "claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transcript: path, ConfiguredModel: test.configured})
+			if err != nil || usage == nil || usage.UsedTokens != 300000 || usage.ContextWindow != test.window || usage.ContextWindowSource != test.source || usage.WindowEstimated {
+				t.Fatalf("usage=%+v err=%v", usage, err)
+			}
+		})
+	}
 }

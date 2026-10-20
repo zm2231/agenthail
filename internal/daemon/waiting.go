@@ -54,6 +54,9 @@ func (d *Daemon) observeTurnLocked(ctx context.Context, adapter surface.Surface,
 		d.log.Printf("record waiting %s: %s", d.resolveDisplay(session.ID), err)
 		return observation, false, nil
 	}
+	if record.Replaced != nil && record.ReplacedAnnounced {
+		d.withdrawWaiting(session.ID, *record.Replaced)
+	}
 	if record.Announce {
 		d.announceWaiting(*session, *record.Waiting)
 	}
@@ -145,7 +148,27 @@ func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waitin
 		if err := d.Registry.MarkWaitingAnnounced(sessionID, questionID); err != nil {
 			d.log.Printf("mark waiting announced %s: %s", sessionID, err)
 		}
+		// A question settled while it was being announced was not withdrawn
+		// with the record, which had not been marked announced yet.
+		if recorded, _, err := d.Registry.WaitingState(sessionID); err == nil && (recorded == nil || recorded.ID != questionID) {
+			d.withdrawWaiting(sessionID, waiting)
+		}
 	}(session.ID, waiting.ID)
+}
+
+// withdrawWaiting removes the notifications that told the user about a
+// question that is no longer waiting, on the desktop and on paired devices,
+// so a question answered anywhere stops asking everywhere.
+func (d *Daemon) withdrawWaiting(sessionID string, waiting surface.Waiting) {
+	key := waitingNotificationKey(sessionID, waiting.ID)
+	go func() {
+		if err := d.withdrawDesktop("agenthail-" + key); err != nil {
+			d.log.Printf("withdraw desktop notification: %s", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		d.withdrawFromPairedDevices(ctx, key)
+	}()
 }
 
 // waitingRequest is the open request a session waits on, when its provider

@@ -229,6 +229,21 @@ func TestClaudeCommandOutputIsJoinedToItsRequest(t *testing.T) {
 	}
 }
 
+func TestClaudeCommandOnStderrIsARejection(t *testing.T) {
+	shortControlPoll(t)
+	fixture, session := busyControlSession(t)
+	remote := newFakeRemoteControl(t)
+	remote.onPost = func(payload map[string]any) []map[string]any {
+		appendTranscript(t, session.Transcript, fmt.Sprintf(`{"type":"system","subtype":"local_command","uuid":"fresh","parentUuid":%q,"commandRun":{"command":"context","args":""},"content":"<local-command-stderr>\u001b[31mdenied\u001b[39m</local-command-stderr>"}`, payload["uuid"])+"\n")
+		return nil
+	}
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, remote.request)
+	result, err := claude.Control(context.Background(), session, surface.ControlRequest{Action: "context"})
+	if err == nil || result == nil || result.Evidence != surface.EvidenceFailed || result.Output != "denied" || !strings.Contains(err.Error(), "Claude rejected /context: denied") {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
 func TestClaudeCommandAfterACompetingPromptIsUnknown(t *testing.T) {
 	shortControlPoll(t)
 	fixture, session := busyControlSession(t)

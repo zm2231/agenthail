@@ -146,3 +146,49 @@ func sendDevicePush(ctx context.Context, target registry.DevicePushTarget, notif
 	detail, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
 	return &pushRelayError{status: response.StatusCode, detail: strings.TrimSpace(string(detail))}
 }
+
+// withdrawFromPairedDevices asks every paired device to remove the
+// notification it showed under collapseID. A relay that cannot withdraw is
+// not a reason to stop notifying a device, so no failure here removes one.
+func (d *Daemon) withdrawFromPairedDevices(ctx context.Context, collapseID string) {
+	targets, err := d.Registry.DevicePushTargets()
+	if err != nil {
+		d.log.Printf("load device push targets: %s", err)
+		return
+	}
+	for _, target := range targets {
+		if err := sendDeviceWithdraw(ctx, target, collapseID); err != nil {
+			d.log.Printf("withdraw mobile notification %s: %s", target.DeviceID, err)
+		}
+	}
+}
+
+func sendDeviceWithdraw(ctx context.Context, target registry.DevicePushTarget, collapseID string) error {
+	relayURL := PushRelayURL()
+	if relayURL == "" {
+		return errors.New("push relay is not configured")
+	}
+	payload, err := json.Marshal(map[string]any{
+		"installationId": target.InstallationID,
+		"credential":     target.Credential,
+		"collapseId":     boundedNotificationText(collapseID, 64),
+	})
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, relayURL+"/v1/withdraw", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := pushHTTPClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 200 && response.StatusCode < 300 {
+		return nil
+	}
+	detail, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
+	return &pushRelayError{status: response.StatusCode, detail: strings.TrimSpace(string(detail))}
+}

@@ -65,7 +65,7 @@ func (c *Codex) RequiresLocalTranscript(session *surface.Session) bool {
 
 func (c *Codex) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
-		Send: true, Stream: true, Reply: true, Goal: true, GoalStatus: true,
+		Send: true, Stream: true, Reply: true, Goal: true, GoalSet: true, GoalStatus: true,
 		Compact: true, Model: true, Interrupt: true, Steer: true,
 		Attach: true,
 	}
