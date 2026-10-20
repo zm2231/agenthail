@@ -53,7 +53,7 @@ The dashboard shows the coordinator in the project header as `@name`, or `host::
 - `lead` is reserved and cannot name a session.
 - A coordinator cannot take a name held by a conversation still starting, and a conversation cannot start under a coordinator's name. See [launchers](launchers.md#names).
 
-A worker reports with `agenthail send @lead "..."`. Its host needs to have paired the coordinator's host to see it.
+A worker reports with `agenthail send @lead "..."`. Its host needs to have paired the coordinator's host to see it. A finished report ends with the worker's completion report, the `agenthail-report` block the [operations skill](../../skills/agenthail-operations/SKILL.md#completion-report) defines, and a coordinator dispatching work asks for one. Agenthail does not parse it.
 
 ## Delivery
 
