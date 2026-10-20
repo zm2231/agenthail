@@ -314,6 +314,47 @@ when busy (or queues when steering is unavailable), resumes it when ended, and
 starts a new conversation from its saved instructions when the conversation is
 gone. Do not set or clear the coordinator unless the person asks.
 
+When you dispatch work to another agent, ask it to end its final message with a
+completion report (below). When you finish work someone dispatched to you, end
+your final message, and your report to `@lead`, with one.
+
+## Completion Report
+
+End the final message of a finished piece of work with exactly one completion
+report: a fenced block whose info string is `agenthail-report`, holding one line
+of JSON, with nothing after the closing fence.
+
+````markdown
+Fixed the export retry and pushed the branch.
+
+```agenthail-report
+{"v":1,"status":"done","stop":"complete","commits":["0d825e4d"],"paths":["internal/export/retry.go"],"next":"Review PR #142"}
+```
+````
+
+| Key | Required | Value |
+| --- | --- | --- |
+| `v` | yes | `1` |
+| `status` | yes | `done`, `partial`, `blocked` or `failed` |
+| `stop` | yes | Why you stopped: `complete`, `needs_input`, `needs_approval`, `waiting`, `limit` or `error` |
+| `commits` | no | Commit ids you made, oldest first, at most 20 |
+| `paths` | no | Files you changed or produced, relative to the repository, at most 50 |
+| `next` | no | The one action the reader should take, at most 280 characters |
+
+The JSON line is at most 2048 bytes. Leave out a key you have nothing for rather
+than writing an empty value. Readers ignore keys they do not know; a change that
+breaks this shape uses a new `v`. A report anywhere but the end of the final
+message is quoted text, not a report.
+
+The report is your claim, not evidence. A reader checks `commits` and `paths`
+before acting on them. Read the latest one from any session; `jq -e` exits
+non-zero when the last reply has no report:
+
+```bash
+agenthail last @builder 1 --json \
+  | jq -e '.exchanges[-1].assistant | capture("`{3}agenthail-report\n(?<r>[^\n]+)\n`{3}\\s*$").r | fromjson'
+```
+
 ## Follow, Subscribe, And Notify
 
 AgentHail has four distinct completion behaviors:

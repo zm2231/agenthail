@@ -179,6 +179,25 @@ When the investigation finishes with something the builder needs, Agenthail pass
 
 New routes begin after existing provider history. Completion events and provider cursors survive daemon restarts; each route advances only when its queue item and receipt commit together. A busy or offline destination keeps its handoff in the delivery queue until it can be delivered. Active routes remain until explicitly removed; an inactive route whose Claude Code source stays closed for an hour is removed. `relay list --json`, the dashboard, and native handoff controls show the condition, pending event count, and capture/consumption error. Queued means persisted for delivery, not received by the destination. See [relay recovery](docs/maintainers/durable-relays.md).
 
+### Ask for a completion report
+
+Ask an agent you hand work to to end its final message with a completion report: one line of JSON in a fenced `agenthail-report` block saying whether it finished, why it stopped, and which commits and files it touched.
+
+````markdown
+```agenthail-report
+{"v":1,"status":"blocked","stop":"needs_input","commits":["0d825e4d"],"paths":["internal/export/retry.go"],"next":"Choose the retry limit"}
+```
+````
+
+Read it from the agent's latest reply:
+
+```bash
+agenthail last @builder 1 --json \
+  | jq -e '.exchanges[-1].assistant | capture("`{3}agenthail-report\n(?<r>[^\n]+)\n`{3}\\s*$").r | fromjson'
+```
+
+The report is the agent's own claim; check the commits before you rely on them. The [operations skill](skills/agenthail-operations/SKILL.md#completion-report) defines every field. Agents that have the skill write one when they finish dispatched work.
+
 ## Give each project a coordinator
 
 Each project can have one coordinator, the agent you send the project's work to and its other sessions report to:
