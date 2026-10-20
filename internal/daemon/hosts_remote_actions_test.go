@@ -377,7 +377,7 @@ func TestAForwardedChangeIsRecordedOnTheOwningHostWithWhoMadeIt(t *testing.T) {
 		t.Fatalf("the forwarding host recorded the change itself: %+v", local)
 	}
 
-	phone := deviceToken(t, remote.reg, "Zain's iPhone", "read", "control")
+	phone := deviceToken(t, remote.reg, "Spare phone", "read", "control")
 	claimed := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(`{"action":"model","sessionId":"remote-a","model":"phone"}`))
 	claimed.Header.Set("Authorization", "Bearer "+phone)
 	claimed.Header.Set(ActionActorHeader, CLIActor)
@@ -387,7 +387,7 @@ func TestAForwardedChangeIsRecordedOnTheOwningHostWithWhoMadeIt(t *testing.T) {
 		t.Fatalf("phone status=%d body=%s", response.Code, response.Body.String())
 	}
 	for _, entry := range historyOf(t, remote.reg, "remote-a", "model") {
-		if entry.Message == "phone" && entry.Result != "changed by device Zain's iPhone" {
+		if entry.Message == "phone" && entry.Result != "changed by device Spare phone" {
 			t.Fatalf("a device's claimed actor was trusted: %q", entry.Result)
 		}
 	}

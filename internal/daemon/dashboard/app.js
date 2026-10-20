@@ -1442,46 +1442,6 @@ async function respondToRequest(requestId, decision) {
   await load();
   if (app.selected) await selectSession(app.selected.id);
 }
-document.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-request-respond]");
-  if (!button) return;
-  button.disabled = true;
-  const choice = button.dataset.requestRespond;
-  await respondToRequest(button.dataset.requestId, choice === "deny" ? { behavior: "deny" } : { behavior: "allow", always: choice === "always" });
-});
-document.addEventListener("submit", async (event) => {
-  const form = event.target.closest("[data-request-question]");
-  if (!form) return;
-  event.preventDefault();
-  const answers = {};
-  for (const [index, fieldset] of [...form.querySelectorAll("fieldset[data-question]")].entries()) {
-    const other = form.querySelector(`[name="answer-${index}-other"]`).value.trim();
-    const picked = [...form.querySelectorAll(`[name="answer-${index}"]:checked`)].map((input) => input.value);
-    const answer = other || picked.join(", ");
-    if (!answer) {
-      toast(`Answer: ${fieldset.dataset.question}`);
-      return;
-    }
-    answers[fieldset.dataset.question] = answer;
-  }
-  form.querySelector('[type="submit"]').disabled = true;
-  await respondToRequest(form.dataset.requestQuestion, { behavior: "allow", answers });
-});
-document.addEventListener("submit", async (event) => {
-  const form = event.target.closest("[data-permission-mode]");
-  if (!form) return;
-  event.preventDefault();
-  const permissionMode = form.elements.permissionMode.value;
-  if (!permissionMode) return;
-  try {
-    await action("permission-mode", { permissionMode });
-    toast(`Permission mode set to ${permissionMode}.`);
-  } catch (error) {
-    toast(error.message);
-  }
-  app.requestsKey = "";
-  await syncRequests();
-});
 function formatGoalDuration(seconds) {
   const value = Number(seconds);
   if (!Number.isFinite(value)) return "Unknown";
@@ -2097,6 +2057,46 @@ function startCodexSearch(query) {
     }
   }, 300);
 }
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-request-respond]");
+  if (!button) return;
+  button.disabled = true;
+  const choice = button.dataset.requestRespond;
+  await respondToRequest(button.dataset.requestId, choice === "deny" ? { behavior: "deny" } : { behavior: "allow", always: choice === "always" });
+});
+document.addEventListener("submit", async (event) => {
+  const form = event.target.closest("[data-request-question]");
+  if (!form) return;
+  event.preventDefault();
+  const answers = {};
+  for (const [index, fieldset] of [...form.querySelectorAll("fieldset[data-question]")].entries()) {
+    const other = form.querySelector(`[name="answer-${index}-other"]`).value.trim();
+    const picked = [...form.querySelectorAll(`[name="answer-${index}"]:checked`)].map((input) => input.value);
+    const answer = other || picked.join(", ");
+    if (!answer) {
+      toast(`Answer: ${fieldset.dataset.question}`);
+      return;
+    }
+    answers[fieldset.dataset.question] = answer;
+  }
+  form.querySelector('[type="submit"]').disabled = true;
+  await respondToRequest(form.dataset.requestQuestion, { behavior: "allow", answers });
+});
+document.addEventListener("submit", async (event) => {
+  const form = event.target.closest("[data-permission-mode]");
+  if (!form) return;
+  event.preventDefault();
+  const permissionMode = form.elements.permissionMode.value;
+  if (!permissionMode) return;
+  try {
+    await action("permission-mode", { permissionMode });
+    toast(`Permission mode set to ${permissionMode}.`);
+  } catch (error) {
+    toast(error.message);
+  }
+  app.requestsKey = "";
+  await syncRequests();
+});
 $("#session-search").addEventListener("input", () => {
   app.sessionLimit = sessionBatchSize();
   const query = $("#session-search").value.trim();
