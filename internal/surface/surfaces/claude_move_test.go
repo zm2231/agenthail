@@ -267,3 +267,81 @@ func TestAdoptingATerminalConversationResumesItInTheHostInItsOwnRoot(t *testing.
 		t.Fatalf("adopting a hosted conversation again: result=%+v err=%v", again, err)
 	}
 }
+
+func TestAStagedMoveRechecksAHolderThatCameBackBeforeSwitching(t *testing.T) {
+	fixture, host, c, primary, spare := moveFixture(t)
+	transcript := fixture.Transcript(fixtureConversation, fixture.Home)
+	journal := &claudeMoveJournal{Conversation: fixtureConversation, From: primary, To: spare, ProjectDir: "fixture-project", Cwd: fixture.Home, Resume: true, Started: time.Now()}
+	journal.Pieces = claudeConversationPieces(primary, journal.ProjectDir, fixtureConversation)
+	if err := c.stageMove(journal); err != nil {
+		t.Fatal(err)
+	}
+	later := `{"type":"user","message":{"role":"user","content":"written after the copy"}}` + "\n"
+	appendFile(t, transcript, later)
+	fixture.RecordStatus(fixtureConversation, fixture.Home, "", "busy", "", time.Time{})
+	_, err := c.MoveSession(context.Background(), &surface.Session{ID: fixtureConversation}, surface.MoveRequest{})
+	var busy *surface.MoveBusyError
+	if !errors.As(err, &busy) {
+		t.Fatalf("a staged move went on past a busy holder: %v", err)
+	}
+	if root, _ := c.conversationRoot(fixtureConversation); root != primary {
+		t.Fatalf("root=%s", root)
+	}
+	fixture.RemoveRecord()
+	result, err := c.MoveSession(context.Background(), &surface.Session{ID: fixtureConversation}, surface.MoveRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved, err := os.ReadFile(filepath.Join(spare, "projects", "fixture-project", fixtureConversation+".jsonl"))
+	if err != nil || !strings.Contains(string(moved), "written after the copy") {
+		t.Fatalf("the move promoted a stale copy (err %v)", err)
+	}
+	if result.ToRoot != spare || len(host.Spawns(t, fixtureConversation)) != 1 {
+		t.Fatalf("the conversation that was running before the move was not resumed: result=%+v", result)
+	}
+}
+
+func TestAFinishedSwitchDoesNotResumeAConversationAlreadyHeldInTheTarget(t *testing.T) {
+	fixture, host, c, primary, spare := moveFixture(t)
+	fixture.Transcript(fixtureConversation, fixture.Home)
+	journal := &claudeMoveJournal{Conversation: fixtureConversation, From: primary, To: spare, ProjectDir: "fixture-project", Cwd: fixture.Home, Resume: true, Started: time.Now()}
+	journal.Pieces = claudeConversationPieces(primary, journal.ProjectDir, fixtureConversation)
+	if err := c.stageMove(journal); err != nil {
+		t.Fatal(err)
+	}
+	for _, piece := range journal.Pieces {
+		if err := os.Rename(filepath.Join(primary, piece), filepath.Join(primary, piece)+claudeMovedSuffix); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(filepath.Join(spare, piece)+claudeStagedSuffix, filepath.Join(spare, piece)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	journal.Phase = claudeMovePhaseSwitched
+	if err := c.writeMoveJournal(journal); err != nil {
+		t.Fatal(err)
+	}
+	fixture.Record(fixtureConversation, fixture.Home, "")
+	result, err := c.MoveSession(context.Background(), &surface.Session{ID: fixtureConversation}, surface.MoveRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 0 {
+		t.Fatalf("a held conversation was resumed a second time: %+v", spawns)
+	}
+	if result.Session == nil || result.Session.PID != fixture.PID {
+		t.Fatalf("session=%+v", result.Session)
+	}
+}
+
+func appendFile(t *testing.T, path, content string) {
+	t.Helper()
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
+}

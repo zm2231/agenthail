@@ -110,8 +110,18 @@ func (c *Claude) MoveSession(ctx context.Context, sess *surface.Session, request
 	if err != nil {
 		return nil, err
 	}
+	resume := false
 	if journal != nil && journal.Phase != claudeMovePhaseDone {
-		return c.continueMove(ctx, sess, journal, request)
+		if err := c.checkMoveTarget(journal, request); err != nil {
+			return nil, err
+		}
+		if journal.Phase != claudeMovePhaseStaged || !claudePathExists(filepath.Join(journal.From, journal.Pieces[0])) {
+			return c.finishMove(ctx, sess, journal, &surface.MoveResult{FromRoot: journal.From, ToRoot: journal.To, Copied: true})
+		}
+		// Nothing was switched yet, so the source may have been resumed and
+		// written to since the copy: the move starts over from its checks and
+		// restages, keeping the journal's intent to resume.
+		request.To.Account, resume = journal.To, journal.Resume
 	}
 
 	from, err := c.conversationRoot(conversation)
@@ -181,7 +191,7 @@ func (c *Claude) MoveSession(ctx context.Context, sess *surface.Session, request
 		return result, nil
 	}
 
-	journal = &claudeMoveJournal{Conversation: conversation, From: from, To: to, ProjectDir: filepath.Base(filepath.Dir(transcript)), Cwd: cwd, Resume: holder != nil, Started: time.Now().UTC()}
+	journal = &claudeMoveJournal{Conversation: conversation, From: from, To: to, ProjectDir: filepath.Base(filepath.Dir(transcript)), Cwd: cwd, Resume: resume || holder != nil, Started: time.Now().UTC()}
 	journal.Pieces = claudeConversationPieces(from, journal.ProjectDir, conversation)
 	if err := c.stageMove(journal); err != nil {
 		c.unstageMove(journal)
@@ -191,18 +201,23 @@ func (c *Claude) MoveSession(ctx context.Context, sess *surface.Session, request
 	return c.finishMove(ctx, sess, journal, result)
 }
 
-func (c *Claude) continueMove(ctx context.Context, sess *surface.Session, journal *claudeMoveJournal, request surface.MoveRequest) (*surface.MoveResult, error) {
-	if request.To.Account != "" {
-		to, err := surface.ResolveClaudeAccountRoot(c.home, request.To.Account)
-		if err != nil {
-			return nil, surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
-		}
-		if to != journal.To {
-			return nil, fmt.Errorf("Claude conversation %s has an unfinished move to %s; finish it first with that account", journal.Conversation, journal.To)
-		}
+func (c *Claude) checkMoveTarget(journal *claudeMoveJournal, request surface.MoveRequest) error {
+	if request.To.Account == "" {
+		return nil
 	}
-	result := &surface.MoveResult{FromRoot: journal.From, ToRoot: journal.To, Copied: true}
-	return c.finishMove(ctx, sess, journal, result)
+	to, err := surface.ResolveClaudeAccountRoot(c.home, request.To.Account)
+	if err != nil {
+		return surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
+	}
+	if to != journal.To {
+		return fmt.Errorf("Claude conversation %s has an unfinished move to %s; finish it first with that account", journal.Conversation, journal.To)
+	}
+	return nil
+}
+
+func claudePathExists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
 }
 
 // claudeConversationPieces are the paths, relative to a config root, that
@@ -302,11 +317,19 @@ func (c *Claude) finishMove(ctx context.Context, sess *surface.Session, journal 
 		moved.RuntimeKind = surface.RuntimeClaudeHost
 	}
 	if journal.Resume {
-		resumed, err := c.resume(ctx, journal.Conversation, journal.Cwd)
+		holder, err := c.moveHolder(ctx, journal.Conversation)
 		if err != nil {
 			return nil, err
 		}
-		adoptClaudeProcess(&moved, resumed)
+		if holder != nil {
+			adoptClaudeProcess(&moved, &holder.session)
+		} else {
+			resumed, err := c.resume(ctx, journal.Conversation, journal.Cwd)
+			if err != nil {
+				return nil, err
+			}
+			adoptClaudeProcess(&moved, resumed)
+		}
 	}
 	journal.Phase = claudeMovePhaseDone
 	if err := c.writeMoveJournal(journal); err != nil {
