@@ -43,8 +43,11 @@ type Claude struct {
 	transcripts  *claudeTranscriptIndex
 	host         *claudeHost
 	mcpAdder     surface.ClaudeMCPAdder
-	request      ClaudeRequest
-	localOnly    bool
+	// moveStep, when set, runs at each named step of a move so tests can
+	// act in the gaps a terminal can.
+	moveStep  func(step string)
+	request   ClaudeRequest
+	localOnly bool
 }
 
 type ClaudeRequest func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error)

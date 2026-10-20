@@ -287,10 +287,33 @@ func (c *Claude) unstageMove(journal *claudeMoveJournal) {
 // the conversation lock holds every send until it is live again.
 func (c *Claude) finishMove(ctx context.Context, sess *surface.Session, journal *claudeMoveJournal, result *surface.MoveResult) (*surface.MoveResult, error) {
 	if journal.Phase == claudeMovePhaseStaged {
+		fresh := claudePathExists(filepath.Join(journal.From, journal.Pieces[0]))
+		c.atMoveStep("staged")
+		if fresh {
+			if err := c.checkStagedMove(ctx, journal, ""); err != nil {
+				return nil, err
+			}
+		}
+		var retired []string
 		for _, piece := range journal.Pieces {
 			source := filepath.Join(journal.From, piece)
-			if err := os.Rename(source, source+claudeMovedSuffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+			if err := os.Rename(source, source+claudeMovedSuffix); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					continue
+				}
+				restoreClaudePieces(retired)
 				return nil, fmt.Errorf("retire %s: %w", source, err)
+			}
+			retired = append(retired, source)
+		}
+		c.atMoveStep("retired")
+		if fresh {
+			// A terminal resumed in the instant before the rename writes to
+			// the retired file through its open descriptor; give the source
+			// back rather than promote a copy that misses its writes.
+			if err := c.checkStagedMove(ctx, journal, claudeMovedSuffix); err != nil {
+				restoreClaudePieces(retired)
+				return nil, err
 			}
 		}
 		for _, piece := range journal.Pieces {
@@ -337,6 +360,40 @@ func (c *Claude) finishMove(ctx context.Context, sess *surface.Session, journal 
 	}
 	result.Session = &moved
 	return result, nil
+}
+
+// checkStagedMove refuses to switch a staged move when a process took the
+// conversation, or its transcript changed, after the copy was made. The
+// staged copy and journal stay, so the next attempt starts over.
+func (c *Claude) checkStagedMove(ctx context.Context, journal *claudeMoveJournal, sourceSuffix string) error {
+	holder, err := c.moveHolder(ctx, journal.Conversation)
+	if err != nil {
+		return err
+	}
+	if holder != nil {
+		return &surface.MoveBusyError{Session: journal.Conversation, Reason: "it was resumed during the move"}
+	}
+	transcript := journal.Pieces[0]
+	same, err := sameFileContent(filepath.Join(journal.From, transcript)+sourceSuffix, filepath.Join(journal.To, transcript)+claudeStagedSuffix)
+	if err != nil {
+		return err
+	}
+	if !same {
+		return &surface.MoveBusyError{Session: journal.Conversation, Reason: "it changed during the move"}
+	}
+	return nil
+}
+
+func (c *Claude) atMoveStep(step string) {
+	if c.moveStep != nil {
+		c.moveStep(step)
+	}
+}
+
+func restoreClaudePieces(retired []string) {
+	for _, source := range retired {
+		_ = os.Rename(source+claudeMovedSuffix, source)
+	}
 }
 
 type claudeMoveHolder struct {

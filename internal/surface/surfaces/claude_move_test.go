@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -343,5 +344,52 @@ func appendFile(t *testing.T, path, content string) {
 	defer file.Close()
 	if _, err := file.WriteString(content); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAMoveGivesTheSourceBackWhenATerminalResumesItMidMove(t *testing.T) {
+	for _, step := range []string{"staged", "retired"} {
+		for _, busy := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/holder=%v", step, busy), func(t *testing.T) {
+				fixture, _, c, primary, spare := moveFixture(t)
+				transcript := fixture.Transcript(fixtureConversation, fixture.Home)
+				c.moveStep = func(at string) {
+					if at != step {
+						return
+					}
+					c.moveStep = nil
+					written := transcript
+					if step == "retired" {
+						written += claudeMovedSuffix
+					}
+					appendFile(t, written, `{"type":"user","message":{"role":"user","content":"written mid-move"}}`+"\n")
+					if busy {
+						fixture.RecordStatus(fixtureConversation, fixture.Home, "", "busy", "", time.Time{})
+					}
+				}
+				request := surface.MoveRequest{To: surface.MoveTarget{Account: "spare"}}
+				_, err := c.MoveSession(context.Background(), &surface.Session{ID: fixtureConversation}, request)
+				var refused *surface.MoveBusyError
+				if !errors.As(err, &refused) {
+					t.Fatalf("a move switched past a terminal that resumed mid-move: %v", err)
+				}
+				if root, _ := c.conversationRoot(fixtureConversation); root != primary {
+					t.Fatalf("root=%s", root)
+				}
+				if content, _ := os.ReadFile(transcript); !strings.Contains(string(content), "written mid-move") {
+					t.Fatal("the source lost the write made mid-move")
+				}
+				if busy {
+					fixture.RemoveRecord()
+				}
+				if _, err := c.MoveSession(context.Background(), &surface.Session{ID: fixtureConversation}, request); err != nil {
+					t.Fatal(err)
+				}
+				moved, _ := os.ReadFile(filepath.Join(spare, "projects", "fixture-project", fixtureConversation+".jsonl"))
+				if !strings.Contains(string(moved), "written mid-move") {
+					t.Fatal("the retried move lost the write made mid-move")
+				}
+			})
+		}
 	}
 }
