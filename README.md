@@ -189,12 +189,13 @@ Ask an agent you hand work to to end its final message with a completion report:
 ```
 ````
 
-Read it from the agent's latest reply:
+Read it from the agent's latest reply; the command fails and says why when the reply has no valid report:
 
 ```bash
-agenthail last @builder 1 --json \
-  | jq -e '.exchanges[-1].assistant | capture("(?:\\A|\n)`{3}agenthail-report\n(?<r>[^\n]+)\n`{3}\\s*\\z").r | fromjson'
+agenthail reply @builder --report
 ```
+
+`agenthail last @builder 5 --report` lists the reports of the last five exchanges. To keep a long reply from flooding an agent's context, `--max-bytes 4000` caps what `reply` and `last` print and says how much was cut.
 
 The report is the agent's own claim; check the commits before you rely on them. The [operations skill](skills/agenthail-operations/SKILL.md#completion-report) defines every field. Agents that have the skill write one when they finish dispatched work.
 

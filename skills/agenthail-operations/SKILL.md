@@ -261,6 +261,7 @@ agenthail send @builder "Walk through the issue." --stream --timeout 2m
 agenthail send @builder - --reply --json < prompt.txt
 
 agenthail reply @builder --json
+agenthail reply @builder --json --max-bytes 4000
 agenthail last @builder 5 --full --json
 agenthail stream @builder --timeout 10s
 agenthail steer @builder "Prioritize the failing test."
@@ -299,6 +300,13 @@ Messages a person types in the dashboard or the Mac/iPhone app carry `"author": 
 delivery. `--reply` waits for one new completed reply only when delivery is
 immediate. A queued `--reply` returns the durable queue receipt. `--stream`
 watches live deltas and cannot be combined with `--reply` or `--json`.
+
+`--max-bytes N` caps `reply` text, and each `last` prompt and reply, at N bytes
+without splitting a character. A cut field says so: JSON adds `truncated` and
+`textBytes` to `reply`, and `userTruncated`/`userBytes` or
+`assistantTruncated`/`assistantBytes` to an exchange, with the original size;
+text output ends it with `[truncated: shown of total bytes]`. It cannot be
+combined with `--report`.
 
 Use `--model` only for a one-message Codex or Notion override. Use `--from` when
 the receiving agent needs a human-readable sender label. Long content should go
@@ -358,8 +366,21 @@ breaks this shape uses a new `v`. A report anywhere but the end of the final
 message is quoted text, not a report.
 
 The report is your claim, not evidence. A reader checks `commits` and `paths`
-before acting on them. Read the latest one from any session; `jq -e` exits
-non-zero when the last reply has no report:
+before acting on them. Read it with `--report`, which checks every rule above:
+
+```bash
+agenthail reply @builder --report
+agenthail last @builder 5 --report
+```
+
+`reply --report` prints the report as JSON and exits non-zero, naming the broken
+rule, when the latest reply has no valid report. `last --report` lists each
+exchange's `report` or `reportError` and fails only when the newest exchange
+has none, because earlier ones are often questions without a report. Neither
+prints the reply text.
+
+An Agenthail without `--report` can find the same report with jq, which does
+not check the rules; keep the two in step if either changes:
 
 ```bash
 agenthail last @builder 1 --json \
