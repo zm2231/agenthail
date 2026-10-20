@@ -102,12 +102,16 @@ func endedBackgroundJob(t *testing.T) (*claudetest.Fixture, *claudehosttest.Fixt
 
 func TestClaudeResumeActionOpensAnEndedJobInTheHost(t *testing.T) {
 	_, host, c := endedBackgroundJob(t)
-	result, err := c.SessionAction(context.Background(), &surface.Session{ID: fixtureConversation}, "resume")
+	session := &surface.Session{ID: fixtureConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeBackground}
+	result, err := c.SessionAction(context.Background(), session, "resume")
 	if err != nil || result["id"] != "fe758937" || result["unchanged"] != false {
 		t.Fatalf("result=%v err=%v", result, err)
 	}
 	if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 1 {
 		t.Fatalf("spawns=%+v", spawns)
+	}
+	if session.RuntimeKind != surface.RuntimeClaudeHost || session.PID <= 0 || c.SessionCapabilities(session).Lifecycle.Logs {
+		t.Fatalf("a resumed job is not pointed at its host process: %+v", session)
 	}
 }
 

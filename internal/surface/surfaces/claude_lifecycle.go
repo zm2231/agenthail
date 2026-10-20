@@ -216,12 +216,14 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "state": record.State}, nil
 		}
 		if action == "resume" {
-			target := surface.Session{ID: record.SessionID, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeBackground, Cwd: record.Cwd}
-			resumed, err := c.reach(ctx, &target)
+			if record.Cwd != "" {
+				session.Cwd = record.Cwd
+			}
+			resumed, err := c.reach(ctx, session)
 			if err != nil {
 				return nil, err
 			}
-			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "unchanged": !resumed, "state": string(target.Status)}, nil
+			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "unchanged": !resumed, "state": string(session.Status)}, nil
 		}
 		output, err := c.backgroundCommand(ctx, root, record.Cwd, action, record.ID)
 		if err != nil {
@@ -265,12 +267,11 @@ func (c *Claude) hostSessionAction(ctx context.Context, session *surface.Session
 		}
 		return map[string]any{"sessionId": session.ID, "action": action}, nil
 	case "resume":
-		target := *session
-		resumed, err := c.reach(ctx, &target)
+		resumed, err := c.reach(ctx, session)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"sessionId": session.ID, "action": action, "unchanged": !resumed, "state": string(target.Status)}, nil
+		return map[string]any{"sessionId": session.ID, "action": action, "unchanged": !resumed, "state": string(session.Status)}, nil
 	default:
 		return nil, fmt.Errorf("a Claude host session has no background log; read its transcript with agenthail last")
 	}
