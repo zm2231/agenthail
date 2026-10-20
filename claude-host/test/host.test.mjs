@@ -782,3 +782,30 @@ test('a send with images gives Claude image blocks before the text', async () =>
   await assert.rejects(c.call('send', { sessionId: id, uuid: randomUUID(), text: '' }), { code: 'invalid' });
   c.close();
 });
+
+test('the host lists and announces the background tasks a session runs, marking ambient ones', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const shell = randomUUID();
+  await c.call('send', { sessionId: id, uuid: shell, text: 'BACKGROUND 1500' });
+  const started = await c.event((e) => e.sessionId === id && e.kind === 'tasks' && e.tasks.length === 1, 5000);
+  assert.equal(started.tasks[0].id, `task-${shell}`);
+  assert.equal(started.tasks[0].type, 'local_bash');
+  assert.equal(started.tasks[0].description, 'background shell');
+  assert.equal(started.tasks[0].ambient, false);
+  assert.ok(!Number.isNaN(Date.parse(started.tasks[0].since)));
+  await c.event(turnResult(id, shell));
+  const watcher = randomUUID();
+  await c.call('send', { sessionId: id, uuid: watcher, text: 'AMBIENT 1500' });
+  await c.event((e) => e.sessionId === id && e.kind === 'tasks' && e.tasks.length === 2, 5000);
+  const listed = (await c.call('list')).sessions.find((s) => s.sessionId === id);
+  assert.deepEqual(listed.tasks.map((t) => [t.id, t.ambient]), [[`task-${shell}`, false], [`ambient-${watcher}`, true]]);
+  assert.equal(listed.tasks[0].since, started.tasks[0].since);
+  await c.event((e) => e.sessionId === id && e.kind === 'tasks' && e.tasks.length === 0, 5000);
+  assert.deepEqual((await c.call('list')).sessions.find((s) => s.sessionId === id).tasks, []);
+  c.close();
+});

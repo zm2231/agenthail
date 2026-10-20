@@ -447,8 +447,13 @@ function statusLabel(status) {
     }[status] || status
   );
 }
+// A session between turns whose background tasks still run has not finished.
+function backgroundWaiting(session) {
+  return session.status !== "busy" && Boolean(session.backgroundTasks?.running);
+}
 function presenceLabel(session) {
   if (session.waitingOn) return "Waiting on you";
+  if (backgroundWaiting(session)) return "Waiting on background work";
   return (
     {
       working: "Working",
@@ -460,12 +465,13 @@ function presenceLabel(session) {
 }
 
 function presenceTone(session) {
+  if (backgroundWaiting(session)) return "background";
   if (session.status === "busy" || ["working", "open"].includes(session.currentReason)) return "active";
   if (session.status === "idle" || ["queued", "blocked"].includes(session.currentReason)) return "idle";
   return session.status;
 }
 function conversationMeta(session, model = "") {
-  const parts = [session.waitingOn ? "Waiting on you" : statusLabel(session.status), `${session.queueCount || 0} queued`];
+  const parts = [session.waitingOn ? "Waiting on you" : backgroundWaiting(session) ? "Waiting on background work" : statusLabel(session.status), `${session.queueCount || 0} queued`];
   if (session.status !== "busy") parts.push(`last active ${timeAgo(session.lastActive)}`);
   if (model) parts.push(model);
   if (session.claudeAccount?.label) parts.push(session.claudeAccount.label);
@@ -553,7 +559,7 @@ function renderOverview() {
     recent
       .map(
         (session) =>
-          `<button class="activity-item" type="button" data-session="${escape(session.id)}"><div class="activity-main"><div class="activity-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="activity-detail">${escape(labels[session.surface] || session.surface)} · ${session.status === "busy" ? "working now" : timeAgo(session.lastActive)}</div></div><span class="status-pill ${escape(session.currentReason || session.status)}">${escape(presenceLabel(session))}</span></button>`,
+          `<button class="activity-item" type="button" data-session="${escape(session.id)}"><div class="activity-main"><div class="activity-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="activity-detail">${escape(labels[session.surface] || session.surface)} · ${session.status === "busy" ? "working now" : timeAgo(session.lastActive)}</div></div><span class="status-pill ${escape(backgroundWaiting(session) ? "background" : session.currentReason || session.status)}">${escape(presenceLabel(session))}</span></button>`,
       )
       .join("") ||
     '<p class="empty-inline">No conversations are active right now.</p>';
@@ -689,6 +695,7 @@ function renderSessions() {
     const matchesStatus =
       app.filters.status === "all" ||
       session.status === app.filters.status ||
+      (app.filters.status === "background" && backgroundWaiting(session)) ||
       (app.filters.status === "unavailable" &&
         ["unknown", "notLoaded"].includes(session.status));
     return matchesQuery && matchesSurface && matchesStatus;
@@ -1323,6 +1330,7 @@ function renderChat() {
   syncComposerAction();
   renderSlashMenu();
   syncRequests();
+  renderBackgroundTasks(session);
   $("#chat-subtitle").textContent = conversationMeta(session, model);
   $("#thread-count").textContent =
     `${exchanges.length} recent exchange${exchanges.length === 1 ? "" : "s"}`;
@@ -1461,6 +1469,30 @@ function renderRequests() {
   const failure = state.error ? `<p role="status">Could not read this session's requests: ${escape(state.error)}</p>` : "";
   panel.innerHTML = cards.join("") + failure + mode;
   panel.hidden = panel.innerHTML === "";
+}
+const backgroundKinds = { shell: "Shell", agent: "Agent", monitor: "Monitor" };
+const backgroundSources = { host: "", transcript: "Read from the transcript.", status: "Claude reports a background shell but not which one." };
+// Lists what a session runs in the background. Ambient tasks, such as file
+// watchers, are listed but do not keep the session from being done.
+function renderBackgroundTasks(session) {
+  const panel = $("#background-panel");
+  const background = session?.backgroundTasks;
+  if (!background || (!background.running && !(background.tasks || []).length)) {
+    panel.innerHTML = "";
+    panel.hidden = true;
+    return;
+  }
+  const tasks = (background.tasks || []).map((task) => {
+    const kind = backgroundKinds[task.kind] || task.kind || "Task";
+    const since = task.since ? ` · since <time datetime="${escape(task.since)}">${escape(new Date(task.since).toLocaleTimeString())}</time>` : "";
+    const ambient = task.ambient ? ' <span class="background-ambient">ambient</span>' : "";
+    return `<li data-background-task="${escape(task.id || "")}"><span class="background-kind">${escape(kind)}</span> ${escape(task.description || task.id || "")}${ambient}${since}</li>`;
+  });
+  const running = background.tasks?.filter((task) => !task.ambient).length || 0;
+  const title = !background.running ? "Only ambient tasks run" : running ? `${running} background task${running === 1 ? "" : "s"} running` : "Background work running";
+  const source = backgroundSources[background.source] || "";
+  panel.innerHTML = `<div class="background-card"><h3>${escape(title)}</h3>${tasks.length ? `<ul>${tasks.join("")}</ul>` : ""}${source ? `<p>${escape(source)}</p>` : ""}</div>`;
+  panel.hidden = false;
 }
 // A session waiting on a prompt Agenthail cannot answer shows where to answer it.
 function renderElsewhereWait(session) {

@@ -66,8 +66,9 @@ func (d *Daemon) superviseClaudeHost(ctx context.Context) {
 }
 
 // watchClaudeHostRequests asks for a catalog pass whenever the host opens or
-// resolves a request, so a session shows what it waits on as soon as Claude
-// asks rather than at the next scheduled pass. A dropped subscription may
+// resolves a request or a session's background tasks change, so a session
+// shows what it waits on and runs as soon as Claude reports it rather than at
+// the next scheduled pass. A dropped subscription may
 // mean a new host, which numbers its events from the start again, so the
 // next one reads the host's whole buffer; repeated passes coalesce.
 func (d *Daemon) watchClaudeHostRequests(ctx context.Context) {
@@ -75,7 +76,7 @@ func (d *Daemon) watchClaudeHostRequests(ctx context.Context) {
 	var after uint64
 	for ctx.Err() == nil {
 		start, _ := client.Subscribe(ctx, after, func(event claudehost.Event) {
-			if event.Kind == "request_opened" || event.Kind == "request_resolved" {
+			if event.Kind == "request_opened" || event.Kind == "request_resolved" || event.Kind == "tasks" {
 				d.requestCatalogDiscovery()
 			}
 		})
@@ -97,7 +98,7 @@ func (d *Daemon) watchClaudeHostRequests(ctx context.Context) {
 func (d *Daemon) watchRetiringClaudeHost(ctx context.Context, host claudehost.Client) {
 	d.log.Printf("Claude host: following the retiring host on %s until its sessions close", host.Socket)
 	_, _ = host.Subscribe(ctx, 0, func(event claudehost.Event) {
-		if event.Kind == "request_opened" || event.Kind == "request_resolved" || event.Kind == "exited" {
+		if event.Kind == "request_opened" || event.Kind == "request_resolved" || event.Kind == "tasks" || event.Kind == "exited" {
 			d.requestCatalogDiscovery()
 		}
 	})

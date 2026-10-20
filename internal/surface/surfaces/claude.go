@@ -35,6 +35,8 @@ type Claude struct {
 	observeState map[string]*claudeObservationState
 	goalMu       sync.Mutex
 	goals        map[string]*claudeGoalCursor
+	tasksMu      sync.Mutex
+	taskScans    map[string]*claudeTaskScan
 	modelsMu     sync.Mutex
 	modelsCache  []surface.ModelOption
 	modelsAt     time.Time
@@ -636,10 +638,12 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 	}
 	sess.Status = claudePeerStatus(record)
 	sess.WaitingOn = nil
+	sess.BackgroundTasks = nil
 	if sess.HasLocal {
 		if observation, observeErr := c.Observe(ctx, sess); observeErr == nil && observation.Status != surface.StatusUnknown {
 			sess.Status = observation.Status
 			sess.WaitingOn = observation.WaitingOn
+			sess.BackgroundTasks = observation.BackgroundTasks
 		}
 	}
 }
@@ -866,6 +870,9 @@ func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.T
 	if waiting != nil && observation.Status != surface.StatusOffline {
 		observation.Status = surface.StatusBusy
 		observation.WaitingOn = waiting
+	}
+	if observation.Status != surface.StatusOffline {
+		observation.BackgroundTasks = c.claudeBackground(ctx, sess)
 	}
 	return observation, nil
 }

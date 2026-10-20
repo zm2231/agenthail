@@ -522,6 +522,10 @@ struct StatusIndicator: View {
                     .controlSize(.mini)
                     .tint(DesktopPalette.work)
                     .scaleEffect(0.8)
+            } else if session.isWaitingOnBackground && !needsYou {
+                Circle()
+                    .strokeBorder(DesktopPalette.work, lineWidth: 1.5)
+                    .frame(width: 7, height: 7)
             } else {
                 Circle()
                     .fill(DesktopPalette.statusColor(session, needsYou: needsYou, finishedUnseen: finishedUnseen))
@@ -729,7 +733,7 @@ struct ConversationHeader: View {
             Spacer()
             HStack(spacing: 6) {
                 StatusIndicator(session: session, needsYou: false)
-                Text(session.isWaitingOnYou ? "Waiting on you" : session.isWorking ? "Working" : session.open ? "Idle" : "Closed")
+                Text(session.isWaitingOnYou ? "Waiting on you" : session.isWorking ? "Working" : session.isWaitingOnBackground ? "Waiting on background work" : session.open ? "Idle" : "Closed")
             }
             .font(.system(size: 12))
             .foregroundStyle(DesktopPalette.text2)
@@ -826,6 +830,13 @@ struct TranscriptView: View {
                     HStack(spacing: 8) {
                         StatusIndicator(session: session, needsYou: false)
                         Text(session.isWaitingOnYou ? "Waiting on you" : "Working")
+                    }
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(DesktopPalette.text2)
+                } else if session.isWaitingOnBackground, let background = session.backgroundTasks {
+                    HStack(spacing: 8) {
+                        StatusIndicator(session: session, needsYou: false)
+                        Text("Waiting on background work · \(background.summary)")
                     }
                     .font(.system(size: 12.5))
                     .foregroundStyle(DesktopPalette.text2)
@@ -1990,6 +2001,9 @@ struct DetailsTab: View {
                 }
                 if let detail = pane.detail {
                     detailRow("Exchanges", SessionFacts.exchangeLabel(detail.exchanges.count))
+                }
+                if let background = session.backgroundTasks {
+                    detailRow("Background", ([background.summary] + (background.tasks ?? []).map(\.line) + [background.sourceNote].compactMap { $0 }).joined(separator: "\n"))
                 }
                 let modelName = pane.detail?.model
                 if canControl && session.capabilities.model, case let options = modelOptions, !options.isEmpty {

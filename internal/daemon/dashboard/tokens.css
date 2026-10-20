@@ -409,6 +409,10 @@ textarea:focus-visible {
 .dot.queued {
   background: var(--accent);
 }
+.dot.background {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--good);
+}
 .surface-row {
   display: grid;
   grid-template-columns: minmax(190px, 1.15fr) repeat(3, minmax(70px, 0.4fr));
@@ -1423,6 +1427,9 @@ select {
 .status-pill.blocked {
   color: var(--accent);
 }
+.status-pill.background {
+  color: var(--good);
+}
 .status-pill.dead,
 .status-pill.failed {
   color: var(--bad);
@@ -2167,6 +2174,45 @@ select {
   }
 }
 
+.background-panel {
+  margin-bottom: 10px;
+}
+.background-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px 14px;
+  border: 1px solid var(--rule);
+  border-radius: calc(var(--radius) - 4px);
+  background: var(--raised);
+}
+.background-card h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+.background-card ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.background-card li,
+.background-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.background-kind {
+  color: var(--ink);
+  font-weight: 600;
+}
+.background-ambient {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
 .request-panel {
   display: grid;
   gap: 10px;

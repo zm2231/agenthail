@@ -222,11 +222,15 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 			return CatalogEvent{}, false, err
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,waiting_on)
-		VALUES(?,?,?,?,?,?,?,0,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
+	background, err := encodeCatalogBackground(state.Session.BackgroundTasks)
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,waiting_on,background_tasks)
+		VALUES(?,?,?,?,?,?,?,0,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
 		checkout=excluded.checkout, unavailable_reason=excluded.unavailable_reason, observed_at=excluded.observed_at, misses=0,
-		projection_fingerprint=excluded.projection_fingerprint, projection_generation=excluded.projection_generation, discovery_failures=0, waiting_on=excluded.waiting_on`,
-		state.Session.ID, []byte(state.Project), []byte(state.Checkout), state.UnavailableReason, state.ObservedAt.Format(time.RFC3339Nano), state.ProjectionFingerprint, priorGeneration, waitingOn); err != nil {
+		projection_fingerprint=excluded.projection_fingerprint, projection_generation=excluded.projection_generation, discovery_failures=0, waiting_on=excluded.waiting_on, background_tasks=excluded.background_tasks`,
+		state.Session.ID, []byte(state.Project), []byte(state.Checkout), state.UnavailableReason, state.ObservedAt.Format(time.RFC3339Nano), state.ProjectionFingerprint, priorGeneration, waitingOn, background); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	if len(event.Payload) > 0 {
@@ -599,6 +603,7 @@ func (r *Registry) retireUnobservedSessionTx(tx *sql.Tx, sessionID string, now t
 	session["current"] = current
 	delete(session, "currentReason")
 	delete(session, "waitingOn")
+	delete(session, "backgroundTasks")
 	if reason != "" {
 		session["currentReason"] = reason
 	}
@@ -614,7 +619,7 @@ func (r *Registry) retireUnobservedSessionTx(tx *sql.Tx, sessionID string, now t
 		return CatalogEvent{}, false, fmt.Errorf("parse catalog observation: %w", err)
 	}
 	generation++
-	if _, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=?,projection_generation=?,waiting_on=? WHERE session_id=?`, string(next), generation, []byte{}, sessionID); err != nil {
+	if _, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=?,projection_generation=?,waiting_on=?,background_tasks=? WHERE session_id=?`, string(next), generation, []byte{}, []byte{}, sessionID); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	session["observedAt"] = lastObserved
@@ -706,7 +711,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		return CatalogSnapshot{}, err
 	}
 	rows, err := tx.Query(`SELECT s.id,s.host_id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
-		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,cs.waiting_on,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `
+		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,cs.waiting_on,cs.background_tasks,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id LEFT JOIN session_runtime sr ON sr.session_id=s.id
 		ORDER BY s.last_active_ms DESC,s.updated_at DESC,s.id`)
 	if err != nil {

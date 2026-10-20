@@ -200,6 +200,7 @@
                     <option value="all">All statuses</option>
                     <option value="busy">Working</option>
                     <option value="idle">Idle</option>
+                    <option value="background">Background work</option>
                     <option value="offline">Offline</option>
                     <option value="unavailable">Unavailable</option>
                   </select></label
@@ -267,6 +268,7 @@
                   <button type="submit">Run selected operation</button>
                 </form><pre id="session-operation-result" aria-live="polite"></pre>
               </details>
+              <section class="background-panel" id="background-panel" aria-label="Background work" aria-live="polite" hidden></section>
               <section class="request-panel" id="request-panel" aria-label="Waiting on you" aria-live="polite" hidden></section>
               <div class="slash-menu" id="slash-menu" hidden></div>
               <form id="composer">

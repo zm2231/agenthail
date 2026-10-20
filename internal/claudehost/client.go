@@ -81,6 +81,21 @@ type Session struct {
 	PermissionMode string    `json:"permissionMode"`
 	Model          string    `json:"model"`
 	Requests       []Request `json:"requests"`
+	// Tasks are the live background tasks Claude last reported. A host that
+	// predates them leaves it nil.
+	Tasks []Task `json:"tasks"`
+}
+
+// Task is a background task Claude runs for a session: Type is Claude's task
+// type (local_bash, local_agent, monitor_mcp, ...), Ambient marks a task
+// Claude says is not activity, and Since is when the host first saw it.
+type Task struct {
+	ID          string    `json:"id"`
+	Type        string    `json:"type"`
+	Description string    `json:"description"`
+	ParentID    string    `json:"parentId"`
+	Ambient     bool      `json:"ambient"`
+	Since       time.Time `json:"since"`
 }
 
 // Request is a tool permission or a question Claude asked through the host,
@@ -177,6 +192,7 @@ type Event struct {
 	RequestID string          `json:"requestId,omitempty"`
 	Outcome   string          `json:"outcome,omitempty"`
 	Error     string          `json:"error,omitempty"`
+	Tasks     []Task          `json:"tasks,omitempty"`
 }
 
 // Client reaches the host on Socket and, for a session that host does not
