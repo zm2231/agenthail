@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 struct ClaudeCreationSettings {
@@ -49,6 +50,70 @@ struct ClaudeAccountOption: Decodable, Hashable, Identifiable {
         }
         return parts.joined(separator: " · ")
     }
+}
+
+struct SessionAdoptResult: Decodable, Hashable {
+    var stopped: String? = nil
+    var unchanged: Bool? = nil
+
+    var summary: String {
+        if unchanged == true { return "Already runs in Agenthail." }
+        guard let stopped else { return "Opened in Agenthail." }
+        return "Opened in Agenthail. Stopped the \(stopped) that held it."
+    }
+}
+
+struct SessionAdoptReply: Decodable {
+    let ok: Bool
+    var result: SessionAdoptResult? = nil
+    var error: String? = nil
+    var busy: String? = nil
+    var needsConsent: Bool? = nil
+    var unknown: Bool? = nil
+}
+
+enum SessionAdoptOutcome: Equatable {
+    case adopted(SessionAdoptResult)
+    case needsConsent(String)
+    case busy(String)
+}
+
+/// Drives opening a terminal or background Claude session in Agenthail for
+/// the Mac and iPhone sheets. Stopping a terminal process always waits for
+/// the person to confirm it.
+@MainActor
+final class SessionAdoptController: ObservableObject {
+    enum Phase: Equatable {
+        case ready
+        case adopting
+        case confirmTerminal(String)
+        case done(String)
+        case failed(String)
+    }
+
+    @Published private(set) var phase: Phase = .ready
+    let session: SessionState
+
+    init(session: SessionState) {
+        self.session = session
+    }
+
+    var canAdopt: Bool { phase == .ready }
+
+    func adopt(api: AgenthailAPI, stopTerminal: Bool = false) async {
+        phase = .adopting
+        do {
+            switch try await api.adoptSession(id: session.id, stopTerminal: stopTerminal) {
+            case .adopted(let result): phase = .done(result.summary)
+            case .needsConsent(let message): phase = .confirmTerminal(message)
+            case .busy(let reason): phase = .failed("The session is busy: \(reason). Open it in Agenthail when it is idle.")
+            }
+        } catch {
+            phase = .failed(AgenthailAPIError.userMessage(error))
+        }
+    }
+
+    func cancelConfirmation() { phase = .ready }
 }
 
 struct SessionAccount: Codable, Hashable {
@@ -306,6 +371,10 @@ struct SessionState: Codable, Identifiable, Hashable {
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
     var claudeAccount: SessionAccount? = nil
+    var runtimeKind: String? = nil
+    /// A Claude session Agenthail can open in its host: one a terminal or
+    /// background job runs.
+    var canAdopt: Bool { surface == "claude" && runtimeKind == "claude-cli" && !isReadOnly }
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }

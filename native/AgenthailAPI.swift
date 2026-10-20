@@ -200,6 +200,28 @@ final class AgenthailAPI: @unchecked Sendable {
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
         return try await get(path)
     }
+    /// Opens a Claude session that runs in a terminal or background job in
+    /// Agenthail's host. A refusal the person can act on (busy, or a terminal
+    /// process to stop) is an outcome, not an error.
+    func adoptSession(id: String, stopTerminal: Bool) async throws -> SessionAdoptOutcome {
+        var request = authorizedRequest(path: "/api/v1/actions")
+        request.httpMethod = "POST"
+        request.timeoutInterval = 150
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["action": "session-adopt", "sessionId": id, "stopTerminal": stopTerminal])
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        setIdempotencyHeader(on: &request, path: "/api/v1/actions", method: "POST", key: UUID().uuidString)
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if let reply = try? JSONDecoder().decode(SessionAdoptReply.self, from: data) {
+            if reply.ok, let result = reply.result { return .adopted(result) }
+            if reply.needsConsent == true { return .needsConsent(reply.error ?? "This session is open in a terminal.") }
+            if let busy = reply.busy { return .busy(busy) }
+            if let error = reply.error { throw reply.unknown == true ? AgenthailAPIError.outcomeUnknown(error) : AgenthailAPIError.request(status, error) }
+        }
+        try validate(response: response, data: data)
+        throw AgenthailAPIError.invalidResponse
+    }
+
     func queuedInstructions() async throws -> [QueueState] {
         let response: QueueResponse = try await get("/api/v1/queue")
         return response.items

@@ -33,6 +33,8 @@ struct SessionCommands: Commands {
             }
             .keyboardShortcut(shortcuts.keyboardShortcut(.openInNewWindow))
             .disabled(session == nil)
+            Button("Open in Agenthail") { if let session { pane?.adoptingSession = session } }
+                .disabled(session?.canAdopt != true || pane?.removedSession != nil)
             Button("Fork") { if let session { pane?.fork(session) } }
                 .disabled(session.map(SessionOperationAvailability.fork) != true || pane?.removedSession != nil || pane?.forking == true)
             Divider()

@@ -83,6 +83,10 @@ cached usage, and which roots share one account. `thread create claude
 --account <name|email|dir>` starts the session under that root; `list --wide`
 shows each Claude session's account.
 
+`thread adopt <target>` takes a terminal or background Claude conversation
+into the Agenthail host. A busy session is refused (or waited on with
+`--wait`); a terminal is stopped only with `--stop-terminal`.
+
 One unhealthy surface does not block the others. Preserve the `errors` object
 from JSON discovery output when reporting partial availability.
 
