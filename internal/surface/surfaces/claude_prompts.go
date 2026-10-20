@@ -59,6 +59,10 @@ const claudePromptDeclined = "The person declined this request."
 // record to show it, so the prompt takes the record's name for the wait.
 const claudePromptRecordWait = 2 * time.Second
 
+// claudePromptDuplicateWindow bounds how long an ended hold is remembered. A
+// duplicate hook call joins within claudePromptRecordWait of the first.
+const claudePromptDuplicateWindow = 2*claudePromptRecordWait + time.Second
+
 // claudePromptSettleEvery is how often a held prompt checks whether the
 // session settled it without Agenthail.
 var claudePromptSettleEvery = time.Second
@@ -75,6 +79,10 @@ type claudePrompts struct {
 	// Agenthail answered. The record goes on showing it until Claude acts on
 	// the answer, and that is no longer a wait.
 	answered map[string]int64
+	// ended keeps, per session, the holds that ended lately, so a duplicate
+	// hook call that arrives after its prompt was settled takes that outcome
+	// rather than holding the prompt again.
+	ended    map[string][]*claudePrompt
 	sequence uint64
 	changed  func(ClaudePromptChange)
 }
@@ -92,6 +100,10 @@ type claudePrompt struct {
 	// passes the same prompt more than once; those calls share one hold.
 	key     string
 	holders int
+	// recordMS is the statusUpdatedAt of the wait the record showed when the
+	// hook called, and endedAt when the hold ended.
+	recordMS int64
+	endedAt  time.Time
 	// done closes when the hold ends; decision is set before then when a
 	// person answered it through Agenthail.
 	done     chan struct{}
@@ -100,7 +112,7 @@ type claudePrompt struct {
 }
 
 func newClaudePrompts() *claudePrompts {
-	return &claudePrompts{open: map[string][]*claudePrompt{}, answered: map[string]int64{}}
+	return &claudePrompts{open: map[string][]*claudePrompt{}, answered: map[string]int64{}, ended: map[string][]*claudePrompt{}}
 }
 
 // OnPromptChange registers what runs after a session gains or loses a held
@@ -138,11 +150,15 @@ func (c *Claude) HoldPrompt(ctx context.Context, prompt ClaudePermissionPrompt) 
 		kind = surface.WaitingQuestion
 	}
 	id := fmt.Sprintf("%s:%s:held:%d", prompt.SessionID, kind, c.prompts.next())
-	// The record shows the prompt once Claude does; when it shows it says
-	// when the prompt was first asked, and later changes tell this prompt
-	// was settled.
-	if waiting := c.awaitRecordWaiting(ctx, session); waiting != nil && waiting.Kind == kind && !c.prompts.shown(prompt.SessionID, waiting.Since.UnixMilli()) {
-		created, held.shownMS = waiting.Since, waiting.Since.UnixMilli()
+	waiting := c.awaitRecordWaiting(ctx, session)
+	if waiting == nil {
+		// Claude shows a prompt in the record as it opens the dialog; one
+		// the record does not show was settled before the hook got here.
+		return nil, nil
+	}
+	held.recordMS = waiting.Since.UnixMilli()
+	if !c.prompts.shown(prompt.SessionID, held.recordMS) {
+		created, held.shownMS = waiting.Since, held.recordMS
 	}
 	held.request = claudePromptRequest(id, kind, prompt, input, created)
 	held = c.prompts.join(prompt.SessionID, held)
@@ -252,6 +268,16 @@ func claudePromptRequest(id string, kind surface.WaitingKind, prompt ClaudePermi
 // an earlier call of a duplicate hook started.
 func (p *claudePrompts) join(sessionID string, held *claudePrompt) *claudePrompt {
 	p.mu.Lock()
+	p.ended[sessionID] = slices.DeleteFunc(p.ended[sessionID], func(ended *claudePrompt) bool { return time.Since(ended.endedAt) > claudePromptDuplicateWindow })
+	if len(p.ended[sessionID]) == 0 {
+		delete(p.ended, sessionID)
+	}
+	for _, ended := range p.ended[sessionID] {
+		if ended.key == held.key && ended.shownMS != 0 && held.recordMS == ended.shownMS {
+			p.mu.Unlock()
+			return ended
+		}
+	}
 	for _, open := range p.open[sessionID] {
 		if open.key == held.key {
 			open.holders++
@@ -286,6 +312,8 @@ func (p *claudePrompts) endLocked(sessionID string, held *claudePrompt, decision
 	}
 	held.closed = true
 	held.decision = decision
+	held.endedAt = time.Now()
+	p.ended[sessionID] = append(p.ended[sessionID], held)
 	if decision != nil && held.shownMS != 0 {
 		p.answered[sessionID] = held.shownMS
 	}

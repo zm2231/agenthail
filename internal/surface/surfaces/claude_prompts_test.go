@@ -270,3 +270,66 @@ func TestAHookThatStopsWaitingLeavesTheHoldToTheOtherCall(t *testing.T) {
 		t.Fatalf("second=%+v", held)
 	}
 }
+
+func TestALateDuplicateTakesTheAnswerButTheSamePromptAskedAgainIsHeldAgain(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	asked := time.Now().Add(-time.Second).UnixMilli()
+	writeClaudeRecord(t, home, map[string]any{"kind": "interactive", "entrypoint": "cli", "status": "waiting", "waitingFor": "permission prompt", "statusUpdatedAt": asked})
+	claude := NewClaude(nil, home)
+	var mu sync.Mutex
+	opened := 0
+	claude.OnPromptChange(func(change ClaudePromptChange) {
+		mu.Lock()
+		if change.Open {
+			opened++
+		}
+		mu.Unlock()
+	})
+	session := terminalSession(t)
+	prompt := ClaudePermissionPrompt{SessionID: "conversation", ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"rm -rf build"}`), PID: os.Getpid()}
+	first, cancel := holdInBackground(claude, prompt)
+	defer cancel()
+	request := awaitRequests(t, claude, session)[0]
+	if _, err := claude.Respond(context.Background(), session, request.ID, surface.Decision{Behavior: "allow"}); err != nil {
+		t.Fatal(err)
+	}
+	if held := <-first; held.decision == nil || held.decision.Behavior != "allow" {
+		t.Fatalf("first=%+v", held)
+	}
+
+	late, err := claude.HoldPrompt(context.Background(), prompt)
+	if err != nil || late == nil || late.Behavior != "allow" {
+		t.Fatalf("a late duplicate of the answered prompt got %+v, %v", late, err)
+	}
+	mu.Lock()
+	if opened != 1 {
+		t.Fatalf("the late duplicate opened the prompt again: %d opens", opened)
+	}
+	mu.Unlock()
+
+	writeClaudeRecord(t, home, map[string]any{"kind": "interactive", "entrypoint": "cli", "status": "waiting", "waitingFor": "permission prompt", "statusUpdatedAt": asked + 3000})
+	again, cancelAgain := holdInBackground(claude, prompt)
+	defer cancelAgain()
+	if requests := awaitRequests(t, claude, session); requests[0].ID == request.ID {
+		t.Fatal("the prompt asked again reused the answered request")
+	}
+	select {
+	case held := <-again:
+		t.Fatalf("the prompt asked again was answered without a person: %+v", held)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestAPromptTheRecordNeverShowsIsNotHeld(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	writeClaudeRecord(t, home, map[string]any{"kind": "interactive", "entrypoint": "cli", "status": "busy", "statusUpdatedAt": time.Now().UnixMilli()})
+	claude := NewClaude(nil, home)
+	opened := false
+	claude.OnPromptChange(func(change ClaudePromptChange) { opened = opened || change.Open })
+	decision, err := claude.HoldPrompt(context.Background(), ClaudePermissionPrompt{SessionID: "conversation", ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"ls"}`), PID: os.Getpid()})
+	if decision != nil || err != nil || opened || claude.SessionCapabilities(terminalSession(t)).Respond {
+		t.Fatalf("decision=%+v err=%v opened=%v", decision, err, opened)
+	}
+}
