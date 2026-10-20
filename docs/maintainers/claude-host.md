@@ -314,4 +314,9 @@ go test ./internal/claudehost/... ./internal/surface/surfaces/ ./internal/daemon
 The tests run the real host against a fake Claude CLI
 ([`claude-host/test/fake-claude.mjs`](../../claude-host/test/fake-claude.mjs))
 that speaks the stream-json protocol, writes a session record and serves a
-messaging socket.
+messaging socket. Hosts and fake CLIs run in their own sessions, out of reach of a
+test's cleanup once its process is killed or times out, so the tests preload
+[`claude-host/test/owner-watchdog.cjs`](../../claude-host/test/owner-watchdog.cjs)
+into each one: it exits the process when any pid in
+`AGENTHAIL_TEST_OWNER_PIDS` (the test process, and for the Node tests their
+runner) is gone.

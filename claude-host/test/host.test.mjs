@@ -12,6 +12,12 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const hostScript = path.join(here, '..', 'host.mjs');
 const fakeClaude = path.join(here, 'fake-claude.mjs');
+// Hosts and their fake Claudes exit once this file's process or the test
+// runner that started it is gone, so a killed run leaves none behind.
+const ownerEnv = {
+  AGENTHAIL_TEST_OWNER_PIDS: `${process.pid},${process.ppid}`,
+  NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --require=${path.join(here, 'owner-watchdog.cjs')}`.trim(),
+};
 const hosts = [];
 
 after(() => {
@@ -31,7 +37,7 @@ function fixture() {
 async function startHost(f, { lock = true, version = 'test', env = {}, claude = fakeClaude } = {}) {
   const fd = lock ? fs.openSync(path.join(f.state, 'lock'), 'r') : null;
   const host = spawn(process.execPath, [hostScript, '--socket', f.socket, '--state', f.state, '--claude', claude, '--version', version], {
-    env: { ...process.env, FAKE_CLAUDE_DIR: f.claudeDir, ...env },
+    env: { ...process.env, ...ownerEnv, FAKE_CLAUDE_DIR: f.claudeDir, ...env },
     stdio: lock ? ['ignore', 'ignore', 'pipe', fd] : ['ignore', 'ignore', 'pipe'],
   });
   if (lock) fs.closeSync(fd);
@@ -162,6 +168,20 @@ test('open, send and stream a turn bound to the message uuid', async () => {
   const seqs = c.events.map((e) => e.seq);
   assert.deepEqual(seqs, [...seqs].sort((a, b) => a - b));
   c.close();
+});
+
+test('a host and its Claude exit once the test process that owns them is gone', async () => {
+  const f = fixture();
+  const owner = spawn('sleep', ['60'], { stdio: 'ignore' });
+  after(() => owner.kill('SIGKILL'));
+  const host = await startHost(f, { env: { AGENTHAIL_TEST_OWNER_PIDS: String(owner.pid) } });
+  const c = new Client(f.socket);
+  const opened = await c.call('open', { sessionId: randomUUID(), cwd: f.cwd });
+  c.close();
+  owner.kill('SIGKILL');
+  assert.equal(await host.exited, 1);
+  for (let i = 0; i < 100 && alive(opened.pid); i++) await sleep(50);
+  assert.ok(!alive(opened.pid), `fake Claude ${opened.pid} outlived its owner`);
 });
 
 test('every session opens with consent to bypassPermissions and asks the host about tools', async () => {
