@@ -114,24 +114,137 @@ func TestClaudeGoalReadsOnlyWhatClaudeAppends(t *testing.T) {
 	}
 }
 
+type streamedGoal struct {
+	goal    *surface.GoalState
+	version uint64
+}
+
+func streamClaudeGoals(t *testing.T, path string) (<-chan streamedGoal, <-chan string, context.CancelFunc) {
+	t.Helper()
+	session := seededClaudeStreamSession(t, path, "")
+	goals := make(chan streamedGoal, 16)
+	texts := make(chan string, 64)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		NewClaude(nil, t.TempDir()).Stream(ctx, session, "", func(event surface.StreamEvent) {
+			switch {
+			case event.Kind == "goal":
+				goals <- streamedGoal{event.Goal, event.Version}
+			case event.Text != "":
+				texts <- event.Text
+			}
+		}, 10*time.Second)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	return goals, texts, cancel
+}
+
+func nextStreamedGoal(t *testing.T, goals <-chan streamedGoal) streamedGoal {
+	t.Helper()
+	select {
+	case goal := <-goals:
+		return goal
+	case <-time.After(5 * time.Second):
+		t.Fatal("no goal event")
+		return streamedGoal{}
+	}
+}
+
+func awaitStreamedText(t *testing.T, texts <-chan string, want string) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case text := <-texts:
+			if text == want {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("no timeline event %q", want)
+		}
+	}
+}
+
+func replaceTranscript(t *testing.T, path string, records ...string) {
+	t.Helper()
+	replacement := path + ".next"
+	if err := os.WriteFile(replacement, []byte(strings.Join(records, "\n")+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClaudeStreamSendsTheGoalWhenClaudeRecordsAVerdict(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","uuid":"u1","message":{"content":"/goal tests pass"}}`+"\n"+goalSetRecord)
-	session := seededClaudeStreamSession(t, path, "")
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		appendTestTranscript(t, path, `{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}]}}`, goalMetRecord)
-	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var goals []*surface.GoalState
-	err := NewClaude(nil, t.TempDir()).Stream(ctx, session, "", func(event surface.StreamEvent) {
-		if event.Kind == "goal" {
-			goals = append(goals, event.Goal)
-			cancel()
-		}
-	}, time.Second)
-	if err != context.Canceled || len(goals) != 1 || goals[0] == nil || goals[0].Status != surface.GoalStatusComplete || goals[0].Reason != "go test exited 0" {
-		t.Fatalf("err=%v goals=%+v", err, goals)
+	goals, _, _ := streamClaudeGoals(t, path)
+	set := nextStreamedGoal(t, goals)
+	if set.goal == nil || set.goal.Status != surface.GoalStatusActive {
+		t.Fatalf("first goal event = %+v", set.goal)
+	}
+	appendTestTranscript(t, path, `{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}]}}`)
+	appendTestTranscript(t, path, goalMetRecord)
+	met := nextStreamedGoal(t, goals)
+	if met.goal == nil || met.goal.Status != surface.GoalStatusComplete || met.goal.Reason != "go test exited 0" || met.version <= set.version {
+		t.Fatalf("goal event = %+v version %d after %d", met.goal, met.version, set.version)
+	}
+	appendTestTranscript(t, path, `{"type":"user","uuid":"u2","message":{"content":"thanks"}}`)
+	select {
+	case again := <-goals:
+		t.Fatalf("a record without a goal change sent %+v", again.goal)
+	case <-time.After(10 * transcriptPollInterval):
+	}
+}
+
+func TestClaudeStreamSendsNoGoalForASessionWithoutOne(t *testing.T) {
+	path := writeTranscript(t, `{"type":"user","uuid":"u1","message":{"content":"hello"}}`)
+	goals, texts, _ := streamClaudeGoals(t, path)
+	appendTestTranscript(t, path, `{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"hi"}]}}`)
+	awaitStreamedText(t, texts, "hi")
+	select {
+	case goal := <-goals:
+		t.Fatalf("goal event %+v for a session without a goal", goal.goal)
+	case <-time.After(5 * transcriptPollInterval):
+	}
+}
+
+func TestClaudeStreamFollowsAReplacedTranscript(t *testing.T) {
+	padding := `{"type":"assistant","uuid":"pad","message":{"id":"mpad","content":[{"type":"text","text":"` + strings.Repeat("x", 2000) + `"}]}}`
+	for name, records := range map[string][]string{
+		"larger":  {`{"type":"user","uuid":"r1","message":{"content":"after the replacement"}}`, goalClearedRecord, padding},
+		"shorter": {`{"type":"user","uuid":"r1","message":{"content":"after the replacement"}}`, goalClearedRecord},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := writeTranscript(t, `{"type":"user","uuid":"u1","message":{"content":"/goal tests pass"}}`+"\n"+goalSetRecord+"\n"+goalUnmetRecord)
+			original, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			goals, texts, _ := streamClaudeGoals(t, path)
+			active := nextStreamedGoal(t, goals)
+			if active.goal == nil || active.goal.Status != surface.GoalStatusActive {
+				t.Fatalf("goal event = %+v", active.goal)
+			}
+			replaceTranscript(t, path, records...)
+			replaced, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if larger := replaced.Size() > original.Size(); larger != (name == "larger") {
+				t.Fatalf("replacement is %d bytes after %d", replaced.Size(), original.Size())
+			}
+			cleared := nextStreamedGoal(t, goals)
+			if cleared.goal != nil || cleared.version <= active.version {
+				t.Fatalf("goal event = %+v version %d after %d", cleared.goal, cleared.version, active.version)
+			}
+			awaitStreamedText(t, texts, "after the replacement")
+		})
 	}
 }
 

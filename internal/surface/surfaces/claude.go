@@ -34,7 +34,7 @@ type Claude struct {
 	observeMu    sync.Mutex
 	observeState map[string]*claudeObservationState
 	goalMu       sync.Mutex
-	goals        map[string]claudeGoalCursor
+	goals        map[string]*claudeGoalCursor
 	modelsMu     sync.Mutex
 	modelsCache  []surface.ModelOption
 	modelsAt     time.Time
@@ -1206,9 +1206,6 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 	}
 	turns := newClaudeTurnTracker(replayed.current, closing)
 	completed := false
-	// goalAt is the end of the last goal record this scan read; the goal is
-	// sent once the scan ends, as the whole transcript describes it.
-	var goalAt int64
 	finish := func(ended []claudeTurnEnd) {
 		for _, end := range ended {
 			if uuid != "" && end.TurnID != uuid && end.Status == "" {
@@ -1221,6 +1218,12 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		}
 	}
 	for time.Now().Before(deadline) {
+		if info, statErr := os.Stat(path); statErr == nil {
+			if current := transcriptFileIdentity(info); identity != "" && current != identity {
+				// A transcript replaced at the same path is read from its start, as a shorter rewrite is.
+				identity, offset = current, 0
+			}
+		}
 		// A closing turn belongs to the bytes before offset; a rewritten transcript drops it.
 		// The anchor then rolls forward over the bytes this scan parses, never a later read.
 		tail, tailErr := transcriptTail(path, offset)
@@ -1238,9 +1241,6 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			var record map[string]any
 			if json.Unmarshal(line, &record) != nil {
 				return nil
-			}
-			if _, ok := parseClaudeGoalRecord(line); ok && uuid == "" {
-				goalAt = lineOffset
 			}
 			items := claudeTimelineItems(record)
 			turnID, ended, interrupted := turns.observe(record, recordOffset, line, len(items))
@@ -1275,13 +1275,14 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			return scanErr
 		}
 		offset = next
-		if goalAt > 0 {
-			goal, goalErr := c.GoalGet(ctx, sess)
+		if uuid == "" {
+			goal, version, changed, goalErr := c.streamGoal(ctx, sess)
 			if goalErr != nil {
 				return goalErr
 			}
-			onEvent(surface.StreamEvent{ID: "goal", ProviderKey: "goal", Version: uint64(goalAt), Operation: "replace", Kind: "goal", Goal: goal})
-			goalAt = 0
+			if changed {
+				onEvent(surface.StreamEvent{ID: "goal", ProviderKey: "goal", Version: version, Operation: "replace", Kind: "goal", Goal: goal})
+			}
 		}
 		finish(turns.settle(func(at time.Time) bool { return c.settledAfter(sess, at) }))
 		if turns.closing.TurnID != "" {

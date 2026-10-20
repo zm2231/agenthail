@@ -37,8 +37,11 @@ session metadata endpoint and `agenthail goal <target>` return the goal;
 `goal` means the session also takes the typed set, edit, pause, resume and
 budget controls ([Codex goals](codex-goals.md)), which Claude has no equivalent
 for. Clients show a Claude goal with its status and reason and offer no goal
-controls. The Claude transcript stream sends a `goal` event whenever Claude
-writes a `goal_status` record, so an open session updates without a reload.
+controls. The Claude transcript stream sends a `goal` event each time the goal
+it reads changes, including when the transcript is replaced and a new file
+describes a different goal, so an open session updates without a reload. Each
+event's version is higher than the last one sent for the session while the
+daemon runs.
 
 Goal-completed relays still require `goal`, so they do not route Claude
 sessions.
