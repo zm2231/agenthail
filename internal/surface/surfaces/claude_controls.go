@@ -390,10 +390,7 @@ func (c *Claude) commandControl(ctx context.Context, sess *surface.Session, acti
 			if json.Unmarshal(line, &record) != nil || record.Type != "system" || record.Subtype != "local_command" || record.CommandRun == nil || record.CommandRun.Command != action || record.CommandRun.Args != value {
 				return nil
 			}
-			output := strings.TrimSpace(record.Content)
-			output = strings.TrimPrefix(output, "<local-command-stdout>")
-			output = strings.TrimSuffix(output, "</local-command-stdout>")
-			output = strings.TrimSpace(ansiEscapeRe.ReplaceAllString(output, ""))
+			output, _ := claudeLocalCommandOutput(record.Content)
 			candidates[record.UUID] = output
 			if record.ParentUUID == sent.UUID {
 				result.Output = output

@@ -27,13 +27,16 @@ var (
 
 // claudePromptOrigin names who injected a user-role prompt. Claude Code
 // records it in origin.kind; a record without one is a human prompt unless
-// it is a task notification envelope.
+// it is a task notification or a peer message envelope.
 func claudePromptOrigin(origin map[string]any, text string) string {
 	if kind := str(origin, "kind"); kind != "" {
 		return kind
 	}
 	if strings.HasPrefix(strings.TrimSpace(text), "<task-notification>") {
 		return claudeOriginTaskNotification
+	}
+	if claudePeerEnvelope.MatchString(text) {
+		return claudeOriginPeer
 	}
 	return claudeOriginHuman
 }

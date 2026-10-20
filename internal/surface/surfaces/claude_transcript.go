@@ -285,8 +285,11 @@ func isHumanTranscriptText(text string) bool {
 			return false
 		}
 	}
+	if claudeCommandMarkup(text) {
+		return false
+	}
 	for _, prefix := range []string{
-		"<local-command", "<command-", "<system", "[Request interrupted", "[Request to",
+		"<system", "[Request interrupted", "[Request to",
 		"This session is being continued from a previous conversation that ran out of context.",
 	} {
 		if strings.HasPrefix(text, prefix) {

@@ -844,7 +844,7 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 		case "compact_boundary":
 			return []surface.TimelineItem{{Kind: "event", Title: "Context compacted", Text: str(record, "content")}}
 		case "local_command":
-			return []surface.TimelineItem{{Kind: "event", Title: "Local command", Text: str(record, "content")}}
+			return []surface.TimelineItem{claudeLocalCommandItem(str(record, "content"))}
 		}
 		return nil
 	}
@@ -864,6 +864,15 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 			if injected := claudePromptOrigin(origin, text); injected != claudeOriginHuman {
 				return []surface.TimelineItem{claudeInjectedItem(injected, origin, text)}
 			}
+			if claudeCommandMarkup(text) {
+				return claudeCommandItems(text)
+			}
+		}
+		// Claude Code writes its own instructions to the model, such as a
+		// goal's Stop hook or a loaded skill, as meta records; they show as one
+		// line rather than as something the user said.
+		if meta, _ := record["isMeta"].(bool); meta && !claudeRecordHasToolResult(record) {
+			return []surface.TimelineItem{{Kind: "event", Title: "Claude Code instructions"}}
 		}
 	}
 	if text, ok := message["content"].(string); ok && text != "" {

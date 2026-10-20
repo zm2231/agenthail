@@ -1309,7 +1309,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 }
 
 func claudeRecordStartsTurn(record map[string]any) bool {
-	return str(record, "type") == "user" && str(record, "uuid") != "" && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record)
+	return str(record, "type") == "user" && str(record, "uuid") != "" && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record) && !claudeRecordIsCommand(record)
 }
 
 func claudeRecordHasToolResult(record map[string]any) bool {
