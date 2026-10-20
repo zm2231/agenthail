@@ -1439,12 +1439,13 @@ function renderUsageLimit(limit) {
 }
 async function refreshUsageLimit(id) {
   const request = (app.usageLimitRequest || 0) + 1;
+  const history = app.history;
   app.usageLimitRequest = request;
   try {
     const response = await fetch(`/api/session?id=${encodeURIComponent(id)}&limit=1&timeline=1`);
     if (!response.ok) return;
     const detail = await response.json();
-    if (app.usageLimitRequest !== request || app.selected?.id !== id || !app.history) return;
+    if (app.usageLimitRequest !== request || app.selected?.id !== id || !history || app.history !== history) return;
     app.history.usageLimit = detail.usageLimit || null;
     renderChat();
   } catch (error) {}

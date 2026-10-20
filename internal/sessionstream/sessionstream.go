@@ -75,6 +75,17 @@ func (e Event) Failed() bool {
 	}
 }
 
+// FailureReason is why a failed event failed: its source reason, the body a
+// failed turn's end carries, such as an API refusal, else its status.
+func (e Event) FailureReason() string {
+	for _, reason := range []string{e.Reason, e.Body, e.Status} {
+		if reason != "" {
+			return reason
+		}
+	}
+	return "terminal failure"
+}
+
 func (e Event) SpokenAssistantContent() bool {
 	if e.Role != "assistant" {
 		return false

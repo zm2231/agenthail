@@ -215,5 +215,10 @@ await newer;
 pending[0]({ ok: true, json: async () => ({}) });
 await older;
 assert.equal(context.app.history.usageLimit?.message, "newer", "a stale refresh does not overwrite a newer usage limit");
+const before = context.refreshUsageLimit(session.id);
+context.app.history = { exchanges: [], capabilities: {}, readOnly: false, timeline: { items: [] }, usageLimit: { message: "reloaded", alternatives: [] } };
+pending[2]({ ok: true, json: async () => ({}) });
+await before;
+assert.equal(context.app.history.usageLimit?.message, "reloaded", "a refresh begun before the detail was reloaded does not overwrite it");
 
 console.log("dashboard timeline VM tests passed");

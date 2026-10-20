@@ -649,6 +649,24 @@ func TestDirectDelegationFailsOnCancelledTerminal(t *testing.T) {
 	waitFor(t, "delegation failure", func() bool { return hasEvent(f.View(), "voice/delegation/failed") })
 }
 
+func TestADirectTurnRefusedByTheAPIFailsTheDelegationWithTheRefusal(t *testing.T) {
+	refusal := "the Claude account is out of usage (You've hit your session limit); move the session to another account with: agenthail thread move <session> --account <name>"
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Claude", Transport: "browser"}}
+	target.stream = func(callback func(surface.StreamEvent)) {
+		callback(surface.StreamEvent{Kind: "done", Status: "failed", Text: refusal})
+	}
+	f := targetSelected(t, target)
+	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the task"})
+	waitFor(t, "the refused delegation to fail", func() bool {
+		for _, event := range f.View().Events {
+			if event.Method == "voice/delegation/failed" && strings.Contains(fmt.Sprint(event.Params["error"]), "out of usage") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
 func TestDelegationToClaudePeerDeliversAndSaysItCannotFollowTheReply(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "peer-a", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Peer", Transport: "uds"}}
 	f := targetSelected(t, target)

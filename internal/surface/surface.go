@@ -600,6 +600,17 @@ func (e StreamEvent) Failed() bool {
 	}
 }
 
+// FailureReason is why a failed terminal event failed: the text a failed
+// turn's end carries, such as an API refusal, else its status.
+func (e StreamEvent) FailureReason() string {
+	for _, reason := range []string{e.Text, e.Status} {
+		if reason != "" {
+			return reason
+		}
+	}
+	return "terminal failure"
+}
+
 func StreamEventDelta(event StreamEvent, previous string) string {
 	if event.Operation == "append" {
 		return event.Text

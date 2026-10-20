@@ -16,10 +16,10 @@ func TestAFailedTurnEndReportsWhyItFailed(t *testing.T) {
 	if err := directStreamTerminalError(surface.StreamEvent{Kind: "done"}, "u1"); err != nil {
 		t.Fatalf("a completed turn failed: %v", err)
 	}
-	if got := daemonStreamFailure(sessionstream.Event{Kind: "done", Status: "failed", Body: limit}); got != limit {
+	if got := (sessionstream.Event{Kind: "done", Status: "failed", Body: limit}).FailureReason(); got != limit {
 		t.Fatalf("daemon reason=%q", got)
 	}
-	if got := daemonStreamFailure(sessionstream.Event{Kind: "done", Status: "cancelled"}); got != "cancelled" {
+	if got := (sessionstream.Event{Kind: "done", Status: "cancelled"}).FailureReason(); got != "cancelled" {
 		t.Fatalf("daemon reason=%q", got)
 	}
 }

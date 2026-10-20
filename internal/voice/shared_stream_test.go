@@ -55,3 +55,21 @@ func TestVoiceUsesPreparedJournalAndFiltersTurnWithBodyDelta(t *testing.T) {
 		t.Fatal("journal subscription was not released")
 	}
 }
+
+func TestAJournalTurnRefusedByTheAPIFailsTheDelegationWithTheRefusal(t *testing.T) {
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Claude", Transport: "browser"}, turnID: "turn-a"}
+	stream := &journalStreamFixture{events: make(chan sessionstream.Event, 8), prepared: make(chan struct{}), cancelled: make(chan struct{})}
+	f := newFixture(t, fixtureOptions{target: target, stream: stream})
+	apply(t, f, Action{Action: "prepare"})
+	apply(t, f, Action{Action: "select", TargetID: "target-a"})
+	connectFixture(t, f)
+	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Inspect this"})
+	select {
+	case <-stream.prepared:
+	case <-time.After(time.Second):
+		t.Fatal("journal subscription was not prepared before dispatch")
+	}
+	refusal := "the Claude account is out of usage (You've hit your session limit); move the session to another account with: agenthail thread move <session> --account <name>"
+	stream.events <- sessionstream.Event{ItemID: "done", Version: 1, Kind: "done", TurnID: "turn-a", Status: "failed", Body: refusal}
+	waitFor(t, "the refused delegation to fail", func() bool { return hasEventWith(f.View(), "voice/delegation/failed", "error", refusal) })
+}

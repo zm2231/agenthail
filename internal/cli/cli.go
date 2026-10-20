@@ -1562,14 +1562,7 @@ func directStreamTerminalError(event surface.StreamEvent, turnID string) error {
 	if !event.Failed() {
 		return nil
 	}
-	reason := event.Text
-	if reason == "" {
-		reason = event.Status
-	}
-	if reason == "" {
-		reason = "terminal failure"
-	}
-	return fmt.Errorf("turn %s did not complete successfully: %s", turnID, reason)
+	return fmt.Errorf("turn %s did not complete successfully: %s", turnID, event.FailureReason())
 }
 
 func streamDirectOutput(ctx context.Context, surf surface.Surface, sess *surface.Session, turnID string, timeout time.Duration) error {
@@ -1641,7 +1634,7 @@ func consumeSessionReply(ctx context.Context, subscription sessionstream.Subscri
 			}
 			if event.Terminal() {
 				if event.Failed() {
-					return nil, fmt.Errorf("turn %s did not complete successfully: %s", turnID, daemonStreamFailure(event))
+					return nil, fmt.Errorf("turn %s did not complete successfully: %s", turnID, event.FailureReason())
 				}
 				return &surface.ReplyResult{Text: latest, Done: true, Source: "daemon-journal"}, nil
 			}
@@ -1668,7 +1661,7 @@ func consumeDaemonStreamOutput(ctx context.Context, subscription sessionstream.S
 			}
 			if event.Kind == "done" {
 				if event.Failed() {
-					return fmt.Errorf("turn %s did not complete successfully: %s", turnID, daemonStreamFailure(event))
+					return fmt.Errorf("turn %s did not complete successfully: %s", turnID, event.FailureReason())
 				}
 				fmt.Println()
 				return nil
@@ -3255,15 +3248,4 @@ func messageText(text string) (string, error) {
 		return "", fmt.Errorf("read stdin: %w", err)
 	}
 	return string(data), nil
-}
-
-// daemonStreamFailure is why a failed stream event failed: its reason, the
-// body a failed turn's end carries, or its status.
-func daemonStreamFailure(event sessionstream.Event) string {
-	for _, reason := range []string{event.Reason, event.Body, event.Status} {
-		if reason != "" {
-			return reason
-		}
-	}
-	return "terminal failure"
 }
