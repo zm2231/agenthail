@@ -957,6 +957,13 @@ func (r *Registry) EnsureAliasAvailable(name string) error {
 	if strings.EqualFold(name, LeadAlias) {
 		return ErrReservedAlias
 	}
+	var coordinator bool
+	if err := r.read.QueryRow(`SELECT EXISTS(SELECT 1 FROM coordinators WHERE host_id='' AND name=?)`, name).Scan(&coordinator); err != nil {
+		return err
+	}
+	if coordinator {
+		return CoordinatorAliasError{Name: name}
+	}
 	var owner string
 	err := r.read.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&owner)
 	if err == sql.ErrNoRows {

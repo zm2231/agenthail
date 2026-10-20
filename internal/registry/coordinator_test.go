@@ -190,10 +190,10 @@ func TestACoordinatorsNameMovesOnlyThroughTheCoordinator(t *testing.T) {
 	}
 	var aliasErr CoordinatorAliasError
 	for name, attempt := range map[string]func() error{
-		"rename the coordinator's session": func() error { return r.SetAlias("renamed", "lead-session") },
-		"give its name to another session": func() error { return r.SetAlias("a-lead", "other") },
+		"rename the coordinator's session":     func() error { return r.SetAlias("renamed", "lead-session") },
+		"give its name to another session":     func() error { return r.SetAlias("a-lead", "other") },
 		"take an unstarted coordinator's name": func() error { return r.SetAlias("b-lead", "other") },
-		"remove the name": func() error { return r.RemoveAlias("a-lead") },
+		"remove the name":                      func() error { return r.RemoveAlias("a-lead") },
 	} {
 		if err := attempt(); !errors.As(err, &aliasErr) {
 			t.Fatalf("%s: err=%v", name, err)

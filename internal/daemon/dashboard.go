@@ -123,27 +123,27 @@ type dashboardSession struct {
 }
 
 type dashboardState struct {
-	UpdatedAt          time.Time                  `json:"updatedAt"`
-	EventCursor        uint64                     `json:"eventCursor"`
-	HostEpoch          string                     `json:"hostEpoch"`
-	CatalogSeq         uint64                     `json:"catalogSeq"`
-	Daemon             map[string]any             `json:"daemon"`
-	Surfaces           []dashboardSurface         `json:"surfaces"`
-	Sessions           []dashboardSession         `json:"sessions"`
-	TotalSessions      int                        `json:"totalSessions"`
-	Counts             map[string]int             `json:"counts,omitempty"`
-	Projects           []dashboardProject         `json:"projects,omitempty"`
-	NextCursor         string                     `json:"nextCursor,omitempty"`
-	Queue              []dashboardQueue           `json:"queue"`
-	Channels           []dashboardChannel         `json:"channels"`
-	Relays             []dashboardRelay           `json:"relays"`
-	History            []dashboardHistory         `json:"history"`
-	Attention          []dashboardAttention       `json:"attention"`
-	DeliveryProblems   []registry.DeliveryProblem `json:"deliveryProblems"`
-	CodexRecentHours   int                        `json:"codexRecentHours"`
-	BusyDelivery       string                     `json:"busyDelivery"`
-	Signin             []signin.Status            `json:"signin"`
-	Rekeyed            map[string]string          `json:"rekeyed,omitempty"`
+	UpdatedAt          time.Time                   `json:"updatedAt"`
+	EventCursor        uint64                      `json:"eventCursor"`
+	HostEpoch          string                      `json:"hostEpoch"`
+	CatalogSeq         uint64                      `json:"catalogSeq"`
+	Daemon             map[string]any              `json:"daemon"`
+	Surfaces           []dashboardSurface          `json:"surfaces"`
+	Sessions           []dashboardSession          `json:"sessions"`
+	TotalSessions      int                         `json:"totalSessions"`
+	Counts             map[string]int              `json:"counts,omitempty"`
+	Projects           []dashboardProject          `json:"projects,omitempty"`
+	NextCursor         string                      `json:"nextCursor,omitempty"`
+	Queue              []dashboardQueue            `json:"queue"`
+	Channels           []dashboardChannel          `json:"channels"`
+	Relays             []dashboardRelay            `json:"relays"`
+	History            []dashboardHistory          `json:"history"`
+	Attention          []dashboardAttention        `json:"attention"`
+	DeliveryProblems   []registry.DeliveryProblem  `json:"deliveryProblems"`
+	CodexRecentHours   int                         `json:"codexRecentHours"`
+	BusyDelivery       string                      `json:"busyDelivery"`
+	Signin             []signin.Status             `json:"signin"`
+	Rekeyed            map[string]string           `json:"rekeyed,omitempty"`
 	Coordinators       []registry.CoordinatorEntry `json:"coordinators"`
 	catalogPageApplied bool
 	catalogPageFilter  string
@@ -1169,7 +1169,8 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			if err := d.Registry.EnsureAliasAvailable(alias); err != nil {
 				var taken registry.AliasTakenError
-				if errors.As(err, &taken) {
+				var coordinator registry.CoordinatorAliasError
+				if errors.As(err, &taken) || errors.As(err, &coordinator) {
 					http.Error(w, err.Error(), http.StatusBadRequest)
 				} else {
 					http.Error(w, fmt.Sprintf("check conversation name: %s", err), http.StatusInternalServerError)
@@ -1272,7 +1273,8 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@")
 		if err := d.Registry.EnsureAliasAvailable(alias); err != nil {
 			var taken registry.AliasTakenError
-			if errors.As(err, &taken) {
+			var coordinator registry.CoordinatorAliasError
+			if errors.As(err, &taken) || errors.As(err, &coordinator) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 			} else {
 				http.Error(w, fmt.Sprintf("check conversation name: %s", err), http.StatusInternalServerError)

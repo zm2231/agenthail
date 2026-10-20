@@ -739,7 +739,8 @@ func (d *Daemon) correlatePendingLaunches(ctx context.Context, sessions []surfac
 				candidate.Runtime = &surface.Runtime{Launcher: item.Launcher, Location: &locationsCopy, Focusable: true}
 				if err := d.Registry.RegisterSessionAndDeletePending(candidate, item.ID, item.Alias); err != nil {
 					var aliasErr registry.AliasTakenError
-					if errors.As(err, &aliasErr) {
+					var coordinatorErr registry.CoordinatorAliasError
+					if errors.As(err, &aliasErr) || errors.As(err, &coordinatorErr) {
 						d.errorMu.Lock()
 						first := !d.pendingAliasWarns[item.ID]
 						d.pendingAliasWarns[item.ID] = true
