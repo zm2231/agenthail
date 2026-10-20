@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -113,14 +114,15 @@ func (d *Daemon) launchProjects() ([]launchProject, error) {
 	if err != nil {
 		return nil, err
 	}
+	listed := make([]registry.ProjectRecord, 0, len(byID))
+	for _, entry := range byID {
+		listed = append(listed, registry.ProjectRecord{WorkspaceRoot: entry.project.RootPath})
+	}
 	for _, spec := range coordinators {
-		if addedProjectNamed(records, spec.ProjectID) {
+		if projectRootHeld(records, listed, spec) {
 			continue
 		}
 		found := coordinatorCatalogProject(spec)
-		if _, listed := byID[found.LocalID]; listed {
-			continue
-		}
 		if _, archived := archive.Projects[found.LocalID]; archived {
 			continue
 		}

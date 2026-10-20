@@ -47,6 +47,20 @@ assert.match(html, /data-session="far".*<span class="host-badge" title="On forge
 assert.doesNotMatch(html.slice(0, html.indexOf("</section>")), /host-badge/, "local projects and sessions carry no host badge");
 assert.doesNotMatch(html, /data-session="hidden"|data-session="loose"/, "archived sessions and sessions without a project stay out");
 assert.match(html, /Archived \(1\)<\/summary>.*data-project-action="project-unarchive" data-project-id="project-notes".*data-session="kept"/s);
+const local = { id: "h0", name: "mac", state: "local" };
+const remote = { id: "h1", name: "forge-agents.tail0000.ts.net", state: "connected" };
+const leads = (coordinators) => {
+  context.app.state.projects = [{ ...widget, coordinators }];
+  const rendered = vm.runInContext('renderProjects("")', context).html;
+  return rendered.slice(0, rendered.indexOf("</section>"));
+};
+assert.match(leads([{ host: local, name: "widget-lead", surface: "claude", sessionId: "lead" }]), /<button class="lead-chip" type="button" data-session="lead" title="Open @widget-lead, the project coordinator">@widget-lead<\/button>/, "a started coordinator opens its conversation");
+assert.match(leads([{ host: local, name: "widget-lead", surface: "claude" }]), /<span class="lead-chip idle" title="@widget-lead starts on its first message">@widget-lead<\/span>/, "an unstarted coordinator is not clickable");
+assert.match(leads([{ host: remote, name: "forge-lead", surface: "codex", sessionId: "h1::s9" }]), /data-session="h1::s9"[^>]*>forge-agents::@forge-lead</, "a paired host's coordinator is named with its host and opens its mirrored session");
+const conflict = leads([{ host: local, name: "a<b", surface: "claude", sessionId: "lead" }, { host: remote, name: "forge-lead", surface: "codex" }]);
+assert.match(conflict, /<span class="lead-chip conflict" title="Several hosts each have a coordinator: @a&lt;b, forge-agents::@forge-lead\.[^"]*">2 leads<\/span>/, "a conflict names every coordinator and opens none");
+assert.doesNotMatch(conflict, /lead-chip"[^>]*data-session/, "a conflict chip is not a button");
+assert.doesNotMatch(leads([]), /lead-chip/, "a project without a coordinator shows no chip");
 const pickerStart = source.indexOf("function renderStartProjects(");
 const pickerEnd = source.indexOf("function syncStartForm()", pickerStart);
 assert(pickerStart >= 0 && pickerEnd > pickerStart);

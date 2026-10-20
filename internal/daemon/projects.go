@@ -204,7 +204,9 @@ func catalogScopeCounts(rows []dashboardSession) map[string]int {
 // catalogProjects groups the rows by project, adds the added projects and this
 // host's coordinators' projects that have no sessions yet, and names each
 // project's coordinators. A paired host's coordinator is listed on a project
-// this host shows.
+// this host shows. A coordinator whose folder this host now lists under
+// another project, after its repository's origin changed, belongs to no
+// listed project; 'coordinator list' marks it.
 func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, coordinators []registry.CoordinatorSpec, archived map[string]time.Time, local dashboardHost, hostRef func(string) dashboardHost) []dashboardProject {
 	byID := map[string]*dashboardProject{}
 	order := []string{}
@@ -254,11 +256,19 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 		project := entry(found)
 		checkout(project, local, found)
 	}
+	localRoots := map[string]bool{}
+	for _, project := range byID {
+		for _, at := range project.Checkouts {
+			if at.Host.ID == local.ID {
+				localRoots[at.RootPath] = true
+			}
+		}
+	}
 	for _, spec := range coordinators {
 		if spec.HostID != "" {
 			continue
 		}
-		if _, listed := byID[spec.ProjectID]; listed {
+		if _, listed := byID[spec.ProjectID]; listed || localRoots[spec.ProjectRoot] {
 			continue
 		}
 		found := coordinatorCatalogProject(spec)
@@ -462,7 +472,7 @@ func (d *Daemon) localProjectCheckouts(projectID string) ([]registry.ProjectReco
 	}
 	for _, spec := range coordinators {
 		found := coordinatorCatalogProject(spec)
-		if found.ID != projectID && found.LocalID != projectID || seen[found.LocalID] || addedProjectNamed(records, spec.ProjectID) {
+		if found.ID != projectID && found.LocalID != projectID || seen[found.LocalID] || projectRootHeld(records, targets, spec) {
 			continue
 		}
 		seen[found.LocalID] = true
@@ -471,11 +481,18 @@ func (d *Daemon) localProjectCheckouts(projectID string) ([]registry.ProjectReco
 	return targets, nil
 }
 
-// addedProjectNamed reports whether an added project is the project with this
-// id, by its own id or its repository key.
-func addedProjectNamed(records []registry.ProjectRecord, id string) bool {
+// projectRootHeld reports whether a coordinator's project is already a project
+// of this host: an added project with its id, key or folder, or a listed
+// project at its folder. Then the coordinator names that project, or one its
+// folder no longer resolves to, and stands for no project of its own.
+func projectRootHeld(records, listed []registry.ProjectRecord, spec registry.CoordinatorSpec) bool {
 	for _, record := range records {
-		if record.Added && (record.ID == id || record.Key == id) {
+		if record.Added && (record.ID == spec.ProjectID || record.Key == spec.ProjectID || record.WorkspaceRoot == spec.ProjectRoot) {
+			return true
+		}
+	}
+	for _, record := range listed {
+		if record.WorkspaceRoot == spec.ProjectRoot {
 			return true
 		}
 	}

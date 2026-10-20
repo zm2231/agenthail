@@ -569,4 +569,87 @@ func TestEveryProjectSurfaceNamesItsCoordinatorsOnEveryHost(t *testing.T) {
 	if leads := projects()[widget.ID].Coordinators; len(leads) != 2 || leads[0].Name != "widget-lead" || leads[1].Name != "forge-lead" || leads[1].Host.ID != "forge" || leads[1].SessionID != hosts.Qualify("forge", "s-forge") {
 		t.Fatalf("conflicting coordinators=%+v", leads)
 	}
+
+	gitRun(t, repo, "remote", "set-url", "origin", "https://github.com/example/widget-renamed.git")
+	d.discoverCatalog(context.Background())
+	byID = projects()
+	renamed, found := byID["repo:github.com/example/widget-renamed"]
+	if _, stale := byID[widget.ID]; stale || !found || len(renamed.Coordinators) != 0 || len(renamed.Checkouts) != 1 {
+		t.Fatalf("after the origin changed: projects=%+v", byID)
+	}
+	var options struct {
+		Projects []launchProject `json:"projects"`
+	}
+	call(http.MethodGet, "/api/v1/session-options", "", &options)
+	offered := 0
+	for _, found := range options.Projects {
+		if found.RootPath == repo {
+			offered++
+		}
+	}
+	if offered != 1 {
+		t.Fatalf("session options=%+v", options.Projects)
+	}
+}
+
+func TestAnAddedProjectsCoordinatorStaysOneProjectAfterTheOriginChanges(t *testing.T) {
+	d, r, _, repo := projectsFixture(t)
+	gitRun(t, repo, "remote", "add", "origin", "https://github.com/example/widget.git")
+	if response := runDashboardAction(t, d, `{"action":"project-add","path":"`+repo+`"}`); response.Code != http.StatusOK {
+		t.Fatalf("add: %d %s", response.Code, response.Body)
+	}
+	d.discoverCatalog(context.Background())
+	records, err := r.ListProjects()
+	if err != nil || len(records) != 1 {
+		t.Fatalf("records=%+v err=%v", records, err)
+	}
+	added := records[0]
+	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: added.Key, ProjectRoot: repo, Name: "widget-lead", Surface: "claude", Cwd: repo}, registry.CoordinatorChange{ChangedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "remote", "set-url", "origin", "https://github.com/example/widget-renamed.git")
+	d.discoverCatalog(context.Background())
+	state, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	atRoot := 0
+	for _, project := range state.Projects {
+		for _, at := range project.Checkouts {
+			if at.RootPath == repo {
+				atRoot++
+			}
+		}
+	}
+	if atRoot != 1 {
+		t.Fatalf("projects=%+v", state.Projects)
+	}
+	options, err := d.launchProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	offered := 0
+	for _, found := range options {
+		if found.RootPath == repo {
+			offered++
+			if found.ID != added.ID {
+				t.Fatalf("offered=%+v added=%+v", found, added)
+			}
+		}
+	}
+	if offered != 1 {
+		t.Fatalf("session options=%+v", options)
+	}
+	response := runDashboardAction(t, d, `{"action":"project-archive","projectId":"`+added.Key+`"}`)
+	if response.Code == http.StatusOK {
+		var result struct {
+			Checkouts []map[string]any `json:"checkouts"`
+		}
+		_ = json.Unmarshal(response.Body.Bytes(), &result)
+		for _, checkout := range result.Checkouts {
+			if checkout["projectId"] != added.ID {
+				t.Fatalf("archived %v instead of the added project %s", checkout["projectId"], added.ID)
+			}
+		}
+	}
 }
