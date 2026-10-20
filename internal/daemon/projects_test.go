@@ -437,7 +437,7 @@ func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing
 }
 
 func TestTheCatalogAndPathResolutionAgreeRightAfterOriginChanges(t *testing.T) {
-	d, r, _, repo := projectsFixture(t)
+	d, r, fake, repo := projectsFixture(t)
 	gitRun(t, repo, "remote", "add", "origin", "https://github.com/example/widget.git")
 	d.discoverCatalog(context.Background())
 	if id := storedProjection(t, r, "from").Project.ID; id != "repo:github.com/example/widget" {
@@ -451,5 +451,28 @@ func TestTheCatalogAndPathResolutionAgreeRightAfterOriginChanges(t *testing.T) {
 	}
 	if stored := storedProjection(t, r, "from").Project.ID; stored != "repo:github.com/another-owner/widget-renamed" || resolved != stored {
 		t.Fatalf("catalog=%s resolved=%s", stored, resolved)
+	}
+
+	if response := runDashboardAction(t, d, `{"action":"project-add","path":"`+filepath.Join(repo, "src")+`"}`); response.Code != http.StatusOK {
+		t.Fatalf("add: %d %s", response.Code, response.Body)
+	}
+	from := fake.sessions["from"]
+	from.Cwd = filepath.Join(repo, "src", "lib")
+	fake.sessions["from"] = from
+	if err := r.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	d.discoverCatalog(context.Background())
+	if id := storedProjection(t, r, "from").Project.ID; id != "repo:github.com/another-owner/widget-renamed::src" {
+		t.Fatalf("added project before: %s", id)
+	}
+	gitRun(t, repo, "remote", "set-url", "origin", "https://github.com/example/widget.git")
+	d.discoverCatalog(context.Background())
+	records, err := r.ListProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id := storedProjection(t, r, "from").Project.ID; id != "repo:github.com/example/widget::src" || len(records) != 1 || records[0].Key != id {
+		t.Fatalf("added project after: session=%s records=%+v", id, records)
 	}
 }

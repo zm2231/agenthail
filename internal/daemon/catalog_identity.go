@@ -78,6 +78,8 @@ type catalogIdentityCache struct {
 type catalogRootEntry struct {
 	key        string
 	repository []byte
+	gitDirs    catalogGitDirs
+	gitStamp   string
 	resolvedAt time.Time
 }
 
@@ -114,20 +116,22 @@ func (c *catalogIdentityCache) setProjects(records []registry.ProjectRecord) {
 // ok is false when git failed for a reason other than the folder being
 // outside a repository, so the stored key is kept.
 func (c *catalogIdentityCache) rootRepository(ctx context.Context, root string, now time.Time) (key string, repository []byte, ok bool) {
-	if entry, found := c.roots[root]; found && now.Sub(entry.resolvedAt) < catalogIdentityTTL {
+	if entry, found := c.roots[root]; found && now.Sub(entry.resolvedAt) < catalogIdentityTTL && catalogGitStamp(entry.gitDirs) == entry.gitStamp {
 		return entry.key, entry.repository, true
 	}
 	resolved, notRepository, err := resolveCatalogRepository(ctx, root, c.repositories)
 	if err != nil && !notRepository {
 		return "", nil, false
 	}
+	var dirs catalogGitDirs
 	if err == nil {
+		dirs.common = resolved.commonDir
 		key = resolved.key(root)
 		if key != "" {
 			repository, _ = json.Marshal(resolved.repository)
 		}
 	}
-	c.roots[root] = catalogRootEntry{key: key, repository: repository, resolvedAt: now}
+	c.roots[root] = catalogRootEntry{key: key, repository: repository, gitDirs: dirs, gitStamp: catalogGitStamp(dirs), resolvedAt: now}
 	return key, repository, true
 }
 
