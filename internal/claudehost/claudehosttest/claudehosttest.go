@@ -105,12 +105,25 @@ func (f *Fixture) launch(t testing.TB, script, version string, env ...string) cl
 }
 
 // StartProtocol1Host starts the host Agenthail shipped before hosts could
-// retire, the way its daemon did: in its own session, holding the host lock
-// as fd 3. Its fake Claude keeps running once its input closes, as a real one
-// was seen doing.
+// retire, the way its daemon did. Its fake Claude keeps running once its input
+// closes, as a real one was seen doing.
 func (f *Fixture) StartProtocol1Host(t testing.TB, version string) claudehost.Hello {
 	t.Helper()
-	launch := f.launch(t, filepath.Join("test", "protocol1-host.mjs"), version, "FAKE_CLAUDE_OUTLIVES_INPUT=1")
+	return f.startShippedHost(t, "protocol1-host.mjs", version, "FAKE_CLAUDE_OUTLIVES_INPUT=1")
+}
+
+// StartProtocol2Host starts the host Agenthail shipped before protocol 3, the
+// way its daemon did. It retires on drain and serves its sessions to the end.
+func (f *Fixture) StartProtocol2Host(t testing.TB, version string) claudehost.Hello {
+	t.Helper()
+	return f.startShippedHost(t, "protocol2-host.mjs", version)
+}
+
+// startShippedHost starts a host script an earlier Agenthail shipped the way
+// its daemon did: in its own session, holding the host lock as fd 3.
+func (f *Fixture) startShippedHost(t testing.TB, script, version string, env ...string) claudehost.Hello {
+	t.Helper()
+	launch := f.launch(t, filepath.Join("test", script), version, env...)
 	state := claudehost.StateDir(f.Home)
 	if err := os.MkdirAll(state, 0700); err != nil {
 		t.Fatal(err)
@@ -141,7 +154,7 @@ func (f *Fixture) StartProtocol1Host(t testing.TB, version string) claudehost.He
 	go func() { _ = cmd.Wait() }()
 	client := claudehost.NewClient(f.Home)
 	var hello claudehost.Hello
-	WaitFor(t, "the protocol 1 host", func() bool {
+	WaitFor(t, "the shipped host "+script, func() bool {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		hello, err = client.Hello(ctx)
