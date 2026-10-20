@@ -3,32 +3,42 @@ import SwiftUI
 
 struct MessageActions: View {
     let text: String
-    let emphasized: Bool
+    let revealed: Bool
     var onEdit: (() -> Void)? = nil
     @State private var copied = false
+    @State private var hovering = false
+    @FocusState private var focus: Action?
+
+    private enum Action { case copy, edit }
 
     var body: some View {
+        let shown = revealed || hovering || copied || focus != nil
         HStack(spacing: 2) {
-            button(copied ? "Copied" : "Copy", symbol: copied ? "checkmark" : "doc.on.doc", action: copy)
+            button(.copy, copied ? "Copied" : "Copy", symbol: copied ? "checkmark" : "doc.on.doc", action: copy)
             if let onEdit {
-                button("Edit", symbol: "pencil", action: onEdit)
+                button(.edit, "Edit", symbol: "pencil", action: onEdit)
             }
         }
-        .foregroundStyle(emphasized || copied ? DesktopPalette.text2 : DesktopPalette.muted)
-        .animation(.easeOut(duration: 0.12), value: emphasized)
+        .foregroundStyle(DesktopPalette.text2)
+        .opacity(shown ? 1 : 0)
+        .animation(.easeOut(duration: 0.12), value: shown)
+        .onHover { hovering = $0 }
     }
 
-    private func button(_ label: String, symbol: String, action: @escaping () -> Void) -> some View {
+    private func button(_ id: Action, _ label: String, symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 11.5))
-                .frame(width: 24, height: 22)
+                .frame(width: 24, height: MessageActions.height)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focused($focus, equals: id)
         .help(label)
         .accessibilityLabel(label)
     }
+
+    static let height: CGFloat = 20
 
     private func copy() {
         NSPasteboard.general.clearContents()
