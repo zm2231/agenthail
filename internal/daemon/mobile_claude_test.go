@@ -168,8 +168,16 @@ func TestClaudeCreationThatNeverStartedIsAFailureNotUnknown(t *testing.T) {
 			d := New(registry, []surface.Surface{surfaces.NewClaude(nil, home)})
 			body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "claude", "launcher": surface.LauncherClaudeBG, "message": "fixture instruction", "cwd": home})
 			response := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", string(body))
-			if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "delivery did not start") || !strings.Contains(response.Body.String(), test.want) {
+			var failure struct {
+				Status string `json:"status"`
+				Error  string `json:"error"`
+			}
+			if response.Code != http.StatusBadGateway || json.Unmarshal(response.Body.Bytes(), &failure) != nil || failure.Status != "failed" || strings.Count(failure.Error, "delivery did not start") != 1 || !strings.Contains(failure.Error, test.want) {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			history, err := registry.ListHistory(10, "")
+			if err != nil || len(history) != 1 || history[0].Kind != "failed" || history[0].Message != "fixture instruction" || history[0].Error != failure.Error {
+				t.Fatalf("history=%+v err=%v", history, err)
 			}
 		})
 	}
