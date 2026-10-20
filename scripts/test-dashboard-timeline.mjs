@@ -117,7 +117,7 @@ assert(!claudeMetadata.includes("wake") && !claudeMetadata.includes("cancel"), "
 context.app.selected = { id: "session-1", surface: "claude", runtime: {}, status: "idle" };
 context.app.history = {
   exchanges: [],
-  capabilities: { goal: true },
+  capabilities: { goal: true, goalSet: true, goalStatus: true },
   readOnly: false,
   timeline: { items: [{ id: "message-2", kind: "message", role: "assistant", text: "Ready" }] },
   claudeRuns: [{ jobId: "job-writable", providerState: "idle" }],
@@ -142,7 +142,7 @@ assert.equal((fallback.match(/data-edit-message=/g) || []).length, 1, "exchange 
 assert(fallback.includes('data-edit-message="Synthetic fallback request"'), "exchange fallback Edit carries the message text");
 context.app.history = {
   exchanges: [],
-  capabilities: { goal: true },
+  capabilities: { goal: true, goalSet: true, goalStatus: true },
   readOnly: false,
   timeline: { items: [{ id: "message-2", kind: "message", role: "assistant", text: "Ready" }] },
 };
@@ -165,6 +165,10 @@ for (const status of ["blocked", "usageLimited", "budgetLimited"]) {
 }
 const complete = renderGoal({ status: "complete", objective: "Investigate" });
 assert(!complete.includes("Needs you:"), "complete goal should not render active attention");
+context.app.history.capabilities = { goal: false, goalSet: true, goalStatus: true };
+const claudeGoal = renderGoal({ status: "active", objective: "Investigate" });
+assert(claudeGoal.includes("Clear") && !claudeGoal.includes("Pause") && !claudeGoal.includes("budget"), "a goal set by command offers clear but no pause or budget");
+context.app.history.capabilities = { goal: true, goalSet: true, goalStatus: true };
 
 const first = [{ id: "call-2", kind: "toolCall", title: "Search", text: "first", callId: "call-8", status: "running" }];
 const refreshed = [{ id: "call-2", kind: "toolCall", title: "Search", text: "second", callId: "call-8", status: "complete" }];

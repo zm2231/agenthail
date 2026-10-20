@@ -80,7 +80,7 @@ func (c *Claude) ObserveAllClaudeSubagents(ctx context.Context) ([]surface.Claud
 
 func (c *Claude) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
-		Send: true, Stream: true, Reply: true, GoalStatus: true,
+		Send: true, Stream: true, Reply: true, GoalSet: true, GoalStatus: true,
 		Compact: true, Model: true, Interrupt: true, Steer: true,
 		Attach: true, Commands: true,
 	}
@@ -91,9 +91,11 @@ func (c *Claude) Capabilities() surface.Capabilities {
 // for any other session Control cannot reach through Remote Control: a CLI
 // session reached only over its native peer socket, or any session on an
 // install without Remote Control. Hosted and socket sessions stream only from
-// a local transcript.
+// a local transcript. A goal is set only where the session runs /goal as a
+// command: its peer socket hands the text to the model as a message.
 func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities {
 	capabilities := c.Capabilities()
+	capabilities.GoalSet = sess == nil || c.canSendHumanTurn(sess)
 	if claudeHosted(sess) {
 		capabilities.Stream = sess.HasLocal && sess.Transcript != ""
 		capabilities.Compact = false
@@ -1313,7 +1315,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 }
 
 func claudeRecordStartsTurn(record map[string]any) bool {
-	return str(record, "type") == "user" && str(record, "uuid") != "" && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record)
+	return str(record, "type") == "user" && str(record, "uuid") != "" && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record) && !claudeRecordIsCommand(record)
 }
 
 func claudeRecordHasToolResult(record map[string]any) bool {
@@ -1329,7 +1331,8 @@ func claudeRecordHasToolResult(record map[string]any) bool {
 }
 
 func claudeRecordIsInterrupt(record map[string]any) bool {
-	if str(record, "type") != "user" {
+	origin, _ := record["origin"].(map[string]any)
+	if str(record, "type") != "user" || str(origin, "kind") == claudeOriginHuman {
 		return false
 	}
 	message, _ := record["message"].(map[string]any)
@@ -1356,14 +1359,6 @@ func claudeStreamTerminal(record map[string]any) (done, ending, interrupted bool
 func strNested(record map[string]any, object, field string) string {
 	value, _ := record[object].(map[string]any)
 	return str(value, field)
-}
-
-func (c *Claude) GoalSet(ctx context.Context, sess *surface.Session, text string) error {
-	return surface.ErrUnsupported
-}
-
-func (c *Claude) GoalClear(ctx context.Context, sess *surface.Session) error {
-	return surface.ErrUnsupported
 }
 
 func (c *Claude) Compact(ctx context.Context, sess *surface.Session) error {

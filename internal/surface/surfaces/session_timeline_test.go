@@ -383,10 +383,10 @@ func TestClaudeReadGroupsTurnsFiltersNonHumanRecordsAndKeepsFullReply(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(read.Exchanges) != 3 || read.Exchanges[0].Origin != "command" || read.Exchanges[1].Origin != "command" {
+	if len(read.Exchanges) != 1 {
 		t.Fatalf("exchanges=%+v", read.Exchanges)
 	}
-	exchange := read.Exchanges[2]
+	exchange := read.Exchanges[0]
 	if exchange.User != "fix it" || exchange.Origin != "" || exchange.Assistant != long || exchange.Timestamp.IsZero() {
 		t.Fatalf("user=%q assistant_bytes=%d timestamp=%v", exchange.User, len(exchange.Assistant), exchange.Timestamp)
 	}

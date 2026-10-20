@@ -56,13 +56,26 @@ struct SessionPreview: View {
     nonisolated static let previewWaiting: [String: String] = ["kind": "question", "id": "preview-question"]
 
     /// With --preview-waiting the detail reports the question too; with
-    /// --preview-waiting-catalog-only only the catalog does.
+    /// --preview-waiting-catalog-only only the catalog does. With
+    /// --preview-claude-goal the session reports a blocked goal it sets and
+    /// clears but cannot pause or budget.
     nonisolated static var previewDetailJSON: String {
-        guard ProcessInfo.processInfo.arguments.contains("--preview-waiting") else { return basePreviewDetailJSON }
+        let arguments = ProcessInfo.processInfo.arguments
+        guard arguments.contains("--preview-waiting") || arguments.contains("--preview-claude-goal") else { return basePreviewDetailJSON }
         var detail = try! JSONSerialization.jsonObject(with: Data(basePreviewDetailJSON.utf8)) as! [String: Any]
-        var session = detail["session"] as! [String: Any]
-        session["waitingOn"] = previewWaiting
-        detail["session"] = session
+        if arguments.contains("--preview-waiting") {
+            var session = detail["session"] as! [String: Any]
+            session["waitingOn"] = previewWaiting
+            detail["session"] = session
+        }
+        if arguments.contains("--preview-claude-goal") {
+            var capabilities = detail["capabilities"] as! [String: Any]
+            capabilities["goal"] = false
+            capabilities["goalSet"] = true
+            capabilities["goalStatus"] = true
+            detail["capabilities"] = capabilities
+            detail["goal"] = ["objective": "Make the release build pass on a clean checkout", "status": "blocked", "timeUsedSeconds": 540, "tokensUsed": 1078, "tokenBudget": NSNull(), "reason": "The signing certificate is not installed on this machine, so the release build cannot pass here.", "createdAt": "2026-09-07T12:00:00Z", "updatedAt": "2026-09-07T12:09:00Z"]
+        }
         return String(data: try! JSONSerialization.data(withJSONObject: detail), encoding: .utf8)!
     }
 
@@ -89,7 +102,7 @@ struct SessionPreview: View {
     }
 
     nonisolated static var snapshotJSON: String {
-        let capabilities: [String: Bool] = ["send": true, "stream": true, "reply": true, "goal": true, "compact": true, "model": true, "interrupt": true, "steer": true]
+        let capabilities: [String: Bool] = ["send": true, "stream": true, "reply": true, "goal": true, "goalSet": true, "goalStatus": true, "compact": true, "model": true, "interrupt": true, "steer": true]
         let sessions: [[String: Any]] = [
             ["id": "demo", "project": ["id": "project-fieldnotes", "displayName": "fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "kind": "git"], "name": "Make the build reliable", "surface": "claude", "cwd": "/Users/demo/projects/fieldnotes", "status": "busy", "lastActive": "2026-09-12T04:03:00Z", "queueCount": 1, "open": true, "current": true, "capabilities": capabilities],
             ["id": "codex-demo", "project": ["id": "project-fieldnotes", "displayName": "fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "kind": "git"], "name": "Review the release pipeline", "surface": "codex", "cwd": "/Users/demo/projects/fieldnotes", "status": "idle", "lastActive": "2026-09-12T03:45:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities],
@@ -116,7 +129,7 @@ struct SessionPreview: View {
     {
       "session":{"id":"demo","surface":"claude","name":"Make the build reliable","status":"busy","lastActive":"2026-09-07T12:05:00Z","cwd":"/Users/demo/projects/fieldnotes","source":"cli","transport":"local"},
       "journalSeq":2048,
-      "exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"compact":true,"model":true,"interrupt":true,"steer":true},
+      "exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"goalSet":true,"goalStatus":true,"compact":true,"model":true,"interrupt":true,"steer":true},
       "readOnly":false,"readOnlyReason":"","model":"Claude Sonnet",
       "models":[{"id":"sonnet","displayName":"Claude Sonnet"},{"id":"opus","displayName":"Claude Opus"}],
       "context":{"usedTokens":86400,"contextWindow":200000,"cumulativeTokens":312000,"compacting":false,"compactionCount":1,"reclaimedTokens":42000,"inputTokens":83000,"cachedInputTokens":60000,"outputTokens":3400},

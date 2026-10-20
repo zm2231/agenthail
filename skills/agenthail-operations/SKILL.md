@@ -96,7 +96,9 @@ from JSON discovery output when reporting partial availability.
 | Stream, interrupt, steer, compact | yes | yes | no |
 | Persistent session model | yes | yes | no |
 | One-message model override | no | yes | yes |
-| Goal tracking | no | yes | no |
+| Goal status | yes | yes | no |
+| Goal set, edit, clear | host or Remote Control | yes | no |
+| Goal pause, resume, token budget | no | yes | no |
 
 Claude's control capabilities depend on its transport. Native UDS messages
 cannot execute slash commands, steer a running turn, or correlate message IDs
@@ -297,6 +299,11 @@ agenthail goal @builder budget 50000
 agenthail goal @builder budget clear
 agenthail goal @builder clear
 ```
+
+Goals: Codex takes every goal subcommand. A Claude session takes `set`, `edit`
+and `clear`, which run Claude's `/goal` once the session is idle and are
+confirmed by Claude's answer; it has no `pause`, `resume` or `budget`, and a
+session reached only through its peer socket cannot set a goal.
 
 Claude controls over Remote Control report request-linked evidence. `model` and
 `interrupt` wait for Claude's `control_response` to their own request id;
