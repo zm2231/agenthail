@@ -24,7 +24,7 @@ export default {
         const apnsConfigured = Boolean(env.APNS_KEY_P8 && env.APNS_KEY_ID && env.APPLE_TEAM_ID && env.APNS_TOPIC)
         const rateLimitsConfigured = Boolean(env.REGISTER_RATE_LIMITER && env.SEND_RATE_LIMITER)
         const configured = appAttestConfigured && apnsConfigured && rateLimitsConfigured
-        return json({ ok: configured, service: "agenthail-push", version: env.RELAY_VERSION || "dev", protocol: 2, capabilities: ["apns", "app-attest", "credential-auth", "registration-check", "expiring-registration", "rate-limit"], appAttest: { required: true, configured: appAttestConfigured }, apns: { configured: apnsConfigured }, rateLimits: { configured: rateLimitsConfigured } })
+        return json({ ok: configured, service: "agenthail-push", version: env.RELAY_VERSION || "dev", protocol: 2, capabilities: ["apns", "app-attest", "credential-auth", "registration-check", "expiring-registration", "rate-limit", "request-id"], appAttest: { required: true, configured: appAttestConfigured }, apns: { configured: apnsConfigured }, rateLimits: { configured: rateLimitsConfigured } })
       }
       if (request.method === "POST" && url.pathname === "/v1/attest/challenge") {
         return await issueChallenge(request, env)
@@ -206,6 +206,11 @@ export async function send(request, env) {
     sessionId: clean(body?.sessionId, 240),
     eventType: clean(body?.eventType, 80)
   }
+  const requestId = openRequestId(body)
+  if (requestId) {
+    payload.aps["mutable-content"] = 1
+    payload.requestId = requestId
+  }
   const headers = {
     authorization: `bearer ${providerToken}`,
     "apns-topic": env.APNS_TOPIC,
@@ -312,6 +317,14 @@ async function readJSON(request, limit = defaultRequestBodyLimit) {
 async function allowRequest(limiter, key) {
   const result = await limiter.limit({ key })
   return result.success
+}
+
+// openRequestId names the request a waiting notification is about. The app's
+// notification service fetches what it asks and its buttons from the paired
+// Mac, so neither passes through the relay.
+function openRequestId(body) {
+  const requestId = typeof body?.requestId === "string" ? body.requestId.trim() : ""
+  return /^[A-Za-z0-9._-]{1,120}$/.test(requestId) ? requestId : ""
 }
 
 function clean(value, limit) {

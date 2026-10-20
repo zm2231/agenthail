@@ -489,6 +489,7 @@ struct SessionScreen: View {
                 atLatest = value
             }
             .refreshable { await model.refreshSession(session.id) }
+            .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)") { await model.syncRequests(for: session) }
             .safeAreaInset(edge: .top, spacing: 0) {
                 if let detail { SessionSummary(detail: detail) { showingInfo = true } }
             }
@@ -506,6 +507,14 @@ struct SessionScreen: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Jump to latest")
+                    }
+                    if let detail, !detail.readOnly, let request = model.sessionRequests?.requests.first {
+                        RequestCard(request: request, answering: model.answeringRequest != nil, accent: SessionStyle.accent) { decision in
+                            Task { await model.respond(to: request, sessionID: session.id, decision: decision) }
+                        }
+                        .id(request.id)
+                        .padding(.horizontal)
+                        .padding(.top, 6)
                     }
                     if let detail {
                         if detail.readOnly || (!detail.capabilities.send && !detail.capabilities.steer) {
@@ -1128,6 +1137,17 @@ struct SessionInspector: View {
                         if detail.capabilities.model {
                             Button("Change model") { showingModels = true }
                                 .disabled(model.pendingControls.contains(session.id))
+                        }
+                        if detail.capabilities.permissionMode {
+                            let current = model.sessionRequests?.permissionMode ?? ""
+                            Menu {
+                                ForEach(SessionRequests.permissionModes, id: \.self) { mode in
+                                    Button(SessionRequests.permissionModeLabel(mode)) { Task { await model.setPermissionMode(mode, sessionID: session.id) } }
+                                        .disabled(mode == current)
+                                }
+                            } label: {
+                                LabeledContent("Permission mode", value: SessionRequests.permissionModeLabel(current))
+                            }
                         }
                         if detail.capabilities.commands {
                             Group {

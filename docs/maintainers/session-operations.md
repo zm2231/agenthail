@@ -106,7 +106,23 @@ both were attempted; a question recorded but not yet announced when the daemon
 stops is announced after it restarts. Both notifications carry a key derived
 from the session and question: the desktop notification identifier and the APNs
 `apns-collapse-id`, so an announcement repeated after a stop replaces the one
-already shown rather than adding a second. While a target waits, nothing is
+already shown rather than adding a second. When the session's provider takes
+answers through Agenthail, the announcement reads the open request at that
+moment. The desktop notification shows its prompt, the first question's for a
+request with several, and its buttons: `allow`, `always`, `deny` and `reply`
+for an approval, or `o0` to `o3` for a single question's options and `reply`.
+Apple documents only that a banner shows the first two actions; what the
+expanded view shows of five is checked on a device. Several questions, or one
+that takes several answers, get no buttons, since a notification answer
+carries one choice or one line of text; opening the notification opens the
+session with the request above its message box. The push stays generic and
+adds only the request ID; the phone fetches the prompt and buttons from
+`GET /api/v1/requests`, which returns each open request with `prompt` and
+`actions`. A button answers with `respond` and `decision.choice`, plus
+`decision.message` for `reply`, which answers a question with that text or
+denies an approval with it as the reason. A choice is resolved against the
+request as it is then: one it no longer offers is refused, and an answered
+request is `stale`. While a target waits, nothing is
 steered into it, and a peer socket message is not held: Claude keeps it queued
 behind the question or prompt without answering or dismissing it. `send` under
 the `steer` policy to a target without a peer socket, and `steer`, queue a steer,

@@ -609,6 +609,7 @@ struct ConversationPane: View {
     var body: some View {
         if let session = pane.displayedSession {
             TranscriptView(model: model, pane: pane, session: session)
+                .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)") { await pane.syncRequests(for: session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)
@@ -621,7 +622,21 @@ struct ConversationPane: View {
                     if pane.removedSession?.id == session.id {
                         RemovedSessionBar(onClose: pane.closeRemovedSession)
                     } else {
-                        ComposerView(model: model, pane: pane, session: session)
+                        VStack(spacing: 0) {
+                            if let request = pane.requests?.requests.first, pane.detail?.readOnly == false {
+                                RequestCard(request: request, answering: pane.answeringRequest != nil, accent: DesktopPalette.accentText) { decision in
+                                    Task { await pane.respond(to: request, decision: decision) }
+                                }
+                                .id(request.id)
+                                .frame(maxWidth: 720)
+                                .padding(.horizontal, 16)
+                                .padding(.top, 8)
+                            }
+                            if let error = pane.requestError {
+                                Text(error).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 4)
+                            }
+                            ComposerView(model: model, pane: pane, session: session)
+                        }
                     }
                 }
             .background(DesktopPalette.window)
@@ -1978,6 +1993,22 @@ struct DetailsTab: View {
                     }
                 } else if let modelName {
                     detailRow("Model", modelName)
+                }
+                if canControl && pane.detail?.capabilities.permissionMode == true, let current = pane.requests?.permissionMode {
+                    GridRow {
+                        Text("Permissions").foregroundStyle(DesktopPalette.text2)
+                        Menu(SessionRequests.permissionModeLabel(current)) {
+                            ForEach(SessionRequests.permissionModes, id: \.self) { mode in
+                                Button {
+                                    Task { await pane.setPermissionMode(mode) }
+                                } label: {
+                                    if mode == current { Label(SessionRequests.permissionModeLabel(mode), systemImage: "checkmark") } else { Text(SessionRequests.permissionModeLabel(mode)) }
+                                }
+                            }
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                    }
                 }
                 if let project = session.project?.displayName { detailRow("Project", project) }
                 if let branch = session.checkout?.branch ?? session.checkout?.detachedHead { detailRow("Branch", branch, monospaced: true) }
