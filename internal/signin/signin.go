@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+
+	"github.com/zm2231/agenthail/internal/installdir"
 )
 
 type Browser string
@@ -352,6 +354,8 @@ func permissionError(profile Profile, path string, err error) error {
 	exe, exeErr := os.Executable()
 	if exeErr != nil {
 		exe = "the agenthail daemon"
+	} else if bundle := installdir.Bundle(exe); bundle != "" {
+		exe = bundle
 	}
 	return fmt.Errorf("permission denied reading %s data at %s (macOS needs Full Disk Access for this); add %s in System Settings > Privacy & Security > Full Disk Access, then restart Agenthail", profile.Browser.Label(), path, exe)
 }

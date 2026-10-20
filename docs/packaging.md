@@ -22,7 +22,8 @@ The build verifies the runtime archive hashes before extraction. `THIRD_PARTY_NO
 
 | Path | Purpose |
 |---|---|
-| `/Library/Application Support/Agenthail` | CLI binary, bundled runtimes, sidecars, skills, licenses |
+| `/Library/Application Support/Agenthail` | Bundled runtimes, sidecars, skills, licenses |
+| `/Library/Application Support/Agenthail/Agenthail Daemon.app` | The `agenthail` binary, run by launchd as the daemon and by the launcher as the CLI, and `agenthail-permissions` |
 | `/Applications/Agenthail.app` | Native Mac app, menu bar controls, and notifications |
 | `/usr/local/bin/agenthail` | Launcher that binds the bundled runtime explicitly |
 | `/usr/local/bin/agenthail-uninstall` | Complete package removal command |
@@ -30,6 +31,12 @@ The build verifies the runtime archive hashes before extraction. `THIRD_PARTY_NO
 The installer migrates an existing Homebrew Agenthail installation before activating the package. It preserves `~/.agenthail` and relinks only Agenthail-managed skill symlinks. The postinstall script installs the per-user launchd daemon, registers the Mac app login item, and opens the app for the logged-in console user. A headless or MDM install leaves activation to `agenthail daemon install` under the intended user account.
 
 `agenthail daemon install` is the only writer of `~/Library/LaunchAgents/com.agenthail.daemon.plist`. The daemon runs with launchd `ProcessType` `Standard`: with `Background`, macOS throttles the daemon whenever the Mac is busy, and every API request, including `/api/v1/version`, stalls for seconds. launchd reads the process type only from the plist, so an existing install keeps its old value until the plist is rewritten by the package installer or `agenthail daemon install`. Release notes for a version that changes the plist must say so.
+
+### Daemon bundle and privacy grants
+
+macOS keeps a privacy grant (Accessibility, Screen Recording, Automation) for the process responsible for a request. launchd makes the daemon responsible for itself, and every process it starts, Claude and its tools and agent-hands among them, inherits it. The daemon is therefore the main executable of `Agenthail Daemon.app` (`com.agenthail.daemon`), signed with the hardened runtime and the `com.apple.security.automation.apple-events` entitlement, without which macOS refuses to even ask for Automation. With a Developer ID its designated requirement is its identifier and team, so a grant outlives every update; `scripts/build-daemon-bundle.sh` builds and checks it, and the `.pkg` verifier checks it again. A daemon that launchd did not start, `agenthail daemon start` from a terminal say, inherits whatever started it instead.
+
+Only a process the daemon starts can read the grants, since macOS answers for the responsible process of whoever asks. `agenthail-permissions`, beside the daemon in the bundle, reads them without prompting, or with `--ask` has macOS ask for each one not yet decided, which also lists the bundle in System Settings. The daemon serves them at `/api/v1/permissions` (and `POST /api/v1/permissions/request`) for `agenthail permissions`, `agenthail doctor` and the Mac app's Overview. The postinstall script removes the bare `agenthail` executable earlier packages installed, and `agenthail daemon install` rewrites the LaunchAgent to run the bundle. If an install stops part way, `agenthail doctor` reports a LaunchAgent or launcher that does not run the bundle, or a bare executable left behind, with the fix for each.
 
 ## Build and verification
 

@@ -311,6 +311,14 @@ final class AgenthailAPI: @unchecked Sendable {
         return try JSONDecoder().decode(PairedDeviceResponse.self, from: data)
     }
 
+    func permissions() async throws -> PermissionsState {
+        try await get("/api/v1/permissions")
+    }
+
+    func requestPermissions() async throws {
+        let _: PermissionsRequestResponse = try await post("/api/v1/permissions/request", body: [:])
+    }
+
     func signin() async throws -> SigninState {
         try await get("/api/v1/signin")
     }

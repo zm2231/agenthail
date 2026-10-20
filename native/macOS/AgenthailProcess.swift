@@ -28,8 +28,8 @@ enum AgenthailProcess {
         process.executableURL = executableURL()
         process.arguments = arguments
         var environment = ProcessInfo.processInfo.environment
-        let root = "/Library/Application Support/Agenthail"
-        if FileManager.default.fileExists(atPath: "\(root)/agenthail") {
+        let root = packageRoot
+        if FileManager.default.fileExists(atPath: packagedDaemon) {
             environment["AGENTHAIL_SIDECAR"] = "\(root)/sidecar.py"
             environment["AGENTHAIL_COOKIE_BRIDGE"] = "\(root)/cookie.mjs"
             environment["AGENTHAIL_PYTHON"] = "\(root)/runtime/python/bin/python3"
@@ -41,6 +41,11 @@ enum AgenthailProcess {
         process.environment = environment
         return process
     }
+
+    private static let packageRoot = "/Library/Application Support/Agenthail"
+    /// The package installs the daemon as the main executable of the
+    /// Agenthail Daemon bundle.
+    private static let packagedDaemon = "\(packageRoot)/Agenthail Daemon.app/Contents/MacOS/agenthail"
 
     private static func environmentSuffix(_ value: String?) -> String {
         guard let value, !value.isEmpty else { return "" }

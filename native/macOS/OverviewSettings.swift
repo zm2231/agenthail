@@ -11,6 +11,7 @@ struct OverviewSettings: View {
                     Text(OverviewSummary.line(snapshot))
                         .foregroundStyle(snapshot.daemon.stale == true ? DesktopPalette.amber : DesktopPalette.text2)
                 }
+                PermissionsSection(model: model)
                 Section("Surfaces") {
                     let cards = SurfaceOverview.build(surfaces: snapshot.surfaces, sessions: snapshot.sessions, codexRecentHours: snapshot.codexRecentHours)
                     if cards.isEmpty {
@@ -24,6 +25,70 @@ struct OverviewSettings: View {
             SettingsError(model: model)
         }
         .formStyle(.grouped)
+    }
+}
+
+/// The privacy grants the daemon holds, each with the System Settings pane
+/// that changes it. Agents the daemon runs, agent-hands among them, use them.
+private struct PermissionsSection: View {
+    @ObservedObject var model: AgenthailModel
+    @State private var asking = false
+
+    var body: some View {
+        Group {
+            if let state = model.permissions, state.supported {
+                Section {
+                    if let problem = state.problem {
+                        Text(problem).font(.system(size: 12)).foregroundStyle(DesktopPalette.amber).textSelection(.enabled)
+                    }
+                    ForEach(state.grants) { grant in
+                        HStack(spacing: 8) {
+                            Text(grant.title).font(.system(size: 13))
+                            Label(grant.stateLabel, systemImage: "circle.fill")
+                                .labelStyle(StatusDotLabelStyle())
+                                .font(.system(size: 12))
+                                .foregroundStyle(grant.state == "granted" ? DesktopPalette.green : DesktopPalette.amber)
+                            Spacer()
+                            if grant.state != "granted", let url = URL(string: grant.url) {
+                                Button("Open Settings") { NSWorkspace.shared.open(url) }
+                                    .help(grant.pane)
+                            }
+                        }
+                    }
+                    if state.grants.contains(where: { $0.state == "missing" }) {
+                        HStack {
+                            Text("macOS lists Agenthail Daemon in these panes once it has asked.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(DesktopPalette.text2)
+                            Spacer()
+                            if asking { ProgressView().controlSize(.small) }
+                            Button("Ask macOS") {
+                                asking = true
+                                Task {
+                                    await model.requestPermissions()
+                                    asking = false
+                                }
+                            }
+                            .disabled(asking)
+                        }
+                    }
+                } header: {
+                    Text("Privacy Permissions")
+                } footer: {
+                    if let holder = state.holder {
+                        Text("Held by \(holder)").font(.system(size: 11)).foregroundStyle(DesktopPalette.text2).textSelection(.enabled)
+                    }
+                }
+            } else if let error = model.permissionsError {
+                Section("Privacy Permissions") {
+                    Text(error).font(.system(size: 12)).foregroundStyle(DesktopPalette.amber).textSelection(.enabled)
+                }
+            }
+        }
+        .task { await model.loadPermissions() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await model.loadPermissions() }
+        }
     }
 }
 

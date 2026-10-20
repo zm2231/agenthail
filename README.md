@@ -32,6 +32,8 @@ agenthail doctor
 
 The package installs the Mac app, menu bar item, and command line tool. Agenthail opens automatically and stays ready in the background.
 
+Agents that Agenthail runs act with the privacy permissions of **Agenthail Daemon**, the background part of Agenthail. Desktop automation such as agent-hands needs Accessibility, Screen Recording, and Automation of Codex Computer Use. `agenthail permissions` shows each one, granted or missing, and the System Settings pane that changes it. `agenthail permissions request` has macOS ask for the missing ones. Settings > Overview in the Mac app shows the same. The permissions stay granted across updates.
+
 Homebrew is also available:
 
 ```bash
@@ -126,7 +128,7 @@ agenthail signin use claude auto           # back to the system default browser
 agenthail signin use claude none           # turn Claude Remote Control sign-in off
 ```
 
-`signin list`, `agenthail doctor`, Settings > Browser Sign-in in the Mac app and the web dashboard, and Settings on iPhone all show the profile each consumer resolves to. If it cannot be read they say why and how to fix it. Safari keeps its cookies in a protected folder, so on macOS reading them needs Full Disk Access for `/Library/Application Support/Agenthail/agenthail` in System Settings > Privacy & Security > Full Disk Access. Supported browsers are Chrome, Brave, Arc, Chromium, Edge, Firefox and Safari.
+`signin list`, `agenthail doctor`, Settings > Browser Sign-in in the Mac app and the web dashboard, and Settings on iPhone all show the profile each consumer resolves to. If it cannot be read they say why and how to fix it. Safari keeps its cookies in a protected folder, so on macOS reading them needs Full Disk Access for Agenthail Daemon (`/Library/Application Support/Agenthail/Agenthail Daemon.app`) in System Settings > Privacy & Security > Full Disk Access. Supported browsers are Chrome, Brave, Arc, Chromium, Edge, Firefox and Safari.
 
 ## One place to check in
 

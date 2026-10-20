@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/zm2231/agenthail/internal/coordinator"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"sort"
 	"strconv"
@@ -18,6 +18,9 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/coordinator"
+	"github.com/zm2231/agenthail/internal/permissions"
 
 	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/daemon"
@@ -203,6 +206,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdLaunch(rest)
 	case "doctor":
 		return a.cmdDoctor(rest)
+	case "permissions":
+		return a.cmdPermissions(rest)
 	case "dashboard":
 		return a.cmdDashboard(rest)
 	case "version", "--version":
@@ -340,6 +345,8 @@ Dashboard (optional):
 Other:
   launch <surface>              Launch a surface app with debug settings
   doctor [--json]               Health check (nonzero when any surface is unhealthy)
+  permissions [--json]          The daemon's macOS privacy grants and where to change them
+  permissions request           Have macOS ask for the grants the daemon lacks
   update [--check] [--json]     Install the latest Agenthail release
   upgrade [--check] [--json]    Alias for update
   version [--json]              Build and revision information
@@ -632,7 +639,7 @@ func validateCommandFlags(command string, args []string) error {
 		"project": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}}, "projects": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}},
 		"hosts":  {values: map[string]bool{"--address": true, "--name": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"signin": {values: map[string]bool{"--label": true}, bools: map[string]bool{"--json": true, "--help": true}},
-		"doctor": {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
+		"doctor": {bools: map[string]bool{"--json": true}}, "permissions": {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
 		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
 		"permission-mode": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "requests": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
@@ -2986,10 +2993,24 @@ func (a *App) cmdDoctor(args []string) error {
 	if serviceProblems == nil {
 		serviceProblems = []serviceProblem{}
 	}
+	var grants *permissions.Report
+	var grantsErr error
+	if runtime.GOOS == "darwin" {
+		var report permissions.Report
+		callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		report, grantsErr = a.daemonPermissions(callCtx)
+		cancel()
+		grants = &report
+	}
 	if hasFlag(args, "--json") {
 		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "claudeAccounts": claudeAccounts, "signin": signins}
 		if claudeRootsErr != nil {
 			report["claudeConfigError"] = claudeRootsErr.Error()
+		}
+		if grantsErr != nil {
+			report["permissionsError"] = grantsErr.Error()
+		} else if grants != nil {
+			report["permissions"] = grants
 		}
 		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
 			return err
@@ -3014,6 +3035,11 @@ func (a *App) cmdDoctor(args []string) error {
 				fmt.Printf("  problem: %s\n", problem.Detail)
 				fmt.Printf("  fix: %s\n", problem.Fix)
 			}
+		}
+		if grantsErr != nil {
+			fmt.Printf("[permissions] unknown: %s\n", grantsErr)
+		} else if grants != nil {
+			printPermissions(*grants)
 		}
 		for _, status := range signins {
 			fmt.Printf("[sign-in] %s: %s\n", status.ID, describeSignin(status))
