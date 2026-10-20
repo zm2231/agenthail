@@ -34,6 +34,9 @@ func TestProjectArchiveResolvesByIdAndRejectsAmbiguousNames(t *testing.T) {
 	if err := app.Run([]string{"project", "archive", "widget"}); err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("err=%v", err)
 	}
+	if err := app.Run([]string{"project", "archive", "repo:github.com/example/widget-before"}); err == nil || err.Error() != `no project matched "repo:github.com/example/widget-before"; a project's id can change, for example after its repository's origin changed; see 'agenthail project list --all' for the current ones` {
+		t.Fatalf("err=%v", err)
+	}
 	if _, err := captureStdout(t, func() error {
 		return app.Run([]string{"project", "archive", "h0123456789ab::implicit:/home/remote/scratch/widget"})
 	}); err != nil {

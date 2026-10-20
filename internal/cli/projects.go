@@ -268,7 +268,7 @@ func resolveProject(projects []projectRow, selector string) (projectRow, error) 
 	}
 	switch len(named) {
 	case 0:
-		return projectRow{}, fmt.Errorf("no project matched %q; see 'agenthail project list --all'", selector)
+		return projectRow{}, fmt.Errorf("no project matched %q; a project's id can change, for example after its repository's origin changed; see 'agenthail project list --all' for the current ones", selector)
 	case 1:
 		return named[0], nil
 	}

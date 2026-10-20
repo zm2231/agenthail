@@ -1974,11 +1974,11 @@ document.addEventListener("click", async (event) => {
         const result = await action("project-add", { path: viewControl.dataset.projectAdd }, crypto.randomUUID(), "");
         toast(`Added project ${result.project?.displayName || ""}.`);
       }
-      await load();
     } catch (error) {
       toast(error.message);
     } finally {
       viewControl.disabled = false;
+      await load();
     }
     return;
   }

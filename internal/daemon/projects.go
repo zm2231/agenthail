@@ -422,7 +422,7 @@ func (d *Daemon) projectAction(r *http.Request, w http.ResponseWriter, request p
 		}
 	}
 	if len(checkouts) == 0 {
-		http.Error(w, "project not found", http.StatusNotFound)
+		http.Error(w, d.projectNotListed(request.ProjectID), http.StatusNotFound)
 		return
 	}
 	status := http.StatusOK
@@ -506,6 +506,14 @@ func (d *Daemon) archiveLocalProject(target registry.ProjectRecord, archive bool
 	return d.Registry.UnarchiveProject(target.ID)
 }
 
+// projectNotListed refuses an action on a project id this host does not
+// list. A project's id follows its repository, so a client holding an id from
+// before an origin change is told to refresh rather than reaching whatever
+// project is in that folder now.
+func (d *Daemon) projectNotListed(projectID string) string {
+	return fmt.Sprintf("project %s is not listed on %s; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again", projectID, d.hostIdentity().Name)
+}
+
 // removeProject removes one added project of this host. Its sessions move to
 // the next project that contains them on the following catalog pass.
 func (d *Daemon) removeProject(w http.ResponseWriter, projectID string, targets []registry.ProjectRecord) {
@@ -521,7 +529,7 @@ func (d *Daemon) removeProject(w http.ResponseWriter, projectID string, targets 
 			http.Error(w, "project "+projectID+" was not added, so it cannot be removed; archive it to hide it", http.StatusConflict)
 			return
 		}
-		http.Error(w, "project not found", http.StatusNotFound)
+		http.Error(w, d.projectNotListed(projectID), http.StatusNotFound)
 		return
 	case 1:
 	default:

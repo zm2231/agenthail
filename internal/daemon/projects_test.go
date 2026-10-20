@@ -640,8 +640,10 @@ func TestAnAddedProjectsCoordinatorStaysOneProjectAfterTheOriginChanges(t *testi
 	if offered != 1 {
 		t.Fatalf("session options=%+v", options)
 	}
-	if response := runDashboardAction(t, d, `{"action":"project-archive","projectId":"`+added.Key+`"}`); response.Code != http.StatusNotFound {
-		t.Fatalf("archive by the id the project no longer has: %d %s", response.Code, response.Body)
+	response := runDashboardAction(t, d, `{"action":"project-archive","projectId":"`+added.Key+`"}`)
+	want := "project " + added.Key + " is not listed on " + d.hostIdentity().Name + "; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\n"
+	if response.Code != http.StatusNotFound || response.Body.String() != want {
+		t.Fatalf("archive by the id the project no longer has: %d %q", response.Code, response.Body)
 	}
 	archive, err := r.ArchiveState()
 	if err != nil || len(archive.Projects) != 0 {
