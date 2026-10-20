@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -49,7 +50,8 @@ func (a *App) resolveDeliveryTarget(ctx context.Context, target string) (*surfac
 		}
 		return nil, nil, nil, inexactTargetError{target: target, matches: matches}
 	}
-	if a.registry() == nil || a.registeredExactly(target) {
+	var exited exitedNamedSession
+	if a.registry() == nil || a.registeredExactly(target) || errors.As(err, &exited) {
 		return nil, nil, nil, err
 	}
 	candidates := a.fragmentCandidates(target)
