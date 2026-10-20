@@ -1,6 +1,7 @@
 package surfaces
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -93,5 +94,31 @@ func TestCodexSessionReadsSubagentIdentityFromThread(t *testing.T) {
 	top := codexSession(map[string]any{"id": "root", "source": "vscode"})
 	if top.Subagent != nil {
 		t.Fatalf("top-level thread has subagent identity %+v", top.Subagent)
+	}
+}
+
+func TestCodexThreadsAnAgentStartedAreDelegatedWhateverTheirSourceShape(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		source    string
+		delegated bool
+	}{
+		{"desktop conversation", `"vscode"`, false},
+		{"terminal conversation", `"cli"`, false},
+		{"app-server conversation", `"appServer"`, false},
+		{"codex exec run", `"exec"`, true},
+		{"review thread", `{"subAgent":"review"}`, true},
+		{"compaction thread", `{"subAgent":"compact"}`, true},
+		{"spawned subagent", `{"subAgent":{"thread_spawn":{"parent_thread_id":"root","depth":1,"agent_path":null,"agent_nickname":"Ada","agent_role":null}}}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var thread map[string]any
+			if err := json.Unmarshal([]byte(`{"id":"thread","status":{"type":"idle"},"source":`+tc.source+`}`), &thread); err != nil {
+				t.Fatal(err)
+			}
+			if got := codexSession(thread).Delegated(); got != tc.delegated {
+				t.Fatalf("Delegated()=%v, want %v", got, tc.delegated)
+			}
+		})
 	}
 }

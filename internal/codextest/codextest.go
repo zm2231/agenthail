@@ -51,6 +51,8 @@ type Thread struct {
 	// ActiveFlags are what an active thread reports it is blocked on, such as
 	// waitingOnApproval.
 	ActiveFlags []string
+	// Source is the thread's app-server source; empty is "vscode".
+	Source any
 }
 
 type Daemon struct {
@@ -435,10 +437,14 @@ func (d *Daemon) threadJSON(thread *Thread, includeTurns bool) map[string]any {
 		}
 		threadStatus["activeFlags"] = flags
 	}
+	var source any = "vscode"
+	if thread.Source != nil {
+		source = thread.Source
+	}
 	value := map[string]any{
 		"id":                   thread.ID,
 		"cwd":                  thread.Cwd,
-		"source":               "vscode",
+		"source":               source,
 		"originator":           thread.Originator,
 		"preview":              preview,
 		"status":               threadStatus,
