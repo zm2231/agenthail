@@ -130,3 +130,36 @@ func TestClaudeCommandMarkupClassifies(t *testing.T) {
 		t.Fatal("a meta instruction still starts the model's turn")
 	}
 }
+
+func TestClaudeTypedSlashCommandIsAPromptInEveryReading(t *testing.T) {
+	path := timelineFixture(t, `{"type":"user","uuid":"typed","origin":{"kind":"human"},"timestamp":"2026-10-20T18:00:00Z","message":{"role":"user","content":"<command-message>goal</command-message>\n<command-name>/goal</command-name>\n<command-args>tests pass</command-args>"}}
+{"type":"system","subtype":"local_command","uuid":"output","parentUuid":"typed","content":"<local-command-stdout>Goal set: tests pass</local-command-stdout>","commandRun":{"command":"goal","args":"tests pass"},"timestamp":"2026-10-20T18:00:00Z"}
+{"type":"assistant","uuid":"a","timestamp":"2026-10-20T18:00:05Z","message":{"id":"m","stop_reason":"end_turn","content":[{"type":"text","text":"Working on it"}]}}
+{"type":"system","subtype":"stop_hook_summary"}
+`)
+	read, err := timelineClaude().ReadSession(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 5})
+	if err != nil || read.Reply == nil || read.Reply.UserText != "/goal tests pass" || read.Reply.Text != "Working on it" {
+		t.Fatalf("read reply=%+v err=%v", read.Reply, err)
+	}
+	session := &surface.Session{ID: "typed-command", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Transcript: path}
+	observation, err := NewClaude(nil, t.TempDir()).Observe(context.Background(), session)
+	if err != nil || observation.Reply == nil || observation.Reply.UserText != "/goal tests pass" || observation.InputTurnID != "typed" {
+		t.Fatalf("observation=%+v err=%v", observation, err)
+	}
+	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prompt, reply surface.TimelineItem
+	for _, item := range page.Items {
+		switch {
+		case item.Kind == "message" && item.Role == "user":
+			prompt = item
+		case item.Kind == "message" && item.Role == "assistant":
+			reply = item
+		}
+	}
+	if prompt.Text != "/goal tests pass" || prompt.TurnID != "typed" || reply.TurnID != "typed" {
+		t.Fatalf("page=%+v", page.Items)
+	}
+}

@@ -868,8 +868,8 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 				if str(origin, "kind") != claudeOriginHuman {
 					return claudeCommandItems(text)
 				}
-				if claudeCommandInvocation(text) {
-					return []surface.TimelineItem{{Kind: "message", Role: kind, Title: kind, Text: claudeCommandLine(text)}}
+				if typed, human := claudePromptText(claudeOriginHuman, text); human {
+					return []surface.TimelineItem{{Kind: "message", Role: kind, Title: kind, Text: typed}}
 				}
 			}
 		}

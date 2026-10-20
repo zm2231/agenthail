@@ -75,6 +75,16 @@ func claudeLocalCommandItem(content string) surface.TimelineItem {
 	return item
 }
 
+// claudePromptText returns the prompt a user record holds and whether a person
+// wrote it. A slash command the person typed carries origin.kind human and
+// reads as typed.
+func claudePromptText(originKind, text string) (string, bool) {
+	if originKind == claudeOriginHuman && claudeCommandInvocation(text) {
+		return claudeCommandLine(text), true
+	}
+	return text, isHumanTranscriptText(text)
+}
+
 // claudeRecordIsCommand reports a user record that holds only command markup
 // Claude Code wrote itself. A slash command the person typed carries
 // origin.kind human and stays their prompt.
