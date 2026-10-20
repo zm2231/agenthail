@@ -849,3 +849,42 @@ func registryFiles(t *testing.T, path string) map[string]string {
 	}
 	return files
 }
+
+func TestOpenHoldsNoNameForALaunchPendingAtTheVersionBefore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, r, "first")
+	for _, statement := range []string{
+		`DROP TABLE alias_reservations`,
+		`DROP TABLE launcher_pending`,
+		`CREATE TABLE launcher_pending (id INTEGER PRIMARY KEY AUTOINCREMENT, launcher TEXT NOT NULL, agent TEXT NOT NULL, cwd TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '', alias TEXT NOT NULL DEFAULT '', location BLOB NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')))`,
+		`INSERT INTO launcher_pending(launcher,agent,cwd,alias,location,created_at) VALUES('tmux','claude','/work/app','builder','{"workspace":"w"}','2026-10-18 07:35:43')`,
+		`PRAGMA user_version=24`,
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var version int
+	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("user_version=%d err=%v", version, err)
+	}
+	pending, err := r.PendingLaunches()
+	if err != nil || len(pending) != 1 || pending[0].Alias.Name != "builder" || !pending[0].ExpiresAt.Before(time.Now()) {
+		t.Fatalf("pending=%+v err=%v", pending, err)
+	}
+	if err := r.SetAlias("builder", "first"); err != nil {
+		t.Fatalf("a launch pending before the upgrade holds its name: %v", err)
+	}
+}

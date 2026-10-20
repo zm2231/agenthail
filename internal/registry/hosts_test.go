@@ -229,11 +229,18 @@ func TestLocalRegistrationRefusesHostOwnedSession(t *testing.T) {
 	if err := r.RegisterSession(takeover); !errors.As(err, &SessionOwnedError{}) {
 		t.Fatalf("RegisterSession err=%v", err)
 	}
-	pendingID, err := r.RecordPendingLaunch("terminal", surface.KindClaude, "/work", "local takeover", "", surface.Location{})
+	name, err := r.ReserveAlias("takeover", time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSessionAndDeletePending(takeover, pendingID, "takeover"); !errors.As(err, &SessionOwnedError{}) {
+	if _, err := r.RecordPendingLaunch("terminal", surface.KindClaude, "/work", "local takeover", name, surface.Location{}, time.Now(), time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	launches, err := r.PendingLaunches()
+	if err != nil || len(launches) != 1 {
+		t.Fatalf("launches=%+v err=%v", launches, err)
+	}
+	if _, err := r.RegisterSessionAndDeletePending(takeover, launches[0]); !errors.As(err, &SessionOwnedError{}) {
 		t.Fatalf("RegisterSessionAndDeletePending err=%v", err)
 	}
 	after, err := r.Session("remote-thread")

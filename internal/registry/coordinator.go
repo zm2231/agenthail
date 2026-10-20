@@ -226,6 +226,11 @@ func (r *Registry) checkCoordinatorTx(tx *sql.Tx, spec CoordinatorSpec, change C
 	if owner != "" && owner != change.SessionID && !freed {
 		return nil, AliasTakenError{Name: spec.Name, Owner: owner}
 	}
+	if !freed {
+		if err := aliasReservedTx(tx, spec.Name, ""); err != nil {
+			return nil, err
+		}
+	}
 	return previous, nil
 }
 
