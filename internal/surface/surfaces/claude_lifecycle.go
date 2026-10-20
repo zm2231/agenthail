@@ -46,15 +46,21 @@ func (c *Claude) backgroundCommand(ctx context.Context, root, cwd string, args .
 	return cmd.CombinedOutput()
 }
 
+// claudeCommandEnv is the environment of every Claude Agenthail launches.
 // cmux's claude wrapper keys on CMUX_SURFACE_ID to inject a temporary
 // --settings file that background jobs persist and replay on resume, after
-// the file is gone. Without CMUX_ variables the wrapper passes through.
+// the file is gone. Without CMUX_ variables the wrapper passes through. A
+// blank CLAUDE_CONFIG_DIR means the default root to Agenthail but is still
+// set to Claude Code, which then reads a different keychain credential, so it
+// is dropped; a configured one is inherited as it is.
 func claudeCommandEnv(home string) []string {
 	var env []string
 	for _, entry := range surface.AgentEnv(os.Environ()) {
-		if !strings.HasPrefix(entry, "CMUX_") {
-			env = append(env, entry)
+		name, value, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(name, "CMUX_") || name == "CLAUDE_CONFIG_DIR" && strings.TrimSpace(value) == "" {
+			continue
 		}
+		env = append(env, entry)
 	}
 	return append(env, "HOME="+home)
 }

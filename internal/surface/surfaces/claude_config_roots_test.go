@@ -63,51 +63,74 @@ func TestClaudeSessionInASecondConfigRootIsListedReadSentStoppedAndResumed(t *te
 		t.Fatalf("result=%v err=%v", result, err)
 	}
 	spawns := host.Spawns(t, fixtureConversation)
-	if len(spawns) != 1 || spawns[0].ConfigDir != root {
+	if len(spawns) != 1 || spawns[0].ConfigDir == nil || *spawns[0].ConfigDir != root {
 		t.Fatalf("spawns=%+v, want one resume in %s", spawns, root)
 	}
 	for _, dir := range fixture.ConfigDirs() {
-		if dir != root {
-			t.Fatalf("claude ran with CLAUDE_CONFIG_DIR=%v, want %s", fixture.ConfigDirs(), root)
+		if dir != (claudetest.ConfigDir{Set: true, Dir: root}) {
+			t.Fatalf("claude ran with CLAUDE_CONFIG_DIR %+v, want %s", fixture.ConfigDirs(), root)
 		}
 	}
 }
 
+// The primary root is never named to a Claude Agenthail starts: Claude Code
+// on macOS reads a different keychain credential once CLAUDE_CONFIG_DIR is
+// set, even to the default directory. A primary the daemon was configured
+// with is inherited as it is, and a blank one is dropped.
 func TestClaudeSessionInThePrimaryConfigRootIsStoppedAndResumedWithoutNamingIt(t *testing.T) {
-	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	fixture, host, c := hostResume(t)
-	fixture.AddRoot("claude-work")
-	fixture.Root = filepath.Join(fixture.Home, ".claude")
-	fixture.Transcript(fixtureConversation, fixture.Home)
-	fixture.Record(fixtureConversation, fixture.Home, "")
-	ctx := context.Background()
+	for _, env := range []string{"unset", "blank", "configured"} {
+		t.Run(env, func(t *testing.T) {
+			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			fixture := claudetest.New(t)
+			want := claudetest.ConfigDir{}
+			switch env {
+			case "unset":
+				os.Unsetenv("CLAUDE_CONFIG_DIR")
+			case "configured":
+				fixture.Root = filepath.Join(fixture.Home, "claude-main")
+				t.Setenv("CLAUDE_CONFIG_DIR", fixture.Root)
+				want = claudetest.ConfigDir{Set: true, Dir: fixture.Root}
+			}
+			fixture.AddRoot("claude-work")
+			fixture.Root = surface.ClaudeConfigDir(fixture.Home)
+			host := claudehosttest.New(t, fixture.Home)
+			host.Start(t)
+			c := NewClaude(nil, fixture.Home)
+			fixture.Transcript(fixtureConversation, fixture.Home)
+			fixture.Record(fixtureConversation, fixture.Home, "")
+			ctx := context.Background()
 
-	fixture.Job("fe758937", fixtureConversation, fixture.Home, "working", fixture.PID)
-	if _, err := c.SessionAction(ctx, &surface.Session{ID: fixtureConversation}, "stop"); err != nil {
-		t.Fatal(err)
-	}
-	if fixture.InvocationsIn(fixture.Root, "stop", "fe758937") != 1 {
-		t.Fatal("stop did not run against the primary config root")
-	}
+			fixture.Job("fe758937", fixtureConversation, fixture.Home, "working", fixture.PID)
+			if _, err := c.SessionAction(ctx, &surface.Session{ID: fixtureConversation}, "stop"); err != nil {
+				t.Fatal(err)
+			}
+			if fixture.InvocationsIn(fixture.Root, "stop", "fe758937") != 1 {
+				t.Fatal("stop did not run against the primary config root")
+			}
 
-	fixture.RemoveRecord()
-	fixture.Job("fe758937", fixtureConversation, fixture.Home, "done", 0)
-	result, err := c.SessionAction(ctx, &surface.Session{ID: fixtureConversation}, "resume")
-	if err != nil || result["unchanged"] != false {
-		t.Fatalf("result=%v err=%v", result, err)
-	}
-	spawns := host.Spawns(t, fixtureConversation)
-	if len(spawns) != 1 || spawns[0].ConfigDir != "" {
-		t.Fatalf("spawns=%+v, want one resume without a config dir", spawns)
-	}
-	dirs := fixture.ConfigDirs()
-	if len(dirs) == 0 {
-		t.Fatal("claude never ran")
-	}
-	for _, dir := range dirs {
-		if dir != "" {
-			t.Fatalf("claude ran with CLAUDE_CONFIG_DIR=%v, want it unset for the primary root", dirs)
-		}
+			fixture.RemoveRecord()
+			fixture.Job("fe758937", fixtureConversation, fixture.Home, "done", 0)
+			result, err := c.SessionAction(ctx, &surface.Session{ID: fixtureConversation}, "resume")
+			if err != nil || result["unchanged"] != false {
+				t.Fatalf("result=%v err=%v", result, err)
+			}
+			// The test host runs with the test's own environment, so a resume
+			// that names no config dir leaves the CLI with exactly that.
+			inherited, set := os.LookupEnv("CLAUDE_CONFIG_DIR")
+			spawns := host.Spawns(t, fixtureConversation)
+			if len(spawns) != 1 || (spawns[0].ConfigDir != nil) != set || set && *spawns[0].ConfigDir != inherited {
+				t.Fatalf("spawns=%+v, want one resume with the host's own CLAUDE_CONFIG_DIR", spawns)
+			}
+			dirs := fixture.ConfigDirs()
+			if len(dirs) == 0 {
+				t.Fatal("claude never ran")
+			}
+			for _, dir := range dirs {
+				if dir != want {
+					t.Fatalf("claude ran with CLAUDE_CONFIG_DIR %+v, want %+v", dirs, want)
+				}
+			}
+		})
 	}
 }
 
