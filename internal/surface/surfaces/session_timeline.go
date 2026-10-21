@@ -573,29 +573,27 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		}
 	}
 	slices.Reverse(records)
-	var exchangeOffsets []int64
-	if source == "claude" {
-		var items []surface.TimelineItem
-		var itemOffsets []int64
-		seen := map[string]bool{}
-		for i := len(records) - 1; i >= 0; i-- {
-			for j := len(records[i].items) - 1; j >= 0; j-- {
-				if item := records[i].items[j]; !seen[item.ID] {
-					seen[item.ID] = true
-					items = append(items, item)
-					itemOffsets = append(itemOffsets, records[i].offset)
-				}
+	var items []surface.TimelineItem
+	var itemOffsets []int64
+	seen := map[string]bool{}
+	for i := len(records) - 1; i >= 0; i-- {
+		for j := len(records[i].items) - 1; j >= 0; j-- {
+			if item := records[i].items[j]; !seen[item.ID] {
+				seen[item.ID] = true
+				items = append(items, item)
+				itemOffsets = append(itemOffsets, records[i].offset)
 			}
 		}
-		slices.Reverse(items)
-		slices.Reverse(itemOffsets)
-		result.Exchanges = surface.ExchangesFromItems(items, "")
-		for _, start := range surface.ExchangeStarts(items) {
-			exchangeOffsets = append(exchangeOffsets, itemOffsets[start])
-		}
+	}
+	slices.Reverse(items)
+	slices.Reverse(itemOffsets)
+	result.Exchanges = surface.ExchangesFromItems(items, "")
+	var exchangeOffsets []int64
+	for _, start := range surface.ExchangeStarts(items) {
+		exchangeOffsets = append(exchangeOffsets, itemOffsets[start])
+	}
+	if source == "claude" {
 		result.Reply = claudeTranscriptReply(records, result.Source, settled)
-	} else {
-		result.Exchanges, exchangeOffsets = codexTranscriptExchanges(records)
 	}
 	pageStart := int64(-1)
 	if limit > 0 && len(result.Exchanges) > limit {
@@ -605,7 +603,7 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 	}
 	// An item recorded twice, as a queued and a delivered prompt, keeps its
 	// newest copy, as the journal does.
-	seen := map[string]bool{}
+	seen = map[string]bool{}
 	for i := 0; i < len(groups); i++ {
 		if groupOffsets[i] < pageStart {
 			continue
@@ -716,43 +714,6 @@ func claudeTranscriptReply(records []transcriptRecord, source string, settled fu
 	return reply
 }
 
-func codexTranscriptExchanges(records []transcriptRecord) ([]surface.Exchange, []int64) {
-	exchanges := make([]surface.Exchange, 0)
-	offsets := make([]int64, 0)
-	turnIDs := make([]string, 0)
-	for _, record := range records {
-		for _, item := range record.items {
-			if item.Kind == "done" && len(exchanges) > 0 && exchanges[len(exchanges)-1].Turn == nil && (item.TurnID == "" || turnIDs[len(turnIDs)-1] == "" || item.TurnID == turnIDs[len(turnIDs)-1]) {
-				ended := item.Turn
-				if ended == nil {
-					ended = surface.NewTurnMetadata(surface.TurnStateOfDone(item.Status), surface.TurnMeasure{})
-				}
-				exchanges[len(exchanges)-1].Turn = ended
-				continue
-			}
-			if item.Kind != "message" || (item.Text == "" && len(item.Files) == 0) {
-				continue
-			}
-			timestamp, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
-			switch item.Role {
-			case "user":
-				exchanges = append(exchanges, surface.Exchange{User: item.Text, Timestamp: timestamp})
-				offsets = append(offsets, record.offset)
-				turnIDs = append(turnIDs, item.TurnID)
-			case "assistant":
-				if len(exchanges) == 0 || exchanges[len(exchanges)-1].Assistant != "" {
-					exchanges = append(exchanges, surface.Exchange{Assistant: item.Text, Timestamp: timestamp})
-					offsets = append(offsets, record.offset)
-					turnIDs = append(turnIDs, item.TurnID)
-				} else {
-					exchanges[len(exchanges)-1].Assistant = item.Text
-				}
-			}
-		}
-	}
-	return exchanges, offsets
-}
-
 const (
 	codexTurnAbortedOpen  = "<turn_aborted>"
 	codexTurnAbortedClose = "</turn_aborted>"
@@ -787,6 +748,60 @@ func codexTurnError(payload map[string]any) (message, info string) {
 		info = "error"
 	}
 	return message, info
+}
+
+// codexContextFragments mirrors the markers Codex itself uses to tell the
+// context it injects into a user-role message (AGENTS.md, the environment,
+// skills, shell commands it ran for the user, subagent notices) from text a
+// person typed.
+var codexContextFragments = []struct{ open, close string }{
+	{"# AGENTS.md instructions", "</INSTRUCTIONS>"},
+	{"<environment_context>", "</environment_context>"},
+	{"<user_instructions>", "</user_instructions>"},
+	{"<skill>", "</skill>"},
+	{"<user_shell_command>", "</user_shell_command>"},
+	{"<subagent_notification>", "</subagent_notification>"},
+	{"<image_resize_notice>", "</image_resize_notice>"},
+}
+
+func codexContextFragment(text string) bool {
+	text = strings.TrimSpace(text)
+	for _, fragment := range codexContextFragments {
+		if strings.HasPrefix(text, fragment.open) && strings.HasSuffix(text, fragment.close) {
+			return true
+		}
+	}
+	return false
+}
+
+// codexInstructions returns the text of a message that is model input
+// rather than conversation: a developer message, or a user message made
+// only of Codex's injected context. A user message with any typed block
+// stays a prompt.
+func codexInstructions(payload map[string]any) (string, bool) {
+	blocks, _ := payload["content"].([]any)
+	var parts []string
+	for _, raw := range blocks {
+		block, _ := raw.(map[string]any)
+		text := str(block, "text")
+		if strings.TrimSpace(text) == "" {
+			if str(payload, "role") == "user" && strings.Contains(str(block, "type"), "image") {
+				return "", false
+			}
+			continue
+		}
+		if str(payload, "role") == "user" && !codexContextFragment(text) {
+			return "", false
+		}
+		parts = append(parts, text)
+	}
+	switch str(payload, "role") {
+	case "developer", "system":
+		return strings.Join(parts, "\n\n"), true
+	case "user":
+		return strings.Join(parts, "\n\n"), len(parts) > 0
+	}
+	return "", false
 }
 
 func codexInterruptionNotice(payload map[string]any) (surface.TimelineItem, bool) {
@@ -1159,6 +1174,9 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 	case "message":
 		if notice, ok := codexInterruptionNotice(payload); ok {
 			return []surface.TimelineItem{notice}
+		}
+		if text, ok := codexInstructions(payload); ok {
+			return []surface.TimelineItem{{Kind: "instructions", Title: "Instructions", Text: text}}
 		}
 		item.Kind = "message"
 		item.Role = str(payload, "role")
