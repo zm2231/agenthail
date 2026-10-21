@@ -261,7 +261,7 @@ func startRunningDaemon(t *testing.T, agent *scriptedAgent) *runningDaemon {
 			t.Fatal(err)
 		}
 	}
-	d := New(store, []surface.Surface{agent})
+	d := newTestDaemon(t, store, []surface.Surface{agent})
 	d.pollInterval = 10 * time.Millisecond
 	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: e2eToken}))
 	ctx, cancel := context.WithCancel(context.Background())

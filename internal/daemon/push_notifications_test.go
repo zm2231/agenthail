@@ -129,7 +129,7 @@ func TestNotifyPairedDevicesRetiresOnlyTerminalTargets(t *testing.T) {
 			if err := reg.SaveDevicePushTarget(device.ID, "installation", "credential"); err != nil {
 				t.Fatal(err)
 			}
-			New(reg, nil).notifyPairedDevices(context.Background(), mobileNotification{Title: "Agenthail", Message: "Finished", SessionID: "codex/session", TurnID: "turn-1", EventType: "turn.completed"})
+			newTestDaemon(t, reg, nil).notifyPairedDevices(context.Background(), mobileNotification{Title: "Agenthail", Message: "Finished", SessionID: "codex/session", TurnID: "turn-1", EventType: "turn.completed"})
 			targets, err := reg.DevicePushTargets()
 			if err != nil || len(targets) != test.remaining {
 				t.Fatalf("targets=%+v err=%v", targets, err)

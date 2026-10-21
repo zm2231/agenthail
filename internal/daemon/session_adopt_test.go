@@ -28,7 +28,7 @@ func TestSessionAdoptActionOpensAClaudeSessionInTheHostAndReRegistersIt(t *testi
 	if err := registry.RegisterSession(surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: fixture.Home, Transcript: transcript}); err != nil {
 		t.Fatal(err)
 	}
-	d := New(registry, []surface.Surface{surfaces.NewClaude(nil, fixture.Home)})
+	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewClaude(nil, fixture.Home)})
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	adopt := func(stopTerminal bool) *httptest.ResponseRecorder {
 		body, _ := json.Marshal(map[string]any{"action": "session-adopt", "sessionId": conversation, "stopTerminal": stopTerminal})
@@ -70,7 +70,7 @@ func TestTheSnapshotOffersAdoptionForTerminalAndBackgroundSessionsUntilTheHostRu
 	t.Setenv("HOME", fixture.Home)
 	const conversation = "6a2e9c1d-4b3f-4e8a-9d07-c1b2a3f4e5d6"
 	fixture.Transcript(conversation, fixture.Home)
-	d := New(registry, []surface.Surface{surfaces.NewClaude(nil, fixture.Home)})
+	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewClaude(nil, fixture.Home)})
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	serve := func(method, path string, body []byte) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, path, bytes.NewReader(body))
@@ -134,7 +134,7 @@ func TestAnExitedSessionWhoseFileDiscoveryMissedIsOfferedAndAdopted(t *testing.T
 	if err := registry.RegisterSession(surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: fixture.Home, Transcript: transcript, Status: surface.StatusOffline}); err != nil {
 		t.Fatal(err)
 	}
-	d := New(registry, []surface.Surface{surfaces.NewClaude(nil, fixture.Home)})
+	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewClaude(nil, fixture.Home)})
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	serve := func(method, path string, body []byte) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, path, bytes.NewReader(body))

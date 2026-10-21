@@ -73,7 +73,7 @@ func TestAPhoneAnswersAHostSessionsPermissionRequestOnceAndHistoryNamesIt(t *tes
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
-	d := New(r, []surface.Surface{claude})
+	d := newTestDaemon(t, r, []surface.Surface{claude})
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	phone := deviceToken(t, r, "Phone", "read", "control")
 	reader := deviceToken(t, r, "Watcher", "read")
@@ -135,7 +135,7 @@ func TestAPermissionModeChangeTakesTheCreationGuardAndIsRecordedWithWhoChangedIt
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
-	d := New(r, []surface.Surface{claude})
+	d := newTestDaemon(t, r, []surface.Surface{claude})
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	phone := deviceToken(t, r, "Phone", "read", "control")
 	reader := deviceToken(t, r, "Watcher", "read")
@@ -171,7 +171,7 @@ func TestAHostRequestAsksForACatalogPassAtOnce(t *testing.T) {
 	client := fixture.Start(t)
 	id := uuid.NewString()
 	fixture.Open(t, client, id)
-	d := New(hostRegistry(t), nil)
+	d := newTestDaemon(t, hostRegistry(t), nil)
 	d.SetClaudeHost(fixture.Manager(t, "test"))
 	ctx, cancel := context.WithCancel(context.Background())
 	watched := make(chan struct{})
@@ -212,7 +212,7 @@ func TestTheDashboardOffersAHostSessionNoRemoteControlCommands(t *testing.T) {
 	if caps := surface.EffectiveCapabilities(claude, &session); caps.Commands || !caps.Model {
 		t.Fatalf("capabilities = %+v", caps)
 	}
-	handler := New(r, []surface.Surface{claude}).dashboardHandler(&dashboardServer{token: "secret"})
+	handler := newTestDaemon(t, r, []surface.Surface{claude}).dashboardHandler(&dashboardServer{token: "secret"})
 	for _, action := range []string{"status", "context", "usage", "effort", "rename"} {
 		response := apiCall(t, handler, http.MethodPost, "/api/v1/actions", "secret", map[string]any{"action": action, "sessionId": id, "message": "high"})
 		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "Remote Control commands") {
@@ -233,7 +233,7 @@ func TestAWaitingHostRequestPushNamesOnlyTheRequestAndTheButtonsComeFromTheMac(t
 		t.Fatal(err)
 	}
 	pushes := newPushRecorder(t, r)
-	d := New(r, []surface.Surface{claude})
+	d := newTestDaemon(t, r, []surface.Surface{claude})
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	phone := deviceToken(t, r, "Phone", "read", "control")
 	ask := func(message string) map[string]string {

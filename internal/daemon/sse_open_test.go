@@ -17,7 +17,7 @@ func TestStreamsSendBodyBytesBeforeTheFirstKeepalive(t *testing.T) {
 	d, reg, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 1)}
 	adapter.caps.Stream = true
-	d = New(reg, []surface.Surface{adapter})
+	d = newTestDaemon(t, reg, []surface.Surface{adapter})
 	entry, inserted, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "message-1", Payload: []byte(`{"itemId":"message-1","version":1,"op":"upsert","kind":"text","ts":"2026-10-03T12:00:00Z","body":"first"}`)}, registry.SessionJournalRetention{Count: 2, Bytes: 1024})
 	if err != nil || !inserted {
 		t.Fatalf("entry=%+v inserted=%v err=%v", entry, inserted, err)

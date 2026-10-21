@@ -21,7 +21,7 @@ func TestSessionRowReportsTheLifecycleItsRuntimeSupports(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	adapter := surfaces.NewClaude(nil, home)
-	d := New(registry, []surface.Surface{adapter})
+	d := newTestDaemon(t, registry, []surface.Surface{adapter})
 	transcript := filepath.Join(home, ".claude", "projects", "-work", "s.jsonl")
 	for _, tc := range []struct {
 		runtime    surface.RuntimeKind
@@ -74,7 +74,7 @@ func TestResumingABackgroundJobRegistersItsHostSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapter := surfaces.NewClaude(nil, fixture.Home)
-	d := New(registry, []surface.Surface{adapter})
+	d := newTestDaemon(t, registry, []surface.Surface{adapter})
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	body, _ := json.Marshal(map[string]string{"action": "session-lifecycle-resume", "sessionId": conversation})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/actions", bytes.NewReader(body))

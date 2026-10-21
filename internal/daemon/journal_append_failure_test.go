@@ -185,7 +185,7 @@ func TestDaemonSessionActivityRecoversReplayAfterTransientJournalFailure(t *test
 	adapter := &replayingStreamSurface{flakySeedSurface: &flakySeedSurface{daemonSurface: fake}, replay: make(chan struct{})}
 	adapter.caps.Stream = true
 	allow := rejectJournalWrites(t, reg, "replayed")
-	d := New(reg, []surface.Surface{adapter})
+	d := newTestDaemon(t, reg, []surface.Surface{adapter})
 	defer d.sources.shutdown()
 	subscription, err := d.sources.subscribe(&from, adapter)
 	if err != nil {

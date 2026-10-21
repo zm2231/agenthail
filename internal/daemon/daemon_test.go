@@ -310,7 +310,7 @@ func daemonFixture(t *testing.T) (*Daemon, *registry.Registry, *daemonSurface, s
 		t.Fatal(err)
 	}
 	fake := &daemonSurface{sessions: map[string]surface.Session{"from": from, "to": to}, observations: map[string]*surface.TurnObservation{}, accepted: true}
-	return New(r, []surface.Surface{fake}), r, fake, from, to
+	return newTestDaemon(t, r, []surface.Surface{fake}), r, fake, from, to
 }
 
 func TestObservationPersistsRefreshedCodexTransport(t *testing.T) {
@@ -1110,7 +1110,6 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 	if err != nil || item.Status != "delivered" || item.Evidence != surface.EvidenceDelivered {
 		t.Fatalf("after boundary item=%+v err=%v", item, err)
 	}
-	daemon.queueWorkers.Wait()
 }
 
 func TestFailedCompletionIsNotRelayed(t *testing.T) {

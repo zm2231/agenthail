@@ -83,7 +83,7 @@ func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
 	}
 	f.transcript(t, f.bridged, idleClaudeTranscript)
 	f.transcript(t, f.native, idleClaudeTranscript)
-	f.d = New(r, []surface.Surface{f.claude})
+	f.d = newTestDaemon(t, r, []surface.Surface{f.claude})
 	return f
 }
 
