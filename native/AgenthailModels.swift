@@ -317,9 +317,11 @@ struct SessionLifecycle: Codable, Hashable {
     var logs = false
     var stop = false
     var resume = false
+    /// The session can be reopened in Agenthail's host.
+    var adopt = false
 
-    init(status: Bool = false, logs: Bool = false, stop: Bool = false, resume: Bool = false) {
-        (self.status, self.logs, self.stop, self.resume) = (status, logs, stop, resume)
+    init(status: Bool = false, logs: Bool = false, stop: Bool = false, resume: Bool = false, adopt: Bool = false) {
+        (self.status, self.logs, self.stop, self.resume, self.adopt) = (status, logs, stop, resume, adopt)
     }
 
     init(from decoder: Decoder) throws {
@@ -328,8 +330,11 @@ struct SessionLifecycle: Codable, Hashable {
         logs = try container.decodeIfPresent(Bool.self, forKey: .logs) ?? false
         stop = try container.decodeIfPresent(Bool.self, forKey: .stop) ?? false
         resume = try container.decodeIfPresent(Bool.self, forKey: .resume) ?? false
+        adopt = try container.decodeIfPresent(Bool.self, forKey: .adopt) ?? false
     }
 
+    /// Any operation on the session's own process. Adoption is offered on its
+    /// own, not in the process operations.
     var any: Bool { status || logs || stop || resume }
 }
 
@@ -405,9 +410,8 @@ struct SessionState: Codable, Identifiable, Hashable {
     var backgroundTasks: BackgroundTasks? = nil
     var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
-    /// A Claude session Agenthail can open in its host: one a terminal or
-    /// background job runs.
-    var canAdopt: Bool { surface == "claude" && (runtimeKind == "claude-cli" || runtimeKind == "claude-bg") && !isReadOnly }
+    /// A session its daemon can open in Agenthail's host.
+    var canAdopt: Bool { capabilities.lifecycle.adopt && !isReadOnly }
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }

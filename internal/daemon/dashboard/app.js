@@ -2747,14 +2747,16 @@ function syncSessionOperationFields() {
   const form = $("#session-operation-form");
   const surface = app.selected?.surface;
   const lifecycle = app.selected?.capabilities?.lifecycle || {};
-  form.closest("details").hidden = surface === "claude" ? !Object.values(lifecycle).some(Boolean) : surface !== "codex";
   $("#turn-effort").closest("details").hidden = surface !== "codex";
+  let offered = false;
   for (const option of form.elements.operation.options) {
     const lifecycleOperation = option.value.startsWith("session-lifecycle-") ? option.value.slice("session-lifecycle-".length) : "";
     const matches = surface === "claude" ? Boolean(lifecycleOperation && lifecycle[lifecycleOperation]) : !lifecycleOperation;
+    offered ||= matches;
     option.hidden = !matches;
     option.disabled = !matches || (Boolean(app.selected?.readOnly) && option.value !== "native-list");
   }
+  form.closest("details").hidden = surface === "claude" ? !offered : surface !== "codex";
   const chosen = form.elements.operation.selectedOptions[0];
   if (!chosen || chosen.disabled) {
     form.elements.operation.value = [...form.elements.operation.options].find(option => !option.disabled)?.value || "";

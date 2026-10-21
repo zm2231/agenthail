@@ -53,10 +53,10 @@ app.selected = {id:'hosted',surface:'claude',capabilities:{lifecycle:{status:tru
 vm.runInContext('syncSessionOperationFields()', context);
 assert.deepEqual(lifecycleOptions(), ['session-lifecycle-status', 'session-lifecycle-stop', 'session-lifecycle-resume'], 'an operation whose flag is off is not offered');
 assert.equal(options.find(x => x.value === 'session-lifecycle-logs').hidden, true);
-app.selected = {id:'interactive',surface:'claude',capabilities:{lifecycle:{status:false,logs:false,stop:false,resume:false}}};
+app.selected = {id:'interactive',surface:'claude',capabilities:{lifecycle:{status:false,logs:false,stop:false,resume:false,adopt:true}}};
 vm.runInContext('syncSessionOperationFields()', context);
 assert.deepEqual(lifecycleOptions(), [], 'an interactive session offers no lifecycle operation');
-assert.equal(details.hidden, true);
+assert.equal(details.hidden, true, 'adoption alone does not open an operations panel with nothing in it');
 app.selected = {id:'readonly',surface:'codex',readOnly:true};
 vm.runInContext('syncSessionOperationFields()', context);
 assert.equal(operation.value, 'native-list');

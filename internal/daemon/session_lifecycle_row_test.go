@@ -22,9 +22,9 @@ func TestSessionRowReportsTheLifecycleItsRuntimeSupports(t *testing.T) {
 	adapter := surfaces.NewClaude(nil, home)
 	d := New(registry, []surface.Surface{adapter})
 	for runtime, want := range map[surface.RuntimeKind]map[string]bool{
-		surface.RuntimeClaudeBackground: {"status": true, "logs": true, "stop": true, "resume": true},
-		surface.RuntimeClaudeHost:       {"status": true, "logs": true, "stop": true, "resume": true},
-		surface.RuntimeClaudeCLI:        {"status": false, "logs": false, "stop": false, "resume": false},
+		surface.RuntimeClaudeBackground: {"status": true, "logs": true, "stop": true, "resume": true, "adopt": true},
+		surface.RuntimeClaudeHost:       {"status": true, "logs": true, "stop": true, "resume": true, "adopt": false},
+		surface.RuntimeClaudeCLI:        {"status": false, "logs": false, "stop": false, "resume": false, "adopt": true},
 	} {
 		row := d.catalogSessionProjection(adapter, surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: runtime, Transport: "uds"}, catalogIdentity{}, time.Now(), "", 0, false, DashboardConfig{})
 		data, err := json.Marshal(row)

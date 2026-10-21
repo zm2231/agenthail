@@ -17,6 +17,12 @@ const (
 	claudeAdoptPollEvery   = 500 * time.Millisecond
 )
 
+// claudeAdoptable is a session AdoptSession moves into the host: one a
+// terminal or a background job runs. A host session is already there.
+func claudeAdoptable(sess *surface.Session) bool {
+	return sess != nil && (sess.RuntimeKind == surface.RuntimeClaudeCLI || sess.RuntimeKind == surface.RuntimeClaudeBackground)
+}
+
 // AdoptSession reopens a conversation in Agenthail's host. The process that
 // holds it is stopped first once it is idle: a host session is closed, a
 // background job stopped, and a terminal process only with the person's

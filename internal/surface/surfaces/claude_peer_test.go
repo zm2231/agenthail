@@ -25,9 +25,9 @@ func TestClaudeLifecycleCapabilitiesFollowTheRuntime(t *testing.T) {
 		runtime surface.RuntimeKind
 		want    surface.Lifecycle
 	}{
-		{surface.RuntimeClaudeBackground, surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true}},
+		{surface.RuntimeClaudeBackground, surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true, Adopt: true}},
 		{surface.RuntimeClaudeHost, surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true}},
-		{surface.RuntimeClaudeCLI, surface.Lifecycle{}},
+		{surface.RuntimeClaudeCLI, surface.Lifecycle{Adopt: true}},
 	} {
 		session := &surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: tc.runtime, Transport: "uds", Bridge: "session_bridge"}
 		if got := adapter.SessionCapabilities(session).Lifecycle; got != tc.want {
@@ -39,7 +39,7 @@ func TestClaudeLifecycleCapabilitiesFollowTheRuntime(t *testing.T) {
 		}
 		adapter = NewClaude(nil, t.TempDir())
 	}
-	if adapter.Capabilities().Lifecycle != (surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true}) {
+	if adapter.Capabilities().Lifecycle != (surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true, Adopt: true}) {
 		t.Fatal("the adapter advertises less lifecycle than its sessions reach")
 	}
 	var codex surface.Surface = NewCodex("")

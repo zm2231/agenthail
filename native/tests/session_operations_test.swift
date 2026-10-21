@@ -111,24 +111,28 @@ struct SessionOperationsTest {
     }
 
     static func checkLifecycleAvailability() {
-        let background = lifecycleSession("claude-bg", lifecycle: #"{"status":true,"logs":true,"stop":true,"resume":true}"#)
-        check(background.map(SessionOperationAvailability.lifecycle) == SessionLifecycle(status: true, logs: true, stop: true, resume: true), "a background job offers all four operations")
+        let background = lifecycleSession("claude-bg", lifecycle: #"{"status":true,"logs":true,"stop":true,"resume":true,"adopt":true}"#)
+        check(background.map(SessionOperationAvailability.lifecycle) == SessionLifecycle(status: true, logs: true, stop: true, resume: true, adopt: true), "a background job offers all four operations and adoption")
         check(background.map(SessionLifecycleCopy.title) == "Background session", "a background job keeps its label")
         let hosted = lifecycleSession("claude-host", lifecycle: #"{"status":true,"logs":false,"stop":true,"resume":true}"#)
         check(hosted.map(SessionOperationAvailability.lifecycle) == SessionLifecycle(status: true, stop: true, resume: true), "an operation whose flag is off is not offered")
         check(hosted.map(SessionLifecycleCopy.title) == "Session", "a host session is not labelled a background session")
-        let interactive = lifecycleSession("claude-cli", lifecycle: #"{"status":false,"logs":false,"stop":false,"resume":false}"#)
-        check(interactive.map { SessionOperationAvailability.lifecycle($0).any } == false, "an interactive session offers no lifecycle operation")
+        let interactive = lifecycleSession("claude-cli", lifecycle: #"{"status":false,"logs":false,"stop":false,"resume":false,"adopt":true}"#)
+        check(interactive.map { SessionOperationAvailability.lifecycle($0).any } == false, "an interactive session offers no process operation, so its operations section stays hidden")
         let older = lifecycleSession(nil, lifecycle: nil)
         check(older.map { SessionOperationAvailability.lifecycle($0).any } == false, "a host that reports no lifecycle offers none")
-        let extended = lifecycleSession("claude-bg", lifecycle: #"{"status":true,"adopt":true}"#)
+        let extended = lifecycleSession("claude-bg", lifecycle: #"{"status":true,"move":true}"#)
         check(extended.map(SessionOperationAvailability.lifecycle) == SessionLifecycle(status: true), "unknown lifecycle operations are ignored and missing ones are off")
-        let readOnly = lifecycleSession("claude-bg", lifecycle: #"{"status":true,"logs":true,"stop":true,"resume":true}"#, readOnly: true)
+        let readOnly = lifecycleSession("claude-bg", lifecycle: #"{"status":true,"logs":true,"stop":true,"resume":true,"adopt":true}"#, readOnly: true)
         check(readOnly.map { SessionOperationAvailability.lifecycle($0).any } == false, "a read-only session offers no lifecycle operation")
         check(background?.canAdopt == true, "a background job can be opened in Agenthail")
         check(interactive?.canAdopt == true, "a terminal session can be opened in Agenthail")
         check(hosted?.canAdopt == false, "a session Agenthail already runs is not offered for adoption")
         check(readOnly?.canAdopt == false, "a read-only session is not offered for adoption")
+        check(extended?.canAdopt == false, "a session whose daemon does not offer adoption is not offered it")
+        check(older?.canAdopt == false, "a daemon that reports no lifecycle offers no adoption")
+        let undeclared = lifecycleSession("claude-cli", lifecycle: #"{"status":false,"logs":false,"stop":false,"resume":false}"#)
+        check(undeclared?.canAdopt == false, "the runtime alone does not offer adoption; the daemon's flag does")
     }
 
     static func checkQueueOrder() {
