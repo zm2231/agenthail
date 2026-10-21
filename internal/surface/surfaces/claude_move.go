@@ -153,8 +153,10 @@ func claudeMoveParts(conversation string) []string {
 	return []string{conversation + ".jsonl", conversation, path.Join("tasks", conversation)}
 }
 
-func (c *Claude) movedDir(root, conversation string) string {
-	return filepath.Join(root, claudeMovedDir, conversation)
+// movedDir holds one move's copy of a conversation, so the copy a finished
+// move left is never taken for another move's.
+func (c *Claude) movedDir(root, conversation, moveID string) string {
+	return filepath.Join(root, claudeMovedDir, conversation, moveID)
 }
 
 // rootPath is where a move archive part lives under a config root.
@@ -166,18 +168,19 @@ func claudeRootPart(root, projectDir, part string) string {
 }
 
 // ArchiveMove takes a conversation's files out of every folder Claude and
-// Agenthail read conversations from, into <root>/agenthail-moved/<id>/. It
-// may run again after a crash: a part already archived stays where it is.
-func (c *Claude) ArchiveMove(conversation string) error {
-	if !claudeConversationID(conversation) {
-		return fmt.Errorf("Claude session %q is not a conversation id", conversation)
+// Agenthail read conversations from, into
+// <root>/agenthail-moved/<id>/<move id>/. It may run again after a crash: a
+// part already archived stays where it is.
+func (c *Claude) ArchiveMove(conversation, moveID string) error {
+	if !claudeConversationID(conversation) || !claudeConversationID(moveID) {
+		return fmt.Errorf("Claude session %q or move %q is not a valid id", conversation, moveID)
 	}
 	roots, err := surface.ClaudeConfigRoots(c.home)
 	if err != nil {
 		return err
 	}
 	transcripts := c.transcripts.pass(roots)(conversation)
-	origin, archived, err := c.moveOrigin(roots, conversation)
+	origin, archived, err := c.moveOrigin(roots, conversation, moveID)
 	if err != nil {
 		return err
 	}
@@ -187,7 +190,7 @@ func (c *Claude) ArchiveMove(conversation string) error {
 		}
 		origin = claudeMoveOrigin{Root: claudeTranscriptRoot(transcripts[0]), ProjectDir: filepath.Base(filepath.Dir(transcripts[0]))}
 	}
-	dir := c.movedDir(origin.Root, conversation)
+	dir := c.movedDir(origin.Root, conversation, moveID)
 	if err := os.MkdirAll(filepath.Join(dir, "tasks"), 0700); err != nil {
 		return err
 	}
@@ -205,21 +208,21 @@ func (c *Claude) ArchiveMove(conversation string) error {
 	return nil
 }
 
-// RestoreMove puts an archived conversation's files back where ArchiveMove
-// found them. A conversation that was never archived is left as it is.
-func (c *Claude) RestoreMove(conversation string) error {
-	if !claudeConversationID(conversation) {
-		return fmt.Errorf("Claude session %q is not a conversation id", conversation)
+// RestoreMove puts a move's archived files back where ArchiveMove found
+// them. A move that archived nothing leaves the conversation as it is.
+func (c *Claude) RestoreMove(conversation, moveID string) error {
+	if !claudeConversationID(conversation) || !claudeConversationID(moveID) {
+		return fmt.Errorf("Claude session %q or move %q is not a valid id", conversation, moveID)
 	}
 	roots, err := surface.ClaudeConfigRoots(c.home)
 	if err != nil {
 		return err
 	}
-	origin, archived, err := c.moveOrigin(roots, conversation)
+	origin, archived, err := c.moveOrigin(roots, conversation, moveID)
 	if err != nil || !archived {
 		return err
 	}
-	dir := c.movedDir(origin.Root, conversation)
+	dir := c.movedDir(origin.Root, conversation, moveID)
 	if err := os.MkdirAll(filepath.Join(origin.Root, "projects", origin.ProjectDir), 0700); err != nil {
 		return err
 	}
@@ -236,10 +239,10 @@ func (c *Claude) RestoreMove(conversation string) error {
 	return os.RemoveAll(dir)
 }
 
-// moveOrigin reads where an archived conversation came from.
-func (c *Claude) moveOrigin(roots []string, conversation string) (claudeMoveOrigin, bool, error) {
+// moveOrigin reads where a move's archived conversation came from.
+func (c *Claude) moveOrigin(roots []string, conversation, moveID string) (claudeMoveOrigin, bool, error) {
 	for _, root := range roots {
-		data, err := os.ReadFile(filepath.Join(c.movedDir(root, conversation), "origin.json"))
+		data, err := os.ReadFile(filepath.Join(c.movedDir(root, conversation, moveID), "origin.json"))
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -281,19 +284,19 @@ func writeFileAtomic(name string, data []byte) error {
 // WriteMoveArchive streams an archived conversation as a tar of its parts:
 // <id>.jsonl, <id>/ and tasks/<id>/. Only regular files and folders are
 // written.
-func (c *Claude) WriteMoveArchive(w io.Writer, conversation string) error {
+func (c *Claude) WriteMoveArchive(w io.Writer, conversation, moveID string) error {
 	roots, err := surface.ClaudeConfigRoots(c.home)
 	if err != nil {
 		return err
 	}
-	origin, archived, err := c.moveOrigin(roots, conversation)
+	origin, archived, err := c.moveOrigin(roots, conversation, moveID)
 	if err != nil {
 		return err
 	}
 	if !archived {
-		return fmt.Errorf("Claude conversation %s is not archived for a move", conversation)
+		return fmt.Errorf("Claude conversation %s is not archived for move %s", conversation, moveID)
 	}
-	dir := c.movedDir(origin.Root, conversation)
+	dir := c.movedDir(origin.Root, conversation, moveID)
 	archive := tar.NewWriter(w)
 	for _, part := range claudeMoveParts(conversation) {
 		base := filepath.Join(dir, filepath.FromSlash(part))
@@ -399,7 +402,7 @@ func checkMoveInPlace(in surface.MoveIn) error {
 // the move declared. A conversation a process here already runs, which an
 // earlier attempt of the move resumed, is only checked: what arrived must
 // begin what runs here.
-func (c *Claude) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.Reader) (*surface.Session, error) {
+func (c *Claude) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.Reader, admit func() error) (*surface.Session, error) {
 	if err := checkMoveInPlace(in); err != nil {
 		return nil, err
 	}
@@ -411,6 +414,9 @@ func (c *Claude) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.
 		return nil, err
 	}
 	defer unlock()
+	if err := admit(); err != nil {
+		return nil, err
+	}
 	root, roots, err := c.moveInRoot()
 	if err != nil {
 		return nil, err
@@ -431,9 +437,13 @@ func (c *Claude) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.
 	} else if alive {
 		dest := filepath.Join(root, "projects", claudeProjectDirName(in.Cwd), in.Conversation+".jsonl")
 		if err := checkPrefix(filepath.Join(staging, in.Conversation+".jsonl"), dest); err != nil {
-			return nil, fmt.Errorf("a process here already holds Claude conversation %s with a different transcript", in.Conversation)
+			return nil, fmt.Errorf("%w with a different transcript: Claude conversation %s", surface.ErrMoveInRunning, in.Conversation)
 		}
-		return c.resumeAs(ctx, in.Conversation, in.Cwd, claudehost.OpenRequest{Model: in.Model, PermissionMode: in.PermissionMode, Name: in.Title})
+		resumed, err := c.resumeAs(ctx, in.Conversation, in.Cwd, claudehost.OpenRequest{Model: in.Model, PermissionMode: in.PermissionMode, Name: in.Title})
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", surface.ErrMoveInRunning, err)
+		}
+		return resumed, nil
 	}
 	if err := c.CheckMoveIn(in); err != nil {
 		return nil, err
@@ -449,6 +459,17 @@ func (c *Claude) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.
 	if err := os.MkdirAll(filepath.Join(root, "tasks"), 0700); err != nil {
 		return nil, err
 	}
+	resumed, err := c.placeAndResume(ctx, in, staging, root, projectDir)
+	if err == nil {
+		return resumed, nil
+	}
+	if dropErr := c.dropMoveInLocked(ctx, in.Conversation, in.MoveID, roots); dropErr != nil {
+		return nil, fmt.Errorf("%w: %v (%v)", dropErr, err, surface.ErrMoveInPlaced)
+	}
+	return nil, err
+}
+
+func (c *Claude) placeAndResume(ctx context.Context, in surface.MoveIn, staging, root, projectDir string) (*surface.Session, error) {
 	for _, part := range claudeMoveParts(in.Conversation) {
 		from := filepath.Join(staging, filepath.FromSlash(part))
 		if _, err := os.Lstat(from); errors.Is(err, fs.ErrNotExist) {
@@ -462,16 +483,48 @@ func (c *Claude) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.
 			return nil, err
 		}
 	}
-	c.transcripts.pass(roots)(in.Conversation)
 	return c.resumeAs(ctx, in.Conversation, in.Cwd, claudehost.OpenRequest{Model: in.Model, PermissionMode: in.PermissionMode, Name: in.Title})
 }
 
-func (c *Claude) MoveInRunning(ctx context.Context, conversation string) (bool, error) {
-	if !claudeConversationID(conversation) {
-		return false, fmt.Errorf("Claude session %q is not a conversation id", conversation)
+// DropMoveIn sets aside the copy a move placed in projects/ and tasks/, into
+// the move's folder under agenthail-moved/, and runs commit before any other
+// Agenthail process can resume the conversation.
+func (c *Claude) DropMoveIn(ctx context.Context, conversation, moveID string, commit func() error) error {
+	if !claudeConversationID(conversation) || !claudeConversationID(moveID) {
+		return fmt.Errorf("Claude session %q or move %q is not a valid id", conversation, moveID)
 	}
-	_, alive, err := c.conversationProcess(ctx, conversation)
-	return alive, err
+	unlock, err := c.lockConversation(ctx, conversation)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	_, roots, err := c.moveInRoot()
+	if err != nil {
+		return err
+	}
+	if err := c.dropMoveInLocked(ctx, conversation, moveID, roots); err != nil {
+		return err
+	}
+	return commit()
+}
+
+// dropMoveInLocked sets aside a move's placed copy unless a process here
+// holds the conversation. The caller holds the conversation lock.
+func (c *Claude) dropMoveInLocked(ctx context.Context, conversation, moveID string, roots []string) error {
+	if _, alive, err := c.conversationProcess(ctx, conversation); err != nil {
+		return fmt.Errorf("%w: %v", surface.ErrMoveInPlaced, err)
+	} else if alive {
+		return surface.ErrMoveInRunning
+	}
+	if len(c.transcripts.pass(roots)(conversation)) == 0 {
+		if _, archived, err := c.moveOrigin(roots, conversation, moveID); err != nil || !archived {
+			return err
+		}
+	}
+	if err := c.ArchiveMove(conversation, moveID); err != nil {
+		return fmt.Errorf("%w: %v", surface.ErrMoveInPlaced, err)
+	}
+	return nil
 }
 
 // moveArchivePart reports whether name, a cleaned slash path, is one of the
@@ -526,6 +579,10 @@ func extractMoveArchive(staging string, in surface.MoveIn, archive io.Reader) er
 		var sink io.Writer = file
 		sum := sha256.New()
 		if name == in.Conversation+".jsonl" {
+			if header.Size != in.Size {
+				_ = file.Close()
+				return fmt.Errorf("the moved transcript is %d bytes, not the %d the move declared", header.Size, in.Size)
+			}
 			transcript = true
 			sink = io.MultiWriter(file, sum)
 		}

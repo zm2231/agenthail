@@ -1,6 +1,7 @@
 package surfaces
 
 import (
+	"errors"
 	"archive/tar"
 	"bytes"
 	"context"
@@ -56,10 +57,10 @@ func TestAMovedConversationIsArchivedOutOfReachAndRestoredWhereItWas(t *testing.
 	writeFixtureFile(t, filepath.Join(fixture.Root, "tasks", fixtureConversation, "1.json"), `{"id":"1"}`)
 	c := NewClaude(nil, fixture.Home)
 
-	if err := c.ArchiveMove(fixtureConversation); err != nil {
+	if err := c.ArchiveMove(fixtureConversation, fixtureMove); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.ArchiveMove(fixtureConversation); err != nil {
+	if err := c.ArchiveMove(fixtureConversation, fixtureMove); err != nil {
 		t.Fatalf("archiving again after a crash: %v", err)
 	}
 	roots, _ := surface.ClaudeConfigRoots(fixture.Home)
@@ -75,7 +76,7 @@ func TestAMovedConversationIsArchivedOutOfReachAndRestoredWhereItWas(t *testing.
 		}
 	}
 	var archive bytes.Buffer
-	if err := c.WriteMoveArchive(&archive, fixtureConversation); err != nil {
+	if err := c.WriteMoveArchive(&archive, fixtureConversation, fixtureMove); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{fixtureConversation + "/", fixtureConversation + "/subagents/", fixtureConversation + "/subagents/agent-a.jsonl", fixtureConversation + ".jsonl", "tasks/" + fixtureConversation + "/", "tasks/" + fixtureConversation + "/1.json"}
@@ -84,7 +85,7 @@ func TestAMovedConversationIsArchivedOutOfReachAndRestoredWhereItWas(t *testing.
 		t.Fatalf("archive holds %v, want %v", got, want)
 	}
 
-	if err := c.RestoreMove(fixtureConversation); err != nil {
+	if err := c.RestoreMove(fixtureConversation, fixtureMove); err != nil {
 		t.Fatal(err)
 	}
 	for _, back := range []string{transcript, filepath.Join(project, fixtureConversation, "subagents", "agent-a.jsonl"), filepath.Join(fixture.Root, "tasks", fixtureConversation, "1.json")} {
@@ -92,7 +93,7 @@ func TestAMovedConversationIsArchivedOutOfReachAndRestoredWhereItWas(t *testing.
 			t.Fatalf("%s was not restored: %v", back, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(fixture.Root, claudeMovedDir, fixtureConversation)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(fixture.Root, claudeMovedDir, fixtureConversation, fixtureMove)); !os.IsNotExist(err) {
 		t.Fatalf("the archive outlived the restore: %v", err)
 	}
 	if found := c.transcripts.pass(roots)(fixtureConversation); len(found) != 1 {
@@ -175,7 +176,7 @@ func TestAMoveInTakesOnlyTheConversationsOwnFilesAsDeclared(t *testing.T) {
 				sum = test.sum
 			}
 			in := surface.MoveIn{MoveID: uuid.NewString(), Conversation: conversation, Cwd: cwd, Size: size, SHA256: sum}
-			_, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(buildArchive(t, test.parts...)))
+			_, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(buildArchive(t, test.parts...)), admitMove)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("err=%v, want %q", err, test.want)
 			}
@@ -213,7 +214,7 @@ func TestAMoveInRefusesWhatClaudeWouldRenameOrADivergedCopy(t *testing.T) {
 	os.Remove(elsewhere)
 	diverged := "turn one\nturn 2\nturn three\n"
 	in := surface.MoveIn{MoveID: uuid.NewString(), Conversation: fixtureConversation, Cwd: cwd, Size: int64(len(diverged)), SHA256: digest(diverged)}
-	if _, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(buildArchive(t, tarPart{name: fixtureConversation + ".jsonl", body: diverged}))); err == nil || !strings.Contains(err.Error(), "diverged") {
+	if _, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(buildArchive(t, tarPart{name: fixtureConversation + ".jsonl", body: diverged})), admitMove); err == nil || !strings.Contains(err.Error(), "diverged") {
 		t.Fatalf("diverged copy err=%v", err)
 	}
 	if data, _ := os.ReadFile(dest); string(data) != "turn one\nturn two\n" {
@@ -233,7 +234,7 @@ func TestAMovedConversationResumesInTheHostWithItsModelAndMode(t *testing.T) {
 		tarPart{name: "tasks/" + conversation + "/1.json", body: `{"id":"1"}`},
 	)
 	in := surface.MoveIn{MoveID: uuid.NewString(), Conversation: conversation, Cwd: host.Cwd, Model: "claude-opus-4-8", PermissionMode: "plan", Title: "moved work", Size: int64(len(body)), SHA256: digest(body)}
-	session, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(archive))
+	session, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(archive), admitMove)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,10 +262,13 @@ func TestAMovedConversationResumesInTheHostWithItsModelAndMode(t *testing.T) {
 			t.Fatalf("resume argv %q lacks %q", argv, want)
 		}
 	}
-	if running, err := c.MoveInRunning(context.Background(), conversation); err != nil || !running {
+	if _, running, err := c.conversationProcess(context.Background(), conversation); err != nil || !running {
 		t.Fatalf("running=%v err=%v", running, err)
 	}
-	again, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(archive))
+	if err := c.DropMoveIn(context.Background(), conversation, in.MoveID, func() error { return nil }); !errors.Is(err, surface.ErrMoveInRunning) {
+		t.Fatalf("dropping a move in Claude already runs: %v", err)
+	}
+	again, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(archive), admitMove)
 	if err != nil || again.PID != session.PID {
 		t.Fatalf("a repeated move in of a running conversation: session=%+v err=%v", again, err)
 	}
@@ -297,8 +301,78 @@ func TestPreparingAMoveClosesTheHostSessionAndDeclaresItsTranscript(t *testing.T
 	if err != nil || size != out.Size || sum != out.SHA256 {
 		t.Fatalf("declared %d/%s, file is %d/%s (%v)", out.Size, out.SHA256, size, sum, err)
 	}
-	if running, _ := c.MoveInRunning(context.Background(), session.ID); running {
+	if _, running, _ := c.conversationProcess(context.Background(), session.ID); running {
 		t.Fatal("a prepared move left a process holding the conversation")
+	}
+}
+
+const fixtureMove = "4d3c2b1a-0000-4000-8000-00000000a001"
+
+func admitMove() error { return nil }
+
+func TestASecondMoveOfAConversationIgnoresTheCopyAnEarlierMoveLeft(t *testing.T) {
+	fixture := claudetest.New(t)
+	transcript := fixture.Transcript(fixtureConversation, fixture.Home)
+	c := NewClaude(nil, fixture.Home)
+	if err := c.ArchiveMove(fixtureConversation, fixtureMove); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(transcript), 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeFixtureFile(t, transcript, "{\"type\":\"user\"}\n{\"type\":\"assistant\"}\n")
+
+	second := "4d3c2b1a-0000-4000-8000-00000000a002"
+	if err := c.ArchiveMove(fixtureConversation, second); err != nil {
+		t.Fatalf("a second move after a finished one: %v", err)
+	}
+	if err := c.RestoreMove(fixtureConversation, second); err != nil {
+		t.Fatalf("putting back a second move that did not happen: %v", err)
+	}
+	data, err := os.ReadFile(transcript)
+	if err != nil || !strings.Contains(string(data), "assistant") {
+		t.Fatalf("the second move's own transcript did not come back: %q %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(fixture.Root, claudeMovedDir, fixtureConversation, fixtureMove, fixtureConversation+".jsonl")); err != nil {
+		t.Fatalf("the first move's recovery copy is gone: %v", err)
+	}
+}
+
+func TestAMoveInClaudeRefusesLeavesNoCopyItCouldResume(t *testing.T) {
+	_, host, c := hostResume(t)
+	conversation := uuid.NewString()
+	body := `{"type":"user","sessionId":"` + conversation + `","cwd":"/elsewhere","message":{"role":"user","content":"hello"}}` + "\n"
+	in := surface.MoveIn{MoveID: uuid.NewString(), Conversation: conversation, Cwd: host.Cwd, Size: int64(len(body)), SHA256: digest(body)}
+	host.Refuse(t, conversation, "not logged in")
+	_, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(buildArchive(t, tarPart{name: conversation + ".jsonl", body: body}, tarPart{name: "tasks/" + conversation + "/1.json", body: "{}"})), admitMove)
+	if err == nil || errors.Is(err, surface.ErrMoveInPlaced) || errors.Is(err, surface.ErrMoveInRunning) {
+		t.Fatalf("a move in Claude refused: %v", err)
+	}
+	roots, _ := surface.ClaudeConfigRoots(host.Home)
+	if found := c.transcripts.pass(roots)(conversation); len(found) != 0 {
+		t.Fatalf("a refused move in left %v where Claude finds it", found)
+	}
+	if _, err := os.Stat(filepath.Join(host.Home, ".claude", "tasks", conversation)); !os.IsNotExist(err) {
+		t.Fatalf("a refused move in left its tasks in place: %v", err)
+	}
+	committed := false
+	if err := c.DropMoveIn(context.Background(), conversation, in.MoveID, func() error { committed = true; return nil }); err != nil || !committed {
+		t.Fatalf("dropping a refused move in: committed=%v err=%v", committed, err)
+	}
+}
+
+func TestAMoveInItsAbortReachedFirstPlacesNothing(t *testing.T) {
+	_, host, c := hostResume(t)
+	conversation := uuid.NewString()
+	body := `{"type":"user","sessionId":"` + conversation + `"}` + "\n"
+	in := surface.MoveIn{MoveID: uuid.NewString(), Conversation: conversation, Cwd: host.Cwd, Size: int64(len(body)), SHA256: digest(body)}
+	_, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(buildArchive(t, tarPart{name: conversation + ".jsonl", body: body})), func() error { return errors.New("the move is aborted") })
+	if err == nil {
+		t.Fatal("an aborted move was received")
+	}
+	roots, _ := surface.ClaudeConfigRoots(host.Home)
+	if found := c.transcripts.pass(roots)(conversation); len(found) != 0 || len(host.Spawns(t, conversation)) != 0 {
+		t.Fatalf("an aborted move placed %v", found)
 	}
 }
 

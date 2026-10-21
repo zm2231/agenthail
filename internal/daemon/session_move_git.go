@@ -178,11 +178,17 @@ func (d *Daemon) resolveMoveTarget(ctx context.Context, moveID string, checkout 
 	head, _ := catalogGit(ctx, main, "rev-parse", "--verify", "HEAD^{commit}")
 	status, statusErr := catalogGit(ctx, main, "status", "--porcelain", "--untracked-files=normal")
 	if head != checkout.Commit || statusErr != nil || strings.TrimSpace(status) != "" {
-		target.checkout = filepath.Join(main, ".worktrees", "move-"+moveID[:8])
+		target.checkout = moveWorktreePath(main, moveID)
 		target.worktree = true
 	}
 	target.cwd = filepath.Join(target.checkout, filepath.FromSlash(checkout.Path))
 	return target, nil
+}
+
+// moveWorktreePath is the worktree a move makes in main when the main
+// checkout is not clean at the moving commit.
+func moveWorktreePath(main, moveID string) string {
+	return filepath.Join(main, ".worktrees", "move-"+moveID[:8])
 }
 
 // ensureMoveCheckout makes the worktree a move runs in. A worktree an

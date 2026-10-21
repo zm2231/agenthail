@@ -89,6 +89,13 @@ func (h *pairedHost) setHidden(id string, row *dashboardSession) {
 	h.hidden[id] = *row
 }
 
+func (h *pairedHost) hiddenRow(id string) (dashboardSession, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	row, found := h.hidden[id]
+	return row, found
+}
+
 func (h *pairedHost) hiddenRows() []dashboardSession {
 	h.mu.Lock()
 	defer h.mu.Unlock()

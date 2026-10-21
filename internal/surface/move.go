@@ -2,8 +2,17 @@ package surface
 
 import (
 	"context"
+	"errors"
 	"io"
 )
+
+// ErrMoveInRunning is returned when a process here already holds a
+// conversation a move brought, so the move can no longer be abandoned.
+var ErrMoveInRunning = errors.New("the conversation already runs here")
+
+// ErrMoveInPlaced is returned when a move's files may still be where the
+// runtime finds them, so the outcome of the move-in is unknown.
+var ErrMoveInPlaced = errors.New("the conversation's files may still be in place here")
 
 // MoveOut is an idle conversation held for a move to another host. Its
 // transcript stays unchanged until Release, which ends the hold.
@@ -40,12 +49,17 @@ type MoveIn struct {
 // conversation with CheckMoveIn and takes it with ReceiveMove.
 type SessionMover interface {
 	PrepareMove(ctx context.Context, sess *Session, request AdoptRequest) (*MoveOut, error)
-	ArchiveMove(conversation string) error
-	RestoreMove(conversation string) error
-	WriteMoveArchive(w io.Writer, conversation string) error
+	ArchiveMove(conversation, moveID string) error
+	RestoreMove(conversation, moveID string) error
+	WriteMoveArchive(w io.Writer, conversation, moveID string) error
 	CheckMoveIn(in MoveIn) error
-	ReceiveMove(ctx context.Context, in MoveIn, archive io.Reader) (*Session, error)
-	// MoveInRunning reports whether a process here holds the conversation, so
-	// a move that brought it is no longer abandoned.
-	MoveInRunning(ctx context.Context, conversation string) (bool, error)
+	// ReceiveMove runs admit while it holds the conversation, before it
+	// places anything, so a move that admit finds aborted places nothing. A
+	// failed move-in leaves no copy the runtime finds; when it cannot be sure
+	// of that its error wraps ErrMoveInRunning or ErrMoveInPlaced.
+	ReceiveMove(ctx context.Context, in MoveIn, archive io.Reader, admit func() error) (*Session, error)
+	// DropMoveIn sets aside any copy the move placed here and runs commit
+	// while it holds the conversation, so nothing resumes it in between. A
+	// conversation a process here holds returns ErrMoveInRunning.
+	DropMoveIn(ctx context.Context, conversation, moveID string, commit func() error) error
 }

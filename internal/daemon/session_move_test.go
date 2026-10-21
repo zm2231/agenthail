@@ -155,7 +155,7 @@ func TestAnIdleClaudeSessionMovesToAPairedHostAndRunsThere(t *testing.T) {
 	if path := claudeTranscriptIn(t, source.host.Home, session.ID); path != "" {
 		t.Fatalf("the source still reaches its transcript at %s", path)
 	}
-	archived := filepath.Join(source.host.Home, ".claude", "agenthail-moved", session.ID, session.ID+".jsonl")
+	archived := filepath.Join(source.host.Home, ".claude", "agenthail-moved", session.ID, result.Move.ID, session.ID+".jsonl")
 	if data, err := os.ReadFile(archived); err != nil || string(data) != string(before) {
 		t.Fatalf("the source's recovery copy: err=%v", err)
 	}
@@ -321,25 +321,47 @@ func TestAMoveSentByADaemonThatStoppedIsSettledFromTheTargetsRecord(t *testing.T
 			if err := source.daemon.prepareMoveOnHost(context.Background(), host, manifest); err != nil {
 				t.Fatal(err)
 			}
-			if err := source.reg.SetMoveState(manifest.ID, registry.MoveSent, "", registry.MovePreparing); err != nil {
+			if err := source.claude.ArchiveMove(session.ID, manifest.ID); err != nil {
 				t.Fatal(err)
 			}
-			if err := source.claude.ArchiveMove(session.ID); err != nil {
+			if err := source.reg.SetMoveState(manifest.ID, registry.MoveSent, "", registry.MovePreparing); err != nil {
 				t.Fatal(err)
 			}
 			if stage == "after the target resumed" {
 				if status, err := source.daemon.transferMove(context.Background(), host, source.claude, manifest.ID, session.ID); err != nil || status.State != registry.MoveResumed {
 					t.Fatalf("status=%+v err=%v", status, err)
 				}
+				target.daemon.discoverCatalog(context.Background())
+				awaitFederation(t, "the target's row to reach the source while the session is still local there", func() bool {
+					_, hidden := host.hiddenRow(session.ID)
+					return hidden
+				})
 			}
 			out.Release()
 
+			spawned := len(source.host.Spawns(t, session.ID))
+			if sent, err := source.claude.SendHumanTurn(context.Background(), session, "sent while the move is unresolved", nil); err == nil {
+				t.Fatalf("a send resumed a conversation a sent move holds: %+v pid=%d alive=%v spawns before=%d after=%d", sent, session.PID, claudehosttest.Alive(session.PID), spawned, len(source.host.Spawns(t, session.ID)))
+			}
+			if len(source.host.Spawns(t, session.ID)) != spawned {
+				t.Fatal("a send started Claude on a conversation a sent move holds")
+			}
 			source.daemon.resumeHostMoves(context.Background(), host)
 			if move, _ := source.reg.SessionMove(manifest.ID); move.State != registry.MoveDone {
 				t.Fatalf("recovery left the move %s (%s)", move.State, move.Detail)
 			}
 			if spawns := target.host.Spawns(t, session.ID); len(spawns) != 1 {
 				t.Fatalf("the target resumed the conversation %d times", len(spawns))
+			}
+			if stage == "after the target resumed" {
+				awaitFederation(t, "the source to show the row the target reported before the flip", func() bool {
+					for _, row := range sessionsOf(source.snapshot(t), record.ID) {
+						if row.ID == record.ID+"::"+session.ID && row.UnavailableReason == "" {
+							return true
+						}
+					}
+					return false
+				})
 			}
 		})
 	}
@@ -348,7 +370,12 @@ func TestAMoveSentByADaemonThatStoppedIsSettledFromTheTargetsRecord(t *testing.T
 func TestADaemonThatStoppedWhilePreparingAMoveFailsIt(t *testing.T) {
 	source, _, record, _ := movePair(t)
 	session := startMovable(t, source)
-	if err := source.reg.BeginMoveOut("6a1b0c9d-1111-4222-8333-944455556666", session.ID, record.ID, []byte(`{}`)); err != nil {
+	moveID := "6a1b0c9d-1111-4222-8333-944455556666"
+	manifest, _ := json.Marshal(moveManifest{ID: moveID, Conversation: session.ID, Surface: session.Surface})
+	if err := source.reg.BeginMoveOut(moveID, session.ID, record.ID, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := source.claude.ArchiveMove(session.ID, moveID); err != nil {
 		t.Fatal(err)
 	}
 	source.daemon.failInterruptedMoves()
@@ -357,6 +384,37 @@ func TestADaemonThatStoppedWhilePreparingAMoveFailsIt(t *testing.T) {
 	}
 	if path := claudeTranscriptIn(t, source.host.Home, session.ID); path == "" {
 		t.Fatal("a move that never left took the transcript away")
+	}
+}
+
+func TestAMoveWhoseResumeTheTargetRefusesLeavesNoCopyThere(t *testing.T) {
+	source, target, _, checkout := movePair(t)
+	session := startMovable(t, source)
+	if err := os.WriteFile(filepath.Join(checkout, "README"), []byte("elsewhere\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, checkout, "commit", "--quiet", "-am", "elsewhere")
+	target.host.Refuse(t, session.ID, "not logged in")
+
+	result, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "forge"})
+	var refused MoveRefusedError
+	if !errors.As(err, &refused) {
+		t.Fatalf("err=%v", err)
+	}
+	if result.Move.State != registry.MoveFailed {
+		t.Fatalf("move=%+v", result.Move)
+	}
+	if claudeTranscriptIn(t, source.host.Home, session.ID) == "" {
+		t.Fatal("the source did not get its conversation back")
+	}
+	if path := claudeTranscriptIn(t, target.host.Home, session.ID); path != "" {
+		t.Fatalf("the target kept a copy it could resume at %s", path)
+	}
+	if moved, _ := target.reg.SessionMove(result.Move.ID); moved.State != registry.MoveAborted {
+		t.Fatalf("target move=%+v", moved)
+	}
+	if _, err := os.Stat(moveWorktreePath(checkout, result.Move.ID)); !os.IsNotExist(err) {
+		t.Fatalf("the worktree the aborted move made is still there: %v", err)
 	}
 }
 

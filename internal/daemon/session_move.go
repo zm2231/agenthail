@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -45,6 +47,8 @@ type moveStatus struct {
 const (
 	moveNoRecord        = "none"
 	moveTransferTimeout = 6 * time.Hour
+	// movePrepareTimeout outlasts the fetch a target may run to prepare.
+	movePrepareTimeout = moveGitTimeout + 30*time.Second
 )
 
 // movesInFlight keeps one daemon goroutine at a time driving a move.
@@ -148,6 +152,17 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 		result.Move, _ = d.Registry.SessionMove(manifest.ID)
 		return result, MoveRefusedError{Reason: fmt.Sprintf("%s did not accept the move: %s", host.record.Name, err)}
 	}
+	// The files leave the folders the runtime reads while the hold is still
+	// on, so a sent move's conversation is out of reach of every local
+	// resume, even after a crash ends the hold.
+	if err := mover.ArchiveMove(session.ID, manifest.ID); err != nil {
+		cause := fmt.Errorf("archive the conversation: %w", err)
+		if restoreErr := d.restoreMoveOut(mover, manifest.ID, session.ID, cause.Error()); restoreErr != nil {
+			return result, restoreErr
+		}
+		result.Move, _ = d.Registry.SessionMove(manifest.ID)
+		return result, cause
+	}
 	if err := d.Registry.SetMoveState(manifest.ID, registry.MoveSent, "", registry.MovePreparing); err != nil {
 		return result, err
 	}
@@ -158,7 +173,9 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 
 func (d *Daemon) prepareMoveOnHost(ctx context.Context, host *pairedHost, manifest moveManifest) error {
 	body, _ := json.Marshal(manifest)
-	response, err := host.client.Do(ctx, http.MethodPost, "/api/v1/session-move/prepare", nil, body, nil)
+	ctx, cancel := context.WithTimeout(ctx, movePrepareTimeout)
+	defer cancel()
+	response, err := host.client.Stream(ctx, "/api/v1/session-move/prepare", nil, bytes.NewReader(body), http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
 		return err
 	}
@@ -170,13 +187,10 @@ func (d *Daemon) prepareMoveOnHost(ctx context.Context, host *pairedHost, manife
 	return err
 }
 
-// settleMoveOut drives a sent move to done or failed: it archives the
-// conversation, asks the target what it holds and acts on the answer. A
-// move whose answer cannot be had stays sent and returns MoveUnknownError.
+// settleMoveOut drives a sent move, whose files are archived, to done or
+// failed: it asks the target what it holds and acts on the answer. A move
+// whose answer cannot be had stays sent and returns MoveUnknownError.
 func (d *Daemon) settleMoveOut(ctx context.Context, host *pairedHost, mover surface.SessionMover, moveID, conversation string) error {
-	if err := mover.ArchiveMove(conversation); err != nil {
-		return d.abandonMoveOut(ctx, host, mover, moveID, conversation, fmt.Errorf("archive the conversation: %w", err))
-	}
 	status, err := d.moveStatusOnHost(ctx, host, moveID)
 	if err != nil {
 		return MoveUnknownError{MoveID: moveID, Err: err}
@@ -243,7 +257,7 @@ func moveRefusal(err error) bool {
 }
 
 func (d *Daemon) restoreMoveOut(mover surface.SessionMover, moveID, conversation, detail string) error {
-	if err := mover.RestoreMove(conversation); err != nil {
+	if err := mover.RestoreMove(conversation, moveID); err != nil {
 		return fmt.Errorf("move %s: put the conversation back: %w", moveID, err)
 	}
 	if err := d.Registry.SetMoveState(moveID, registry.MoveFailed, detail, registry.MoveSent, registry.MovePreparing); err != nil {
@@ -268,6 +282,13 @@ func (d *Daemon) completeMoveOut(ctx context.Context, host *pairedHost, moveID s
 		return err
 	}
 	if move, err := d.Registry.SessionMove(moveID); err == nil {
+		// The target may have reported the session while it was still local
+		// here, which hid its row; it is the session's row now.
+		if row, found := host.hiddenRow(move.Conversation); found {
+			if err := d.mirrorOrHide(host, row); err != nil {
+				d.logRuntimeError("move "+moveID+" mirror", err)
+			}
+		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "session-operation", SessionID: move.Conversation, Result: "moved to " + host.record.Name})
 	}
 	if d.dashboard != nil {
@@ -311,7 +332,7 @@ func (d *Daemon) transferMove(ctx context.Context, host *pairedHost, mover surfa
 	ctx, cancel := context.WithTimeout(ctx, moveTransferTimeout)
 	defer cancel()
 	reader, writer := io.Pipe()
-	go func() { writer.CloseWithError(mover.WriteMoveArchive(writer, conversation)) }()
+	go func() { writer.CloseWithError(mover.WriteMoveArchive(writer, conversation, moveID)) }()
 	response, err := host.client.Stream(ctx, "/api/v1/session-move/transfer", url.Values{"id": []string{moveID}}, reader, http.Header{"Content-Type": []string{"application/x-tar"}})
 	reader.CloseWithError(errors.New("transfer ended"))
 	if err != nil {
@@ -329,7 +350,7 @@ func (d *Daemon) transferMove(ctx context.Context, host *pairedHost, mover surfa
 }
 
 // failInterruptedMoves fails every move out a previous daemon left
-// preparing: none of its files left, so its conversation is untouched here.
+// preparing. None of its files were sent, so any it archived come back.
 func (d *Daemon) failInterruptedMoves() {
 	moves, err := d.Registry.SessionMoves(true)
 	if err != nil {
@@ -337,10 +358,27 @@ func (d *Daemon) failInterruptedMoves() {
 		return
 	}
 	for _, move := range moves {
-		if move.State == registry.MovePreparing {
+		if move.Role != "out" || move.State != registry.MovePreparing {
+			continue
+		}
+		mover := d.moverOf(move)
+		if mover == nil {
 			_ = d.Registry.SetMoveState(move.ID, registry.MoveFailed, "the daemon stopped before the move was sent", registry.MovePreparing)
+			continue
+		}
+		if err := d.restoreMoveOut(mover, move.ID, move.Conversation, "the daemon stopped before the move was sent"); err != nil {
+			d.log.Printf("move %s: %s", move.ID, err)
 		}
 	}
+}
+
+func (d *Daemon) moverOf(move registry.SessionMove) surface.SessionMover {
+	var manifest moveManifest
+	if json.Unmarshal(move.Manifest, &manifest) != nil {
+		return nil
+	}
+	mover, _ := d.adapters().ForSurface(manifest.Surface).(surface.SessionMover)
+	return mover
 }
 
 // resumeHostMoves settles each sent move to a host that has just connected.
@@ -358,11 +396,7 @@ func (d *Daemon) resumeHostMoves(ctx context.Context, host *pairedHost) {
 		if !ok {
 			continue
 		}
-		var manifest moveManifest
-		mover := surface.SessionMover(nil)
-		if json.Unmarshal(move.Manifest, &manifest) == nil {
-			mover, _ = d.adapters().ForSurface(manifest.Surface).(surface.SessionMover)
-		}
+		mover := d.moverOf(move)
 		if mover == nil {
 			release()
 			d.logRuntimeError("move "+move.ID, fmt.Errorf("no adapter can move %s", move.Conversation))
@@ -405,7 +439,19 @@ func (d *Daemon) apiSessionMovesHandler(w http.ResponseWriter, r *http.Request) 
 			writeAPIError(w, http.StatusInternalServerError, "moves_unavailable", err.Error())
 			return
 		}
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"moves": moves})
+		type listedMove struct {
+			registry.SessionMove
+			PeerHostName string `json:"peerHostName,omitempty"`
+		}
+		listed := make([]listedMove, 0, len(moves))
+		for _, move := range moves {
+			view := listedMove{SessionMove: move}
+			if host, found := d.pairedHost(move.PeerHost); found {
+				view.PeerHostName = host.record.Name
+			}
+			listed = append(listed, view)
+		}
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"moves": listed})
 	case http.MethodPost:
 		var request sessionMoveRequest
 		if err := decodeAPIV1JSON(w, r, &request, false); err != nil {
@@ -522,6 +568,28 @@ func moveInOf(manifest moveManifest, cwd string) surface.MoveIn {
 	return surface.MoveIn{MoveID: manifest.ID, Conversation: manifest.Conversation, Cwd: cwd, Title: manifest.Title, Model: manifest.Model, PermissionMode: manifest.PermissionMode, Size: manifest.Size, SHA256: manifest.SHA256}
 }
 
+// removeMoveWorktree removes the worktree an aborted move made, unless work
+// was left in it.
+func (d *Daemon) removeMoveWorktree(ctx context.Context, move registry.SessionMove) {
+	var manifest moveManifest
+	if json.Unmarshal(move.Manifest, &manifest) != nil || validMoveCheckout(manifest.Checkout) != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, moveGitTimeout)
+	defer cancel()
+	roots, err := d.repositoryCheckouts(ctx, manifest.Checkout.Repository)
+	if err != nil || len(roots) != 1 {
+		return
+	}
+	worktree := moveWorktreePath(roots[0], move.ID)
+	if _, err := os.Stat(worktree); err != nil {
+		return
+	}
+	if _, err := catalogGit(ctx, roots[0], "worktree", "remove", worktree); err != nil {
+		d.log.Printf("move %s: keep worktree %s: %s", move.ID, worktree, err)
+	}
+}
+
 // apiMoveTransferHandler takes a prepared conversation's files from the
 // stream, resumes it and makes it a session of this host. A transfer again
 // for a move already resumed answers as the first did.
@@ -562,9 +630,19 @@ func (d *Daemon) apiMoveTransferHandler(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusConflict, "move_refused", err.Error())
 		return
 	}
-	session, err := mover.ReceiveMove(ctx, moveInOf(manifest, target.cwd), r.Body)
+	admit := func() error {
+		current, err := d.Registry.SessionMove(move.ID)
+		if err != nil {
+			return err
+		}
+		if current.State != registry.MoveReceived {
+			return fmt.Errorf("the move is %s", current.State)
+		}
+		return nil
+	}
+	session, err := mover.ReceiveMove(ctx, moveInOf(manifest, target.cwd), r.Body, admit)
 	if err != nil {
-		if running, runErr := mover.MoveInRunning(ctx, manifest.Conversation); runErr != nil || running || surface.IsDeliveryOutcomeUnknown(err) {
+		if errors.Is(err, surface.ErrMoveInRunning) || errors.Is(err, surface.ErrMoveInPlaced) || surface.IsDeliveryOutcomeUnknown(err) {
 			writeAPIError(w, http.StatusBadGateway, "move_unknown", err.Error())
 			return
 		}
@@ -600,20 +678,34 @@ func (d *Daemon) apiMoveAbortHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hostID, _ := requestingHost(r.Context())
-	if move, err := d.Registry.SessionMove(id); err == nil && move.Role == "in" && move.PeerHost == hostID && move.State == registry.MoveReceived {
-		var manifest moveManifest
-		_ = json.Unmarshal(move.Manifest, &manifest)
-		mover, ok := d.adapters().ForSurface(manifest.Surface).(surface.SessionMover)
-		if !ok {
+	var move registry.SessionMove
+	abort := func() error {
+		var err error
+		move, err = d.Registry.AbortMoveIn(id, conversation, hostID)
+		return err
+	}
+	var err error
+	if existing, findErr := d.Registry.SessionMove(id); findErr == nil && existing.Role == "in" && existing.PeerHost == hostID && existing.Conversation == conversation && existing.State == registry.MoveReceived {
+		mover := d.moverOf(existing)
+		if mover == nil {
 			writeAPIError(w, http.StatusConflict, "move_refused", "This host cannot check that move.")
 			return
 		}
-		if running, err := mover.MoveInRunning(r.Context(), conversation); err != nil || running {
+		err = mover.DropMoveIn(r.Context(), conversation, id, abort)
+		if errors.Is(err, surface.ErrMoveInRunning) {
 			writeAPIError(w, http.StatusConflict, "move_running", "The moved session already runs here; transfer again to finish the move.")
 			return
 		}
+		if errors.Is(err, surface.ErrMoveInPlaced) {
+			writeAPIError(w, http.StatusInternalServerError, "move_unsettled", err.Error())
+			return
+		}
+		if err == nil {
+			d.removeMoveWorktree(r.Context(), existing)
+		}
+	} else {
+		err = abort()
 	}
-	move, err := d.Registry.AbortMoveIn(id, conversation, hostID)
 	var conflict registry.MoveConflictError
 	switch {
 	case errors.As(err, &conflict) && conflict.State == registry.MoveResumed:

@@ -99,13 +99,6 @@ func (r *Registry) SessionMoves(unfinished bool) ([]SessionMove, error) {
 	return moves, rows.Err()
 }
 
-// MoveHoldsConversation reports whether a move out holds the conversation.
-func (r *Registry) MoveHoldsConversation(conversation string) (bool, error) {
-	var held bool
-	err := r.read.QueryRow(`SELECT EXISTS(SELECT 1 FROM session_moves WHERE conversation=? AND role='out' AND state IN ('preparing','sent'))`, conversation).Scan(&held)
-	return held, err
-}
-
 // SessionMoveRefusal names what keeps a local session from moving: another
 // host owning it, a move already holding it, a delivery in flight, an active
 // relay, a channel or the coordinator role. It is empty when nothing does.

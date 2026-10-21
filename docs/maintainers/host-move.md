@@ -18,8 +18,8 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    conversation lock and stops the process that holds it the way
    [adopt](session-operations.md) does: it closes a host session only once
    idle, stops a background job, and stops a terminal process only with
-   `--stop-terminal`. The lock is held until the move ends, so nothing here
-   resumes the conversation in the meantime.
+   `--stop-terminal`. The lock is held until the move ends, so no Agenthail
+   process here resumes the conversation in the meantime.
 2. **Declare.** The source reads where the conversation's working directory
    sits in its repository: the remote's canonical key, the folder inside the
    repository, and a commit that some remote branch contains. Only a clean
@@ -36,47 +36,60 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    extend. Otherwise it records the move `prepared` and keeps the
    declaration. The files that arrive later are held to that declaration.
    They cannot redefine it.
-4. **Archive.** The source records the move `sent` and moves the
-   conversation's files out of `projects/` and `tasks/` into
-   `<root>/agenthail-moved/<id>/`: `<id>.jsonl`, the `<id>/` folder of
-   subagent transcripts and tool results, and `tasks/<id>/`. Claude and
-   Agenthail read conversations only from `projects/` and `tasks/`, so
-   nothing finds the conversation there. Nothing in Agenthail reads that
-   folder either. Once reads route to the target, it is only a copy to
-   recover from by hand.
+4. **Archive.** Still holding the lock, the source moves the conversation's
+   files out of `projects/` and `tasks/` into
+   `<root>/agenthail-moved/<id>/<move id>/`: `<id>.jsonl`, the `<id>/`
+   folder of subagent transcripts and tool results, and `tasks/<id>/`. Only
+   then does it record the move `sent`. A sent move's conversation is
+   therefore out of reach even after a crash ends the hold: Claude and
+   Agenthail read conversations only from `projects/` and `tasks/`, and
+   Agenthail refuses to resume a conversation that has no transcript, as
+   Claude does. Nothing in Agenthail reads `agenthail-moved/` outside the
+   move that wrote the folder. Once the move is done, the folder is only a
+   copy to recover from by hand. Each move has its own folder, so a later
+   move of the same conversation never mistakes an earlier move's copy for
+   its own.
 5. **Transfer** (`POST /api/v1/session-move/transfer`). The source streams the
    archive as a tar over the pairing. The body is never held in memory on
    either side, and a transfer sent again resends everything. The target
    records the move `received` and makes the working directory, which is the
    main checkout when it sits clean at the commit, and otherwise a worktree
-   at `<checkout>/.worktrees/move-<id>`. It then reads the tar as untrusted
-   input:
+   at `<checkout>/.worktrees/move-<first 8 characters of the move id>`. It
+   then reads the tar as untrusted input:
    - It accepts only regular files and folders.
    - It refuses absolute paths, `..`, symlinks, hard links, and any name
      outside `<id>.jsonl`, `<id>/` and `tasks/<id>/`.
    - It writes into `<root>/.agenthail-move-<move id>/` inside its primary
      config root.
-   - It checks the transcript against the declared size and digest.
+   - It checks the transcript against the declared size before writing it
+     and against the declared digest after.
+   - It reads the tar only while it holds the conversation and the move is
+     still `received`, so a move that the source has already aborted places
+     nothing.
 
    Only then does it rename the files into
    `<root>/projects/<folder for the working directory>/` and `<root>/tasks/`.
    It resumes the conversation in its Claude host with the declared model,
-   permission mode and title. Last, in one transaction, it registers the
-   session as local, takes over the row the source mirrored there, binds the
-   alias if it is free, and records the move `resumed`.
+   permission mode and title. If Claude refuses to start, the target sets the
+   placed files aside in its own `agenthail-moved/<id>/<move id>/` before it
+   answers, so nothing there finds a copy to run beside the source's. Last,
+   in one transaction, it registers the session as local, takes over the row
+   the source mirrored there, binds the alias if it is free, and records the
+   move `resumed`.
 6. **Flip.** The source, in one transaction:
    - gives the row to the target, clearing its process, transcript and local
      flags;
    - drops the alias;
    - turns each queued message into a send held for the target, under its
-     delivery key, and fails a queued operation the target cannot take as a
-     send;
+     delivery key, and fails a queued message with attachments and any
+     queued operation the target cannot take as a send;
    - writes a mirrored row that says the session moved and is waiting for the
      target to report it;
    - records the move `done`.
 
    Held sends then drain to the target, and the target's catalog replaces the
-   placeholder row.
+   placeholder row. If the target reported the session while it was still
+   local here, its row was hidden; the flip shows it at once.
 
 On the target, every request must come from a paired host's token, which has
 the `control` and `host` scopes. The token names the source; the request body
@@ -90,17 +103,22 @@ target never will. It proves that by having the target record the move as
 `aborted`, after which any late or repeated request for it is refused. Until
 then the move stays `sent`. Nothing here delivers to the conversation, since
 local queue claims skip it, and nothing resumes it, since its files are
-archived. Each time the target reconnects, the source asks it where the move
-stands.
+archived before the move is `sent`. Each time the target reconnects, the
+source asks it where the move stands. The target answers an abort only while
+it holds the conversation: it refuses with `move_running` when Claude already
+runs it there, and otherwise sets aside any copy it placed before it records
+`aborted`.
 
 | Where it stopped | What recovery reads | What it does |
 |---|---|---|
 | Before the move was recorded | nothing | Nothing. The process the hold stopped is gone, and the next send resumes the conversation here as usual. |
-| `preparing` (target refused, or the daemon stopped) | the source's own record | Marks the move `failed` when the daemon starts. No file had moved. A target that had recorded it `prepared` drops that record when the next move of the conversation from this host is prepared. |
-| `sent`, before the transfer | target: `prepared` | Archives again (each part that is already archived is skipped) and transfers. |
+| `preparing` (target refused, or the daemon stopped) | the source's own record | Puts back any files it had archived and marks the move `failed`, at once or when the daemon starts. No file had been sent. A target that had recorded it `prepared` drops that record when the next move of the conversation from this host is prepared. |
+| `sent`, before the transfer | target: `prepared` | Transfers. |
 | `sent`, transfer unanswered | target: `received` | Transfers again. A target that already runs the conversation only checks that what arrived begins what runs there. |
 | `sent`, target resumed it but the source stopped before the flip | target: `resumed` | Flips. |
 | `sent`, target refused the transfer before starting Claude | answer `409 move_refused` | Asks the target to abort. Once the target records `aborted`, puts the files back and marks the move `failed`. |
+| `sent`, target could not set aside a copy it placed | answer `502 move_unknown`, then `500 move_unsettled` to the abort | Leaves the move unresolved and asks again on the next reconnect. |
+| Putting the files back fails | the source's record | Leaves the move as it was and tries again on the next reconnect, or the next start for a `preparing` move. |
 | `sent`, target has no record | target: `none` | Same as a refusal. |
 | `sent`, target unreachable | nothing | Leaves the move unresolved. `agenthail move list --unfinished` shows it. |
 | `done` | the source's record | Nothing. |
