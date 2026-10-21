@@ -272,6 +272,9 @@ func (a *App) controlRemote(ctx context.Context, remote *remoteTarget, action, v
 	if err := json.Unmarshal(data, &result); err != nil {
 		return fmt.Errorf("decode %s answer for %s: %w", action, remote.label(), err)
 	}
+	if result.Change != nil {
+		return printModelChange(remote.ID, *result.Change, args)
+	}
 	if hasFlag(args, "--json") {
 		return json.NewEncoder(os.Stdout).Encode(result)
 	}

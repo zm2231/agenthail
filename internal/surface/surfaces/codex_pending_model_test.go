@@ -2,7 +2,6 @@ package surfaces
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 
@@ -192,13 +191,12 @@ func TestCodexSessionsCarryThePendingModelAndItsFileIsWatched(t *testing.T) {
 	if row.PendingModel != "gpt-sol" {
 		t.Fatalf("row pending=%q", row.PendingModel)
 	}
-	pruneCodexPendingModels([]surface.Session{{ID: "other"}})
-	if _, err := os.Stat(codexPendingModelPath("thread")); !os.IsNotExist(err) {
-		t.Fatalf("pending file for an unlisted thread survived prune: %v", err)
+	if _, err := codex.SetModel(context.Background(), session, "gpt-luna"); err != nil {
+		t.Fatal(err)
 	}
 	applyCodexPendingModel(&row)
 	if row.PendingModel != "" {
-		t.Fatalf("row pending=%q after prune", row.PendingModel)
+		t.Fatalf("row pending=%q after choosing the current model", row.PendingModel)
 	}
 }
 
@@ -207,5 +205,36 @@ func TestCodexPendingModelPathRejectsIDsThatAreNotFileNames(t *testing.T) {
 		if path := codexPendingModelPath(id); path != "" {
 			t.Fatalf("id %q gave path %q", id, path)
 		}
+	}
+}
+
+func TestCodexADroppedPendingModelIsReportedByTheTurnThatStarts(t *testing.T) {
+	fail := true
+	fake, codex, session := pendingModelThread(t, func(method string, _ map[string]any) map[string]any {
+		if method == "turn/start" && fail {
+			return map[string]any{"error": map[string]any{"code": -32603, "message": "at capacity"}}
+		}
+		return nil
+	}, true)
+	if _, err := codex.SetModel(context.Background(), session, "gpt-sol"); err != nil {
+		t.Fatal(err)
+	}
+	fake.SetThreadModel("thread", "gpt-terra")
+	if _, err := codex.SendWithOptions(context.Background(), session, "hello", surface.SendOptions{}); err == nil {
+		t.Fatal("send succeeded while turn/start failed")
+	}
+	fail = false
+	sent, err := codex.SendWithOptions(context.Background(), session, "retry", surface.SendOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sent.Notice, "Dropped the pending model gpt-sol") {
+		t.Fatalf("notice=%q", sent.Notice)
+	}
+	if param, ran := lastTurnModel(t, fake); param != nil || ran != "gpt-terra" {
+		t.Fatalf("turn/start model=%v, ran on %q", param, ran)
+	}
+	if got := codex.PendingModel("thread"); got != "" {
+		t.Fatalf("pending=%q", got)
 	}
 }

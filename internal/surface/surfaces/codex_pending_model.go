@@ -99,22 +99,6 @@ func applyCodexPendingModel(session *surface.Session) {
 	}
 }
 
-func pruneCodexPendingModels(listed []surface.Session) {
-	entries, err := os.ReadDir(codexPendingModelDir())
-	if err != nil {
-		return
-	}
-	keep := make(map[string]struct{}, len(listed))
-	for _, session := range listed {
-		keep[session.ID+".json"] = struct{}{}
-	}
-	for _, entry := range entries {
-		if _, found := keep[entry.Name()]; !found && filepath.Ext(entry.Name()) == ".json" {
-			_ = os.Remove(filepath.Join(codexPendingModelDir(), entry.Name()))
-		}
-	}
-}
-
 func codexPendingModelForTurn(threadID, current string) (model, notice string) {
 	pending, ok := loadCodexPendingModel(threadID)
 	if !ok {
@@ -122,10 +106,8 @@ func codexPendingModelForTurn(threadID, current string) (model, notice string) {
 	}
 	switch {
 	case current == pending.Model:
-		_ = clearCodexPendingModel(threadID)
 		return "", ""
 	case current != pending.From:
-		_ = clearCodexPendingModel(threadID)
 		return "", fmt.Sprintf("Dropped the pending model %s: the thread moved from %s to %s after it was chosen, so this turn runs on %s.", pending.Model, pending.From, current, current)
 	}
 	return pending.Model, ""

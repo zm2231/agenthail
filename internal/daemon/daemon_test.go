@@ -1161,3 +1161,24 @@ func TestRelayToUnavailableSurfaceRemainsQueuedWithoutNotifyingSource(t *testing
 		t.Fatal("relay must queue once without notifying source")
 	}
 }
+
+type pendingModelSurface struct{ *daemonSurface }
+
+func (pendingModelSurface) SetModel(_ context.Context, _ *surface.Session, name string) (surface.ModelChange, error) {
+	return surface.ModelChange{Model: "gpt-luna", PendingModel: name, Limit: "Desktop runs its own model."}, nil
+}
+
+func TestModelControlCarriesThePendingChoiceAsAField(t *testing.T) {
+	d, _, fake, from, _ := daemonFixture(t)
+	adapter := pendingModelSurface{fake}
+	result, err := d.control(context.Background(), adapter, &from, surface.ControlRequest{Action: "model", Value: "gpt-sol"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Change == nil || result.Change.Model != "gpt-luna" || result.Change.PendingModel != "gpt-sol" {
+		t.Fatalf("change=%+v", result.Change)
+	}
+	if result.Detail != "" || !strings.HasPrefix(result.Output, "gpt-sol applies from the next turn") {
+		t.Fatalf("output=%q detail=%q", result.Output, result.Detail)
+	}
+}

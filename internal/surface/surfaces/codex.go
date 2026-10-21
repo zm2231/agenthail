@@ -303,9 +303,6 @@ func (c *Codex) list(ctx context.Context, sweep bool) ([]surface.Session, bool, 
 		out = append(out, session)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].LastActive.After(out[j].LastActive) })
-	if complete {
-		pruneCodexPendingModels(out)
-	}
 	return out, complete, nil
 }
 
@@ -928,9 +925,9 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("turn/start: %w", err))
 	}
-	if pending && model != "" {
+	if pending {
 		if err := clearCodexPendingModel(sess.ID); err != nil {
-			notice = fmt.Sprintf("The turn runs on %s, but its pending choice could not be cleared: %s", model, err)
+			notice = strings.TrimSpace(notice + " The pending model choice could not be cleared: " + err.Error())
 		}
 	}
 	turnID := sess.ID
@@ -1200,7 +1197,7 @@ func (c *Codex) SetModel(ctx context.Context, sess *surface.Session, name string
 		return surface.ModelChange{}, surface.DeliveryUnavailable(err)
 	}
 	defer client.Close()
-	if _, err := c.loadForDirectInput(ctx, client, sess, name); err != nil {
+	if err := c.loadForDirectInput(ctx, client, sess, name); err != nil {
 		if surface.IsDeliveryTerminal(err) {
 			return surface.ModelChange{}, err
 		}

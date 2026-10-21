@@ -1899,10 +1899,7 @@ func (d *Daemon) control(ctx context.Context, adapter surface.Surface, session *
 	} else if setter, ok := adapter.(surface.ModelSetter); ok && request.Value != "" {
 		var change surface.ModelChange
 		change, err = setter.SetModel(ctx, session, request.Value)
-		result.Output = change.Text()
-		if change.PendingModel != "" {
-			result.Detail = "pending:" + change.PendingModel
-		}
+		result.Output, result.Change = change.Text(), &change
 	} else {
 		result.Output, err = adapter.Model(ctx, session, request.Value)
 	}

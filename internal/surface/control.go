@@ -16,6 +16,7 @@ type ControlResult struct {
 	Source    string           `json:"source"`
 	Output    string           `json:"output,omitempty"`
 	Detail    string           `json:"detail,omitempty"`
+	Change    *ModelChange     `json:"change,omitempty"`
 }
 
 // Controller runs a control and reports the evidence it observed. A result
