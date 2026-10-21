@@ -2,6 +2,8 @@
 set -euo pipefail
 
 : "${RUNNER_TEMP:?}" "${RUNNER_TOOL_CACHE:?}" "${GITHUB_WORKSPACE:?}" "${RUNNER_NAME:?}"
+case "$RUNNER_TOOL_CACHE" in /*) ;; *) echo "RUNNER_TOOL_CACHE must be an absolute path" >&2; exit 1 ;; esac
+case "$RUNNER_TOOL_CACHE/" in */./* | */../*) echo "RUNNER_TOOL_CACHE must not contain . or .. components" >&2; exit 1 ;; esac
 
 # The job temp directory lives in the user's own temp directory, as it does
 # on hosted runners and users' Macs: /var/folders resolves to /private/var,
@@ -89,7 +91,7 @@ cleanup() {
 # resolve to exactly the runner's tool cache plus agenthail-cache/go-build,
 # so a symlink cannot point the clean anywhere else.
 trim_go_cache() {
-	local max_kb="${AGENTHAIL_CI_GO_CACHE_MAX_KB:-8388608}" tools cache size
+	local max_kb=8388608 tools cache size
 	tools="$(cd "$RUNNER_TOOL_CACHE" && pwd -P)"
 	cache="$RUNNER_TOOL_CACHE/agenthail-cache/go-build"
 	[ -d "$cache" ] || return 0
