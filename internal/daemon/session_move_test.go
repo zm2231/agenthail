@@ -418,6 +418,19 @@ func TestAMoveWhoseResumeTheTargetRefusesLeavesNoCopyThere(t *testing.T) {
 	}
 }
 
+func TestAMoveIsRefusedWhenItsFolderLeadsOutOfTheTargetsCheckout(t *testing.T) {
+	_, _, _, checkout := movePair(t)
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(checkout, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	target := moveTarget{main: checkout, checkout: checkout, cwd: filepath.Join(checkout, "escape")}
+	err := ensureMoveCheckout(context.Background(), target, moveCheckout{Commit: strings.Repeat("a", 40)})
+	if err == nil || !strings.Contains(err.Error(), "outside the checkout") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestOnlyAPairedHostCanMoveASessionIn(t *testing.T) {
 	_, target, _, _ := movePair(t)
 	for _, path := range []string{"/api/v1/session-move?id=x", "/api/v1/session-move/prepare", "/api/v1/session-move/transfer?id=x", "/api/v1/session-move/abort?id=x"} {

@@ -106,6 +106,14 @@ func (c *Claude) PrepareMove(ctx context.Context, sess *surface.Session, request
 	if out.Size, out.SHA256, err = hashFile(transcripts[0]); err != nil {
 		return nil, err
 	}
+	projectDir := filepath.Base(filepath.Dir(transcripts[0]))
+	for _, part := range claudeMoveParts(conversation)[1:] {
+		size, err := regularFilesSize(claudeRootPart(root, projectDir, part))
+		if err != nil {
+			return nil, err
+		}
+		out.PartsSize += size
+	}
 	out.Release = unlock
 	return out, nil
 }
@@ -130,6 +138,27 @@ func (c *Claude) hostSettings(conversation string) (claudeKeptSettings, bool) {
 	}
 	kept, ok := state.Sessions[conversation]
 	return kept, ok
+}
+
+// regularFilesSize is the bytes of the regular files under name, which
+// WriteMoveArchive carries.
+func regularFilesSize(name string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(name, func(_ string, entry fs.DirEntry, err error) error {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil || !entry.Type().IsRegular() {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		total += info.Size()
+		return nil
+	})
+	return total, err
 }
 
 func hashFile(name string) (int64, string, error) {
@@ -542,6 +571,7 @@ func moveArchivePart(conversation, name string, dir bool) bool {
 func extractMoveArchive(staging string, in surface.MoveIn, archive io.Reader) error {
 	reader := tar.NewReader(archive)
 	transcript := false
+	parts := int64(0)
 	for {
 		header, err := reader.Next()
 		if errors.Is(err, io.EOF) {
@@ -585,6 +615,9 @@ func extractMoveArchive(staging string, in surface.MoveIn, archive io.Reader) er
 			}
 			transcript = true
 			sink = io.MultiWriter(file, sum)
+		} else if parts += header.Size; header.Size < 0 || parts > in.PartsSize {
+			_ = file.Close()
+			return fmt.Errorf("the moved conversation's other files are more than the %d bytes the move declared", in.PartsSize)
 		}
 		written, copyErr := io.Copy(sink, reader)
 		closeErr := file.Close()

@@ -35,6 +35,7 @@ type moveManifest struct {
 	PermissionMode string              `json:"permissionMode,omitempty"`
 	Size           int64               `json:"size"`
 	SHA256         string              `json:"sha256"`
+	PartsSize      int64               `json:"partsSize"`
 }
 
 type moveStatus struct {
@@ -136,7 +137,7 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 		return sessionMoveResult{}, MoveRefusedError{Reason: err.Error()}
 	}
 	alias, _ := d.Registry.ReverseAlias(session.ID)
-	manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256}
+	manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize}
 	encoded, err := json.Marshal(manifest)
 	if err != nil {
 		return sessionMoveResult{}, err
@@ -533,7 +534,7 @@ func (d *Daemon) apiMovePrepareHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusForbidden, "forbidden", "A move names its own host as its source.")
 		return
 	}
-	if !validMoveID(manifest.ID) || !validMoveID(manifest.Conversation) || manifest.Size < 0 || len(manifest.SHA256) != 64 {
+	if !validMoveID(manifest.ID) || !validMoveID(manifest.Conversation) || manifest.Size < 0 || manifest.PartsSize < 0 || len(manifest.SHA256) != 64 {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "The move's id, conversation, size or digest is not valid.")
 		return
 	}
@@ -565,7 +566,7 @@ func (d *Daemon) apiMovePrepareHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func moveInOf(manifest moveManifest, cwd string) surface.MoveIn {
-	return surface.MoveIn{MoveID: manifest.ID, Conversation: manifest.Conversation, Cwd: cwd, Title: manifest.Title, Model: manifest.Model, PermissionMode: manifest.PermissionMode, Size: manifest.Size, SHA256: manifest.SHA256}
+	return surface.MoveIn{MoveID: manifest.ID, Conversation: manifest.Conversation, Cwd: cwd, Title: manifest.Title, Model: manifest.Model, PermissionMode: manifest.PermissionMode, Size: manifest.Size, SHA256: manifest.SHA256, PartsSize: manifest.PartsSize}
 }
 
 // removeMoveWorktree removes the worktree an aborted move made, unless work

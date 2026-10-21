@@ -222,5 +222,17 @@ func ensureMoveCheckout(ctx context.Context, target moveTarget, checkout moveChe
 	if info, err := os.Stat(target.cwd); err != nil || !info.IsDir() {
 		return fmt.Errorf("folder %s does not exist at commit %s", target.cwd, checkout.Commit[:12])
 	}
+	// A symlink in the repository could otherwise run the session outside it.
+	resolvedCheckout, err := filepath.EvalSymlinks(target.checkout)
+	if err != nil {
+		return err
+	}
+	resolvedCwd, err := filepath.EvalSymlinks(target.cwd)
+	if err != nil {
+		return err
+	}
+	if rel, err := filepath.Rel(resolvedCheckout, resolvedCwd); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("folder %s leads outside the checkout %s", target.cwd, target.checkout)
+	}
 	return nil
 }

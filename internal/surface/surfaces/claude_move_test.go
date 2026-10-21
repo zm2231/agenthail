@@ -146,10 +146,11 @@ func TestAMoveInTakesOnlyTheConversationsOwnFilesAsDeclared(t *testing.T) {
 	conversation := fixtureConversation
 	transcript := tarPart{name: conversation + ".jsonl", body: body}
 	cases := map[string]struct {
-		parts []tarPart
-		size  int64
-		sum   string
-		want  string
+		parts      []tarPart
+		size       int64
+		sum        string
+		partsLimit int64
+		want       string
 	}{
 		"absolute path":       {parts: []tarPart{transcript, {name: "/etc/agenthail", body: "x"}}, want: "unsafe path"},
 		"parent path":         {parts: []tarPart{transcript, {name: "../escape", body: "x"}}, want: "unsafe path"},
@@ -162,6 +163,7 @@ func TestAMoveInTakesOnlyTheConversationsOwnFilesAsDeclared(t *testing.T) {
 		"no transcript":       {parts: []tarPart{{name: conversation + "/subagents/a.jsonl", body: "{}"}}, want: "no transcript"},
 		"wrong size":          {parts: []tarPart{transcript}, size: int64(len(body)) + 1, want: "move declared"},
 		"wrong digest":        {parts: []tarPart{transcript}, sum: digest("other"), want: "move declared"},
+		"other files too big": {parts: []tarPart{transcript, {name: conversation + "/tool-results/r.txt", body: "too long"}}, partsLimit: 3, want: "more than the 3 bytes"},
 	}
 	for name, test := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -175,7 +177,11 @@ func TestAMoveInTakesOnlyTheConversationsOwnFilesAsDeclared(t *testing.T) {
 			if test.sum != "" {
 				sum = test.sum
 			}
-			in := surface.MoveIn{MoveID: uuid.NewString(), Conversation: conversation, Cwd: cwd, Size: size, SHA256: sum}
+			limit := int64(1 << 20)
+			if test.partsLimit != 0 {
+				limit = test.partsLimit
+			}
+			in := surface.MoveIn{MoveID: uuid.NewString(), Conversation: conversation, Cwd: cwd, Size: size, SHA256: sum, PartsSize: limit}
 			_, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(buildArchive(t, test.parts...)), admitMove)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("err=%v, want %q", err, test.want)
@@ -233,7 +239,7 @@ func TestAMovedConversationResumesInTheHostWithItsModelAndMode(t *testing.T) {
 		tarPart{name: "tasks/", typeflag: tar.TypeDir},
 		tarPart{name: "tasks/" + conversation + "/1.json", body: `{"id":"1"}`},
 	)
-	in := surface.MoveIn{MoveID: uuid.NewString(), Conversation: conversation, Cwd: host.Cwd, Model: "claude-opus-4-8", PermissionMode: "plan", Title: "moved work", Size: int64(len(body)), SHA256: digest(body)}
+	in := surface.MoveIn{MoveID: uuid.NewString(), Conversation: conversation, Cwd: host.Cwd, Model: "claude-opus-4-8", PermissionMode: "plan", Title: "moved work", Size: int64(len(body)), SHA256: digest(body), PartsSize: int64(len("result") + len(`{"id":"1"}`))}
 	session, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(archive), admitMove)
 	if err != nil {
 		t.Fatal(err)
@@ -342,7 +348,7 @@ func TestAMoveInClaudeRefusesLeavesNoCopyItCouldResume(t *testing.T) {
 	_, host, c := hostResume(t)
 	conversation := uuid.NewString()
 	body := `{"type":"user","sessionId":"` + conversation + `","cwd":"/elsewhere","message":{"role":"user","content":"hello"}}` + "\n"
-	in := surface.MoveIn{MoveID: uuid.NewString(), Conversation: conversation, Cwd: host.Cwd, Size: int64(len(body)), SHA256: digest(body)}
+	in := surface.MoveIn{MoveID: uuid.NewString(), Conversation: conversation, Cwd: host.Cwd, Size: int64(len(body)), SHA256: digest(body), PartsSize: 2}
 	host.Refuse(t, conversation, "not logged in")
 	_, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(buildArchive(t, tarPart{name: conversation + ".jsonl", body: body}, tarPart{name: "tasks/" + conversation + "/1.json", body: "{}"})), admitMove)
 	if err == nil || errors.Is(err, surface.ErrMoveInPlaced) || errors.Is(err, surface.ErrMoveInRunning) {

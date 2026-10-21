@@ -24,6 +24,8 @@ type MoveOut struct {
 	PermissionMode string `json:"permissionMode,omitempty"`
 	Size           int64  `json:"size"`
 	SHA256         string `json:"sha256"`
+	// PartsSize is the bytes of every other file the move carries.
+	PartsSize int64 `json:"partsSize"`
 	// Stopped names the process the hold ended, as an adoption does.
 	Stopped string `json:"stopped,omitempty"`
 	Release func() `json:"-"`
@@ -40,6 +42,7 @@ type MoveIn struct {
 	PermissionMode string
 	Size           int64
 	SHA256         string
+	PartsSize      int64
 }
 
 // SessionMover moves an idle conversation between machines. The source holds
