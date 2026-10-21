@@ -17,6 +17,15 @@ const (
 	claudeAdoptPollEvery   = 500 * time.Millisecond
 )
 
+// claudeAdoptable reports whether sess runs where AdoptSession moves
+// sessions from: a terminal or a background job. A host session is already
+// in the host. Like the other lifecycle flags it follows the runtime; the
+// conversation's own state, such as its transcript, is checked when the
+// adoption runs.
+func claudeAdoptable(sess *surface.Session) bool {
+	return sess != nil && (sess.RuntimeKind == surface.RuntimeClaudeCLI || sess.RuntimeKind == surface.RuntimeClaudeBackground)
+}
+
 // AdoptSession reopens a conversation in Agenthail's host. The process that
 // holds it is stopped first once it is idle: a host session is closed, a
 // background job stopped, and a terminal process only with the person's

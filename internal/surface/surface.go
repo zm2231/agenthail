@@ -762,12 +762,14 @@ type Capabilities struct {
 }
 
 // Lifecycle names the operations on a session's process that its runtime
-// supports: report its state, read its log, stop it, and start it again.
+// supports: report its state, read its log, stop it, start it again, and
+// adopt it, reopening it in Agenthail's host.
 type Lifecycle struct {
 	Status bool `json:"status"`
 	Logs   bool `json:"logs"`
 	Stop   bool `json:"stop"`
 	Resume bool `json:"resume"`
+	Adopt  bool `json:"adopt"`
 }
 
 type SessionCapabilities struct {
