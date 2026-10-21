@@ -42,8 +42,13 @@ type moveNode struct {
 
 func newMoveNode(t *testing.T) *moveNode {
 	t.Helper()
+	return moveNodeOn(t, claudehosttest.New(t, ""))
+}
+
+// moveNodeOn starts host and a daemon whose Claude sessions run in it.
+func moveNodeOn(t *testing.T, host *claudehosttest.Fixture) *moveNode {
+	t.Helper()
 	allowLoopbackHosts(t)
-	host := claudehosttest.New(t, "")
 	host.Start(t)
 	claude := surfaces.NewClaude(nil, host.Home)
 	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
@@ -65,7 +70,13 @@ func movePair(t *testing.T) (*moveNode, *moveNode, registry.PairedHost, string) 
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	claudetest.New(t)
-	source, target := newMoveNode(t), newMoveNode(t)
+	return pairMoveNodes(t, newMoveNode(t), newMoveNode(t))
+}
+
+// pairMoveNodes pairs source with target and gives them checkouts of one
+// repository, the source's at a pushed commit.
+func pairMoveNodes(t *testing.T, source, target *moveNode) (*moveNode, *moveNode, registry.PairedHost, string) {
+	t.Helper()
 	repo := source.host.Cwd
 	runGit(t, repo, "init", "--quiet", "--initial-branch=main")
 	runGit(t, repo, "remote", "add", "origin", moveRemote)
