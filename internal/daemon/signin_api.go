@@ -176,20 +176,24 @@ func (d *Daemon) apiSigninBindingsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	d.publishEvent("signin.changed", string(consumer.ID), map[string]any{"consumer": consumer.ID})
-	go d.refreshSigninSurfaces()
+	d.background.start(d.refreshSigninSurfaces)
 	writeDashboardJSON(w, http.StatusOK, d.signinConsumer(consumer))
 }
 
 // refreshSigninSurfaces re-checks the surfaces that read cookies so a new
 // binding shows in health without waiting for the next discovery pass.
-func (d *Daemon) refreshSigninSurfaces() {
+func (d *Daemon) refreshSigninSurfaces(lifetime context.Context) {
 	for _, kind := range []surface.SurfaceKind{surface.KindNotion, surface.KindClaude} {
 		adapter := d.adapters().ForSurface(kind)
 		if adapter == nil {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(lifetime, 20*time.Second)
 		_, err := adapter.List(ctx)
+		if lifetime.Err() != nil {
+			cancel()
+			return
+		}
 		d.publishSurfaceHealth(d.recordSurfaceHealth(ctx, adapter, err), time.Now().UTC())
 		cancel()
 	}

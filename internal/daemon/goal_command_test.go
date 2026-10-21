@@ -110,7 +110,7 @@ func TestQueuedGoalRunsAtIdleBeforeTheMessagesBehindIt(t *testing.T) {
 	if err := r.QueueMessage(session.ID, "follow-up"); err != nil {
 		t.Fatal(err)
 	}
-	daemon.scanAndRelay(context.Background())
+	daemon.scanAndRelay(t.Context())
 	if len(adapter.sent) != 0 || r.QueueCount(session.ID) != 2 {
 		t.Fatalf("while the goal runs sent=%v pending=%d", adapter.sent, r.QueueCount(session.ID))
 	}
@@ -123,7 +123,7 @@ func TestQueuedGoalRunsAtIdleBeforeTheMessagesBehindIt(t *testing.T) {
 	if err != nil || item.Status != "delivered" || item.Evidence != surface.EvidenceDelivered || strings.Join(adapter.commands(), ",") != "/goal tests pass" {
 		t.Fatalf("item=%+v ran=%v err=%v", item, adapter.commands(), err)
 	}
-	daemon.scanAndRelay(context.Background())
+	daemon.scanAndRelay(t.Context())
 	if len(adapter.sent) != 1 || adapter.sent[0] != "follow-up" {
 		t.Fatalf("after the goal sent=%v", adapter.sent)
 	}
@@ -145,10 +145,10 @@ func TestQueuedGoalSettlesByWhatTheSessionAnswered(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			daemon.scanAndRelay(context.Background())
+			daemon.scanAndRelay(t.Context())
 			// The goal runs on a queue worker; an item is pending before it
 			// runs too, so the outcome is read once the worker has settled it.
-			daemon.queueWorkers.Wait()
+			daemon.background.wait()
 			item, err := r.QueueItem(id, nil)
 			if err != nil || item.Status != test.status || !strings.Contains(item.LastError, test.reason) || len(adapter.commands()) != 1 {
 				t.Fatalf("item=%+v ran=%v err=%v", item, adapter.commands(), err)

@@ -64,7 +64,7 @@ type Daemon struct {
 	// withdrawDesktop removes a desktop notification; it is
 	// WithdrawNotification outside tests.
 	withdrawDesktop   func(identifier string) error
-	queueWorkers      sync.WaitGroup
+	background        *backgroundWork
 	events            *eventHub
 	catalog           *catalogHub
 	catalogLive       map[string]*catalogLiveSession
@@ -135,6 +135,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		catalogNudge:      make(chan struct{}, 1),
 		federation:        newFederation(),
 		uploads:           uploads.New(uploadsDir(reg)),
+		background:        newBackgroundWork(),
 	}
 	identity, err := reg.HostIdentity()
 	if err != nil {
@@ -264,9 +265,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			d.background.stop()
 			<-catalogDone
 			<-hostDone
-			d.queueWorkers.Wait()
 			d.log.Printf("stopping")
 			return nil
 		case <-observerTicker.C:

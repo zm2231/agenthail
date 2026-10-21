@@ -259,11 +259,20 @@ func (d *Daemon) startDashboard() (*dashboardServer, error) {
 	return dashboard, nil
 }
 
+// dashboardShutdownTimeout bounds how long a stopping daemon waits for the
+// requests in flight, which may still write to the registry, to finish.
+const dashboardShutdownTimeout = 5 * time.Second
+
 func (d *dashboardServer) shutdown() error {
 	if d.cancel != nil {
 		d.cancel()
 	}
-	err := d.server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), dashboardShutdownTimeout)
+	defer cancel()
+	err := d.server.Shutdown(ctx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		err = d.server.Close()
+	}
 	if d.voice != nil {
 		d.voice.Close()
 	}

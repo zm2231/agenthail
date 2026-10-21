@@ -184,7 +184,7 @@ func TestPersonSendToBusyBridgedClaudeQueuesHumanTurn(t *testing.T) {
 	}
 	queueID := int64(receipt["queueId"].(float64))
 	f.transcript(t, f.bridged, idleClaudeTranscript)
-	f.d.drainMessageQueue(context.Background(), f.claude, &f.bridged)
+	f.d.drainMessageQueue(t.Context(), f.claude, &f.bridged)
 	if len(f.claude.native) != 0 || len(f.posts) != 1 {
 		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
 	}
@@ -200,7 +200,7 @@ func TestQueuedAgentMessageToBridgedClaudeStaysNative(t *testing.T) {
 	if _, err := f.r.QueueMessageWithOptions(f.bridged.ID, "relayed", "", surface.SendOptions{SourceSessionID: "agent"}); err != nil {
 		t.Fatal(err)
 	}
-	f.d.drainMessageQueue(context.Background(), f.claude, &f.bridged)
+	f.d.drainMessageQueue(t.Context(), f.claude, &f.bridged)
 	if len(f.posts) != 0 || len(f.claude.native) != 1 || f.claude.native[0] != "relayed" {
 		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
 	}
@@ -222,7 +222,7 @@ func TestUncertainHumanTurnPostIsNeverRetried(t *testing.T) {
 	if receipt["evidence"] != string(surface.EvidenceSubmitted) || len(f.posts) != 1 || len(f.claude.native) != 0 {
 		t.Fatalf("receipt=%v native=%q posts=%q", receipt, f.claude.native, f.posts)
 	}
-	f.d.drainMessageQueue(context.Background(), f.claude, &f.bridged)
+	f.d.drainMessageQueue(t.Context(), f.claude, &f.bridged)
 	if len(f.posts) != 1 || len(f.claude.native) != 0 {
 		t.Fatalf("uncertain human turn was resent: native=%q posts=%q", f.claude.native, f.posts)
 	}
@@ -235,8 +235,8 @@ func TestUncertainQueuedHumanTurnDeadLettersWithoutRetry(t *testing.T) {
 	queueID := int64(receipt["queueId"].(float64))
 	f.transcript(t, f.bridged, idleClaudeTranscript)
 	f.postErr = errors.New("connection reset after write")
-	f.d.drainMessageQueue(context.Background(), f.claude, &f.bridged)
-	f.d.drainMessageQueue(context.Background(), f.claude, &f.bridged)
+	f.d.drainMessageQueue(t.Context(), f.claude, &f.bridged)
+	f.d.drainMessageQueue(t.Context(), f.claude, &f.bridged)
 	if len(f.posts) != 1 || len(f.claude.native) != 0 {
 		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
 	}
@@ -291,7 +291,7 @@ func TestQueuedPersonMessageWithOptionsIsRejectedAtDrain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.d.drainMessageQueue(context.Background(), f.claude, &f.bridged)
+	f.d.drainMessageQueue(t.Context(), f.claude, &f.bridged)
 	if len(f.posts) != 0 || len(f.claude.native) != 0 {
 		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
 	}
@@ -372,8 +372,8 @@ func TestQueuedPersonSendThatCannotStartIsDeferredForRetry(t *testing.T) {
 	queueID := int64(receipt["queueId"].(float64))
 	f.transcript(t, f.bridged, idleClaudeTranscript)
 	f.withoutWebBridgeSidecar(t)
-	f.d.drainMessageQueue(context.Background(), f.claude, &f.bridged)
-	f.d.queueWorkers.Wait()
+	f.d.drainMessageQueue(t.Context(), f.claude, &f.bridged)
+	f.d.background.wait()
 	item, err := f.r.QueueItem(queueID, nil)
 	if err != nil || item.Status == "dead" || item.Evidence == surface.EvidenceUnknown || !strings.Contains(item.LastError, "did not start") || len(f.claude.native) != 0 {
 		t.Fatalf("item=%+v err=%v native=%q", item, err, f.claude.native)
