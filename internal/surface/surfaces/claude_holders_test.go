@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -161,6 +162,14 @@ func TestClaudeWriteToAConversationOpenInTwoProcessesIsRefusedNamingEach(t *test
 		},
 		"steer":     func(session *surface.Session) error { return s.adapter.Steer(s.ctx, session, "which terminal?") },
 		"interrupt": func(session *surface.Session) error { return s.adapter.Interrupt(s.ctx, session) },
+		"stop": func(session *surface.Session) error {
+			_, err := s.adapter.SessionAction(s.ctx, session, "stop")
+			return err
+		},
+		"resume": func(session *surface.Session) error {
+			_, err := s.adapter.SessionAction(s.ctx, session, "resume")
+			return err
+		},
 	} {
 		for label, session := range map[string]*surface.Session{"bound": bound(), "listed": &listed} {
 			t.Run(name+"/"+label, func(t *testing.T) {
@@ -241,5 +250,45 @@ func TestClaudeConversationOpenInTwoProcessesIsOpenAndWaitsWhenEitherWaits(t *te
 	}
 	if status.Status != surface.StatusBusy || status.WaitingOn == nil {
 		t.Fatalf("status=%+v, want the waiting holder to make the conversation wait", status)
+	}
+}
+
+func TestClaudePinToAnEarlierProcessUnderTheSamePIDIsRefused(t *testing.T) {
+	s := newSharedConversation(t)
+	pinned, err := s.adapter.Resolve(context.Background(), strconv.Itoa(s.later.PID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pinned.HolderStart == "" {
+		t.Fatalf("pinned=%+v, want the pin to carry the process start", pinned)
+	}
+	// The pin was taken for an earlier process that had this pid.
+	pinned.HolderStart = "Mon Jan  1 00:00:00 2024"
+	_, err = s.adapter.Send(s.ctx, pinned, "to a process that left")
+	if !surface.IsDeliveryTerminal(err) || surface.DeliveryTerminalReason(err) != surface.DeliveryTargetMissing {
+		t.Fatalf("err=%v, want target missing", err)
+	}
+	if _, err := s.adapter.SessionAction(s.ctx, pinned, "stop"); !surface.IsDeliveryTerminal(err) {
+		t.Fatalf("stop err=%v, want target missing", err)
+	}
+	s.assertNothingReceived(t)
+}
+
+func TestClaudeAdoptingAConversationOpenInTwoProcessesAsksToCloseTheOthers(t *testing.T) {
+	s := newSharedConversation(t)
+	pinned, err := s.adapter.Resolve(context.Background(), strconv.Itoa(s.later.PID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, session := range map[string]*surface.Session{"pinned": pinned, "unpinned": {ID: sharedConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}} {
+		_, err := s.adapter.AdoptSession(s.ctx, session, surface.AdoptRequest{StopTerminal: true})
+		if !surface.IsDeliveryRefused(err) || !strings.Contains(err.Error(), "close the others first") || strings.Contains(err.Error(), "send to one with") {
+			t.Fatalf("%s: err=%v, want a refusal asking to close the other terminals", name, err)
+		}
+	}
+	for _, holder := range []*claudetest.Holder{s.first, s.later} {
+		if err := syscall.Kill(holder.PID, 0); err != nil {
+			t.Fatalf("refused adoption stopped process %d: %v", holder.PID, err)
+		}
 	}
 }

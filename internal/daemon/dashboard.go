@@ -1111,6 +1111,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Approval        string                     `json:"approvalPolicy"`
 		Author          surface.Author             `json:"author"`
 		PID             int                        `json:"pid"`
+		PIDStartedAt    int64                      `json:"pidStartedAt"`
 		ProjectID       string                     `json:"projectId"`
 		Path            string                     `json:"path"`
 		Title           string                     `json:"title"`
@@ -1713,7 +1714,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if request.PID != 0 {
-		if err := pinHolder(r.Context(), adapter, session, request.PID); err != nil {
+		if err := pinHolder(r.Context(), adapter, session, request.PID, request.PIDStartedAt); err != nil {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -2397,14 +2398,17 @@ func (d *Daemon) reserveStartName(w http.ResponseWriter, name string) (registry.
 
 // pinHolder addresses session to the one live process pid among those that
 // hold its conversation, as a target naming that process does.
-func pinHolder(ctx context.Context, adapter surface.Surface, session *surface.Session, pid int) error {
+// pinHolder addresses session to the one process pid among those that hold
+// its conversation. startedAt, when the picker sent it, is that process's
+// start as listed, so a pid reused since the pick does not match.
+func pinHolder(ctx context.Context, adapter surface.Surface, session *surface.Session, pid int, startedAt int64) error {
 	if session.Surface != surface.KindClaude || pid < 0 {
 		return fmt.Errorf("pid names a Claude process that holds the conversation")
 	}
 	pinned, err := adapter.Resolve(ctx, strconv.Itoa(pid))
-	if err != nil || pinned.ID != session.ID || pinned.PID != pid {
+	if err != nil || pinned.ID != session.ID || pinned.PID != pid || startedAt != 0 && pinned.StartedAt.UnixMilli() != startedAt {
 		return fmt.Errorf("Claude process %d does not hold conversation %s", pid, session.ID)
 	}
-	session.PID, session.HolderPID, session.Transport, session.Bridge = pinned.PID, pinned.HolderPID, pinned.Transport, pinned.Bridge
+	session.PID, session.HolderPID, session.HolderStart, session.Transport, session.Bridge = pinned.PID, pinned.HolderPID, pinned.HolderStart, pinned.Transport, pinned.Bridge
 	return nil
 }

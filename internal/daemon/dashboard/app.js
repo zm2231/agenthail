@@ -628,7 +628,10 @@ function chosenHolder(sessionID) {
 }
 function withHolder(sessionID, payload) {
   const pid = chosenHolder(sessionID);
-  return pid ? { ...payload, pid } : payload;
+  if (!pid) return payload;
+  const holder = sharedHolders(app.selected).find((candidate) => candidate.pid === pid);
+  const startedAt = Date.parse(holder?.startedAt || "");
+  return Number.isFinite(startedAt) ? { ...payload, pid, pidStartedAt: startedAt } : { ...payload, pid };
 }
 function sessionButton(session) {
   const holders = sharedHolders(session);

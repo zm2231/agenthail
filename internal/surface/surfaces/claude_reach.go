@@ -45,7 +45,7 @@ func (c *Claude) reach(ctx context.Context, sess *surface.Session) (bool, error)
 		return false, surface.DeliveryUnavailable(err)
 	}
 	defer unlock()
-	state, err := c.conversation(ctx, conversation, sess.HolderPID)
+	state, err := c.conversation(ctx, conversation, sessionPin(sess))
 	if err != nil {
 		return false, deliveryError(err)
 	}
@@ -81,7 +81,7 @@ func (c *Claude) reachRunning(ctx context.Context, sess *surface.Session) error 
 	if c.reachableAsIs(ctx, sess) {
 		return nil
 	}
-	state, err := c.conversation(ctx, sess.ID, sess.HolderPID)
+	state, err := c.conversation(ctx, sess.ID, sessionPin(sess))
 	if err != nil {
 		return deliveryError(err)
 	}
@@ -109,7 +109,7 @@ func (c *Claude) reachableAsIs(ctx context.Context, sess *surface.Session) bool 
 		return false
 	}
 	record, ok := c.peerRecord(sess.PID)
-	if !ok || str(record, "sessionId") != sess.ID {
+	if !ok || str(record, "sessionId") != sess.ID || sess.HolderStart != "" && recordStart(record) != sess.HolderStart {
 		return false
 	}
 	sess.Bridge = ""
@@ -125,7 +125,7 @@ func (c *Claude) reachableAsIs(ctx context.Context, sess *surface.Session) bool 
 // conversation reads which processes hold a conversation. Session records
 // show processes that have initialized; the background catalog also shows a
 // job that is still starting and has not written its record.
-func (c *Claude) conversation(ctx context.Context, id string, pin int) (claudeConversation, error) {
+func (c *Claude) conversation(ctx context.Context, id string, pin claudePin) (claudeConversation, error) {
 	var state claudeConversation
 	process, alive, err := c.conversationProcess(ctx, id, pin)
 	if err != nil {
@@ -160,22 +160,22 @@ func (c *Claude) conversation(ctx context.Context, id string, pin int) (claudeCo
 // conversationProcess returns the reachable process that holds a
 // conversation, and whether any live process holds it. pin, when set, names
 // the holder; a conversation several processes hold is refused without one.
-func (c *Claude) conversationProcess(ctx context.Context, id string, pin int) (*surface.Session, bool, error) {
+func (c *Claude) conversationProcess(ctx context.Context, id string, pin claudePin) (*surface.Session, bool, error) {
 	roots, records, err := c.records()
 	if err != nil {
 		return nil, false, err
 	}
 	holders := holderRecords(records, id)
 	shared := len(holders) > 1
-	if pin > 0 {
+	if pin.pid > 0 {
 		var pinned []map[string]any
 		for _, record := range holders {
-			if recordPID(record) == pin {
+			if pin.matches(record) {
 				pinned = append(pinned, record)
 			}
 		}
 		if len(pinned) == 0 {
-			return nil, false, surface.DeliveryTerminal(fmt.Errorf("Claude process %d no longer holds conversation %s", pin, id), surface.DeliveryTargetMissing)
+			return nil, false, pin.missing(id)
 		}
 		holders = pinned
 	} else if len(holders) > 1 {
@@ -189,7 +189,7 @@ func (c *Claude) conversationProcess(ctx context.Context, id string, pin int) (*
 		return nil, true, nil
 	}
 	if shared {
-		process.session.HolderPID = pin
+		process.session.HolderPID, process.session.HolderStart = pin.pid, recordStart(holders[0])
 	}
 	c.enrich(ctx, &process)
 	return &process.session, true, nil
@@ -225,7 +225,7 @@ func (c *Claude) resume(ctx context.Context, conversation, cwd string) (*surface
 	defer ticker.Stop()
 	for {
 		c.host.forget()
-		process, _, err := c.conversationProcess(ctx, conversation, opened.PID)
+		process, _, err := c.conversationProcess(ctx, conversation, claudePin{pid: opened.PID})
 		if err == nil && process != nil && process.PID == opened.PID && claudeHosted(process) {
 			return process, nil
 		}
@@ -305,7 +305,7 @@ func (c *Claude) lockConversation(ctx context.Context, conversation string) (fun
 // atRest reports whether a session whose process exited belongs to a
 // conversation no other process holds, so a message would resume it.
 func (c *Claude) atRest(ctx context.Context, sess *surface.Session) bool {
-	state, err := c.conversation(ctx, sess.ID, 0)
+	state, err := c.conversation(ctx, sess.ID, claudePin{})
 	return err == nil && !state.alive
 }
 

@@ -141,6 +141,7 @@ type Session struct {
 	Subagents             *SubagentRollup   `json:"subagents,omitempty"`
 	Holders               []Holder          `json:"holders,omitempty"`
 	HolderPID             int               `json:"-"`
+	HolderStart           string            `json:"-"`
 	StreamCursor          uint64            `json:"-"`
 	StreamCursorSet       bool              `json:"-"`
 	TranscriptOffset      int64             `json:"-"`
@@ -174,6 +175,19 @@ func (e SharedConversationError) Error() string {
 	described, pins := e.describe()
 	return fmt.Sprintf("Claude conversation %s is open in %d terminals: %s; send to one with %s, or close the others", e.SessionID, len(e.Holders), described, pins)
 }
+
+// Unpinnable is the error without its advice to pin one terminal, for an
+// operation a pin cannot settle.
+func (e SharedConversationError) Unpinnable() error { return sharedHolders{e} }
+
+type sharedHolders struct{ SharedConversationError }
+
+func (e sharedHolders) Error() string {
+	described, _ := e.describe()
+	return fmt.Sprintf("Claude conversation %s is open in %d terminals: %s", e.SessionID, len(e.Holders), described)
+}
+
+func (e sharedHolders) Unwrap() error { return e.SharedConversationError }
 
 // HeldReason explains a queued message held because the conversation is
 // open in several terminals, and the two ways to move it on.

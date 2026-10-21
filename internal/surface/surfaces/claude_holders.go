@@ -72,6 +72,38 @@ func processTTY(pid int) string {
 	return tty
 }
 
+// claudePin names one process among those that hold a conversation: its pid
+// and, once resolved, the start it recorded, so a reused pid never matches.
+type claudePin struct {
+	pid   int
+	start string
+}
+
+func sessionPin(sess *surface.Session) claudePin {
+	return claudePin{pid: sess.HolderPID, start: sess.HolderStart}
+}
+
+func (p claudePin) matches(record map[string]any) bool {
+	return recordPID(record) == p.pid && (p.start == "" || recordStart(record) == p.start)
+}
+
+// recordStart identifies the process that wrote a session record: the start
+// the process recorded for itself, else when it began its session. A process
+// that later reuses the pid writes a record that names neither.
+func recordStart(record map[string]any) string {
+	if start := str(record, "procStart"); start != "" {
+		return start
+	}
+	if startedAt, ok := record["startedAt"].(float64); ok {
+		return strconv.FormatFloat(startedAt, 'f', -1, 64)
+	}
+	return ""
+}
+
+func (p claudePin) missing(conversation string) error {
+	return surface.DeliveryTerminal(fmt.Errorf("Claude process %d no longer holds conversation %s", p.pid, conversation), surface.DeliveryTargetMissing)
+}
+
 // ensureOneHolder refuses a write to a conversation that several live
 // processes hold unless the session names one of them, and a write naming a
 // process that no longer holds the conversation.
@@ -81,13 +113,13 @@ func (c *Claude) ensureOneHolder(sess *surface.Session) error {
 		return surface.DeliveryUnavailable(err)
 	}
 	holders := holderRecords(records, sess.ID)
-	if sess.HolderPID > 0 {
+	if pin := sessionPin(sess); pin.pid > 0 {
 		for _, record := range holders {
-			if recordPID(record) == sess.HolderPID {
+			if pin.matches(record) {
 				return nil
 			}
 		}
-		return surface.DeliveryTerminal(fmt.Errorf("Claude process %d no longer holds conversation %s", sess.HolderPID, sess.ID), surface.DeliveryTargetMissing)
+		return pin.missing(sess.ID)
 	}
 	if len(holders) > 1 {
 		return refuseSharedConversation(sess.ID, holders)
@@ -97,6 +129,14 @@ func (c *Claude) ensureOneHolder(sess *surface.Session) error {
 
 func refuseSharedConversation(conversation string, holders []map[string]any) error {
 	return surface.DeliveryRefused(surface.SharedConversationError{SessionID: conversation, Holders: sessionHolders(holders)})
+}
+
+// refuseSharedAdoption refuses to open a conversation several processes hold
+// in the Claude host, pinned or not: the processes left open would still
+// hold it, so only closing them makes the host its one holder.
+func refuseSharedAdoption(conversation string, holders []map[string]any) error {
+	shared := surface.SharedConversationError{SessionID: conversation, Holders: sessionHolders(holders)}
+	return surface.DeliveryRefused(fmt.Errorf("%w; the Claude host can take it over only once a single terminal holds it, so close the others first", shared.Unpinnable()))
 }
 
 // shareConversation makes one session of the processes that hold a
@@ -130,7 +170,7 @@ func applyHoldersStatus(sess *surface.Session) {
 func (p claudeProcess) pinned(pid int) (claudeProcess, bool) {
 	for _, holder := range p.holders {
 		if holder.session.PID == pid {
-			holder.session.HolderPID = pid
+			holder.session.HolderPID, holder.session.HolderStart = pid, recordStart(holder.record)
 			return holder, true
 		}
 	}

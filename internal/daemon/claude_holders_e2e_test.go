@@ -133,6 +133,10 @@ func TestConversationResumedInASecondTerminalIsNeverSentToOneOfThemSilently(t *t
 		t.Fatalf("a refused send reached a process: first=%q later=%q", first.Received(), later.Received())
 	}
 
+	status, payload = h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "send", "sessionId": conversation, "author": "person", "message": "picked before the pid was reused", "pid": later.PID, "pidStartedAt": 1})
+	if status != http.StatusConflict {
+		t.Fatalf("send pinned to an earlier process under pid %d: status=%d body=%s, want a refusal", later.PID, status, payload)
+	}
 	h.receipt(map[string]any{"action": "send", "sessionId": conversation, "author": "person", "message": "to the later terminal", "pid": later.PID})
 	eventually(t, "the pinned send to reach the later process", func() bool { return len(later.Received()) == 1 })
 	if len(first.Received()) != 0 {

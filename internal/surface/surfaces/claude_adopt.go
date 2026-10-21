@@ -53,7 +53,7 @@ func (c *Claude) AdoptSession(ctx context.Context, sess *surface.Session, reques
 		return nil, surface.DeliveryUnavailable(err)
 	}
 	if holders := holderRecords(records, conversation); len(holders) > 1 {
-		return nil, refuseSharedConversation(conversation, holders)
+		return nil, refuseSharedAdoption(conversation, holders)
 	}
 	holder, err := c.adoptHolder(ctx, conversation, root)
 	if err != nil {

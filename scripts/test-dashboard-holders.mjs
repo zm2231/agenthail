@@ -43,7 +43,7 @@ const shared = {
   surface: "claude",
   holders: [
     { pid: 5799, tty: "ttys001", status: "idle" },
-    { pid: 31497, tty: "ttys021", status: "busy" },
+    { pid: 31497, tty: "ttys021", status: "busy", startedAt: "2026-10-21T01:02:03.456Z" },
   ],
 };
 
@@ -67,6 +67,7 @@ context.renderHolderPicker();
 assert.equal(select.value, "31497", "a refresh keeps the picked terminal");
 await context.runAction("steer", { message: "picked" }, "k", "shared");
 assert.equal(calls.at(-1).body.pid, 31497, "a write carries the picked terminal");
+assert.equal(calls.at(-1).body.pidStartedAt, Date.parse("2026-10-21T01:02:03.456Z"), "a write carries the picked terminal's start, so a reused pid is refused");
 await context.runAction("queue-cancel", { queueId: 4 }, "k", "shared");
 assert.equal(calls.at(-1).body.pid, undefined, "an action that is not a write to the session carries no pin");
 
