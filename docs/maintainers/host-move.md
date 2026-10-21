@@ -1,0 +1,128 @@
+# Moving a session to another host
+
+`agenthail move <session> --to <host>` hands an idle Claude conversation to a
+paired host. The conversation keeps its id and its history. After the move,
+the other host's Claude writes to it, and this host has no process, transcript
+or alias for it. The row stays listed here as the other host's session, so
+every read, send and action on it routes there, like any
+[paired host's](hosts.md) session.
+
+Only the source daemon drives a move. The target answers four requests, all
+of them idempotent by move id. Both sides keep the move in `session_moves`.
+
+## Protocol
+
+1. **Hold.** The source refuses a session that another host owns, that
+   another move holds, that has a delivery in flight, an active relay, a
+   channel or the coordinator role. The Claude adapter then takes the
+   conversation lock and stops the process that holds it the way
+   [adopt](session-operations.md) does: it closes a host session only once
+   idle, stops a background job, and stops a terminal process only with
+   `--stop-terminal`. The lock is held until the move ends, so nothing here
+   resumes the conversation in the meantime.
+2. **Declare.** The source reads where the conversation's working directory
+   sits in its repository: the remote's canonical key, the folder inside the
+   repository, and a commit that some remote branch contains. Only a clean
+   tree can move. It also records the transcript's size and SHA-256, the
+   alias, the title, and the model and permission mode the conversation last
+   ran with in this machine's Claude host. The move is recorded `preparing`.
+3. **Prepare** (`POST /api/v1/session-move/prepare`). The target finds its own
+   checkout of the repository through its added projects and the projects of
+   its sessions. When the checkout lacks the commit, it fetches. It refuses
+   the move if it has no checkout or more than one, if the commit is missing
+   after the fetch, if the working directory's project folder name would be
+   longer than Claude writes verbatim (200 characters), or if it already
+   holds a transcript of the conversation that the incoming one does not
+   extend. Otherwise it records the move `prepared` and keeps the
+   declaration. The files that arrive later are held to that declaration.
+   They cannot redefine it.
+4. **Archive.** The source records the move `sent` and moves the
+   conversation's files out of `projects/` and `tasks/` into
+   `<root>/agenthail-moved/<id>/`: `<id>.jsonl`, the `<id>/` folder of
+   subagent transcripts and tool results, and `tasks/<id>/`. Claude and
+   Agenthail read conversations only from `projects/` and `tasks/`, so
+   nothing finds the conversation there. Nothing in Agenthail reads that
+   folder either. Once reads route to the target, it is only a copy to
+   recover from by hand.
+5. **Transfer** (`POST /api/v1/session-move/transfer`). The source streams the
+   archive as a tar over the pairing. The body is never held in memory on
+   either side, and a transfer sent again resends everything. The target
+   records the move `received` and makes the working directory, which is the
+   main checkout when it sits clean at the commit, and otherwise a worktree
+   at `<checkout>/.worktrees/move-<id>`. It then reads the tar as untrusted
+   input:
+   - It accepts only regular files and folders.
+   - It refuses absolute paths, `..`, symlinks, hard links, and any name
+     outside `<id>.jsonl`, `<id>/` and `tasks/<id>/`.
+   - It writes into `<root>/.agenthail-move-<move id>/` inside its primary
+     config root.
+   - It checks the transcript against the declared size and digest.
+
+   Only then does it rename the files into
+   `<root>/projects/<folder for the working directory>/` and `<root>/tasks/`.
+   It resumes the conversation in its Claude host with the declared model,
+   permission mode and title. Last, in one transaction, it registers the
+   session as local, takes over the row the source mirrored there, binds the
+   alias if it is free, and records the move `resumed`.
+6. **Flip.** The source, in one transaction:
+   - gives the row to the target, clearing its process, transcript and local
+     flags;
+   - drops the alias;
+   - turns each queued message into a send held for the target, under its
+     delivery key, and fails a queued operation the target cannot take as a
+     send;
+   - writes a mirrored row that says the session moved and is waiting for the
+     target to report it;
+   - records the move `done`.
+
+   Held sends then drain to the target, and the target's catalog replaces the
+   placeholder row.
+
+On the target, every request must come from a paired host's token, which has
+the `control` and `host` scopes. The token names the source; the request body
+does not. `GET /api/v1/session-move?id=` answers `none` for a move this host
+has no record of from that host.
+
+## Failure model
+
+The source resumes the conversation locally only once it can prove the
+target never will. It proves that by having the target record the move as
+`aborted`, after which any late or repeated request for it is refused. Until
+then the move stays `sent`. Nothing here delivers to the conversation, since
+local queue claims skip it, and nothing resumes it, since its files are
+archived. Each time the target reconnects, the source asks it where the move
+stands.
+
+| Where it stopped | What recovery reads | What it does |
+|---|---|---|
+| Before the move was recorded | nothing | Nothing. The process the hold stopped is gone, and the next send resumes the conversation here as usual. |
+| `preparing` (target refused, or the daemon stopped) | the source's own record | Marks the move `failed` when the daemon starts. No file had moved. A target that had recorded it `prepared` drops that record when the next move of the conversation from this host is prepared. |
+| `sent`, before the transfer | target: `prepared` | Archives again (each part that is already archived is skipped) and transfers. |
+| `sent`, transfer unanswered | target: `received` | Transfers again. A target that already runs the conversation only checks that what arrived begins what runs there. |
+| `sent`, target resumed it but the source stopped before the flip | target: `resumed` | Flips. |
+| `sent`, target refused the transfer before starting Claude | answer `409 move_refused` | Asks the target to abort. Once the target records `aborted`, puts the files back and marks the move `failed`. |
+| `sent`, target has no record | target: `none` | Same as a refusal. |
+| `sent`, target unreachable | nothing | Leaves the move unresolved. `agenthail move list --unfinished` shows it. |
+| `done` | the source's record | Nothing. |
+
+A target refuses to abort a move whose conversation already runs there
+(`move_running`), so a move whose resume outcome was unknown is finished, not
+undone.
+
+## Forge and other Linux hosts
+
+- The target places the conversation in its primary Claude config root, the
+  one the daemon's `CLAUDE_CONFIG_DIR` names (`/persist/claude` on forge), and
+  launches Claude without naming that root.
+- A proxied install (`ANTHROPIC_BASE_URL` and a token in the root's
+  `settings.json`, no login) needs nothing from the move. Every process on
+  that root goes through the proxy.
+- A host that cannot push to GitHub can still take a move as long as it can
+  fetch the commit. The source requires the commit to be on a remote branch.
+- A conversation moved to a host without Remote Control loses its claude.ai
+  listing, as every session in the Claude host does.
+
+## Not in this slice
+
+A working tree with uncommitted changes is refused. Moving one, Mac and
+iPhone controls, and Codex sessions come later.

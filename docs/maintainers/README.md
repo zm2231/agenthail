@@ -15,6 +15,7 @@ These notes cover Agenthail's implementation, packaging, release automation, and
 - [Subagents: identity, families, targets, and cost](subagents.md)
 - [Projects, scopes and archive](projects.md)
 - [Paired hosts: pairing, ownership, routing, and unreachable delivery](hosts.md)
+- [Moving a session to another host: protocol and failure model](host-move.md)
 - [Registry migrations: adding a table, column, index or data step](registry-migrations.md)
 - [Coordinator: one per project, its saved spec, @lead, and how a send always lands](coordinator.md)
 - [Dashboard design reference](../../design.md)
