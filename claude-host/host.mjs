@@ -402,8 +402,11 @@ async function open(params) {
       options: {
         cwd,
         // Claude reports its own idle, busy and requires_action states only
-        // when asked; the SDK otherwise reads them and drops them.
-        env: { ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.configDir ? { CLAUDE_CONFIG_DIR: params.configDir } : {}) },
+        // when asked; the SDK otherwise reads them and drops them. It offers
+        // its task tools (TaskCreate, TaskList and the rest) to an SDK
+        // session only when asked too, though a terminal session has them;
+        // the host's own environment can still turn them off.
+        env: { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.configDir ? { CLAUDE_CONFIG_DIR: params.configDir } : {}) },
         pathToClaudeCodeExecutable: args.claude,
         ...(params.resume ? { resume: id } : { sessionId: id }),
         ...(permissionMode ? { permissionMode } : {}),
