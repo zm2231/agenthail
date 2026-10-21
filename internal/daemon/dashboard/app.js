@@ -1278,6 +1278,11 @@ function renderTimelineMetadata(item) {
   if (item.bodyRef) fields.push(`<span>Body reference: <code>${escape(item.bodyRef)}</code></span>`);
   return fields.length ? `<div class="timeline-meta">${fields.join(" · ")}</div>` : "";
 }
+// isInstructions reports model input a provider injected, such as project
+// instructions or hook context, rather than conversation.
+function isInstructions(item) {
+  return item.kind === "instructions" || (["message", "text"].includes(item.kind) && ["developer", "system"].includes(item.role));
+}
 function renderTimelineItem(item, session) {
   const kind = String(item.kind || "unknown");
   const kindClass = timelineKindClass(kind);
@@ -1285,6 +1290,10 @@ function renderTimelineItem(item, session) {
   const metadata = renderTimelineMetadata(item);
   if (kind === "attachment") {
     return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderImageAttachment(item, session)}${metadata}</section>`;
+  }
+  if (isInstructions(item)) {
+    const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';
+    return `<details class="timeline-item timeline-instructions timeline-collapsible" ${attributes}><summary>Instructions</summary>${metadata}<div class="turn-content">${body}</div></details>`;
   }
   if (kind === "message" && item.role === "peer") {
     return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(item.text, "peer", `From ${item.sender || "another agent"}`, `${session.id}:${item.id}`)}${metadata}</section>`;
