@@ -55,7 +55,13 @@ func TestRelayReportFiltersMatchOnlyAReportThatEndsTheReply(t *testing.T) {
 					t.Errorf("matchPattern(%s) = %v, want %v", filter.pattern, got, filter.want)
 				}
 			}
-			if jq, err := exec.LookPath("jq"); err == nil {
+			jq, err := exec.LookPath("jq")
+			if err != nil && os.Getenv("CI") != "" {
+				t.Fatalf("jq is not on PATH, so the skill's jq reader goes unchecked: %v", err)
+			}
+			if err != nil {
+				t.Logf("jq is not on PATH; the skill's jq reader is not run")
+			} else {
 				input, _ := json.Marshal(map[string]any{"exchanges": []map[string]string{{"assistant": c.text}}})
 				command := exec.Command(jq, "-e", reportJQFilter)
 				command.Stdin = strings.NewReader(string(input))
@@ -63,7 +69,7 @@ func TestRelayReportFiltersMatchOnlyAReportThatEndsTheReply(t *testing.T) {
 					t.Errorf("the skill's jq reader finds a report = %v, but the relay filter matches = %v", found, c.any)
 				}
 			}
-			_, err := report.Parse(c.text)
+			_, err = report.Parse(c.text)
 			if c.any && errors.Is(err, report.ErrAbsent) {
 				t.Errorf("the relay filter matches a reply where report.Parse finds no report")
 			}
