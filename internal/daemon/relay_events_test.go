@@ -119,7 +119,7 @@ func TestDurableRelayClaudeBurstFailureRestartAndOutbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
+	t.Cleanup(func() { reopened.Close() })
 	restarted := newTestDaemon(t, reopened, []surface.Surface{target})
 	restarted.syncRelays(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source)
 	restarted.syncRelays(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source)

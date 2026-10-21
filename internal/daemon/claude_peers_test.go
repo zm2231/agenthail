@@ -16,7 +16,7 @@ func TestRecentPeerRegistrationReadsFreshCatalogRowsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reg.Close()
+	t.Cleanup(func() { reg.Close() })
 	codex := &daemonSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}}
 	notion := &daemonSurface{kind: surface.KindNotion, sessions: map[string]surface.Session{}}
 	claude := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}}
@@ -77,7 +77,7 @@ func TestPeerRegistrationFollowsDiscoveryWithoutWaitingForTheTicker(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reg.Close()
+	t.Cleanup(func() { reg.Close() })
 	d := newTestDaemon(t, reg, []surface.Surface{&daemonSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}}})
 	ctx, cancel := context.WithCancel(context.Background())
 	ensured := make(chan string, 8)

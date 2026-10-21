@@ -60,7 +60,7 @@ func TestNativeVoiceHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reg.Close()
+	t.Cleanup(func() { reg.Close() })
 	codex := surfaces.NewCodex(os.Getenv("AGENTHAIL_CODEX_REMOTE"))
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	sessions, err := codex.List(ctx)
