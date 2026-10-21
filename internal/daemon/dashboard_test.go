@@ -891,6 +891,42 @@ func TestDashboardShutdownCancelsActiveStreams(t *testing.T) {
 	}
 }
 
+func TestDashboardShutdownWaitsForARequestInFlight(t *testing.T) {
+	serverCtx, cancel := context.WithCancel(context.Background())
+	started, release := make(chan struct{}), make(chan struct{})
+	var finished atomic.Bool
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dashboard := &dashboardServer{cancel: cancel}
+	dashboard.server = &http.Server{
+		BaseContext: func(net.Listener) context.Context { return serverCtx },
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(started)
+			<-release
+			finished.Store(true)
+		}),
+	}
+	go dashboard.server.Serve(listener)
+	go func() {
+		if response, requestErr := http.Get("http://" + listener.Addr().String()); requestErr == nil {
+			response.Body.Close()
+		}
+	}()
+	<-started
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		close(release)
+	}()
+	if err := dashboard.shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	if !finished.Load() {
+		t.Fatal("shutdown returned while a request could still write to the registry")
+	}
+}
+
 func TestEffectiveCapabilitiesMakeUnloadedCodexReadOnly(t *testing.T) {
 	effective := surface.EffectiveCapabilities(&daemonSurface{kind: surface.KindCodex, caps: surface.Capabilities{Send: true, Model: true}}, &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.SessionStatus("notLoaded")})
 	if !effective.ReadOnly || effective.ReadOnlyReason == "" || effective.Send || effective.Model {
