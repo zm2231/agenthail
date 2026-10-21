@@ -13,6 +13,6 @@ import (
 // registered earlier close the registry they write to.
 func newTestDaemon(t testing.TB, r *registry.Registry, surfaces []surface.Surface) *Daemon {
 	d := New(r, surfaces)
-	t.Cleanup(d.queueWorkers.Wait)
+	t.Cleanup(d.background.stop)
 	return d
 }

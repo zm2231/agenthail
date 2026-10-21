@@ -148,7 +148,7 @@ func TestQueuedGoalSettlesByWhatTheSessionAnswered(t *testing.T) {
 			daemon.scanAndRelay(context.Background())
 			// The goal runs on a queue worker; an item is pending before it
 			// runs too, so the outcome is read once the worker has settled it.
-			daemon.queueWorkers.Wait()
+			daemon.background.wait()
 			item, err := r.QueueItem(id, nil)
 			if err != nil || item.Status != test.status || !strings.Contains(item.LastError, test.reason) || len(adapter.commands()) != 1 {
 				t.Fatalf("item=%+v ran=%v err=%v", item, adapter.commands(), err)
