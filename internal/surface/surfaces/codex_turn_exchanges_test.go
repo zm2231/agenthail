@@ -84,6 +84,12 @@ func TestCodexUserMessageWithATypedBlockStaysAPrompt(t *testing.T) {
 	if _, ok := codexInstructions(quoted); ok {
 		t.Fatal("a typed question naming a marker read as instructions")
 	}
+	request := map[string]any{"role": "user", "content": []any{
+		map[string]any{"type": "input_text", "text": "# AGENTS.md instructions for /project\n\n## My request:\nFix the app."},
+	}}
+	if _, ok := codexInstructions(request); ok {
+		t.Fatal("instructions carrying the request read as instructions")
+	}
 	items := codexTimelineItems(map[string]any{"type": "response_item", "payload": map[string]any{"type": "message", "role": "user", "content": mixed["content"]}})
 	if len(items) != 1 || items[0].Kind != "message" || items[0].Role != "user" || !strings.Contains(items[0].Text, "Fix the build.") {
 		t.Fatalf("mixed message items=%+v", items)
