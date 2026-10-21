@@ -549,7 +549,7 @@ func TestQueueAllowsUnloadedCodexDesktopSession(t *testing.T) {
 func TestQueueRetryReturnsAnUnconfirmedHostSendToItsReplay(t *testing.T) {
 	app, r := cliFixture(t, &cliSurface{kind: surface.KindCodex})
 	hostID := "h0123456789ab"
-	if _, err := r.AddHost(registry.PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+	if _, err := r.AddHost(registry.PairedHost{ID: hostID, Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-thread"
@@ -560,7 +560,7 @@ func TestQueueRetryReturnsAnUnconfirmedHostSendToItsReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.DeadLetterUnknown(id, errors.New("host forge has not confirmed the message")); err != nil {
+	if err := r.DeadLetterUnknown(id, errors.New("host vps has not confirmed the message")); err != nil {
 		t.Fatal(err)
 	}
 	if err := app.Run([]string{"queue", "retry", strconv.FormatInt(id, 10)}); err != nil {
@@ -1328,7 +1328,7 @@ func TestListShowsAPairedHostSessionWaitingOnItsUser(t *testing.T) {
 	app, r := cliFixture(t, &cliSurface{kind: surface.KindCodex})
 	app.catalogDaemonRunning = func() bool { return true }
 	hostID := "h0123456789ab"
-	if _, err := r.AddHost(registry.PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+	if _, err := r.AddHost(registry.PairedHost{ID: hostID, Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-asking"
@@ -1379,7 +1379,7 @@ func TestQueueStatusLabelShowsEvidenceBesideADifferentStatus(t *testing.T) {
 func TestQueueListShowsASendAPairedHostQueuedAsDelivered(t *testing.T) {
 	app, r := cliFixture(t, &cliSurface{kind: surface.KindCodex})
 	hostID := "h0123456789ab"
-	if _, err := r.AddHost(registry.PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+	if _, err := r.AddHost(registry.PairedHost{ID: hostID, Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-busy", Name: "remote-busy", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}, EntityID: hostID + "::remote-busy", Projection: json.RawMessage(`{"id":"` + hostID + `::remote-busy","status":"busy"}`), ObservedAt: time.Now()}); err != nil {
@@ -1454,7 +1454,7 @@ func TestSendToASessionWithNoReplyRouteIsRefusedWithItsReason(t *testing.T) {
 	if err := store.EnsureOperatorSession(); err != nil {
 		t.Fatal(err)
 	}
-	unrepliable, err := store.EnsureUnrepliableSender("h0123456789ab", "worker-1", "forge/builder")
+	unrepliable, err := store.EnsureUnrepliableSender("h0123456789ab", "worker-1", "vps/builder")
 	if err != nil {
 		t.Fatal(err)
 	}

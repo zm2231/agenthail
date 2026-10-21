@@ -400,15 +400,15 @@ func TestAFolderOutsideEveryProjectHasNoLead(t *testing.T) {
 
 func TestCoordinatorSetOfAPairedHostsSessionAsksThatHost(t *testing.T) {
 	app, _, _, api := federatedCLIFixture(t, true)
-	api.responses = map[string]string{"coordinator-set": `{"ok":true,"coordinator":{"projectId":"repo:github.com/example/widget","projectRoot":"/home/remote/src","name":"builder-lead","surface":"codex","sessionId":"remote-1"},"replaced":[{"projectId":"repo:github.com/example/widget","name":"old-lead","hostId":"` + forgeHostID + `"}]}`}
+	api.responses = map[string]string{"coordinator-set": `{"ok":true,"coordinator":{"projectId":"repo:github.com/example/widget","projectRoot":"/home/remote/src","name":"builder-lead","surface":"codex","sessionId":"remote-1"},"replaced":[{"projectId":"repo:github.com/example/widget","name":"old-lead","hostId":"` + vpsHostID + `"}]}`}
 	output, err := captureStdout(t, func() error {
-		return app.Run([]string{"coordinator", "set", "forge::@builder", "--name", "builder-lead", "--replace"})
+		return app.Run([]string{"coordinator", "set", "vps::@builder", "--name", "builder-lead", "--replace"})
 	})
-	if err != nil || !strings.Contains(output, "replaced forge::@old-lead") || !strings.Contains(output, "@builder-lead coordinates /home/remote/src") {
+	if err != nil || !strings.Contains(output, "replaced vps::@old-lead") || !strings.Contains(output, "@builder-lead coordinates /home/remote/src") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
 	actions, _ := api.recorded()
-	if len(actions) != 1 || actions[0]["action"] != "coordinator-set" || actions[0]["sessionId"] != forgeBuilder.ID || actions[0]["name"] != "builder-lead" || actions[0]["replace"] != true {
+	if len(actions) != 1 || actions[0]["action"] != "coordinator-set" || actions[0]["sessionId"] != vpsBuilder.ID || actions[0]["name"] != "builder-lead" || actions[0]["replace"] != true {
 		t.Fatalf("actions=%v", actions)
 	}
 }
@@ -425,18 +425,18 @@ func TestLeadOnAPairedHostIsReachedThroughThatHost(t *testing.T) {
 	for _, key := range []string{"AGENTHAIL_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"} {
 		t.Setenv(key, "")
 	}
-	if err := reg.ReplaceHostCoordinators(forgeHostID, []registry.CoordinatorEntry{{ProjectID: "repo:github.com/example/widget", ProjectRoot: "/home/remote/widget", Name: "widget-lead", Surface: "codex"}}); err != nil {
+	if err := reg.ReplaceHostCoordinators(vpsHostID, []registry.CoordinatorEntry{{ProjectID: "repo:github.com/example/widget", ProjectRoot: "/home/remote/widget", Name: "widget-lead", Surface: "codex"}}); err != nil {
 		t.Fatal(err)
 	}
 	api.responses = map[string]string{"coordinator-send": `{"ok":true,"started":true,"result":{"evidence":"delivered","status":"sent","detail":"Started coordinator @widget-lead."}}`}
 	for _, target := range []string{"@lead", "@widget-lead"} {
 		output, err := captureStdout(t, func() error { return app.Run([]string{"send", target, "status?"}) })
-		if err != nil || !strings.Contains(output, "Started coordinator @widget-lead") || !strings.Contains(output, "agenthail last forge::@widget-lead") {
+		if err != nil || !strings.Contains(output, "Started coordinator @widget-lead") || !strings.Contains(output, "agenthail last vps::@widget-lead") {
 			t.Fatalf("%s: output=%q err=%v", target, output, err)
 		}
 	}
 	actions, _ := api.recorded()
-	if len(actions) != 2 || actions[0]["action"] != "coordinator-send" || actions[0]["host"] != forgeHostID || actions[0]["name"] != "widget-lead" || actions[0]["message"] != "status?" {
+	if len(actions) != 2 || actions[0]["action"] != "coordinator-send" || actions[0]["host"] != vpsHostID || actions[0]["name"] != "widget-lead" || actions[0]["message"] != "status?" {
 		t.Fatalf("actions=%v", actions)
 	}
 	if len(fake.sent) != 0 {

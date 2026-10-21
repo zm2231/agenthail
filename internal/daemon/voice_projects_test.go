@@ -143,7 +143,7 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 	setLead(t, remote, "repo:github.com/example/gadget", gadget, "gadget-lead", "remote-a", registry.CoordinatorChange{})
 	remoteSprocket := widgetRepo(t, "https://github.com/example/sprocket.git")
 	moveSession(t, remote, "remote-b", remoteSprocket, now)
-	setLead(t, remote, "repo:github.com/example/sprocket", remoteSprocket, "forge-sprocket", "remote-b", registry.CoordinatorChange{})
+	setLead(t, remote, "repo:github.com/example/sprocket", remoteSprocket, "vps-sprocket", "remote-b", registry.CoordinatorChange{})
 	remote.daemon.discoverCatalog(context.Background())
 	awaitFederation(t, "the paired host's coordinators mirrored", func() bool {
 		mirrored, _ := local.reg.ProjectCoordinators("repo:github.com/example/sprocket")
@@ -152,7 +152,7 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 	})
 	sprocket := widgetRepo(t, "https://github.com/example/sprocket.git")
 	moveSession(t, local, "sprocket-a", sprocket, now)
-	setLead(t, local, "repo:github.com/example/sprocket", sprocket, "mac-sprocket", "sprocket-a", registry.CoordinatorChange{Replace: true, OverPeers: true})
+	setLead(t, local, "repo:github.com/example/sprocket", sprocket, "laptop-sprocket", "sprocket-a", registry.CoordinatorChange{Replace: true, OverPeers: true})
 	local.daemon.discoverCatalog(context.Background())
 	service, call := connectToolVoice(t, local)
 
@@ -169,7 +169,7 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 	if got := byName["widget"]; len(got) != 1 || got[0].ID != "repo:github.com/example/widget" || got[0].Conflict || len(got[0].Coordinators) != 1 || got[0].Coordinators[0] != (voice.Lead{Ref: "@widget-lead", Host: here, SessionID: "lead"}) {
 		t.Fatalf("widget=%+v", got)
 	}
-	if got := byName["gadget"]; len(got) != 1 || len(got[0].Coordinators) != 1 || got[0].Coordinators[0].Ref != "forge::@gadget-lead" || got[0].Coordinators[0].Host != "forge" {
+	if got := byName["gadget"]; len(got) != 1 || len(got[0].Coordinators) != 1 || got[0].Coordinators[0].Ref != "vps::@gadget-lead" || got[0].Coordinators[0].Host != "vps" {
 		t.Fatalf("gadget=%+v", got)
 	}
 	if got := byName["sprocket"]; len(got) != 1 || !got[0].Conflict || len(got[0].Coordinators) != 2 {
@@ -194,7 +194,7 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 		{"voice_send_to_lead", map[string]any{"project": "nothing", "message": "standup"}, `no project is named "nothing"`},
 		{"voice_transfer", map[string]any{"project": "sprocket"}, "sprocket has coordinators "},
 		{"voice_transfer", map[string]any{"project": "tool"}, `"tool" names several projects: `},
-		{"voice_transfer", map[string]any{"project": "gadget"}, "@gadget-lead runs on host forge"},
+		{"voice_transfer", map[string]any{"project": "gadget"}, "@gadget-lead runs on host vps"},
 		{"voice_transfer", map[string]any{"project": "fresh"}, "@fresh-lead has no conversation yet"},
 		{"voice_transfer", map[string]any{"project": "widget", "targetId": "lead"}, "give exactly one of targetId or project"},
 	} {
@@ -203,7 +203,7 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 			t.Fatalf("%s %v: %+v", refused.tool, refused.arguments, got)
 		}
 	}
-	if conflict := call.call(t, "voice_send_to_lead", map[string]any{"project": "sprocket", "message": "standup"}); !strings.Contains(conflict.text, "@mac-sprocket") || !strings.Contains(conflict.text, "forge::@forge-sprocket") {
+	if conflict := call.call(t, "voice_send_to_lead", map[string]any{"project": "sprocket", "message": "standup"}); !strings.Contains(conflict.text, "@laptop-sprocket") || !strings.Contains(conflict.text, "vps::@vps-sprocket") {
 		t.Fatalf("the conflict did not name both coordinators: %+v", conflict)
 	}
 	if service.View("phone").Target != nil || len(local.fake.delivered()) != localSent || len(remote.fake.delivered()) != remoteSent || len(local.fake.startOptions) != started {
@@ -234,7 +234,7 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 	}
 
 	peer := call.call(t, "voice_send_to_lead", map[string]any{"project": "#gadget", "message": "ship the gadget"})
-	if !peer.success || json.Unmarshal([]byte(peer.text), &receipt) != nil || receipt.Ref != "forge::@gadget-lead" || receipt.Receipt == nil {
+	if !peer.success || json.Unmarshal([]byte(peer.text), &receipt) != nil || receipt.Ref != "vps::@gadget-lead" || receipt.Receipt == nil {
 		t.Fatalf("send to the paired host's lead: %+v", peer)
 	}
 	awaitFederation(t, "the paired host's lead received the message", func() bool {
@@ -261,7 +261,7 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 		t.Fatal(err)
 	}
 	release()
-	if answer := call.await(t, "voice_send_to_lead", held); !answer.success || !strings.Contains(answer.text, "forge::@gadget-lead") {
+	if answer := call.await(t, "voice_send_to_lead", held); !answer.success || !strings.Contains(answer.text, "vps::@gadget-lead") {
 		t.Fatalf("the held send: %+v", answer)
 	}
 }

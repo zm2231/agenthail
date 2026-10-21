@@ -86,34 +86,34 @@ func TestHandOverLeavesNoSelfOrDuplicateRelayRoute(t *testing.T) {
 func TestSetCoordinatorRefusesATakeoverUnlessReplacedAndKeepsHistory(t *testing.T) {
 	r := coordinatorRegistry(t, "first", "second")
 	spec := CoordinatorSpec{ProjectID: "repo:github.com/example/widget", ProjectRoot: "/work/widget", Name: "widget-lead", Surface: "claude", Cwd: "/work/widget"}
-	set, err := r.SetCoordinator(spec, CoordinatorChange{SessionID: "first", ChangedBy: "mac::first"})
-	if err != nil || set.SessionID != "first" || set.ChangedBy != "mac::first" {
+	set, err := r.SetCoordinator(spec, CoordinatorChange{SessionID: "first", ChangedBy: "laptop::first"})
+	if err != nil || set.SessionID != "first" || set.ChangedBy != "laptop::first" {
 		t.Fatalf("set=%+v err=%v", set, err)
 	}
 	var exists CoordinatorExistsError
-	if _, err := r.SetCoordinator(spec, CoordinatorChange{SessionID: "second", ChangedBy: "mac::second"}); !errors.As(err, &exists) || len(exists.Existing) != 1 || exists.Existing[0].Name != "widget-lead" {
+	if _, err := r.SetCoordinator(spec, CoordinatorChange{SessionID: "second", ChangedBy: "laptop::second"}); !errors.As(err, &exists) || len(exists.Existing) != 1 || exists.Existing[0].Name != "widget-lead" {
 		t.Fatalf("takeover err=%v", err)
 	}
 	if current, _ := r.Coordinator(spec.ProjectID); current.SessionID != "first" {
 		t.Fatalf("a refused takeover moved the coordinator: %+v", current)
 	}
-	replaced, err := r.SetCoordinator(spec, CoordinatorChange{SessionID: "second", Replace: true, ChangedBy: "mac::second"})
+	replaced, err := r.SetCoordinator(spec, CoordinatorChange{SessionID: "second", Replace: true, ChangedBy: "laptop::second"})
 	if err != nil || replaced.SessionID != "second" {
 		t.Fatalf("replace=%+v err=%v", replaced, err)
 	}
-	if _, err := r.ClearCoordinator(spec.ProjectID, "mac::second", set.ChangedAt.Add(-time.Second)); !errors.Is(err, ErrCoordinatorChanged) {
+	if _, err := r.ClearCoordinator(spec.ProjectID, "laptop::second", set.ChangedAt.Add(-time.Second)); !errors.Is(err, ErrCoordinatorChanged) {
 		t.Fatalf("stale clear err=%v", err)
 	}
-	if _, err := r.ClearCoordinator(spec.ProjectID, "mac::second", replaced.ChangedAt); err != nil {
+	if _, err := r.ClearCoordinator(spec.ProjectID, "laptop::second", replaced.ChangedAt); err != nil {
 		t.Fatal(err)
 	}
 	history, err := r.CoordinatorHistory(spec.ProjectID)
 	if err != nil || len(history) != 3 {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}
-	if history[0].Action != "set" || history[0].SessionID != "first" || history[0].ChangedBy != "mac::first" ||
+	if history[0].Action != "set" || history[0].SessionID != "first" || history[0].ChangedBy != "laptop::first" ||
 		history[1].Action != "replaced" || history[1].SessionID != "second" || history[1].PreviousSessionID != "first" ||
-		history[2].Action != "cleared" || history[2].PreviousSessionID != "second" || history[2].ChangedBy != "mac::second" {
+		history[2].Action != "cleared" || history[2].PreviousSessionID != "second" || history[2].ChangedBy != "laptop::second" {
 		t.Fatalf("history=%+v", history)
 	}
 	events, err := r.CatalogEventsAfter(0, 100)
@@ -134,14 +134,14 @@ func TestSetCoordinatorRefusesATakeoverUnlessReplacedAndKeepsHistory(t *testing.
 func TestAPairedHostsCoordinatorHoldsItsProjectAndNameUntilTheHostIsRemoved(t *testing.T) {
 	r := coordinatorRegistry(t, "local")
 	hostID := "h0123456789ab"
-	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
-	remote := CoordinatorEntry{ProjectID: "repo:github.com/example/widget", ProjectRoot: "/home/forge/widget", Name: "widget-lead", Surface: "codex", SessionID: "thread-1", ChangedBy: hostID + "::thread-1", ChangedAt: time.UnixMilli(1_700_000_000_000)}
+	remote := CoordinatorEntry{ProjectID: "repo:github.com/example/widget", ProjectRoot: "/home/dev/widget", Name: "widget-lead", Surface: "codex", SessionID: "thread-1", ChangedBy: hostID + "::thread-1", ChangedAt: time.UnixMilli(1_700_000_000_000)}
 	if err := r.ReplaceHostCoordinators(hostID, []CoordinatorEntry{remote}); err != nil {
 		t.Fatal(err)
 	}
-	spec := CoordinatorSpec{ProjectID: remote.ProjectID, ProjectRoot: "/work/widget", Name: "mac-lead", Surface: "claude", Cwd: "/work/widget"}
+	spec := CoordinatorSpec{ProjectID: remote.ProjectID, ProjectRoot: "/work/widget", Name: "laptop-lead", Surface: "claude", Cwd: "/work/widget"}
 	var exists CoordinatorExistsError
 	for _, replace := range []bool{false, true} {
 		if _, err := r.SetCoordinator(spec, CoordinatorChange{SessionID: "local", Replace: replace}); !errors.As(err, &exists) || exists.Existing[0].HostID != hostID {

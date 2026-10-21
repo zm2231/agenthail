@@ -535,7 +535,7 @@ func TestRetriedFailedDeliveryIsANewAttempt(t *testing.T) {
 
 func TestNoNoticeIsQueuedForAnUnrepliableSender(t *testing.T) {
 	r := openTestRegistry(t)
-	sender, err := r.EnsureUnrepliableSender("h0123456789ab", "worker-1", "forge/builder")
+	sender, err := r.EnsureUnrepliableSender("h0123456789ab", "worker-1", "vps/builder")
 	if err != nil {
 		t.Fatal(err)
 	}

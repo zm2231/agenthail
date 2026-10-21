@@ -911,7 +911,7 @@ func TestPeerMessageForAHostsSessionIsHeldForThatHostWithItsSender(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reg.AddHost(registry.PairedHost{ID: "h0123456789ab", Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
+	if _, err := reg.AddHost(registry.PairedHost{ID: "h0123456789ab", Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
 		t.Fatal(err)
 	}
 	remote := surface.Session{ID: "remote-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "builder", Status: surface.StatusIdle}
@@ -942,14 +942,14 @@ func TestPeerMessageForAHostsSessionIsHeldForThatHostWithItsSender(t *testing.T)
 	if err := os.WriteFile(filepath.Join(surface.ClaudeConfigDir(home), "sessions", strconv.Itoa(stand.Process.Pid)+".json"), record, 0600); err != nil {
 		t.Fatal(err)
 	}
-	worker, stop := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: remote, SocketDir: socketDir, HostName: "forge"})
+	worker, stop := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: remote, SocketDir: socketDir, HostName: "vps"})
 	defer stop()
 	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(home), "sessions", strconv.Itoa(worker.PID)+".json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var peer sessionRecord
-	if err := json.Unmarshal(data, &peer); err != nil || peer.Name != "agenthail/codex: forge/builder" {
+	if err := json.Unmarshal(data, &peer); err != nil || peer.Name != "agenthail/codex: vps/builder" {
 		t.Fatalf("peer name=%q err=%v", peer.Name, err)
 	}
 	sendFrames(t, worker.SocketPath,
@@ -1045,7 +1045,7 @@ func TestPeerMessageToASessionWithNoReplyRouteIsRefusedWithItsReason(t *testing.
 	if err := reg.EnsureOperatorSession(); err != nil {
 		t.Fatal(err)
 	}
-	unrepliable, err := reg.EnsureUnrepliableSender("h0123456789ab", "worker-1", "forge/builder")
+	unrepliable, err := reg.EnsureUnrepliableSender("h0123456789ab", "worker-1", "vps/builder")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1054,7 +1054,7 @@ func TestPeerMessageToASessionWithNoReplyRouteIsRefusedWithItsReason(t *testing.
 		reason []string
 	}{
 		{target: registry.OperatorSessionID, reason: []string{"not delivered", "Agenthail operator", "no session reads it"}},
-		{target: unrepliable, reason: []string{"not delivered", "forge/builder", "agenthail send h0123456789ab::worker-1"}},
+		{target: unrepliable, reason: []string{"not delivered", "vps/builder", "agenthail send h0123456789ab::worker-1"}},
 	} {
 		t.Run(test.target, func(t *testing.T) {
 			session, err := reg.Session(test.target)

@@ -388,7 +388,7 @@ final class AgenthailIOSTests: XCTestCase {
         model.handlePairingURL(URL(string: "agenthail://pair?endpoint=https%3A%2F%2Fnew.tailnet.ts.net%3A7412&secret=12345678901234567890")!)
         XCTAssertTrue(model.isPaired)
         XCTAssertTrue(model.showPairingConfirmation)
-        XCTAssertEqual(model.pairingConfirmationTitle, "Replace connected Mac?")
+        XCTAssertEqual(model.pairingConfirmationTitle, "Replace connected computer?")
         XCTAssertTrue(model.pairingConfirmationMessage.contains("new.tailnet.ts.net"))
         KeychainStore.removeAll()
     }
