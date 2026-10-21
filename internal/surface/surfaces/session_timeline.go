@@ -765,10 +765,28 @@ func codexDoneItem(status string, payload map[string]any) surface.TimelineItem {
 		item.Title = "Turn interrupted"
 	case "failed":
 		item.Title = "Turn failed"
-		failure, _ := payload["error"].(map[string]any)
-		item.Text = str(failure, "message")
+		item.Text, _ = codexTurnError(payload)
 	}
 	return item
+}
+
+// codexTurnError reads the error a failed turn's end record carries. Codex
+// writes an object with a message and a codex_error_info kind; any other
+// value still failed the turn, so it gets a generic message.
+func codexTurnError(payload map[string]any) (message, info string) {
+	switch failure := payload["error"].(type) {
+	case map[string]any:
+		message, info = str(failure, "message"), str(failure, "codex_error_info")
+	case string:
+		message = failure
+	}
+	if strings.TrimSpace(message) == "" {
+		message = "Codex ended the turn with an error and no message."
+	}
+	if info == "" {
+		info = "error"
+	}
+	return message, info
 }
 
 func codexInterruptionNotice(payload map[string]any) (surface.TimelineItem, bool) {
@@ -1127,11 +1145,8 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 			if status != "failed" {
 				return []surface.TimelineItem{done}
 			}
-			failure, _ := payload["error"].(map[string]any)
-			notice := surface.TimelineItem{Kind: "notice", Title: "Codex error", Text: done.Text, Status: str(failure, "codex_error_info")}
-			if notice.Status == "" {
-				notice.Status = "error"
-			}
+			_, info := codexTurnError(payload)
+			notice := surface.TimelineItem{Kind: "notice", Title: "Codex error", Text: done.Text, Status: info}
 			return []surface.TimelineItem{notice, done}
 		}
 	}

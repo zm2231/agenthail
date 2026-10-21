@@ -75,3 +75,12 @@ func TestCodexStreamEndsARefusedTurnAsAFailureWithItsReason(t *testing.T) {
 		t.Fatalf("answered turn done=%+v", done[1])
 	}
 }
+
+func TestCodexFailedTurnWithoutAnErrorObjectStillSaysWhy(t *testing.T) {
+	for _, failure := range []any{"upstream closed", map[string]any{}, true} {
+		items := codexTimelineItems(map[string]any{"type": "event_msg", "payload": map[string]any{"type": "task_complete", "turn_id": "turn-1", "error": failure}})
+		if len(items) != 2 || items[0].Kind != "notice" || strings.TrimSpace(items[0].Text) == "" || items[0].Status == "" || items[1].Status != "failed" {
+			t.Fatalf("error %#v gave %+v", failure, items)
+		}
+	}
+}
