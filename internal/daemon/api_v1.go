@@ -531,7 +531,7 @@ func pairingEndpoint(r *http.Request) (string, error) {
 	}
 	status := RemoteAccessStatusForConfig(config)
 	if !status.Enabled || status.URL == "" {
-		message := "Turn on Phone access in Settings > Devices before pairing an iPhone."
+		message := "Turn on remote access before pairing: run agenthail dashboard remote, or turn on Phone access in the Mac app's Settings > Devices."
 		if status.Error != "" {
 			message += " " + status.Error
 		}
