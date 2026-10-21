@@ -223,6 +223,25 @@ test('a session opened in a Claude config root runs its Claude there', async () 
   c.close();
 });
 
+test('every session the host opens has the task tools unless the host turns them off', async () => {
+  const on = fixture();
+  await startHost(on, { env: { CLAUDE_CODE_ENABLE_TODO_TOOLS: undefined } });
+  const c = new Client(on.socket);
+  await c.call('open', { sessionId: randomUUID(), cwd: on.cwd });
+  await c.call('open', { resume: randomUUID(), cwd: on.cwd });
+  const spawned = fs.readFileSync(path.join(on.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(spawned.map((s) => s.todoTools), ['1', '1']);
+  c.close();
+
+  const off = fixture();
+  await startHost(off, { env: { CLAUDE_CODE_ENABLE_TODO_TOOLS: '0' } });
+  const d = new Client(off.socket);
+  await d.call('open', { sessionId: randomUUID(), cwd: off.cwd });
+  const [kept] = fs.readFileSync(path.join(off.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(kept.todoTools, '0');
+  d.close();
+});
+
 test('logs returns what an open session wrote to stderr', async () => {
   const f = fixture();
   await startHost(f);
