@@ -437,11 +437,12 @@ has none, because earlier ones are often questions without a report. Neither
 prints the reply text.
 
 An Agenthail without `--report` can find the same report with jq, which does
-not check the rules; keep the two in step if either changes:
+not check the rules. It allows the same whitespace as the relay filters below;
+keep them in step if either changes:
 
 ```bash
 agenthail last @builder 1 --json \
-  | jq -e '.exchanges[-1].assistant | capture("(?:\\A|\n)`{3}agenthail-report\n(?<r>[^\n]+)\n`{3}\\s*\\z").r | fromjson'
+  | jq -e '.exchanges[-1].assistant | capture("(?:\\A|\n)`{3}agenthail-report\n[ \t\r]*(?<r>\\{[^\n]*\\})[ \t\r]*\n`{3}[ \t\r\n]*\\z").r | fromjson'
 ```
 
 To relay a completion only when it carries a report, filter the relay on the
@@ -464,7 +465,8 @@ match. The status filters find `"status"` anywhere on the report's line: an
 escaped `\"status\":\"done\"` inside a string value does not match, but a
 nested object with its own `"status"` key does. The filter does not check the
 other rules, so the receiver reads the report with
-`agenthail reply @builder --report` before acting on it. A filter on bare text,
+`agenthail reply @builder --report` before acting on it; `--report` is the exact
+parser, and the filters are only a screen. A filter on bare text,
 such as `'agenthail-report'` or `'"status":"done"'`, also fires on replies that
 only mention or quote a report.
 

@@ -216,7 +216,7 @@ agenthail relay add @builder @reviewer '(?:\A|\n)`{3}agenthail-report\n[ \t\r]*\
 agenthail relay add @builder @lead '(?:\A|\n)`{3}agenthail-report\n[ \t\r]*\{[^\n]*"status"[ \t\r]*:[ \t\r]*"(?:blocked|failed|partial)"[^\n]*\}[ \t\r]*\n`{3}[ \t\r\n]*\z'
 ```
 
-Each filter matches only a report that ends the reply, so a report quoted mid-reply, or shown inside a longer code block that closes after it, does not fire it. The filter checks where the report is and finds `"status"` anywhere on its line, including inside a nested value; it does not check the other rules. The receiver checks the report with `agenthail reply @builder --report` before acting on it.
+Each filter matches only a report that ends the reply, so a report quoted mid-reply, or shown inside a longer code block that closes after it, does not fire it. The filter checks where the report is and finds `"status"` anywhere on its line, including inside a nested value; it does not check the other rules. The receiver checks the report with `agenthail reply @builder --report`, the exact parser, before acting on it.
 
 ## Give each project a coordinator
 

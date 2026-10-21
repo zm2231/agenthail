@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +16,7 @@ const (
 	relayAnyReport       = "(?:\\A|\\n)`{3}agenthail-report\\n[ \\t\\r]*\\{[^\\n]*\\}[ \\t\\r]*\\n`{3}[ \\t\\r\\n]*\\z"
 	relayDoneReport      = "(?:\\A|\\n)`{3}agenthail-report\\n[ \\t\\r]*\\{[^\\n]*\"status\"[ \\t\\r]*:[ \\t\\r]*\"done\"[^\\n]*\\}[ \\t\\r]*\\n`{3}[ \\t\\r\\n]*\\z"
 	relayAttentionReport = "(?:\\A|\\n)`{3}agenthail-report\\n[ \\t\\r]*\\{[^\\n]*\"status\"[ \\t\\r]*:[ \\t\\r]*\"(?:blocked|failed|partial)\"[^\\n]*\\}[ \\t\\r]*\\n`{3}[ \\t\\r\\n]*\\z"
+	reportJQFilter       = ".exchanges[-1].assistant | capture(\"(?:\\\\A|\\n)`{3}agenthail-report\\n[ \\t\\r]*(?<r>\\\\{[^\\n]*\\\\})[ \\t\\r]*\\n`{3}[ \\t\\r\\n]*\\\\z\").r | fromjson"
 )
 
 func TestRelayReportFiltersMatchOnlyAReportThatEndsTheReply(t *testing.T) {
@@ -52,6 +55,14 @@ func TestRelayReportFiltersMatchOnlyAReportThatEndsTheReply(t *testing.T) {
 					t.Errorf("matchPattern(%s) = %v, want %v", filter.pattern, got, filter.want)
 				}
 			}
+			if jq, err := exec.LookPath("jq"); err == nil {
+				input, _ := json.Marshal(map[string]any{"exchanges": []map[string]string{{"assistant": c.text}}})
+				command := exec.Command(jq, "-e", reportJQFilter)
+				command.Stdin = strings.NewReader(string(input))
+				if found := command.Run() == nil; found != c.any {
+					t.Errorf("the skill's jq reader finds a report = %v, but the relay filter matches = %v", found, c.any)
+				}
+			}
 			_, err := report.Parse(c.text)
 			if c.any && errors.Is(err, report.ErrAbsent) {
 				t.Errorf("the relay filter matches a reply where report.Parse finds no report")
@@ -70,7 +81,7 @@ func TestRelayReportFiltersAreTheOnesTheDocsGive(t *testing.T) {
 		filters []string
 	}{
 		{"README.md", []string{relayDoneReport, relayAttentionReport}},
-		{filepath.Join("skills", "agenthail-operations", "SKILL.md"), []string{relayAnyReport, relayDoneReport, relayAttentionReport}},
+		{filepath.Join("skills", "agenthail-operations", "SKILL.md"), []string{relayAnyReport, relayDoneReport, relayAttentionReport, reportJQFilter}},
 	} {
 		text, err := os.ReadFile(filepath.Join("..", "..", doc.path))
 		if err != nil {
