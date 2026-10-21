@@ -43,8 +43,20 @@ func codexRecordStartsTurn(record map[string]any) bool {
 
 func codexRecordEndsTurn(record map[string]any) (string, bool) {
 	payload, _ := record["payload"].(map[string]any)
+	return codexTurnEnd(payload)
+}
+
+// codexTurnEnd reports how a record ends its turn. Codex records a turn
+// that failed at the model, such as one refused at capacity, as
+// task_complete carrying an error.
+func codexTurnEnd(payload map[string]any) (string, bool) {
 	switch typ := str(payload, "type"); typ {
-	case "task_complete", "task_completed", "task_cancelled", "task_canceled", "task_aborted", "turn_completed", "turn_aborted", "interrupted":
+	case "task_complete", "task_completed", "turn_completed":
+		if payload["error"] != nil {
+			return "failed", true
+		}
+		return typ, true
+	case "task_cancelled", "task_canceled", "task_aborted", "turn_aborted", "interrupted":
 		return typ, true
 	}
 	return "", false

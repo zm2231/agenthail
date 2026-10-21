@@ -295,8 +295,8 @@ func (p *codexUserProjection) consume(record map[string]any, items []surface.Tim
 func codexOpaqueTimelineItem(record map[string]any) *surface.TimelineItem {
 	payload, _ := record["payload"].(map[string]any)
 	typ := str(payload, "type")
-	if typ == "task_complete" || typ == "task_completed" || typ == "task_cancelled" || typ == "task_canceled" || typ == "task_aborted" || typ == "turn_completed" || typ == "turn_aborted" || typ == "interrupted" {
-		done := codexDoneItem(typ)
+	if status, ended := codexTurnEnd(payload); ended {
+		done := codexDoneItem(status, payload)
 		return &done
 	}
 	if typ == "" || (str(record, "type") != "response_item" && str(record, "type") != "event_msg") {
@@ -758,13 +758,17 @@ const (
 	codexTurnAbortedClose = "</turn_aborted>"
 )
 
-func codexDoneItem(status string) surface.TimelineItem {
-	title := "Turn complete"
+func codexDoneItem(status string, payload map[string]any) surface.TimelineItem {
+	item := surface.TimelineItem{Kind: "done", Title: "Turn complete", Status: status}
 	switch status {
 	case "task_cancelled", "task_canceled", "task_aborted", "turn_aborted", "interrupted":
-		title = "Turn interrupted"
+		item.Title = "Turn interrupted"
+	case "failed":
+		item.Title = "Turn failed"
+		failure, _ := payload["error"].(map[string]any)
+		item.Text = str(failure, "message")
 	}
-	return surface.TimelineItem{Kind: "done", Title: title, Status: status}
+	return item
 }
 
 func codexInterruptionNotice(payload map[string]any) (surface.TimelineItem, bool) {
@@ -1118,9 +1122,17 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 		return items
 	}
 	if str(record, "type") == "event_msg" {
-		switch str(payload, "type") {
-		case "task_complete", "task_completed", "task_cancelled", "task_canceled", "task_aborted", "turn_completed", "turn_aborted", "interrupted":
-			return []surface.TimelineItem{codexDoneItem(str(payload, "type"))}
+		if status, ended := codexTurnEnd(payload); ended {
+			done := codexDoneItem(status, payload)
+			if status != "failed" {
+				return []surface.TimelineItem{done}
+			}
+			failure, _ := payload["error"].(map[string]any)
+			notice := surface.TimelineItem{Kind: "notice", Title: "Codex error", Text: done.Text, Status: str(failure, "codex_error_info")}
+			if notice.Status == "" {
+				notice.Status = "error"
+			}
+			return []surface.TimelineItem{notice, done}
 		}
 	}
 	if str(record, "type") != "response_item" {
