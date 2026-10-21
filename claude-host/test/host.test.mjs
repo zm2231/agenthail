@@ -225,7 +225,7 @@ test('a session opened in a Claude config root runs its Claude there', async () 
 
 test('every session the host opens has the task tools unless the host turns them off', async () => {
   const on = fixture();
-  await startHost(on);
+  await startHost(on, { env: { CLAUDE_CODE_ENABLE_TODO_TOOLS: undefined } });
   const c = new Client(on.socket);
   await c.call('open', { sessionId: randomUUID(), cwd: on.cwd });
   await c.call('open', { resume: randomUUID(), cwd: on.cwd });
