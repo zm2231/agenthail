@@ -87,14 +87,14 @@ func TestCompactSettingsEditOnlyTheirKeysInTheRootsSettingsFile(t *testing.T) {
 
 func TestCompactSettingsAreReadPerRootWithTheConfiguredPrimaryRoot(t *testing.T) {
 	home, primary, work := compactSettingsFixture(t)
-	writeTestFile(t, filepath.Join(primary, "settings.json"), `{"autoCompactWindow":425000,"modelSettings":{"claude-opus-5-5":{"autoCompactWindow":250000}}}`)
+	writeTestFile(t, filepath.Join(primary, "settings.json"), `{"autoCompactWindow":400000,"modelSettings":{"claude-opus-5-5":{"autoCompactWindow":250000}}}`)
 	writeTestFile(t, filepath.Join(work, "settings.json"), `{"autoCompactWindow":"auto","idleCompaction":true}`)
 
 	roots := compactSettings(t)
 	if len(roots) != 2 || roots[0].Root != primary || roots[0].SettingsPath != filepath.Join(primary, "settings.json") || roots[1].Root != work {
 		t.Fatalf("roots=%+v", roots)
 	}
-	if roots[0].AutoCompactWindow.Tokens != 425000 || roots[0].ModelWindows["claude-opus-5-5"].Tokens != 250000 || roots[0].IdleCompaction != nil {
+	if roots[0].AutoCompactWindow.Tokens != 400000 || roots[0].ModelWindows["claude-opus-5-5"].Tokens != 250000 || roots[0].IdleCompaction != nil {
 		t.Fatalf("primary=%+v", roots[0])
 	}
 	if !roots[1].AutoCompactWindow.Auto || roots[1].ModelWindows != nil || roots[1].IdleCompaction == nil || !*roots[1].IdleCompaction {

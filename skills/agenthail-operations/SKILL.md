@@ -101,6 +101,8 @@ in that root's file (the primary root by default). Tokens run from 100000 to
 running Claude does not reread the file: a change applies to sessions started
 after it. A hosted session's `contextUsage.autoCompact` is what the running
 Claude reports (`source: "runtime"`), the value actually in effect.
+The roots are those of the machine the command runs on; each host's settings
+are changed on that host or through its daemon.
 
 One unhealthy surface does not block the others. Preserve the `errors` object
 from JSON discovery output when reporting partial availability.

@@ -21,7 +21,7 @@ func TestTheDashboardReadsAndEditsEachClaudeRootsCompactionSettings(t *testing.T
 	work := filepath.Join(home, ".claude-work")
 	for path, content := range map[string]string{
 		filepath.Join(home, ".agenthail", "config.json"): `{"claudeConfigDirs":["` + work + `"]}`,
-		filepath.Join(primary, "settings.json"):          `{"theme":"dark","autoCompactWindow":425000}`,
+		filepath.Join(primary, "settings.json"):          `{"theme":"dark","autoCompactWindow":400000}`,
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			t.Fatal(err)
@@ -42,7 +42,7 @@ func TestTheDashboardReadsAndEditsEachClaudeRootsCompactionSettings(t *testing.T
 		}
 		return body.Roots
 	}
-	if roots := read(); len(roots) != 2 || roots[0].Root != primary || roots[0].AutoCompactWindow.Tokens != 425000 || roots[1].Root != work || roots[1].AutoCompactWindow != nil {
+	if roots := read(); len(roots) != 2 || roots[0].Root != primary || roots[0].AutoCompactWindow.Tokens != 400000 || roots[1].Root != work || roots[1].AutoCompactWindow != nil {
 		t.Fatalf("roots=%+v", roots)
 	}
 
@@ -51,7 +51,7 @@ func TestTheDashboardReadsAndEditsEachClaudeRootsCompactionSettings(t *testing.T
 	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &written) != nil || written.Root != work || written.ModelWindows["claude-opus-5-5"].Tokens != 250000 || written.IdleCompaction == nil || *written.IdleCompaction {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
-	if roots := read(); roots[0].AutoCompactWindow.Tokens != 425000 || roots[1].ModelWindows["claude-opus-5-5"].Tokens != 250000 {
+	if roots := read(); roots[0].AutoCompactWindow.Tokens != 400000 || roots[1].ModelWindows["claude-opus-5-5"].Tokens != 250000 {
 		t.Fatalf("roots=%+v", roots)
 	}
 	for _, body := range []string{`{"window":"50000"}`, `{"root":"/not/a/root","window":"300000"}`, `{"model":"claude-opus-5-5"}`, `{"window":"300000"} trailing`, `{"window":"300000"}{"window":"auto"}`, `{"window":"300000","idle":false}`, `{"window":"300000"}` + strings.Repeat(" ", 16<<10) + `{"window":"auto"}`} {
@@ -59,7 +59,7 @@ func TestTheDashboardReadsAndEditsEachClaudeRootsCompactionSettings(t *testing.T
 			t.Fatalf("%s: status=%d body=%s", body, response.Code, response.Body.String())
 		}
 	}
-	if data, _ := os.ReadFile(filepath.Join(primary, "settings.json")); string(data) != `{"theme":"dark","autoCompactWindow":425000}` {
+	if data, _ := os.ReadFile(filepath.Join(primary, "settings.json")); string(data) != `{"theme":"dark","autoCompactWindow":400000}` {
 		t.Fatalf("a refused change wrote the file: %s", data)
 	}
 
