@@ -136,7 +136,7 @@ agenthail signin use claude none           # turn Claude Remote Control sign-in 
 
 ## One place to check in
 
-The Mac app shows what is working now, what is waiting, and what needs you. Open a conversation to read the transcript, send the next instruction, steer the current turn, stop it, compact it, or change models when that conversation supports it.
+The Mac app shows what is working now, what is waiting, and what needs you. Open a conversation to read the transcript, send the next instruction, steer the current turn, stop it, compact it, or change models when that conversation supports it. A Codex conversation that Codex already has open, in Desktop or its app-server daemon, takes a new model with its next turn sent through Agenthail, and shows it as "from next turn" until then; a turn started from Desktop's own composer or its queue runs on the model Desktop shows.
 
 The same actions are available from the command line:
 

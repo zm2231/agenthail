@@ -315,6 +315,15 @@ and `clear`, which run Claude's `/goal` once the session is idle and are
 confirmed by Claude's answer; it has no `pause`, `resume` or `budget`, and a
 session reached only through its peer socket cannot set a goal.
 
+Codex model: a conversation Codex already has open keeps its model until its
+next turn, so `model @builder <name>` records the choice and the next turn
+Agenthail sends carries it. `--json` then reports `model` (what it runs now)
+and `pendingModel`; `model @builder` and the session row show `pendingModel`
+until that turn starts. A turn started from Codex Desktop's composer, or from
+its own queue with `thread queue <target> start`, runs on the model Desktop
+shows. If the conversation moved to a third model meanwhile, the choice is
+dropped and the send result's `notice` says so.
+
 Claude controls over Remote Control report request-linked evidence. `model` and
 `interrupt` wait for Claude's `control_response` to their own request id;
 `interrupt` also waits for the active turn to end. A steer is only

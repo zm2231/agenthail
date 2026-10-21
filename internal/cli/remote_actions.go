@@ -71,15 +71,12 @@ func (a *App) modelRemote(ctx context.Context, remote *remoteTarget, name string
 	if !found {
 		return fmt.Errorf("%s does not report a model", remote.label())
 	}
-	var current string
-	_ = json.Unmarshal(raw, &current)
-	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]string{"sessionId": remote.ID, "model": current})
+	var change surface.ModelChange
+	_ = json.Unmarshal(raw, &change.Model)
+	if pending, ok := metadata["pendingModel"]; ok {
+		_ = json.Unmarshal(pending, &change.PendingModel)
 	}
-	if current != "" {
-		fmt.Println(current)
-	}
-	return nil
+	return printModelChange(remote.ID, change, args)
 }
 
 func (a *App) goalRemote(ctx context.Context, remote *remoteTarget, positional []string, jsonOut bool) error {
@@ -274,6 +271,9 @@ func (a *App) controlRemote(ctx context.Context, remote *remoteTarget, action, v
 	var result surface.ControlResult
 	if err := json.Unmarshal(data, &result); err != nil {
 		return fmt.Errorf("decode %s answer for %s: %w", action, remote.label(), err)
+	}
+	if result.Change != nil {
+		return printModelChange(remote.ID, *result.Change, args)
 	}
 	if hasFlag(args, "--json") {
 		return json.NewEncoder(os.Stdout).Encode(result)

@@ -41,6 +41,7 @@ type Turn struct {
 	Status    string
 	User      string
 	Assistant string
+	Model     string
 }
 
 type Thread struct {
@@ -53,6 +54,9 @@ type Thread struct {
 	ActiveFlags []string
 	// Source is the thread's app-server source; empty is "vscode".
 	Source any
+	// Model is the thread's model. thread/resume changes it only for a thread
+	// that is not loaded; turn/start with a model changes it for good.
+	Model string
 }
 
 type Daemon struct {
@@ -232,6 +236,20 @@ func (d *Daemon) Unload(threadID string) {
 	delete(d.loaded, threadID)
 }
 
+func (d *Daemon) Load(threadID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.loaded[threadID] = true
+}
+
+func (d *Daemon) SetThreadModel(threadID, model string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if thread := d.threads[threadID]; thread != nil {
+		thread.Model = model
+	}
+}
+
 func (d *Daemon) Loaded(threadID string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -323,8 +341,11 @@ func (d *Daemon) lifecycle(method string, params map[string]any, result map[stri
 		if thread == nil {
 			return rpcError("thread not found: " + threadID)
 		}
+		if model, _ := params["model"].(string); model != "" && !d.loaded[threadID] {
+			thread.Model = model
+		}
 		d.loaded[threadID] = true
-		return map[string]any{"thread": d.threadJSON(thread, false)}
+		return map[string]any{"thread": d.threadJSON(thread, false), "model": thread.Model}
 	case "thread/read":
 		thread := d.threads[threadID]
 		if thread == nil {
@@ -361,7 +382,10 @@ func (d *Daemon) lifecycle(method string, params map[string]any, result map[stri
 		if thread == nil || !d.loaded[threadID] {
 			return rpcError("thread not found: " + threadID)
 		}
-		turn := Turn{ID: fmt.Sprintf("turn-%d", len(thread.Turns)+1), Status: "inProgress", User: inputText(params)}
+		if model, _ := params["model"].(string); model != "" {
+			thread.Model = model
+		}
+		turn := Turn{ID: fmt.Sprintf("turn-%d", len(thread.Turns)+1), Status: "inProgress", User: inputText(params), Model: thread.Model}
 		thread.Turns = append(thread.Turns, turn)
 		return map[string]any{"turn": turnJSON(turn)}
 	case "turn/steer":
@@ -450,6 +474,9 @@ func (d *Daemon) threadJSON(thread *Thread, includeTurns bool) map[string]any {
 		"status":               threadStatus,
 		"canAcceptDirectInput": d.loaded[thread.ID],
 		"recencyAt":            float64(1792300000 + len(d.order)),
+	}
+	if thread.Model != "" {
+		value["model"] = thread.Model
 	}
 	if thread.Originator == "" {
 		delete(value, "originator")

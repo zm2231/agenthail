@@ -979,14 +979,14 @@ struct SessionSummary: View {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
                     status
-                    Text(detail.model ?? SessionStyle.agentName(detail.session.surface)).lineLimit(1)
+                    Text(detail.modelLabel ?? SessionStyle.agentName(detail.session.surface)).lineLimit(1)
                     Spacer(minLength: 4)
                     context
                     Image(systemName: "chevron.down").font(.caption2)
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     HStack { status; Spacer(); context }
-                    Text(detail.model ?? SessionStyle.agentName(detail.session.surface))
+                    Text(detail.modelLabel ?? SessionStyle.agentName(detail.session.surface))
                 }
             }
             .font(.footnote)
@@ -1039,7 +1039,7 @@ struct SessionInspector: View {
                 Section {
                     LabeledContent("Agent", value: detail.session.surface.capitalized)
                     LabeledContent("Status", value: detail.session.waitingOn != nil ? "Waiting on you" : liveSession.isWaitingOnBackground ? "Waiting on background work" : detail.session.status.capitalized)
-                    if let value = detail.model { LabeledContent("Model", value: value) }
+                    if let value = detail.modelLabel { LabeledContent("Model", value: value) }
                     if let configRoot = liveSession.claudeConfigRoot { LabeledContent("Config folder", value: configRoot.summary) }
                     if liveSession.canAdopt { Button("Open in Agenthail", systemImage: "arrow.down.app") { adopting = true } }
                     if let value = detail.session.cwd, !value.isEmpty { LabeledContent("Workspace", value: value).textSelection(.enabled) }

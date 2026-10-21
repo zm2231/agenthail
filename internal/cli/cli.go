@@ -1929,6 +1929,9 @@ func (a *App) cmdSend(args []string) error {
 	} else {
 		fmt.Printf("sent (turn %s)\n", receipt.TurnID)
 	}
+	if receipt.Notice != "" && !jsonOut {
+		fmt.Println(receipt.Notice)
+	}
 	return nil
 }
 
@@ -2408,15 +2411,34 @@ func (a *App) cmdModel(args []string) error {
 		}
 		return a.printControlResult(sess, result, controlErr, args)
 	}
+	if setter, ok := surf.(surface.ModelSetter); ok && name != "" {
+		change, err := setter.SetModel(ctx, sess, name)
+		if err != nil {
+			return err
+		}
+		a.recordHistory(registry.HistoryEntry{Kind: "model", SessionID: sess.ID, Message: name, Result: change.Text()})
+		return printModelChange(sess.ID, change, args)
+	}
 	current, err := surf.Model(ctx, sess, name)
 	if err != nil {
 		return err
 	}
-	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]string{"sessionId": sess.ID, "model": current})
+	change := surface.ModelChange{Model: current}
+	if reader, ok := surf.(surface.PendingModelReader); ok && name == "" {
+		change.PendingModel = reader.PendingModel(sess.ID)
 	}
-	if current != "" {
-		fmt.Println(current)
+	return printModelChange(sess.ID, change, args)
+}
+
+func printModelChange(sessionID string, change surface.ModelChange, args []string) error {
+	if hasFlag(args, "--json") {
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			SessionID string `json:"sessionId"`
+			surface.ModelChange
+		}{sessionID, change})
+	}
+	if change.Model != "" {
+		fmt.Println(change.Text())
 	}
 	return nil
 }
