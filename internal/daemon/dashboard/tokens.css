@@ -2269,7 +2269,9 @@ select {
 .request-card label small {
   color: var(--quiet);
 }
-.request-card input[type="text"] {
+.request-card input[type="text"],
+.request-card input[type="number"],
+.request-card select {
   min-width: 0;
   flex: 1;
 }
@@ -2295,4 +2297,10 @@ select {
 .composer .request-mode select {
   width: auto;
   flex: 0 1 240px;
+}
+.timeline-notice {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--warn);
+  color: var(--muted);
 }

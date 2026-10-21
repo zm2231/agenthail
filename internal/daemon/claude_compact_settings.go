@@ -46,7 +46,7 @@ func (d *Daemon) claudeCompactSettingsHandler(w http.ResponseWriter, r *http.Req
 			http.Error(w, "invalid compaction settings request", http.StatusBadRequest)
 			return
 		}
-		root, err := surface.ResolveClaudeAccountRoot(home, request.Root)
+		root, err := surface.ResolveClaudeConfigRoot(home, request.Root)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

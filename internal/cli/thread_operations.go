@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -106,7 +107,11 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 		if !ok {
 			return surface.ErrUnsupported
 		}
+		addressed := *session
 		output, err = lifecycle.SessionAction(ctx, session, operation)
+		if err == nil && operation == "resume" {
+			err = (delivery.Dispatcher{Registry: a.registry()}).RegisterReached(&addressed, session)
+		}
 	default:
 		return fmt.Errorf("%s", threadUsage)
 	}

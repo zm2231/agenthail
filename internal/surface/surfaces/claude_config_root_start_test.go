@@ -28,7 +28,7 @@ func configureClaudeRoots(t *testing.T, home string, roots ...string) {
 	}
 }
 
-func TestClaudeHostedCreationRunsUnderTheChosenAccount(t *testing.T) {
+func TestClaudeHostedCreationRunsUnderTheChosenRoot(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	host := claudehosttest.New(t, "")
 	host.Start(t)
@@ -37,7 +37,7 @@ func TestClaudeHostedCreationRunsUnderTheChosenAccount(t *testing.T) {
 	c := NewClaude(nil, host.Home)
 	ctx := context.Background()
 
-	session, _, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, Account: "work"})
+	session, _, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, ConfigRoot: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestClaudeHostedCreationRunsUnderTheChosenAccount(t *testing.T) {
 		t.Fatalf("spawns=%+v, want one start in %s", spawns, second)
 	}
 
-	primary, _, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, Account: "default"})
+	primary, _, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, ConfigRoot: "default"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,12 +55,12 @@ func TestClaudeHostedCreationRunsUnderTheChosenAccount(t *testing.T) {
 		t.Fatalf("spawns=%+v, want the primary root left to the host's own CLAUDE_CONFIG_DIR", spawns)
 	}
 
-	if _, _, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, Account: "nobody"}); err == nil || !strings.Contains(err.Error(), "no configured Claude account") {
-		t.Fatalf("an unknown account started: %v", err)
+	if _, _, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, ConfigRoot: "nobody"}); err == nil || !strings.Contains(err.Error(), "no configured Claude config directory") {
+		t.Fatalf("an unknown config root started: %v", err)
 	}
 }
 
-func TestClaudeBackgroundCreationRunsUnderTheChosenAccount(t *testing.T) {
+func TestClaudeBackgroundCreationRunsUnderTheChosenRoot(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	home := t.TempDir()
 	second := filepath.Join(home, "spare")
@@ -78,7 +78,7 @@ fi
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
-	session, _, err := NewClaude(nil, home).BackgroundStarter().StartSession(context.Background(), surface.SessionStartOptions{Message: "hello", Cwd: home, Account: second})
+	session, _, err := NewClaude(nil, home).BackgroundStarter().StartSession(context.Background(), surface.SessionStartOptions{Message: "hello", Cwd: home, ConfigRoot: second})
 	if err != nil || session == nil || session.ID != "real-session-id" {
 		t.Fatalf("session=%+v err=%v", session, err)
 	}
@@ -90,9 +90,9 @@ fi
 	}
 }
 
-func TestCodexCreationRefusesAClaudeAccount(t *testing.T) {
+func TestCodexCreationRefusesAClaudeConfigRoot(t *testing.T) {
 	c := &Codex{}
-	if _, _, err := c.startSessionOnTransport(context.Background(), nil, surface.SessionStartOptions{Message: "hi", Account: "work"}, codexTransportManaged); err == nil || !strings.Contains(err.Error(), "require Claude") {
+	if _, _, err := c.startSessionOnTransport(context.Background(), nil, surface.SessionStartOptions{Message: "hi", ConfigRoot: "work"}, codexTransportManaged); err == nil || !strings.Contains(err.Error(), "require Claude") {
 		t.Fatalf("err=%v", err)
 	}
 }

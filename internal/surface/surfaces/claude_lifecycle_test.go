@@ -102,12 +102,16 @@ func endedBackgroundJob(t *testing.T) (*claudetest.Fixture, *claudehosttest.Fixt
 
 func TestClaudeResumeActionOpensAnEndedJobInTheHost(t *testing.T) {
 	_, host, c := endedBackgroundJob(t)
-	result, err := c.SessionAction(context.Background(), &surface.Session{ID: fixtureConversation}, "resume")
+	session := &surface.Session{ID: fixtureConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeBackground}
+	result, err := c.SessionAction(context.Background(), session, "resume")
 	if err != nil || result["id"] != "fe758937" || result["unchanged"] != false {
 		t.Fatalf("result=%v err=%v", result, err)
 	}
 	if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 1 {
 		t.Fatalf("spawns=%+v", spawns)
+	}
+	if session.RuntimeKind != surface.RuntimeClaudeHost || session.PID <= 0 {
+		t.Fatalf("a resumed job is not pointed at its host process: %+v", session)
 	}
 }
 
@@ -133,8 +137,9 @@ func TestClaudeHostSessionLifecycle(t *testing.T) {
 	if status, err := c.SessionAction(context.Background(), session, "status"); err != nil || status["pid"] != session.PID {
 		t.Fatalf("status=%v err=%v", status, err)
 	}
-	if _, err := c.SessionAction(context.Background(), session, "logs"); err == nil || !strings.Contains(err.Error(), "agenthail last") {
-		t.Fatalf("logs err=%v", err)
+	logs, err := c.SessionAction(context.Background(), session, "logs")
+	if output, _ := logs["output"].(string); err != nil || !strings.Contains(output, "fake-claude: session "+session.ID+" started") || logs["pid"] != session.PID {
+		t.Fatalf("logs=%v err=%v", logs, err)
 	}
 	if _, err := c.SessionAction(context.Background(), session, "stop"); err != nil {
 		t.Fatal(err)
@@ -142,6 +147,9 @@ func TestClaudeHostSessionLifecycle(t *testing.T) {
 	claudehosttest.WaitFor(t, "the session to close", func() bool { return !claudehosttest.Alive(session.PID) })
 	if status, err := c.SessionAction(context.Background(), session, "status"); err != nil || status["state"] != "closed" {
 		t.Fatalf("status after stop=%v err=%v", status, err)
+	}
+	if _, err := c.SessionAction(context.Background(), session, "logs"); err == nil || !strings.Contains(err.Error(), "not open in the host") {
+		t.Fatalf("logs of a closed session err=%v", err)
 	}
 	if result, err := c.SessionAction(context.Background(), session, "resume"); err != nil || result["unchanged"] != false {
 		t.Fatalf("resume=%v err=%v", result, err)

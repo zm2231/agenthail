@@ -297,7 +297,7 @@ function startLiveStream() {
     app.history.transcriptWarning = "";
     const items = app.history.timeline?.items || [];
     const index = items.findIndex((value) => value.id === item.itemId);
-    const projected = { id: item.itemId, kind: item.kind, role: item.role, origin: item.origin, sender: item.sender, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, truncated: item.truncated, bodyRef: item.bodyRef, attachment: item.attachment, files: item.files, callId: item.callId, turnId: item.turnId };
+    const projected = { id: item.itemId, kind: item.kind, role: item.role, origin: item.origin, sender: item.sender, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, resetsAt: item.resetsAt, truncated: item.truncated, bodyRef: item.bodyRef, attachment: item.attachment, files: item.files, callId: item.callId, turnId: item.turnId };
     if (item.op === "remove") { if (index >= 0) items.splice(index, 1); }
     else if (index >= 0) items[index] = projected;
     else items.push(projected);
@@ -474,7 +474,8 @@ function conversationMeta(session, model = "") {
   const parts = [session.waitingOn ? "Waiting on you" : backgroundWaiting(session) ? "Waiting on background work" : statusLabel(session.status), `${session.queueCount || 0} queued`];
   if (session.status !== "busy") parts.push(`last active ${timeAgo(session.lastActive)}`);
   if (model) parts.push(model);
-  if (session.claudeAccount?.label) parts.push(session.claudeAccount.label);
+  const configRoot = session.claudeConfigRoot;
+  if (configRoot?.name && (configRoot.name !== "default" || configRoot.signedInAs)) parts.push(configRoot.signedInAs ? `config folder ${configRoot.name} · currently signed in as ${configRoot.signedInAs}` : `config folder ${configRoot.name}`);
   return parts.join(" · ");
 }
 function surfaceIcon(name) {
@@ -1288,6 +1289,12 @@ function renderTimelineItem(item, session) {
     const content = user ? handoffMessage(item.text) : { text: item.text, label: labels[session.surface] || session.surface };
     return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(content.text, user ? "user" : "agent", content.label, `${session.id}:${item.id}`, user ? item.files : [])}${metadata}</section>`;
   }
+  if (kind === "done") return "";
+  if (kind === "notice") {
+    const resets = Date.parse(item.resetsAt || "");
+    const until = resets ? ` Resets ${new Date(resets).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.` : "";
+    return `<p class="timeline-item timeline-notice" role="status" ${attributes}><strong>${escape(item.title || "Notice")}</strong> ${escape(item.text || "")}${escape(until)}</p>`;
+  }
   if (["toolCall", "toolResult", "reasoning"].includes(kind)) {
     const title = item.title || kind;
     const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';
@@ -1538,6 +1545,7 @@ function renderElsewhereWait(session) {
 }
 function renderRequestCard(request) {
   const created = request.createdAt ? ` · <time datetime="${escape(request.createdAt)}">${escape(new Date(request.createdAt).toLocaleTimeString())}</time>` : "";
+  if (request.kind === "input" && request.elicitation) return renderInputRequest(request, created);
   if (request.kind === "question") {
     const questions = (request.questions || []).map((question, index) => {
       const type = question.multiSelect ? "checkbox" : "radio";
@@ -1551,6 +1559,60 @@ function renderRequestCard(request) {
   const input = request.input && Object.keys(request.input).length ? `<pre>${escape(JSON.stringify(request.input, null, 2))}</pre>` : "";
   const detail = [request.description, request.reason, request.blockedPath && `Path: ${request.blockedPath}`].filter(Boolean).map((line) => `<p>${escape(line)}</p>`).join("");
   return `<div class="request-card"><h3>${escape(title)}${created}</h3>${detail}${input}<div class="request-actions"><button class="primary-button" type="button" data-request-respond="allow" data-request-id="${escape(request.id)}">Allow</button>${request.alwaysAllow ? `<button class="soft-button" type="button" data-request-respond="always" data-request-id="${escape(request.id)}">Always allow</button>` : ""}<button class="soft-button" type="button" data-request-respond="deny" data-request-id="${escape(request.id)}">Deny</button></div></div>`;
+}
+// An MCP server's request for input is a form of its fields, or a link to
+// open that is accepted once the person chose to open it.
+function renderInputRequest(request, created) {
+  const e = request.elicitation;
+  const heading = `<h3>${escape(e.server || "An MCP server")} asks for input${created}</h3><p>${escape(e.message)}</p>`;
+  const decline = `<button class="soft-button" type="button" data-request-respond="deny" data-request-id="${escape(request.id)}">Decline</button>`;
+  if (e.mode === "url") {
+    const link = /^https?:\/\//i.test(e.url || "") ? `<p><a href="${escape(e.url)}" target="_blank" rel="noopener noreferrer">${escape(e.url)}</a></p>` : `<p>${escape(e.url || "")}</p>`;
+    return `<div class="request-card">${heading}${link}<div class="request-actions"><button class="primary-button" type="button" data-request-respond="allow" data-request-id="${escape(request.id)}">Opened, continue</button>${decline}</div></div>`;
+  }
+  const fields = (e.fields || []).map(renderInputField).join("");
+  return `<form class="request-card" data-request-input="${escape(request.id)}">${heading}${fields}<div class="request-actions"><button class="primary-button" type="submit">Submit</button>${decline}</div></form>`;
+}
+function renderInputField(field) {
+  const label = `${escape(field.title || field.name)}${field.required ? " *" : ""}`;
+  const help = field.description ? `<small>${escape(field.description)}</small>` : "";
+  const name = `field-${escape(field.name)}`;
+  if (field.multiSelect) {
+    const picked = new Set(Array.isArray(field.default) ? field.default : []);
+    const options = (field.options || []).map((option) => `<label><input type="checkbox" name="${name}" value="${escape(option.value)}"${picked.has(option.value) ? " checked" : ""}><span>${escape(option.label)}</span></label>`).join("");
+    return `<fieldset data-field="${escape(field.name)}"><legend>${label}</legend>${help}${options}</fieldset>`;
+  }
+  if (field.options) {
+    const options = (field.options || []).map((option) => `<option value="${escape(option.value)}"${option.value === field.default ? " selected" : ""}>${escape(option.label)}</option>`).join("");
+    return `<label data-field="${escape(field.name)}"><span>${label}</span><select name="${name}"><option value=""></option>${options}</select>${help}</label>`;
+  }
+  if (field.type === "boolean") {
+    return `<label data-field="${escape(field.name)}"><input type="checkbox" name="${name}"${field.default === true ? " checked" : ""}><span>${label}</span>${help}</label>`;
+  }
+  const number = field.type === "number" || field.type === "integer";
+  const value = field.default === undefined ? "" : ` value="${escape(String(field.default))}"`;
+  return `<label data-field="${escape(field.name)}"><span>${label}</span><input type="${number ? "number" : "text"}"${field.type === "integer" ? ' step="1"' : number ? ' step="any"' : ""} name="${name}"${value}>${help}</label>`;
+}
+// inputContent reads a form's field values as the MCP server takes them. A
+// field left empty is left out, so the host refuses a missing required one.
+function inputContent(form, request) {
+  const content = {};
+  for (const field of request.elicitation.fields || []) {
+    const name = `field-${field.name}`;
+    if (field.multiSelect) {
+      content[field.name] = [...form.querySelectorAll(`[name="${CSS.escape(name)}"]:checked`)].map((input) => input.value);
+      continue;
+    }
+    const input = form.querySelector(`[name="${CSS.escape(name)}"]`);
+    if (field.type === "boolean") {
+      content[field.name] = input.checked;
+      continue;
+    }
+    const text = input.value.trim();
+    if (text === "") continue;
+    content[field.name] = field.type === "number" || field.type === "integer" ? Number(text) : text;
+  }
+  return content;
 }
 async function respondToRequest(requestId, decision) {
   try {
@@ -2226,6 +2288,15 @@ document.addEventListener("submit", async (event) => {
   await respondToRequest(form.dataset.requestQuestion, { behavior: "allow", answers });
 });
 document.addEventListener("submit", async (event) => {
+  const form = event.target.closest("[data-request-input]");
+  if (!form) return;
+  event.preventDefault();
+  const request = (app.requests?.requests || []).find((r) => r.id === form.dataset.requestInput);
+  if (!request) return;
+  form.querySelector('[type="submit"]').disabled = true;
+  await respondToRequest(request.id, { behavior: "allow", content: inputContent(form, request) });
+});
+document.addEventListener("submit", async (event) => {
   const form = event.target.closest("[data-permission-mode]");
   if (!form) return;
   event.preventDefault();
@@ -2338,8 +2409,8 @@ function syncStartForm() {
     document.querySelectorAll(`[${attribute}]`).forEach(field => { field.hidden = !enabled; field.querySelectorAll("input,select,textarea").forEach(input => input.disabled = !enabled); });
   }
   $("[data-start-folder]").hidden = selected === "notion" || $("#new-conversation-project").value !== "";
-  const account = $("[data-claude-account]");
-  if (account.dataset.single === "true") account.hidden = true;
+  const configRoot = $("[data-claude-root]");
+  if (configRoot.dataset.single === "true") configRoot.hidden = true;
   document.querySelectorAll("[data-codex-start]").forEach((field) => {
     field.hidden = !isCodex;
     field.querySelectorAll("input,select,textarea").forEach((input) => {
@@ -2348,24 +2419,23 @@ function syncStartForm() {
   });
   renderStartLaunchers();
 }
-function renderStartAccounts(accounts) {
-  const select = $("#new-conversation-account");
-  select.innerHTML = accounts.map(account =>
-    `<option value="${account.primary ? "" : escape(account.root)}"${account.signedIn ? "" : " disabled"}>${escape(claudeAccountOption(account))}</option>`,
+function renderStartConfigRoots(roots) {
+  const select = $("#new-conversation-config-root");
+  select.innerHTML = roots.map(root =>
+    `<option value="${root.primary ? "" : escape(root.root)}"${root.signedInAs ? "" : " disabled"}>${escape(claudeConfigRootOption(root))}</option>`,
   ).join("");
-  select.closest("[data-claude-account]").dataset.single = accounts.length < 2 ? "true" : "";
+  select.closest("[data-claude-root]").dataset.single = roots.length < 2 ? "true" : "";
   syncStartForm();
 }
-function claudeAccountOption(account) {
-  const parts = [account.label];
-  const exhausted = claudeAccountExhausted(account);
+function claudeConfigRootOption(root) {
+  const parts = [root.name, root.signedInAs ? `signed in as ${root.signedInAs.email}` : "signed out"];
+  const exhausted = claudeUsageExhausted(root);
   if (exhausted) parts.push(`out of usage until ${new Date(exhausted).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`);
-  if (account.primary) parts.push("default");
   return parts.join(" · ");
 }
-function claudeAccountExhausted(account) {
+function claudeUsageExhausted(root) {
   const now = Date.now();
-  const resets = (account.usage?.limits || []).filter(limit => limit.percent >= 100 && Date.parse(limit.resetsAt) > now).map(limit => Date.parse(limit.resetsAt));
+  const resets = (root.usage?.limits || []).filter(limit => limit.percent >= 100 && Date.parse(limit.resetsAt) > now).map(limit => Date.parse(limit.resetsAt));
   return resets.length ? Math.max(...resets) : 0;
 }
 function renderStartLaunchers() {
@@ -2391,7 +2461,7 @@ async function loadStartOptions() {
   if (host !== app.startHost) return;
   app.startOptions = options;
   app.launchers = options.launchers || [];
-  renderStartAccounts(options.claudeAccounts || []);
+  renderStartConfigRoots(options.claudeConfigRoots || []);
   renderStartSurfaceOptions();
 }
 async function loadStartModels() {
@@ -2723,14 +2793,19 @@ $("#session-operation-form").addEventListener("submit", async event => {
 function syncSessionOperationFields() {
   const form = $("#session-operation-form");
   const surface = app.selected?.surface;
-  form.closest("details").hidden = !["codex", "claude"].includes(surface);
+  const lifecycle = app.selected?.capabilities?.lifecycle || {};
   $("#turn-effort").closest("details").hidden = surface !== "codex";
+  let offered = false;
   for (const option of form.elements.operation.options) {
-    const matches = surface === "claude" ? option.value.startsWith("session-lifecycle-") : !option.value.startsWith("session-lifecycle-");
+    const lifecycleOperation = option.value.startsWith("session-lifecycle-") ? option.value.slice("session-lifecycle-".length) : "";
+    const matches = surface === "claude" ? Boolean(lifecycleOperation && lifecycle[lifecycleOperation]) : !lifecycleOperation;
+    offered ||= matches;
     option.hidden = !matches;
     option.disabled = !matches || (Boolean(app.selected?.readOnly) && option.value !== "native-list");
   }
-  if (form.elements.operation.selectedOptions[0]?.disabled) {
+  form.closest("details").hidden = surface === "claude" ? !offered : surface !== "codex";
+  const chosen = form.elements.operation.selectedOptions[0];
+  if (!chosen || chosen.disabled) {
     form.elements.operation.value = [...form.elements.operation.options].find(option => !option.disabled)?.value || "";
   }
   const operation = form.elements.operation.value;

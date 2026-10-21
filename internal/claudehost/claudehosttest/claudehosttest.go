@@ -75,8 +75,7 @@ func (f *Fixture) Manager(t testing.TB, version string) *claudehost.Manager {
 
 func (f *Fixture) launch(t testing.TB, script, version string, env ...string) claudehost.Launch {
 	t.Helper()
-	_, file, _, _ := runtime.Caller(0)
-	hostDir := filepath.Join(filepath.Dir(file), "..", "..", "..", "claude-host")
+	hostDir := hostDir()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Fatalf("the Claude host tests need node on PATH: %v", err)
@@ -93,8 +92,9 @@ func (f *Fixture) launch(t testing.TB, script, version string, env ...string) cl
 			inherited = append(inherited, variable)
 		}
 	}
-	env = append(append(inherited, "FAKE_CLAUDE_DIR="+f.ClaudeDir, "FAKE_CLAUDE_RECORD=1", "HOME="+f.Home,
-		"NODE_OPTIONS=--report-on-signal --report-signal=SIGUSR2 --report-directory="+f.reportDir()), env...)
+	owner := OwnerEnv()
+	env = append(append(inherited, "FAKE_CLAUDE_DIR="+f.ClaudeDir, "FAKE_CLAUDE_RECORD=1", "HOME="+f.Home, owner[0],
+		owner[1]+" --report-on-signal --report-signal=SIGUSR2 --report-directory="+f.reportDir()), env...)
 	return claudehost.Launch{
 		Node:    node,
 		Script:  filepath.Join(hostDir, script),
@@ -102,6 +102,22 @@ func (f *Fixture) launch(t testing.TB, script, version string, env ...string) cl
 		Version: version,
 		Env:     env,
 	}
+}
+
+// OwnerEnv is the environment that exits a Node process this test starts
+// once the test process is gone. Hosts and fake Claudes run in their own
+// session, beyond the reach of cleanup in a test that is killed or times out.
+// The second entry is NODE_OPTIONS, which callers may extend.
+func OwnerEnv() []string {
+	return []string{
+		"AGENTHAIL_TEST_OWNER_PIDS=" + strconv.Itoa(os.Getpid()),
+		"NODE_OPTIONS=--require=" + filepath.Join(hostDir(), "test", "owner-watchdog.cjs"),
+	}
+}
+
+func hostDir() string {
+	_, file, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(file), "..", "..", "..", "claude-host")
 }
 
 // StartProtocol1Host starts the host Agenthail shipped before hosts could
@@ -113,10 +129,11 @@ func (f *Fixture) StartProtocol1Host(t testing.TB, version string) claudehost.He
 }
 
 // StartProtocol2Host starts the host Agenthail shipped before protocol 3, the
-// way its daemon did. It retires on drain and serves its sessions to the end.
-func (f *Fixture) StartProtocol2Host(t testing.TB, version string) claudehost.Hello {
+// way its daemon did, with env added to its fake Claude's. It retires on drain
+// and serves its sessions to the end.
+func (f *Fixture) StartProtocol2Host(t testing.TB, version string, env ...string) claudehost.Hello {
 	t.Helper()
-	return f.startShippedHost(t, "protocol2-host.mjs", version)
+	return f.startShippedHost(t, "protocol2-host.mjs", version, env...)
 }
 
 // startShippedHost starts a host script an earlier Agenthail shipped the way

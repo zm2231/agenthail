@@ -77,6 +77,7 @@ globalThis.presenceLabel = presenceLabel;
 globalThis.presenceTone = presenceTone;
 globalThis.renderBackgroundTasks = renderBackgroundTasks;
 globalThis.renderRequests = renderRequests;
+globalThis.renderRequestCard = renderRequestCard;
 globalThis.renderChat = renderChat;
 globalThis.goalStatusLabel = goalStatusLabel;
 globalThis.contextBreakdown = contextBreakdown;`, context);
@@ -216,6 +217,10 @@ assert(!elements["#background-panel"].hidden, "background work shows its panel")
 for (const expected of ["1 background task running", "go test ./...", "file watcher", "ambient", "Read from the transcript."]) assert(backgroundPanel.includes(expected), `background panel omitted ${expected}`);
 context.renderBackgroundTasks({ ...backgroundSession, backgroundTasks: { running: true, source: "status" } });
 assert(elements["#background-panel"].innerHTML.includes("Background work running") && elements["#background-panel"].innerHTML.includes("not which one"), "a shell reported without a list says what is known");
+const notice = context.renderTimeline([{ id: "limit-1", kind: "notice", title: "Usage limit reached", text: "You've hit your session limit <b>", status: "usage_limit" }], session);
+assert(notice.includes("timeline-notice") && notice.includes("Usage limit reached") && notice.includes("&lt;b&gt;") && !notice.includes("turn-action"), "a notice renders as an escaped status line, not as the agent's message");
+assert(context.renderTimeline([{ id: "limit-2", kind: "notice", title: "Usage limit reached", text: "limit", status: "usage_limit", resetsAt: "2026-10-21T11:00:00Z" }], session).includes("Resets "), "a usage-limit notice names when it resets");
+assert.equal(context.renderTimeline([{ id: "done-1", kind: "done", status: "failed", text: "limit" }], session), "", "a turn's end renders nothing");
 
 context.app.selected = { id: "session-dialog", name: "builder", surface: "claude", status: "busy", runtime: {}, waitingOn: { kind: "dialog", id: "session-dialog:dialog:1" } };
 context.app.history = { capabilities: { respond: true } };
@@ -230,5 +235,28 @@ assert(elements["#request-panel"].hidden, "an approval with no request yet shows
 context.app.requests = { requests: [{ id: "live", kind: "approval", title: "Run ls" }] };
 context.renderRequests();
 assert(elements["#request-panel"].innerHTML.includes("data-request-respond=\"allow\"") && elements["#request-panel"].innerHTML.includes("Run ls"), "an approval shows its request card");
+const formCard = context.renderRequestCard({
+  id: "e1",
+  kind: "input",
+  elicitation: {
+    server: "deploy",
+    message: "Where should this deploy?",
+    mode: "form",
+    fields: [
+      { name: "env", title: "Environment", type: "string", required: true, multiSelect: false, options: [{ value: "staging", label: "Staging" }, { value: "prod", label: "Production" }] },
+      { name: "replicas", title: "Replicas", type: "integer", required: false, multiSelect: false, default: 2 },
+      { name: "notify", title: "Notify", type: "boolean", required: false, multiSelect: false },
+      { name: "regions", title: "Regions", type: "string", required: false, multiSelect: true, options: [{ value: "us", label: "US" }] },
+    ],
+  },
+});
+for (const expected of ['data-request-input="e1"', "deploy asks for input", "Where should this deploy?", "Environment *", '<option value="prod">Production</option>', 'type="number" step="1" name="field-replicas" value="2"', 'type="checkbox" name="field-notify"', 'type="checkbox" name="field-regions" value="us"', 'data-request-respond="deny"']) {
+  assert(formCard.includes(expected), `an MCP form card shows ${expected}`);
+}
+assert(!formCard.includes('data-request-respond="allow"'), "an MCP form is submitted with its fields, not allowed");
+const linkCard = context.renderRequestCard({ id: "e2", kind: "input", elicitation: { server: "docs", message: "Sign in", mode: "url", url: "https://example.com/auth" } });
+assert(linkCard.includes('href="https://example.com/auth"') && linkCard.includes('rel="noopener noreferrer"') && linkCard.includes('data-request-respond="allow"'), "an MCP link card opens the link and continues");
+const scriptLink = context.renderRequestCard({ id: "e3", kind: "input", elicitation: { server: "docs", message: "Sign in", mode: "url", url: "javascript:alert(1)" } });
+assert(!scriptLink.includes("href="), "a link that is not http or https is shown, not linked");
 
 console.log("dashboard timeline VM tests passed");

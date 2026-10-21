@@ -160,7 +160,7 @@
                   <option value="never">Never ask</option>
                 </select>
               </label>
-              <label data-claude-start data-claude-account data-single="true"><span>Claude account</span><select name="account" id="new-conversation-account"></select></label>
+              <label data-claude-start data-claude-root data-single="true"><span>Config folder</span><select name="configRoot" id="new-conversation-config-root"></select></label>
               <label data-claude-start><span>Claude model (optional)</span><input name="model" placeholder="Use Claude default" /></label>
               <label data-claude-start data-launch-option><span>Claude agent (optional)</span><input name="agent" /></label>
               <label data-claude-start data-launch-option><span>Worktree name (optional)</span><input name="worktree" /></label>
@@ -259,7 +259,7 @@
               </details>
               <details><summary>Session lifecycle and native queue</summary>
                 <form id="session-operation-form">
-                  <label>Operation <select name="operation"><option value="session-fork">Fork Codex</option><option value="native-list">List Codex native queue</option><option value="native-add">Add to Codex native queue</option><option value="native-update">Update Codex native queue item</option><option value="native-delete">Delete Codex native queue item</option><option value="native-reorder">Reorder Codex native queue</option><option value="native-start">Start Codex queued input</option><option value="session-lifecycle-status">Claude background status</option><option value="session-lifecycle-logs">Claude background logs</option><option value="session-lifecycle-stop">Stop Claude background session</option><option value="session-lifecycle-resume">Resume Claude background session</option></select></label>
+                  <label>Operation <select name="operation"><option value="session-fork">Fork Codex</option><option value="native-list">List Codex native queue</option><option value="native-add">Add to Codex native queue</option><option value="native-update">Update Codex native queue item</option><option value="native-delete">Delete Codex native queue item</option><option value="native-reorder">Reorder Codex native queue</option><option value="native-start">Start Codex queued input</option><option value="session-lifecycle-status">Claude session status</option><option value="session-lifecycle-logs">Claude session logs</option><option value="session-lifecycle-stop">Stop Claude session</option><option value="session-lifecycle-resume">Resume Claude session</option></select></label>
                   <label>Message <textarea name="message" rows="2"></textarea></label>
                   <label>Queue item ID <input name="id" /></label>
                   <label>Stable client message ID (required when adding) <input name="clientId" /></label>

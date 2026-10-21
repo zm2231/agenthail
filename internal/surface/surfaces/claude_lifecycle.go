@@ -100,10 +100,10 @@ func validateClaudeStart(options surface.SessionStartOptions) error {
 // startRoot is the config root a new conversation runs under, "" for the
 // primary.
 func (c *Claude) startRoot(options surface.SessionStartOptions) (string, error) {
-	if options.Account == "" {
+	if options.ConfigRoot == "" {
 		return "", nil
 	}
-	root, err := surface.ResolveClaudeAccountRoot(c.home, options.Account)
+	root, err := surface.ResolveClaudeConfigRoot(c.home, options.ConfigRoot)
 	if err != nil {
 		return "", surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
 	}
@@ -179,7 +179,7 @@ func (s claudeBackgroundStarter) StartSession(ctx context.Context, options surfa
 		if listErr == nil {
 			for _, record := range records {
 				if record.ID == shortID && record.Kind == "background" && record.SessionID != "" {
-					session := &surface.Session{ID: record.SessionID, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: record.Name, Cwd: record.Cwd, Status: surface.StatusUnknown, HasLocal: true, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
+					session := &surface.Session{ID: record.SessionID, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeBackground, Name: record.Name, Cwd: record.Cwd, Status: surface.StatusUnknown, HasLocal: true, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
 					return session, nil, nil
 				}
 			}
@@ -216,12 +216,14 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "state": record.State}, nil
 		}
 		if action == "resume" {
-			target := surface.Session{ID: record.SessionID, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: record.Cwd}
-			resumed, err := c.reach(ctx, &target)
+			if record.Cwd != "" {
+				session.Cwd = record.Cwd
+			}
+			resumed, err := c.reach(ctx, session)
 			if err != nil {
 				return nil, err
 			}
-			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "unchanged": !resumed, "state": string(target.Status)}, nil
+			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "unchanged": !resumed, "state": string(session.Status)}, nil
 		}
 		output, err := c.backgroundCommand(ctx, root, record.Cwd, action, record.ID)
 		if err != nil {
@@ -241,7 +243,9 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 
 // hostSessionAction runs a lifecycle action on a session the Claude host
 // runs. Stop closes it in the host; the conversation resumes on the next
-// message or resume. The host keeps no background log.
+// message or resume. Logs is what its Claude process wrote to stderr, which
+// the host keeps while the session is open; the conversation itself is the
+// transcript.
 func (c *Claude) hostSessionAction(ctx context.Context, session *surface.Session, action string) (map[string]any, error) {
 	switch action {
 	case "status":
@@ -265,14 +269,25 @@ func (c *Claude) hostSessionAction(ctx context.Context, session *surface.Session
 		}
 		return map[string]any{"sessionId": session.ID, "action": action}, nil
 	case "resume":
-		target := *session
-		resumed, err := c.reach(ctx, &target)
+		resumed, err := c.reach(ctx, session)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"sessionId": session.ID, "action": action, "unchanged": !resumed, "state": string(target.Status)}, nil
+		return map[string]any{"sessionId": session.ID, "action": action, "unchanged": !resumed, "state": string(session.Status)}, nil
+	case "logs":
+		logs, err := c.host.client.Logs(ctx, session.ID)
+		if claudehost.IsCode(err, "not_open") {
+			return nil, fmt.Errorf("Claude session %s is not open in the host, which keeps its process log only while it runs; read the conversation with agenthail last", session.ID)
+		}
+		if claudehost.IsCode(err, "invalid") {
+			return nil, fmt.Errorf("the running Claude host predates session logs; it reports them once the next Agenthail install replaces it: %w", err)
+		}
+		if err != nil {
+			return nil, claudeHostDeliveryError(err)
+		}
+		return map[string]any{"sessionId": session.ID, "action": action, "pid": logs.PID, "output": logs.Stderr}, nil
 	default:
-		return nil, fmt.Errorf("a Claude host session has no background log; read its transcript with agenthail last")
+		return nil, fmt.Errorf("Claude lifecycle action must be status, stop, resume, or logs")
 	}
 }
 

@@ -33,25 +33,25 @@ const (
 )
 
 type Daemon struct {
-	Registry          *registry.Registry
-	claudeAccountsMu  sync.Mutex
-	claudeAccountsAt  time.Time
-	claudeAccountList []surface.ClaudeAccount
-	coordinatorMu     sync.Mutex
-	pollInterval      time.Duration
-	Surfaces          []surface.Surface
-	log               *log.Logger
-	errorMu           sync.Mutex
-	observeErrors     map[string]observedError
-	retryMu           sync.Mutex
-	observeRetry      map[string]observeRetry
-	notificationMu    sync.Mutex
-	notificationArmed map[string]bool
-	waitingLocks      sync.Map
-	announceMu        sync.Mutex
-	announcing        map[string]string
-	announcingRefusal map[int64]int64
-	catalogNudge      chan struct{}
+	Registry             *registry.Registry
+	claudeConfigRootsMu  sync.Mutex
+	claudeConfigRootsAt  time.Time
+	claudeConfigRootList []surface.ClaudeConfigRoot
+	coordinatorMu        sync.Mutex
+	pollInterval         time.Duration
+	Surfaces             []surface.Surface
+	log                  *log.Logger
+	errorMu              sync.Mutex
+	observeErrors        map[string]observedError
+	retryMu              sync.Mutex
+	observeRetry         map[string]observeRetry
+	notificationMu       sync.Mutex
+	notificationArmed    map[string]bool
+	waitingLocks         sync.Map
+	announceMu           sync.Mutex
+	announcing           map[string]string
+	announcingRefusal    map[int64]int64
+	catalogNudge         chan struct{}
 	// catalogSelected, when set, runs after a catalog publication has chosen
 	// what a session waits on and before its row commits.
 	catalogSelected func(sessionID string)

@@ -85,11 +85,11 @@ struct NewSessionSheet: View {
                         if selectedSurface == "codex" {
                             TurnSettingsView(settings: $turnSettings, modelOption: selectedModelOption, enabled: selectedLauncher?.isTerminal != true)
                         }
-                        if selectedSurface == "claude", hosts.claudeAccounts.count > 1 {
+                        if selectedSurface == "claude", hosts.claudeConfigRoots.count > 1 {
                             Section {
-                                Picker("Account", selection: $claude.account) {
-                                    ForEach(hosts.claudeAccounts) { account in
-                                        Text(account.menuLabel).tag(account.choice).selectionDisabled(!account.signedIn)
+                                Picker("Config folder", selection: $claude.configRoot) {
+                                    ForEach(hosts.claudeConfigRoots) { root in
+                                        Text(root.menuLabel).tag(root.choice).selectionDisabled(!root.signedIn)
                                     }
                                 }
                             }
@@ -172,7 +172,7 @@ struct NewSessionSheet: View {
             .onChange(of: selectedLauncher) { _, launcher in
                 guard launcher?.isTerminal == true else { return }
                 turnSettings = .init()
-                claude = ClaudeCreationSettings(account: claude.account)
+                claude = ClaudeCreationSettings(configRoot: claude.configRoot)
             }
         }
     }

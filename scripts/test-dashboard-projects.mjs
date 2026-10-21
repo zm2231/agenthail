@@ -88,3 +88,14 @@ vm.runInContext("renderStartProjects()", picker);
 assert.equal(select.value, "");
 assert.equal(folder.value, "~", "a host without projects keeps the home folder");
 console.log("dashboard projects view tests passed");
+
+const metaStart = source.indexOf("function conversationMeta(");
+const metaEnd = source.indexOf("function surfaceIcon(", metaStart);
+assert(metaStart >= 0 && metaEnd > metaStart);
+const metaContext = { backgroundWaiting: () => false, statusLabel: (status) => status, timeAgo: () => "now" };
+vm.runInNewContext(source.slice(metaStart, metaEnd), metaContext);
+const meta = (configRoot) => vm.runInContext(`conversationMeta(${JSON.stringify({ status: "busy", queueCount: 0, claudeConfigRoot: configRoot })})`, metaContext);
+assert(meta({ name: "work", root: "/w", signedInAs: "work@example.com" }).includes("config folder work · currently signed in as work@example.com"), "a session's config folder shows its current login");
+assert(meta({ name: "default", root: "/d", signedInAs: "me@example.com" }).includes("config folder default · currently signed in as me@example.com"), "the primary folder shows its login too");
+assert(meta({ name: "spare", root: "/s" }).endsWith("config folder spare"), "a folder with no login shows its name");
+assert(!meta({ name: "default", root: "/d" }).includes("config folder"), "the primary folder with no login adds nothing");

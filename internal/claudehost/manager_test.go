@@ -2,6 +2,7 @@ package claudehost_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -447,6 +448,7 @@ func TestDiagnoseSignalsOnlyTheHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	foreign := exec.Command(node, "-e", "setInterval(() => {}, 1000)", "fake-claude.mjs")
+	foreign.Env = append(os.Environ(), claudehosttest.OwnerEnv()...)
 	if err := foreign.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +495,9 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 		t.Run(test.name, func(t *testing.T) {
 			f := claudehosttest.New(t, "")
 			ctx := testContext(t)
-			old := f.StartProtocol2Host(t, "0.2.50")
+			// Its Claudes close their output a while before they exit, so a stop
+			// can find the session ended while its Claude still runs.
+			old := f.StartProtocol2Host(t, "0.2.50", "FAKE_CLAUDE_LINGER_MS=1500")
 			if old.Protocol != 2 {
 				t.Fatalf("shipped host hello = %+v, want protocol 2", old)
 			}
@@ -503,13 +507,27 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 			f.Peer(t, opened.PID, test.prompt)
 			request := listed(t, client, asking, 1).Requests[0]
 			busy := f.Open(t, client, working)
-			if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: working, UUID: uuid.NewString(), Text: "SLOW 1500"}); err != nil {
+			events := make(chan claudehost.Event, 256)
+			subscribed, stop := context.WithCancel(ctx)
+			defer stop()
+			go func() { _, _ = client.Subscribe(subscribed, 0, func(e claudehost.Event) { events <- e }) }()
+			if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: working, UUID: uuid.NewString(), Text: "SLOW 60000"}); err != nil {
 				t.Fatal(err)
 			}
+			waitClaudeRunning(t, events, working)
+			stop()
+			retired := uuid.NewString()
+			exiting := f.Open(t, client, retired)
 
 			client, err := f.Manager(t, "1.1.0").Ensure(ctx)
 			if err != nil {
 				t.Fatalf("Ensure after the update = %v", err)
+			}
+			if err := client.Close(ctx, retired); err != nil {
+				t.Fatalf("stopping a session the protocol 2 host retired = %v", err)
+			}
+			if claudehosttest.Alive(exiting.PID) {
+				t.Fatalf("Claude %d still runs after its retired session was stopped", exiting.PID)
 			}
 			if hello, err := client.Hello(ctx); err != nil || hello.Protocol != claudehost.Protocol || hello.PID == old.PID {
 				t.Fatalf("hello after the update = %+v, %v", hello, err)
@@ -529,10 +547,18 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 			if result, err := client.Send(ctx, claudehost.SendRequest{SessionID: asking, UUID: uuid.NewString(), Text: "after the update", Origin: &claudehost.Origin{Kind: "human"}}); err != nil || !result.Accepted {
 				t.Fatalf("send after the update = %+v, %v", result, err)
 			}
-			if err := client.Close(ctx, working); err != nil {
-				t.Fatalf("close through the protocol 2 host = %v", err)
+			if state := listed(t, client, working, 0).State; state != "busy" {
+				t.Fatalf("the session to stop is %q, want it busy", state)
 			}
-			claudehosttest.WaitFor(t, "the closed session's Claude to exit", func() bool { return !claudehosttest.Alive(busy.PID) })
+			closeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			err = client.Close(closeCtx, working)
+			cancel()
+			if err != nil {
+				t.Fatalf("stopping a busy session through the protocol 2 host = %v", err)
+			}
+			if claudehosttest.Alive(busy.PID) {
+				t.Fatalf("Claude %d still runs after its session was stopped", busy.PID)
+			}
 			if outcome, err := client.Respond(ctx, asking, request.RequestID, test.decision); err != nil || outcome != test.outcome {
 				t.Fatalf("respond after the update = %q, %v; want %s", outcome, err, test.outcome)
 			}
@@ -555,6 +581,63 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 				t.Fatal(err)
 			}
 			claudehosttest.WaitFor(t, "the turn on the new host", func() bool { return len(f.Turns(t, asking)) == 3 })
+		})
+	}
+}
+
+// waitClaudeRunning waits for Claude to report that it runs a turn of the
+// session; a host calls the session busy as soon as it passes a message on.
+func waitClaudeRunning(t *testing.T, events <-chan claudehost.Event, sessionID string) {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case e := <-events:
+			var message struct {
+				Subtype string `json:"subtype"`
+				State   string `json:"state"`
+			}
+			if e.SessionID == sessionID && e.Kind == "sdk" && json.Unmarshal(e.Message, &message) == nil && message.Subtype == "session_state_changed" && message.State == "running" {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("Claude never reported running a turn of %s", sessionID)
+		}
+	}
+}
+
+// An idle-only close, on this build's host and on one that predates it,
+// refuses a session with a turn running and leaves the turn to finish.
+func TestCloseIdleRefusesAWorkingSessionAndLeavesItsTurnRunning(t *testing.T) {
+	for _, protocol2 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("protocol2=%v", protocol2), func(t *testing.T) {
+			f := claudehosttest.New(t, "")
+			ctx := testContext(t)
+			client := claudehost.NewClient(f.Home)
+			if protocol2 {
+				f.StartProtocol2Host(t, "0.2.50")
+			} else {
+				var err error
+				if client, err = f.Manager(t, "1.1.0").Ensure(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			sessionID := uuid.NewString()
+			opened := f.Open(t, client, sessionID)
+			if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: sessionID, UUID: uuid.NewString(), Text: "SLOW 1500"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := client.CloseIdle(ctx, sessionID); !claudehost.IsCode(err, "busy") {
+				t.Fatalf("idle-only close of a working session = %v, want busy", err)
+			}
+			claudehosttest.WaitFor(t, "the turn to finish", func() bool { return slices.Equal(replies(f.Turns(t, sessionID)), []string{"slow:1500"}) })
+			claudehosttest.WaitFor(t, "the session to go idle", func() bool { return listed(t, client, sessionID, 0).State == "idle" })
+			if err := client.CloseIdle(ctx, sessionID); err != nil {
+				t.Fatalf("idle-only close of an idle session = %v", err)
+			}
+			if claudehosttest.Alive(opened.PID) {
+				t.Fatalf("Claude %d still runs after its idle session was closed", opened.PID)
+			}
 		})
 	}
 }

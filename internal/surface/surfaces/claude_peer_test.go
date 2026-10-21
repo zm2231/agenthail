@@ -19,6 +19,35 @@ import (
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
+func TestClaudeLifecycleCapabilitiesFollowTheRuntime(t *testing.T) {
+	adapter := NewClaude(nil, t.TempDir())
+	for _, tc := range []struct {
+		runtime surface.RuntimeKind
+		want    surface.Lifecycle
+	}{
+		{surface.RuntimeClaudeBackground, surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true, Adopt: true}},
+		{surface.RuntimeClaudeHost, surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true}},
+		{surface.RuntimeClaudeCLI, surface.Lifecycle{Adopt: true}},
+	} {
+		session := &surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: tc.runtime, Transport: "uds", Bridge: "session_bridge", Transcript: "/home/test/.claude/projects/-work/s.jsonl", HasLocal: true}
+		if got := adapter.SessionCapabilities(session).Lifecycle; got != tc.want {
+			t.Fatalf("%s lifecycle=%+v, want %+v", tc.runtime, got, tc.want)
+		}
+		adapter.DisableRemoteControl()
+		if got := adapter.SessionCapabilities(session).Lifecycle; got != tc.want {
+			t.Fatalf("%s without Remote Control lifecycle=%+v, want %+v", tc.runtime, got, tc.want)
+		}
+		adapter = NewClaude(nil, t.TempDir())
+	}
+	if adapter.Capabilities().Lifecycle != (surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true, Adopt: true}) {
+		t.Fatal("the adapter advertises less lifecycle than its sessions reach")
+	}
+	var codex surface.Surface = NewCodex("")
+	if codex.Capabilities().Lifecycle != (surface.Lifecycle{}) {
+		t.Fatalf("Codex advertises a lifecycle: %+v", codex.Capabilities().Lifecycle)
+	}
+}
+
 func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	t.Setenv("TZ", "America/New_York")
 	home := t.TempDir()
@@ -56,6 +85,15 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	if sessions[0].Transcript != transcript {
 		t.Fatal("transcript escaped adapter home")
 	}
+	for kind, want := range map[string]surface.RuntimeKind{"bg": surface.RuntimeClaudeBackground, "interactive": surface.RuntimeClaudeCLI} {
+		record["kind"] = kind
+		write(record)
+		sessions, err = adapter.List(context.Background())
+		if err != nil || len(sessions) != 1 || sessions[0].RuntimeKind != want {
+			t.Fatalf("record kind %s: sessions=%+v err=%v, want runtime %s", kind, sessions, err, want)
+		}
+	}
+	delete(record, "kind")
 	record["bridgeSessionId"] = "session_bridge"
 	write(record)
 	resolved, err := adapter.Resolve(context.Background(), "local-id")
@@ -405,6 +443,79 @@ func TestClaudeSocketSessionStreamsOnlyFromALocalTranscript(t *testing.T) {
 	}
 }
 
+func writeLivePeerRecord(t *testing.T, sessionsDir string, pid int, id, cwd string) {
+	t.Helper()
+	command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	start, err := command.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join("/tmp/cc-socks", strconv.Itoa(pid)+".sock")
+	if _, err := os.Lstat(socket); !os.IsNotExist(err) {
+		t.Fatalf("test socket already exists %s: %v", socket, err)
+	}
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	record := map[string]any{"pid": pid, "sessionId": id, "name": id, "cwd": cwd, "status": "idle", "version": "2.1.270", "procStart": string(start), "messagingSocketPath": socket}
+	data, _ := json.Marshal(record)
+	if err := os.WriteFile(filepath.Join(sessionsDir, strconv.Itoa(pid)+".json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClaudeResolveReadsTheStateOfOnlyTheSessionItReturns(t *testing.T) {
+	home := t.TempDir()
+	sessionsDir := filepath.Join(home, ".claude", "sessions")
+	projects := filepath.Join(home, ".claude", "projects", "-fixture")
+	for _, dir := range []string{sessionsDir, projects, "/tmp/cc-socks"} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	worker := exec.Command("/bin/sh", "-c", "sleep 10")
+	if err := worker.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = worker.Process.Kill()
+		_ = worker.Wait()
+	}()
+	transcript := func(id string) string {
+		path := filepath.Join(projects, id+".jsonl")
+		line := `{"type":"user","uuid":"u-` + id + `","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hello"}}` + "\n"
+		if err := os.WriteFile(path, []byte(line), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	const target, other = "7d0c3a4e-0000-4000-8000-00000000a001", "7d0c3a4e-0000-4000-8000-00000000a002"
+	targetPath, otherPath := transcript(target), transcript(other)
+	writeLivePeerRecord(t, sessionsDir, os.Getpid(), target, "/fixture")
+	writeLivePeerRecord(t, sessionsDir, worker.Process.Pid, other, "/fixture")
+	adapter := NewClaude(nil, home)
+	resolved, err := adapter.Resolve(context.Background(), target)
+	if err != nil || resolved.ID != target || resolved.Transcript != targetPath || resolved.Status == "" {
+		t.Fatalf("resolved=%+v err=%v", resolved, err)
+	}
+	if _, read := adapter.taskScans[targetPath]; !read {
+		t.Fatal("the resolved session's background tasks were not read")
+	}
+	if _, read := adapter.taskScans[otherPath]; read {
+		t.Fatal("resolving one session read another's transcript")
+	}
+	listed, err := adapter.List(context.Background())
+	if err != nil || len(listed) != 2 {
+		t.Fatalf("listed=%+v err=%v", listed, err)
+	}
+	if _, read := adapter.taskScans[otherPath]; !read {
+		t.Fatal("a listing reads every session's state")
+	}
+}
+
 func TestClaudeResolveExactIDBeatsCwdContainingIt(t *testing.T) {
 	home := t.TempDir()
 	sessionsDir := filepath.Join(home, ".claude", "sessions")
@@ -422,28 +533,7 @@ func TestClaudeResolveExactIDBeatsCwdContainingIt(t *testing.T) {
 		_ = worker.Process.Kill()
 		_ = worker.Wait()
 	}()
-	write := func(pid int, id, cwd string) {
-		command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
-		command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
-		start, err := command.Output()
-		if err != nil {
-			t.Fatal(err)
-		}
-		socket := filepath.Join("/tmp/cc-socks", strconv.Itoa(pid)+".sock")
-		if _, err := os.Lstat(socket); !os.IsNotExist(err) {
-			t.Fatalf("test socket already exists %s: %v", socket, err)
-		}
-		listener, err := net.Listen("unix", socket)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { listener.Close() })
-		record := map[string]any{"pid": pid, "sessionId": id, "name": id, "cwd": cwd, "status": "idle", "version": "2.1.270", "procStart": string(start), "messagingSocketPath": socket}
-		data, _ := json.Marshal(record)
-		if err := os.WriteFile(filepath.Join(sessionsDir, strconv.Itoa(pid)+".json"), data, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	write := func(pid int, id, cwd string) { writeLivePeerRecord(t, sessionsDir, pid, id, cwd) }
 	const coordinator = "4c1d2f8e-0000-4000-8000-00000000c011"
 	write(os.Getpid(), coordinator, "/fixture")
 	write(worker.Process.Pid, "worker-id", "/scratch/"+coordinator+"/check")

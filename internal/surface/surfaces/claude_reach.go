@@ -178,6 +178,7 @@ func (c *Claude) conversationProcess(ctx context.Context, id string) (*surface.S
 	if best == nil {
 		return nil, alive, nil
 	}
+	c.enrich(ctx, best)
 	return &best.session, true, nil
 }
 

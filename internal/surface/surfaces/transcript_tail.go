@@ -75,6 +75,12 @@ func readRecentJSONLLines(ctx context.Context, path string, limit int, byteLimit
 	return lines, end, nil
 }
 
+type transcriptRecordTooLarge struct{ limit int }
+
+func (e transcriptRecordTooLarge) Error() string {
+	return fmt.Sprintf("transcript record exceeds %d bytes", e.limit)
+}
+
 func scanAppendedJSONL(ctx context.Context, path string, offset int64, limit int, visit func([]byte) error) (int64, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -102,7 +108,7 @@ func scanAppendedJSONL(ctx context.Context, path string, offset int64, limit int
 		for {
 			part, partErr := reader.ReadSlice('\n')
 			if len(line)+len(part) > limit {
-				return current, fmt.Errorf("transcript record exceeds %d bytes", limit)
+				return current, transcriptRecordTooLarge{limit: limit}
 			}
 			line = append(line, part...)
 			readErr = partErr

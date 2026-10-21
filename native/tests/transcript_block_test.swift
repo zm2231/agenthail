@@ -34,7 +34,20 @@ struct TranscriptBlockTest {
         check(kinds == [.user("Read this", files: [notes]), .user("", files: [notes])], "sent files stay with their message, even without text: \(kinds)")
     }
 
+    static func usageLimitNotice() {
+        var limit = item("notice", "Usage limit reached", text: "You've hit your session limit", status: "usage_limit")
+        limit.resetsAt = "2026-10-21T11:00:00Z"
+        let blocks = TranscriptBlock.build([limit, item("done", "done", text: "You've hit your session limit", status: "failed")]).map(\.kind)
+        guard blocks.count == 1, case .notice(let text) = blocks[0] else {
+            check(false, "a usage limit is one notice and its failed end shows nothing: \(blocks)")
+            return
+        }
+        check(text.hasPrefix("You've hit your session limit Resets "), "the notice names when the limit resets: \(text)")
+        check(item("notice", "API error", text: "Overloaded").noticeText == "Overloaded", "a notice without a reset is its text")
+    }
+
     static func main() {
+        usageLimitNotice()
         injected()
         attachedFiles()
         let blocks = TranscriptBlock.build([

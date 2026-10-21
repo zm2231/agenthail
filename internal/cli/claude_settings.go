@@ -10,7 +10,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const claudeSettingsUsage = "usage: agenthail claude settings compact [--root <path|name|email>] [--model <model>] [<tokens|auto|unset>] [--enabled on|off] [--idle on|off] [--json]"
+const claudeSettingsUsage = "usage: agenthail claude settings compact [--root <path|name>] [--model <model>] [<tokens|auto|unset>] [--enabled on|off] [--idle on|off] [--json]"
 
 func (a *App) cmdClaude(args []string) error {
 	positional := stripFlags(args)
@@ -42,7 +42,7 @@ func (a *App) cmdClaude(args []string) error {
 	changing := change.Window != "" || change.Model != "" || change.Enabled != nil || change.Idle != nil
 	var roots []string
 	if choice := flagVal(args, "--root"); choice != "" || changing {
-		root, err := surface.ResolveClaudeAccountRoot(home, choice)
+		root, err := surface.ResolveClaudeConfigRoot(home, choice)
 		if err != nil {
 			return err
 		}

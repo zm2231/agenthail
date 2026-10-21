@@ -55,7 +55,7 @@ func (c *Claude) Respond(ctx context.Context, sess *surface.Session, requestID s
 		return c.prompts.answer(sess.ID, requestID, decision)
 	}
 	defer c.host.forget()
-	outcome, err := c.host.client.Respond(ctx, sess.ID, requestID, claudehost.Decision{Behavior: decision.Behavior, Always: decision.Always, Message: decision.Message, Answers: decision.Answers})
+	outcome, err := c.host.client.Respond(ctx, sess.ID, requestID, claudehost.Decision{Behavior: decision.Behavior, Always: decision.Always, Message: decision.Message, Answers: decision.Answers, Content: decision.Content})
 	switch {
 	case claudehost.IsCode(err, "stale"), claudehost.IsCode(err, "not_open"), claudehost.IsCode(err, "held"), errors.Is(err, claudehost.ErrNotRunning):
 		return "", fmt.Errorf("%w: %s", surface.ErrRequestStale, err)
@@ -92,10 +92,14 @@ func validClaudePermissionMode(mode string) bool {
 }
 
 func claudeRequestKind(kind string) surface.WaitingKind {
-	if kind == "question" {
+	switch kind {
+	case "question":
 		return surface.WaitingQuestion
+	case "input":
+		return surface.WaitingInput
+	default:
+		return surface.WaitingApproval
 	}
-	return surface.WaitingApproval
 }
 
 func claudeRequest(request claudehost.Request) surface.Request {
@@ -111,6 +115,19 @@ func claudeRequest(request claudehost.Request) surface.Request {
 			options = append(options, surface.QuestionOption{Label: option.Label, Description: option.Description})
 		}
 		out.Questions = append(out.Questions, surface.Question{Question: question.Question, Header: question.Header, MultiSelect: question.MultiSelect, Options: options})
+	}
+	if e := request.Elicitation; e != nil {
+		out.Elicitation = &surface.Elicitation{Server: e.Server, Message: e.Message, Mode: e.Mode, URL: e.URL}
+		for _, field := range e.Fields {
+			options := make([]surface.ElicitationOption, 0, len(field.Options))
+			for _, option := range field.Options {
+				options = append(options, surface.ElicitationOption{Value: option.Value, Label: option.Label})
+			}
+			out.Elicitation.Fields = append(out.Elicitation.Fields, surface.ElicitationField{
+				Name: field.Name, Title: field.Title, Description: field.Description, Type: field.Type,
+				Required: field.Required, MultiSelect: field.MultiSelect, Options: options, Default: field.Default,
+			})
+		}
 	}
 	return out
 }

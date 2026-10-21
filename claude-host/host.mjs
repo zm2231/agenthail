@@ -23,6 +23,11 @@ const MAX_IMAGE_BYTES = 5 << 20;
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif']);
 const OPEN_TIMEOUT_MS = 60_000;
 const TAKE_TIMEOUT_MS = 10_000;
+// How long close waits for Claude to stop its turn and exit before it kills
+// the process, and how long it then waits for the killed process to exit. Both
+// together stay well inside the daemon's 20 s deadline for a stop.
+const CLOSE_GRACE_MS = Number(process.env.AGENTHAIL_CLAUDE_HOST_CLOSE_GRACE_MS) || 5_000;
+const KILL_WAIT_MS = 2_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PERMISSION_MODES = new Set(['default', 'manual', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']);
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -52,6 +57,8 @@ const events = [];
 const subscribers = new Set();
 let seq = 0;
 let draining = false;
+// Replies not yet written; a retiring host writes them before it exits.
+let replying = 0;
 let exiting = false;
 let listening = args.socket;
 let retiring = null;
@@ -153,8 +160,12 @@ class Session {
   // waits on, so those requests end here rather than stay listed unanswerable.
   end() {
     this.ended = true;
-    for (const pending of [...this.pending.values()]) pending.settle('ended', { behavior: 'deny', message: WITHDRAWN });
+    this.endRequests();
     this.wake?.();
+  }
+
+  endRequests() {
+    for (const pending of [...this.pending.values()]) pending.settle('ended', pending.refused);
   }
 
   // owe records work Claude was handed while idle and has yet to start a turn
@@ -184,9 +195,15 @@ class Session {
   // A Claude that ended a turn without reporting its states leaves idle a
   // guess that a turn it started itself may still be running, so such a
   // session retires only as a turn result arrives.
+  // settled is Claude idle with no open request, no background task and no
+  // turn owed.
+  settled() {
+    return this.state === 'idle' && this.pending.size === 0 && this.tasks.length === 0 && this.owed.size === 0;
+  }
+
   retireIfDone({ turnEnded = false } = {}) {
     if (this.guessesIdle && !turnEnded) return;
-    if (!draining || this.ended || !this.query || this.state !== 'idle' || this.pending.size > 0 || this.tasks.length > 0 || this.owed.size > 0) return;
+    if (!draining || this.ended || !this.query || !this.settled()) return;
     if (this.measuring) {
       this.measuring.then(() => this.retireIfDone({ turnEnded }));
       return;
@@ -197,24 +214,34 @@ class Session {
   }
 
   // ask holds a permission request or question until a person answers it.
-  // It has no deadline: it ends only with an answer, Claude withdrawing it
-  // (an interrupt or a turn that ended), or the session's end.
   ask(tool, input, options) {
-    const request = permissionRequest(tool, input, options);
-    if (this.ended) return Promise.resolve({ behavior: 'deny', message: WITHDRAWN });
+    return this.hold(permissionRequest(tool, input, options), { input, suggestions: options.suggestions }, options.signal, { behavior: 'deny', message: WITHDRAWN });
+  }
+
+  // elicit holds an MCP server's request for input until a person answers it.
+  // One nobody answered is cancelled, which MCP gives a dismissed request.
+  elicit(elicitation, options) {
+    return this.hold(elicitationRequest(elicitation, options), {}, options.signal, { action: 'cancel' });
+  }
+
+  // hold keeps a request open until a person answers it. It has no deadline:
+  // it ends only with an answer, Claude withdrawing it (an interrupt or a turn
+  // that ended), or the session's end, which settle it as refused.
+  hold(request, held, signal, refused) {
+    if (this.ended) return Promise.resolve(refused);
     return new Promise((resolve) => {
-      const withdraw = () => settle('withdrawn', { behavior: 'deny', message: WITHDRAWN });
+      const withdraw = () => settle('withdrawn', refused);
       const settle = (outcome, result) => {
         if (!this.pending.delete(request.requestId)) return;
-        options.signal?.removeEventListener('abort', withdraw);
+        signal?.removeEventListener('abort', withdraw);
         emit(this.id, 'request_resolved', { requestId: request.requestId, outcome });
         resolve(result);
         this.retireIfDone();
       };
-      this.pending.set(request.requestId, { request, input, suggestions: options.suggestions, settle });
+      this.pending.set(request.requestId, { request, ...held, refused, settle });
       emit(this.id, 'request_opened', { request });
-      if (options.signal?.aborted) withdraw();
-      else options.signal?.addEventListener('abort', withdraw, { once: true });
+      if (signal?.aborted) withdraw();
+      else signal?.addEventListener('abort', withdraw, { once: true });
     });
   }
 
@@ -255,7 +282,9 @@ class Session {
 }
 
 const methods = {
-  hello: () => ({ protocol: PROTOCOL, hostVersion: args.version, pid: process.pid }),
+  // closeStops tells clients that close interrupts a running turn, so they need
+  // not interrupt first.
+  hello: () => ({ protocol: PROTOCOL, hostVersion: args.version, pid: process.pid, closeStops: true }),
   open,
   send,
   interrupt: async ({ sessionId }) => {
@@ -287,10 +316,36 @@ const methods = {
     emit(s.id, 'permission_mode', { permissionMode });
     return s.describe();
   },
-  close: async ({ sessionId }) => {
+  // logs is the tail of what the session's Claude process wrote to stderr,
+  // which the host keeps while the session is open.
+  logs: ({ sessionId }) => {
     const s = session(sessionId);
+    return { sessionId: s.id, pid: s.pid, stderr: s.stderr };
+  },
+  // close stops the session now: it interrupts a running turn, closes
+  // Claude's input and returns once the process has exited, killing it if it
+  // has not within the grace period. A session that has ended but whose
+  // Claude is still exiting is waited for the same way.
+  // With ifIdle it closes only a settled session and refuses one that is
+  // working, deciding in the same step that ends its input.
+  close: async ({ sessionId, ifIdle = false }) => {
+    const s = sessions.get(sessionId) ?? session(sessionId);
+    if (ifIdle && !s.ended && !s.settled()) throw new HostError('busy', `Claude session ${s.id} is working`);
+    const deadline = Date.now() + CLOSE_GRACE_MS;
+    if (!s.ended && s.state !== 'idle') {
+      s.endRequests();
+      await by(deadline, s.query?.interrupt());
+    }
     s.end();
-    await s.done;
+    if (!(await by(deadline, s.done.then(() => true)))) {
+      process.stderr.write(`claude-host: Claude ${s.pid} for session ${s.id} did not exit ${CLOSE_GRACE_MS} ms after close; killing it\n`);
+      killSession(s);
+      if (!(await by(Date.now() + KILL_WAIT_MS, s.done.then(() => true)))) {
+        throw new HostError('stuck', `Claude ${s.pid} for session ${s.id} did not exit after it was killed`);
+      }
+    }
+    // done also settles when Claude ends its output but its process lingers.
+    killSession(s);
     return {};
   },
   list: () => ({
@@ -367,6 +422,7 @@ async function open(params) {
         // asks canUseTool for questions in bypassPermissions.
         allowDangerouslySkipPermissions: true,
         canUseTool: (toolName, input, options) => s.ask(toolName, input, options),
+        onElicitation: (elicitation, options) => s.elicit(elicitation, options),
         spawnClaudeCodeProcess: (options) => spawnDetached(s, options, exited),
       },
     });
@@ -414,10 +470,108 @@ function permissionRequest(tool, input, options) {
   return request;
 }
 
+// elicitationRequest is an MCP server's request for input as a request a
+// person answers: a form of flat fields, or a link to open. MCP limits a
+// form's fields to strings, numbers, booleans and lists of choices.
+function elicitationRequest(elicitation, options) {
+  const mode = elicitation?.mode === 'url' ? 'url' : 'form';
+  const request = {
+    requestId: typeof options.requestId === 'string' && options.requestId ? options.requestId : randomUUID(),
+    toolUseId: '',
+    tool: '',
+    kind: 'input',
+    createdAt: new Date().toISOString(),
+    alwaysAllow: false,
+    elicitation: {
+      server: requestText(elicitation?.serverName),
+      message: requestText(elicitation?.message),
+      mode,
+      ...(mode === 'url' ? { url: typeof elicitation?.url === 'string' ? elicitation.url.slice(0, MAX_REQUEST_INPUT) : '' } : { fields: elicitationFields(elicitation?.requestedSchema) }),
+    },
+  };
+  for (const name of ['title', 'displayName', 'description']) {
+    if (typeof elicitation?.[name] === 'string' && elicitation[name] !== '') request[name] = requestText(elicitation[name]);
+  }
+  return request;
+}
+
+function requestText(value) {
+  return typeof value === 'string' ? value.slice(0, MAX_REQUEST_TEXT) : '';
+}
+
+// elicitationFields lists a form's fields in the order the server gave them.
+// A string with enum or oneOf, or a list of those, offers its choices; a
+// property of a type MCP does not define is taken as text.
+function elicitationFields(schema) {
+  const properties = schema?.properties && typeof schema.properties === 'object' && !Array.isArray(schema.properties) ? schema.properties : {};
+  const required = new Set(Array.isArray(schema?.required) ? schema.required : []);
+  return Object.entries(properties).map(([name, property]) => {
+    const multiSelect = property?.type === 'array';
+    const choices = elicitationChoices(multiSelect ? property?.items : property);
+    const type = multiSelect || choices ? 'string' : ['number', 'integer', 'boolean'].includes(property?.type) ? property.type : 'string';
+    const field = { name, title: requestText(property?.title), description: requestText(property?.description), type, required: required.has(name), multiSelect };
+    if (choices) field.options = choices;
+    if (property?.default !== undefined && fieldAccepts(field, property.default)) field.default = property.default;
+    return field;
+  });
+}
+
+function elicitationChoices(schema) {
+  if (Array.isArray(schema?.enum)) {
+    const labels = Array.isArray(schema.enumNames) ? schema.enumNames : [];
+    return schema.enum.map((value, index) => ({ value: String(value), label: requestText(String(labels[index] ?? value)) }));
+  }
+  const listed = Array.isArray(schema?.oneOf) ? schema.oneOf : Array.isArray(schema?.anyOf) ? schema.anyOf : null;
+  return listed ? listed.map((choice) => ({ value: String(choice?.const ?? ''), label: requestText(String(choice?.title ?? choice?.const ?? '')) })) : null;
+}
+
+function fieldAccepts(field, value) {
+  const values = field.options?.map((option) => option.value);
+  if (field.multiSelect) return Array.isArray(value) && value.every((v) => typeof v === 'string' && (!values || values.includes(v)));
+  switch (field.type) {
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'integer':
+      return Number.isInteger(value);
+    default:
+      return typeof value === 'string' && (!values || values.includes(value));
+  }
+}
+
+// decideInput turns a person's decision into the MCP server's result. A form
+// is accepted with a value for each required field, and only its own fields;
+// a link is accepted with no content, once the person chose to open it.
+function decideInput({ elicitation }, decision) {
+  if (decision?.behavior === 'deny') return { outcome: 'declined', result: { action: 'decline' } };
+  if (decision?.behavior !== 'allow') throw new HostError('invalid', 'decision.behavior must be allow or deny');
+  if (decision.always || decision.answers !== undefined) throw new HostError('invalid', "an MCP server's request takes content, not answers or a rule");
+  if (elicitation.mode === 'url') {
+    if (decision.content !== undefined) throw new HostError('invalid', 'a link takes no content');
+    return { outcome: 'accepted', result: { action: 'accept' } };
+  }
+  const content = decision.content ?? {};
+  if (!content || typeof content !== 'object' || Array.isArray(content)) throw new HostError('invalid', 'content must be an object of field values');
+  for (const name of Object.keys(content)) {
+    if (!elicitation.fields.some((field) => field.name === name)) throw new HostError('invalid', `not a field of this request: ${name}`);
+  }
+  for (const field of elicitation.fields) {
+    const value = content[field.name];
+    if (value === undefined) {
+      if (field.required) throw new HostError('invalid', `no value for: ${field.name}`);
+    } else if (!fieldAccepts(field, value)) {
+      throw new HostError('invalid', `not a value ${field.name} takes: ${JSON.stringify(value)}`);
+    }
+  }
+  return { outcome: 'accepted', result: { action: 'accept', content } };
+}
+
 // decide turns a person's decision into Claude's permission result. A question
 // is answered only with an answer to each of its questions, keyed by the
 // question's text; a free-text answer stands for Claude's own "Other".
 function decide({ request, input, suggestions }, decision) {
+  if (request.kind === 'input') return decideInput(request, decision);
   if (decision?.behavior === 'deny') {
     const message = typeof decision.message === 'string' && decision.message.trim() !== '' ? decision.message.trim() : DECLINED;
     return { outcome: 'denied', result: { behavior: 'deny', message } };
@@ -435,6 +589,7 @@ function decide({ request, input, suggestions }, decision) {
     return { outcome: 'answered', result: { behavior: 'allow', updatedInput: { ...input, answers } } };
   }
   if (decision.answers !== undefined) throw new HostError('invalid', 'only a question takes answers');
+  if (decision.content !== undefined) throw new HostError('invalid', "only an MCP server's request takes content");
   if (decision.always) {
     if (!request.alwaysAllow) throw new HostError('invalid', 'this request offers no rule to always allow');
     return { outcome: 'allowed_always', result: { behavior: 'allow', updatedInput: input, updatedPermissions: suggestions } };
@@ -578,7 +733,7 @@ async function run(s, exit) {
     error = e?.message ?? String(e);
   }
   s.ended = true;
-  for (const pending of [...s.pending.values()]) pending.settle('ended', { behavior: 'deny', message: WITHDRAWN });
+  for (const pending of [...s.pending.values()]) pending.settle('ended', pending.refused);
   const status = await Promise.race([exit, timeout(10_000, 'exit').catch(() => ({ code: null, signal: null }))]);
   sessions.delete(s.id);
   writeState();
@@ -637,12 +792,18 @@ function serve(socket) {
     const { id, method, params = {} } = request;
     if (method === 'subscribe') return subscribe(socket, id, params.after);
     const handler = Object.hasOwn(methods, method) ? methods[method] : null;
+    replying++;
+    let reply;
     try {
       if (!handler) throw new HostError('invalid', `unknown method: ${method}`);
-      socket.write(JSON.stringify({ id, result: await handler(params) }) + '\n');
+      reply = { id, result: await handler(params) };
     } catch (error) {
-      socket.write(JSON.stringify({ id, error: { code: error.code ?? 'internal', message: error.message } }) + '\n');
+      reply = { id, error: { code: error.code ?? 'internal', message: error.message } };
     }
+    socket.write(JSON.stringify(reply) + '\n', () => {
+      replying--;
+      exitWhenDrained();
+    });
   });
 }
 
@@ -729,6 +890,21 @@ function processStart(pid) {
   return ps.status === 0 ? ps.stdout.trim() : '';
 }
 
+// killSession kills a session's Claude process and the processes it started
+// in its group, such as background shells, if Claude still runs; its start
+// time tells it from a later process given the same pid. Claude is spawned
+// detached, so it leads its own process group.
+function killSession(s) {
+  if (!runs({ pid: s.pid, started: s.started })) return;
+  try {
+    process.kill(-s.pid, 'SIGKILL');
+  } catch {
+    try {
+      process.kill(s.pid, 'SIGKILL');
+    } catch {}
+  }
+}
+
 function alive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -755,8 +931,18 @@ function timeout(ms, what) {
   return new Promise((_, reject) => setTimeout(() => reject(new Error(`${what} within ${ms / 1000}s`)), ms).unref());
 }
 
+// by settles with the promise's value, or with false once the deadline passes
+// or the promise fails.
+function by(deadline, promise) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise).catch(() => false),
+    new Promise((resolve) => (timer = setTimeout(() => resolve(false), Math.max(0, deadline - Date.now())))),
+  ]).finally(() => clearTimeout(timer));
+}
+
 function exitWhenDrained() {
-  if (draining && sessions.size === 0) shutdown(0);
+  if (draining && sessions.size === 0 && replying === 0) shutdown(0);
 }
 
 function shutdown(code) {

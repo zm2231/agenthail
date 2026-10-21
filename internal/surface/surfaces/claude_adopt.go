@@ -17,6 +17,15 @@ const (
 	claudeAdoptPollEvery   = 500 * time.Millisecond
 )
 
+// claudeAdoptable reports whether sess runs where AdoptSession moves
+// sessions from: a terminal or a background job. A host session is already
+// in the host. Like the other lifecycle flags it follows the runtime; the
+// conversation's own state, such as its transcript, is checked when the
+// adoption runs.
+func claudeAdoptable(sess *surface.Session) bool {
+	return sess != nil && (sess.RuntimeKind == surface.RuntimeClaudeCLI || sess.RuntimeKind == surface.RuntimeClaudeBackground)
+}
+
 // AdoptSession reopens a conversation in Agenthail's host. The process that
 // holds it is stopped first once it is idle: a host session is closed, a
 // background job stopped, and a terminal process only with the person's
@@ -99,8 +108,9 @@ func (c *Claude) adoptHolder(ctx context.Context, conversation, root string) (*c
 		if pid, _ := record.fields["pid"].(float64); pid <= 0 {
 			continue
 		}
-		holder := &claudeAdoptHolder{record: record.fields, background: str(record.fields, "kind") == "background"}
+		holder := &claudeAdoptHolder{record: record.fields, background: str(record.fields, "kind") == "bg"}
 		if process, ok := c.process(ctx, record, transcripts); ok {
+			c.enrich(ctx, &process)
 			holder.session = process.session
 		} else {
 			pid, _ := record.fields["pid"].(float64)
@@ -148,6 +158,17 @@ func (c *Claude) quiesce(ctx context.Context, conversation, root string, holder 
 	deadline := time.Now().Add(request.Wait)
 	for {
 		reason := adoptBusy(holder)
+		if reason == "" && holder.hosted {
+			// A turn can start after the check, from a send or from Claude
+			// itself, so the host closes the session only if it is still idle.
+			err := c.host.client.CloseIdle(ctx, conversation)
+			switch {
+			case claudehost.IsCode(err, "busy"):
+				reason = "a turn is running"
+			case err != nil && !claudehost.IsCode(err, "not_open"):
+				return "", claudeHostDeliveryError(err)
+			}
+		}
 		if reason == "" {
 			break
 		}
@@ -171,9 +192,6 @@ func (c *Claude) quiesce(ctx context.Context, conversation, root string, holder 
 	var stopped string
 	switch {
 	case holder.hosted:
-		if err := c.host.client.Close(ctx, conversation); err != nil && !claudehost.IsCode(err, "not_open") {
-			return "", claudeHostDeliveryError(err)
-		}
 		stopped = "host"
 	case holder.background:
 		records, err := c.backgroundSessions(ctx, root)

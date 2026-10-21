@@ -770,11 +770,7 @@ func (s *Service) watchDelegation(attemptID, messageID, targetID, turnID string,
 		switch event.Class() {
 		case surface.StreamEventTerminal:
 			if event.Failed() {
-				reason := event.Status
-				if reason == "" {
-					reason = "terminal failure"
-				}
-				streamFailure = errors.New(reason)
+				streamFailure = errors.New(event.FailureReason())
 				cancelStream()
 				return
 			}
@@ -876,11 +872,7 @@ func (s *Service) watchJournalDelegation(ctx context.Context, attemptID, message
 			}
 			if event.Terminal() {
 				if event.Failed() {
-					reason := event.Reason
-					if reason == "" {
-						reason = "selected worker journal turn failed"
-					}
-					s.recordDelegationFailure(attemptID, messageID, target.ID, errors.New(reason))
+					s.recordDelegationFailure(attemptID, messageID, target.ID, errors.New(event.FailureReason()))
 				}
 				return
 			}

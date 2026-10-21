@@ -37,6 +37,7 @@ type Claude struct {
 	goals        map[string]*claudeGoalCursor
 	tasksMu      sync.Mutex
 	taskScans    map[string]*claudeTaskScan
+	taskPrune    sync.Once
 	modelsMu     sync.Mutex
 	modelsCache  []surface.ModelOption
 	modelsAt     time.Time
@@ -65,7 +66,7 @@ func NewClaudeWithRequest(signins signin.Resolver, home string, request ClaudeRe
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
 
 func (c *Claude) RuntimeKinds() []surface.RuntimeKind {
-	return []surface.RuntimeKind{surface.RuntimeClaudeCLI, surface.RuntimeClaudeHost}
+	return []surface.RuntimeKind{surface.RuntimeClaudeCLI, surface.RuntimeClaudeHost, surface.RuntimeClaudeBackground}
 }
 
 func (c *Claude) ObserveClaudeRuns(ctx context.Context) ([]surface.ClaudeRunObservation, error) {
@@ -85,6 +86,7 @@ func (c *Claude) Capabilities() surface.Capabilities {
 		Send: true, Stream: true, Reply: true, GoalSet: true, GoalStatus: true,
 		Compact: true, Model: true, Interrupt: true, Steer: true,
 		Attach: true, Commands: true,
+		Lifecycle: surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true, Adopt: true},
 	}
 }
 
@@ -95,6 +97,10 @@ func (c *Claude) Capabilities() surface.Capabilities {
 // install without Remote Control. Hosted and socket sessions stream only from
 // a local transcript. A goal is set only where the session runs /goal as a
 // command: its peer socket hands the text to the model as a message.
+// Lifecycle follows the runtime: a background job and a host session have
+// status, logs, stop and resume; an interactive session belongs to its
+// terminal. A terminal session or background job can be adopted into the
+// host; a host session already runs there.
 func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities {
 	capabilities := c.Capabilities()
 	capabilities.GoalSet = sess == nil || c.canSendHumanTurn(sess)
@@ -104,11 +110,16 @@ func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities
 		capabilities.Commands = false
 		capabilities.Respond = true
 		capabilities.PermissionMode = true
+		capabilities.Lifecycle = surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true}
 		return capabilities
 	}
 	if sess == nil {
 		return capabilities
 	}
+	if sess.RuntimeKind != surface.RuntimeClaudeBackground {
+		capabilities.Lifecycle = surface.Lifecycle{}
+	}
+	capabilities.Lifecycle.Adopt = claudeAdoptable(sess)
 	if sess.Transport == "uds" {
 		capabilities.Stream = sess.HasLocal && sess.Transcript != ""
 	}
@@ -130,11 +141,11 @@ func (c *Claude) DisableRemoteControl() {
 }
 
 func (c *Claude) Health(ctx context.Context) error {
-	sessions, err := c.List(ctx)
+	processes, err := c.conversations(ctx)
 	native, bridged := false, false
-	for _, session := range sessions {
-		native = native || session.Transport == "uds"
-		bridged = bridged || session.Bridge != ""
+	for _, process := range processes {
+		native = native || process.session.Transport == "uds"
+		bridged = bridged || process.session.Bridge != ""
 	}
 	if c.localOnly {
 		if native {
@@ -415,34 +426,60 @@ func (c *Claude) firstUserMessage(path string) string {
 // without Remote Control carries the same session id; the process that opened
 // it first keeps the id, so the later one never takes over its row.
 func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
-	processes, err := c.processes(ctx)
+	processes, err := c.conversations(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]surface.Session, 0, len(processes))
-	started := make([]float64, 0, len(processes))
+	for _, process := range processes {
+		c.enrich(ctx, &process)
+		out = append(out, process.session)
+	}
+	return out, nil
+}
+
+// conversations returns each conversation's earliest started live process,
+// before its status is read.
+func (c *Claude) conversations(ctx context.Context) ([]claudeProcess, error) {
+	processes, err := c.processes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]claudeProcess, 0, len(processes))
 	owner := map[string]int{}
 	for _, process := range processes {
 		if index, seen := owner[process.session.ID]; seen {
-			if process.startedAt < started[index] {
-				out[index], started[index] = process.session, process.startedAt
+			if process.startedAt < out[index].startedAt {
+				out[index] = process
 			}
 			continue
 		}
 		owner[process.session.ID] = len(out)
-		out = append(out, process.session)
-		started = append(started, process.startedAt)
+		out = append(out, process)
 	}
 	return out, nil
 }
 
 type claudeProcess struct {
 	session   surface.Session
+	record    map[string]any
 	startedAt float64
 }
 
+// enrich reads a process's status, what it waits on, its background tasks and
+// its subagents. A lookup by id, name or process needs none of them, so only
+// the sessions a caller returns are read.
+func (c *Claude) enrich(ctx context.Context, process *claudeProcess) {
+	c.applyRecordStatus(ctx, &process.session, process.record)
+	if process.session.HasLocal {
+		if rollup, err := c.subagents.rollup(ctx, &process.session); err == nil {
+			process.session.Subagents = rollup
+		}
+	}
+}
+
 // processes returns a session for every live Claude process, including
-// processes that share a session id.
+// processes that share a session id, without reading their status.
 func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
 	roots, records, err := c.records()
 	if err != nil {
@@ -601,8 +638,11 @@ func (c *Claude) process(ctx context.Context, record claudeSessionRecord, transc
 	if socket != "" {
 		sess.Transport = "uds"
 	}
-	if hosted {
+	switch {
+	case hosted:
 		sess.RuntimeKind = surface.RuntimeClaudeHost
+	case str(m, "kind") == "bg":
+		sess.RuntimeKind = surface.RuntimeClaudeBackground
 	}
 	if n, ok := m["name"].(string); ok {
 		sess.Name = n
@@ -615,19 +655,13 @@ func (c *Claude) process(ctx context.Context, record claudeSessionRecord, transc
 	if sess.Name == "" {
 		sess.Name = c.firstUserMessage(sess.Transcript)
 	}
-	c.applyRecordStatus(ctx, &sess, m)
-	if sess.HasLocal {
-		if rollup, rollupErr := c.subagents.rollup(ctx, &sess); rollupErr == nil {
-			sess.Subagents = rollup
-		}
-	}
 	startedAt, ok := m["startedAt"].(float64)
 	if ok {
 		sess.StartedAt = time.UnixMilli(int64(startedAt))
 	} else {
 		startedAt = math.MaxFloat64
 	}
-	return claudeProcess{session: sess, startedAt: startedAt}, true
+	return claudeProcess{session: sess, record: m, startedAt: startedAt}, true
 }
 
 // applyRecordStatus takes status and last activity from Claude's session
@@ -752,24 +786,25 @@ func claudePeerStatus(record map[string]any) surface.SessionStatus {
 }
 
 func (c *Claude) Resolve(ctx context.Context, target string) (*surface.Session, error) {
-	sessions, err := c.List(ctx)
+	processes, err := c.conversations(ctx)
 	if err != nil {
 		return nil, err
 	}
 	lower := strings.ToLower(target)
-	var matches []surface.Session
-	var exactMatches []surface.Session
-	for _, s := range sessions {
+	var matches []claudeProcess
+	var exactMatches []claudeProcess
+	for _, process := range processes {
+		s := process.session
 		if strconv.Itoa(s.PID) == target ||
 			s.ID == target ||
 			strings.TrimSuffix(filepath.Base(s.Transcript), ".jsonl") == target {
-			exactMatches = append(exactMatches, s)
+			exactMatches = append(exactMatches, process)
 			continue
 		}
 		if strings.HasPrefix(s.ID, target) ||
 			strings.Contains(strings.ToLower(s.Cwd), lower) ||
 			strings.Contains(strings.ToLower(s.Name), lower) {
-			matches = append(matches, s)
+			matches = append(matches, process)
 		}
 	}
 	if len(exactMatches) > 0 {
@@ -784,11 +819,12 @@ func (c *Claude) Resolve(ctx context.Context, target string) (*surface.Session, 
 	if len(matches) > 1 {
 		var lines []string
 		for _, m := range matches {
-			lines = append(lines, fmt.Sprintf("  pid=%d %s cwd=%s", m.PID, m.ID, m.Cwd))
+			lines = append(lines, fmt.Sprintf("  pid=%d %s cwd=%s", m.session.PID, m.session.ID, m.session.Cwd))
 		}
 		return nil, fmt.Errorf("ambiguous target '%s':\n%s", target, strings.Join(lines, "\n"))
 	}
-	return &matches[0], nil
+	c.enrich(ctx, &matches[0])
+	return &matches[0].session, nil
 }
 
 // processByPID finds a live process that shares its session id with an
@@ -804,8 +840,8 @@ func (c *Claude) processByPID(ctx context.Context, target string) (*surface.Sess
 	}
 	for _, process := range processes {
 		if process.session.PID == pid {
-			session := process.session
-			return &session, true, nil
+			c.enrich(ctx, &process)
+			return &process.session, true, nil
 		}
 	}
 	return nil, false, nil
@@ -955,7 +991,7 @@ func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surfa
 	if state.hasCompleted && state.completed.MessageID != "" {
 		observation.CompletedTurnID = state.completed.MessageID
 		observation.InputTurnID = state.completed.UserID
-		observation.Reply = &surface.ReplyResult{Text: state.completed.Assistant, UserText: state.completed.User, Done: true}
+		observation.Reply = &surface.ReplyResult{Text: state.completed.Assistant, UserText: state.completed.User, Done: true, Error: claudeTurnError(state.completed)}
 	}
 	return observation, nil
 }
@@ -1237,8 +1273,8 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			if uuid != "" && end.TurnID != uuid && end.Status == "" {
 				continue
 			}
-			onEvent(surface.StreamEvent{ID: end.Key, ProviderKey: "timeline:" + end.Key, Version: 1, Operation: "phase", TurnID: end.TurnID, Kind: "done", Status: end.Status, Turn: end.Turn})
-			if uuid != "" && end.TurnID == uuid && end.Status == "" {
+			onEvent(surface.StreamEvent{ID: end.Key, ProviderKey: "timeline:" + end.Key, Version: 1, Operation: "phase", TurnID: end.TurnID, Kind: "done", Status: end.Status, Text: end.Reason, Turn: end.Turn})
+			if uuid != "" && end.TurnID == uuid && (end.Status == "" || end.Status == "failed") {
 				completed = true
 			}
 		}
@@ -1293,7 +1329,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 					version = 1
 				}
 				at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
-				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Files: item.Files, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
+				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, ResetsAt: item.ResetsAt, Attachment: item.Attachment, Files: item.Files, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
 			}
 			return nil
 		})
@@ -1366,6 +1402,9 @@ func claudeStreamTerminal(record map[string]any) (done, ending, interrupted bool
 	case "system":
 		return str(record, "subtype") == "turn_duration", false, false
 	case "assistant":
+		if apiError, _ := record["isApiErrorMessage"].(bool); apiError {
+			return true, false, false
+		}
 		reason := strNested(record, "message", "stop_reason")
 		return false, reason == "end_turn", claudeTerminalInterruption(reason)
 	case "user":

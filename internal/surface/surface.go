@@ -473,7 +473,7 @@ type SessionStartOptions struct {
 	Worktree       string `json:"worktree,omitempty"`
 	Agent          string `json:"agent,omitempty"`
 	PermissionMode string `json:"permissionMode,omitempty"`
-	Account        string `json:"account,omitempty"`
+	ConfigRoot     string `json:"configRoot,omitempty"`
 	Message        string `json:"message"`
 	Cwd            string `json:"cwd,omitempty"`
 	Model          string `json:"model,omitempty"`
@@ -607,6 +607,7 @@ type StreamEvent struct {
 	Sender           string         `json:"sender,omitempty"`
 	Title            string         `json:"title,omitempty"`
 	Status           string         `json:"status,omitempty"`
+	ResetsAt         string         `json:"resetsAt,omitempty"`
 	CallID           string         `json:"callId,omitempty"`
 	Attachment       *Attachment    `json:"attachment,omitempty"`
 	Files            []AttachedFile `json:"files,omitempty"`
@@ -662,6 +663,17 @@ func (e StreamEvent) Failed() bool {
 	default:
 		return e.Kind == "source-error"
 	}
+}
+
+// FailureReason is why a failed terminal event failed: the text a failed
+// turn's end carries, such as an API refusal, else its status.
+func (e StreamEvent) FailureReason() string {
+	for _, reason := range []string{e.Text, e.Status} {
+		if reason != "" {
+			return reason
+		}
+	}
+	return "terminal failure"
 }
 
 func StreamEventDelta(event StreamEvent, previous string) string {
@@ -759,6 +771,19 @@ type Capabilities struct {
 	// Commands is a session that takes Claude Remote Control's context, usage,
 	// status, effort and rename commands.
 	Commands bool `json:"commands"`
+	// Lifecycle is what the session's runtime does to the session itself.
+	Lifecycle Lifecycle `json:"lifecycle"`
+}
+
+// Lifecycle names the operations on a session's process that its runtime
+// supports: report its state, read its log, stop it, start it again, and
+// adopt it, reopening it in Agenthail's host.
+type Lifecycle struct {
+	Status bool `json:"status"`
+	Logs   bool `json:"logs"`
+	Stop   bool `json:"stop"`
+	Resume bool `json:"resume"`
+	Adopt  bool `json:"adopt"`
 }
 
 type SessionCapabilities struct {

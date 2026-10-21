@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -57,6 +60,9 @@ type Hello struct {
 	Protocol    int    `json:"protocol"`
 	HostVersion string `json:"hostVersion"`
 	PID         int    `json:"pid"`
+	// CloseStops is set by hosts whose close interrupts a running turn and
+	// returns once Claude has exited.
+	CloseStops bool `json:"closeStops"`
 }
 
 type OpenRequest struct {
@@ -128,6 +134,33 @@ type Request struct {
 	AgentID        string          `json:"agentId,omitempty"`
 	Input          json.RawMessage `json:"input,omitempty"`
 	Questions      []Question      `json:"questions,omitempty"`
+	Elicitation    *Elicitation    `json:"elicitation,omitempty"`
+}
+
+// Elicitation is an MCP server's request for input: a form of fields, or in
+// url mode a link to open.
+type Elicitation struct {
+	Server  string             `json:"server"`
+	Message string             `json:"message"`
+	Mode    string             `json:"mode"`
+	URL     string             `json:"url,omitempty"`
+	Fields  []ElicitationField `json:"fields,omitempty"`
+}
+
+type ElicitationField struct {
+	Name        string              `json:"name"`
+	Title       string              `json:"title"`
+	Description string              `json:"description"`
+	Type        string              `json:"type"`
+	Required    bool                `json:"required"`
+	MultiSelect bool                `json:"multiSelect"`
+	Options     []ElicitationOption `json:"options,omitempty"`
+	Default     json.RawMessage     `json:"default,omitempty"`
+}
+
+type ElicitationOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
 }
 
 type Question struct {
@@ -149,6 +182,7 @@ type Decision struct {
 	Always   bool              `json:"always,omitempty"`
 	Message  string            `json:"message,omitempty"`
 	Answers  map[string]string `json:"answers,omitempty"`
+	Content  json.RawMessage   `json:"content,omitempty"`
 }
 
 type Origin struct {
@@ -305,8 +339,112 @@ func (c Client) SetPermissionMode(ctx context.Context, sessionID, mode string) (
 	return out, c.sessionCall(ctx, "setPermissionMode", map[string]string{"sessionId": sessionID, "permissionMode": mode}, &out)
 }
 
+// Logs is the tail of what an open session's Claude process wrote to stderr.
+type Logs struct {
+	SessionID string `json:"sessionId"`
+	PID       int    `json:"pid"`
+	Stderr    string `json:"stderr"`
+}
+
+func (c Client) Logs(ctx context.Context, sessionID string) (Logs, error) {
+	var out Logs
+	return out, c.sessionCall(ctx, "logs", map[string]string{"sessionId": sessionID}, &out)
+}
+
+// Close stops a session now, on whichever host runs it, and returns once its
+// Claude has exited.
 func (c Client) Close(ctx context.Context, sessionID string) error {
-	return c.sessionCall(ctx, "close", map[string]string{"sessionId": sessionID}, nil)
+	return c.close(ctx, sessionID, false)
+}
+
+// CloseIdle closes a session only if it is idle when the host gets the close,
+// and otherwise refuses with busy, leaving a turn that started since the
+// caller looked to run.
+func (c Client) CloseIdle(ctx context.Context, sessionID string) error {
+	return c.close(ctx, sessionID, true)
+}
+
+func (c Client) close(ctx context.Context, sessionID string, ifIdle bool) error {
+	err := c.closeOn(ctx, sessionID, ifIdle)
+	if !(IsCode(err, "not_open") || IsCode(err, "held") || errors.Is(err, ErrNotRunning)) {
+		return err
+	}
+	for _, host := range c.Retiring() {
+		retiringErr := host.closeOn(ctx, sessionID, ifIdle)
+		if IsCode(retiringErr, "not_open") || errors.Is(retiringErr, ErrNotRunning) {
+			continue
+		}
+		return retiringErr
+	}
+	return err
+}
+
+func (c Client) closeOn(ctx context.Context, sessionID string, ifIdle bool) error {
+	hello, err := c.Hello(ctx)
+	if err != nil {
+		return err
+	}
+	if hello.CloseStops {
+		return c.call(ctx, "close", map[string]any{"sessionId": sessionID, "ifIdle": ifIdle}, nil)
+	}
+	// Such a host's close waits out a running turn, so a stop interrupts the
+	// turn first. It can answer, or exit without answering, before its Claude
+	// has exited, so the close is done once that Claude has.
+	params := map[string]string{"sessionId": sessionID}
+	listing, err := c.List(ctx)
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(listing.Sessions, func(s Session) bool { return s.SessionID == sessionID })
+	if i < 0 {
+		return &Error{Code: "not_open", Message: fmt.Sprintf("Claude session %s is not open in the host", sessionID)}
+	}
+	listed := listing.Sessions[i]
+	pid := listed.PID
+	started, err := processStart(pid)
+	if err != nil {
+		// Claude has already exited.
+		started = ""
+	}
+	if ifIdle {
+		// The host cannot refuse a close, so a session it lists as working is
+		// refused here; one that starts a turn after this waits it out.
+		if listed.State != "idle" || len(listed.Requests) > 0 {
+			return &Error{Code: "busy", Message: fmt.Sprintf("Claude session %s is working", sessionID)}
+		}
+	} else if err := c.call(ctx, "interrupt", params, nil); err != nil && !IsCode(err, "not_open") {
+		return err
+	}
+	var unknown *OutcomeUnknownError
+	if err := c.call(ctx, "close", params, nil); err != nil && !IsCode(err, "not_open") && !errors.Is(err, ErrNotRunning) && !errors.As(err, &unknown) {
+		return err
+	}
+	return waitExited(ctx, pid, started)
+}
+
+// waitExited waits until the process that had this pid and start time has
+// exited; a later process given the same pid does not count.
+func waitExited(ctx context.Context, pid int, started string) error {
+	for started != "" {
+		if now, err := processStart(pid); err != nil || now != started {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("Claude %d has not exited: %w", pid, ctx.Err())
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return nil
+}
+
+// processStart is the process's start time as ps reports it in UTC. It is
+// claudepeer.ProcessStart, which this package cannot import.
+func processStart(pid int) (string, error) {
+	command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	out, err := command.Output()
+	return strings.TrimSpace(string(out)), err
 }
 
 // sessionCall runs a request for one session on the host that runs it. The

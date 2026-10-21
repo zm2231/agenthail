@@ -42,7 +42,7 @@ type threadCreateRequest struct {
 
 const threadNameMargin = 30 * time.Second
 
-const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree <name>] [--agent <name>] [--permission-mode <mode>] [--account <name|email|dir>] [--host <host>] [--timeout <duration>] [--json]
+const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree <name>] [--agent <name>] [--permission-mode <mode>] [--root <name|dir>] [--host <host>] [--timeout <duration>] [--json]
        agenthail thread fork <target> [--model <model>] [--last-turn <id>] [--alias <name>] [--json]
        agenthail thread <status|stop|resume|logs> <target> [--json]
        agenthail thread <archive|unarchive> <target> [--json]
@@ -241,7 +241,7 @@ func parseThreadCreateRequest(args []string) (threadCreateRequest, error) {
 			continue
 		}
 		switch arg {
-		case "--message", "--cwd", "--alias", "--model", "--approval", "--timeout", "--effort", "--mode", "--service-tier", "--output-schema", "--name", "--worktree", "--agent", "--permission-mode", "--account", "--host":
+		case "--message", "--cwd", "--alias", "--model", "--approval", "--timeout", "--effort", "--mode", "--service-tier", "--output-schema", "--name", "--worktree", "--agent", "--permission-mode", "--root", "--host":
 			i++
 		case "--json":
 		default:
@@ -283,7 +283,7 @@ func parseThreadCreateRequest(args []string) (threadCreateRequest, error) {
 	if err != nil {
 		return request, err
 	}
-	request.options = surface.SessionStartOptions{Message: request.message, Cwd: request.cwd, Model: request.model, ApprovalPolicy: request.approval, TurnOptions: turnOptions, Name: flagVal(args, "--name"), Worktree: flagVal(args, "--worktree"), Agent: flagVal(args, "--agent"), PermissionMode: flagVal(args, "--permission-mode"), Account: flagVal(args, "--account")}
+	request.options = surface.SessionStartOptions{Message: request.message, Cwd: request.cwd, Model: request.model, ApprovalPolicy: request.approval, TurnOptions: turnOptions, Name: flagVal(args, "--name"), Worktree: flagVal(args, "--worktree"), Agent: flagVal(args, "--agent"), PermissionMode: flagVal(args, "--permission-mode"), ConfigRoot: flagVal(args, "--root")}
 	return request, nil
 }
 

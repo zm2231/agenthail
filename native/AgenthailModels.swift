@@ -7,15 +7,18 @@ struct ClaudeCreationSettings {
     var agent = ""
     var effort = ""
     var permissionMode = ""
-    var account = ""
+    var configRoot = ""
     var fields: [String: String] {
-        ["name": name, "worktree": worktree, "agent": agent, "effort": effort, "permissionMode": permissionMode, "account": account].filter { !$0.value.isEmpty }
+        ["name": name, "worktree": worktree, "agent": agent, "effort": effort, "permissionMode": permissionMode, "configRoot": configRoot].filter { !$0.value.isEmpty }
     }
 }
 
-/// A Claude config directory and the account signed into it. The primary
-/// directory is chosen by sending no account.
-struct ClaudeAccountOption: Decodable, Hashable, Identifiable {
+/// A Claude config directory and the login it holds now. The primary
+/// directory is chosen by sending no config root.
+struct ClaudeConfigRootOption: Decodable, Hashable, Identifiable {
+    struct Login: Decodable, Hashable {
+        var email: String? = nil
+    }
     struct Usage: Decodable, Hashable {
         struct Limit: Decodable, Hashable {
             let kind: String
@@ -26,12 +29,12 @@ struct ClaudeAccountOption: Decodable, Hashable, Identifiable {
     }
     let name: String
     let root: String
-    let label: String
     let primary: Bool
-    let signedIn: Bool
+    var signedInAs: Login? = nil
     var usage: Usage? = nil
     var id: String { root }
     var choice: String { primary ? "" : root }
+    var signedIn: Bool { signedInAs != nil }
 
     func exhaustedUntil(now: Date = Date()) -> Date? {
         let parser = ISO8601DateFormatter()
@@ -44,7 +47,7 @@ struct ClaudeAccountOption: Decodable, Hashable, Identifiable {
     }
 
     var menuLabel: String {
-        var parts = [label]
+        var parts = [name, signedInAs.map { "signed in as \($0.email ?? "unknown")" } ?? "signed out"]
         if let until = exhaustedUntil() {
             parts.append("out of usage until \(until.formatted(date: .abbreviated, time: .shortened))")
         }
@@ -98,9 +101,10 @@ final class SessionAdoptController: ObservableObject {
         self.session = session
     }
 
-    var canAdopt: Bool { phase == .ready }
+    var canAdopt: Bool { phase == .ready && session.canAdopt }
 
     func adopt(api: AgenthailAPI, stopTerminal: Bool = false) async {
+        guard session.canAdopt else { return }
         phase = .adopting
         do {
             switch try await api.adoptSession(id: session.id, stopTerminal: stopTerminal) {
@@ -116,11 +120,17 @@ final class SessionAdoptController: ObservableObject {
     func cancelConfirmation() { phase = .ready }
 }
 
-struct SessionAccount: Codable, Hashable {
+/// The config directory holding a Claude session's transcript, with the
+/// login that directory holds now.
+struct SessionConfigRoot: Codable, Hashable {
     let name: String
     let root: String
-    var email: String? = nil
-    let label: String
+    var signedInAs: String? = nil
+
+    var summary: String {
+        guard let signedInAs, !signedInAs.isEmpty else { return name }
+        return "\(name) · currently signed in as \(signedInAs)"
+    }
 }
 
 struct SessionCreationOptions: Decodable {
@@ -129,7 +139,7 @@ struct SessionCreationOptions: Decodable {
     let surfaces: [Surface]
     let projects: [LaunchProject]
     var launchers: [LauncherOption]? = nil
-    var claudeAccounts: [ClaudeAccountOption]? = nil
+    var claudeConfigRoots: [ClaudeConfigRootOption]? = nil
 }
 
 /// A project a new session can start in, most recently active first. The
@@ -174,7 +184,7 @@ struct CreationHostPicker {
     var isLoading: Bool { options == nil && loadError == nil }
     var canStart: Bool { options != nil && (selected.isEmpty || selectedHost?.isAvailable == true) }
     var projects: [LaunchProject] { options?.projects ?? [] }
-    var claudeAccounts: [ClaudeAccountOption] { options?.claudeAccounts ?? [] }
+    var claudeConfigRoots: [ClaudeConfigRootOption] { options?.claudeConfigRoots ?? [] }
 
     mutating func update(daemon: DaemonState?) {
         let paired = daemon?.hosts ?? []
@@ -275,13 +285,14 @@ struct Capabilities: Codable, Hashable {
     var commands = false
     var respond = false
     var permissionMode = false
+    var lifecycle = SessionLifecycle()
 
-    init(send: Bool = false, stream: Bool = false, reply: Bool = false, goal: Bool = false, goalSet: Bool = false, compact: Bool = false, model: Bool = false, interrupt: Bool = false, steer: Bool = false, attach: Bool = false, commands: Bool = false, respond: Bool = false, permissionMode: Bool = false) {
-        (self.send, self.stream, self.reply, self.goal, self.goalSet, self.compact, self.model, self.interrupt, self.steer, self.attach, self.commands, self.respond, self.permissionMode) = (send, stream, reply, goal, goalSet, compact, model, interrupt, steer, attach, commands, respond, permissionMode)
+    init(send: Bool = false, stream: Bool = false, reply: Bool = false, goal: Bool = false, goalSet: Bool = false, compact: Bool = false, model: Bool = false, interrupt: Bool = false, steer: Bool = false, attach: Bool = false, commands: Bool = false, respond: Bool = false, permissionMode: Bool = false, lifecycle: SessionLifecycle = SessionLifecycle()) {
+        (self.send, self.stream, self.reply, self.goal, self.goalSet, self.compact, self.model, self.interrupt, self.steer, self.attach, self.commands, self.respond, self.permissionMode, self.lifecycle) = (send, stream, reply, goal, goalSet, compact, model, interrupt, steer, attach, commands, respond, permissionMode, lifecycle)
     }
 
     // A paired host on an older release omits goalSet, attach, commands,
-    // respond and permissionMode; it cannot do any of them.
+    // respond, permissionMode and lifecycle; it cannot do any of them.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         send = try container.decode(Bool.self, forKey: .send)
@@ -297,7 +308,35 @@ struct Capabilities: Codable, Hashable {
         commands = try container.decodeIfPresent(Bool.self, forKey: .commands) ?? false
         respond = try container.decodeIfPresent(Bool.self, forKey: .respond) ?? false
         permissionMode = try container.decodeIfPresent(Bool.self, forKey: .permissionMode) ?? false
+        lifecycle = try container.decodeIfPresent(SessionLifecycle.self, forKey: .lifecycle) ?? SessionLifecycle()
     }
+}
+
+/// The operations on a session's process that its runtime supports.
+struct SessionLifecycle: Codable, Hashable {
+    var status = false
+    var logs = false
+    var stop = false
+    var resume = false
+    /// The session can be reopened in Agenthail's host.
+    var adopt = false
+
+    init(status: Bool = false, logs: Bool = false, stop: Bool = false, resume: Bool = false, adopt: Bool = false) {
+        (self.status, self.logs, self.stop, self.resume, self.adopt) = (status, logs, stop, resume, adopt)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        status = try container.decodeIfPresent(Bool.self, forKey: .status) ?? false
+        logs = try container.decodeIfPresent(Bool.self, forKey: .logs) ?? false
+        stop = try container.decodeIfPresent(Bool.self, forKey: .stop) ?? false
+        resume = try container.decodeIfPresent(Bool.self, forKey: .resume) ?? false
+        adopt = try container.decodeIfPresent(Bool.self, forKey: .adopt) ?? false
+    }
+
+    /// Any operation on the session's own process. Adoption is offered on its
+    /// own, not in the process operations.
+    var any: Bool { status || logs || stop || resume }
 }
 
 struct SurfaceState: Decodable, Identifiable, Equatable {
@@ -370,11 +409,10 @@ struct SessionState: Codable, Identifiable, Hashable {
     var transport: String? = nil
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
-    var claudeAccount: SessionAccount? = nil
+    var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
-    /// A Claude session Agenthail can open in its host: one a terminal or
-    /// background job runs.
-    var canAdopt: Bool { surface == "claude" && runtimeKind == "claude-cli" && !isReadOnly }
+    /// A session its daemon can open in Agenthail's host.
+    var canAdopt: Bool { capabilities.lifecycle.adopt && !isReadOnly }
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }
@@ -1370,6 +1408,7 @@ struct SessionStreamItem: Decodable {
     let sender: String?
     let title: String?
     let status: String?
+    var resetsAt: String? = nil
     let truncated: Bool
     let truncationReason: String?
     let bodyRef: String?
@@ -1441,10 +1480,18 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     var attachment: SessionAttachment? = nil
     var sender: String? = nil
     var files: [AttachedFile]? = nil
+    var resetsAt: String? = nil
 
     var isPeerMessage: Bool { kind == "message" && role == "peer" }
     var peerSender: String { sender.flatMap { $0.isEmpty ? nil : $0 } ?? "another agent" }
     var peerLabel: String { "From \(peerSender)" }
+
+    /// A notice's text with the time its usage limit resets, when it reports one.
+    var noticeText: String {
+        let text = self.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let resetsAt, let date = ISO8601DateFormatter().date(from: resetsAt) else { return text }
+        return "\(text) Resets \(date.formatted(date: .abbreviated, time: .shortened))."
+    }
 }
 
 struct SessionSearchResponse: Decodable {
@@ -1464,7 +1511,8 @@ struct UploadedAttachment: Decodable, Equatable {
     let bytes: Int64
 }
 
-/// A tool approval or questions an open turn waits on a person for.
+/// A tool approval, questions, or an MCP server's request for input that an
+/// open turn waits on a person for.
 struct SessionRequest: Decodable, Hashable, Identifiable {
     struct Option: Decodable, Hashable {
         let label: String
@@ -1489,12 +1537,13 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
     var questions: [Question]? = nil
     let alwaysAllow: Bool
     var input: String? = nil
+    var elicitation: Elicitation? = nil
 
     var isQuestion: Bool { kind == "question" }
     var summary: String { [title, displayName].compactMap { $0 }.first { !$0.isEmpty } ?? tool }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input
+        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input, elicitation
     }
 
     init(id: String, kind: String, tool: String, title: String? = nil, questions: [Question]? = nil, alwaysAllow: Bool = false, input: String? = nil) {
@@ -1512,6 +1561,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
         reason = try container.decodeIfPresent(String.self, forKey: .reason)
         blockedPath = try container.decodeIfPresent(String.self, forKey: .blockedPath)
         questions = try container.decodeIfPresent([Question].self, forKey: .questions)
+        elicitation = try container.decodeIfPresent(Elicitation.self, forKey: .elicitation)
         alwaysAllow = try container.decodeIfPresent(Bool.self, forKey: .alwaysAllow) ?? false
         if let raw = try container.decodeIfPresent(RequestInput.self, forKey: .input), let data = try? JSONEncoder().encode(raw) {
             input = String(data: data, encoding: .utf8)
@@ -1519,20 +1569,97 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
     }
 }
 
+/// An MCP server's request for input: a form of flat fields, or in url mode a
+/// link for the person to open.
+struct Elicitation: Decodable, Hashable {
+    struct Option: Decodable, Hashable {
+        let value: String
+        let label: String
+    }
+
+    /// One form field. `type` is string, number, integer or boolean; a string
+    /// with options takes one of their values, or with `multiSelect` a list.
+    struct Field: Decodable, Hashable {
+        let name: String
+        let title: String
+        let description: String
+        let type: String
+        let required: Bool
+        let multiSelect: Bool
+        var options: [Option]? = nil
+        var initial: ElicitationValue? = nil
+
+        var label: String { title.isEmpty ? name : title }
+
+        private enum CodingKeys: String, CodingKey {
+            case name, title, description, type, required, multiSelect, options
+            case initial = "default"
+        }
+
+        init(name: String, title: String = "", description: String = "", type: String = "string", required: Bool = false, multiSelect: Bool = false, options: [Option]? = nil, initial: ElicitationValue? = nil) {
+            (self.name, self.title, self.description, self.type, self.required, self.multiSelect, self.options, self.initial) = (name, title, description, type, required, multiSelect, options, initial)
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            name = try container.decode(String.self, forKey: .name)
+            title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
+            description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
+            type = try container.decodeIfPresent(String.self, forKey: .type) ?? "string"
+            required = try container.decodeIfPresent(Bool.self, forKey: .required) ?? false
+            multiSelect = try container.decodeIfPresent(Bool.self, forKey: .multiSelect) ?? false
+            options = try container.decodeIfPresent([Option].self, forKey: .options)
+            initial = try? container.decodeIfPresent(ElicitationValue.self, forKey: .initial)
+        }
+    }
+
+    let server: String
+    let message: String
+    let mode: String
+    var url: String? = nil
+    var fields: [Field]? = nil
+}
+
+/// A value an MCP form field takes.
+enum ElicitationValue: Codable, Hashable, Sendable {
+    case string(String), number(Double), bool(Bool), strings([String])
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(Bool.self) { self = .bool(value) }
+        else if let value = try? container.decode(Double.self) { self = .number(value) }
+        else if let value = try? container.decode(String.self) { self = .string(value) }
+        else { self = .strings(try container.decode([String].self)) }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        case .strings(let value): try container.encode(value)
+        }
+    }
+}
+
 /// A person's answer to a request: a notification button's `choice`, or a
-/// `behavior` with an optional `always`, `message` or `answers`.
+/// `behavior` with an optional `always`, `message`, `answers`, or an MCP
+/// form's `content`.
 struct RequestDecision: Encodable, Hashable, Sendable {
     var choice: String? = nil
     var behavior: String? = nil
     var always: Bool? = nil
     var message: String? = nil
     var answers: [String: String]? = nil
+    var content: [String: ElicitationValue]? = nil
 
     static let allow = RequestDecision(behavior: "allow")
     static let alwaysAllow = RequestDecision(behavior: "allow", always: true)
     static let deny = RequestDecision(behavior: "deny")
     static func answers(_ answers: [String: String]) -> RequestDecision { RequestDecision(behavior: "allow", answers: answers) }
     static func choice(_ choice: String) -> RequestDecision { RequestDecision(choice: choice) }
+    static func content(_ content: [String: ElicitationValue]) -> RequestDecision { RequestDecision(behavior: "allow", content: content) }
 }
 
 /// A session's open requests, oldest first, and the permission mode it runs

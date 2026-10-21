@@ -848,8 +848,16 @@ struct IOSTimelineRow: View {
 	@State private var retainedBody: RetainedBodyResult?
 
     var body: some View {
-        if compactContext, let title = TranscriptContext.title(for: item) {
+        if item.kind == "done" {
+            EmptyView()
+        } else if compactContext, let title = TranscriptContext.title(for: item) {
             ContextRecordRow(title: title, item: item)
+        } else if item.kind == "notice" {
+            Label("\(item.title): \(item.noticeText)", systemImage: item.status == "usage_limit" ? "gauge.with.dots.needle.100percent" : "exclamationmark.triangle")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 4)
+                .textSelection(.enabled)
         } else if item.kind == "message" {
             IOSMessage(label: messageLabel, text: item.text, color: .secondary, timestamp: item.timestamp, files: item.files ?? [])
             if item.truncated { shortened }
@@ -1032,7 +1040,7 @@ struct SessionInspector: View {
                     LabeledContent("Agent", value: detail.session.surface.capitalized)
                     LabeledContent("Status", value: detail.session.waitingOn != nil ? "Waiting on you" : liveSession.isWaitingOnBackground ? "Waiting on background work" : detail.session.status.capitalized)
                     if let value = detail.model { LabeledContent("Model", value: value) }
-                    if let account = liveSession.claudeAccount { LabeledContent("Account", value: account.label) }
+                    if let configRoot = liveSession.claudeConfigRoot { LabeledContent("Config folder", value: configRoot.summary) }
                     if liveSession.canAdopt { Button("Open in Agenthail", systemImage: "arrow.down.app") { adopting = true } }
                     if let value = detail.session.cwd, !value.isEmpty { LabeledContent("Workspace", value: value).textSelection(.enabled) }
                     if let value = detail.session.source { LabeledContent("Source", value: value) }

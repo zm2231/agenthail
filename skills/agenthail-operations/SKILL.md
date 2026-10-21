@@ -78,10 +78,12 @@ overrides in the service; rerun it after changing them. Claude Code state is
 read from `CLAUDE_CONFIG_DIR` when it is set, otherwise `~/.claude`, plus every
 root listed as `claudeConfigDirs` in `~/.agenthail/config.json`. `doctor` shows
 each root. A conversation present in two roots is refused rather than guessed.
-`agenthail accounts [--json]` shows the account signed into each root, its
-cached usage, and which roots share one account. `thread create claude
---account <name|email|dir>` starts the session under that root; `list --wide`
-shows each Claude session's account.
+`agenthail roots [--json]` shows the login each root currently holds and its
+cached usage; a root is a config folder, not an account. `thread create claude
+--root <name|dir>` starts the session in that root; `list --wide` shows the
+config folder each Claude session lives in.
+A `send --reply` that fails with "out of usage" means the session
+hit its limit; wait for the reset it names rather than resending.
 
 `thread adopt <target>` takes a terminal or background Claude conversation
 into the Agenthail host. A busy session is refused (or waited on with
@@ -251,6 +253,9 @@ The session runs in Agenthail's Claude host, which needs the daemon running. It
 has no Remote Control. A tool its permission mode does not allow, and every
 question it asks, waits for a person: `agenthail requests <target>` lists them
 and `agenthail answer <target> allow|always|deny|"answer"` answers the oldest.
+An MCP server's request for input (kind `input`) is answered with
+`agenthail answer <target> allow --answers '{"field":value}'`, `allow` alone
+for a link the person opened, or `deny`.
 Do not answer them yourself unless your user asked you to.
 A Claude CLI in a terminal shows its prompts the same way once
 `agenthail hooks install` has added the PermissionRequest hook; the daemon
@@ -263,8 +268,9 @@ never the identity. `/branch` and `/clear` create a new session without an alias
 After `/branch`, `agenthail whoami` names the branch. Move an alias only with
 `agenthail identify <target> <name>`.
 
-Use `thread status`, `stop` or `resume` with the alias; a host session has no
-`logs`, so read it with `agenthail last`. Preserve unknown launch outcomes;
+Use `thread status`, `logs`, `stop` or `resume` with the alias; a host
+session's `logs` is its Claude process's stderr while it is open, and
+`agenthail last` reads the conversation. Preserve unknown launch outcomes;
 inspect `agenthail list` before retrying.
 Send to a Claude session whose process has ended (a stopped or finished
 background job, or a closed terminal session) like any other session: the send
