@@ -18,7 +18,7 @@ Every set, replace and clear appends a `coordinator_history` row naming who made
 
 ## Commands
 
-- `coordinator set <target>` makes an existing session its project's coordinator and saves its agent, working directory and configured model. The target can be on any paired host (`forge::@builder`): the CLI sends the routed action `coordinator-set` to the host that runs the session, which resolves the project there and records the coordinator. If that host is unreachable, the set is refused and nothing is written anywhere else.
+- `coordinator set <target>` makes an existing session its project's coordinator and saves its agent, working directory and configured model. The target can be on any paired host (`server::@builder`): the CLI sends the routed action `coordinator-set` to the host that runs the session, which resolves the project there and records the coordinator. If that host is unreachable, the set is refused and nothing is written anywhere else.
 - `coordinator new <claude|codex>` saves a coordinator with no session yet; its first message starts it. It uses the project of `--cwd` (default: the current folder) and starts in that folder or the project root. `--host <host> --cwd <folder>` defines it on a paired host, in a folder on that host.
 - `coordinator` shows the current folder's project's coordinator, on any host. `coordinator list` shows every coordinator this host knows, with its host. A local coordinator whose folder now resolves to another project, for example after the repository's origin changed, is marked; `set --replace` moves it. Agenthail does not re-key it.
 - `coordinator clear` removes the coordinator of the current folder's project, on whichever host owns it. Its session and name stay.

@@ -32,17 +32,15 @@ Agenthail updates the app, command line tool, and background service together. I
 
 ## iPhone app
 
-The iPhone and iPad app requires iOS/iPadOS 18 or later. It reaches your Mac privately through Tailscale. It does not make your Mac public on the internet.
+The iPhone and iPad app requires iOS/iPadOS 18 or later. It reaches the computer running Agenthail, a Mac or a Linux machine, privately through Tailscale. It does not make that computer public on the internet.
 
 [Request TestFlight access privately](mailto:zainmer@protonmail.com?subject=Agenthail%20iPhone%20TestFlight%20access&body=Please%20invite%20this%20Apple%20Account%20email%3A%20). An App Store distribution `.ipa` cannot be installed directly on an ordinary iPhone, so GitHub release downloads are not used for the companion app.
 
 To connect it:
 
-1. Install Tailscale on your Mac and iPhone and sign into the same account.
-2. Open **Operations** in Agenthail on the Mac.
-3. Turn on **Private phone access**.
-4. Choose **Pair an iPhone**.
-5. Scan the code with the Agenthail iPhone app.
+1. Install Tailscale on the iPhone and on the computer running Agenthail, and sign both into the same account.
+2. On that computer, open **Operations** in the Mac app and turn on **Private phone access**, then choose **Pair an iPhone**. Without the Mac app, use **Open Agenthail on your phone** in the web dashboard's settings, or run `agenthail dashboard remote`.
+3. Scan the code with the Agenthail iPhone app.
 
 The pairing code expires quickly and works once. You can disconnect a phone from either device.
 

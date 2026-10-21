@@ -55,7 +55,7 @@ final class ScannerController: UIViewController, @preconcurrency AVCaptureMetada
 
     private func showCameraUnavailable() {
         let label = UILabel()
-        label.text = "Camera unavailable. Allow camera access in iOS Settings, or close this screen and paste the pairing link from your Mac."
+        label.text = "Camera unavailable. Allow camera access in iOS Settings, or close this screen and paste the pairing link from Agenthail on your computer."
         label.font = .preferredFont(forTextStyle: .body)
         label.adjustsFontForContentSizeCategory = true
         label.numberOfLines = 0
