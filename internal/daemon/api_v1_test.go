@@ -237,7 +237,7 @@ func TestEventHubReplaysAcrossDaemonRestart(t *testing.T) {
 	if first == 0 {
 		t.Fatal("action did not publish an event")
 	}
-	restarted := dashboardRouter(New(reg, []surface.Surface{fake}))
+	restarted := dashboardRouter(newTestDaemon(t, reg, []surface.Surface{fake}))
 	if response := serveDashboardRequest(restarted, http.MethodPost, "/api/action", `{"action":"alias","sessionId":"from","alias":"after"}`); response.Code != http.StatusOK {
 		t.Fatalf("alias after restart status=%d body=%s", response.Code, response.Body.String())
 	}

@@ -120,7 +120,7 @@ func TestDurableRelayClaudeBurstFailureRestartAndOutbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	restarted := New(reopened, []surface.Surface{target})
+	restarted := newTestDaemon(t, reopened, []surface.Surface{target})
 	restarted.syncRelays(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source)
 	restarted.syncRelays(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source)
 	routes, _ = reopened.ListRoutes()
@@ -187,7 +187,7 @@ func TestGoalRelayWaitsForExplicitCompletionAndReleasesLatestOnce(t *testing.T) 
 		t.Fatal("goal released before final turn")
 	}
 	base.observations[from.ID].ActiveTurnID = ""
-	restarted := New(r, []surface.Surface{fake})
+	restarted := newTestDaemon(t, r, []surface.Surface{fake})
 	restarted.syncRelays(context.Background(), fake, &from)
 	restarted.syncRelays(context.Background(), fake, &from)
 	if r.QueueCount(to.ID) != 1 {

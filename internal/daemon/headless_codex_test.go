@@ -37,12 +37,12 @@ func newHeadlessCodexFixture(t *testing.T, desktopURL string) *headlessCodexFixt
 	}
 	t.Cleanup(func() { r.Close() })
 	fixture.registry = r
-	fixture.restartAgenthail(desktopURL)
+	fixture.restartAgenthail(t, desktopURL)
 	return fixture
 }
 
-func (f *headlessCodexFixture) restartAgenthail(desktopURL string) {
-	f.handler = dashboardRouter(New(f.registry, []surface.Surface{surfaces.NewCodex(desktopURL)}))
+func (f *headlessCodexFixture) restartAgenthail(t *testing.T, desktopURL string) {
+	f.handler = dashboardRouter(newTestDaemon(t, f.registry, []surface.Surface{surfaces.NewCodex(desktopURL)}))
 }
 
 func (f *headlessCodexFixture) action(t *testing.T, body map[string]any) (int, map[string]any) {
@@ -132,14 +132,14 @@ func TestHeadlessCodexSendAfterAgenthailAndDaemonRestartsResumesTheThread(t *tes
 	fixture.lifecycle.Daemon().CompleteTurn(id, "done")
 
 	fixture.lifecycle.Daemon().Unload(id)
-	fixture.restartAgenthail(unreachableDesktop)
+	fixture.restartAgenthail(t, unreachableDesktop)
 	if code, body := fixture.action(t, map[string]any{"action": "send", "sessionId": id, "message": "After an Agenthail restart"}); code != http.StatusOK {
 		t.Fatalf("send status=%d body=%v", code, body)
 	}
 	fixture.lifecycle.Daemon().CompleteTurn(id, "done")
 
 	fixture.lifecycle.Crash()
-	fixture.restartAgenthail(unreachableDesktop)
+	fixture.restartAgenthail(t, unreachableDesktop)
 	if code, body := fixture.action(t, map[string]any{"action": "send", "sessionId": id, "message": "After a daemon crash"}); code != http.StatusOK {
 		t.Fatalf("send status=%d body=%v", code, body)
 	}
@@ -212,7 +212,7 @@ func TestHeadlessCodexDesktopCreatedThreadStaysOnDesktop(t *testing.T) {
 		}
 	}
 
-	fixture.restartAgenthail(unreachableDesktop)
+	fixture.restartAgenthail(t, unreachableDesktop)
 	code, body := fixture.action(t, map[string]any{"action": "send", "sessionId": desktopThread, "message": "Desktop is closed"})
 	encoded, _ := json.Marshal(body)
 	if code == http.StatusOK || !strings.Contains(string(encoded), "agenthail launch codex") {

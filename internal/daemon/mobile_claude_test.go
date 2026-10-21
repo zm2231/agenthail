@@ -31,7 +31,7 @@ func createClaudeSessionInTheHost(t *testing.T, launcher string) {
 	host := claudehosttest.New(t, "")
 	host.Start(t)
 	home := host.Cwd
-	d := New(registry, []surface.Surface{surfaces.NewClaude(nil, host.Home)})
+	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewClaude(nil, host.Home)})
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-options", nil)
 	request.Header.Set("Authorization", "Bearer secret")
@@ -102,7 +102,7 @@ func TestAClaudeCreationWhoseFirstTurnIsUnconfirmedRecordsThatTurnsUUID(t *testi
 	_, registry, _, _, _ := daemonFixture(t)
 	host := claudehosttest.New(t, "")
 	host.Start(t)
-	d := New(registry, []surface.Surface{lostAnswerClaude{surfaces.NewClaude(nil, host.Home)}})
+	d := newTestDaemon(t, registry, []surface.Surface{lostAnswerClaude{surfaces.NewClaude(nil, host.Home)}})
 	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "claude", "message": "first", "cwd": host.Cwd})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/actions", bytes.NewReader(body))
 	request.Header.Set("Authorization", "Bearer secret")
@@ -165,7 +165,7 @@ func TestClaudeCreationThatNeverStartedIsAFailureNotUnknown(t *testing.T) {
 			_, registry, _, _, _ := daemonFixture(t)
 			home := t.TempDir()
 			t.Setenv("AGENTHAIL_CLAUDE_BIN", test.binary(home))
-			d := New(registry, []surface.Surface{surfaces.NewClaude(nil, home)})
+			d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewClaude(nil, home)})
 			body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "claude", "launcher": surface.LauncherClaudeBG, "message": "fixture instruction", "cwd": home})
 			response := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", string(body))
 			var failure struct {

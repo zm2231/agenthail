@@ -170,7 +170,7 @@ func runDaemon(t *testing.T, store *registry.Registry, adapters ...surface.Surfa
 // runDaemonWith is runDaemon with setup applied to the daemon before it runs.
 func runDaemonWith(t *testing.T, store *registry.Registry, setup func(*Daemon), adapters ...surface.Surface) (*runningDaemon, func()) {
 	t.Helper()
-	d := New(store, adapters)
+	d := newTestDaemon(t, store, adapters)
 	d.pollInterval = 10 * time.Millisecond
 	setup(d)
 	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: e2eToken}))
@@ -442,7 +442,7 @@ func TestACallerThatReadTheQuestionBeforeItsAnnouncementFinishedDoesNotAnnounceI
 	if record, err := q.store.RecordWaiting(q.session.ID, &waiting, questionAsked); err != nil || !record.Announce {
 		t.Fatalf("record=%+v err=%v", record, err)
 	}
-	d := New(q.store, []surface.Surface{q.claude})
+	d := newTestDaemon(t, q.store, []surface.Surface{q.claude})
 	d.announceWaiting(q.session, waiting)
 	eventually(t, "the announcement to finish", func() bool {
 		_, announced, err := q.store.WaitingState(q.session.ID)

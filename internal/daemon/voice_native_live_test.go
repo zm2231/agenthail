@@ -76,7 +76,7 @@ func TestNativeVoiceHost(t *testing.T) {
 	if err := reg.RegisterSession(*saved.State.Session); err != nil {
 		t.Fatal(err)
 	}
-	d := New(reg, []surface.Surface{codex})
+	d := newTestDaemon(t, reg, []surface.Surface{codex})
 	dashboard := &dashboardServer{token: uuid.NewString()}
 	handler := d.dashboardHandler(dashboard)
 	defer dashboard.voice.Close()

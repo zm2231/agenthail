@@ -32,7 +32,7 @@ func TestPeerWorkerEnvelopeReachesBusySteerOutbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := &daemonSurface{kind: surface.KindCodex, accepted: true, caps: surface.Capabilities{Send: true, Steer: true}, observations: map[string]*surface.TurnObservation{target.ID: {Status: surface.StatusBusy, ActiveTurnID: "turn-1"}}}
-	d := New(reg, []surface.Surface{fake})
+	d := newTestDaemon(t, reg, []surface.Surface{fake})
 	parentR, parentW := io.Pipe()
 	readyCh := make(chan claudepeer.Ready, 1)
 	workerDone := make(chan error, 1)

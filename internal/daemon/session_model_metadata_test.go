@@ -51,7 +51,7 @@ func TestDashboardSessionMetadataEndpointRetainsProviderMetadata(t *testing.T) {
 	adapter := &timedOutTailSurface{daemonSurface: fake}
 	adapter.caps.Model = true
 	start := time.Now()
-	response := serveSessionMetadata(context.Background(), New(registry, []surface.Surface{adapter}))
+	response := serveSessionMetadata(context.Background(), newTestDaemon(t, registry, []surface.Surface{adapter}))
 
 	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
 		t.Fatalf("session metadata exceeded bounded test budget: %s", elapsed)
@@ -119,7 +119,7 @@ func TestDashboardSessionMetadataReportsIndependentProviderErrors(t *testing.T) 
 			fake.caps.Model = true
 			adapter := &metadataErrorSurface{daemonSurface: fake}
 			test.configure(adapter)
-			response := serveSessionMetadata(context.Background(), New(registry, []surface.Surface{adapter}))
+			response := serveSessionMetadata(context.Background(), newTestDaemon(t, registry, []surface.Surface{adapter}))
 			if response.Code != http.StatusOK {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 			}
@@ -166,7 +166,7 @@ func TestDashboardSessionMetadataReturnsOnRequestCancellationWhenProvidersIgnore
 	_, registry, fake, _, _ := daemonFixture(t)
 	fake.caps.Model = true
 	adapter := &blockingMetadataSurface{daemonSurface: fake, started: make(chan string, 3), release: make(chan struct{}), done: make(chan struct{}, 3)}
-	d := New(registry, []surface.Surface{adapter})
+	d := newTestDaemon(t, registry, []surface.Surface{adapter})
 	requestContext, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
 	defer cancel()
 	started := time.Now()
@@ -208,7 +208,7 @@ func (*nilGoalSurface) GoalGet(context.Context, *surface.Session) (*surface.Goal
 func TestDashboardSessionMetadataExplicitlyClearsNilGoal(t *testing.T) {
 	_, registry, fake, _, _ := daemonFixture(t)
 	fake.caps.Goal, fake.caps.GoalStatus = true, true
-	response := serveSessionMetadata(context.Background(), New(registry, []surface.Surface{&nilGoalSurface{daemonSurface: fake}}))
+	response := serveSessionMetadata(context.Background(), newTestDaemon(t, registry, []surface.Surface{&nilGoalSurface{daemonSurface: fake}}))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"goal":null`) || strings.Contains(response.Body.String(), `"errors"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -223,7 +223,7 @@ func (*reportedGoalSurface) GoalGet(context.Context, *surface.Session) (*surface
 func TestDashboardSessionMetadataReadsAGoalTheSessionOnlyReports(t *testing.T) {
 	_, registry, fake, _, _ := daemonFixture(t)
 	fake.caps.GoalStatus = true
-	response := serveSessionMetadata(context.Background(), New(registry, []surface.Surface{&reportedGoalSurface{daemonSurface: fake}}))
+	response := serveSessionMetadata(context.Background(), newTestDaemon(t, registry, []surface.Surface{&reportedGoalSurface{daemonSurface: fake}}))
 	body := response.Body.String()
 	if response.Code != http.StatusOK || !strings.Contains(body, `"objective":"tests pass"`) || !strings.Contains(body, `"reason":"go test exited 0"`) {
 		t.Fatalf("status=%d body=%s", response.Code, body)
