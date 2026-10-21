@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -55,8 +56,13 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 	if err != nil {
 		return nil, err
 	}
-	if window, ok := c.providerContextWindow(ctx, sess, model); ok {
-		usage.ContextWindow, usage.ContextWindowSource, usage.WindowEstimated = window, ClaudeContextWindowSourceProvider, false
+	if listed, ok := c.hostedContext(ctx, sess, model); ok {
+		if listed.ContextWindow > 0 {
+			usage.ContextWindow, usage.ContextWindowSource, usage.WindowEstimated = listed.ContextWindow, ClaudeContextWindowSourceProvider, false
+		}
+		if reported := listed.AutoCompact; reported != nil {
+			usage.AutoCompact = &surface.AutoCompact{Enabled: reported.Enabled, Window: reported.Window, Threshold: reported.Threshold, DecidedBy: reported.DecidedBy, Source: surface.AutoCompactSourceRuntime}
+		}
 	}
 	if usage.UsedTokens == 0 && usage.ContextWindow == 0 && usage.CompactionCount == 0 {
 		return nil, nil
@@ -191,19 +197,19 @@ func (c *Claude) transcriptContextUsage(ctx context.Context, sess *surface.Sessi
 	return state.usage, state.model, nil
 }
 
-// providerContextWindow is the window Claude reported running the session's
-// main model with, which only the host that runs the session hears. It holds
+// hostedContext is what Claude reported about the context of the session's
+// main model, which only the host that runs the session hears. It holds
 // while that model is the one the transcript last replied with.
-func (c *Claude) providerContextWindow(ctx context.Context, sess *surface.Session, observedModel string) (int64, bool) {
+func (c *Claude) hostedContext(ctx context.Context, sess *surface.Session, observedModel string) (claudehost.Session, bool) {
 	observed := claudeModelBase(observedModel)
 	if !claudeHosted(sess) || observed == "" {
-		return 0, false
+		return claudehost.Session{}, false
 	}
 	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
-	if !ok || listed.ContextWindow <= 0 || observed != claudeModelBase(listed.ContextModel) {
-		return 0, false
+	if !ok || observed != claudeModelBase(listed.ContextModel) {
+		return claudehost.Session{}, false
 	}
-	return listed.ContextWindow, true
+	return listed, true
 }
 
 // observeClaudeCurrentContextWindow reports a 1M window on positive evidence

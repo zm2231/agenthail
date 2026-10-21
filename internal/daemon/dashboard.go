@@ -300,6 +300,7 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/api/history", dashboard.guard(d.hostRouted("sessionId", d.dashboardHistoryHandler)))
 	mux.HandleFunc("/api/action", dashboard.guard(d.idempotentActionHandler(d.hostRoutedAction(d.dashboardActionHandler))))
 	mux.HandleFunc("/api/settings", dashboard.guard(d.dashboardSettingsHandler))
+	mux.HandleFunc("/api/claude/compact-settings", dashboard.guard(d.claudeCompactSettingsHandler))
 	mux.HandleFunc("/api/settings/remote-qr", dashboard.guard(d.dashboardRemoteQRHandler))
 	d.registerAPIV1(mux, dashboard)
 	return d.dashboardHeaders(mux)

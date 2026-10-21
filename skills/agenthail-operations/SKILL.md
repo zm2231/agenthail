@@ -89,6 +89,21 @@ hit its limit; wait for the reset it names rather than resending.
 into the Agenthail host. A busy session is refused (or waited on with
 `--wait`); a terminal is stopped only with `--stop-terminal`.
 
+`agenthail claude settings compact [--json]` shows each root's compaction
+settings as its `settings.json` holds them: `autoCompactWindow`, each
+`modelSettings.<model>.autoCompactWindow`, `autoCompactEnabled` and
+`idleCompaction`, plus `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `DISABLE_AUTO_COMPACT`
+or `DISABLE_COMPACT` when set in this environment, since they take precedence.
+`agenthail claude settings compact [--root <root>] [--model <model>]
+<tokens|auto|unset> [--enabled on|off] [--idle on|off]` edits only those keys
+in that root's file (the primary root by default). Tokens run from 100000 to
+1000000; `auto` is Claude's window for the model; `unset` removes the key. A
+running Claude does not reread the file: a change applies to sessions started
+after it. A hosted session's `contextUsage.autoCompact` is what the running
+Claude reports (`source: "runtime"`), the value actually in effect.
+The roots are those of the machine the command runs on; each host's settings
+are changed on that host or through its daemon.
+
 One unhealthy surface does not block the others. Preserve the `errors` object
 from JSON discovery output when reporting partial availability.
 
@@ -354,7 +369,7 @@ Each exchange in `last --json` and `last --report`, and the reply in
 about that turn:
 
 ```json
-{"v":1,"state":"completed","model":"gpt-5.6-terra","durationMs":4200,"usage":{"inputTokens":250,"cachedInputTokens":140,"cacheWriteTokens":5,"outputTokens":50,"reasoningTokens":10},"contextTokens":180,"compactions":[{"trigger":"threshold","preTokens":1103,"postTokens":200}]}
+{"v":1,"state":"completed","model":"claude-opus-5-5","durationMs":4200,"usage":{"inputTokens":250,"cachedInputTokens":140,"cacheWriteTokens":5,"outputTokens":50,"reasoningTokens":10},"contextTokens":180,"compactions":[{"trigger":"threshold","preTokens":1103,"postTokens":200}]}
 ```
 
 `state` is `completed`, `interrupted`, `failed`, `running` or `unknown`.
