@@ -216,16 +216,16 @@ func (c *Claude) resumeAs(ctx context.Context, conversation, cwd string, options
 		return nil, err
 	}
 	if root == "" {
-		if roots, err := surface.ClaudeConfigRoots(c.home); err == nil {
-			var holding []string
-			for _, candidate := range roots {
-				if claudeTranscriptExists(candidate, conversation) {
-					holding = append(holding, candidate)
-				}
-			}
-			if len(holding) == 1 {
-				root = holding[0]
-			}
+		roots, err := surface.ClaudeConfigRoots(c.home)
+		if err != nil {
+			return nil, err
+		}
+		found := map[string]bool{}
+		for _, candidate := range roots {
+			found[candidate] = claudeTranscriptExists(candidate, conversation)
+		}
+		if root, err = claudeHoldingRoot(conversation, roots, found, nil); err != nil {
+			return nil, err
 		}
 	}
 	// Claude finds no conversation to resume without its transcript, which a

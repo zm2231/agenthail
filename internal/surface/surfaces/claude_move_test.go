@@ -1,12 +1,12 @@
 package surfaces
 
 import (
-	"errors"
 	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
