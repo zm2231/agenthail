@@ -3,6 +3,7 @@
 // control requests and runs each user message as a turn. FAKE_CLAUDE_DIR
 // holds its transcript, one JSON line per turn, which also deduplicates
 // message uuids across processes the way the real transcript does.
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -135,7 +136,7 @@ async function turn(message) {
     const result = await control(request);
     interrupt = null;
     state('running');
-    reply = `elicit:${result.action}:${JSON.stringify(result.content ?? null)}`;
+    reply = `elicit:${result.action ?? result.behavior}:${JSON.stringify(result.content ?? null)}`;
   } else if (text.startsWith('SLOW')) {
     const ms = Number(text.split(' ')[1] ?? 30000);
     const interrupted = await new Promise((resolve) => {
@@ -147,6 +148,14 @@ async function turn(message) {
     });
     interrupt = null;
     reply = interrupted ? 'interrupted' : `slow:${ms}`;
+  } else if (text.startsWith('SHELL')) {
+    // A background shell Claude started, in its process group.
+    const shell = spawn('sleep', ['600'], { stdio: 'ignore' });
+    reply = `shell:${shell.pid}`;
+  } else if (text.startsWith('HANG')) {
+    // A turn that ignores interrupts and the end of its input, like a wedged
+    // Claude: only a kill ends it.
+    await new Promise(() => {});
   } else if (text.startsWith('BACKGROUND')) {
     // A background shell that outlives the turn, like run_in_background.
     const ms = Number(text.split(' ')[1] ?? 30000);
@@ -290,7 +299,8 @@ lines.on('line', (line) => {
 // Claude cannot ask anyone once its input closes: it refuses the prompts
 // still open, finishes its turns and exits. With FAKE_CLAUDE_OUTLIVES_INPUT
 // it keeps running and serving its messaging socket instead, as a Claude
-// whose input an earlier host closed was seen doing.
+// whose input an earlier host closed was seen doing. With FAKE_CLAUDE_LINGER_MS
+// it closes its output and exits that much later.
 lines.on('close', async () => {
   inputClosed = true;
   for (const [id, resolve] of [...pending]) {
@@ -299,6 +309,11 @@ lines.on('close', async () => {
   }
   await turns;
   if (process.env.FAKE_CLAUDE_OUTLIVES_INPUT) return setInterval(() => {}, 1 << 30);
+  const linger = Number(process.env.FAKE_CLAUDE_LINGER_MS);
+  if (linger) {
+    process.stdout.end();
+    return setTimeout(() => process.exit(0), linger);
+  }
   process.exit(0);
 });
 process.on('SIGTERM', () => process.exit(0));

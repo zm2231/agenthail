@@ -23,6 +23,11 @@ const MAX_IMAGE_BYTES = 5 << 20;
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif']);
 const OPEN_TIMEOUT_MS = 60_000;
 const TAKE_TIMEOUT_MS = 10_000;
+// How long close waits for Claude to stop its turn and exit before it kills
+// the process, and how long it then waits for the killed process to exit. Both
+// together stay well inside the daemon's 20 s deadline for a stop.
+const CLOSE_GRACE_MS = Number(process.env.AGENTHAIL_CLAUDE_HOST_CLOSE_GRACE_MS) || 5_000;
+const KILL_WAIT_MS = 2_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PERMISSION_MODES = new Set(['default', 'manual', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']);
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -52,6 +57,8 @@ const events = [];
 const subscribers = new Set();
 let seq = 0;
 let draining = false;
+// Replies not yet written; a retiring host writes them before it exits.
+let replying = 0;
 let exiting = false;
 let listening = args.socket;
 let retiring = null;
@@ -148,8 +155,12 @@ class Session {
   // waits on, so those requests end here rather than stay listed unanswerable.
   end() {
     this.ended = true;
-    for (const pending of [...this.pending.values()]) pending.settle('ended', pending.refused);
+    this.endRequests();
     this.wake?.();
+  }
+
+  endRequests() {
+    for (const pending of [...this.pending.values()]) pending.settle('ended', pending.refused);
   }
 
   // owe records work Claude was handed while idle and has yet to start a turn
@@ -179,9 +190,15 @@ class Session {
   // A Claude that ended a turn without reporting its states leaves idle a
   // guess that a turn it started itself may still be running, so such a
   // session retires only as a turn result arrives.
+  // settled is Claude idle with no open request, no background task and no
+  // turn owed.
+  settled() {
+    return this.state === 'idle' && this.pending.size === 0 && this.tasks.length === 0 && this.owed.size === 0;
+  }
+
   retireIfDone({ turnEnded = false } = {}) {
     if (this.guessesIdle && !turnEnded) return;
-    if (!draining || this.ended || !this.query || this.state !== 'idle' || this.pending.size > 0 || this.tasks.length > 0 || this.owed.size > 0) return;
+    if (!draining || this.ended || !this.query || !this.settled()) return;
     if (this.measuring) {
       this.measuring.then(() => this.retireIfDone({ turnEnded }));
       return;
@@ -259,7 +276,9 @@ class Session {
 }
 
 const methods = {
-  hello: () => ({ protocol: PROTOCOL, hostVersion: args.version, pid: process.pid }),
+  // closeStops tells clients that close interrupts a running turn, so they need
+  // not interrupt first.
+  hello: () => ({ protocol: PROTOCOL, hostVersion: args.version, pid: process.pid, closeStops: true }),
   open,
   send,
   interrupt: async ({ sessionId }) => {
@@ -297,10 +316,30 @@ const methods = {
     const s = session(sessionId);
     return { sessionId: s.id, pid: s.pid, stderr: s.stderr };
   },
-  close: async ({ sessionId }) => {
-    const s = session(sessionId);
+  // close stops the session now: it interrupts a running turn, closes
+  // Claude's input and returns once the process has exited, killing it if it
+  // has not within the grace period. A session that has ended but whose
+  // Claude is still exiting is waited for the same way.
+  // With ifIdle it closes only a settled session and refuses one that is
+  // working, deciding in the same step that ends its input.
+  close: async ({ sessionId, ifIdle = false }) => {
+    const s = sessions.get(sessionId) ?? session(sessionId);
+    if (ifIdle && !s.ended && !s.settled()) throw new HostError('busy', `Claude session ${s.id} is working`);
+    const deadline = Date.now() + CLOSE_GRACE_MS;
+    if (!s.ended && s.state !== 'idle') {
+      s.endRequests();
+      await by(deadline, s.query?.interrupt());
+    }
     s.end();
-    await s.done;
+    if (!(await by(deadline, s.done.then(() => true)))) {
+      process.stderr.write(`claude-host: Claude ${s.pid} for session ${s.id} did not exit ${CLOSE_GRACE_MS} ms after close; killing it\n`);
+      killSession(s);
+      if (!(await by(Date.now() + KILL_WAIT_MS, s.done.then(() => true)))) {
+        throw new HostError('stuck', `Claude ${s.pid} for session ${s.id} did not exit after it was killed`);
+      }
+    }
+    // done also settles when Claude ends its output but its process lingers.
+    killSession(s);
     return {};
   },
   list: () => ({
@@ -747,12 +786,18 @@ function serve(socket) {
     const { id, method, params = {} } = request;
     if (method === 'subscribe') return subscribe(socket, id, params.after);
     const handler = Object.hasOwn(methods, method) ? methods[method] : null;
+    replying++;
+    let reply;
     try {
       if (!handler) throw new HostError('invalid', `unknown method: ${method}`);
-      socket.write(JSON.stringify({ id, result: await handler(params) }) + '\n');
+      reply = { id, result: await handler(params) };
     } catch (error) {
-      socket.write(JSON.stringify({ id, error: { code: error.code ?? 'internal', message: error.message } }) + '\n');
+      reply = { id, error: { code: error.code ?? 'internal', message: error.message } };
     }
+    socket.write(JSON.stringify(reply) + '\n', () => {
+      replying--;
+      exitWhenDrained();
+    });
   });
 }
 
@@ -839,6 +884,21 @@ function processStart(pid) {
   return ps.status === 0 ? ps.stdout.trim() : '';
 }
 
+// killSession kills a session's Claude process and the processes it started
+// in its group, such as background shells, if Claude still runs; its start
+// time tells it from a later process given the same pid. Claude is spawned
+// detached, so it leads its own process group.
+function killSession(s) {
+  if (!runs({ pid: s.pid, started: s.started })) return;
+  try {
+    process.kill(-s.pid, 'SIGKILL');
+  } catch {
+    try {
+      process.kill(s.pid, 'SIGKILL');
+    } catch {}
+  }
+}
+
 function alive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -853,8 +913,18 @@ function timeout(ms, what) {
   return new Promise((_, reject) => setTimeout(() => reject(new Error(`${what} within ${ms / 1000}s`)), ms).unref());
 }
 
+// by settles with the promise's value, or with false once the deadline passes
+// or the promise fails.
+function by(deadline, promise) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise).catch(() => false),
+    new Promise((resolve) => (timer = setTimeout(() => resolve(false), Math.max(0, deadline - Date.now())))),
+  ]).finally(() => clearTimeout(timer));
+}
+
 function exitWhenDrained() {
-  if (draining && sessions.size === 0) shutdown(0);
+  if (draining && sessions.size === 0 && replying === 0) shutdown(0);
 }
 
 function shutdown(code) {
