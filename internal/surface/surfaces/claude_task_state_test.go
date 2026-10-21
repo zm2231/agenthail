@@ -219,6 +219,54 @@ func TestSavedScansOfTranscriptsThatAreGoneAreRemoved(t *testing.T) {
 	}
 }
 
+func TestAScanWhoseTranscriptChangedBeforeItsStartWhileItReadIsReadAgain(t *testing.T) {
+	now := time.Now().UTC()
+	home := t.TempDir()
+	path := writeTranscript(t, launch(t, now, "call-1", "b-1"))
+	c := NewClaude(nil, home)
+	c.transcriptTasks(context.Background(), path)
+	appendTranscript(t, path, launch(t, now, "call-2", "b-2"))
+	scan := c.taskScans[path]
+	from, anchor := scan.Offset, scan.Anchor
+	scan.advance(context.Background())
+	if err := os.WriteFile(path, []byte(launch(t, now, "call-9", "b-9")+launch(t, now, "call-8", "b-8")+launch(t, now, "call-7", "b-7")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settled := c.settleTaskScan(context.Background(), scan, from, anchor)
+	if got, want := taskIDs(settled.Running), fullScan(t, path); !slices.Equal(got, want) || !slices.Equal(got, []string{"b-7", "b-8", "b-9"}) {
+		t.Fatalf("tasks = %v, full scan = %v", got, want)
+	}
+	if _, saved := readSavedScan(t, c, path); saved.Offset != fileSize(t, path) || !slices.Equal(taskIDs(saved.Running), []string{"b-7", "b-8", "b-9"}) {
+		t.Fatalf("saved = %+v", saved)
+	}
+}
+
+func TestATemporaryScanLeftByACrashIsRemovedOnceItIsOld(t *testing.T) {
+	home := t.TempDir()
+	c := NewClaude(nil, home)
+	dir := c.taskStateDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stale, writing := filepath.Join(dir, ".scan-stale"), filepath.Join(dir, ".scan-writing")
+	for _, path := range []string{stale, writing} {
+		if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+	c.transcriptTasks(context.Background(), writeTranscript(t, launch(t, time.Now().UTC(), "call-1", "b-1")))
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale temporary scan: %v", err)
+	}
+	if _, err := os.Stat(writing); err != nil {
+		t.Fatalf("a temporary scan another process may be writing was removed: %v", err)
+	}
+}
+
 func fileSize(t *testing.T, path string) int64 {
 	t.Helper()
 	info, err := os.Stat(path)

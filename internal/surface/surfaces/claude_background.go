@@ -139,28 +139,48 @@ func (c *Claude) transcriptTasks(ctx context.Context, path string) []surface.Bac
 		c.taskScans[path] = scan
 	}
 	scan.file = info
-	read := scan.Offset
+	from, anchor := scan.Offset, scan.Anchor
+	scan.advance(ctx)
+	scan = c.settleTaskScan(ctx, scan, from, anchor)
+	return append([]surface.BackgroundTask(nil), scan.Running...)
+}
+
+// settleTaskScan keeps a scan that has read from offset from only if the
+// transcript before from did not change while it read; otherwise it reads the
+// transcript again from the start.
+func (c *Claude) settleTaskScan(ctx context.Context, scan *claudeTaskScan, from int64, anchor string) *claudeTaskScan {
+	if !scan.unchangedBefore(from, anchor) {
+		file := scan.file
+		scan = newTaskScan(scan.Path)
+		scan.file = file
+		c.taskScans[scan.Path] = scan
+		from, anchor = 0, scan.Anchor
+		scan.advance(ctx)
+	}
+	if scan.Offset != from && scan.unchangedBefore(from, anchor) {
+		c.saveTaskScan(scan)
+	}
+	return scan
+}
+
+func (s *claudeTaskScan) advance(ctx context.Context) {
 	for {
-		next, err := scanAppendedJSONL(ctx, path, scan.Offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
-			scan.read(line)
+		next, err := scanAppendedJSONL(ctx, s.Path, s.Offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+			s.read(line)
 			return nil
 		})
-		scan.Offset = next
+		s.Offset = next
 		if !errors.As(err, new(transcriptRecordTooLarge)) {
-			break
+			return
 		}
 		// A record too large to read cannot be decoded; the scan goes on
 		// after it once it is whole.
-		past, whole := skipJSONLRecord(path, next)
+		past, whole := skipJSONLRecord(s.Path, next)
 		if !whole {
-			break
+			return
 		}
-		scan.Offset = past
+		s.Offset = past
 	}
-	if scan.Offset != read {
-		c.saveTaskScan(scan)
-	}
-	return append([]surface.BackgroundTask(nil), scan.Running...)
 }
 
 func (s *claudeTaskScan) read(line []byte) {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -26,8 +27,12 @@ func (c *Claude) taskStatePath(transcript string) string {
 	return filepath.Join(c.taskStateDir(), hex.EncodeToString(sum[:])+".json")
 }
 
+func newTaskScan(path string) *claudeTaskScan {
+	return &claudeTaskScan{Path: path, Anchor: anchorOf(nil), Calls: map[string]surface.BackgroundTask{}}
+}
+
 func (c *Claude) loadTaskScan(path string, info os.FileInfo) *claudeTaskScan {
-	fresh := &claudeTaskScan{Path: path, Anchor: anchorOf(nil), Calls: map[string]surface.BackgroundTask{}}
+	fresh := newTaskScan(path)
 	raw, err := os.ReadFile(c.taskStatePath(path))
 	if err != nil {
 		return fresh
@@ -50,9 +55,15 @@ func (s *claudeTaskScan) matches(path string) bool {
 	return err == nil && anchor == s.Anchor
 }
 
+func (s *claudeTaskScan) unchangedBefore(offset int64, anchor string) bool {
+	current, err := completionAnchor(s.Path, offset)
+	return err == nil && current == anchor
+}
+
 // A reader sees one whole scan or the one before it. A failed save only
 // makes the next process read more.
 func (c *Claude) saveTaskScan(scan *claudeTaskScan) {
+	// Read after the scan: Claude only appends, so bytes it has read are not rewritten in place.
 	anchor, err := completionAnchor(scan.Path, scan.Offset)
 	if err != nil {
 		return
@@ -84,6 +95,12 @@ func pruneTaskStates(dir string) {
 		return
 	}
 	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".scan-") {
+			if info, err := entry.Info(); err == nil && time.Since(info.ModTime()) > time.Hour {
+				_ = os.Remove(filepath.Join(dir, entry.Name()))
+			}
+			continue
+		}
 		if !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
