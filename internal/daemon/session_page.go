@@ -32,6 +32,7 @@ type journalPageItem struct {
 // and returns the whole exchanges that fit sessionPageBytes; the cursor addresses the next one.
 func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*surface.SessionReadResult, error) {
 	result := &surface.SessionReadResult{Source: "journal", Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}}
+	toItem := d.journalItemReader(sessionID)
 	var collected []journalPageItem
 	var items []surface.TimelineItem
 	var positions, starts []int
@@ -65,7 +66,7 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 		for _, item := range chunk {
 			collectedBytes += item.size
 		}
-		items, positions = journalVisibleItems(collected)
+		items, positions = journalVisibleItems(collected, toItem)
 		starts = surface.ExchangeStarts(items)
 		reachedStart = page.NextBefore == 0 || len(page.Entries) < 200
 		if len(starts) > limit || len(collected) >= sessionPageScanRows || collectedBytes > sessionPageBytes || reachedStart {
@@ -95,7 +96,7 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 			continue
 		}
 		result.UnavailableReason = ""
-		result.Items = append(result.Items, journalTimelineItem(payload))
+		result.Items = append(result.Items, toItem(payload))
 		result.Truncated = result.Truncated || payload.Truncated
 	}
 	result.Exchanges = surface.ExchangesFromItems(result.Items, "journal")
@@ -130,17 +131,54 @@ func journalPageStart(collected []journalPageItem, positions, starts []int, limi
 }
 
 // journalVisibleItems returns the timeline items among entries and each item's entry position.
-func journalVisibleItems(entries []journalPageItem) ([]surface.TimelineItem, []int) {
+func journalVisibleItems(entries []journalPageItem, toItem func(sessionJournalPayload) surface.TimelineItem) ([]surface.TimelineItem, []int) {
 	items := make([]surface.TimelineItem, 0, len(entries))
 	positions := make([]int, 0, len(entries))
 	for index, entry := range entries {
 		if entry.payload.Kind == "source-error" || entry.payload.Op == "remove" {
 			continue
 		}
-		items = append(items, journalTimelineItem(entry.payload))
+		items = append(items, toItem(entry.payload))
 		positions = append(positions, index)
 	}
 	return items, positions
+}
+
+// journalInjectedContextBodyLimit bounds the full body read to tell whether
+// a Codex row journaled as a prompt is injected context.
+const journalInjectedContextBodyLimit = 1 << 20
+
+// journalItemReader returns how a session's journal rows read as timeline
+// items. A Codex user row journaled before injected context was told apart
+// from prompts reads as instructions when its whole body is Codex's injected
+// context; a row whose full body was not retained stays a prompt, since the
+// request Codex appends may be in the part that was dropped.
+func (d *Daemon) journalItemReader(sessionID string) func(sessionJournalPayload) surface.TimelineItem {
+	kind, _, _, err := d.Registry.GetSession(sessionID)
+	if err != nil || kind != string(surface.KindCodex) {
+		return journalTimelineItem
+	}
+	return func(payload sessionJournalPayload) surface.TimelineItem {
+		item := journalTimelineItem(payload)
+		if item.Kind != "message" || item.Role != "user" {
+			return item
+		}
+		body := payload.Body
+		if payload.Truncated {
+			if payload.BodyRef == "" {
+				return item
+			}
+			full, _, err := d.Registry.SessionJournalBody(sessionID, payload.BodyRef, 0, journalInjectedContextBodyLimit)
+			if err != nil {
+				return item
+			}
+			body = string(full)
+		}
+		if surface.IsCodexInjectedContext(body) {
+			item.Kind, item.Role, item.Title = "instructions", "", "Instructions"
+		}
+		return item
+	}
 }
 
 func journalTimelineItem(payload sessionJournalPayload) surface.TimelineItem {

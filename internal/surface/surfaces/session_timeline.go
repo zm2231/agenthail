@@ -750,30 +750,6 @@ func codexTurnError(payload map[string]any) (message, info string) {
 	return message, info
 }
 
-// codexContextFragments mirrors the markers Codex itself uses to tell the
-// context it injects into a user-role message (AGENTS.md, the environment,
-// skills, shell commands it ran for the user, subagent notices) from text a
-// person typed.
-var codexContextFragments = []struct{ open, close string }{
-	{"# AGENTS.md instructions", "</INSTRUCTIONS>"},
-	{"<environment_context>", "</environment_context>"},
-	{"<user_instructions>", "</user_instructions>"},
-	{"<skill>", "</skill>"},
-	{"<user_shell_command>", "</user_shell_command>"},
-	{"<subagent_notification>", "</subagent_notification>"},
-	{"<image_resize_notice>", "</image_resize_notice>"},
-}
-
-func codexContextFragment(text string) bool {
-	text = strings.TrimSpace(text)
-	for _, fragment := range codexContextFragments {
-		if strings.HasPrefix(text, fragment.open) && strings.HasSuffix(text, fragment.close) {
-			return true
-		}
-	}
-	return false
-}
-
 // codexInstructions returns the text of a message that is model input
 // rather than conversation: a developer message, or a user message made
 // only of Codex's injected context. A user message with any typed block
@@ -790,7 +766,7 @@ func codexInstructions(payload map[string]any) (string, bool) {
 			}
 			continue
 		}
-		if str(payload, "role") == "user" && !codexContextFragment(text) {
+		if str(payload, "role") == "user" && !surface.IsCodexInjectedContext(text) {
 			return "", false
 		}
 		parts = append(parts, text)

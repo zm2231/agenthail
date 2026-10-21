@@ -328,3 +328,40 @@ func TestReadJournalPageCountsCodexTurnsNotTheirMessages(t *testing.T) {
 		}
 	}
 }
+
+func TestJournaledCodexContextFromBeforeInstructionsReadsAsInstructions(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	at := time.Date(2026, 10, 21, 10, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
+	agents := "# AGENTS.md instructions for /work\n\n<INSTRUCTIONS>\n" + strings.Repeat("Read the code before editing.\n", 1200) + "</INSTRUCTIONS>"
+	environment := "<environment_context>\n  <cwd>/work</cwd>\n</environment_context>"
+	long, err := sessionJournalEntry(from.ID, sessionJournalPayload{ItemID: "t1-agents", Op: "upsert", Version: 1, Kind: "message", Role: "user", Body: agents + "\n\n" + environment, TurnID: "t1", TS: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.AppendSessionJournalEntry(long, registry.SessionJournalRetention{Count: 4096, Bytes: 64 << 20}); err != nil {
+		t.Fatal(err)
+	}
+	appendJournalPayloads(t, r, from.ID,
+		sessionJournalPayload{ItemID: "t1-environment", Kind: "message", Role: "user", Body: environment, TurnID: "t1", TS: at},
+		sessionJournalPayload{ItemID: "t1-unretained", Kind: "message", Role: "user", Body: "# AGENTS.md instructions for /work\n\n<INSTRUCTIONS>\nBe", Truncated: true, TruncationReason: "full_body_not_retained", TurnID: "t1", TS: at},
+		sessionJournalPayload{ItemID: "t1-prompt", Kind: "message", Role: "user", Body: "Fix the build.", TurnID: "t1", TS: at},
+		sessionJournalPayload{ItemID: "t1-answer", Kind: "message", Role: "assistant", Body: "Fixed.", TurnID: "t1", TS: at},
+		sessionJournalPayload{ItemID: "t1-done", Kind: "done", TurnID: "t1", TS: at},
+	)
+	page, err := d.readJournalPage(from.ID, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := map[string]string{}
+	for _, item := range page.Items {
+		kinds[item.ID] = item.Kind + "/" + item.Role
+	}
+	for id, want := range map[string]string{"t1-agents": "instructions/", "t1-environment": "instructions/", "t1-unretained": "message/user", "t1-prompt": "message/user"} {
+		if kinds[id] != want {
+			t.Fatalf("%s read as %q, want %q (items %v)", id, kinds[id], want, kinds)
+		}
+	}
+	if len(page.Exchanges) != 1 || !strings.HasSuffix(page.Exchanges[0].User, "Fix the build.") || strings.Contains(page.Exchanges[0].User, "environment_context") || page.Exchanges[0].Assistant != "Fixed." {
+		t.Fatalf("exchanges=%+v", page.Exchanges)
+	}
+}

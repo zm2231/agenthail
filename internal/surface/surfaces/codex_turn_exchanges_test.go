@@ -84,15 +84,22 @@ func TestCodexUserMessageWithATypedBlockStaysAPrompt(t *testing.T) {
 	if _, ok := codexInstructions(quoted); ok {
 		t.Fatal("a typed question naming a marker read as instructions")
 	}
+	items := codexTimelineItems(map[string]any{"type": "response_item", "payload": map[string]any{"type": "message", "role": "user", "content": mixed["content"]}})
+	if len(items) != 1 || items[0].Kind != "message" || items[0].Role != "user" || !strings.Contains(items[0].Text, "Fix the build.") {
+		t.Fatalf("mixed message items=%+v", items)
+	}
 	request := map[string]any{"role": "user", "content": []any{
 		map[string]any{"type": "input_text", "text": "# AGENTS.md instructions for /project\n\n## My request:\nFix the app."},
 	}}
 	if _, ok := codexInstructions(request); ok {
 		t.Fatal("instructions carrying the request read as instructions")
 	}
-	items := codexTimelineItems(map[string]any{"type": "response_item", "payload": map[string]any{"type": "message", "role": "user", "content": mixed["content"]}})
-	if len(items) != 1 || items[0].Kind != "message" || items[0].Role != "user" || !strings.Contains(items[0].Text, "Fix the build.") {
-		t.Fatalf("mixed message items=%+v", items)
+	enclosed := map[string]any{"role": "user", "content": []any{
+		map[string]any{"type": "input_text", "text": "# AGENTS.md instructions for /project\n\n<INSTRUCTIONS>\nBe brief.\n\n## My request:\nFix the app.\n</INSTRUCTIONS>"},
+	}}
+	items = codexTimelineItems(map[string]any{"type": "response_item", "payload": map[string]any{"type": "message", "role": "user", "content": enclosed["content"]}})
+	if len(items) != 1 || items[0].Kind != "message" || items[0].Role != "user" {
+		t.Fatalf("a request inside the instructions block was hidden: %+v", items)
 	}
 }
 
