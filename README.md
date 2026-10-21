@@ -212,11 +212,11 @@ The report is the agent's own claim; check the commits before you rely on them. 
 To hand work on only when an agent reports, filter a relay on the report. The first relay passes a finished report to the reviewer; the second tells the lead when the builder is blocked, failed or stopped partway:
 
 ```bash
-agenthail relay add @builder @reviewer '(?:\A|\n)`{3}agenthail-report\n\{[^\n]*"status" *: *"done"[^\n]*\}\n`{3}\s*\z'
-agenthail relay add @builder @lead '(?:\A|\n)`{3}agenthail-report\n\{[^\n]*"status" *: *"(?:blocked|failed|partial)"[^\n]*\}\n`{3}\s*\z'
+agenthail relay add @builder @reviewer '(?:\A|\n)`{3}agenthail-report\n[ \t\r]*\{[^\n]*"status"[ \t\r]*:[ \t\r]*"done"[^\n]*\}[ \t\r]*\n`{3}[ \t\r\n]*\z'
+agenthail relay add @builder @lead '(?:\A|\n)`{3}agenthail-report\n[ \t\r]*\{[^\n]*"status"[ \t\r]*:[ \t\r]*"(?:blocked|failed|partial)"[^\n]*\}[ \t\r]*\n`{3}[ \t\r\n]*\z'
 ```
 
-Each filter matches only a report that ends the reply, so a report quoted mid-reply or shown inside another code block does not fire it. The filter checks where the report is and its status, not the other rules; the receiver checks the rest with `agenthail reply @builder --report`.
+Each filter matches only a report that ends the reply, so a report quoted mid-reply, or shown inside a longer code block that closes after it, does not fire it. The filter checks where the report is and finds `"status"` anywhere on its line, including inside a nested value; it does not check the other rules. The receiver checks the report with `agenthail reply @builder --report` before acting on it.
 
 ## Give each project a coordinator
 

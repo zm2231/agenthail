@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	relayAnyReport       = "(?:\\A|\\n)`{3}agenthail-report\\n\\{[^\\n]*\\}\\n`{3}\\s*\\z"
-	relayDoneReport      = "(?:\\A|\\n)`{3}agenthail-report\\n\\{[^\\n]*\"status\" *: *\"done\"[^\\n]*\\}\\n`{3}\\s*\\z"
-	relayAttentionReport = "(?:\\A|\\n)`{3}agenthail-report\\n\\{[^\\n]*\"status\" *: *\"(?:blocked|failed|partial)\"[^\\n]*\\}\\n`{3}\\s*\\z"
+	relayAnyReport       = "(?:\\A|\\n)`{3}agenthail-report\\n[ \\t\\r]*\\{[^\\n]*\\}[ \\t\\r]*\\n`{3}[ \\t\\r\\n]*\\z"
+	relayDoneReport      = "(?:\\A|\\n)`{3}agenthail-report\\n[ \\t\\r]*\\{[^\\n]*\"status\"[ \\t\\r]*:[ \\t\\r]*\"done\"[^\\n]*\\}[ \\t\\r]*\\n`{3}[ \\t\\r\\n]*\\z"
+	relayAttentionReport = "(?:\\A|\\n)`{3}agenthail-report\\n[ \\t\\r]*\\{[^\\n]*\"status\"[ \\t\\r]*:[ \\t\\r]*\"(?:blocked|failed|partial)\"[^\\n]*\\}[ \\t\\r]*\\n`{3}[ \\t\\r\\n]*\\z"
 )
 
 func TestRelayReportFiltersMatchOnlyAReportThatEndsTheReply(t *testing.T) {
@@ -30,6 +30,10 @@ func TestRelayReportFiltersMatchOnlyAReportThatEndsTheReply(t *testing.T) {
 		{"report spaced and followed by whitespace", "Done.\n" + block(`{"v": 1, "status": "partial", "stop": "gaveUp", "reason": "Ran out of time"}`) + "\n  \n", true, false, true},
 		{"failed report", "Stopped.\n\n" + block(`{"v":1,"status":"failed","stop":"gaveUp","reason":"The build server is down"}`), true, false, true},
 		{"escaped status inside a blocked reason", "Stuck.\n\n" + block(`{"v":1,"status":"blocked","stop":"needsInput","reason":"the log said \"status\":\"done\" earlier"}`), true, false, true},
+		{"padded report line and fence", "Done.\n```agenthail-report\n  {\"v\":1,\"status\":\"done\",\"stop\":\"complete\"} \r\n``` \r\n", true, true, false},
+		{"tab around the status colon", "Done.\n\n" + block("{\"v\":1,\"status\"\t:\t\"done\",\"stop\":\"complete\"}"), true, true, false},
+		{"form feed after the fence", "Done.\n\n" + done + "\f", false, false, false},
+		{"nested status key matches anywhere on the line", "Stuck.\n\n" + block(`{"v":1,"status":"blocked","stop":"needsInput","reason":"x","prev":{"status":"done"}}`), true, true, true},
 		{"report quoted mid-reply", "An example of that format:\n\n" + done + "\n\nThe fields describe the real state of the task.", false, false, false},
 		{"report inside a longer fence at the end", "To show the format:\n\n````markdown\n" + done + "\n````", false, false, false},
 		{"report inside a tilde fence at the end", "To show the format:\n\n~~~\n" + done + "\n~~~", false, false, false},
