@@ -136,7 +136,7 @@ async function turn(message) {
     const result = await control(request);
     interrupt = null;
     state('running');
-    reply = `elicit:${result.action}:${JSON.stringify(result.content ?? null)}`;
+    reply = `elicit:${result.action ?? result.behavior}:${JSON.stringify(result.content ?? null)}`;
   } else if (text.startsWith('SLOW')) {
     const ms = Number(text.split(' ')[1] ?? 30000);
     const interrupted = await new Promise((resolve) => {

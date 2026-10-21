@@ -406,6 +406,21 @@ test("an MCP server's link is accepted without content, and a request is decline
   c.close();
 });
 
+test("closing a session with an MCP server's request open cancels it for Claude", async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const { id, request } = await openPending(f, c, 'ELICIT');
+  await c.call('close', { sessionId: id });
+  assert.equal((await c.event((e) => e.kind === 'request_resolved' && e.requestId === request.requestId)).outcome, 'ended');
+  // Close interrupts the turn as it ends the request, so Claude has either
+  // been told cancel or cancelled the request on the interrupt; it is never
+  // answered.
+  assert.match(transcript(f, id)[0].reply, /^elicit:(cancel|cancelled):null$/);
+  c.close();
+});
+
 test('a request answered for another session or one never asked is refused', async () => {
   const f = fixture();
   await startHost(f);
