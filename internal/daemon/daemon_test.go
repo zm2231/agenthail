@@ -28,6 +28,7 @@ type daemonSurface struct {
 	sessions       map[string]surface.Session
 	observations   map[string]*surface.TurnObservation
 	accepted       bool
+	notice         string
 	nilResult      bool
 	sent           []string
 	steered        []string
@@ -217,7 +218,7 @@ func (f *daemonSurface) Send(_ context.Context, session *surface.Session, messag
 	if turnID == "" {
 		turnID = "turn"
 	}
-	return &surface.SendResult{UUID: turnID, Accepted: f.accepted}, nil
+	return &surface.SendResult{UUID: turnID, Accepted: f.accepted, Notice: f.notice}, nil
 }
 func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
 	if f.rejectBusy && session.Status == surface.StatusBusy {
@@ -235,7 +236,7 @@ func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Sess
 	if turnID == "" {
 		turnID = "turn"
 	}
-	return &surface.SendResult{UUID: turnID, Accepted: f.accepted}, nil
+	return &surface.SendResult{UUID: turnID, Accepted: f.accepted, Notice: f.notice}, nil
 }
 func (f *daemonSurface) StartSession(_ context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
 	f.startOptions = append(f.startOptions, options)
@@ -1181,4 +1182,23 @@ func TestModelControlCarriesThePendingChoiceAsAField(t *testing.T) {
 	if result.Detail != "" || !strings.HasPrefix(result.Output, "gpt-sol applies from the next turn") {
 		t.Fatalf("output=%q detail=%q", result.Output, result.Detail)
 	}
+}
+
+func TestQueuedSendRecordsTheModelNoticeItsTurnReported(t *testing.T) {
+	d, r, fake, _, to := daemonFixture(t)
+	fake.notice = "Dropped the pending model gpt-sol: the thread moved from gpt-luna to gpt-terra after it was chosen, so this turn runs on gpt-terra."
+	if err := r.QueueMessage(to.ID, "queued after a model change"); err != nil {
+		t.Fatal(err)
+	}
+	d.drainMessageQueue(context.Background(), fake, &to)
+	history, err := r.ListHistory(20, to.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range history {
+		if entry.Kind == "model" && entry.Message == fake.notice {
+			return
+		}
+	}
+	t.Fatalf("no model notice in history: %+v", history)
 }
