@@ -187,13 +187,22 @@ func (c *Claude) conversationProcess(ctx context.Context, id string) (*surface.S
 // earlier host that still runs holds the conversation, and a Claude that
 // fails to start has refused it.
 func (c *Claude) resume(ctx context.Context, conversation, cwd string) (*surface.Session, error) {
+	return c.resumeAs(ctx, conversation, cwd, claudehost.OpenRequest{})
+}
+
+// resumeAs is resume with the model, permission mode and name of options,
+// for a conversation the host has no settings for yet.
+func (c *Claude) resumeAs(ctx context.Context, conversation, cwd string, options claudehost.OpenRequest) (*surface.Session, error) {
 	root, err := c.conversationRoot(conversation)
 	if err != nil {
 		return nil, err
 	}
 	// Claude restores a resumed conversation's title but names the resumed
 	// process anew, so the title is passed back as its name.
-	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd, ConfigDir: surface.ClaudeLaunchConfigDir(c.home, root), Name: c.conversationTitle(ctx, conversation, root)})
+	if options.Name == "" {
+		options.Name = c.conversationTitle(ctx, conversation, root)
+	}
+	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd, ConfigDir: surface.ClaudeLaunchConfigDir(c.home, root), Name: options.Name, Model: options.Model, PermissionMode: options.PermissionMode})
 	if err != nil {
 		return nil, claudeHostResumeError(conversation, err)
 	}

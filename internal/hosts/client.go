@@ -156,7 +156,20 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 	if !c.verified.Load() {
 		return nil, NotSentError{Err: ErrUnverified}
 	}
-	return c.do(ctx, c.http, method, path, query, body, header)
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	return c.do(ctx, c.http, method, path, query, reader, header)
+}
+
+// Stream is Do with a streamed body and no response deadline, for a request
+// body too large to hold in memory.
+func (c *Client) Stream(ctx context.Context, path string, query url.Values, body io.Reader, header http.Header) (*http.Response, error) {
+	if !c.verified.Load() {
+		return nil, NotSentError{Err: ErrUnverified}
+	}
+	return c.do(ctx, c.stream, http.MethodPost, path, query, body, header)
 }
 
 // Open is Do without a response deadline, for event streams.
@@ -167,14 +180,10 @@ func (c *Client) Open(ctx context.Context, path string, query url.Values, header
 	return c.do(ctx, c.stream, http.MethodGet, path, query, nil, header)
 }
 
-func (c *Client) do(ctx context.Context, client *http.Client, method, path string, query url.Values, body []byte, header http.Header) (*http.Response, error) {
+func (c *Client) do(ctx context.Context, client *http.Client, method, path string, query url.Values, body io.Reader, header http.Header) (*http.Response, error) {
 	var wrote atomic.Bool
 	trace := &httptrace.ClientTrace{WroteHeaderField: func(string, []string) { wrote.Store(true) }}
-	var reader io.Reader
-	if body != nil {
-		reader = bytes.NewReader(body)
-	}
-	request, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), method, c.url(path, query), reader)
+	request, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), method, c.url(path, query), body)
 	if err != nil {
 		return nil, NotSentError{Err: err}
 	}
@@ -329,7 +338,7 @@ func Pair(ctx context.Context, link PairingLink, address, deviceName, hostID str
 		return "", Version{}, err
 	}
 	payload, _ := json.Marshal(map[string]string{"secret": link.Secret, "name": deviceName, "hostId": hostID})
-	response, err := anonymous.do(ctx, anonymous.http, http.MethodPost, "/api/v1/pair", nil, payload, nil)
+	response, err := anonymous.do(ctx, anonymous.http, http.MethodPost, "/api/v1/pair", nil, bytes.NewReader(payload), nil)
 	if err != nil {
 		return "", Version{}, err
 	}

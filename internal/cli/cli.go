@@ -188,6 +188,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdThread(rest)
 	case "hosts":
 		return a.cmdHosts(rest)
+	case "move":
+		return a.cmdMove(rest)
 	case "project", "projects":
 		return a.cmdProject(rest)
 	case "signin":
@@ -319,6 +321,10 @@ Hosts:
                                  Pair a host so its sessions appear here
   hosts remove <host>            Unpair a host and drop its sessions from this host
   hosts name [name]              Show or set this host's name
+  move <target> --to <host> [--wait <duration>] [--stop-terminal] [--json]
+                                 Move an idle Claude session to a paired host
+  move list [--unfinished] [--json]
+                                 Show moves to and from this host
 
 Browser sign-in (Notion and Claude Remote Control only):
   signin [list] [--json]        Show consumers, sign-in profiles and this computer's browser profiles
@@ -612,7 +618,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--request": true, "--reason": true, "--answers": true, "--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--max-bytes": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--project": true, "--instructions": true, "--permission-mode": true, "--wait": true, "--root": true, "--enabled": true, "--idle": true}
+	valueFlags := map[string]bool{"--request": true, "--reason": true, "--answers": true, "--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--max-bytes": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--project": true, "--instructions": true, "--permission-mode": true, "--wait": true, "--root": true, "--enabled": true, "--idle": true, "--to": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -650,6 +656,7 @@ func validateCommandFlags(command string, args []string) error {
 		"channel": {},
 		"project": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}}, "projects": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}},
 		"hosts":  {values: map[string]bool{"--address": true, "--name": true}, bools: map[string]bool{"--json": true, "--help": true}},
+		"move":   {values: map[string]bool{"--to": true, "--wait": true, "--timeout": true}, bools: map[string]bool{"--json": true, "--stop-terminal": true, "--unfinished": true}},
 		"signin": {values: map[string]bool{"--label": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"doctor": {bools: map[string]bool{"--json": true}}, "permissions": {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},

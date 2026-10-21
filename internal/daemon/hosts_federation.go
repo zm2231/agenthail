@@ -149,6 +149,7 @@ func (d *Daemon) startFederation(ctx context.Context) {
 	d.federation.ctx = ctx
 	d.federation.running = true
 	d.federation.mu.Unlock()
+	d.failInterruptedMoves()
 	paired, err := d.Registry.ListHosts()
 	if err != nil {
 		d.log.Printf("paired hosts: %s", err)
@@ -403,6 +404,7 @@ func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost) (bool, er
 			return true, err
 		}
 		d.drainHostDeliveries(ctx, host)
+		d.resumeHostMoves(ctx, host)
 		gap, err := d.followHostCatalog(ctx, host, seq)
 		if !gap {
 			return true, err

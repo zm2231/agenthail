@@ -120,6 +120,7 @@ type actionGate struct {
 	snapshots atomic.Pointer[snapshotHold]
 	versions  atomic.Pointer[snapshotHold]
 	actions   atomic.Pointer[snapshotHold]
+	transfers atomic.Pointer[snapshotHold]
 	// beyondVersion counts requests for anything other than /api/v1/version.
 	beyondVersion atomic.Int32
 }
@@ -189,6 +190,10 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 			<-hold.release
 		}
 		if hold := n.gate.actions.Load(); hold != nil && r.URL.Path == "/api/v1/actions" {
+			hold.waiting.Add(1)
+			<-hold.release
+		}
+		if hold := n.gate.transfers.Load(); hold != nil && r.URL.Path == "/api/v1/session-move/transfer" {
 			hold.waiting.Add(1)
 			<-hold.release
 		}
