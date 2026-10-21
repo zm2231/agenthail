@@ -46,7 +46,7 @@ func TestAProjectChannelReachesItsActiveConversationsOnEveryHost(t *testing.T) {
 	if _, err := local.reg.SetCoordinator(registry.CoordinatorSpec{ProjectID: "repo:github.com/example/widget", ProjectRoot: localRepo, Name: "widget-lead", Surface: "codex", Cwd: localRepo}, registry.CoordinatorChange{SessionID: "lead", ChangedBy: "fixture"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := remote.reg.SetCoordinator(registry.CoordinatorSpec{ProjectID: "repo:github.com/example/widget", ProjectRoot: remoteRepo, Name: "forge-lead", Surface: "codex", Cwd: remoteRepo}, registry.CoordinatorChange{SessionID: "remote-a", ChangedBy: "fixture"}); err != nil {
+	if _, err := remote.reg.SetCoordinator(registry.CoordinatorSpec{ProjectID: "repo:github.com/example/widget", ProjectRoot: remoteRepo, Name: "vps-lead", Surface: "codex", Cwd: remoteRepo}, registry.CoordinatorChange{SessionID: "remote-a", ChangedBy: "fixture"}); err != nil {
 		t.Fatal(err)
 	}
 	moveSession(t, remote, "remote-c", remoteRepo, time.Now())
@@ -83,7 +83,7 @@ func TestAProjectChannelReachesItsActiveConversationsOnEveryHost(t *testing.T) {
 	if lead := byRef["@widget-lead"]; lead.Outcome != broadcast.OutcomeSent {
 		t.Fatalf("the coordinator outside the active window was not reached: %+v", answer.Recipients)
 	}
-	if lead := byRef[record.ID+"::@forge-lead"]; lead.Outcome != broadcast.OutcomeQueued {
+	if lead := byRef[record.ID+"::@vps-lead"]; lead.Outcome != broadcast.OutcomeQueued {
 		t.Fatalf("the paired host's coordinator was not reached once as its coordinator: %+v", answer.Recipients)
 	}
 	if member := byRef[hosts.Qualify(record.ID, "remote-c")]; member.Outcome != broadcast.OutcomeQueued {

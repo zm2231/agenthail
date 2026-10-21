@@ -619,14 +619,14 @@ here. Pairing needs remote access on the other host and both daemons running.
 agenthail hosts                     # this host, paired hosts, state, session counts
 agenthail hosts invite              # on the other host: prints a pairing link
 agenthail hosts add '<link>' --address <tailnet-ip>
-agenthail hosts remove forge
-agenthail hosts name mac
+agenthail hosts remove server
+agenthail hosts name laptop
 ```
 
-Address a paired host's session as `forge::@builder` or `forge::<id>`.
+Address a paired host's session as `server::@builder` or `server::<id>`.
 An unqualified target that matches on two hosts is an error listing each
 `host::target`; show the candidates and ask which one. `send`, `steer`,
-`interrupt`, `reply`, `last`, `stream` and `thread create --host forge` reach
+`interrupt`, `reply`, `last`, `stream` and `thread create --host server` reach
 paired hosts, and `--cwd` with `--host` is a path on that host. A session on an
 unreachable host stays listed as `down` with the host named. A send to it is
 held by the local daemon (`queued`, held by `hostUnreachable`) and delivered

@@ -52,7 +52,7 @@ To remove a package installation, run `sudo agenthail-uninstall`. Your local con
 
 ### Linux
 
-Agenthail runs on Linux (amd64 and arm64) as a headless daemon for Claude Code and Codex on remote machines. It needs systemd and installs in your home directory without root:
+Agenthail runs on Linux (amd64 and arm64) as a headless daemon for Claude Code and Codex. It needs systemd and installs in your home directory without root:
 
 ```bash
 tag=$(curl -fsSL https://api.github.com/repos/zm2231/agenthail/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p') && arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && name=agenthail-$tag-linux-$arch && cd "$(mktemp -d)" && curl -fsSLO "https://github.com/zm2231/agenthail/releases/download/$tag/$name.tar.gz" -O "https://github.com/zm2231/agenthail/releases/download/$tag/$name.tar.gz.sha256" && sha256sum -c "$name.tar.gz.sha256" && tar -xzf "$name.tar.gz" && test ! -e ~/.local/share/agenthail && mkdir -p ~/.local/share ~/.local/bin && mv "$name" ~/.local/share/agenthail && ln -sfn ~/.local/share/agenthail/agenthail ~/.local/bin/agenthail
@@ -274,9 +274,11 @@ agenthail send notion:new:launch-notes "Draft the launch notes" --reply
 
 The iPhone companion is distributed through TestFlight. [Request an iPhone invite privately](mailto:zainmer@protonmail.com?subject=Agenthail%20iPhone%20TestFlight%20access&body=Please%20invite%20this%20Apple%20Account%20email%3A%20). Publishing the `.ipa` as a normal download would not make it installable on an ordinary iPhone, so TestFlight is the supported path while the app is in beta.
 
-After installing the iPhone app, install Tailscale on your Mac and iPhone, sign both into the same account, then open **Operations** in Agenthail on the Mac.
+After installing the iPhone app, install Tailscale on the iPhone and on the computer running Agenthail, and sign both into the same account. The phone connects only over Tailscale.
 
-Turn on **Private phone access** and choose **Pair an iPhone**. The iPhone app can then show current work, open conversations, send or steer messages, and notify you when an agent finishes or is waiting on you. Your Mac is not opened to the public internet.
+In the Mac app, open Settings > **Devices**, turn on **Phone access**, and choose **Show Pairing Code** under **Pair an iPhone**. The iPhone app can then show current work, open conversations, send or steer messages, and notify you when an agent finishes or is waiting on you. The computer is not opened to the public internet.
+
+The iPhone app pairs through the Mac app. On a computer without it, such as a Linux server, `agenthail dashboard remote` or **Open Agenthail on your phone** in the web dashboard's settings opens the dashboard on the phone in the browser instead, over the same Tailscale connection.
 
 Matching voice-enabled builds also offer **Talk to orchestrator**: a real Codex
 Voice conversation that can inspect agents, delegate work, and read replies through
@@ -284,7 +286,7 @@ one persistent operator. [Voice setup, flow, and current limits](docs/maintainer
 
 ## See agents on your other machines
 
-Pair the Agenthail daemon on another machine in your tailnet and its sessions appear in the same list, app and phone. Run `agenthail hosts invite` there and `agenthail hosts add '<link>'` here, then address its sessions as `forge::@builder`. If a machine goes offline, its sessions stay listed as unavailable, and messages to them wait until it returns; they never expire. [How paired hosts work](docs/maintainers/hosts.md).
+Pair the Agenthail daemon on another machine in your tailnet and its sessions appear in the same list, app and phone. Pair as many machines as you like, on macOS or Linux. Run `agenthail hosts invite` there and `agenthail hosts add '<link>'` here, then address its sessions as `server::@builder`. If a machine goes offline, its sessions stay listed as unavailable, and messages to them wait until it returns; they never expire. [How paired hosts work](docs/maintainers/hosts.md).
 
 ## What Agenthail remembers
 

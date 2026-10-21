@@ -796,7 +796,7 @@ func TestSendToASessionWithNoReplyRouteIsRefusedWithItsReason(t *testing.T) {
 	if err := h.store.EnsureOperatorSession(); err != nil {
 		t.Fatal(err)
 	}
-	unrepliable, err := h.store.EnsureUnrepliableSender("h0123456789ab", "worker-1", "forge/builder")
+	unrepliable, err := h.store.EnsureUnrepliableSender("h0123456789ab", "worker-1", "vps/builder")
 	if err != nil {
 		t.Fatal(err)
 	}

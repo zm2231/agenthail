@@ -2,9 +2,8 @@
 set -euo pipefail
 
 repo="zm2231/agenthail"
-app_id=4268339
-setec_url="https://secrets.tailb77c8a.ts.net"
-key_name="agents/github/zm2231-agent-bot-private-key"
+app_id="${AGENTHAIL_CI_APP_ID:?set AGENTHAIL_CI_APP_ID to the GitHub App id}"
+key_command="${AGENTHAIL_CI_APP_KEY_COMMAND:?set AGENTHAIL_CI_APP_KEY_COMMAND to a command that prints the GitHub App private key}"
 label="agenthail-vm"
 slots="${AGENTHAIL_CI_VM_SLOTS:-2}"
 cpu="${AGENTHAIL_CI_VM_CPU:-4}"
@@ -40,8 +39,7 @@ b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
 app_jwt() {
 	local key header payload now signature
-	key="$(curl -fsS --max-time 30 -X POST -H 'Sec-X-Tailscale-No-Browsers: setec' -H 'Content-Type: application/json' \
-		-d "{\"Name\":\"$key_name\"}" "$setec_url/api/get" | jq -er .Value | base64 -d)" || return 1
+	key="$(bash -c "$key_command")" || return 1
 	now="$(date +%s)"
 	header="$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)"
 	payload="$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' $((now - 60)) $((now + 540)) "$app_id" | b64url)"

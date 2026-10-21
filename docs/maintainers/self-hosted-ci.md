@@ -51,13 +51,13 @@ The script refuses to start with less than 60 GB free. It flushes the guest disk
 
 Runner output and the runner's diagnostic log for each slot are kept in `~/Library/Logs/agenthail-ci-vm/`.
 
-The App private key is read from setec over the tailnet when a token is needed and is never written to disk or passed to the guest.
+The supervisor needs `AGENTHAIL_CI_APP_ID`, the GitHub App's id, and `AGENTHAIL_CI_APP_KEY_COMMAND`, a command that prints the App's private key, for example one that reads it from the login keychain or a secret manager. It runs that command each time it mints a token; the key is never written to disk or passed to the guest.
 
 ### Host setup
 
 1. Install Tart and Softnet with Homebrew, and let Softnet run as root without a password: add `<user> ALL=(root) NOPASSWD: <homebrew prefix>/bin/softnet` to a file in `/etc/sudoers.d/` and check it with `sudo visudo -cf <file>`.
 2. Clone this repository on the host and run `ci/vm/build-image.sh` from it.
-3. Create a LaunchAgent that runs `/bin/bash <clone>/ci/vm/supervisor.sh` with `RunAtLoad`, `KeepAlive` set to restart only after an unsuccessful exit (`SuccessfulExit` false), an `ExitTimeOut` of 60 seconds and a log file, then load it with `launchctl bootstrap gui/$(id -u) <plist>`.
+3. Create a LaunchAgent that runs `/bin/bash <clone>/ci/vm/supervisor.sh` with `RunAtLoad`, `KeepAlive` set to restart only after an unsuccessful exit (`SuccessfulExit` false), an `ExitTimeOut` of 60 seconds, a log file, and `EnvironmentVariables` holding `AGENTHAIL_CI_APP_ID` and `AGENTHAIL_CI_APP_KEY_COMMAND`, then load it with `launchctl bootstrap gui/$(id -u) <plist>`.
 4. Turn off system sleep on the host: `sudo pmset -a sleep 0 disksleep 0 powernap 0`.
 
 ## Stacked pull requests

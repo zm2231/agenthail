@@ -38,7 +38,7 @@ func readApps() []readApp {
 			app.daemonSessionPageReader = func() (sessionPageReader, error) {
 				return sessionPageFixture{result: &surface.SessionReadResult{Source: "journal", Exchanges: exchanges}}, nil
 			}
-			return app, "forge::@builder"
+			return app, "vps::@builder"
 		}},
 		{name: "daemon page", build: func(t *testing.T, exchanges []surface.Exchange) (*App, string) {
 			session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}

@@ -20,14 +20,14 @@ struct AgenthailIOSRoot: View {
         } message: {
             Text(model.operationError ?? "")
         }
-        .confirmationDialog("This Mac could not be reached", isPresented: $model.showForgetMacConfirmation, titleVisibility: .visible) {
-            Button("Forget this Mac on iPhone", role: .destructive) { model.forgetThisMac() }
+        .confirmationDialog("This computer could not be reached", isPresented: $model.showForgetMacConfirmation, titleVisibility: .visible) {
+            Button("Forget this computer on iPhone", role: .destructive) { model.forgetThisMac() }
             Button("Keep connection", role: .cancel) {}
         } message: {
-            Text("Forget the saved connection only if this Mac is gone or you want to pair with another Mac.")
+            Text("Forget the saved connection only if this computer is gone or you want to pair with another one.")
         }
         .confirmationDialog(model.pairingConfirmationTitle, isPresented: $model.showPairingConfirmation, titleVisibility: .visible) {
-            Button(model.isPaired ? "Replace Mac" : "Connect") { model.confirmPairing() }
+            Button(model.isPaired ? "Replace computer" : "Connect") { model.confirmPairing() }
             Button("Cancel", role: .cancel) { model.cancelPairing() }
         } message: {
             Text(model.pairingConfirmationMessage)
@@ -51,7 +51,7 @@ struct PairingScreen: View {
                 .frame(width: 112, height: 112)
                 VStack(spacing: 8) {
                     Text("Connect to your agents").font(.largeTitle.bold()).multilineTextAlignment(.center)
-                    Text("On your Mac, open Agenthail, choose Operations, then Pair an iPhone.")
+                    Text("In Agenthail on your Mac, open Settings > Devices, turn on Phone access, and choose Show Pairing Code.")
                         .foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
                 .padding(.horizontal)
@@ -74,7 +74,7 @@ struct PairingScreen: View {
                 }.disabled(pastedURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.pairing)
                 if model.pairing { ProgressView("Pairing securely") }
                 Spacer()
-                Text("Your conversations stay between this phone and your Mac over Tailscale.")
+                Text("Your conversations stay between this phone and your computer over Tailscale.")
                     .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 30)
             }
             .padding(.vertical)
@@ -147,7 +147,7 @@ struct ConversationFlow: View {
                     ConversationListView(model: model, selectedID: wideSelection) { wideSelection = $0; path = [$0] }
                 } detail: {
                     if let wideSelection { SessionRouteView(model: model, sessionID: wideSelection) }
-                    else { ContentUnavailableView("Choose a session", systemImage: "desktopcomputer", description: Text("Follow work on your Mac, review results, or give the next instruction.")) }
+                    else { ContentUnavailableView("Choose a session", systemImage: "desktopcomputer", description: Text("Follow work on your computers, review results, or give the next instruction.")) }
                 }
             } else {
                 NavigationStack(path: $path) {
@@ -226,7 +226,7 @@ struct ConversationListView: View {
             if let error = model.connectionError {
                 Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(.secondary)
             }
-            Label(model.reconnecting ? "Reconnecting to your Mac" : "Work on your Mac", systemImage: "desktopcomputer")
+            Label(model.reconnecting ? "Reconnecting to your computer" : "Work on your computers", systemImage: "desktopcomputer")
                 .font(.subheadline).foregroundStyle(.secondary).listRowSeparator(.hidden)
             Picker("Sessions to show", selection: $scope) {
                 ForEach(SessionFilter.allCases) { Text($0.rawValue).tag($0) }
@@ -541,7 +541,7 @@ struct SessionScreen: View {
                     VStack(spacing: 2) {
                         Text(displayTitle).font(.body.weight(.semibold)).lineLimit(1)
                         if let cwd = detail?.session.cwd, !cwd.isEmpty {
-                            Text(URL(fileURLWithPath: cwd).lastPathComponent + " · " + (session.remoteHostID == nil ? "Mac" : session.host?.name ?? "Mac")).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            Text(URL(fileURLWithPath: cwd).lastPathComponent + " · " + ((session.remoteHostID == nil ? model.snapshot?.daemon.host?.name : session.host?.name) ?? "computer")).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
                 }
@@ -1346,7 +1346,7 @@ struct SettingsView: View {
                 Button("Reconnect") { model.connect() }
             }
             if !attentionSurfaces.isEmpty {
-                Section("Mac connections") {
+                Section("Connections") {
                     ForEach(attentionSurfaces) { surface in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(surface.name.capitalized).font(.headline)
@@ -1374,7 +1374,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Browser sign-in")
                 } footer: {
-                    Text("Change it on the Mac in Settings > Browser Sign-in, or run agenthail signin use.")
+                    Text("Change it in Settings > Browser Sign-in on that computer, or run agenthail signin use there.")
                 }
             }
             if let hosts = model.snapshot?.daemon.hosts, !hosts.isEmpty {
@@ -1403,7 +1403,7 @@ struct SettingsView: View {
                 } else {
                     Button("Enable notifications") { model.requestNotifications() }
                 }
-                Text("Your Mac sends an alert when an agent finishes or fails.").font(.footnote).foregroundStyle(.secondary)
+                Text("Your computer sends an alert when an agent finishes or fails.").font(.footnote).foregroundStyle(.secondary)
             }
             Section {
                 Button("Disconnect this iPhone", role: .destructive) { model.unpair() }

@@ -1,9 +1,10 @@
 # Paired hosts
 
 One Agenthail daemon can show and drive the sessions of other Agenthail daemons
-on the same tailnet. The Mac pairs with a Linux box, the box's sessions appear
-in the Mac's list, CLI, Mac app and phone, and every action on them goes
-through the Mac's daemon to the box's daemon.
+on the same tailnet. When a laptop pairs with a server, the server's sessions
+appear in the laptop's list, CLI, Mac app and phone, and every action on them
+goes through the laptop's daemon to the server's daemon. A daemon can pair
+with any number of hosts, on macOS or Linux.
 
 ## Identity
 
@@ -23,7 +24,7 @@ Pairing reuses the device-token model the phone uses.
    The `host` scope gives the catalog stream every row, so the pairing mirrors
    subagents the session list hides; a device token without it streams the
    session list. A host paired without it must be paired again.
-2. On the Mac: `agenthail hosts add '<link>' [--address <tailnet-ip>]`. The
+2. On the local host: `agenthail hosts add '<link>' [--address <tailnet-ip>]`. The
    daemon redeems the secret, sending its own host id, receives an `ahd_`
    device token, checks the protocol version and host id, and stores the
    pairing in `hosts`. The remote binds the token to the host id it was
@@ -82,7 +83,7 @@ host row whose id is already local is refused: the local row is unchanged and
 the mirror carries on with the host's other rows. The host's copy is not
 shown; instead the host's entry in `agenthail hosts`, `GET /api/v1/hosts`, the
 snapshot's `daemon.hosts` and the Mac and iPhone host lists carries a notice
-such as `1 session on forge not shown: conversation <id> is also a local
+such as `1 session on server not shown: conversation <id> is also a local
 session`. A local session row is never deleted, so the notice clears when the
 host stops serving that session. Neither discovery nor any local registration can take
 over a mirrored row (`SessionOwnedError`). A
@@ -196,7 +197,7 @@ session in the chosen project's root; a typed folder is still accepted.
 ## Unreachable hosts and delivery
 
 A host that stops answering keeps its rows. They are re-rendered unavailable
-with the host named (`host forge is unreachable`), and the host's state is one
+with the host named (`host server is unreachable`), and the host's state is one
 of `connecting`, `connected`, `unreachable`, `unauthorized` or
 `incompatible`.
 

@@ -81,11 +81,11 @@ func TestLeadPathOnAPairedHostIsResolvedThere(t *testing.T) {
 		}
 	}
 	t.Chdir(repo)
-	if err := reg.ReplaceHostCoordinators(forgeHostID, []registry.CoordinatorEntry{{ProjectID: "repo:github.com/example/widget", ProjectRoot: "/home/remote/widget", Name: "widget-lead", Surface: "codex", SessionID: "remote-1"}}); err != nil {
+	if err := reg.ReplaceHostCoordinators(vpsHostID, []registry.CoordinatorEntry{{ProjectID: "repo:github.com/example/widget", ProjectRoot: "/home/remote/widget", Name: "widget-lead", Surface: "codex", SessionID: "remote-1"}}); err != nil {
 		t.Fatal(err)
 	}
-	ada := forgeBuilder
-	ada.ID, ada.Alias, ada.Name = forgeBuilder.ID+"-ada", "", "Ada"
+	ada := vpsBuilder
+	ada.ID, ada.Alias, ada.Name = vpsBuilder.ID+"-ada", "", "Ada"
 	api.matches["@remote-1/Ada"] = []remoteTarget{ada}
 	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "@lead/Ada", "status?"}) })
 	if err != nil {

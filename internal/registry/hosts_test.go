@@ -47,7 +47,7 @@ func TestAddHostRefusesSelfDuplicatesAndNameCollisions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	remote := PairedHost{ID: "h0123456789ab", Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}
+	remote := PairedHost{ID: "h0123456789ab", Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}
 	if _, err := r.AddHost(PairedHost{ID: local.ID, Name: "other", Endpoint: remote.Endpoint, Address: remote.Address, Token: remote.Token}); err == nil {
 		t.Fatal("pairing with self was accepted")
 	}
@@ -60,13 +60,13 @@ func TestAddHostRefusesSelfDuplicatesAndNameCollisions(t *testing.T) {
 	if _, err := r.AddHost(remote); err == nil {
 		t.Fatal("duplicate host id was accepted")
 	}
-	if _, err := r.AddHost(PairedHost{ID: "h0123456789ad", Name: "forge", Endpoint: remote.Endpoint, Address: remote.Address, Token: remote.Token}); err == nil {
+	if _, err := r.AddHost(PairedHost{ID: "h0123456789ad", Name: "vps", Endpoint: remote.Endpoint, Address: remote.Address, Token: remote.Token}); err == nil {
 		t.Fatal("duplicate host name was accepted")
 	}
-	if _, err := r.SetHostName("forge"); err == nil {
+	if _, err := r.SetHostName("vps"); err == nil {
 		t.Fatal("local rename onto a paired host name was accepted")
 	}
-	byName, err := r.Host("FORGE")
+	byName, err := r.Host("VPS")
 	if err != nil || byName.ID != remote.ID || byName.Token != remote.Token {
 		t.Fatalf("byName=%+v err=%v", byName, err)
 	}
@@ -82,7 +82,7 @@ func TestAddHostRefusesSelfDuplicatesAndNameCollisions(t *testing.T) {
 func TestHostCatalogRowsStayOwnedAndOutsideLocalResolution(t *testing.T) {
 	r := openTestRegistry(t)
 	hostID := "h0123456789ab"
-	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	local := surface.Session{ID: "local-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
@@ -158,7 +158,7 @@ func TestHostCatalogRowsStayOwnedAndOutsideLocalResolution(t *testing.T) {
 func TestRemoveHostDeletesOwnedSessionsAndAnnouncesRemoval(t *testing.T) {
 	r := openTestRegistry(t)
 	hostID := "h0123456789ab"
-	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-thread"
@@ -180,7 +180,7 @@ func TestRemoveHostDeletesOwnedSessionsAndAnnouncesRemoval(t *testing.T) {
 func TestHeldHostDeliveryIsInvisibleToLocalClaimsAndMatchesByAlias(t *testing.T) {
 	r := openTestRegistry(t)
 	hostID := "h0123456789ab"
-	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-thread"
@@ -214,7 +214,7 @@ func TestHeldHostDeliveryIsInvisibleToLocalClaimsAndMatchesByAlias(t *testing.T)
 func TestLocalRegistrationRefusesHostOwnedSession(t *testing.T) {
 	r := openTestRegistry(t)
 	hostID := "h0123456789ab"
-	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-thread"
@@ -268,7 +268,7 @@ func TestHostCatalogRowRequiresPairedHost(t *testing.T) {
 	if _, _, err := r.ApplyHostCatalogRow(hostID, row); err == nil {
 		t.Fatal("mirrored a row for a host that is not paired")
 	}
-	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := r.ApplyHostCatalogRow(hostID, row); err != nil {
@@ -288,7 +288,7 @@ func TestHostCatalogRowRequiresPairedHost(t *testing.T) {
 func TestHeldHostDeliveryStaysPendingUntilTheHostTakesIt(t *testing.T) {
 	r := openTestRegistry(t)
 	hostID := "h0123456789ab"
-	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-thread"
@@ -338,7 +338,7 @@ func TestHeldHostDeliveryStaysPendingUntilTheHostTakesIt(t *testing.T) {
 func TestHostDeliveryConfirmationWindowStartsAtFirstSend(t *testing.T) {
 	r := openTestRegistry(t)
 	hostID := "h0123456789ab"
-	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-thread"
@@ -375,7 +375,7 @@ func TestHostDeliveryConfirmationWindowStartsAtFirstSend(t *testing.T) {
 func TestSurfaceAndExactResolutionNeverReachHostOwnedSessions(t *testing.T) {
 	r := openTestRegistry(t)
 	hostID := "h0123456789ab"
-	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-thread"

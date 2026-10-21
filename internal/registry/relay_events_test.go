@@ -345,7 +345,7 @@ func TestQuotedRelayEnvelopeKeepsTheQueuedHopCount(t *testing.T) {
 func TestRelayToAHostsSessionIsHeldForThatHostWithItsHopCount(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "source")
-	if _, err := r.AddHost(PairedHost{ID: "h0123456789ab", Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
+	if _, err := r.AddHost(PairedHost{ID: "h0123456789ab", Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := r.ApplyHostCatalogRow("h0123456789ab", HostCatalogRow{Session: surface.Session{ID: "remote", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}, EntityID: "h0123456789ab::remote", Projection: []byte(`{"id":"h0123456789ab::remote"}`)}); err != nil {
@@ -383,7 +383,7 @@ func TestRelayToAHostsSessionIsHeldForThatHostWithItsHopCount(t *testing.T) {
 func TestAHeldSendNamesOnlyThisHostsSessionAsItsSender(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "local")
-	if _, err := r.AddHost(PairedHost{ID: "h0123456789ab", Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
+	if _, err := r.AddHost(PairedHost{ID: "h0123456789ab", Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"remote", "remote-sibling"} {

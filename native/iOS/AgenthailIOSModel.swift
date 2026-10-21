@@ -79,7 +79,7 @@ final class AgenthailIOSModel: ObservableObject {
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
 
     func dismissDeliveryProblem(_ problem: DeliveryProblem) async throws {
-        guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
+        guard let api else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
         let key = "delivery:\(problem.deliveryId)"
         guard !pendingControls.contains(key) else { return }
         pendingControls.insert(key)
@@ -138,12 +138,12 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func queuedInstructions() async throws -> [QueueState] {
-        guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
+        guard let api else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
         return try await api.queuedInstructions()
     }
 
     func editSession(id: String, action: String, text: String = "") async throws {
-        guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
+        guard let api else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
         guard !pendingControls.contains(id) else { throw AgenthailAPIError.unavailable("An update is already in progress.") }
         if action != "alias" {
             let settable = ["goal-set", "goal-edit", "goal-clear"].contains(action)
@@ -159,7 +159,7 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func updateQueue(_ item: QueueState, retry: Bool) async throws {
-        guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
+        guard let api else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
         let key = "queue:\(item.id)"
         guard !pendingControls.contains(key) else { return }
         pendingControls.insert(key)
@@ -169,11 +169,11 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func sessionOptions(host: String?) async throws -> SessionCreationOptions {
-        guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
+        guard let api else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
         return try await api.sessionOptions(host: host)
     }
     func creationModels(surface: String, host: String?) async throws -> [ModelOption] {
-        guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
+        guard let api else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
         return try await api.creationModels(surface: surface, host: host)
     }
     func prepareNewSessionForm() {
@@ -308,12 +308,12 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     var pairingConfirmationTitle: String {
-        isPaired ? "Replace connected Mac?" : "Connect to this Mac?"
+        isPaired ? "Replace connected computer?" : "Connect to this computer?"
     }
 
     var pairingConfirmationMessage: String {
         guard let host = pendingPairing?.endpoint.host else { return "" }
-        return isPaired ? "This will replace the saved Mac with \(host)." : "Agenthail will connect securely to \(host) over Tailscale."
+        return isPaired ? "This will replace the saved computer with \(host)." : "Agenthail will connect securely to \(host) over Tailscale."
     }
 
     func confirmPairing() {
@@ -337,7 +337,7 @@ final class AgenthailIOSModel: ObservableObject {
                         try await PushRelayClient(baseURL: previousRelayURL, session: networkSession).revoke(previousRegistration)
                     } catch {
                         try? await pairedAPI.revokeCurrentDevice()
-                        throw AgenthailAPIError.unavailable("The previous notification connection could not be revoked. Try replacing the Mac again.")
+                        throw AgenthailAPIError.unavailable("The previous notification connection could not be revoked. Try pairing again.")
                     }
                 }
                 if let previousEndpoint, let previousToken {
@@ -433,7 +433,7 @@ final class AgenthailIOSModel: ObservableObject {
             } else {
                 catalogStreamCursor = max(catalogStreamCursor, loaded.catalogSeq ?? catalogStreamCursor)
             }
-            connectionError = loaded.daemon.stale == true ? (loaded.daemon.refreshError ?? "Showing saved state. The Mac could not refresh its agents.") : nil
+            connectionError = loaded.daemon.stale == true ? (loaded.daemon.refreshError ?? "Showing saved state. The computer could not refresh its agents.") : nil
             await refreshDeliveries()
             return true
         } catch {
