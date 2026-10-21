@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"regexp"
 	"strings"
@@ -110,11 +111,15 @@ func backgroundOf(tasks []surface.BackgroundTask, source string) *surface.Backgr
 // claudeTaskScan follows one transcript's background tasks as Claude appends
 // to it: a Bash or Agent call run in the background, or a Monitor, starts a
 // task its result names; a task notification or a TaskStop on the id ends it.
+// Calls holds the calls still waiting for their result. A scan is saved with
+// the offset it has read to, so another process resumes it where it stopped.
 type claudeTaskScan struct {
 	file    os.FileInfo
-	offset  int64
-	calls   map[string]surface.BackgroundTask
-	running []surface.BackgroundTask
+	Path    string                            `json:"path"`
+	Offset  int64                             `json:"offset"`
+	Anchor  string                            `json:"anchor"`
+	Calls   map[string]surface.BackgroundTask `json:"calls"`
+	Running []surface.BackgroundTask          `json:"running"`
 }
 
 func (c *Claude) transcriptTasks(ctx context.Context, path string) []surface.BackgroundTask {
@@ -129,42 +134,66 @@ func (c *Claude) transcriptTasks(ctx context.Context, path string) []surface.Bac
 		return nil
 	}
 	scan := c.taskScans[path]
-	if scan == nil || !os.SameFile(scan.file, info) || info.Size() < scan.offset {
-		scan = &claudeTaskScan{calls: map[string]surface.BackgroundTask{}}
+	if scan == nil || !os.SameFile(scan.file, info) || info.Size() < scan.Offset || !scan.matches(path) {
+		scan = c.loadTaskScan(path, info)
 		c.taskScans[path] = scan
 	}
 	scan.file = info
-	next, err := scanAppendedJSONL(ctx, path, scan.offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
-		scan.read(line)
-		return nil
-	})
-	if err == nil {
-		scan.offset = next
+	read := scan.Offset
+	for {
+		next, err := scanAppendedJSONL(ctx, path, scan.Offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+			scan.read(line)
+			return nil
+		})
+		scan.Offset = next
+		if !errors.As(err, new(transcriptRecordTooLarge)) {
+			break
+		}
+		// A record too large to read cannot be decoded; the scan goes on
+		// after it once it is whole.
+		past, whole := skipJSONLRecord(path, next)
+		if !whole {
+			break
+		}
+		scan.Offset = past
 	}
-	return append([]surface.BackgroundTask(nil), scan.running...)
+	if scan.Offset != read {
+		c.saveTaskScan(scan)
+	}
+	return append([]surface.BackgroundTask(nil), scan.Running...)
 }
 
 func (s *claudeTaskScan) read(line []byte) {
-	for _, match := range claudeTaskIDTag.FindAllSubmatch(line, -1) {
-		s.end(string(match[1]))
+	if bytes.Contains(line, []byte("task-id")) {
+		for _, match := range claudeTaskIDTag.FindAllSubmatch(line, -1) {
+			s.end(string(match[1]))
+		}
 	}
 	if !bytes.Contains(line, []byte(`"tool_use"`)) && !bytes.Contains(line, []byte(`"toolUseResult"`)) {
 		return
 	}
 	var record struct {
+		Type      string `json:"type"`
 		Timestamp string `json:"timestamp"`
 		Message   struct {
 			Content json.RawMessage `json:"content"`
 		} `json:"message"`
-		Result struct {
-			BackgroundTaskID string `json:"backgroundTaskId"`
-			AgentID          string `json:"agentId"`
-			IsAsync          bool   `json:"isAsync"`
-			TaskID           string `json:"taskId"`
-		} `json:"toolUseResult"`
+		Result json.RawMessage `json:"toolUseResult"`
 	}
-	if json.Unmarshal(line, &record) != nil {
+	// Claude also records the requests it sends, which repeat calls already
+	// made; only its own messages make and answer them.
+	if json.Unmarshal(line, &record) != nil || record.Type != "assistant" && record.Type != "user" {
 		return
+	}
+	// A failed call's result is its error text, and it still ends the call.
+	var result struct {
+		BackgroundTaskID string `json:"backgroundTaskId"`
+		AgentID          string `json:"agentId"`
+		IsAsync          bool   `json:"isAsync"`
+		TaskID           string `json:"taskId"`
+	}
+	if len(record.Result) > 0 && record.Result[0] == '{' {
+		_ = json.Unmarshal(record.Result, &result)
 	}
 	var blocks []struct {
 		Type      string `json:"type"`
@@ -195,37 +224,37 @@ func (s *claudeTaskScan) read(line []byte) {
 			// mark.
 			switch {
 			case block.Name == "Bash":
-				s.calls[block.ID] = surface.BackgroundTask{Kind: surface.BackgroundShell, Description: description}
+				s.Calls[block.ID] = surface.BackgroundTask{Kind: surface.BackgroundShell, Description: description}
 			case block.Name == "Agent":
-				s.calls[block.ID] = surface.BackgroundTask{Kind: surface.BackgroundAgent, Description: description}
+				s.Calls[block.ID] = surface.BackgroundTask{Kind: surface.BackgroundAgent, Description: description}
 			case block.Name == "Monitor":
-				s.calls[block.ID] = surface.BackgroundTask{Kind: surface.BackgroundMonitor, Description: description}
+				s.Calls[block.ID] = surface.BackgroundTask{Kind: surface.BackgroundMonitor, Description: description}
 			case block.Name == "TaskStop":
 				s.end(block.Input.TaskID)
 				s.end(block.Input.ShellID)
 			}
 		case "tool_result":
-			task, ok := s.calls[block.ToolUseID]
+			task, ok := s.Calls[block.ToolUseID]
 			if !ok {
 				continue
 			}
-			delete(s.calls, block.ToolUseID)
+			delete(s.Calls, block.ToolUseID)
 			switch task.Kind {
 			case surface.BackgroundShell:
-				task.ID = record.Result.BackgroundTaskID
+				task.ID = result.BackgroundTaskID
 			case surface.BackgroundAgent:
-				if record.Result.IsAsync {
-					task.ID = record.Result.AgentID
+				if result.IsAsync {
+					task.ID = result.AgentID
 				}
 			case surface.BackgroundMonitor:
-				task.ID = record.Result.TaskID
+				task.ID = result.TaskID
 			}
 			if task.ID == "" {
 				continue
 			}
 			task.Since = at.UTC()
 			s.end(task.ID)
-			s.running = append(s.running, task)
+			s.Running = append(s.Running, task)
 		}
 	}
 }
@@ -234,9 +263,9 @@ func (s *claudeTaskScan) end(id string) {
 	if id == "" {
 		return
 	}
-	for index, task := range s.running {
+	for index, task := range s.Running {
 		if task.ID == id {
-			s.running = append(s.running[:index], s.running[index+1:]...)
+			s.Running = append(s.Running[:index], s.Running[index+1:]...)
 			return
 		}
 	}

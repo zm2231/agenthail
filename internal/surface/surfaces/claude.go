@@ -37,6 +37,7 @@ type Claude struct {
 	goals        map[string]*claudeGoalCursor
 	tasksMu      sync.Mutex
 	taskScans    map[string]*claudeTaskScan
+	taskPrune    sync.Once
 	modelsMu     sync.Mutex
 	modelsCache  []surface.ModelOption
 	modelsAt     time.Time
