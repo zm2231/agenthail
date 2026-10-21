@@ -38,22 +38,7 @@ func TestALiveClaudeConversationKeepsItsHistoryAndTasksAcrossAMove(t *testing.T)
 	if cli == "" || settingsPath == "" {
 		t.Skip("set AGENTHAIL_MOVE_LIVE_CLAUDE and AGENTHAIL_MOVE_LIVE_SETTINGS to move a conversation the real Claude CLI runs")
 	}
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
-		t.Fatal(err)
-	}
-	env, _ := config["env"].(map[string]any)
-	if env == nil {
-		env = map[string]any{}
-	}
-	// Claude offers its task tools to an SDK session only when asked to.
-	env["CLAUDE_CODE_ENABLE_TODO_TOOLS"] = "1"
-	config["env"] = env
-	settings, err := json.Marshal(config)
+	settings, err := os.ReadFile(settingsPath)
 	if err != nil {
 		t.Fatal(err)
 	}
