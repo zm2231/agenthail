@@ -190,6 +190,13 @@ func (c *Claude) resume(ctx context.Context, conversation, cwd string) (*surface
 	return c.resumeAs(ctx, conversation, cwd, claudehost.OpenRequest{})
 }
 
+// claudeTranscriptExists reads the filesystem itself rather than the
+// transcript index, whose folder listings can lag a rename.
+func claudeTranscriptExists(root, conversation string) bool {
+	found, _ := filepath.Glob(filepath.Join(root, "projects", "*", conversation+".jsonl"))
+	return len(found) > 0
+}
+
 // resumeAs is resume with the model, permission mode and name of options,
 // for a conversation the host has no settings for yet.
 func (c *Claude) resumeAs(ctx context.Context, conversation, cwd string, options claudehost.OpenRequest) (*surface.Session, error) {
@@ -199,7 +206,7 @@ func (c *Claude) resumeAs(ctx context.Context, conversation, cwd string, options
 	}
 	// Claude finds no conversation to resume without its transcript, which a
 	// move to another host takes away, so none is started.
-	if root == "" || len(c.transcripts.pass([]string{root})(conversation)) == 0 {
+	if root == "" || !claudeTranscriptExists(root, conversation) {
 		return nil, surface.DeliveryTerminal(fmt.Errorf("Claude conversation %s has no transcript on this machine to resume", conversation), surface.DeliveryTargetMissing)
 	}
 	// Claude restores a resumed conversation's title but names the resumed

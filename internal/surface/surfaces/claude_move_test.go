@@ -351,7 +351,7 @@ func TestAMoveInClaudeRefusesLeavesNoCopyItCouldResume(t *testing.T) {
 	in := surface.MoveIn{MoveID: uuid.NewString(), Conversation: conversation, Cwd: host.Cwd, Size: int64(len(body)), SHA256: digest(body), PartsSize: 2}
 	host.Refuse(t, conversation, "not logged in")
 	_, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(buildArchive(t, tarPart{name: conversation + ".jsonl", body: body}, tarPart{name: "tasks/" + conversation + "/1.json", body: "{}"})), admitMove)
-	if err == nil || errors.Is(err, surface.ErrMoveInPlaced) || errors.Is(err, surface.ErrMoveInRunning) {
+	if !errors.Is(err, surface.ErrMoveInRefused) || errors.Is(err, surface.ErrMoveInPlaced) || errors.Is(err, surface.ErrMoveInRunning) {
 		t.Fatalf("a move in Claude refused: %v", err)
 	}
 	roots, _ := surface.ClaudeConfigRoots(host.Home)
@@ -364,6 +364,32 @@ func TestAMoveInClaudeRefusesLeavesNoCopyItCouldResume(t *testing.T) {
 	committed := false
 	if err := c.DropMoveIn(context.Background(), conversation, in.MoveID, func() error { committed = true; return nil }); err != nil || !committed {
 		t.Fatalf("dropping a refused move in: committed=%v err=%v", committed, err)
+	}
+
+	_, err = c.ReceiveMove(context.Background(), in, bytes.NewReader(buildArchive(t, tarPart{name: conversation + ".jsonl", body: body}, tarPart{name: "tasks/" + conversation + "/1.json", body: "{}"})), admitMove)
+	if !errors.Is(err, surface.ErrMoveInRefused) || errors.Is(err, surface.ErrMoveInPlaced) || errors.Is(err, surface.ErrMoveInRunning) {
+		t.Fatalf("the same move in refused again: %v", err)
+	}
+	if found := c.transcripts.pass(roots)(conversation); len(found) != 0 {
+		t.Fatalf("a second refused move in left %v where Claude finds it", found)
+	}
+}
+
+func TestAMoveInKeepsTheCopyHereItExtends(t *testing.T) {
+	_, host, c := hostResume(t)
+	conversation := uuid.NewString()
+	older := `{"type":"user","sessionId":"` + conversation + `"}` + "\n"
+	body := older + `{"type":"assistant","sessionId":"` + conversation + `"}` + "\n"
+	root := filepath.Join(host.Home, ".claude")
+	existing := filepath.Join(root, "projects", claudeProjectDirName(host.Cwd), conversation+".jsonl")
+	writeFixtureFile(t, existing, older)
+	in := surface.MoveIn{MoveID: uuid.NewString(), Conversation: conversation, Cwd: host.Cwd, Size: int64(len(body)), SHA256: digest(body)}
+	if _, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(buildArchive(t, tarPart{name: conversation + ".jsonl", body: body})), admitMove); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := os.ReadFile(filepath.Join(root, claudeMovedDir, conversation, in.MoveID, "previous", conversation+".jsonl"))
+	if err != nil || string(kept) != older {
+		t.Fatalf("the copy here was not kept: %q %v", kept, err)
 	}
 }
 

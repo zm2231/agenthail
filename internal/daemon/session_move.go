@@ -162,7 +162,7 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 			return result, restoreErr
 		}
 		result.Move, _ = d.Registry.SessionMove(manifest.ID)
-		return result, cause
+		return result, MoveRefusedError{Reason: cause.Error()}
 	}
 	if err := d.Registry.SetMoveState(manifest.ID, registry.MoveSent, "", registry.MovePreparing); err != nil {
 		return result, err
@@ -647,7 +647,26 @@ func (d *Daemon) apiMoveTransferHandler(w http.ResponseWriter, r *http.Request) 
 			writeAPIError(w, http.StatusBadGateway, "move_unknown", err.Error())
 			return
 		}
-		writeAPIError(w, http.StatusConflict, "move_refused", err.Error())
+		if !errors.Is(err, surface.ErrMoveInRefused) {
+			writeAPIError(w, http.StatusConflict, "move_refused", err.Error())
+			return
+		}
+		// Claude here refused the conversation, so the move cannot resume
+		// here and is aborted now: a repeated transfer is refused instead of
+		// placing the files again.
+		refusal := err
+		abort := func() error {
+			if current, err := d.Registry.SessionMove(move.ID); err == nil && current.State == registry.MoveAborted {
+				return nil
+			}
+			return d.Registry.SetMoveState(move.ID, registry.MoveAborted, refusal.Error(), registry.MoveReceived)
+		}
+		if err := mover.DropMoveIn(ctx, manifest.Conversation, move.ID, abort); err != nil {
+			writeAPIError(w, http.StatusBadGateway, "move_unknown", fmt.Sprintf("%s; %s", refusal, err))
+			return
+		}
+		d.removeMoveWorktree(ctx, move)
+		writeAPIError(w, http.StatusConflict, "move_refused", refusal.Error())
 		return
 	}
 	d.catalog.mu.Lock()

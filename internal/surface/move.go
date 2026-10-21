@@ -10,6 +10,10 @@ import (
 // conversation a move brought, so the move can no longer be abandoned.
 var ErrMoveInRunning = errors.New("the conversation already runs here")
 
+// ErrMoveInRefused is returned when the runtime here refused to start a
+// conversation a move placed, and the placed copy was set aside.
+var ErrMoveInRefused = errors.New("the runtime here refused the conversation")
+
 // ErrMoveInPlaced is returned when a move's files may still be where the
 // runtime finds them, so the outcome of the move-in is unknown.
 var ErrMoveInPlaced = errors.New("the conversation's files may still be in place here")

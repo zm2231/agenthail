@@ -255,6 +255,8 @@ func (r *Registry) AbortMoveIn(id, conversation, sourceHost string) (SessionMove
 		return SessionMove{}, fmt.Errorf("move %s is not a move from this host", id)
 	case existing.State == MoveResumed:
 		return existing, MoveConflictError{ID: id, State: existing.State, Want: MoveAborted}
+	case existing.State == MoveAborted:
+		return existing, nil
 	default:
 		if err := setMoveStateTx(tx, r.now(), id, MoveAborted, "aborted by the source", MovePrepared, MoveReceived); err != nil {
 			return SessionMove{}, err

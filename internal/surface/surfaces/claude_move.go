@@ -492,10 +492,13 @@ func (c *Claude) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.
 	if err == nil {
 		return resumed, nil
 	}
+	if surface.IsDeliveryOutcomeUnknown(err) {
+		return nil, fmt.Errorf("%w: %v", surface.ErrMoveInPlaced, err)
+	}
 	if dropErr := c.dropMoveInLocked(ctx, in.Conversation, in.MoveID, roots); dropErr != nil {
 		return nil, fmt.Errorf("%w: %v (%v)", dropErr, err, surface.ErrMoveInPlaced)
 	}
-	return nil, err
+	return nil, fmt.Errorf("%w: %v", surface.ErrMoveInRefused, err)
 }
 
 func (c *Claude) placeAndResume(ctx context.Context, in surface.MoveIn, staging, root, projectDir string) (*surface.Session, error) {
@@ -505,7 +508,7 @@ func (c *Claude) placeAndResume(ctx context.Context, in surface.MoveIn, staging,
 			continue
 		}
 		to := claudeRootPart(root, filepath.Base(projectDir), part)
-		if err := os.RemoveAll(to); err != nil {
+		if err := c.setAsideExisting(root, in, part, to); err != nil {
 			return nil, err
 		}
 		if err := os.Rename(from, to); err != nil {
@@ -513,6 +516,24 @@ func (c *Claude) placeAndResume(ctx context.Context, in surface.MoveIn, staging,
 		}
 	}
 	return c.resumeAs(ctx, in.Conversation, in.Cwd, claudehost.OpenRequest{Model: in.Model, PermissionMode: in.PermissionMode, Name: in.Title})
+}
+
+// setAsideExisting moves a copy of a part the arriving conversation extends
+// into the move's folder, under previous/, rather than deleting it.
+func (c *Claude) setAsideExisting(root string, in surface.MoveIn, part, at string) error {
+	if _, err := os.Lstat(at); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	kept := filepath.Join(c.movedDir(root, in.Conversation, in.MoveID), "previous", filepath.FromSlash(part))
+	if err := os.MkdirAll(filepath.Dir(kept), 0700); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(kept); err != nil {
+		return err
+	}
+	return os.Rename(at, kept)
 }
 
 // DropMoveIn sets aside the copy a move placed in projects/ and tasks/, into
@@ -545,10 +566,25 @@ func (c *Claude) dropMoveInLocked(ctx context.Context, conversation, moveID stri
 	} else if alive {
 		return surface.ErrMoveInRunning
 	}
-	if len(c.transcripts.pass(roots)(conversation)) == 0 {
-		if _, archived, err := c.moveOrigin(roots, conversation, moveID); err != nil || !archived {
-			return err
+	placed := c.transcripts.pass(roots)(conversation)
+	_, archived, err := c.moveOrigin(roots, conversation, moveID)
+	if err != nil {
+		return fmt.Errorf("%w: %v", surface.ErrMoveInPlaced, err)
+	}
+	if len(placed) == 0 && !archived {
+		return nil
+	}
+	if archived && len(placed) == 1 {
+		// An earlier attempt of the move already set aside the files it
+		// declared, so this attempt's copy of them is removed.
+		root, projectDir := claudeTranscriptRoot(placed[0]), filepath.Base(filepath.Dir(placed[0]))
+		for _, part := range claudeMoveParts(conversation) {
+			if err := os.RemoveAll(claudeRootPart(root, projectDir, part)); err != nil {
+				return fmt.Errorf("%w: %v", surface.ErrMoveInPlaced, err)
+			}
 		}
+		c.transcripts.pass(roots)(conversation)
+		return nil
 	}
 	if err := c.ArchiveMove(conversation, moveID); err != nil {
 		return fmt.Errorf("%w: %v", surface.ErrMoveInPlaced, err)

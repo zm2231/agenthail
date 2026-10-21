@@ -70,9 +70,12 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    Only then does it rename the files into
    `<root>/projects/<folder for the working directory>/` and `<root>/tasks/`.
    It resumes the conversation in its Claude host with the declared model,
-   permission mode and title. If Claude refuses to start, the target sets the
-   placed files aside in its own `agenthail-moved/<id>/<move id>/` before it
-   answers, so nothing there finds a copy to run beside the source's. Last,
+   permission mode and title. A copy of the conversation already here, which
+   the arriving one extends, is kept in `agenthail-moved/<id>/<move id>/previous/`.
+   If Claude refuses to start, the target sets the placed files aside in its
+   own `agenthail-moved/<id>/<move id>/` and records the move `aborted` before
+   it answers, so nothing there finds a copy to run beside the source's and a
+   repeated transfer is refused. Last,
    in one transaction, it registers the session as local, takes over the row
    the source mirrored there, binds the alias if it is free, and records the
    move `resumed`.
@@ -116,7 +119,7 @@ runs it there, and otherwise sets aside any copy it placed before it records
 | `sent`, before the transfer | target: `prepared` | Transfers. |
 | `sent`, transfer unanswered | target: `received` | Transfers again. A target that already runs the conversation only checks that what arrived begins what runs there. |
 | `sent`, target resumed it but the source stopped before the flip | target: `resumed` | Flips. |
-| `sent`, target refused the transfer before starting Claude | answer `409 move_refused` | Asks the target to abort. Once the target records `aborted`, puts the files back and marks the move `failed`. |
+| `sent`, target refused the transfer before starting Claude | answer `409 move_refused`, or `move_aborted` to a repeated transfer | Asks the target to abort, which it answers as `aborted` again if it already recorded that. Then puts the files back and marks the move `failed`. |
 | `sent`, target could not set aside a copy it placed | answer `502 move_unknown`, then `500 move_unsettled` to the abort | Leaves the move unresolved and asks again on the next reconnect. |
 | Putting the files back fails | the source's record | Leaves the move as it was and tries again on the next reconnect, or the next start for a `preparing` move. |
 | `sent`, target has no record | target: `none` | Same as a refusal. |

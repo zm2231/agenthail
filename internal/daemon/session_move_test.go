@@ -416,6 +416,12 @@ func TestAMoveWhoseResumeTheTargetRefusesLeavesNoCopyThere(t *testing.T) {
 	if _, err := os.Stat(moveWorktreePath(checkout, result.Move.ID)); !os.IsNotExist(err) {
 		t.Fatalf("the worktree the aborted move made is still there: %v", err)
 	}
+	if moved, _ := target.reg.SessionMove(result.Move.ID); !strings.Contains(moved.Detail, "not logged in") {
+		t.Fatalf("the target did not record why it refused: %+v", moved)
+	}
+	if _, err := target.reg.AbortMoveIn(result.Move.ID, session.ID, source.daemon.hostIdentity().ID); err != nil {
+		t.Fatalf("a repeated abort of an aborted move: %v", err)
+	}
 }
 
 func TestAMoveIsRefusedWhenItsFolderLeadsOutOfTheTargetsCheckout(t *testing.T) {
