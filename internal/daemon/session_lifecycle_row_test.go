@@ -31,10 +31,9 @@ func TestSessionRowReportsTheLifecycleItsRuntimeSupports(t *testing.T) {
 		{surface.RuntimeClaudeBackground, transcript, map[string]bool{"status": true, "logs": true, "stop": true, "resume": true, "adopt": true}},
 		{surface.RuntimeClaudeHost, transcript, map[string]bool{"status": true, "logs": true, "stop": true, "resume": true, "adopt": false}},
 		{surface.RuntimeClaudeCLI, transcript, map[string]bool{"status": false, "logs": false, "stop": false, "resume": false, "adopt": true}},
-		// Discovery leaves the transcript empty when the conversation has none
-		// or has one in more than one config root; adoption refuses both.
-		{surface.RuntimeClaudeCLI, "", map[string]bool{"status": false, "logs": false, "stop": false, "resume": false, "adopt": false}},
-		{surface.RuntimeClaudeBackground, "", map[string]bool{"status": true, "logs": true, "stop": true, "resume": true, "adopt": false}},
+		// A job registered before its transcript exists, or a row whose file
+		// discovery missed, can still be adopted once the transcript is there.
+		{surface.RuntimeClaudeBackground, "", map[string]bool{"status": true, "logs": true, "stop": true, "resume": true, "adopt": true}},
 	} {
 		runtime, want := tc.runtime, tc.want
 		row := d.catalogSessionProjection(adapter, surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: runtime, Transport: "uds", Transcript: tc.transcript, HasLocal: tc.transcript != ""}, catalogIdentity{}, time.Now(), "", 0, false, DashboardConfig{})

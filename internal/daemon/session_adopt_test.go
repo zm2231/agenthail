@@ -121,3 +121,45 @@ func TestTheSnapshotOffersAdoptionForTerminalAndBackgroundSessionsUntilTheHostRu
 		t.Fatalf("host session runtime=%s lifecycle=%+v, want its operations without adopt", runtime, got)
 	}
 }
+
+func TestAnExitedSessionWhoseFileDiscoveryMissedIsOfferedAndAdopted(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	_, registry, _, _, _ := daemonFixture(t)
+	fixture := claudetest.New(t)
+	host := claudehosttest.New(t, fixture.Home)
+	host.Start(t)
+	t.Setenv("HOME", fixture.Home)
+	const conversation = "7b3fad2e-5c4a-4f9b-8e18-d2c3b4a5f6e7"
+	transcript := fixture.Transcript(conversation, fixture.Home)
+	if err := registry.RegisterSession(surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: fixture.Home, Transcript: transcript, Status: surface.StatusOffline}); err != nil {
+		t.Fatal(err)
+	}
+	d := New(registry, []surface.Surface{surfaces.NewClaude(nil, fixture.Home)})
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	serve := func(method, path string, body []byte) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(method, path, bytes.NewReader(body))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	response := serve(http.MethodGet, "/api/v1/session?id="+conversation, nil)
+	var read struct {
+		Capabilities struct {
+			Lifecycle surface.Lifecycle `json:"lifecycle"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &read); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("session: %d %s", response.Code, response.Body.String())
+	}
+	if !read.Capabilities.Lifecycle.Adopt {
+		t.Fatalf("the exited session is not offered for adoption: %+v", read.Capabilities.Lifecycle)
+	}
+	body, _ := json.Marshal(map[string]any{"action": "session-adopt", "sessionId": conversation})
+	if response := serve(http.MethodPost, "/api/v1/actions", body); response.Code != http.StatusOK {
+		t.Fatalf("adopt: %d %s", response.Code, response.Body.String())
+	}
+	if spawns := host.Spawns(t, conversation); len(spawns) != 1 {
+		t.Fatalf("spawns=%+v, want one resume in the host", spawns)
+	}
+}
