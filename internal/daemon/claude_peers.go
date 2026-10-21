@@ -37,7 +37,8 @@ func (d *Daemon) startClaudePeers(ctx context.Context) (func(), error) {
 // runClaudePeerRegistration advertises peers at startup, whenever discovery
 // commits a session change, and every 30 seconds so idle peers age out.
 func (d *Daemon) runClaudePeerRegistration(ctx context.Context, advertise func(context.Context, []surface.Session) map[string]error, retire func(time.Time)) {
-	changed := d.watchCatalogSessions(ctx)
+	changed, watching := d.watchCatalogSessions(ctx)
+	defer func() { <-watching }()
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -55,9 +56,11 @@ func (d *Daemon) runClaudePeerRegistration(ctx context.Context, advertise func(c
 // watchCatalogSessions signals after discovery commits a session change, so a
 // newly discovered agent becomes a peer without waiting for the next tick. It
 // subscribes before returning, and resubscribes before signalling a dropped
-// subscription, so no commit falls between a pass and the subscription.
-func (d *Daemon) watchCatalogSessions(ctx context.Context) <-chan struct{} {
+// subscription, so no commit falls between a pass and the subscription. The
+// second channel closes once the watch has ended with ctx.
+func (d *Daemon) watchCatalogSessions(ctx context.Context) (<-chan struct{}, <-chan struct{}) {
 	changed := make(chan struct{}, 1)
+	watching := make(chan struct{})
 	signal := func() {
 		select {
 		case changed <- struct{}{}:
@@ -66,6 +69,7 @@ func (d *Daemon) watchCatalogSessions(ctx context.Context) <-chan struct{} {
 	}
 	stream, cancel := d.subscribeCatalogSessions(ctx, signal)
 	go func() {
+		defer close(watching)
 		for stream != nil {
 			select {
 			case <-ctx.Done():
@@ -82,7 +86,7 @@ func (d *Daemon) watchCatalogSessions(ctx context.Context) <-chan struct{} {
 			}
 		}
 	}()
-	return changed
+	return changed, watching
 }
 
 func (d *Daemon) subscribeCatalogSessions(ctx context.Context, signal func()) (<-chan registry.CatalogEvent, func()) {
