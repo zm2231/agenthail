@@ -115,7 +115,7 @@ func (c *Claude) accountCookies(ctx context.Context, root surface.ClaudeConfigRo
 		web, err := c.webAccount(ctx, source)
 		var status claudeHTTPStatusError
 		switch {
-		case errors.As(err, &status) && !status.Challenge && (status.Status == http.StatusUnauthorized || status.Status == http.StatusForbidden):
+		case errors.As(err, &status) && status.API && (status.Status == http.StatusUnauthorized || status.Status == http.StatusForbidden):
 			seen = append(seen, fmt.Sprintf("%s is not signed into claude.ai", signinLabel(candidate)))
 		case err != nil:
 			answered = false
@@ -150,7 +150,7 @@ func (c *Claude) webAccount(ctx context.Context, source CookieSource) (claudeWeb
 	if ok && time.Now().Before(entry.expiresAt) {
 		return entry.account, nil
 	}
-	data, err := c.claudeGET(ctx, source, "/api/account")
+	data, err := c.claudeGET(ctx, source, "/api/account", "account")
 	if err != nil {
 		return claudeWebAccount{}, err
 	}
@@ -164,7 +164,8 @@ func (c *Claude) webAccount(ctx context.Context, source CookieSource) (claudeWeb
 	return account, nil
 }
 
-func (c *Claude) claudeGET(ctx context.Context, source CookieSource, path string) (string, error) {
+// claudeGET reads a claude.ai API path; name stands for the path in errors.
+func (c *Claude) claudeGET(ctx context.Context, source CookieSource, path, name string) (string, error) {
 	request := c.request
 	if request == nil {
 		request = claudeSendRequest
@@ -174,22 +175,24 @@ func (c *Claude) claudeGET(ctx context.Context, source CookieSource, path string
 		return "", err
 	}
 	if status != http.StatusOK || strings.Contains(data, "Just a moment") {
-		return "", claudeHTTPStatusError{Path: path, Status: status, Challenge: strings.Contains(data, "Just a moment")}
+		return "", claudeHTTPStatusError{Name: name, Status: status, API: strings.HasPrefix(strings.TrimSpace(data), "{")}
 	}
 	return data, nil
 }
 
+// claudeHTTPStatusError is a claude.ai answer other than 200. API is true when
+// claude.ai's API answered, not a Cloudflare page in front of it.
 type claudeHTTPStatusError struct {
-	Path      string
-	Status    int
-	Challenge bool
+	Name   string
+	Status int
+	API    bool
 }
 
 func (e claudeHTTPStatusError) Error() string {
-	if e.Challenge {
-		return fmt.Sprintf("claude.ai %s answered with a Cloudflare challenge", e.Path)
+	if !e.API {
+		return fmt.Sprintf("claude.ai %s answered with a Cloudflare page (HTTP %d)", e.Name, e.Status)
 	}
-	return fmt.Sprintf("claude.ai %s returned HTTP %d", e.Path, e.Status)
+	return fmt.Sprintf("claude.ai %s returned HTTP %d", e.Name, e.Status)
 }
 
 // ClaudeConfigRoots describes each config root with the sign-in profile
@@ -201,7 +204,11 @@ func (c *Claude) ClaudeConfigRoots(ctx context.Context) ([]surface.ClaudeConfigR
 	}
 	for i := range roots {
 		root := &roots[i]
-		if root.SignedInAs == nil || root.SignedInAs.AccountID == "" || c.localOnly {
+		if root.SignedInAs == nil || root.SignedInAs.AccountID == "" {
+			continue
+		}
+		if c.localOnly {
+			root.UsageProblem = "usage is read from claude.ai with a browser sign-in, and this install has no claude.ai cookie reader"
 			continue
 		}
 		source, err := c.accountCookies(ctx, *root)
@@ -236,9 +243,9 @@ func (c *Claude) claudeUsage(ctx context.Context, source CookieSource, organizat
 	if organization == "" {
 		return nil, fmt.Errorf("the config root does not name its organization")
 	}
-	data, err := c.claudeGET(ctx, source, "/api/organizations/"+organization+"/usage")
+	data, err := c.claudeGET(ctx, source, "/api/organizations/"+organization+"/usage", "usage")
 	if err != nil {
-		return nil, err
+		return nil, errors.New(strings.ReplaceAll(err.Error(), organization, "<organization>"))
 	}
 	var response claudeUsageResponse
 	if err := json.Unmarshal([]byte(data), &response); err != nil {

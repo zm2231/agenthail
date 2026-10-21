@@ -117,15 +117,15 @@ func TestDescribedRootsUseTheEnvironmentRootsOwnConfig(t *testing.T) {
 }
 
 func TestResolveClaudeConfigRoot(t *testing.T) {
-	home := claudeRootsHome(t, ".gentle-claude/.claude")
-	gentle := filepath.Join(home, ".gentle-claude", ".claude")
-	writeClaudeGlobalConfigFixture(t, filepath.Join(gentle, ".claude.json"), map[string]any{"oauthAccount": oauthAccount("g", "other@example.com")})
+	home := claudeRootsHome(t, ".team/.claude")
+	team := filepath.Join(home, ".team", ".claude")
+	writeClaudeGlobalConfigFixture(t, filepath.Join(team, ".claude.json"), map[string]any{"oauthAccount": oauthAccount("g", "other@example.com")})
 	for choice, want := range map[string]string{
-		"":                         filepath.Join(home, ".claude"),
-		"default":                  filepath.Join(home, ".claude"),
-		"gentle-claude":            gentle,
-		gentle:                     gentle,
-		"~/.gentle-claude/.claude": gentle,
+		"":                filepath.Join(home, ".claude"),
+		"default":         filepath.Join(home, ".claude"),
+		"team":            team,
+		team:              team,
+		"~/.team/.claude": team,
 	} {
 		if got, err := ResolveClaudeConfigRoot(home, choice); err != nil || got != want {
 			t.Fatalf("choice %q: got %q err=%v", choice, got, err)

@@ -143,7 +143,7 @@ func ResolveClaudeConfigRoot(home, choice string) (string, error) {
 
 // claudeRootName is "default" for the primary root and otherwise the root's
 // directory name, or its parent's when the root is a .claude directory, so
-// ~/.gentle-claude/.claude is "gentle-claude".
+// ~/.work/.claude is "work".
 func claudeRootName(root string, primary bool) string {
 	if primary {
 		return "default"

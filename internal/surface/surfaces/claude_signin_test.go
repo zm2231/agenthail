@@ -243,3 +243,49 @@ func TestClaudeRemoteControlWithAnUnreadableRootLoginIsHeld(t *testing.T) {
 		t.Fatalf("calls=%q", calls)
 	}
 }
+
+func TestClaudeRemoteControlHoldsWhenCloudflareAnswersForAProfile(t *testing.T) {
+	fixture := newClaudeRootFixture(t, "c", "c@example.com")
+	request := func(ctx context.Context, method, url string, headers map[string]string, body string, cookies CookieSource, timeout time.Duration) (int, string, error) {
+		if strings.HasSuffix(url, "/api/account") && cookies.Signin.Dir == "/a" {
+			return 403, "<html>Access denied</html>", nil
+		}
+		return fixture.request(ctx, method, url, headers, body, cookies, timeout)
+	}
+	claude := NewClaudeWithRequest(twoProfiles, fixture.home, request)
+	_, err := claude.postMessage(context.Background(), fixture.session, "hello")
+	if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryTerminal(err) {
+		t.Fatalf("a Cloudflare block page says nothing about the profile's account: %v", err)
+	}
+}
+
+func TestClaudeConfigRootsUsageProblemDoesNotNameTheOrganization(t *testing.T) {
+	fixture := newClaudeRootFixture(t, "b", "b@example.com")
+	request := func(ctx context.Context, method, url string, headers map[string]string, body string, cookies CookieSource, timeout time.Duration) (int, string, error) {
+		if strings.HasSuffix(url, "/usage") {
+			return 0, "", errors.New("sidecar failed: Max retries exceeded with url: " + strings.TrimPrefix(url, "https://claude.ai"))
+		}
+		return fixture.request(ctx, method, url, headers, body, cookies, timeout)
+	}
+	claude := NewClaudeWithRequest(twoProfiles, fixture.home, request)
+	roots, err := claude.ClaudeConfigRoots(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if problem := roots[0].UsageProblem; problem == "" || strings.Contains(problem, "org-b") {
+		t.Fatalf("usageProblem=%q", problem)
+	}
+}
+
+func TestClaudeConfigRootsSayWhyAnInstallWithoutCookiesHasNoUsage(t *testing.T) {
+	fixture := newClaudeRootFixture(t, "b", "b@example.com")
+	claude := NewClaudeWithRequest(twoProfiles, fixture.home, fixture.request)
+	claude.DisableRemoteControl()
+	roots, err := claude.ClaudeConfigRoots(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roots[0].Usage != nil || !strings.Contains(roots[0].UsageProblem, "no claude.ai cookie reader") || len(fixture.callList()) != 0 {
+		t.Fatalf("root=%+v calls=%q", roots[0], fixture.callList())
+	}
+}

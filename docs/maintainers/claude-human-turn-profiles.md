@@ -131,9 +131,9 @@ record before the transcript exists ([`claude_signin.go`](../../internal/surface
 every other readable profile, and the first whose `GET /api/account` names that
 account's `accountUuid` is used. Each profile's account is kept for five
 minutes. When every profile answered, as another account or as signed out
-(HTTP 401 or 403), the request fails as terminal `signin_unreadable` naming the
+(HTTP 401 or 403 answered by claude.ai's API), the request fails as terminal `signin_unreadable` naming the
 account and each profile's answer. When a profile could not be asked (cookie
-bridge failure, a claude.ai error or challenge) or the root's `.claude.json`
+bridge failure, a claude.ai error, or a Cloudflare page in front of claude.ai) or the root's `.claude.json`
 cannot be read, the request is held. Off still means no cookies. A request with
 no session (the health probe) or for a root without a claude.ai login uses the
 choice.
