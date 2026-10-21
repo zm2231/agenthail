@@ -113,6 +113,30 @@ async function turn(message) {
     interrupt = null;
     state('running');
     reply = `question:${decision.behavior}:${JSON.stringify(decision.updatedInput?.answers ?? null)}`;
+  } else if (text.startsWith('ELICIT')) {
+    // An MCP server asking for input: a form, or a link to open.
+    const request = text.startsWith('ELICIT URL')
+      ? { subtype: 'elicitation', mcp_server_name: 'docs', message: 'Sign in to docs', mode: 'url', url: 'https://example.com/auth', elicitation_id: 'e1' }
+      : {
+          subtype: 'elicitation',
+          mcp_server_name: 'deploy',
+          message: 'Where should this deploy?',
+          requested_schema: {
+            type: 'object',
+            properties: {
+              env: { type: 'string', title: 'Environment', enum: ['staging', 'prod'], enumNames: ['Staging', 'Production'] },
+              replicas: { type: 'integer', title: 'Replicas', default: 2 },
+              notify: { type: 'boolean', title: 'Notify the team' },
+              regions: { type: 'array', title: 'Regions', items: { anyOf: [{ const: 'us', title: 'US' }, { const: 'eu', title: 'EU' }] } },
+              note: { type: 'string', description: 'Why now' },
+            },
+            required: ['env'],
+          },
+        };
+    const result = await control(request);
+    interrupt = null;
+    state('running');
+    reply = `elicit:${result.action}:${JSON.stringify(result.content ?? null)}`;
   } else if (text.startsWith('SLOW')) {
     const ms = Number(text.split(' ')[1] ?? 30000);
     const interrupted = await new Promise((resolve) => {

@@ -77,6 +77,7 @@ globalThis.presenceLabel = presenceLabel;
 globalThis.presenceTone = presenceTone;
 globalThis.renderBackgroundTasks = renderBackgroundTasks;
 globalThis.renderRequests = renderRequests;
+globalThis.renderRequestCard = renderRequestCard;
 globalThis.renderChat = renderChat;
 globalThis.goalStatusLabel = goalStatusLabel;
 globalThis.contextBreakdown = contextBreakdown;`, context);
@@ -230,5 +231,28 @@ assert(elements["#request-panel"].hidden, "an approval with no request yet shows
 context.app.requests = { requests: [{ id: "live", kind: "approval", title: "Run ls" }] };
 context.renderRequests();
 assert(elements["#request-panel"].innerHTML.includes("data-request-respond=\"allow\"") && elements["#request-panel"].innerHTML.includes("Run ls"), "an approval shows its request card");
+const formCard = context.renderRequestCard({
+  id: "e1",
+  kind: "input",
+  elicitation: {
+    server: "deploy",
+    message: "Where should this deploy?",
+    mode: "form",
+    fields: [
+      { name: "env", title: "Environment", type: "string", required: true, multiSelect: false, options: [{ value: "staging", label: "Staging" }, { value: "prod", label: "Production" }] },
+      { name: "replicas", title: "Replicas", type: "integer", required: false, multiSelect: false, default: 2 },
+      { name: "notify", title: "Notify", type: "boolean", required: false, multiSelect: false },
+      { name: "regions", title: "Regions", type: "string", required: false, multiSelect: true, options: [{ value: "us", label: "US" }] },
+    ],
+  },
+});
+for (const expected of ['data-request-input="e1"', "deploy asks for input", "Where should this deploy?", "Environment *", '<option value="prod">Production</option>', 'type="number" step="1" name="field-replicas" value="2"', 'type="checkbox" name="field-notify"', 'type="checkbox" name="field-regions" value="us"', 'data-request-respond="deny"']) {
+  assert(formCard.includes(expected), `an MCP form card shows ${expected}`);
+}
+assert(!formCard.includes('data-request-respond="allow"'), "an MCP form is submitted with its fields, not allowed");
+const linkCard = context.renderRequestCard({ id: "e2", kind: "input", elicitation: { server: "docs", message: "Sign in", mode: "url", url: "https://example.com/auth" } });
+assert(linkCard.includes('href="https://example.com/auth"') && linkCard.includes('rel="noopener noreferrer"') && linkCard.includes('data-request-respond="allow"'), "an MCP link card opens the link and continues");
+const scriptLink = context.renderRequestCard({ id: "e3", kind: "input", elicitation: { server: "docs", message: "Sign in", mode: "url", url: "javascript:alert(1)" } });
+assert(!scriptLink.includes("href="), "a link that is not http or https is shown, not linked");
 
 console.log("dashboard timeline VM tests passed");

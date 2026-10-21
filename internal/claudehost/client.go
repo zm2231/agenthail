@@ -124,6 +124,33 @@ type Request struct {
 	AgentID        string          `json:"agentId,omitempty"`
 	Input          json.RawMessage `json:"input,omitempty"`
 	Questions      []Question      `json:"questions,omitempty"`
+	Elicitation    *Elicitation    `json:"elicitation,omitempty"`
+}
+
+// Elicitation is an MCP server's request for input: a form of fields, or in
+// url mode a link to open.
+type Elicitation struct {
+	Server  string             `json:"server"`
+	Message string             `json:"message"`
+	Mode    string             `json:"mode"`
+	URL     string             `json:"url,omitempty"`
+	Fields  []ElicitationField `json:"fields,omitempty"`
+}
+
+type ElicitationField struct {
+	Name        string              `json:"name"`
+	Title       string              `json:"title"`
+	Description string              `json:"description"`
+	Type        string              `json:"type"`
+	Required    bool                `json:"required"`
+	MultiSelect bool                `json:"multiSelect"`
+	Options     []ElicitationOption `json:"options,omitempty"`
+	Default     json.RawMessage     `json:"default,omitempty"`
+}
+
+type ElicitationOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
 }
 
 type Question struct {
@@ -145,6 +172,7 @@ type Decision struct {
 	Always   bool              `json:"always,omitempty"`
 	Message  string            `json:"message,omitempty"`
 	Answers  map[string]string `json:"answers,omitempty"`
+	Content  json.RawMessage   `json:"content,omitempty"`
 }
 
 type Origin struct {

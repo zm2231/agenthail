@@ -275,7 +275,12 @@ func pickRequest(requests []surface.Request, id string) (surface.Request, error)
 // always or deny. A question takes deny, or its answer: a number picks that
 // option, other text is the answer itself, and --answers answers several
 // questions at once. allow and always are never taken as a question's answer.
+// An MCP server's request takes deny, or allow with --answers holding its
+// form's field values.
 func requestDecision(request surface.Request, reply, answers, reason string) (surface.Decision, error) {
+	if request.Kind == surface.WaitingInput {
+		return inputDecision(request, reply, answers)
+	}
 	switch reply {
 	case "deny":
 		return surface.Decision{Behavior: "deny", Message: reason}, nil
@@ -307,10 +312,30 @@ func requestDecision(request surface.Request, reply, answers, reason string) (su
 	return decision, nil
 }
 
+func inputDecision(request surface.Request, reply, answers string) (surface.Decision, error) {
+	switch {
+	case reply == "deny":
+		return surface.Decision{Behavior: "deny"}, nil
+	case reply != "" && reply != "allow":
+		return surface.Decision{}, fmt.Errorf("request %s asks for input: answer allow, with --answers for its fields, or deny", request.ID)
+	case answers == "":
+		return surface.Decision{Behavior: "allow"}, nil
+	}
+	var content map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(answers), &content); err != nil {
+		return surface.Decision{}, fmt.Errorf("--answers must be a JSON object of field to value: %w", err)
+	}
+	return surface.Decision{Behavior: "allow", Content: json.RawMessage(answers)}, nil
+}
+
 func printRequest(request surface.Request) {
 	summary := request.Title
 	if summary == "" {
 		summary = request.Tool
+	}
+	if e := request.Elicitation; e != nil {
+		printInputRequest(request.ID, *e)
+		return
 	}
 	fmt.Printf("%s  %s  %s\n", request.ID, request.Kind, summary)
 	if request.Description != "" {
@@ -330,6 +355,43 @@ func printRequest(request surface.Request) {
 	} else if request.Kind != surface.WaitingQuestion {
 		fmt.Println("  answer: allow or deny")
 	}
+}
+
+func printInputRequest(id string, e surface.Elicitation) {
+	fmt.Printf("%s  input  %s\n", id, e.Server)
+	fmt.Printf("  %s\n", e.Message)
+	if e.Mode == "url" {
+		fmt.Printf("  open: %s\n", e.URL)
+		fmt.Println("  answer: allow once it is open, or deny")
+		return
+	}
+	for _, field := range e.Fields {
+		kind := field.Type
+		switch {
+		case field.MultiSelect:
+			kind = "list of " + inputChoices(field.Options)
+		case len(field.Options) > 0:
+			kind = "one of " + inputChoices(field.Options)
+		}
+		required := ""
+		if field.Required {
+			required = ", required"
+		}
+		fmt.Printf("    %s (%s%s)  %s\n", field.Name, kind, required, strings.TrimSpace(field.Title+" "+field.Description))
+	}
+	if len(e.Fields) == 0 {
+		fmt.Println("  answer: allow or deny")
+	} else {
+		fmt.Println(`  answer: allow --answers '{"field":value}', or deny`)
+	}
+}
+
+func inputChoices(options []surface.ElicitationOption) string {
+	values := make([]string, 0, len(options))
+	for _, option := range options {
+		values = append(values, strconv.Quote(option.Value))
+	}
+	return strings.Join(values, ", ")
 }
 
 func permissionModeLabel(mode string) string {
