@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -21,12 +22,22 @@ func TestSessionRowReportsTheLifecycleItsRuntimeSupports(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	adapter := surfaces.NewClaude(nil, home)
 	d := New(registry, []surface.Surface{adapter})
-	for runtime, want := range map[surface.RuntimeKind]map[string]bool{
-		surface.RuntimeClaudeBackground: {"status": true, "logs": true, "stop": true, "resume": true, "adopt": true},
-		surface.RuntimeClaudeHost:       {"status": true, "logs": true, "stop": true, "resume": true, "adopt": false},
-		surface.RuntimeClaudeCLI:        {"status": false, "logs": false, "stop": false, "resume": false, "adopt": true},
+	transcript := filepath.Join(home, ".claude", "projects", "-work", "s.jsonl")
+	for _, tc := range []struct {
+		runtime    surface.RuntimeKind
+		transcript string
+		want       map[string]bool
+	}{
+		{surface.RuntimeClaudeBackground, transcript, map[string]bool{"status": true, "logs": true, "stop": true, "resume": true, "adopt": true}},
+		{surface.RuntimeClaudeHost, transcript, map[string]bool{"status": true, "logs": true, "stop": true, "resume": true, "adopt": false}},
+		{surface.RuntimeClaudeCLI, transcript, map[string]bool{"status": false, "logs": false, "stop": false, "resume": false, "adopt": true}},
+		// Discovery leaves the transcript empty when the conversation has none
+		// or has one in more than one config root; adoption refuses both.
+		{surface.RuntimeClaudeCLI, "", map[string]bool{"status": false, "logs": false, "stop": false, "resume": false, "adopt": false}},
+		{surface.RuntimeClaudeBackground, "", map[string]bool{"status": true, "logs": true, "stop": true, "resume": true, "adopt": false}},
 	} {
-		row := d.catalogSessionProjection(adapter, surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: runtime, Transport: "uds"}, catalogIdentity{}, time.Now(), "", 0, false, DashboardConfig{})
+		runtime, want := tc.runtime, tc.want
+		row := d.catalogSessionProjection(adapter, surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: runtime, Transport: "uds", Transcript: tc.transcript, HasLocal: tc.transcript != ""}, catalogIdentity{}, time.Now(), "", 0, false, DashboardConfig{})
 		data, err := json.Marshal(row)
 		if err != nil {
 			t.Fatal(err)
@@ -40,11 +51,11 @@ func TestSessionRowReportsTheLifecycleItsRuntimeSupports(t *testing.T) {
 			t.Fatal(err)
 		}
 		if len(decoded.Capabilities.Lifecycle) != len(want) {
-			t.Fatalf("%s lifecycle=%v, want %v", runtime, decoded.Capabilities.Lifecycle, want)
+			t.Fatalf("%s transcript=%q lifecycle=%v, want %v", runtime, tc.transcript, decoded.Capabilities.Lifecycle, want)
 		}
 		for operation, supported := range want {
 			if got, ok := decoded.Capabilities.Lifecycle[operation]; !ok || got != supported {
-				t.Fatalf("%s lifecycle=%v, want %v", runtime, decoded.Capabilities.Lifecycle, want)
+				t.Fatalf("%s transcript=%q lifecycle=%v, want %v", runtime, tc.transcript, decoded.Capabilities.Lifecycle, want)
 			}
 		}
 	}

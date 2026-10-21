@@ -101,9 +101,10 @@ final class SessionAdoptController: ObservableObject {
         self.session = session
     }
 
-    var canAdopt: Bool { phase == .ready }
+    var canAdopt: Bool { phase == .ready && session.canAdopt }
 
     func adopt(api: AgenthailAPI, stopTerminal: Bool = false) async {
+        guard session.canAdopt else { return }
         phase = .adopting
         do {
             switch try await api.adoptSession(id: session.id, stopTerminal: stopTerminal) {

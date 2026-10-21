@@ -29,7 +29,7 @@ func TestClaudeLifecycleCapabilitiesFollowTheRuntime(t *testing.T) {
 		{surface.RuntimeClaudeHost, surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true}},
 		{surface.RuntimeClaudeCLI, surface.Lifecycle{Adopt: true}},
 	} {
-		session := &surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: tc.runtime, Transport: "uds", Bridge: "session_bridge"}
+		session := &surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: tc.runtime, Transport: "uds", Bridge: "session_bridge", Transcript: "/home/test/.claude/projects/-work/s.jsonl", HasLocal: true}
 		if got := adapter.SessionCapabilities(session).Lifecycle; got != tc.want {
 			t.Fatalf("%s lifecycle=%+v, want %+v", tc.runtime, got, tc.want)
 		}

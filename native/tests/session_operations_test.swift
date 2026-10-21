@@ -133,6 +133,10 @@ struct SessionOperationsTest {
         check(older?.canAdopt == false, "a daemon that reports no lifecycle offers no adoption")
         let undeclared = lifecycleSession("claude-cli", lifecycle: #"{"status":false,"logs":false,"stop":false,"resume":false}"#)
         check(undeclared?.canAdopt == false, "the runtime alone does not offer adoption; the daemon's flag does")
+        MainActor.assumeIsolated {
+            check(interactive.map { SessionAdoptController(session: $0).canAdopt } == true, "the adopt sheet can open a session its daemon offers")
+            check(undeclared.map { SessionAdoptController(session: $0).canAdopt } == false, "the adopt sheet cannot open a session its daemon does not offer")
+        }
     }
 
     static func checkQueueOrder() {

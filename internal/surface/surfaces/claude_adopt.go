@@ -17,10 +17,16 @@ const (
 	claudeAdoptPollEvery   = 500 * time.Millisecond
 )
 
-// claudeAdoptable is a session AdoptSession moves into the host: one a
-// terminal or a background job runs. A host session is already there.
+// claudeAdoptable reports whether AdoptSession can move sess into the host:
+// a terminal session or background job whose transcript discovery found in
+// exactly one config root. A host session is already there, and AdoptSession
+// refuses a conversation with no transcript or one in several roots, for
+// which discovery leaves the transcript empty.
 func claudeAdoptable(sess *surface.Session) bool {
-	return sess != nil && (sess.RuntimeKind == surface.RuntimeClaudeCLI || sess.RuntimeKind == surface.RuntimeClaudeBackground)
+	if sess == nil || !sess.HasLocal || sess.Transcript == "" {
+		return false
+	}
+	return sess.RuntimeKind == surface.RuntimeClaudeCLI || sess.RuntimeKind == surface.RuntimeClaudeBackground
 }
 
 // AdoptSession reopens a conversation in Agenthail's host. The process that
