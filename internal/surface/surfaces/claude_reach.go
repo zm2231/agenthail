@@ -197,6 +197,11 @@ func (c *Claude) resumeAs(ctx context.Context, conversation, cwd string, options
 	if err != nil {
 		return nil, err
 	}
+	// Claude finds no conversation to resume without its transcript, which a
+	// move to another host takes away, so none is started.
+	if root == "" || len(c.transcripts.pass([]string{root})(conversation)) == 0 {
+		return nil, surface.DeliveryTerminal(fmt.Errorf("Claude conversation %s has no transcript on this machine to resume", conversation), surface.DeliveryTargetMissing)
+	}
 	// Claude restores a resumed conversation's title but names the resumed
 	// process anew, so the title is passed back as its name.
 	if options.Name == "" {
