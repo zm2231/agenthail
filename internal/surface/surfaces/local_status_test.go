@@ -29,7 +29,7 @@ func TestCodexLocalStatusFollowsTranscriptLifecycle(t *testing.T) {
 	appendLine(t, path, `{"type":"event_msg","payload":{"type":"task_complete"}}`)
 	codex := &Codex{}
 	session := surface.Session{ID: "synthetic", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Transcript: path}
-	if files := codex.LocalStatusFiles(session); len(files) != 1 || files[0] != path {
+	if files := codex.LocalStatusFiles(session); len(files) != 2 || files[0] != path || files[1] != codexPendingModelPath(session.ID) {
 		t.Fatalf("files=%v", files)
 	}
 

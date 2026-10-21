@@ -51,7 +51,7 @@ func (c *Codex) LocalStatusFiles(session surface.Session) []string {
 	if session.Transcript == "" {
 		return nil
 	}
-	return []string{session.Transcript}
+	return []string{session.Transcript, codexPendingModelPath(session.ID)}
 }
 
 func (c *Codex) LocalStatus(_ context.Context, session surface.Session) (surface.Session, error) {
@@ -63,6 +63,7 @@ func (c *Codex) LocalStatus(_ context.Context, session surface.Session) (surface
 		return session, err
 	}
 	applyCodexTranscriptStatus(&session, info)
+	applyCodexPendingModel(&session)
 	return session, nil
 }
 

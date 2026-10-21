@@ -619,7 +619,7 @@ struct ConversationPane: View {
             TranscriptView(model: model, pane: pane, session: session)
                 .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)") { await pane.syncRequests(for: session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
+                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.modelLabel, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)
                         NSApplication.shared.activate()
                         openWindow(id: "voice")
@@ -1622,7 +1622,7 @@ struct ComposerView: View {
             if options.contains(where: { $0.id == query }) { return [] }
             return options
                 .filter { query.isEmpty || $0.id.localizedCaseInsensitiveContains(query) || $0.displayName.localizedCaseInsensitiveContains(query) }
-                .map { SlashCommandMenu.Suggestion(id: "model:" + $0.id, title: $0.displayName, detail: $0.id == pane.detail?.model ? "Current" : ($0.description ?? $0.id), insertion: "/model " + $0.id) }
+                .map { SlashCommandMenu.Suggestion(id: "model:" + $0.id, title: $0.displayName, detail: $0.id == pane.detail?.model ? "Current" : $0.id == pane.detail?.nextTurnModel ? "From next turn" : ($0.description ?? $0.id), insertion: "/model " + $0.id) }
         }
         let available = SlashCommand.available(capabilities: session.capabilities, working: session.isWorking, waitingOnYou: session.isWaitingOnYou)
         return SlashCommand.suggestions(for: draft.text, available: available).map {
@@ -2013,12 +2013,12 @@ struct DetailsTab: View {
                 if canControl && session.capabilities.model, case let options = modelOptions, !options.isEmpty {
                     GridRow {
                         Text("Model").foregroundStyle(DesktopPalette.text2)
-                        Menu(options.first { $0.id == modelName }?.displayName ?? modelName ?? "Choose") {
+                        Menu(MetadataLabels.modelMenuTitle(current: options.first { $0.id == modelName }?.displayName ?? modelName, next: options.first { $0.id == pane.detail?.nextTurnModel }?.displayName ?? pane.detail?.nextTurnModel)) {
                             ForEach(options) { option in
                                 Button {
                                     pane.changeModel(to: option.id)
                                 } label: {
-                                    if option.id == modelName { Label(option.displayName, systemImage: "checkmark") } else { Text(option.displayName) }
+                                    if option.id == modelName { Label(option.displayName, systemImage: "checkmark") } else if option.id == pane.detail?.nextTurnModel { Label(option.displayName + " (from next turn)", systemImage: "clock") } else { Text(option.displayName) }
                                 }
                             }
                         }
@@ -2026,8 +2026,8 @@ struct DetailsTab: View {
                         .fixedSize()
                         .disabled(pane.controlPending)
                     }
-                } else if let modelName {
-                    detailRow("Model", modelName)
+                } else if let modelLabel = pane.detail?.modelLabel {
+                    detailRow("Model", modelLabel)
                 }
                 if canControl && pane.detail?.capabilities.permissionMode == true, let current = pane.requests?.permissionMode {
                     GridRow {

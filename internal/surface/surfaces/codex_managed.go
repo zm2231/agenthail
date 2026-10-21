@@ -204,24 +204,36 @@ func codexOperationOutcome(err error) error {
 // a loaded thread that accepts direct input is used as is, otherwise the
 // thread is resumed there and must then accept direct input.
 func (c *Codex) requireDirectInput(ctx context.Context, client codexClient, sess *surface.Session) error {
+	_, err := c.loadForDirectInput(ctx, client, sess, "")
+	return err
+}
+
+// loadForDirectInput loads the thread when Codex does not have it loaded,
+// with model as the resume's override. It reports whether the thread was
+// loaded before, when Codex would ignore an override.
+func (c *Codex) loadForDirectInput(ctx context.Context, client codexClient, sess *surface.Session, model string) (bool, error) {
 	readResponse, err := client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
 	if err == nil && codexDirectInputAccepted(readResponse) {
-		return nil
+		return true, nil
 	}
-	if _, err := client.Request(ctx, "thread/resume", codexResumeParams(sess), 10*time.Second); err != nil {
-		return classifyCodexWrite(fmt.Errorf("thread/resume: %w", err))
+	params := codexResumeParams(sess)
+	if model != "" {
+		params["model"] = model
+	}
+	if _, err := client.Request(ctx, "thread/resume", params, 10*time.Second); err != nil {
+		return false, classifyCodexWrite(fmt.Errorf("thread/resume: %w", err))
 	}
 	readResponse, err = client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
 	if err != nil {
-		return fmt.Errorf("thread/read after resume: %w", err)
+		return false, fmt.Errorf("thread/read after resume: %w", err)
 	}
 	if !codexDirectInputAccepted(readResponse) {
-		return errors.New("Codex loaded the session without direct-input capability")
+		return false, errors.New("Codex loaded the session without direct-input capability")
 	}
 	result, _ := readResponse["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
 	sess.Source, sess.Status, sess.WaitingOn = codexSource(thread["source"]), codexStatus(thread["status"]), codexSessionWaiting(sess.ID, thread["status"])
-	return nil
+	return false, nil
 }
 
 func codexResumeParams(sess *surface.Session) map[string]any {

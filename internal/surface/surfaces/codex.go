@@ -299,9 +299,13 @@ func (c *Codex) list(ctx context.Context, sweep bool) ([]surface.Session, bool, 
 	out := make([]surface.Session, 0, len(byID))
 	for _, session := range byID {
 		c.reconcileLocalStatus(&session)
+		applyCodexPendingModel(&session)
 		out = append(out, session)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].LastActive.After(out[j].LastActive) })
+	if complete {
+		pruneCodexPendingModels(out)
+	}
 	return out, complete, nil
 }
 
@@ -572,6 +576,14 @@ func codexStatus(s any) surface.SessionStatus {
 }
 
 func (c *Codex) Resolve(ctx context.Context, target string) (*surface.Session, error) {
+	session, err := c.resolve(ctx, target)
+	if session != nil {
+		applyCodexPendingModel(session)
+	}
+	return session, err
+}
+
+func (c *Codex) resolve(ctx context.Context, target string) (*surface.Session, error) {
 	if looksLikeUUID(target) {
 		return c.resolveID(ctx, target)
 	}
@@ -900,15 +912,26 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 		"threadId": sess.ID,
 		"input":    codexUserInput(message, options.Images),
 	}
-	if options.Model != "" {
-		params["model"] = options.Model
+	model, notice := options.Model, ""
+	_, pending := loadCodexPendingModel(sess.ID)
+	if pending && model == "" {
+		current, err := codexThreadModel(ctx, conn, sess.ID)
+		if err != nil {
+			return nil, surface.DeliveryUnavailable(fmt.Errorf("read the model the pending choice replaces: %w", err))
+		}
+		model, notice = codexPendingModelForTurn(sess.ID, current)
 	}
-	if err := applyCodexTurnOptions(ctx, conn, sess, options.Model, options.TurnOptions, params); err != nil {
+	if err := applyCodexTurnOptions(ctx, conn, sess, model, options.TurnOptions, params); err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}
 	resp, err := conn.Request(ctx, "turn/start", params, 10*time.Second)
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("turn/start: %w", err))
+	}
+	if pending && model != "" {
+		if err := clearCodexPendingModel(sess.ID); err != nil {
+			notice = fmt.Sprintf("The turn runs on %s, but its pending choice could not be cleared: %s", model, err)
+		}
 	}
 	turnID := sess.ID
 	if result, _ := resp["result"].(map[string]any); result != nil {
@@ -918,7 +941,7 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 			turnID = value
 		}
 	}
-	return &surface.SendResult{UUID: turnID, Accepted: true}, nil
+	return &surface.SendResult{UUID: turnID, Accepted: true, Notice: notice}, nil
 }
 
 // NativeImages is true on every route: each Codex transport speaks the
@@ -1152,33 +1175,66 @@ func (c *Codex) Compact(ctx context.Context, sess *surface.Session) error {
 
 func (c *Codex) Model(ctx context.Context, sess *surface.Session, name string) (string, error) {
 	if name == "" {
-		response, err := c.requestSession(ctx, sess, false, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 2*time.Second)
+		client, err := c.openReader(ctx, sess)
 		if err != nil {
 			return "", err
 		}
-		result, _ := response["result"].(map[string]any)
-		thread, _ := result["thread"].(map[string]any)
-		model := str(thread, "model")
-		if model == "" {
-			model = str(result, "model")
-		}
-		if model == "" {
-			return "", fmt.Errorf("session metadata does not include the active model")
-		}
-		return model, nil
+		defer client.Close()
+		return codexThreadModel(ctx, client, sess.ID)
 	}
-	params := map[string]any{"threadId": sess.ID}
-	if name != "" {
-		params["model"] = name
+	change, err := c.SetModel(ctx, sess, name)
+	if err != nil {
+		return "", err
 	}
-	response, err := c.requestSession(ctx, sess, name != "", "thread/resume", params, 5*time.Second)
+	return change.Text(), nil
+}
+
+func (c *Codex) SetModel(ctx context.Context, sess *surface.Session, name string) (surface.ModelChange, error) {
+	lock, err := acquireCodexWriteLock(ctx)
+	if err != nil {
+		return surface.ModelChange{}, surface.DeliveryUnavailable(err)
+	}
+	defer releaseCodexWriteLock(lock)
+	client, err := c.openRoute(ctx, sess)
+	if err != nil {
+		return surface.ModelChange{}, surface.DeliveryUnavailable(err)
+	}
+	defer client.Close()
+	if _, err := c.loadForDirectInput(ctx, client, sess, name); err != nil {
+		if surface.IsDeliveryTerminal(err) {
+			return surface.ModelChange{}, err
+		}
+		return surface.ModelChange{}, surface.DeliveryUnavailable(err)
+	}
+	current, err := codexThreadModel(ctx, client, sess.ID)
+	if err != nil {
+		return surface.ModelChange{}, err
+	}
+	if current == name {
+		if err := clearCodexPendingModel(sess.ID); err != nil {
+			return surface.ModelChange{}, fmt.Errorf("clear the pending model: %w", err)
+		}
+		return surface.ModelChange{Model: current}, nil
+	}
+	if err := saveCodexPendingModel(sess.ID, codexPendingModel{Model: name, From: current, SetAt: time.Now().UTC()}); err != nil {
+		return surface.ModelChange{}, fmt.Errorf("record the pending model: %w", err)
+	}
+	return surface.ModelChange{Model: current, PendingModel: name, Limit: "A turn started from Codex Desktop's composer runs on the model Desktop shows."}, nil
+}
+
+func codexThreadModel(ctx context.Context, client codexClient, threadID string) (string, error) {
+	response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, 5*time.Second)
 	if err != nil {
 		return "", err
 	}
 	result, _ := response["result"].(map[string]any)
-	model := str(result, "model")
+	thread, _ := result["thread"].(map[string]any)
+	model := str(thread, "model")
 	if model == "" {
-		return "", fmt.Errorf("thread/resume response did not include the active model")
+		model = str(result, "model")
+	}
+	if model == "" {
+		return "", fmt.Errorf("session metadata does not include the active model")
 	}
 	return model, nil
 }
