@@ -1041,7 +1041,7 @@ func (a *App) cmdList(args []string) error {
 }
 
 // listHolders names the terminals a conversation is open in, as
-// "2 terminals: 5799 ttys001, 31497 ttys021".
+// "2 terminals: 4101 pts/1, 4102 ttys002".
 func listHolders(holders []surface.Holder) string {
 	parts := make([]string, 0, len(holders))
 	for _, holder := range holders {

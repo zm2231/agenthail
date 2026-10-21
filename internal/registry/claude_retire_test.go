@@ -18,7 +18,7 @@ func TestClaudeRowThatNeverHeldAConversationIsRemovedWithItsCatalogRow(t *testin
 			t.Fatal(err)
 		}
 	}
-	record(surface.Session{ID: "never-written", PID: 31497, Bridge: "session_left", Status: surface.StatusIdle})
+	record(surface.Session{ID: "never-written", PID: 4102, Bridge: "session_left", Status: surface.StatusIdle})
 	record(surface.Session{ID: "written", Transcript: "/fixture/written.jsonl", HasLocal: true, Status: surface.StatusIdle})
 	record(surface.Session{ID: "named", Status: surface.StatusIdle})
 	record(surface.Session{ID: "queued", Status: surface.StatusIdle})
@@ -49,10 +49,10 @@ func TestRegisteringASharedConversationDetachesEachHolderFromItsEarlierRow(t *te
 		session.Surface, session.RuntimeKind = surface.KindClaude, surface.RuntimeClaudeCLI
 		return session
 	}
-	if err := r.RegisterSession(claude(surface.Session{ID: "started", PID: 31497, Bridge: "session_moved", Transport: "uds"})); err != nil {
+	if err := r.RegisterSession(claude(surface.Session{ID: "started", PID: 4102, Bridge: "session_moved", Transport: "uds"})); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(claude(surface.Session{ID: "shared", Holders: []surface.Holder{{PID: 5799}, {PID: 31497}}})); err != nil {
+	if err := r.RegisterSession(claude(surface.Session{ID: "shared", Holders: []surface.Holder{{PID: 4101}, {PID: 4102}}})); err != nil {
 		t.Fatal(err)
 	}
 	started, err := r.Session("started")
@@ -67,11 +67,11 @@ func TestRegisteringASharedConversationDetachesEachHolderFromItsEarlierRow(t *te
 
 func TestASessionAddressedToOneHolderLeavesTheConversationRowAsDiscovered(t *testing.T) {
 	r := openTestRegistry(t)
-	shared := surface.Session{ID: "shared", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Holders: []surface.Holder{{PID: 5799}, {PID: 31497}}}
+	shared := surface.Session{ID: "shared", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Holders: []surface.Holder{{PID: 4101}, {PID: 4102}}}
 	if err := r.RegisterSession(shared); err != nil {
 		t.Fatal(err)
 	}
-	pinned := surface.Session{ID: "shared", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: 31497, HolderPID: 31497, Transport: "uds"}
+	pinned := surface.Session{ID: "shared", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: 4102, HolderPID: 4102, Transport: "uds"}
 	if err := r.RegisterSession(pinned); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestASessionAddressedToOneHolderLeavesTheConversationRowAsDiscovered(t *tes
 
 func TestASessionAddressedToOneHolderOfAnUnlistedConversationGetsARowWithNoProcess(t *testing.T) {
 	r := openTestRegistry(t)
-	pinned := surface.Session{ID: "unlisted", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: 31497, HolderPID: 31497, Transport: "uds"}
+	pinned := surface.Session{ID: "unlisted", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: 4102, HolderPID: 4102, Transport: "uds"}
 	if err := r.RegisterSession(pinned); err != nil {
 		t.Fatal(err)
 	}

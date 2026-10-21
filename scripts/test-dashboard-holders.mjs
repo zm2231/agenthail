@@ -42,8 +42,8 @@ const shared = {
   id: "shared",
   surface: "claude",
   holders: [
-    { pid: 5799, tty: "ttys001", status: "idle" },
-    { pid: 31497, tty: "ttys021", status: "busy", startedAt: "2026-10-21T01:02:03.456Z" },
+    { pid: 4101, tty: "pts/1", status: "idle" },
+    { pid: 4102, tty: "ttys002", status: "busy", startedAt: "2026-10-21T01:02:03.456Z" },
   ],
 };
 
@@ -56,26 +56,26 @@ assert.equal(calls.at(-1).body.pid, undefined, "a conversation in one terminal s
 context.app.selected = shared;
 context.renderHolderPicker();
 assert.equal(elements["#holder-picker"].hidden, false, "a conversation in two terminals shows the picker");
-assert.match(select.innerHTML, /pid 5799, ttys001, idle/);
-assert.match(select.innerHTML, /pid 31497, ttys021, busy/);
+assert.match(select.innerHTML, /pid 4101, pts\/1, idle/);
+assert.match(select.innerHTML, /pid 4102, ttys002, busy/);
 assert.match(context.sessionButton(shared), />2 terminals</, "the row names how many terminals hold it");
 await context.runAction("send", { message: "unpicked" }, "k", "shared");
 assert.equal(calls.at(-1).body.pid, undefined, "no terminal picked sends no pin, so the daemon refuses it");
 
-select.value = "31497";
+select.value = "4102";
 context.renderHolderPicker();
-assert.equal(select.value, "31497", "a refresh keeps the picked terminal");
+assert.equal(select.value, "4102", "a refresh keeps the picked terminal");
 await context.runAction("steer", { message: "picked" }, "k", "shared");
-assert.equal(calls.at(-1).body.pid, 31497, "a write carries the picked terminal");
+assert.equal(calls.at(-1).body.pid, 4102, "a write carries the picked terminal");
 assert.equal(calls.at(-1).body.pidStartedAt, Date.parse("2026-10-21T01:02:03.456Z"), "a write carries the picked terminal's start, so a reused pid is refused");
 await context.runAction("queue-cancel", { queueId: 4 }, "k", "shared");
 assert.equal(calls.at(-1).body.pid, undefined, "an action that is not a write to the session carries no pin");
 
 await context.runLogicalAction("send", "send", { message: "logical" });
 const pinned = calls.at(-1);
-select.value = "5799";
+select.value = "4101";
 await context.runLogicalAction("send", "send", { message: "logical" });
-assert.equal(calls.at(-1).body.pid, 5799);
+assert.equal(calls.at(-1).body.pid, 4101);
 assert.notEqual(calls.at(-1).key, pinned.key, "a different terminal is a different request");
 
 context.app.selected = { ...shared, holders: [shared.holders[1]] };
