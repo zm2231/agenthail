@@ -289,3 +289,42 @@ func TestReadJournalPageStopsAtWholeExchangesThatFitAPage(t *testing.T) {
 		t.Fatalf("paged %d exchanges: %v", len(users), users)
 	}
 }
+
+func TestReadJournalPageCountsCodexTurnsNotTheirMessages(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	for turn := 1; turn <= 8; turn++ {
+		id := fmt.Sprintf("t%d", turn)
+		at := time.Date(2026, 10, 21, 10, turn, 0, 0, time.UTC).Format(time.RFC3339Nano)
+		appendJournalPayloads(t, r, from.ID,
+			sessionJournalPayload{ItemID: id + "-permissions", Kind: "instructions", Title: "Instructions", Body: "<permissions instructions>sandboxed</permissions instructions>", TurnID: id, TS: at},
+			sessionJournalPayload{ItemID: id + "-agents", Kind: "instructions", Title: "Instructions", Body: "# AGENTS.md instructions for /work\n<INSTRUCTIONS>Be brief.</INSTRUCTIONS>", TurnID: id, TS: at},
+			sessionJournalPayload{ItemID: id + "-prompt", Kind: "message", Role: "user", Body: "prompt " + id, TurnID: id, TS: at},
+			sessionJournalPayload{ItemID: id + "-recall", Kind: "instructions", Title: "Instructions", Body: "<canon-recall>recalled</canon-recall>", TurnID: id, TS: at},
+			sessionJournalPayload{ItemID: id + "-commentary", Kind: "message", Role: "assistant", Body: "checking " + id, TurnID: id, TS: at},
+			sessionJournalPayload{ItemID: id + "-answer", Kind: "message", Role: "assistant", Body: "answer " + id, TurnID: id, TS: at},
+			sessionJournalPayload{ItemID: id + "-done", Kind: "done", TurnID: id, TS: at},
+		)
+	}
+	page, err := d.readJournalPage(from.ID, 0, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	older, err := d.readJournalPage(from.ID, uint64(page.NextBefore), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []struct {
+		page  *surface.SessionReadResult
+		turns []int
+	}{{page, []int{6, 7, 8}}, {older, []int{3, 4, 5}}} {
+		if len(check.page.Exchanges) != len(check.turns) {
+			t.Fatalf("exchanges=%+v, want turns %v", check.page.Exchanges, check.turns)
+		}
+		for index, turn := range check.turns {
+			exchange := check.page.Exchanges[index]
+			if exchange.User != fmt.Sprintf("prompt t%d", turn) || exchange.Assistant != fmt.Sprintf("answer t%d", turn) {
+				t.Fatalf("exchange %d = %+v", index, exchange)
+			}
+		}
+	}
+}
