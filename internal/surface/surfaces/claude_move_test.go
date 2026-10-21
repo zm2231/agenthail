@@ -271,7 +271,7 @@ func TestAMovedConversationResumesInTheHostWithItsModelAndMode(t *testing.T) {
 	if _, running, err := c.conversationProcess(context.Background(), conversation); err != nil || !running {
 		t.Fatalf("running=%v err=%v", running, err)
 	}
-	if err := c.DropMoveIn(context.Background(), conversation, in.MoveID, func() error { return nil }); !errors.Is(err, surface.ErrMoveInRunning) {
+	if err := c.DropMoveIn(context.Background(), conversation, in.MoveID, admitMove, func() error { return nil }); !errors.Is(err, surface.ErrMoveInRunning) {
 		t.Fatalf("dropping a move in Claude already runs: %v", err)
 	}
 	again, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(archive), admitMove)
@@ -361,8 +361,12 @@ func TestAMoveInClaudeRefusesLeavesNoCopyItCouldResume(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(host.Home, ".claude", "tasks", conversation)); !os.IsNotExist(err) {
 		t.Fatalf("a refused move in left its tasks in place: %v", err)
 	}
+	resumed := errors.New("the move resumed here")
+	if err := c.DropMoveIn(context.Background(), conversation, in.MoveID, func() error { return resumed }, func() error { t.Fatal("committed a refused drop"); return nil }); !errors.Is(err, resumed) {
+		t.Fatalf("a drop admit refused: %v", err)
+	}
 	committed := false
-	if err := c.DropMoveIn(context.Background(), conversation, in.MoveID, func() error { committed = true; return nil }); err != nil || !committed {
+	if err := c.DropMoveIn(context.Background(), conversation, in.MoveID, admitMove, func() error { committed = true; return nil }); err != nil || !committed {
 		t.Fatalf("dropping a refused move in: committed=%v err=%v", committed, err)
 	}
 

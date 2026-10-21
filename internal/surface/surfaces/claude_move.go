@@ -539,7 +539,7 @@ func (c *Claude) setAsideExisting(root string, in surface.MoveIn, part, at strin
 // DropMoveIn sets aside the copy a move placed in projects/ and tasks/, into
 // the move's folder under agenthail-moved/, and runs commit before any other
 // Agenthail process can resume the conversation.
-func (c *Claude) DropMoveIn(ctx context.Context, conversation, moveID string, commit func() error) error {
+func (c *Claude) DropMoveIn(ctx context.Context, conversation, moveID string, admit, commit func() error) error {
 	if !claudeConversationID(conversation) || !claudeConversationID(moveID) {
 		return fmt.Errorf("Claude session %q or move %q is not a valid id", conversation, moveID)
 	}
@@ -548,6 +548,9 @@ func (c *Claude) DropMoveIn(ctx context.Context, conversation, moveID string, co
 		return err
 	}
 	defer unlock()
+	if err := admit(); err != nil {
+		return err
+	}
 	_, roots, err := c.moveInRoot()
 	if err != nil {
 		return err

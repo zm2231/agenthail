@@ -65,8 +65,9 @@ type SessionMover interface {
 	// failed move-in leaves no copy the runtime finds; when it cannot be sure
 	// of that its error wraps ErrMoveInRunning or ErrMoveInPlaced.
 	ReceiveMove(ctx context.Context, in MoveIn, archive io.Reader, admit func() error) (*Session, error)
-	// DropMoveIn sets aside any copy the move placed here and runs commit
-	// while it holds the conversation, so nothing resumes it in between. A
-	// conversation a process here holds returns ErrMoveInRunning.
-	DropMoveIn(ctx context.Context, conversation, moveID string, commit func() error) error
+	// DropMoveIn holds the conversation, runs admit, sets aside any copy the
+	// move placed here and runs commit, so nothing resumes it in between. A
+	// conversation a process here holds returns ErrMoveInRunning; an admit
+	// error leaves everything in place.
+	DropMoveIn(ctx context.Context, conversation, moveID string, admit, commit func() error) error
 }

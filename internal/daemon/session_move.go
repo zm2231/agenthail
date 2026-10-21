@@ -569,6 +569,21 @@ func moveInOf(manifest moveManifest, cwd string) surface.MoveIn {
 	return surface.MoveIn{MoveID: manifest.ID, Conversation: manifest.Conversation, Cwd: cwd, Title: manifest.Title, Model: manifest.Model, PermissionMode: manifest.PermissionMode, Size: manifest.Size, SHA256: manifest.SHA256, PartsSize: manifest.PartsSize}
 }
 
+// moveNotResumed refuses, under the conversation's hold, to set aside the
+// files of a move that resumed here meanwhile.
+func (d *Daemon) moveNotResumed(id string) func() error {
+	return func() error {
+		current, err := d.Registry.SessionMove(id)
+		if err != nil {
+			return err
+		}
+		if current.State == registry.MoveResumed {
+			return registry.MoveConflictError{ID: id, State: current.State, Want: registry.MoveAborted}
+		}
+		return nil
+	}
+}
+
 // removeMoveWorktree removes the worktree an aborted move made, unless work
 // was left in it.
 func (d *Daemon) removeMoveWorktree(ctx context.Context, move registry.SessionMove) {
@@ -661,7 +676,7 @@ func (d *Daemon) apiMoveTransferHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			return d.Registry.SetMoveState(move.ID, registry.MoveAborted, refusal.Error(), registry.MoveReceived)
 		}
-		if err := mover.DropMoveIn(ctx, manifest.Conversation, move.ID, abort); err != nil {
+		if err := mover.DropMoveIn(ctx, manifest.Conversation, move.ID, d.moveNotResumed(move.ID), abort); err != nil {
 			writeAPIError(w, http.StatusBadGateway, "move_unknown", fmt.Sprintf("%s; %s", refusal, err))
 			return
 		}
@@ -711,7 +726,7 @@ func (d *Daemon) apiMoveAbortHandler(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusConflict, "move_refused", "This host cannot check that move.")
 			return
 		}
-		err = mover.DropMoveIn(r.Context(), conversation, id, abort)
+		err = mover.DropMoveIn(r.Context(), conversation, id, d.moveNotResumed(id), abort)
 		if errors.Is(err, surface.ErrMoveInRunning) {
 			writeAPIError(w, http.StatusConflict, "move_running", "The moved session already runs here; transfer again to finish the move.")
 			return

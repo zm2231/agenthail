@@ -193,8 +193,19 @@ func (c *Claude) resume(ctx context.Context, conversation, cwd string) (*surface
 // claudeTranscriptExists reads the filesystem itself rather than the
 // transcript index, whose folder listings can lag a rename.
 func claudeTranscriptExists(root, conversation string) bool {
-	found, _ := filepath.Glob(filepath.Join(root, "projects", "*", conversation+".jsonl"))
-	return len(found) > 0
+	projects, err := os.ReadDir(filepath.Join(root, "projects"))
+	if err != nil {
+		return false
+	}
+	for _, project := range projects {
+		if !project.IsDir() {
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(root, "projects", project.Name(), conversation+".jsonl")); err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
 }
 
 // resumeAs is resume with the model, permission mode and name of options,
@@ -203,6 +214,19 @@ func (c *Claude) resumeAs(ctx context.Context, conversation, cwd string, options
 	root, err := c.conversationRoot(conversation)
 	if err != nil {
 		return nil, err
+	}
+	if root == "" {
+		if roots, err := surface.ClaudeConfigRoots(c.home); err == nil {
+			var holding []string
+			for _, candidate := range roots {
+				if claudeTranscriptExists(candidate, conversation) {
+					holding = append(holding, candidate)
+				}
+			}
+			if len(holding) == 1 {
+				root = holding[0]
+			}
+		}
 	}
 	// Claude finds no conversation to resume without its transcript, which a
 	// move to another host takes away, so none is started.
