@@ -138,11 +138,11 @@ func (c *Claude) DisableRemoteControl() {
 }
 
 func (c *Claude) Health(ctx context.Context) error {
-	sessions, err := c.List(ctx)
+	processes, err := c.conversations(ctx)
 	native, bridged := false, false
-	for _, session := range sessions {
-		native = native || session.Transport == "uds"
-		bridged = bridged || session.Bridge != ""
+	for _, process := range processes {
+		native = native || process.session.Transport == "uds"
+		bridged = bridged || process.session.Bridge != ""
 	}
 	if c.localOnly {
 		if native {
@@ -423,34 +423,60 @@ func (c *Claude) firstUserMessage(path string) string {
 // without Remote Control carries the same session id; the process that opened
 // it first keeps the id, so the later one never takes over its row.
 func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
-	processes, err := c.processes(ctx)
+	processes, err := c.conversations(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]surface.Session, 0, len(processes))
-	started := make([]float64, 0, len(processes))
+	for _, process := range processes {
+		c.enrich(ctx, &process)
+		out = append(out, process.session)
+	}
+	return out, nil
+}
+
+// conversations returns each conversation's earliest started live process,
+// before its status is read.
+func (c *Claude) conversations(ctx context.Context) ([]claudeProcess, error) {
+	processes, err := c.processes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]claudeProcess, 0, len(processes))
 	owner := map[string]int{}
 	for _, process := range processes {
 		if index, seen := owner[process.session.ID]; seen {
-			if process.startedAt < started[index] {
-				out[index], started[index] = process.session, process.startedAt
+			if process.startedAt < out[index].startedAt {
+				out[index] = process
 			}
 			continue
 		}
 		owner[process.session.ID] = len(out)
-		out = append(out, process.session)
-		started = append(started, process.startedAt)
+		out = append(out, process)
 	}
 	return out, nil
 }
 
 type claudeProcess struct {
 	session   surface.Session
+	record    map[string]any
 	startedAt float64
 }
 
+// enrich reads a process's status, what it waits on, its background tasks and
+// its subagents. A lookup by id, name or process needs none of them, so only
+// the sessions a caller returns are read.
+func (c *Claude) enrich(ctx context.Context, process *claudeProcess) {
+	c.applyRecordStatus(ctx, &process.session, process.record)
+	if process.session.HasLocal {
+		if rollup, err := c.subagents.rollup(ctx, &process.session); err == nil {
+			process.session.Subagents = rollup
+		}
+	}
+}
+
 // processes returns a session for every live Claude process, including
-// processes that share a session id.
+// processes that share a session id, without reading their status.
 func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
 	roots, records, err := c.records()
 	if err != nil {
@@ -626,19 +652,13 @@ func (c *Claude) process(ctx context.Context, record claudeSessionRecord, transc
 	if sess.Name == "" {
 		sess.Name = c.firstUserMessage(sess.Transcript)
 	}
-	c.applyRecordStatus(ctx, &sess, m)
-	if sess.HasLocal {
-		if rollup, rollupErr := c.subagents.rollup(ctx, &sess); rollupErr == nil {
-			sess.Subagents = rollup
-		}
-	}
 	startedAt, ok := m["startedAt"].(float64)
 	if ok {
 		sess.StartedAt = time.UnixMilli(int64(startedAt))
 	} else {
 		startedAt = math.MaxFloat64
 	}
-	return claudeProcess{session: sess, startedAt: startedAt}, true
+	return claudeProcess{session: sess, record: m, startedAt: startedAt}, true
 }
 
 // applyRecordStatus takes status and last activity from Claude's session
@@ -763,24 +783,25 @@ func claudePeerStatus(record map[string]any) surface.SessionStatus {
 }
 
 func (c *Claude) Resolve(ctx context.Context, target string) (*surface.Session, error) {
-	sessions, err := c.List(ctx)
+	processes, err := c.conversations(ctx)
 	if err != nil {
 		return nil, err
 	}
 	lower := strings.ToLower(target)
-	var matches []surface.Session
-	var exactMatches []surface.Session
-	for _, s := range sessions {
+	var matches []claudeProcess
+	var exactMatches []claudeProcess
+	for _, process := range processes {
+		s := process.session
 		if strconv.Itoa(s.PID) == target ||
 			s.ID == target ||
 			strings.TrimSuffix(filepath.Base(s.Transcript), ".jsonl") == target {
-			exactMatches = append(exactMatches, s)
+			exactMatches = append(exactMatches, process)
 			continue
 		}
 		if strings.HasPrefix(s.ID, target) ||
 			strings.Contains(strings.ToLower(s.Cwd), lower) ||
 			strings.Contains(strings.ToLower(s.Name), lower) {
-			matches = append(matches, s)
+			matches = append(matches, process)
 		}
 	}
 	if len(exactMatches) > 0 {
@@ -795,11 +816,12 @@ func (c *Claude) Resolve(ctx context.Context, target string) (*surface.Session, 
 	if len(matches) > 1 {
 		var lines []string
 		for _, m := range matches {
-			lines = append(lines, fmt.Sprintf("  pid=%d %s cwd=%s", m.PID, m.ID, m.Cwd))
+			lines = append(lines, fmt.Sprintf("  pid=%d %s cwd=%s", m.session.PID, m.session.ID, m.session.Cwd))
 		}
 		return nil, fmt.Errorf("ambiguous target '%s':\n%s", target, strings.Join(lines, "\n"))
 	}
-	return &matches[0], nil
+	c.enrich(ctx, &matches[0])
+	return &matches[0].session, nil
 }
 
 // processByPID finds a live process that shares its session id with an
@@ -815,8 +837,8 @@ func (c *Claude) processByPID(ctx context.Context, target string) (*surface.Sess
 	}
 	for _, process := range processes {
 		if process.session.PID == pid {
-			session := process.session
-			return &session, true, nil
+			c.enrich(ctx, &process)
+			return &process.session, true, nil
 		}
 	}
 	return nil, false, nil
