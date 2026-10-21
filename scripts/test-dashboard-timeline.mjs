@@ -217,6 +217,10 @@ assert(!elements["#background-panel"].hidden, "background work shows its panel")
 for (const expected of ["1 background task running", "go test ./...", "file watcher", "ambient", "Read from the transcript."]) assert(backgroundPanel.includes(expected), `background panel omitted ${expected}`);
 context.renderBackgroundTasks({ ...backgroundSession, backgroundTasks: { running: true, source: "status" } });
 assert(elements["#background-panel"].innerHTML.includes("Background work running") && elements["#background-panel"].innerHTML.includes("not which one"), "a shell reported without a list says what is known");
+const notice = context.renderTimeline([{ id: "limit-1", kind: "notice", title: "Usage limit reached", text: "You've hit your session limit <b>", status: "usage_limit" }], session);
+assert(notice.includes("timeline-notice") && notice.includes("Usage limit reached") && notice.includes("&lt;b&gt;") && !notice.includes("turn-action"), "a notice renders as an escaped status line, not as the agent's message");
+assert(context.renderTimeline([{ id: "limit-2", kind: "notice", title: "Usage limit reached", text: "limit", status: "usage_limit", resetsAt: "2026-10-21T11:00:00Z" }], session).includes("Resets "), "a usage-limit notice names when it resets");
+assert.equal(context.renderTimeline([{ id: "done-1", kind: "done", status: "failed", text: "limit" }], session), "", "a turn's end renders nothing");
 
 context.app.selected = { id: "session-dialog", name: "builder", surface: "claude", status: "busy", runtime: {}, waitingOn: { kind: "dialog", id: "session-dialog:dialog:1" } };
 context.app.history = { capabilities: { respond: true } };

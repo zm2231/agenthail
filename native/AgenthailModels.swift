@@ -1403,6 +1403,7 @@ struct SessionStreamItem: Decodable {
     let sender: String?
     let title: String?
     let status: String?
+    var resetsAt: String? = nil
     let truncated: Bool
     let truncationReason: String?
     let bodyRef: String?
@@ -1474,10 +1475,18 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     var attachment: SessionAttachment? = nil
     var sender: String? = nil
     var files: [AttachedFile]? = nil
+    var resetsAt: String? = nil
 
     var isPeerMessage: Bool { kind == "message" && role == "peer" }
     var peerSender: String { sender.flatMap { $0.isEmpty ? nil : $0 } ?? "another agent" }
     var peerLabel: String { "From \(peerSender)" }
+
+    /// A notice's text with the time its usage limit resets, when it reports one.
+    var noticeText: String {
+        let text = self.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let resetsAt, let date = ISO8601DateFormatter().date(from: resetsAt) else { return text }
+        return "\(text) Resets \(date.formatted(date: .abbreviated, time: .shortened))."
+    }
 }
 
 struct SessionSearchResponse: Decodable {

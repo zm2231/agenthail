@@ -82,6 +82,8 @@ each root. A conversation present in two roots is refused rather than guessed.
 cached usage; a root is a config folder, not an account. `thread create claude
 --root <name|dir>` starts the session in that root; `list --wide` shows the
 config folder each Claude session lives in.
+A `send --reply` that fails with "out of usage" means the session
+hit its limit; wait for the reset it names rather than resending.
 
 `thread adopt <target>` takes a terminal or background Claude conversation
 into the Agenthail host. A busy session is refused (or waited on with

@@ -110,7 +110,7 @@ func (c *Claude) transcriptContextUsage(ctx context.Context, sess *surface.Sessi
 				state.oneMRequests[base] = oneM
 			}
 		case record.Type == "assistant":
-			if record.Message.Model != "<synthetic>" {
+			if record.Message.Model != claudeSyntheticModel {
 				state.model = record.Message.Model
 			}
 			used := record.Message.Usage.InputTokens + record.Message.Usage.CacheCreationTokens + record.Message.Usage.CacheReadTokens

@@ -10,17 +10,19 @@ var ErrTranscriptUnavailable = errors.New("session transcript unavailable")
 
 // TimelineItem preserves the ordered, user-visible contents of an agent transcript.
 type TimelineItem struct {
-	ID               string         `json:"id"`
-	Kind             string         `json:"kind"`
-	Role             string         `json:"role,omitempty"`
-	Origin           string         `json:"origin,omitempty"`
-	Sender           string         `json:"sender,omitempty"`
-	Title            string         `json:"title"`
-	Text             string         `json:"text"`
-	Timestamp        string         `json:"timestamp,omitempty"`
-	CallID           string         `json:"callId,omitempty"`
-	TurnID           string         `json:"turnId,omitempty"`
-	Status           string         `json:"status,omitempty"`
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Role      string `json:"role,omitempty"`
+	Origin    string `json:"origin,omitempty"`
+	Sender    string `json:"sender,omitempty"`
+	Title     string `json:"title"`
+	Text      string `json:"text"`
+	Timestamp string `json:"timestamp,omitempty"`
+	CallID    string `json:"callId,omitempty"`
+	TurnID    string `json:"turnId,omitempty"`
+	Status    string `json:"status,omitempty"`
+	// ResetsAt is when a usage limit a notice reports lifts, in RFC 3339.
+	ResetsAt         string         `json:"resetsAt,omitempty"`
 	Truncated        bool           `json:"truncated"`
 	TruncationReason string         `json:"truncationReason,omitempty"`
 	BodyRef          string         `json:"bodyRef,omitempty"`
@@ -243,3 +245,7 @@ func groupExchanges(items []TimelineItem, source string) ([]Exchange, []int) {
 	}
 	return exchanges, starts
 }
+
+// TimelineUsageLimit is the status of a notice that Claude refused a turn
+// because a usage limit was reached.
+const TimelineUsageLimit = "usage_limit"

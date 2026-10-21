@@ -243,7 +243,7 @@ func emitCodexTranscriptItem(session *surface.Session, uuid string, record map[s
 	if item.Kind == "done" {
 		operation = "phase"
 	}
-	onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: operation, Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Files: item.Files, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text, Turn: item.Turn})
+	onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: operation, Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, ResetsAt: item.ResetsAt, Attachment: item.Attachment, Files: item.Files, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text, Turn: item.Turn})
 }
 
 func codexRecordTurnID(record map[string]any) string {
@@ -645,7 +645,7 @@ func claudeRecordTimelineItems(ctx context.Context, record map[string]any, offse
 	}
 	done := make([]surface.TimelineItem, 0, len(ended)+len(items))
 	for _, end := range ended {
-		done = append(done, surface.TimelineItem{ID: end.Key, Kind: "done", TurnID: end.TurnID, Status: end.Status, Timestamp: at, Turn: end.Turn})
+		done = append(done, surface.TimelineItem{ID: end.Key, Kind: "done", TurnID: end.TurnID, Status: end.Status, Text: end.Reason, Timestamp: at, Turn: end.Turn})
 	}
 	return append(done, items...), nil
 }
@@ -702,11 +702,14 @@ func claudeTranscriptReply(records []transcriptRecord, source string, settled fu
 	}
 	reply := &surface.ReplyResult{Done: false, Source: source}
 	for _, turn := range turns {
-		if turn.Assistant != "" {
+		if turn.Assistant != "" || turn.APIError != "" {
 			done := turn.Done || turn.Closing && settled != nil && settled(turn.TerminalAt)
 			reply = &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: done, Source: source}
 			if turn.Interrupted && !done {
 				reply.Error = "turn interrupted before completion"
+			}
+			if err := claudeTurnError(turn); err != "" {
+				reply.Error = err
 			}
 		}
 	}
@@ -886,6 +889,9 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 	}
 	if kind != "user" && kind != "assistant" {
 		return nil
+	}
+	if apiError, _ := record["isApiErrorMessage"].(bool); apiError && kind == "assistant" {
+		return []surface.TimelineItem{claudeAPIErrorNotice(record)}
 	}
 	message, _ := record["message"].(map[string]any)
 	if kind == "user" && claudeImageSourceCompanion(record, message) {
@@ -1198,4 +1204,46 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 		items = append(items, surface.TimelineItem{Kind: "attachment", Role: item.Role, Title: "Image", Text: "Image attachment"})
 	}
 	return items
+}
+
+// claudeAPIErrorNotice turns the message Claude Code writes in place of a
+// reply the API refused into a notice, so a usage limit reads as a
+// status rather than as something the agent said.
+func claudeAPIErrorNotice(record map[string]any) surface.TimelineItem {
+	message, _ := record["message"].(map[string]any)
+	item := surface.TimelineItem{Kind: "notice", Title: "Claude API error", Text: claudeMessageText(message["content"]), Status: "api_error"}
+	if claudeUsageLimitRecord(record) {
+		item.Title, item.Status = "Usage limit reached", surface.TimelineUsageLimit
+		if resetsAt := claudeUsageLimitResetsAt(record); !resetsAt.IsZero() {
+			item.ResetsAt = resetsAt.UTC().Format(time.RFC3339)
+		}
+	}
+	return item
+}
+
+func claudeUsageLimitRecord(record map[string]any) bool {
+	return str(record, "error") == "rate_limit" || str(record, "apiError") == "usage_limit_reached"
+}
+
+func claudeUsageLimitResetsAt(record map[string]any) time.Time {
+	for _, limits := range []any{record["quotaLimits"], claudeNestedField(record, "apiErrorParams", "rate_limit_info")} {
+		if limits, ok := limits.(map[string]any); ok {
+			if seconds, ok := limits["resetsAt"].(float64); ok && seconds > 0 {
+				return time.Unix(int64(seconds), 0)
+			}
+		}
+	}
+	return time.Time{}
+}
+
+func claudeNestedField(record map[string]any, keys ...string) any {
+	var value any = record
+	for _, key := range keys {
+		object, ok := value.(map[string]any)
+		if !ok {
+			return nil
+		}
+		value = object[key]
+	}
+	return value
 }
