@@ -26,13 +26,13 @@ func TestPeerWorkerEnvelopeReachesBusySteerOutbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reg.Close()
+	t.Cleanup(func() { reg.Close() })
 	target := surface.Session{ID: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "managed", Status: surface.StatusBusy}
 	if err := reg.RegisterSession(target); err != nil {
 		t.Fatal(err)
 	}
 	fake := &daemonSurface{kind: surface.KindCodex, accepted: true, caps: surface.Capabilities{Send: true, Steer: true}, observations: map[string]*surface.TurnObservation{target.ID: {Status: surface.StatusBusy, ActiveTurnID: "turn-1"}}}
-	d := New(reg, []surface.Surface{fake})
+	d := newTestDaemon(t, reg, []surface.Surface{fake})
 	parentR, parentW := io.Pipe()
 	readyCh := make(chan claudepeer.Ready, 1)
 	workerDone := make(chan error, 1)

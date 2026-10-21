@@ -44,7 +44,7 @@ func TestStateReportsRekeyedIDsAndBranchParents(t *testing.T) {
 	t.Cleanup(func() { r.Close() })
 
 	fake := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}}
-	state := readDashboardState(t, dashboardRouter(New(r, []surface.Surface{fake})))
+	state := readDashboardState(t, dashboardRouter(newTestDaemon(t, r, []surface.Surface{fake})))
 	if state.Rekeyed[upgraded.ID] != "conversation-upgraded" {
 		t.Fatalf("rekeyed=%v", state.Rekeyed)
 	}

@@ -80,7 +80,7 @@ func (d *Daemon) claudePermissionRequestHandler(w http.ResponseWriter, r *http.R
 // opens or closes, which announces the question with what it asks and
 // withdraws the notifications of the wait it replaced.
 func (d *Daemon) claudePromptChanged(change surfaces.ClaudePromptChange) {
-	go func() {
+	d.background.start(func(lifetime context.Context) {
 		session, err := d.Registry.Session(change.SessionID)
 		if err != nil || session == nil {
 			return
@@ -89,10 +89,10 @@ func (d *Daemon) claudePromptChanged(change surfaces.ClaudePromptChange) {
 		if err != nil {
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), surfaceOperationTimeout)
+		ctx, cancel := context.WithTimeout(lifetime, surfaceOperationTimeout)
 		defer cancel()
 		if _, err := d.observeTurn(ctx, adapter, session); err != nil {
 			d.log.Printf("observe %s after its prompt changed: %s", d.resolveDisplay(session.ID), err)
 		}
-	}()
+	})
 }

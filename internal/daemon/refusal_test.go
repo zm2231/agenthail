@@ -61,7 +61,7 @@ func TestARefusalThatReturnsWhileTheFirstIsStillAnnouncedIsAnnouncedAgain(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			d := New(store, nil)
+			d := newTestDaemon(t, store, nil)
 			now := time.Now()
 			attempt := func(cause error) {
 				t.Helper()

@@ -330,6 +330,15 @@ and `clear`, which run Claude's `/goal` once the session is idle and are
 confirmed by Claude's answer; it has no `pause`, `resume` or `budget`, and a
 session reached only through its peer socket cannot set a goal.
 
+Codex model: a conversation Codex already has open keeps its model until its
+next turn, so `model @builder <name>` records the choice and the next turn
+Agenthail sends carries it. `--json` then reports `model` (what it runs now)
+and `pendingModel`; `model @builder` and the session row show `pendingModel`
+until that turn starts. A turn started from Codex Desktop's composer, or from
+its own queue with `thread queue <target> start`, runs on the model Desktop
+shows. If the conversation moved to a third model meanwhile, the choice is
+dropped and the send result's `notice` says so.
+
 Claude controls over Remote Control report request-linked evidence. `model` and
 `interrupt` wait for Claude's `control_response` to their own request id;
 `interrupt` also waits for the active turn to end. A steer is only
@@ -452,12 +461,38 @@ has none, because earlier ones are often questions without a report. Neither
 prints the reply text.
 
 An Agenthail without `--report` can find the same report with jq, which does
-not check the rules; keep the two in step if either changes:
+not check the rules. It allows the same whitespace as the relay filters below;
+keep them in step if either changes:
 
 ```bash
 agenthail last @builder 1 --json \
-  | jq -e '.exchanges[-1].assistant | capture("(?:\\A|\n)`{3}agenthail-report\n(?<r>[^\n]+)\n`{3}\\s*\\z").r | fromjson'
+  | jq -e '.exchanges[-1].assistant | capture("(?:\\A|\n)`{3}agenthail-report\n[ \t\r]*(?<r>\\{[^\n]*\\})[ \t\r]*\n`{3}[ \t\r\n]*\\z").r | fromjson'
 ```
+
+To relay a completion only when it carries a report, filter the relay on the
+report. These forward any report to `@lead`, a `done` report to `@reviewer`,
+and a report that needs a person (`blocked`, `failed` or `partial`) to
+`@triage`; add only the ones you want, since each relay delivers on its own:
+
+```bash
+agenthail relay add @builder @lead '(?:\A|\n)`{3}agenthail-report\n[ \t\r]*\{[^\n]*\}[ \t\r]*\n`{3}[ \t\r\n]*\z'
+agenthail relay add @builder @reviewer '(?:\A|\n)`{3}agenthail-report\n[ \t\r]*\{[^\n]*"status"[ \t\r]*:[ \t\r]*"done"[^\n]*\}[ \t\r]*\n`{3}[ \t\r\n]*\z'
+agenthail relay add @builder @triage '(?:\A|\n)`{3}agenthail-report\n[ \t\r]*\{[^\n]*"status"[ \t\r]*:[ \t\r]*"(?:blocked|failed|partial)"[^\n]*\}[ \t\r]*\n`{3}[ \t\r\n]*\z'
+```
+
+A relay filter runs against the completed reply: for Claude, the turn's text
+blocks joined by newlines; for Codex, the final answer. Each filter above
+matches only a report that ends that reply, the same place `--report` reads.
+A report quoted mid-reply, wrapped in a longer fence that closes after it such
+as the four-backtick example above, indented, or followed by any text does not
+match. The status filters find `"status"` anywhere on the report's line: an
+escaped `\"status\":\"done\"` inside a string value does not match, but a
+nested object with its own `"status"` key does. The filter does not check the
+other rules, so the receiver reads the report with
+`agenthail reply @builder --report` before acting on it; `--report` is the exact
+parser, and the filters are only a screen. A filter on bare text,
+such as `'agenthail-report'` or `'"status":"done"'`, also fires on replies that
+only mention or quote a report.
 
 ## Follow, Subscribe, And Notify
 

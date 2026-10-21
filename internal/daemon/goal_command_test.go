@@ -110,7 +110,7 @@ func TestQueuedGoalRunsAtIdleBeforeTheMessagesBehindIt(t *testing.T) {
 	if err := r.QueueMessage(session.ID, "follow-up"); err != nil {
 		t.Fatal(err)
 	}
-	daemon.scanAndRelay(context.Background())
+	daemon.scanAndRelay(t.Context())
 	if len(adapter.sent) != 0 || r.QueueCount(session.ID) != 2 {
 		t.Fatalf("while the goal runs sent=%v pending=%d", adapter.sent, r.QueueCount(session.ID))
 	}
@@ -123,7 +123,7 @@ func TestQueuedGoalRunsAtIdleBeforeTheMessagesBehindIt(t *testing.T) {
 	if err != nil || item.Status != "delivered" || item.Evidence != surface.EvidenceDelivered || strings.Join(adapter.commands(), ",") != "/goal tests pass" {
 		t.Fatalf("item=%+v ran=%v err=%v", item, adapter.commands(), err)
 	}
-	daemon.scanAndRelay(context.Background())
+	daemon.scanAndRelay(t.Context())
 	if len(adapter.sent) != 1 || adapter.sent[0] != "follow-up" {
 		t.Fatalf("after the goal sent=%v", adapter.sent)
 	}
@@ -131,12 +131,12 @@ func TestQueuedGoalRunsAtIdleBeforeTheMessagesBehindIt(t *testing.T) {
 
 func TestQueuedGoalSettlesByWhatTheSessionAnswered(t *testing.T) {
 	for name, test := range map[string]struct {
-		err    error
-		status string
+		err            error
+		status, reason string
 	}{
-		"busy again": {surface.DeliveryUnavailable(errors.New("Claude is working")), "pending"},
-		"refused":    {surface.DeliveryTerminal(errors.New("Hooks are disabled by policy"), surface.DeliveryInvalidRequest), "dead"},
-		"unanswered": {surface.DeliveryOutcomeUnknown(errors.New("no outcome")), "dead"},
+		"busy again": {surface.DeliveryUnavailable(errors.New("Claude is working")), "pending", "Claude is working"},
+		"refused":    {surface.DeliveryTerminal(errors.New("Hooks are disabled by policy"), surface.DeliveryInvalidRequest), "dead", "Hooks are disabled by policy"},
+		"unanswered": {surface.DeliveryOutcomeUnknown(errors.New("no outcome")), "dead", "no outcome"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			daemon, r, adapter, session := goalCommandFixture(t, surface.StatusIdle)
@@ -145,16 +145,12 @@ func TestQueuedGoalSettlesByWhatTheSessionAnswered(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			daemon.scanAndRelay(context.Background())
-			deadline := time.Now().Add(time.Second)
-			var item *registry.QueueRow
-			for time.Now().Before(deadline) {
-				if item, err = r.QueueItem(id, nil); err == nil && item.Status == test.status && len(adapter.commands()) == 1 {
-					break
-				}
-				time.Sleep(time.Millisecond)
-			}
-			if err != nil || item == nil || item.Status != test.status || len(adapter.commands()) != 1 {
+			daemon.scanAndRelay(t.Context())
+			// The goal runs on a queue worker; an item is pending before it
+			// runs too, so the outcome is read once the worker has settled it.
+			daemon.background.wait()
+			item, err := r.QueueItem(id, nil)
+			if err != nil || item.Status != test.status || !strings.Contains(item.LastError, test.reason) || len(adapter.commands()) != 1 {
 				t.Fatalf("item=%+v ran=%v err=%v", item, adapter.commands(), err)
 			}
 		})

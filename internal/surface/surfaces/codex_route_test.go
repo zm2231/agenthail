@@ -306,8 +306,8 @@ func TestCodexModelChangeWriterConflictIsTerminal(t *testing.T) {
 	fake.AddThread(codextest.Thread{ID: managedThreadID, Originator: "agenthail"})
 	_, err := isolatedManagedRuntime(t).Model(context.Background(), &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, "gpt-5.6-sol")
 	requireOwnershipConflict(t, err)
-	if resumes := fake.Calls("thread/resume"); len(resumes) != 2 || resumes[1]["model"] != "gpt-5.6-sol" {
-		t.Fatalf("want the preflight resume, then the conflicting model change, got %v", resumes)
+	if resumes := fake.Calls("thread/resume"); len(resumes) != 1 || resumes[0]["model"] != "gpt-5.6-sol" {
+		t.Fatalf("want one loading resume carrying the model, got %v", resumes)
 	}
 }
 

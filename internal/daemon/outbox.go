@@ -51,20 +51,16 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		// it works on its own copy so the observer's session is never written
 		// from this goroutine.
 		compacting := *session
-		d.queueWorkers.Add(1)
-		go func() {
-			defer d.queueWorkers.Done()
+		d.background.start(func(context.Context) {
 			d.runQueuedCompact(ctx, adapter, &compacting, item)
-		}()
+		})
 		return
 	}
 	if item.Operation == registry.QueueOperationGoal {
 		commanding := *session
-		d.queueWorkers.Add(1)
-		go func() {
-			defer d.queueWorkers.Done()
+		d.background.start(func(context.Context) {
 			d.runQueuedGoal(ctx, adapter, &commanding, item)
-		}()
+		})
 		return
 	}
 	if d.restartCoordinator(ctx, session, item, now) {
@@ -148,6 +144,9 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	}
 	d.log.Printf("delivered queue item %d to %s", item.ID, d.resolveDisplay(session.ID))
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: historyKind, SessionID: session.ID, QueueID: item.ID, Message: item.Message, Result: result.UUID})
+	if result.Notice != "" {
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "model", SessionID: session.ID, QueueID: item.ID, Message: result.Notice, Result: result.UUID})
+	}
 }
 
 func (d *Daemon) runQueuedCompact(ctx context.Context, adapter surface.Surface, session *surface.Session, item *registry.QueuedMessage) {
@@ -277,22 +276,29 @@ func (d *Daemon) announceRefusal(session surface.Session, queueID, refusal int64
 	conversationID := session.ConversationID()
 	desktopMessage := fmt.Sprintf("%s refused to start; a queued message is waiting", d.resolveDisplay(conversationID))
 	key := fmt.Sprintf("refused-%d", queueID)
-	go func() {
-		defer func() {
-			d.announceMu.Lock()
-			if d.announcingRefusal[queueID] == refusal {
-				delete(d.announcingRefusal, queueID)
-			}
-			d.announceMu.Unlock()
-		}()
+	finished := func() {
+		d.announceMu.Lock()
+		if d.announcingRefusal[queueID] == refusal {
+			delete(d.announcingRefusal, queueID)
+		}
+		d.announceMu.Unlock()
+	}
+	started := d.background.start(func(ctx context.Context) {
+		defer finished()
 		if err := d.notifyDesktop("Agenthail", desktopMessage, conversationID, "agenthail-"+key, "", nil); err != nil {
 			d.log.Printf("desktop notification: %s", err)
 		}
-		notificationCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		notificationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		d.notifyPairedDevices(notificationCtx, mobileNotification{Title: "Agenthail", Message: "A session refused to start; a queued message is waiting", SessionID: conversationID, EventType: "delivery.refused", CollapseID: key})
+		if ctx.Err() != nil {
+			return
+		}
 		if err := d.Registry.MarkRefusalAnnounced(queueID, refusal); err != nil {
 			d.log.Printf("mark refusal announced %d: %s", queueID, err)
 		}
-	}()
+	})
+	if !started {
+		finished()
+	}
 }

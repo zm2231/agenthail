@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"time"
@@ -47,16 +46,21 @@ func applyCodexTranscriptStatus(session *surface.Session, info os.FileInfo) {
 	}
 }
 
+// LocalStatusFiles watches the pending model record even before the
+// thread has a rollout, since a model can be chosen for a thread with no
+// turns yet.
 func (c *Codex) LocalStatusFiles(session surface.Session) []string {
-	if session.Transcript == "" {
-		return nil
+	files := []string{codexPendingModelPath(session.ID)}
+	if session.Transcript != "" {
+		files = append(files, session.Transcript)
 	}
-	return []string{session.Transcript}
+	return files
 }
 
 func (c *Codex) LocalStatus(_ context.Context, session surface.Session) (surface.Session, error) {
+	applyCodexPendingModel(&session)
 	if session.Transcript == "" {
-		return session, fmt.Errorf("codex session %s has no local transcript", session.ID)
+		return session, nil
 	}
 	info, err := os.Stat(session.Transcript)
 	if err != nil {

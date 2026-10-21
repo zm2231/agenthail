@@ -23,6 +23,7 @@ type Receipt struct {
 	QueueID    int64                    `json:"queueId,omitempty"`
 	DeliveryID int64                    `json:"deliveryId,omitempty"`
 	Detail     string                   `json:"detail,omitempty"`
+	Notice     string                   `json:"notice,omitempty"`
 	// WaitingOn is set on a queued receipt when the target is waiting on its
 	// user; the message is delivered after the user answers.
 	WaitingOn *surface.Waiting `json:"waitingOn,omitempty"`
@@ -355,7 +356,7 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 		return nil, err
 	}
 	if result.Accepted {
-		receipt := &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, TurnID: result.UUID}
+		receipt := &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, TurnID: result.UUID, Notice: result.Notice}
 		peerTransport := surface.RouteFor(adapter, session, options.Author).TransportOnly()
 		if peerTransport {
 			receipt.Evidence = surface.EvidenceTransportAccepted
@@ -372,6 +373,9 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 			return receipt, nil
 		}
 		d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result.UUID})
+		if result.Notice != "" {
+			d.record(registry.HistoryEntry{Kind: "model", SessionID: session.ID, Message: result.Notice, Result: result.UUID})
+		}
 		return receipt, nil
 	}
 	if !retry || route == surface.RoutePeer {

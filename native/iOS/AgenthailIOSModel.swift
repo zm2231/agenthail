@@ -601,6 +601,7 @@ final class AgenthailIOSModel: ObservableObject {
         if !sessionStreamMetadataFields.contains("context"), let context = metadata.context { detail.context = context }
         if !sessionStreamMetadataFields.contains("goal"), let goal = metadata.goal { detail.goal = goal }
         if let model = metadata.model { detail.model = model }
+        detail.pendingModel = metadata.pendingModel
         if let models = metadata.models { detail.models = models }
         detail.claudeRuns = metadata.claudeRuns
         detail.claudeSubagents = metadata.claudeSubagents

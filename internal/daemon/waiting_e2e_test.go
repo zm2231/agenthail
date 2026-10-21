@@ -170,7 +170,7 @@ func runDaemon(t *testing.T, store *registry.Registry, adapters ...surface.Surfa
 // runDaemonWith is runDaemon with setup applied to the daemon before it runs.
 func runDaemonWith(t *testing.T, store *registry.Registry, setup func(*Daemon), adapters ...surface.Surface) (*runningDaemon, func()) {
 	t.Helper()
-	d := New(store, adapters)
+	d := newTestDaemon(t, store, adapters)
 	d.pollInterval = 10 * time.Millisecond
 	setup(d)
 	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: e2eToken}))
@@ -442,7 +442,7 @@ func TestACallerThatReadTheQuestionBeforeItsAnnouncementFinishedDoesNotAnnounceI
 	if record, err := q.store.RecordWaiting(q.session.ID, &waiting, questionAsked); err != nil || !record.Announce {
 		t.Fatalf("record=%+v err=%v", record, err)
 	}
-	d := New(q.store, []surface.Surface{q.claude})
+	d := newTestDaemon(t, q.store, []surface.Surface{q.claude})
 	d.announceWaiting(q.session, waiting)
 	eventually(t, "the announcement to finish", func() bool {
 		_, announced, err := q.store.WaitingState(q.session.ID)
@@ -472,7 +472,11 @@ func TestQuestionAnnouncedAgainAfterAStopMidDeliveryCollapsesIntoOne(t *testing.
 	t.Cleanup(func() { close(stall) })
 	_, stop := runDaemon(t, q.store, q.claude)
 	eventually(t, "the first announcement", func() bool { return q.pushes.count("session.waiting") == 1 })
+	stopping := time.Now()
 	stop()
+	if waited := time.Since(stopping); waited > 5*time.Second {
+		t.Fatalf("stopping waited %s for a stalled delivery instead of cancelling it", waited)
+	}
 	if _, announced, err := q.store.WaitingState(q.session.ID); err != nil || announced {
 		t.Fatalf("announced=%v err=%v before the delivery finished", announced, err)
 	}
@@ -489,6 +493,41 @@ func TestQuestionAnnouncedAgainAfterAStopMidDeliveryCollapsesIntoOne(t *testing.
 	}
 	if other := waitingNotificationKey(q.session.ID, questionID+"-next"); other == key || len(key) > 64 {
 		t.Fatalf("key=%q next question=%q", key, other)
+	}
+}
+
+func TestTheDaemonStopsOnlyAfterAnAnnouncementInFlightFinishes(t *testing.T) {
+	q := newClaudeQuestion(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var first sync.Once
+	_, stop := runDaemonWith(t, q.store, func(d *Daemon) {
+		d.notifyDesktop = func(_, _, _, _, _ string, _ []surface.RequestAction) error {
+			first.Do(func() {
+				close(entered)
+				<-release
+			})
+			return nil
+		}
+	}, q.claude)
+	<-entered
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		stop()
+	}()
+	select {
+	case <-stopped:
+		close(release)
+		t.Fatal("the daemon stopped while an announcement could still write to its registry")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	<-stopped
+	if _, announced, err := q.store.WaitingState(q.session.ID); err != nil || announced {
+		t.Fatalf("announced=%v err=%v; an announcement cut short by the stop must be made again after a restart", announced, err)
+	}
+	if got := q.pushes.count("session.waiting"); got != 0 {
+		t.Fatalf("a stopping daemon sent %d notifications", got)
 	}
 }
 

@@ -138,7 +138,7 @@ agenthail signin use claude none           # turn Claude Remote Control sign-in 
 
 ## One place to check in
 
-The Mac app shows what is working now, what is waiting, and what needs you. Open a conversation to read the transcript, send the next instruction, steer the current turn, stop it, compact it, or change models when that conversation supports it.
+The Mac app shows what is working now, what is waiting, and what needs you. Open a conversation to read the transcript, send the next instruction, steer the current turn, stop it, compact it, or change models when that conversation supports it. A Codex conversation that Codex already has open, in Desktop or its app-server daemon, takes a new model with its next turn sent through Agenthail, and shows it as "from next turn" until then; a turn started from Desktop's own composer or its queue runs on the model Desktop shows.
 
 The same actions are available from the command line:
 
@@ -210,6 +210,15 @@ agenthail reply @builder --report
 With `--json` or `--report`, each turn also reports its state, model, duration and token usage, and lists the fields its provider did not record; Notion records none of them. The [operations skill](skills/agenthail-operations/SKILL.md) gives the schema.
 
 The report is the agent's own claim; check the commits before you rely on them. The [operations skill](skills/agenthail-operations/SKILL.md#completion-report) defines every field. Agents that have the skill write one when they finish dispatched work.
+
+To hand work on only when an agent reports, filter a relay on the report. The first relay passes a finished report to the reviewer; the second tells the lead when the builder is blocked, failed or stopped partway:
+
+```bash
+agenthail relay add @builder @reviewer '(?:\A|\n)`{3}agenthail-report\n[ \t\r]*\{[^\n]*"status"[ \t\r]*:[ \t\r]*"done"[^\n]*\}[ \t\r]*\n`{3}[ \t\r\n]*\z'
+agenthail relay add @builder @lead '(?:\A|\n)`{3}agenthail-report\n[ \t\r]*\{[^\n]*"status"[ \t\r]*:[ \t\r]*"(?:blocked|failed|partial)"[^\n]*\}[ \t\r]*\n`{3}[ \t\r\n]*\z'
+```
+
+Each filter matches only a report that ends the reply, so a report quoted mid-reply, or shown inside a longer code block that closes after it, does not fire it. The filter checks where the report is and finds `"status"` anywhere on its line, including inside a nested value; it does not check the other rules. The receiver checks the report with `agenthail reply @builder --report`, the exact parser, before acting on it.
 
 ## Give each project a coordinator
 

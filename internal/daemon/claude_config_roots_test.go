@@ -33,7 +33,7 @@ func TestClaudeConfigRootsReachSessionOptionsCreationAndTheSessionRow(t *testing
 			t.Fatal(err)
 		}
 	}
-	d := New(registry, []surface.Surface{surfaces.NewClaude(nil, host.Home)})
+	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewClaude(nil, host.Home)})
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	call := func(method, path string, body []byte) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, path, bytes.NewReader(body))

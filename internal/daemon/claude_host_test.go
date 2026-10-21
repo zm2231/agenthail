@@ -76,7 +76,7 @@ func TestAPersonsMessageToAHostSessionIsDeliveredUnderItsIntentUUID(t *testing.T
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
-	d := New(r, []surface.Surface{claude})
+	d := newTestDaemon(t, r, []surface.Surface{claude})
 	ctx := context.Background()
 
 	receipt, err := d.dispatcher().DeliverWithOptions(ctx, claude, &session, "sent now", "", surface.SendOptions{Author: surface.AuthorPerson})
@@ -119,7 +119,7 @@ func TestAStoppedDaemonLeavesNoClaudeHostSupervisorRunning(t *testing.T) {
 		returned.Store(true)
 		return claudehost.Launch{}, errors.New("no Claude host in this test")
 	}}
-	d := New(hostRegistry(t), nil)
+	d := newTestDaemon(t, hostRegistry(t), nil)
 	d.SetClaudeHost(manager)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -146,7 +146,7 @@ func TestARestartedDaemonAttachesToTheRunningHostAndKeepsItsSessions(t *testing.
 	fixture := claudehosttest.New(t, "")
 	r := hostRegistry(t)
 	run := func(manager *claudehost.Manager) (stop func()) {
-		d := New(r, nil)
+		d := newTestDaemon(t, r, nil)
 		d.SetClaudeHost(manager)
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
@@ -224,7 +224,7 @@ func TestARestartedDaemonAttachesToTheRunningHostAndKeepsItsSessions(t *testing.
 
 func TestAHostThatExitsWhileRunningIsLoggedWithItsLogPath(t *testing.T) {
 	fixture := claudehosttest.New(t, "")
-	d := New(hostRegistry(t), nil)
+	d := newTestDaemon(t, hostRegistry(t), nil)
 	manager := fixture.Manager(t, "test")
 	d.SetClaudeHost(manager)
 	var logged strings.Builder
@@ -282,7 +282,7 @@ func updateFromAProtocol1Host(t *testing.T, prompt string) {
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
-	d := New(r, []surface.Surface{claude})
+	d := newTestDaemon(t, r, []surface.Surface{claude})
 	d.log = log.New(io.Discard, "", 0)
 
 	fixture.Peer(t, opened.PID, prompt)
@@ -365,7 +365,7 @@ func TestTheRequestWatcherFollowsTheNewHostWhileTheOldOneRetires(t *testing.T) {
 	waiting := uuid.NewString()
 	opened := fixture.Open(t, client, waiting)
 	fixture.Peer(t, opened.PID, "TOOL")
-	d := New(hostRegistry(t), nil)
+	d := newTestDaemon(t, hostRegistry(t), nil)
 	d.log = log.New(io.Discard, "", 0)
 	d.SetClaudeHost(fixture.Manager(t, "1.0.0"))
 	watched := make(chan struct{})
@@ -441,7 +441,7 @@ func TestAnUpdateFromAProtocol2HostAnswersItsPromptThroughTheNewDaemon(t *testin
 			if err := r.RegisterSession(session); err != nil {
 				t.Fatal(err)
 			}
-			d := New(r, []surface.Surface{claude})
+			d := newTestDaemon(t, r, []surface.Surface{claude})
 			d.log = log.New(io.Discard, "", 0)
 			fixture.Peer(t, opened.PID, test.prompt)
 			claudehosttest.WaitFor(t, "the session to wait on the request", func() bool {

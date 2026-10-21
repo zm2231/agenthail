@@ -204,11 +204,22 @@ func codexOperationOutcome(err error) error {
 // a loaded thread that accepts direct input is used as is, otherwise the
 // thread is resumed there and must then accept direct input.
 func (c *Codex) requireDirectInput(ctx context.Context, client codexClient, sess *surface.Session) error {
+	return c.loadForDirectInput(ctx, client, sess, "")
+}
+
+// loadForDirectInput loads the thread when Codex does not have it loaded,
+// with model as the resume's override; Codex ignores the override for a
+// thread it already has loaded.
+func (c *Codex) loadForDirectInput(ctx context.Context, client codexClient, sess *surface.Session, model string) error {
 	readResponse, err := client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
 	if err == nil && codexDirectInputAccepted(readResponse) {
 		return nil
 	}
-	if _, err := client.Request(ctx, "thread/resume", codexResumeParams(sess), 10*time.Second); err != nil {
+	params := codexResumeParams(sess)
+	if model != "" {
+		params["model"] = model
+	}
+	if _, err := client.Request(ctx, "thread/resume", params, 10*time.Second); err != nil {
 		return classifyCodexWrite(fmt.Errorf("thread/resume: %w", err))
 	}
 	readResponse, err = client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)

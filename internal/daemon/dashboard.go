@@ -90,6 +90,7 @@ type dashboardSession struct {
 	Surface           surface.SurfaceKind        `json:"surface"`
 	RuntimeKind       surface.RuntimeKind        `json:"runtimeKind,omitempty"`
 	ConfiguredModel   string                     `json:"configuredModel,omitempty"`
+	PendingModel      string                     `json:"pendingModel,omitempty"`
 	ClaudeConfigRoot  *surface.SessionConfigRoot `json:"claudeConfigRoot,omitempty"`
 	Name              string                     `json:"name"`
 	Cwd               string                     `json:"cwd,omitempty"`
@@ -259,11 +260,20 @@ func (d *Daemon) startDashboard() (*dashboardServer, error) {
 	return dashboard, nil
 }
 
+// dashboardShutdownTimeout bounds how long a stopping daemon waits for the
+// requests in flight, which may still write to the registry, to finish.
+const dashboardShutdownTimeout = 5 * time.Second
+
 func (d *dashboardServer) shutdown() error {
 	if d.cancel != nil {
 		d.cancel()
 	}
-	err := d.server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), dashboardShutdownTimeout)
+	defer cancel()
+	err := d.server.Shutdown(ctx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		err = d.server.Close()
+	}
 	if d.voice != nil {
 		d.voice.Close()
 	}
@@ -1887,6 +1897,10 @@ func (d *Daemon) control(ctx context.Context, adapter surface.Surface, session *
 	var err error
 	if request.Action == "interrupt" {
 		err = adapter.Interrupt(ctx, session)
+	} else if setter, ok := adapter.(surface.ModelSetter); ok && request.Value != "" {
+		var change surface.ModelChange
+		change, err = setter.SetModel(ctx, session, request.Value)
+		result.Output, result.Change = change.Text(), &change
 	} else {
 		result.Output, err = adapter.Model(ctx, session, request.Value)
 	}
@@ -2114,6 +2128,9 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 	}
 	if effective.Model {
 		requests["model"] = func() (any, error) { return adapter.Model(ctx, session, "") }
+		if reader, ok := adapter.(surface.PendingModelReader); ok {
+			requests["pendingModel"] = func() (any, error) { return reader.PendingModel(session.ID), nil }
+		}
 		if lister, ok := adapter.(surface.ModelLister); ok {
 			requests["models"] = func() (any, error) { return lister.Models(ctx) }
 		}

@@ -219,14 +219,15 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.publishEvent("turn.completed", session.ID, map[string]string{"turnId": observation.CompletedTurnID})
 	}
 	if desktopNotificationMessage != "" {
-		go func(desktopMessage, mobileMessage, sessionID, turnID string) {
+		desktopMessage, mobileMessage, sessionID, turnID := desktopNotificationMessage, mobileNotificationMessage, session.ID, observation.CompletedTurnID
+		d.background.start(func(ctx context.Context) {
 			if err := d.notifyDesktop("Agenthail", desktopMessage, sessionID, "", "", nil); err != nil {
 				d.log.Printf("desktop notification: %s", err)
 			}
-			notificationCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			notificationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
 			d.notifyPairedDevices(notificationCtx, mobileNotification{Title: "Agenthail", Message: mobileMessage, SessionID: sessionID, TurnID: turnID, EventType: "turn.completed"})
-		}(desktopNotificationMessage, mobileNotificationMessage, session.ID, observation.CompletedTurnID)
+		})
 	}
 	canLoadDesktopQueue := session.Surface == surface.KindCodex && session.Transport == "desktop" && observation.Status == surface.SessionStatus("notLoaded")
 	steerQueued, steerQueueErr := d.Registry.PendingSteer(session.ID)

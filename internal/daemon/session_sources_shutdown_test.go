@@ -13,7 +13,7 @@ import (
 func TestConcurrentDashboardSessionAndShutdownLeavesNoAdmittedSource(t *testing.T) {
 	_, r, fake, from, _ := daemonFixture(t)
 	for attempt := 0; attempt < 50; attempt++ {
-		d := New(r, []surface.Surface{fake})
+		d := newTestDaemon(t, r, []surface.Surface{fake})
 		server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
 		request, err := http.NewRequest(http.MethodGet, server.URL+"/api/session?id="+from.ID+"&timeline=1", nil)
 		if err != nil {

@@ -2,6 +2,8 @@
 set -euo pipefail
 
 : "${RUNNER_TEMP:?}" "${RUNNER_TOOL_CACHE:?}" "${GITHUB_WORKSPACE:?}" "${RUNNER_NAME:?}"
+case "$RUNNER_TOOL_CACHE" in /*) ;; *) echo "RUNNER_TOOL_CACHE must be an absolute path" >&2; exit 1 ;; esac
+case "$RUNNER_TOOL_CACHE/" in */./* | */../*) echo "RUNNER_TOOL_CACHE must not contain . or .. components" >&2; exit 1 ;; esac
 
 # The job temp directory lives in the user's own temp directory, as it does
 # on hosted runners and users' Macs: /var/folders resolves to /private/var,
@@ -83,8 +85,29 @@ cleanup() {
 	remove_tmp
 }
 
+# Each runner keeps its own Go build cache between jobs. Go trims entries
+# unused for five days, which is slower than a busy runner fills it, so a
+# cache over the limit is cleared with Go's own command. The path must
+# resolve to exactly the runner's tool cache plus agenthail-cache/go-build,
+# so a symlink cannot point the clean anywhere else.
+trim_go_cache() {
+	local max_kb=8388608 tools cache size
+	tools="$(cd "$RUNNER_TOOL_CACHE" && pwd -P)"
+	cache="$RUNNER_TOOL_CACHE/agenthail-cache/go-build"
+	[ -d "$cache" ] || return 0
+	if [ "$(cd "$cache" && pwd -P)" != "$tools/agenthail-cache/go-build" ]; then
+		echo "Not trimming $cache: it does not resolve to $tools/agenthail-cache/go-build" >&2
+		return 1
+	fi
+	size="$(du -sk "$cache" | cut -f1)"
+	[ "$size" -gt "$max_kb" ] || return 0
+	echo "Go build cache is $((size / 1024)) MB, over $((max_kb / 1024)) MB; clearing it"
+	GOCACHE="$tools/agenthail-cache/go-build" go clean -cache
+}
+
 case "${1:-}" in
 	prepare) prepare ;;
 	cleanup) cleanup ;;
-	*) echo "usage: $0 prepare|cleanup" >&2; exit 2 ;;
+	trim-go-cache) trim_go_cache ;;
+	*) echo "usage: $0 prepare|cleanup|trim-go-cache" >&2; exit 2 ;;
 esac

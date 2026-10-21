@@ -106,7 +106,7 @@ func TestDashboardGoalActionsUseTypedUpdatesAndValidateBudget(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	fake.caps.Goal, fake.caps.GoalSet, fake.caps.GoalStatus = true, true, true
 	adapter := &goalControlSurface{daemonSurface: fake}
-	handler := dashboardRouter(New(registry, []surface.Surface{adapter}))
+	handler := dashboardRouter(newTestDaemon(t, registry, []surface.Surface{adapter}))
 	request := func(action, message string) *httptest.ResponseRecorder {
 		body, _ := json.Marshal(map[string]string{"action": action, "sessionId": from.ID, "message": message})
 		return serveDashboardRequest(handler, http.MethodPost, "/api/action", string(body))
@@ -157,7 +157,7 @@ func TestDashboardSessionReadsJournalWithoutProviderMetadata(t *testing.T) {
 	}
 	probe := &sessionPageReadProbe{daemonSurface: fake, release: make(chan struct{})}
 	probe.caps.Model = true
-	d := New(registry, []surface.Surface{probe})
+	d := newTestDaemon(t, registry, []surface.Surface{probe})
 	defer d.sources.shutdown()
 	defer close(probe.release)
 	handler := dashboardRouter(d)
@@ -213,7 +213,7 @@ func TestDashboardSessionMetadataExposesValidatedClaudeRunObservations(t *testin
 		runs:          []surface.ClaudeRunObservation{{JobID: "job-1", SessionID: from.ID, RunType: "bg", ProviderState: "working"}, {JobID: "other", SessionID: "other", RunType: "bg"}},
 		links:         []surface.ClaudeSubagentLink{{ParentSessionID: from.ID, AgentID: "agent-1", TranscriptPath: "/tmp/agent-1.jsonl"}, {ParentSessionID: "other", AgentID: "agent-2"}},
 	}
-	response := serveDashboardRequest(dashboardRouter(New(registry, []surface.Surface{fake})), http.MethodGet, "/api/session-metadata?id="+from.ID, "")
+	response := serveDashboardRequest(dashboardRouter(newTestDaemon(t, registry, []surface.Surface{fake})), http.MethodGet, "/api/session-metadata?id="+from.ID, "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -271,7 +271,7 @@ func TestDashboardSessionReadDoesNotNegotiateWritableAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapter := &accessDaemonSurface{daemonSurface: fake}
-	response := serveDashboardRequest(dashboardRouter(New(registry, []surface.Surface{adapter})), http.MethodGet, "/api/session?id=history", "")
+	response := serveDashboardRequest(dashboardRouter(newTestDaemon(t, registry, []surface.Surface{adapter})), http.MethodGet, "/api/session?id=history", "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -426,7 +426,7 @@ func TestDashboardCompactUsesTypedClaudeControl(t *testing.T) {
 		accepted:     true,
 		caps:         surface.Capabilities{Compact: true},
 	}
-	response := serveDashboardRequest(dashboardRouter(New(registry, []surface.Surface{fake})), http.MethodPost, "/api/action", `{"action":"compact","sessionId":"claude"}`)
+	response := serveDashboardRequest(dashboardRouter(newTestDaemon(t, registry, []surface.Surface{fake})), http.MethodPost, "/api/action", `{"action":"compact","sessionId":"claude"}`)
 	if response.Code != http.StatusOK || registry.QueueCount(session.ID) != 1 || !strings.Contains(response.Body.String(), `"evidence":"queued"`) || fake.compactCalls.Load() != 0 {
 		t.Fatalf("status=%d queue=%d body=%s", response.Code, registry.QueueCount(session.ID), response.Body.String())
 	}
@@ -445,7 +445,7 @@ func TestDashboardSteerReturnsDeliveryEvidence(t *testing.T) {
 		accepted:     true,
 		caps:         surface.Capabilities{Steer: true},
 	}
-	response := serveDashboardRequest(dashboardRouter(New(registry, []surface.Surface{fake})), http.MethodPost, "/api/action", `{"action":"steer","sessionId":"codex","message":"focus on tests"}`)
+	response := serveDashboardRequest(dashboardRouter(newTestDaemon(t, registry, []surface.Surface{fake})), http.MethodPost, "/api/action", `{"action":"steer","sessionId":"codex","message":"focus on tests"}`)
 	var body struct {
 		Result struct {
 			Evidence string `json:"evidence"`
@@ -528,7 +528,7 @@ func TestDashboardSnapshotCarriesCodexRuntimeProblemAndRepair(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			_, registry, _, _, _ := daemonFixture(t)
 			adapter := &healthDaemonSurface{daemonSurface: &daemonSurface{kind: surface.KindCodex}, runtime: test.runtime}
-			d := New(registry, []surface.Surface{adapter})
+			d := newTestDaemon(t, registry, []surface.Surface{adapter})
 			d.discoverCatalog(context.Background())
 			request := httptest.NewRequest(http.MethodGet, "/api/v1/snapshot", nil)
 			request.Header.Set("Authorization", "Bearer secret")
@@ -578,7 +578,7 @@ func latestSurfaceHealthEvent(t *testing.T, d *Daemon) surfaceHealthEvent {
 func TestCatalogStreamPublishesANoteThatAppearsWhileHealthy(t *testing.T) {
 	_, registry, _, _, _ := daemonFixture(t)
 	adapter := &healthDaemonSurface{daemonSurface: &daemonSurface{kind: surface.KindCodex}, runtime: surface.RuntimeStatus{Name: "Codex Desktop bridge", Reachable: true, Durable: true}}
-	d := New(registry, []surface.Surface{adapter})
+	d := newTestDaemon(t, registry, []surface.Surface{adapter})
 	d.discoverCatalog(context.Background())
 	if event := latestSurfaceHealthEvent(t, d); event.Health != "healthy" || event.Runtime == nil || len(event.Runtime.Notes) != 0 {
 		t.Fatalf("event=%+v", event)
@@ -594,7 +594,7 @@ func TestDashboardRepairsManagedRuntime(t *testing.T) {
 	d, registry, _, _, _ := daemonFixture(t)
 	base := &daemonSurface{kind: surface.KindCodex}
 	adapter := &runtimeDaemonSurface{daemonSurface: base}
-	d = New(registry, []surface.Surface{adapter})
+	d = newTestDaemon(t, registry, []surface.Surface{adapter})
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	body, _ := json.Marshal(map[string]string{"action": "runtime-ensure"})
 	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
@@ -787,7 +787,7 @@ func TestDashboardCreatesAndRegistersNotionThread(t *testing.T) {
 	t.Cleanup(func() { registry.Close() })
 	const threadID = "3978aba0-0606-80ac-a1ae-00a9eb229fc0"
 	fake := &daemonSurface{kind: surface.KindNotion, sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true, turnID: threadID}
-	handler := New(registry, []surface.Surface{fake}).dashboardHandler(&dashboardServer{token: "secret"})
+	handler := newTestDaemon(t, registry, []surface.Surface{fake}).dashboardHandler(&dashboardServer{token: "secret"})
 	body, _ := json.Marshal(map[string]string{"action": "notion-create", "message": "Research the launch", "alias": "research", "model": "fast"})
 	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
 	request.Header.Set("Origin", "http://example.test")
@@ -888,6 +888,42 @@ func TestDashboardShutdownCancelsActiveStreams(t *testing.T) {
 	case <-requestDone:
 	case <-time.After(time.Second):
 		t.Fatal("stream request survived shutdown")
+	}
+}
+
+func TestDashboardShutdownWaitsForARequestInFlight(t *testing.T) {
+	serverCtx, cancel := context.WithCancel(context.Background())
+	started, release := make(chan struct{}), make(chan struct{})
+	var finished atomic.Bool
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dashboard := &dashboardServer{cancel: cancel}
+	dashboard.server = &http.Server{
+		BaseContext: func(net.Listener) context.Context { return serverCtx },
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(started)
+			<-release
+			finished.Store(true)
+		}),
+	}
+	go dashboard.server.Serve(listener)
+	go func() {
+		if response, requestErr := http.Get("http://" + listener.Addr().String()); requestErr == nil {
+			response.Body.Close()
+		}
+	}()
+	<-started
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		close(release)
+	}()
+	if err := dashboard.shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	if !finished.Load() {
+		t.Fatal("shutdown returned while a request could still write to the registry")
 	}
 }
 
@@ -1185,7 +1221,7 @@ func TestChangingTheCodexWindowRepublishesPresence(t *testing.T) {
 	if _, _, err := r.RecordCatalogSession(registrypkg.CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: projection}, registrypkg.CatalogEvent{DedupeKey: "session.upserted:" + session.ID, Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
 		t.Fatal(err)
 	}
-	d := New(r, []surface.Surface{&surfaces.Codex{}})
+	d := newTestDaemon(t, r, []surface.Surface{&surfaces.Codex{}})
 	handler := dashboardRouter(d)
 	if response := serveDashboardRequest(handler, http.MethodPost, "/api/settings", `{"action":"dashboard-config","codexRecentHours":1}`); response.Code != http.StatusOK {
 		t.Fatalf("settings status=%d body=%s", response.Code, response.Body.String())

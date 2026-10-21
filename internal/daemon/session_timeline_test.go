@@ -32,7 +32,7 @@ func (s *timelineSurface) ReadSession(_ context.Context, _ *surface.Session, req
 func TestAPIV1MobileTimelinePreservesContractAndReadAuthorization(t *testing.T) {
 	_, registry, fake, _, _ := daemonFixture(t)
 	adapter := &timelineSurface{daemonSurface: fake}
-	d := New(registry, []surface.Surface{adapter})
+	d := newTestDaemon(t, registry, []surface.Surface{adapter})
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	turns := []struct{ id, role, turn string }{
 		{"item-1", "user", "turn-1"}, {"item-2", "assistant", "turn-1"},
@@ -142,7 +142,7 @@ func TestProviderHistoryOmitsInjectedPromptAlreadyJournaled(t *testing.T) {
 	_, registry, fake, _, _ := daemonFixture(t)
 	shared := surface.TimelineItem{ID: "task-notification:task-1:completed", Kind: "event", Role: "system", Origin: "task-notification", Title: "Task notification", Text: "Synthetic job done", Status: "completed"}
 	adapter := &providerHistorySurface{daemonSurface: fake, shared: &shared}
-	d := New(registry, []surface.Surface{adapter})
+	d := newTestDaemon(t, registry, []surface.Surface{adapter})
 	defer d.sources.shutdown()
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	read := func(query string) surface.SessionTimeline {
@@ -183,7 +183,7 @@ func TestProviderHistoryOmitsInjectedPromptAlreadyJournaled(t *testing.T) {
 func TestSessionPageContinuesIntoProviderHistoryPastSeed(t *testing.T) {
 	_, registry, fake, _, _ := daemonFixture(t)
 	adapter := &providerHistorySurface{daemonSurface: fake}
-	d := New(registry, []surface.Surface{adapter})
+	d := newTestDaemon(t, registry, []surface.Surface{adapter})
 	defer d.sources.shutdown()
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	read := func(query string) surface.SessionTimeline {
@@ -233,7 +233,7 @@ func TestSessionPageWithPreexistingJournalReportsHistoryGapInsteadOfExhaustion(t
 		t.Fatal(err)
 	}
 	adapter := &providerHistorySurface{daemonSurface: fake}
-	d := New(registry, []surface.Surface{adapter})
+	d := newTestDaemon(t, registry, []surface.Surface{adapter})
 	defer d.sources.shutdown()
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	get := func(query string) *httptest.ResponseRecorder {
@@ -353,7 +353,7 @@ func (s *toolHistorySurface) ReadSession(_ context.Context, _ *surface.Session, 
 func TestOlderProviderHistoryPageStopsAtTheItemLimit(t *testing.T) {
 	_, registry, fake, _, _ := daemonFixture(t)
 	adapter := &toolHistorySurface{daemonSurface: fake}
-	d := New(registry, []surface.Surface{adapter})
+	d := newTestDaemon(t, registry, []surface.Surface{adapter})
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	read := func(cursor int64) surface.SessionTimeline {
 		target := "/api/v1/session?id=from&timeline=1&limit=5"

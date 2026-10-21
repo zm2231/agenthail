@@ -24,6 +24,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: ${{ runner.environment != 'self-hosted' }}
+      - name: Trim self-hosted Go cache
+        if: runner.environment == 'self-hosted'
+        run: scripts/ci-self-hosted.sh trim-go-cache
       - uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -54,6 +57,7 @@ jobs:
           node scripts/test-dashboard-rekeys.mjs
           node scripts/test-dashboard-signin.mjs
           node scripts/test-dashboard-projects.mjs
+          node scripts/test-dashboard-model.mjs
           node scripts/test-session-controls.mjs
       - name: Public copy check
         run: scripts/check-public-copy.sh
@@ -77,6 +81,7 @@ jobs:
         run: |
           find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n
           scripts/test-codesign-retry.sh
+          scripts/test-ci-self-hosted.sh
           scripts/test-macos-app-resources-check.sh
           bash -n packaging/scripts/preinstall packaging/scripts/postinstall
           python3 -m py_compile sidecar/sidecar.py

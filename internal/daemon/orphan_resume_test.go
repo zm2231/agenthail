@@ -98,7 +98,7 @@ func newOrphanFixtureOn(t *testing.T, transport string) *orphanFixture {
 		t.Fatal(err)
 	}
 	fixture.claude.Job("fe758937", orphanConversation, fixture.claude.Home, "done", 0)
-	fixture.daemon = New(r, []surface.Surface{surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.claude.Home, fixture.posts.request)})
+	fixture.daemon = newTestDaemon(t, r, []surface.Surface{surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.claude.Home, fixture.posts.request)})
 	fixture.handler = dashboardRouter(fixture.daemon)
 	fixture.token = pairedControlToken(t, r)
 	return fixture

@@ -132,6 +132,7 @@ type Session struct {
 	Transport             string            `json:"transport,omitempty"`
 	RuntimeKind           RuntimeKind       `json:"runtimeKind,omitempty"`
 	ConfiguredModel       string            `json:"configuredModel,omitempty"`
+	PendingModel          string            `json:"pendingModel,omitempty"`
 	Bridge                string            `json:"bridge,omitempty"`
 	ForkedFrom            string            `json:"forkedFrom,omitempty"`
 	LastActive            time.Time         `json:"lastActive"`
@@ -252,6 +253,7 @@ func ReadOnlySessionReason(session *Session) string {
 type SendResult struct {
 	UUID     string `json:"uuid"`
 	Accepted bool   `json:"accepted"`
+	Notice   string `json:"notice,omitempty"`
 }
 
 type DeliveryEvidence string

@@ -35,7 +35,7 @@ func TestBusySteerWhoseTurnEndsFirstIsSentAsTheNextTurn(t *testing.T) {
 	}
 	t.Cleanup(func() { r.Close() })
 	fixture.registry = r
-	fixture.restartAgenthail(unreachableDesktop)
+	fixture.restartAgenthail(t, unreachableDesktop)
 	code, created := fixture.action(t, map[string]any{"action": "session-create", "surface": "codex", "message": "First task", "cwd": t.TempDir()})
 	session, _ := created["session"].(map[string]any)
 	id, _ := session["id"].(string)
@@ -80,7 +80,7 @@ func TestQueuedSteerWhoseTurnEndsFirstIsSentAsTheNextTurn(t *testing.T) {
 	}
 	t.Cleanup(func() { r.Close() })
 	fixture.registry = r
-	fixture.restartAgenthail(unreachableDesktop)
+	fixture.restartAgenthail(t, unreachableDesktop)
 	code, created := fixture.action(t, map[string]any{"action": "session-create", "surface": "codex", "message": "First task", "cwd": t.TempDir()})
 	session, _ := created["session"].(map[string]any)
 	id, _ := session["id"].(string)
@@ -94,7 +94,7 @@ func TestQueuedSteerWhoseTurnEndsFirstIsSentAsTheNextTurn(t *testing.T) {
 	thread, armed = id, true
 	mu.Unlock()
 
-	New(r, []surface.Surface{surfaces.NewCodex(unreachableDesktop)}).scanAndRelay(context.Background())
+	newTestDaemon(t, r, []surface.Surface{surfaces.NewCodex(unreachableDesktop)}).scanAndRelay(context.Background())
 	got := fixture.thread(t, id)
 	if len(got.Turns) != 2 || got.Turns[1].User != "Second task" || len(fixture.lifecycle.Daemon().Calls("turn/steer")) != 0 || r.QueueCount(id) != 0 {
 		t.Fatalf("thread=%+v steers=%d queued=%d", got, len(fixture.lifecycle.Daemon().Calls("turn/steer")), r.QueueCount(id))

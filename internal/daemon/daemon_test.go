@@ -28,6 +28,7 @@ type daemonSurface struct {
 	sessions       map[string]surface.Session
 	observations   map[string]*surface.TurnObservation
 	accepted       bool
+	notice         string
 	nilResult      bool
 	sent           []string
 	steered        []string
@@ -174,15 +175,15 @@ func TestScanBacksOffFailingRelayOnlySessionsAndRecovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.observeErr = errors.New("desktop bridge unavailable")
-	d.scanAndRelay(context.Background())
-	d.scanAndRelay(context.Background())
+	d.scanAndRelay(t.Context())
+	d.scanAndRelay(t.Context())
 	if got := fake.observeCalls.Load(); got != 1 {
 		t.Fatalf("observation calls=%d, want one during backoff", got)
 	}
 	if err := registry.QueueMessage(from.ID, "deliver after recovery"); err != nil {
 		t.Fatal(err)
 	}
-	d.scanAndRelay(context.Background())
+	d.scanAndRelay(t.Context())
 	if got := fake.observeCalls.Load(); got != 2 {
 		t.Fatalf("observation calls=%d, queued work must bypass backoff", got)
 	}
@@ -193,7 +194,7 @@ func TestScanBacksOffFailingRelayOnlySessionsAndRecovers(t *testing.T) {
 	d.retryMu.Unlock()
 	fake.observeErr = nil
 	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
-	d.scanAndRelay(context.Background())
+	d.scanAndRelay(t.Context())
 	if got := fake.observeCalls.Load(); got != 3 {
 		t.Fatalf("observation calls=%d, want recovery attempt", got)
 	}
@@ -217,7 +218,7 @@ func (f *daemonSurface) Send(_ context.Context, session *surface.Session, messag
 	if turnID == "" {
 		turnID = "turn"
 	}
-	return &surface.SendResult{UUID: turnID, Accepted: f.accepted}, nil
+	return &surface.SendResult{UUID: turnID, Accepted: f.accepted, Notice: f.notice}, nil
 }
 func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
 	if f.rejectBusy && session.Status == surface.StatusBusy {
@@ -235,7 +236,7 @@ func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Sess
 	if turnID == "" {
 		turnID = "turn"
 	}
-	return &surface.SendResult{UUID: turnID, Accepted: f.accepted}, nil
+	return &surface.SendResult{UUID: turnID, Accepted: f.accepted, Notice: f.notice}, nil
 }
 func (f *daemonSurface) StartSession(_ context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
 	f.startOptions = append(f.startOptions, options)
@@ -310,7 +311,7 @@ func daemonFixture(t *testing.T) (*Daemon, *registry.Registry, *daemonSurface, s
 		t.Fatal(err)
 	}
 	fake := &daemonSurface{sessions: map[string]surface.Session{"from": from, "to": to}, observations: map[string]*surface.TurnObservation{}, accepted: true}
-	return New(r, []surface.Surface{fake}), r, fake, from, to
+	return newTestDaemon(t, r, []surface.Surface{fake}), r, fake, from, to
 }
 
 func TestObservationPersistsRefreshedCodexTransport(t *testing.T) {
@@ -325,7 +326,7 @@ func TestObservationPersistsRefreshedCodexTransport(t *testing.T) {
 	if err := r.QueueMessage(target.ID, "deliver after Desktop refresh"); err != nil {
 		t.Fatal(err)
 	}
-	d.scanAndRelay(context.Background())
+	d.scanAndRelay(t.Context())
 	stored, err := r.Session(target.ID)
 	if err != nil || stored.Source != "vscode" || stored.Transport != "desktop" {
 		t.Fatalf("stored=%+v err=%v", stored, err)
@@ -357,7 +358,7 @@ func TestBusySteerRelayUsesDurableQueueUntilOutbox(t *testing.T) {
 	if err != nil || item.BusyDelivery != "" {
 		t.Fatalf("item=%+v err=%v, want the relay to follow the live policy", item, err)
 	}
-	d.drainSteerMessageQueue(context.Background(), fake, &to)
+	d.drainSteerMessageQueue(t.Context(), fake, &to)
 	if len(fake.steered) != 1 || r.QueueCount(to.ID) != 0 {
 		t.Fatalf("steered=%v queued=%d", fake.steered, r.QueueCount(to.ID))
 	}
@@ -378,13 +379,13 @@ func TestObservationKeepsQueueItemsBlockedWhileSteerIsPending(t *testing.T) {
 		{Status: surface.StatusIdle, ActiveTurnID: "still-running"},
 	} {
 		fake.observations[to.ID] = observation
-		d.observeSession(context.Background(), fake, &to)
+		d.observeSession(t.Context(), fake, &to)
 		if len(fake.sent) != 0 || len(fake.steered) != 0 || r.QueueCount(to.ID) != 2 {
 			t.Fatalf("status=%s active=%q sent=%v steered=%v queued=%d", observation.Status, observation.ActiveTurnID, fake.sent, fake.steered, r.QueueCount(to.ID))
 		}
 	}
 	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-busy"}
-	d.observeSession(context.Background(), fake, &to)
+	d.observeSession(t.Context(), fake, &to)
 	if len(fake.sent) != 0 || len(fake.steered) != 1 || fake.steered[0] != "steer queued" || r.QueueCount(to.ID) != 1 {
 		t.Fatalf("busy sent=%v steered=%v queued=%d", fake.sent, fake.steered, r.QueueCount(to.ID))
 	}
@@ -405,7 +406,7 @@ func TestRelayOutboxPreservesOptionsWhenBusySteerIsConfigured(t *testing.T) {
 	if err != nil || item.BusyDelivery != "queue" {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
-	d.drainMessageQueue(context.Background(), fake, &to)
+	d.drainMessageQueue(t.Context(), fake, &to)
 	if len(fake.steered) != 0 || len(fake.models) != 1 || fake.models[0] != "model-a" || r.QueueCount(to.ID) != 0 {
 		t.Fatalf("steered=%v models=%v queued=%d", fake.steered, fake.models, r.QueueCount(to.ID))
 	}
@@ -414,17 +415,17 @@ func TestRelayOutboxPreservesOptionsWhenBusySteerIsConfigured(t *testing.T) {
 func TestObservationPublishesOnlyWhenRuntimeStateChanges(t *testing.T) {
 	d, _, fake, from, _ := daemonFixture(t)
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1"}
-	d.observeSession(context.Background(), fake, &from)
+	d.observeSession(t.Context(), fake, &from)
 	firstCount := len(d.events.history)
 	if firstCount == 0 {
 		t.Fatal("baseline observation did not publish")
 	}
-	d.observeSession(context.Background(), fake, &from)
+	d.observeSession(t.Context(), fake, &from)
 	if len(d.events.history) != firstCount {
 		t.Fatalf("unchanged observation published %d additional event(s)", len(d.events.history)-firstCount)
 	}
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-2", CompletedTurnID: "turn-1"}
-	d.observeSession(context.Background(), fake, &from)
+	d.observeSession(t.Context(), fake, &from)
 	if len(d.events.history) != firstCount+1 {
 		t.Fatalf("changed observation events=%d want=%d", len(d.events.history), firstCount+1)
 	}
@@ -443,7 +444,7 @@ func TestAcceptedDeliveryMakesFirstCompletionObservable(t *testing.T) {
 	}
 	fake.accepted = false
 	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "response-1", Reply: &surface.ReplyResult{Text: "done", Done: true}}
-	d.observeSession(context.Background(), fake, &from)
+	d.observeSession(t.Context(), fake, &from)
 	if count := r.QueueCount("to"); count != 1 {
 		t.Fatalf("first completion was only baselined: queued=%d", count)
 	}
@@ -458,12 +459,12 @@ func TestAcceptedDeliveryDoesNotRelayPreviousCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "request-1", CompletedTurnID: "previous", Reply: &surface.ReplyResult{Text: "old", Done: true}}
-	d.observeSession(context.Background(), fake, &from)
+	d.observeSession(t.Context(), fake, &from)
 	if count := r.QueueCount("to"); count != 0 {
 		t.Fatalf("preexisting completion relayed: queued=%d", count)
 	}
 	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "response-1", Reply: &surface.ReplyResult{Text: "new", Done: true}}
-	d.observeSession(context.Background(), fake, &from)
+	d.observeSession(t.Context(), fake, &from)
 	if count := r.QueueCount("to"); count != 1 {
 		t.Fatalf("new completion not relayed: queued=%d", count)
 	}
@@ -484,9 +485,9 @@ func TestCodexCompletionReconcilesMatchingDeliveryIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-before", Reply: &surface.ReplyResult{Done: true}}
-	daemon.observeSession(context.Background(), fake, &from)
+	daemon.observeSession(t.Context(), fake, &from)
 	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-next", Reply: &surface.ReplyResult{Done: true}}
-	daemon.observeSession(context.Background(), fake, &from)
+	daemon.observeSession(t.Context(), fake, &from)
 	stored, err := r.DeliveryIntent(intent.ID)
 	if err != nil || stored.Status != registry.DeliveryIntentDelivered {
 		t.Fatalf("intent=%+v err=%v", stored, err)
@@ -503,9 +504,9 @@ func TestFailedCodexCompletionDoesNotReconcileDeliveryIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-before", Reply: &surface.ReplyResult{Done: true}}
-	daemon.observeSession(context.Background(), fake, &from)
+	daemon.observeSession(t.Context(), fake, &from)
 	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-failed", Reply: &surface.ReplyResult{Done: true, Error: "model error"}}
-	daemon.observeSession(context.Background(), fake, &from)
+	daemon.observeSession(t.Context(), fake, &from)
 	stored, err := r.DeliveryIntent(intent.ID)
 	if err != nil || stored.Status != registry.DeliveryIntentSent {
 		t.Fatalf("intent=%+v err=%v", stored, err)
@@ -527,9 +528,9 @@ func TestClaudeCompletionReconcilesOnlyByInputEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "assistant-baseline", InputTurnID: "other-envelope", Reply: &surface.ReplyResult{Done: true}}
-	daemon.observeSession(context.Background(), fake, &from)
+	daemon.observeSession(t.Context(), fake, &from)
 	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "assistant-completion", InputTurnID: "user-envelope", Reply: &surface.ReplyResult{Done: true}}
-	daemon.observeSession(context.Background(), fake, &from)
+	daemon.observeSession(t.Context(), fake, &from)
 	stored, err := r.DeliveryIntent(intent.ID)
 	if err != nil || stored.Status != registry.DeliveryIntentDelivered {
 		t.Fatalf("intent=%+v err=%v", stored, err)
@@ -543,18 +544,18 @@ func TestQueuedDeliveryBindsProviderTurnForReconciliation(t *testing.T) {
 		t.Fatalf("deliveryID=%d err=%v", deliveryID, err)
 	}
 	fake.turnID = "turn-queued"
-	daemon.drainMessageQueue(context.Background(), fake, &to)
+	daemon.drainMessageQueue(t.Context(), fake, &to)
 	stored, err := r.DeliveryIntent(deliveryID)
 	if err != nil || stored.Status != registry.DeliveryIntentSent || stored.ProviderKey != "turn-queued" {
 		t.Fatalf("intent=%+v err=%v", stored, err)
 	}
 	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-before", Reply: &surface.ReplyResult{Done: true}}
-	daemon.observeSession(context.Background(), fake, &to)
+	daemon.observeSession(t.Context(), fake, &to)
 	if err := r.MarkDeliveryStarted(to.ID, "turn-queued", "turn-before"); err != nil {
 		t.Fatal(err)
 	}
 	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-queued", Reply: &surface.ReplyResult{Done: true, Text: "done"}}
-	daemon.observeSession(context.Background(), fake, &to)
+	daemon.observeSession(t.Context(), fake, &to)
 	stored, err = r.DeliveryIntent(deliveryID)
 	if err != nil || stored.Status != registry.DeliveryIntentDelivered {
 		t.Fatalf("intent=%+v err=%v", stored, err)
@@ -568,7 +569,7 @@ func TestQueuedRelayTerminalFailureRecordsOneProblemWithoutNotifyingSource(t *te
 	}
 	daemon.fireRelays(&from, "relay-turn", 0, "forwarded reply")
 	fake.sendErr = surface.DeliveryTerminal(errors.New("target rejected input"), surface.DeliveryInvalidRequest)
-	daemon.drainMessageQueue(context.Background(), fake, &to)
+	daemon.drainMessageQueue(t.Context(), fake, &to)
 	daemon.fireRelays(&from, "relay-turn", 0, "forwarded reply")
 	if count := r.QueueCount(from.ID); count != 0 {
 		t.Fatalf("source notices=%d", count)
@@ -585,7 +586,7 @@ func TestQueuedRelaySuccessDoesNotCreateDeliveryProblem(t *testing.T) {
 		t.Fatal(err)
 	}
 	daemon.fireRelays(&from, "relay-turn", 0, "forwarded reply")
-	daemon.drainMessageQueue(context.Background(), fake, &to)
+	daemon.drainMessageQueue(t.Context(), fake, &to)
 	if count := r.QueueCount(from.ID); count != 0 {
 		t.Fatalf("source notices=%d", count)
 	}
@@ -625,18 +626,18 @@ func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
 	defer server.Close()
 	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", server.URL)
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle}
-	d.observeSession(context.Background(), fake, &from)
+	d.observeSession(t.Context(), fake, &from)
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}
-	d.observeSession(context.Background(), fake, &from)
+	d.observeSession(t.Context(), fake, &from)
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-2", CompletedTurnID: "turn-1", Reply: &surface.ReplyResult{Done: true}}
-	d.observeSession(context.Background(), fake, &from)
+	d.observeSession(t.Context(), fake, &from)
 	select {
 	case <-received:
 		t.Fatal("active follow-up turn emitted a completion notification")
 	case <-time.After(250 * time.Millisecond):
 	}
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-2", Reply: &surface.ReplyResult{Done: true}}
-	d.observeSession(context.Background(), fake, &from)
+	d.observeSession(t.Context(), fake, &from)
 	select {
 	case payload := <-received:
 		if payload["message"] != "Codex agent finished" || strings.Contains(payload["message"], "private-project-title") {
@@ -676,9 +677,9 @@ func TestCompletionNotificationDoesNotSendForBusyBaseline(t *testing.T) {
 	defer server.Close()
 	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", server.URL)
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "old-turn"}
-	d.observeSession(context.Background(), fake, &from)
+	d.observeSession(t.Context(), fake, &from)
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "old-completion", Reply: &surface.ReplyResult{Done: true}}
-	d.observeSession(context.Background(), fake, &from)
+	d.observeSession(t.Context(), fake, &from)
 	select {
 	case <-received:
 		t.Fatal("busy baseline emitted a completion notification")
@@ -714,11 +715,11 @@ func TestCompletionNotificationWaitsForBackgroundWork(t *testing.T) {
 	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", server.URL)
 	running := &surface.BackgroundTasks{Running: true, Source: surface.BackgroundSourceHost, Tasks: []surface.BackgroundTask{{ID: "b1", Kind: surface.BackgroundShell, Description: "build"}}}
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle}
-	d.observeSession(context.Background(), fake, &from)
+	d.observeSession(t.Context(), fake, &from)
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}
-	d.observeSession(context.Background(), fake, &from)
+	d.observeSession(t.Context(), fake, &from)
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1", Reply: &surface.ReplyResult{Done: true}, BackgroundTasks: running}
-	d.observeSession(context.Background(), fake, &from)
+	d.observeSession(t.Context(), fake, &from)
 	if !surface.BackgroundRunning(from.BackgroundTasks) {
 		t.Fatalf("session background=%+v", from.BackgroundTasks)
 	}
@@ -730,7 +731,7 @@ func TestCompletionNotificationWaitsForBackgroundWork(t *testing.T) {
 	// The follow-up turn Claude starts when the shell reports is not seen
 	// busy; the arm the first turn left still fires for it.
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-2", Reply: &surface.ReplyResult{Done: true}}
-	d.observeSession(context.Background(), fake, &from)
+	d.observeSession(t.Context(), fake, &from)
 	select {
 	case payload := <-received:
 		if payload["turnId"] != "turn-2" {
@@ -751,10 +752,10 @@ func TestRelayBoundsVerboseCompletionText(t *testing.T) {
 	}
 	text := strings.Repeat("x", maxRelayText+1000)
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "baseline", Reply: &surface.ReplyResult{Text: "old", Done: true}}
-	daemon.observeSession(context.Background(), fake, &from)
+	daemon.observeSession(t.Context(), fake, &from)
 	fake.accepted = false
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "verbose", Reply: &surface.ReplyResult{Text: text, Done: true}}
-	daemon.observeSession(context.Background(), fake, &from)
+	daemon.observeSession(t.Context(), fake, &from)
 	items, err := r.ListQueue(false, nil)
 	if err != nil || len(items) != 1 {
 		t.Fatalf("items=%+v err=%v", items, err)
@@ -828,9 +829,9 @@ func TestRelayStopsAtHopLimit(t *testing.T) {
 		}
 	}
 	fake.observations["hop-0"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "baseline-0", Reply: &surface.ReplyResult{Text: "baseline", Done: true}}
-	daemon.observeSession(context.Background(), fake, sessionPointer(fake.sessions["hop-0"]))
+	daemon.observeSession(t.Context(), fake, sessionPointer(fake.sessions["hop-0"]))
 	fake.observations["hop-0"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "done-0", Reply: &surface.ReplyResult{Text: "Done", Done: true}}
-	daemon.observeSession(context.Background(), fake, sessionPointer(fake.sessions["hop-0"]))
+	daemon.observeSession(t.Context(), fake, sessionPointer(fake.sessions["hop-0"]))
 	for index := 1; index <= maxRelayHops; index++ {
 		id := fmt.Sprintf("hop-%d", index)
 		item, err := r.QueueItem(int64(index), nil)
@@ -838,9 +839,9 @@ func TestRelayStopsAtHopLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 		fake.observations[id] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "baseline-" + id, Reply: &surface.ReplyResult{Text: "baseline", Done: true}}
-		daemon.observeSession(context.Background(), fake, sessionPointer(fake.sessions[id]))
+		daemon.observeSession(t.Context(), fake, sessionPointer(fake.sessions[id]))
 		fake.observations[id] = &surface.TurnObservation{Status: surface.StatusIdle, InputTurnID: "input-" + id, CompletedTurnID: "done-" + id, Reply: &surface.ReplyResult{Text: "Done", UserText: item.Message, Done: true}}
-		daemon.observeSession(context.Background(), fake, sessionPointer(fake.sessions[id]))
+		daemon.observeSession(t.Context(), fake, sessionPointer(fake.sessions[id]))
 	}
 	if r.QueueCount(fmt.Sprintf("hop-%d", maxRelayHops)) != 0 {
 		t.Fatal("relay exceeded hop limit")
@@ -880,7 +881,7 @@ func TestScanDoesNotStartSurfaceRuntime(t *testing.T) {
 	daemon, _, fake, _, _ := daemonFixture(t)
 	runtimeSurface := &runtimeDaemonSurface{daemonSurface: fake}
 	daemon.Surfaces = []surface.Surface{runtimeSurface}
-	daemon.scanAndRelay(context.Background())
+	daemon.scanAndRelay(t.Context())
 	if runtimeSurface.ensureCalls.Load() != 0 {
 		t.Fatalf("ensure calls=%d", runtimeSurface.ensureCalls.Load())
 	}
@@ -898,7 +899,7 @@ func TestScanDrainsClaudeQueueWithObservedIdleStatus(t *testing.T) {
 	fake.rejectBusy = true
 	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "done"}
 
-	daemon.scanAndRelay(context.Background())
+	daemon.scanAndRelay(t.Context())
 
 	if r.QueueCount(to.ID) != 0 || len(fake.sent) != 1 || fake.sent[0] != "deliver after idle" {
 		t.Fatalf("pending=%d sent=%v", r.QueueCount(to.ID), fake.sent)
@@ -923,7 +924,7 @@ func TestScanRefreshesClaudeMetadataWithoutRoutesBeforeQueueDrain(t *testing.T) 
 	claude := &refreshAwareClaudeSurface{daemonSurface: base, liveLastActive: liveLastActive}
 	d.Surfaces = []surface.Surface{claude}
 
-	d.scanAndRelay(context.Background())
+	d.scanAndRelay(t.Context())
 
 	registered, err := r.Session(stale.ID)
 	if err != nil {
@@ -949,7 +950,7 @@ func TestScanDoesNotDrainClaudeQueueWhenMetadataRefreshFails(t *testing.T) {
 	base := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{session.ID: session}, observations: map[string]*surface.TurnObservation{session.ID: {Status: surface.StatusIdle}}, accepted: true}
 	d.Surfaces = []surface.Surface{&failingClaudeListSurface{daemonSurface: base}}
 
-	d.scanAndRelay(context.Background())
+	d.scanAndRelay(t.Context())
 
 	if r.QueueCount(session.ID) != 1 || len(base.sent) != 0 {
 		t.Fatalf("pending=%d sent=%v", r.QueueCount(session.ID), base.sent)
@@ -968,7 +969,7 @@ func TestScanLoadsUnloadedDesktopCodexSessionForQueueDelivery(t *testing.T) {
 	fake := &daemonSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{session.ID: session}, observations: map[string]*surface.TurnObservation{session.ID: {Status: surface.SessionStatus("notLoaded")}}, accepted: true}
 	d.Surfaces = []surface.Surface{fake}
 
-	d.scanAndRelay(context.Background())
+	d.scanAndRelay(t.Context())
 
 	if len(fake.sent) != 1 || fake.sent[0] != "deliver after Desktop load" || r.QueueCount(session.ID) != 0 {
 		t.Fatalf("sent=%v pending=%d", fake.sent, r.QueueCount(session.ID))
@@ -987,7 +988,7 @@ func TestQueuedCompactBlocksFollowingMessageUntilCompletion(t *testing.T) {
 	}
 	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
 
-	daemon.scanAndRelay(context.Background())
+	daemon.scanAndRelay(t.Context())
 	deadline := time.Now().Add(time.Second)
 	for fake.compactCalls.Load() != 1 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
@@ -1001,7 +1002,7 @@ func TestQueuedCompactBlocksFollowingMessageUntilCompletion(t *testing.T) {
 	for r.QueueCount(to.ID) != 1 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	daemon.scanAndRelay(context.Background())
+	daemon.scanAndRelay(t.Context())
 	if len(fake.sent) != 1 || fake.sent[0] != "follow-up" || r.QueueCount(to.ID) != 0 {
 		t.Fatalf("after completion sent=%v pending=%d", fake.sent, r.QueueCount(to.ID))
 	}
@@ -1015,7 +1016,7 @@ func TestQueuedCompactUnknownOutcomeIsNotRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
-	daemon.scanAndRelay(context.Background())
+	daemon.scanAndRelay(t.Context())
 	deadline := time.Now().Add(time.Second)
 	var item *registry.QueueRow
 	for time.Now().Before(deadline) {
@@ -1028,7 +1029,7 @@ func TestQueuedCompactUnknownOutcomeIsNotRetried(t *testing.T) {
 	if err != nil || item == nil || item.Status != "dead" || item.Evidence != surface.EvidenceUnknown {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
-	daemon.scanAndRelay(context.Background())
+	daemon.scanAndRelay(t.Context())
 	if fake.compactCalls.Load() != 1 {
 		t.Fatalf("compact calls=%d", fake.compactCalls.Load())
 	}
@@ -1062,7 +1063,7 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 		return 200, `{}`, nil
 	})
 
-	daemon.drainMessageQueue(context.Background(), claude, &session)
+	daemon.drainMessageQueue(t.Context(), claude, &session)
 	var requestUUID string
 	select {
 	case body := <-requestSent:
@@ -1110,7 +1111,6 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 	if err != nil || item.Status != "delivered" || item.Evidence != surface.EvidenceDelivered {
 		t.Fatalf("after boundary item=%+v err=%v", item, err)
 	}
-	daemon.queueWorkers.Wait()
 }
 
 func TestFailedCompletionIsNotRelayed(t *testing.T) {
@@ -1119,9 +1119,9 @@ func TestFailedCompletionIsNotRelayed(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "baseline", Reply: &surface.ReplyResult{Text: "ok", Done: true}}
-	daemon.observeSession(context.Background(), fake, &from)
+	daemon.observeSession(t.Context(), fake, &from)
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "failed", Reply: &surface.ReplyResult{Text: "partial", Done: true, Error: "turn failed"}}
-	daemon.observeSession(context.Background(), fake, &from)
+	daemon.observeSession(t.Context(), fake, &from)
 	if r.QueueCount("to") != 0 || len(fake.sent) != 0 {
 		t.Fatalf("failed completion relayed: pending=%d sent=%v", r.QueueCount("to"), fake.sent)
 	}
@@ -1133,16 +1133,16 @@ func TestRelayIsPersistedWhileDestinationIsUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "baseline", Reply: &surface.ReplyResult{Text: "old", Done: true}}
-	daemon.observeSession(context.Background(), fake, &from)
+	daemon.observeSession(t.Context(), fake, &from)
 	delete(fake.sessions, "to")
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "next", Reply: &surface.ReplyResult{Text: "handoff", Done: true}}
-	daemon.observeSession(context.Background(), fake, &from)
+	daemon.observeSession(t.Context(), fake, &from)
 	if r.QueueCount("to") != 1 {
 		t.Fatalf("relay was not durably queued: pending=%d", r.QueueCount("to"))
 	}
 	fake.sessions["to"] = to
 	fake.accepted = true
-	daemon.drainMessageQueue(context.Background(), fake, &to)
+	daemon.drainMessageQueue(t.Context(), fake, &to)
 	if r.QueueCount("to") != 0 || len(fake.sent) != 1 {
 		t.Fatalf("pending=%d sent=%v", r.QueueCount("to"), fake.sent)
 	}
@@ -1161,4 +1161,44 @@ func TestRelayToUnavailableSurfaceRemainsQueuedWithoutNotifyingSource(t *testing
 	if r.QueueCount(from.ID) != 0 || r.QueueCount(to.ID) != 1 {
 		t.Fatal("relay must queue once without notifying source")
 	}
+}
+
+type pendingModelSurface struct{ *daemonSurface }
+
+func (pendingModelSurface) SetModel(_ context.Context, _ *surface.Session, name string) (surface.ModelChange, error) {
+	return surface.ModelChange{Model: "gpt-luna", PendingModel: name, Limit: "Desktop runs its own model."}, nil
+}
+
+func TestModelControlCarriesThePendingChoiceAsAField(t *testing.T) {
+	d, _, fake, from, _ := daemonFixture(t)
+	adapter := pendingModelSurface{fake}
+	result, err := d.control(context.Background(), adapter, &from, surface.ControlRequest{Action: "model", Value: "gpt-sol"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Change == nil || result.Change.Model != "gpt-luna" || result.Change.PendingModel != "gpt-sol" {
+		t.Fatalf("change=%+v", result.Change)
+	}
+	if result.Detail != "" || !strings.HasPrefix(result.Output, "gpt-sol applies from the next turn") {
+		t.Fatalf("output=%q detail=%q", result.Output, result.Detail)
+	}
+}
+
+func TestQueuedSendRecordsTheModelNoticeItsTurnReported(t *testing.T) {
+	d, r, fake, _, to := daemonFixture(t)
+	fake.notice = "Dropped the pending model gpt-sol: the thread moved from gpt-luna to gpt-terra after it was chosen, so this turn runs on gpt-terra."
+	if err := r.QueueMessage(to.ID, "queued after a model change"); err != nil {
+		t.Fatal(err)
+	}
+	d.drainMessageQueue(context.Background(), fake, &to)
+	history, err := r.ListHistory(20, to.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range history {
+		if entry.Kind == "model" && entry.Message == fake.notice {
+			return
+		}
+	}
+	t.Fatalf("no model notice in history: %+v", history)
 }

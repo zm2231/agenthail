@@ -20,7 +20,7 @@ func TestAPISessionStreamReplaysJournalWithoutNewProviderRead(t *testing.T) {
 	d, reg, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 1)}
 	adapter.caps.Stream = true
-	d = New(reg, []surface.Surface{adapter})
+	d = newTestDaemon(t, reg, []surface.Surface{adapter})
 	manager := newSessionSourceManager(reg)
 	d.sources = manager
 	first, err := manager.subscribe(&from, adapter)
@@ -92,7 +92,7 @@ func TestAPISessionStreamRejectsClaudeWithoutLiveStream(t *testing.T) {
 		items:         []surface.TimelineItem{{ID: "seed-api", Kind: "text", Text: "seeded over API"}},
 	}
 	adapter.caps.Stream = false
-	d = New(reg, []surface.Surface{adapter})
+	d = newTestDaemon(t, reg, []surface.Surface{adapter})
 	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
 	defer server.Close()
 	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/api/v1/session-stream?id="+from.ID+"&after=0", nil)
@@ -119,7 +119,7 @@ func TestAPISessionStreamReplaysSameProviderKeyMutationAfterCursor(t *testing.T)
 	d, reg, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent)}
 	adapter.caps.Stream = true
-	d = New(reg, []surface.Surface{adapter})
+	d = newTestDaemon(t, reg, []surface.Surface{adapter})
 	first, inserted, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "message-1", Payload: []byte(`{"itemId":"message-1","version":1,"op":"upsert","kind":"text","ts":"2026-10-03T12:00:00Z","body":"first"}`)}, registry.SessionJournalRetention{Count: 2, Bytes: 1024})
 	if err != nil || !inserted {
 		t.Fatalf("first=%+v inserted=%v err=%v", first, inserted, err)
@@ -160,7 +160,7 @@ func TestAPISessionStreamReturnsTypedGap(t *testing.T) {
 	d, reg, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 1)}
 	adapter.caps.Stream = true
-	d = New(reg, []surface.Surface{adapter})
+	d = newTestDaemon(t, reg, []surface.Surface{adapter})
 	for index := 0; index < 4; index++ {
 		if _, _, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: string(rune('a' + index)), Payload: []byte(`{"itemId":"item","version":1}`)}, registry.SessionJournalRetention{Count: 2, Bytes: 1024}); err != nil {
 			t.Fatal(err)

@@ -20,7 +20,7 @@ import (
 
 func TestActionIdempotencyResponseOverflowLeavesPending(t *testing.T) {
 	r := openActionTestRegistry(t)
-	d := New(r, nil)
+	d := newTestDaemon(t, r, nil)
 	var effects atomic.Int32
 	handler := d.idempotentActionHandler(func(w http.ResponseWriter, _ *http.Request) {
 		effects.Add(1)
@@ -97,7 +97,7 @@ func openIdempotencyFixture(t *testing.T, path string, adapter surface.Surface) 
 	if err := r.RegisterSession(surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}); err != nil {
 		t.Fatal(err)
 	}
-	return r, dashboardRouter(New(r, []surface.Surface{adapter}))
+	return r, dashboardRouter(newTestDaemon(t, r, []surface.Surface{adapter}))
 }
 
 func idempotencyFake() *daemonSurface {

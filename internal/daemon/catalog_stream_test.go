@@ -132,7 +132,7 @@ func TestCatalogScanFlushesCommittedDeliveryProblemBeforeObserving(t *testing.T)
 	}
 	release := make(chan struct{})
 	fake := &blockingObserveSurface{daemonSurface: &daemonSurface{sessions: map[string]surface.Session{sender.ID: sender, target.ID: target}, observations: map[string]*surface.TurnObservation{}, accepted: true}, entered: make(chan struct{}, 1), release: release}
-	d := New(store, []surface.Surface{fake})
+	d := newTestDaemon(t, store, []surface.Surface{fake})
 	if _, err := store.AddRoute(sender.ID, target.ID, ".*"); err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestCatalogHubClosesStaleSubscribersAndRecoversAfterJournalGap(t *testing.T
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	d := New(store, nil)
+	d := newTestDaemon(t, store, nil)
 	_, stale, cancel, err := d.catalog.subscribe(0)
 	if err != nil {
 		t.Fatal(err)
@@ -979,7 +979,7 @@ func TestSnapshotKeepsTheSubagentCountStoredBeforeHiddenCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { reopened.Close() })
-	d = New(reopened, []surface.Surface{&daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}}})
+	d = newTestDaemon(t, reopened, []surface.Surface{&daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}}})
 	d.publishCatalogPresence()
 	state, err := d.dashboardState(context.Background())
 	if err != nil {
