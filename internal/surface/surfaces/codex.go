@@ -1219,7 +1219,7 @@ func (c *Codex) SetModel(ctx context.Context, sess *surface.Session, name string
 	if err := saveCodexPendingModel(sess.ID, codexPendingModel{Model: name, From: current, SetAt: time.Now().UTC()}); err != nil {
 		return surface.ModelChange{}, fmt.Errorf("record the pending model: %w", err)
 	}
-	return surface.ModelChange{Model: current, PendingModel: name, Limit: "A turn started from Codex Desktop's composer runs on the model Desktop shows."}, nil
+	return surface.ModelChange{Model: current, PendingModel: name, Limit: "A turn started from Codex Desktop's composer or its own queue runs on the model Desktop shows."}, nil
 }
 
 func codexThreadModel(ctx context.Context, client codexClient, threadID string) (string, error) {
