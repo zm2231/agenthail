@@ -260,6 +260,55 @@ func TestLocalRegistrationRefusesHostOwnedSession(t *testing.T) {
 	}
 }
 
+func TestLocalRegistrationTakesASessionItsHostStoppedServing(t *testing.T) {
+	r := openTestRegistry(t)
+	hostID := "h0123456789ab"
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	entity := hostID + "::remote-thread"
+	row := HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "remote work"}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}
+	if _, _, err := r.ApplyHostCatalogRow(hostID, row); err != nil {
+		t.Fatal(err)
+	}
+	unsent, err := r.QueueHostDelivery("remote-thread", "never sent", "key-unsent", []byte(`{"action":"send"}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent, err := r.QueueHostDelivery("remote-thread", "sent once", "key-sent", []byte(`{"action":"send"}`), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.RemoveHostCatalogRow(hostID, "remote-thread", entity, "removed_by_host"); err != nil {
+		t.Fatal(err)
+	}
+	local := surface.Session{ID: "remote-thread", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "here now", PID: 7, Transcript: "/tmp/local.jsonl", HasLocal: true}
+	if err := r.RegisterSession(local); err != nil {
+		t.Fatalf("a session its host no longer serves stayed blocked: %v", err)
+	}
+	if owner, err := r.SessionHost("remote-thread"); err != nil || owner != "" {
+		t.Fatalf("owner=%q err=%v", owner, err)
+	}
+	if stored, err := r.Session("remote-thread"); err != nil || stored.PID != 7 || stored.Transcript != "/tmp/local.jsonl" {
+		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+	if held, err := r.HostDeliveries(hostID); err != nil || len(held) != 0 {
+		t.Fatalf("sends still held for the host=%+v err=%v", held, err)
+	}
+	for id, want := range map[int64]string{unsent: "before the message was sent", sent: "outcome is unknown"} {
+		item, err := r.QueueItem(id, nil)
+		if err != nil || item.Status != "dead" || !strings.Contains(item.LastError, want) {
+			t.Fatalf("held send %d=%+v err=%v", id, item, err)
+		}
+	}
+	if next, err := r.ClaimNextMessage("remote-thread", time.Now()); err != nil || next != nil {
+		t.Fatalf("a failed host send became deliverable here: %+v err=%v", next, err)
+	}
+	if _, _, err := r.ApplyHostCatalogRow(hostID, row); !errors.As(err, &SessionOwnedError{}) {
+		t.Fatalf("the host took back a local session: %v", err)
+	}
+}
+
 func TestHostCatalogRowRequiresPairedHost(t *testing.T) {
 	r := openTestRegistry(t)
 	hostID := "h0123456789ab"

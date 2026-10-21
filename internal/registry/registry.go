@@ -919,7 +919,9 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		return err
 	}
 	if owner != "" {
-		return SessionOwnedError{SessionID: s.ID, HostID: owner}
+		if err := releaseUnservedHostRowTx(tx, s.ID, owner); err != nil {
+			return err
+		}
 	}
 	lastActiveMS := int64(0)
 	if !s.LastActive.IsZero() {
