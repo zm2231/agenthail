@@ -209,6 +209,15 @@ With `--json` or `--report`, each turn also reports its state, model, duration a
 
 The report is the agent's own claim; check the commits before you rely on them. The [operations skill](skills/agenthail-operations/SKILL.md#completion-report) defines every field. Agents that have the skill write one when they finish dispatched work.
 
+To hand work on only when an agent reports, filter a relay on the report. The first relay passes a finished report to the reviewer; the second tells the lead when the builder is blocked, failed or stopped partway:
+
+```bash
+agenthail relay add @builder @reviewer '(?:\A|\n)`{3}agenthail-report\n[ \t\r]*\{[^\n]*"status"[ \t\r]*:[ \t\r]*"done"[^\n]*\}[ \t\r]*\n`{3}[ \t\r\n]*\z'
+agenthail relay add @builder @lead '(?:\A|\n)`{3}agenthail-report\n[ \t\r]*\{[^\n]*"status"[ \t\r]*:[ \t\r]*"(?:blocked|failed|partial)"[^\n]*\}[ \t\r]*\n`{3}[ \t\r\n]*\z'
+```
+
+Each filter matches only a report that ends the reply, so a report quoted mid-reply, or shown inside a longer code block that closes after it, does not fire it. The filter checks where the report is and finds `"status"` anywhere on its line, including inside a nested value; it does not check the other rules. The receiver checks the report with `agenthail reply @builder --report`, the exact parser, before acting on it.
+
 ## Give each project a coordinator
 
 Each project can have one coordinator, the agent you send the project's work to and its other sessions report to:
