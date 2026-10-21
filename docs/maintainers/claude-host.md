@@ -125,6 +125,17 @@ event when either changes. Claude writes this figure nowhere on disk, so a
 session the host does not run has no such window. The report's own `maxTokens`
 is the auto-compact window, not the model's, and is not used for it.
 
+The same report says when Claude compacts the session: `isAutoCompactEnabled`,
+`maxTokens` (the auto-compact window), `autoCompactThreshold` (the size that
+triggers it, the window less Claude's buffer) and `autocompactSource` (which
+input set the window: `settings`, `env`, `auto` and others). The host lists it
+as `autoCompact` (`{enabled, window, threshold, decidedBy}`; `enabled:false`
+alone while autocompact is off, when `maxTokens` is the model's window instead)
+and Agenthail reports it as the session's `contextUsage.autoCompact` with
+`source: "runtime"`, under the same rule as the window: only for a hosted
+session whose latest reply came from the reported model. It is the effective
+value; the settings files are what Claude reads at start.
+
 ## Requests
 
 Claude asks the host, through the SDK's `canUseTool`, before a tool its
