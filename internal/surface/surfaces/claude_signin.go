@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -18,9 +19,8 @@ type claudeWebAccount struct {
 	Email string `json:"email_address"`
 }
 
-// claudeWebAccounts holds each profile's account for as long as its cookie
-// header is cached, so it sees a profile sign into another account as soon as
-// the cookies themselves are read again.
+// claudeWebAccounts holds each profile's account for cookieHeaderTTL, so a
+// profile that signs into another account is seen within that time.
 type claudeWebAccounts struct {
 	mu        sync.Mutex
 	byProfile map[string]claudeWebAccountEntry
@@ -93,9 +93,15 @@ func (c *Claude) sessionConfigRoot(sess *surface.Session) (surface.ClaudeConfigR
 		return surface.ClaudeConfigRoot{}, false, err
 	}
 	root, ok := surface.ClaudeConfigRootFor(roots, path)
+	if ok && root.Error != "" {
+		return surface.ClaudeConfigRoot{}, false, fmt.Errorf("read the login of %s: %s", root.Root, root.Error)
+	}
 	return root, ok && root.SignedInAs != nil && root.SignedInAs.AccountID != "", nil
 }
 
+// accountCookies is the profile signed into root's login. It refuses only when
+// every profile answered for another account or none; a profile that could not
+// be asked leaves the answer open, so the message is held.
 func (c *Claude) accountCookies(ctx context.Context, root surface.ClaudeConfigRoot) (CookieSource, error) {
 	candidates, err := signin.Candidates(c.signins, signin.Claude)
 	if err != nil {
@@ -103,17 +109,25 @@ func (c *Claude) accountCookies(ctx context.Context, root surface.ClaudeConfigRo
 	}
 	login := root.SignedInAs
 	var seen []string
+	answered := true
 	for _, candidate := range candidates {
 		source := c.cookies(candidate)
 		web, err := c.webAccount(ctx, source)
-		if err != nil {
+		var status claudeHTTPStatusError
+		switch {
+		case errors.As(err, &status) && !status.Challenge && (status.Status == http.StatusUnauthorized || status.Status == http.StatusForbidden):
+			seen = append(seen, fmt.Sprintf("%s is not signed into claude.ai", signinLabel(candidate)))
+		case err != nil:
+			answered = false
 			seen = append(seen, fmt.Sprintf("%s: %v", signinLabel(candidate), err))
-			continue
-		}
-		if web.UUID == login.AccountID {
+		case web.UUID == login.AccountID:
 			return source, nil
+		default:
+			seen = append(seen, fmt.Sprintf("%s is %s", signinLabel(candidate), web.Email))
 		}
-		seen = append(seen, fmt.Sprintf("%s is %s", signinLabel(candidate), web.Email))
+	}
+	if !answered {
+		return CookieSource{}, surface.DeliveryUnavailable(fmt.Errorf("could not confirm which sign-in profile is signed into claude.ai as %s, the account of %s (%s)", login.Email, root.Root, strings.Join(seen, "; ")))
 	}
 	return CookieSource{}, signin.ProblemError{Consumer: signin.Claude, Err: fmt.Errorf("no sign-in profile is signed into claude.ai as %s, the account of %s (%s); sign in to claude.ai as %s in a browser profile and add it with `agenthail signin add`", login.Email, root.Root, strings.Join(seen, "; "), login.Email)}
 }
@@ -159,10 +173,23 @@ func (c *Claude) claudeGET(ctx context.Context, source CookieSource, path string
 	if err != nil {
 		return "", err
 	}
-	if status != http.StatusOK {
-		return "", fmt.Errorf("claude.ai %s returned HTTP %d", path, status)
+	if status != http.StatusOK || strings.Contains(data, "Just a moment") {
+		return "", claudeHTTPStatusError{Path: path, Status: status, Challenge: strings.Contains(data, "Just a moment")}
 	}
 	return data, nil
+}
+
+type claudeHTTPStatusError struct {
+	Path      string
+	Status    int
+	Challenge bool
+}
+
+func (e claudeHTTPStatusError) Error() string {
+	if e.Challenge {
+		return fmt.Sprintf("claude.ai %s answered with a Cloudflare challenge", e.Path)
+	}
+	return fmt.Sprintf("claude.ai %s returned HTTP %d", e.Path, e.Status)
 }
 
 // ClaudeConfigRoots describes each config root with the sign-in profile

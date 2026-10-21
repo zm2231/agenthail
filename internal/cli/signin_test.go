@@ -183,3 +183,20 @@ func TestDoctorShowsTheResolvedSigninAndHowToChangeIt(t *testing.T) {
 		t.Fatalf("err=%v output=%s", err, output)
 	}
 }
+
+func TestRootsSayWhyTheDaemonGaveNoSignin(t *testing.T) {
+	app, _ := signinCLIFixture(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"oauthAccount":{"accountUuid":"a","emailAddress":"a@example.com"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureStdout(t, func() error { return app.Run([]string{"roots"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "no sign-in: the Agenthail daemon did not answer") || strings.Contains(output, "not running") {
+		t.Fatalf("a running daemon that failed the call is not a stopped daemon: %q", output)
+	}
+}

@@ -35,9 +35,10 @@ func (a *App) cmdRoots(args []string) error {
 }
 
 // claudeConfigRoots asks the daemon, the process that reads the sign-in
-// profiles, for each root's sign-in profile and usage. With the daemon down
-// only the roots' logins are known.
+// profiles, for each root's sign-in profile and usage. Without its answer only
+// the roots' logins are known.
 func (a *App) claudeConfigRoots(ctx context.Context) ([]surface.ClaudeConfigRoot, error) {
+	problem := "the Agenthail daemon is not running"
 	if a.daemonIsRunning() {
 		var listing struct {
 			Claude []surface.ClaudeConfigRoot `json:"claude"`
@@ -48,6 +49,7 @@ func (a *App) claudeConfigRoots(ctx context.Context) ([]surface.ClaudeConfigRoot
 		if err == nil {
 			return listing.Claude, nil
 		}
+		problem = "the Agenthail daemon did not answer: " + err.Error()
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -56,7 +58,7 @@ func (a *App) claudeConfigRoots(ctx context.Context) ([]surface.ClaudeConfigRoot
 	roots, err := surface.DescribeClaudeConfigRoots(home)
 	for i := range roots {
 		if roots[i].SignedInAs != nil {
-			roots[i].SigninProblem = "the Agenthail daemon is not running"
+			roots[i].SigninProblem = problem
 		}
 	}
 	return roots, err

@@ -50,6 +50,16 @@ func TestClaudeRootsAPIReportsEachRootsSigninAndLiveUsage(t *testing.T) {
 	if root.SignedInAs == nil || root.SignedInAs.Email != "work@example.com" || root.Signin != "work" || root.Usage == nil || len(root.Usage.Limits) != 1 || root.Usage.Limits[0].Percent != 98 {
 		t.Fatalf("root=%+v", root)
 	}
+
+	var options struct {
+		ClaudeConfigRoots []surface.ClaudeConfigRoot `json:"claudeConfigRoots"`
+	}
+	if code := api.do(http.MethodGet, "/api/v1/session-options", "", &options); code != http.StatusOK {
+		t.Fatalf("session-options status=%d", code)
+	}
+	if len(options.ClaudeConfigRoots) != 1 || options.ClaudeConfigRoots[0].Usage == nil || options.ClaudeConfigRoots[0].Signin != "" || options.ClaudeConfigRoots[0].SigninProblem != "" {
+		t.Fatalf("the new-session form gets live usage but not which profile holds which account: %+v", options.ClaudeConfigRoots)
+	}
 }
 
 type candidates []signin.Source

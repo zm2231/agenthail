@@ -129,17 +129,21 @@ about a session therefore carries the cookies of the profile signed into the
 record before the transcript exists ([`claude_signin.go`](../../internal/surface/surfaces/claude_signin.go)):
 `signin.Resolver.SigninCandidates` lists the consumer's choice first, then
 every other readable profile, and the first whose `GET /api/account` names that
-account's `accountUuid` is used. Each profile's account is kept as long as its
-cookie header is cached. A root whose account no profile is signed into fails
-as terminal `signin_unreadable` naming the account and each profile's account.
-Off still means no cookies. A request with no session (the health probe) or for
-a root without a claude.ai login uses the choice.
+account's `accountUuid` is used. Each profile's account is kept for five
+minutes. When every profile answered, as another account or as signed out
+(HTTP 401 or 403), the request fails as terminal `signin_unreadable` naming the
+account and each profile's answer. When a profile could not be asked (cookie
+bridge failure, a claude.ai error or challenge) or the root's `.claude.json`
+cannot be read, the request is held. Off still means no cookies. A request with
+no session (the health probe) or for a root without a claude.ai login uses the
+choice.
 
-`GET /api/v1/claude/roots` lists each config root's login with the profile
-signed into it (`signin`, or `signinProblem`) and its current limits from
-`GET /api/organizations/<organizationUuid>/usage` (`usage`, or
-`usageProblem`). `agenthail roots`, `agenthail signin list`, `doctor` and the
-new-session forms read it.
+`GET /api/v1/claude/roots` (settings scope) lists each config root's login
+with the profile signed into it (`signin`, or `signinProblem`) and its current
+limits from `GET /api/organizations/<organizationUuid>/usage` (`usage`, or
+`usageProblem`). `agenthail roots`, `agenthail signin list` and `doctor` read
+it. The new-session forms get the same roots from `/api/v1/session-options`
+(read scope) without `signin` and `signinProblem`.
 
 ## Planned account model
 

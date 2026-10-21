@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -180,5 +181,65 @@ func TestClaudeRemoteControlThatCannotReadSessionRecordsIsHeldNotRefused(t *test
 	_, err := claude.postMessage(context.Background(), &surface.Session{ID: "fresh", Surface: surface.KindClaude, Bridge: "session_fresh"}, "hello")
 	if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryTerminal(err) {
 		t.Fatalf("an unreadable session directory is not a sign-in problem: %v", err)
+	}
+}
+
+func TestClaudeRemoteControlHoldsWhenAProfileCannotBeAsked(t *testing.T) {
+	fixture := newClaudeRootFixture(t, "c", "c@example.com")
+	request := func(ctx context.Context, method, url string, headers map[string]string, body string, cookies CookieSource, timeout time.Duration) (int, string, error) {
+		if strings.HasSuffix(url, "/api/account") {
+			switch cookies.Signin.Dir {
+			case "/a":
+				return 503, "unavailable", nil
+			case "/b":
+				return 0, "", surface.DeliveryUnavailable(errors.New("cookie bridge timed out"))
+			}
+		}
+		return fixture.request(ctx, method, url, headers, body, cookies, timeout)
+	}
+	claude := NewClaudeWithRequest(twoProfiles, fixture.home, request)
+	_, err := claude.postMessage(context.Background(), fixture.session, "hello")
+	if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryTerminal(err) {
+		t.Fatalf("a profile that could not be asked may be the account's, so the message must be held: %v", err)
+	}
+	for _, call := range fixture.callList() {
+		if strings.HasPrefix(call, "POST") {
+			t.Fatalf("posted without a matching profile: %q", fixture.callList())
+		}
+	}
+}
+
+func TestClaudeRemoteControlRefusesWhenEveryProfileIsSignedOutOrAnotherAccount(t *testing.T) {
+	fixture := newClaudeRootFixture(t, "c", "c@example.com")
+	request := func(ctx context.Context, method, url string, headers map[string]string, body string, cookies CookieSource, timeout time.Duration) (int, string, error) {
+		if strings.HasSuffix(url, "/api/account") && cookies.Signin.Dir == "/a" {
+			return 401, `{"type":"error"}`, nil
+		}
+		return fixture.request(ctx, method, url, headers, body, cookies, timeout)
+	}
+	claude := NewClaudeWithRequest(twoProfiles, fixture.home, request)
+	_, err := claude.postMessage(context.Background(), fixture.session, "hello")
+	if surface.DeliveryTerminalReason(err) != surface.DeliverySigninUnreadable {
+		t.Fatalf("err=%v", err)
+	}
+	for _, want := range []string{"a is not signed into claude.ai", "b is b@example.com"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err=%v, missing %q", err, want)
+		}
+	}
+}
+
+func TestClaudeRemoteControlWithAnUnreadableRootLoginIsHeld(t *testing.T) {
+	fixture := newClaudeRootFixture(t, "b", "b@example.com")
+	if err := os.WriteFile(filepath.Join(fixture.home, ".claude.json"), []byte(`{"oauthAccount":`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	claude := NewClaudeWithRequest(twoProfiles, fixture.home, fixture.request)
+	_, err := claude.postMessage(context.Background(), fixture.session, "hello")
+	if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryTerminal(err) {
+		t.Fatalf("a root whose login cannot be read must not fall back to the chosen profile: %v", err)
+	}
+	if calls := fixture.callList(); len(calls) != 0 {
+		t.Fatalf("calls=%q", calls)
 	}
 }

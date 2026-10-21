@@ -49,8 +49,11 @@ func (d *Daemon) sessionOptionsHandler(w http.ResponseWriter, r *http.Request) {
 		launchers = d.transportResolver.Options(r.Context())
 	}
 	claudeConfigRoots := []surface.ClaudeConfigRoot{}
-	if roots := d.liveClaudeConfigRoots(r.Context()); roots != nil {
-		claudeConfigRoots = roots
+	for _, root := range d.liveClaudeConfigRoots(r.Context()) {
+		// Which browser profile holds which claude.ai account is settings
+		// data, served at /api/v1/claude/roots; this route needs only read.
+		root.Signin, root.SigninProblem = "", ""
+		claudeConfigRoots = append(claudeConfigRoots, root)
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"host": d.localHost(), "surfaces": options, "projects": projects, "launchers": launchers, "claudeConfigRoots": claudeConfigRoots})
 }
