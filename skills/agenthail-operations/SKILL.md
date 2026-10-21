@@ -444,6 +444,27 @@ agenthail last @builder 1 --json \
   | jq -e '.exchanges[-1].assistant | capture("(?:\\A|\n)`{3}agenthail-report\n(?<r>[^\n]+)\n`{3}\\s*\\z").r | fromjson'
 ```
 
+To relay a completion only when it carries a report, filter the relay on the
+report. These forward any report, a `done` report, and a report that needs the
+reader (`blocked`, `failed` or `partial`):
+
+```bash
+agenthail relay add @builder @lead '(?:\A|\n)`{3}agenthail-report\n\{[^\n]*\}\n`{3}\s*\z'
+agenthail relay add @builder @reviewer '(?:\A|\n)`{3}agenthail-report\n\{[^\n]*"status" *: *"done"[^\n]*\}\n`{3}\s*\z'
+agenthail relay add @builder @lead '(?:\A|\n)`{3}agenthail-report\n\{[^\n]*"status" *: *"(?:blocked|failed|partial)"[^\n]*\}\n`{3}\s*\z'
+```
+
+A relay filter runs against the completed reply: for Claude, the turn's text
+blocks joined by newlines; for Codex, the final answer. Each filter above
+matches only a report that ends that reply, the same place `--report` reads.
+A report quoted mid-reply, wrapped in a longer fence such as the four-backtick
+example above, indented, or followed by any text does not match. An escaped
+`\"status\":\"done\"` inside a string value does not match the status. The
+filter does not check the other rules, so the receiver reads the report with
+`agenthail reply @builder --report` before acting on it. A filter on bare text,
+such as `'agenthail-report'` or `'"status":"done"'`, also fires on replies that
+only mention or quote a report.
+
 ## Follow, Subscribe, And Notify
 
 AgentHail has four distinct completion behaviors:
