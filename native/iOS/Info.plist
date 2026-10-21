@@ -36,7 +36,7 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSCameraUsageDescription</key>
-	<string>Scan the pairing code shown by Agenthail on your computer, or take a photo to send to an agent.</string>
+	<string>Scan the pairing code shown by Agenthail on your Mac, or take a photo to send to an agent.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Talk directly to your Codex Voice orchestrator. Audio is sent to Codex, not transcribed on this device.</string>
 	<key>UIBackgroundModes</key>

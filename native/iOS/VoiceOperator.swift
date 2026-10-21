@@ -4,7 +4,7 @@ extension VoiceOperatorModel {
     static func paired(targetID: String = "") -> VoiceOperatorModel {
         guard let endpoint = KeychainStore.get("endpoint").flatMap(URL.init(string:)),
               let token = KeychainStore.get("token") else {
-            return VoiceOperatorModel(targetID: targetID, unavailable: "Pair this phone with Agenthail on your computer first.")
+            return VoiceOperatorModel(targetID: targetID, unavailable: "Pair this phone with Agenthail on your Mac first.")
         }
         return VoiceOperatorModel(endpoint: endpoint, token: token, targetID: targetID, diagnostics: VoiceCallDiagnostics())
     }
