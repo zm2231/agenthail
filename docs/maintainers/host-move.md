@@ -121,6 +121,11 @@ undone.
   fetch the commit. The source requires the commit to be on a remote branch.
 - A conversation moved to a host without Remote Control loses its claude.ai
   listing, as every session in the Claude host does.
+- The conversation's tasks (`tasks/<id>/`) arrive with it, and a turn on the
+  target lists them. Claude offers its task tools to a session in the Claude
+  host only when `CLAUDE_CODE_ENABLE_TODO_TOOLS` is set, for instance in the
+  `env` of the root's `settings.json`. Without it the tasks are there, but the
+  session has no tool to read them.
 
 ## Not in this slice
 
