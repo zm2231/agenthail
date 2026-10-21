@@ -184,8 +184,15 @@ func TestCodexSessionsCarryThePendingModelAndItsFileIsWatched(t *testing.T) {
 	}
 	row := surface.Session{ID: "thread", Transcript: "/rollout.jsonl"}
 	files := codex.LocalStatusFiles(row)
-	if len(files) != 2 || files[1] != codexPendingModelPath("thread") {
+	if len(files) != 2 || files[0] != codexPendingModelPath("thread") {
 		t.Fatalf("status files=%v", files)
+	}
+	fresh, err := codex.LocalStatus(context.Background(), surface.Session{ID: "thread"})
+	if err != nil || fresh.PendingModel != "gpt-sol" {
+		t.Fatalf("a thread without a rollout: pending=%q err=%v", fresh.PendingModel, err)
+	}
+	if files := codex.LocalStatusFiles(surface.Session{ID: "thread"}); len(files) != 1 || files[0] != codexPendingModelPath("thread") {
+		t.Fatalf("status files without a rollout=%v", files)
 	}
 	applyCodexPendingModel(&row)
 	if row.PendingModel != "gpt-sol" {

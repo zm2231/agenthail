@@ -29,7 +29,7 @@ func TestCodexLocalStatusFollowsTranscriptLifecycle(t *testing.T) {
 	appendLine(t, path, `{"type":"event_msg","payload":{"type":"task_complete"}}`)
 	codex := &Codex{}
 	session := surface.Session{ID: "synthetic", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Transcript: path}
-	if files := codex.LocalStatusFiles(session); len(files) != 2 || files[0] != path || files[1] != codexPendingModelPath(session.ID) {
+	if files := codex.LocalStatusFiles(session); len(files) != 2 || files[0] != codexPendingModelPath(session.ID) || files[1] != path {
 		t.Fatalf("files=%v", files)
 	}
 
@@ -52,8 +52,8 @@ func TestCodexLocalStatusFollowsTranscriptLifecycle(t *testing.T) {
 	if err != nil || kept.Status != surface.StatusBusy {
 		t.Fatalf("transcript without lifecycle replaced provider status: %+v err=%v", kept, err)
 	}
-	if _, err := codex.LocalStatus(context.Background(), surface.Session{ID: "none"}); err == nil {
-		t.Fatal("session without transcript returned a status")
+	if none, err := codex.LocalStatus(context.Background(), surface.Session{ID: "none", Status: surface.StatusBusy}); err != nil || none.Status != surface.StatusBusy {
+		t.Fatalf("session without transcript changed status: %+v err=%v", none, err)
 	}
 }
 
