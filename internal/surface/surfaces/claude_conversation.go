@@ -12,8 +12,8 @@ func (c *Claude) ConversationExists(ctx context.Context, sess *surface.Session) 
 	if c.resolveTranscript(sess.ID) != "" {
 		return true, nil
 	}
-	state, err := c.conversation(ctx, sess.ID)
-	if err != nil {
+	state, err := c.conversation(ctx, sess.ID, 0)
+	if err != nil && !state.alive {
 		return false, err
 	}
 	return state.alive, nil

@@ -48,6 +48,13 @@ func (c *Claude) AdoptSession(ctx context.Context, sess *surface.Session, reques
 	if root == "" {
 		return nil, surface.DeliveryTerminal(fmt.Errorf("Claude conversation %s has no transcript in any config root", conversation), surface.DeliveryTargetMissing)
 	}
+	_, records, err := c.records()
+	if err != nil {
+		return nil, surface.DeliveryUnavailable(err)
+	}
+	if holders := holderRecords(records, conversation); len(holders) > 1 {
+		return nil, refuseSharedConversation(conversation, holders)
+	}
 	holder, err := c.adoptHolder(ctx, conversation, root)
 	if err != nil {
 		return nil, err

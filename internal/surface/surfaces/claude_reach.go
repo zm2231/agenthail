@@ -45,9 +45,9 @@ func (c *Claude) reach(ctx context.Context, sess *surface.Session) (bool, error)
 		return false, surface.DeliveryUnavailable(err)
 	}
 	defer unlock()
-	state, err := c.conversation(ctx, conversation)
+	state, err := c.conversation(ctx, conversation, sess.HolderPID)
 	if err != nil {
-		return false, surface.DeliveryUnavailable(err)
+		return false, deliveryError(err)
 	}
 	if state.reachable != nil {
 		adoptClaudeProcess(sess, state.reachable)
@@ -81,9 +81,9 @@ func (c *Claude) reachRunning(ctx context.Context, sess *surface.Session) error 
 	if c.reachableAsIs(ctx, sess) {
 		return nil
 	}
-	state, err := c.conversation(ctx, sess.ID)
+	state, err := c.conversation(ctx, sess.ID, sess.HolderPID)
 	if err != nil {
-		return surface.DeliveryUnavailable(err)
+		return deliveryError(err)
 	}
 	if state.reachable == nil || state.reachable.Bridge == "" {
 		return fmt.Errorf("%w: Claude conversation %s has no running process with Remote Control", surface.ErrUnsupported, sess.ID)
@@ -102,6 +102,9 @@ func (c *Claude) NeedsWake(ctx context.Context, sess *surface.Session) bool {
 // still holds its conversation and offers the transport sess would use. It
 // refreshes the Remote Control attachment from that process's record.
 func (c *Claude) reachableAsIs(ctx context.Context, sess *surface.Session) bool {
+	if sess.HolderPID > 0 {
+		sess.PID = sess.HolderPID
+	}
 	if !claudeProcessAlive(sess.PID) {
 		return false
 	}
@@ -122,10 +125,11 @@ func (c *Claude) reachableAsIs(ctx context.Context, sess *surface.Session) bool 
 // conversation reads which processes hold a conversation. Session records
 // show processes that have initialized; the background catalog also shows a
 // job that is still starting and has not written its record.
-func (c *Claude) conversation(ctx context.Context, id string) (claudeConversation, error) {
+func (c *Claude) conversation(ctx context.Context, id string, pin int) (claudeConversation, error) {
 	var state claudeConversation
-	process, alive, err := c.conversationProcess(ctx, id)
+	process, alive, err := c.conversationProcess(ctx, id, pin)
 	if err != nil {
+		state.alive = alive
 		return state, err
 	}
 	state.reachable, state.alive = process, alive
@@ -153,33 +157,51 @@ func (c *Claude) conversation(ctx context.Context, id string) (claudeConversatio
 	return state, nil
 }
 
-// conversationProcess returns the earliest started reachable process of a
-// conversation, and whether any live process holds it.
-func (c *Claude) conversationProcess(ctx context.Context, id string) (*surface.Session, bool, error) {
+// conversationProcess returns the reachable process that holds a
+// conversation, and whether any live process holds it. pin, when set, names
+// the holder; a conversation several processes hold is refused without one.
+func (c *Claude) conversationProcess(ctx context.Context, id string, pin int) (*surface.Session, bool, error) {
 	roots, records, err := c.records()
 	if err != nil {
 		return nil, false, err
 	}
-	transcripts := c.transcripts.pass(roots)
-	alive := false
-	var best *claudeProcess
-	for _, record := range records {
-		if str(record.fields, "sessionId") != id {
-			continue
+	holders := holderRecords(records, id)
+	shared := len(holders) > 1
+	if pin > 0 {
+		var pinned []map[string]any
+		for _, record := range holders {
+			if recordPID(record) == pin {
+				pinned = append(pinned, record)
+			}
 		}
-		if pid, _ := record.fields["pid"].(float64); pid <= 0 {
-			continue
+		if len(pinned) == 0 {
+			return nil, false, surface.DeliveryTerminal(fmt.Errorf("Claude process %d no longer holds conversation %s", pin, id), surface.DeliveryTargetMissing)
 		}
-		alive = true
-		if process, ok := c.process(ctx, record, transcripts); ok && (best == nil || process.startedAt < best.startedAt) {
-			best = &process
-		}
+		holders = pinned
+	} else if len(holders) > 1 {
+		return nil, true, refuseSharedConversation(id, holders)
 	}
-	if best == nil {
-		return nil, alive, nil
+	if len(holders) == 0 {
+		return nil, false, nil
 	}
-	c.enrich(ctx, best)
-	return &best.session, true, nil
+	process, ok := c.process(ctx, claudeSessionRecord{root: holderRoot(records, holders[0]), fields: holders[0]}, c.transcripts.pass(roots))
+	if !ok {
+		return nil, true, nil
+	}
+	if shared {
+		process.session.HolderPID = pin
+	}
+	c.enrich(ctx, &process)
+	return &process.session, true, nil
+}
+
+// deliveryError keeps a delivery classification the lookup already made and
+// marks any other lookup failure as a delivery that did not start.
+func deliveryError(err error) error {
+	if surface.IsDeliveryUnavailable(err) || surface.IsDeliveryTerminal(err) || surface.IsDeliveryOutcomeUnknown(err) {
+		return err
+	}
+	return surface.DeliveryUnavailable(err)
 }
 
 // resume opens the conversation in the Claude host, under the config root
@@ -203,7 +225,7 @@ func (c *Claude) resume(ctx context.Context, conversation, cwd string) (*surface
 	defer ticker.Stop()
 	for {
 		c.host.forget()
-		process, _, err := c.conversationProcess(ctx, conversation)
+		process, _, err := c.conversationProcess(ctx, conversation, opened.PID)
 		if err == nil && process != nil && process.PID == opened.PID && claudeHosted(process) {
 			return process, nil
 		}
@@ -283,7 +305,7 @@ func (c *Claude) lockConversation(ctx context.Context, conversation string) (fun
 // atRest reports whether a session whose process exited belongs to a
 // conversation no other process holds, so a message would resume it.
 func (c *Claude) atRest(ctx context.Context, sess *surface.Session) bool {
-	state, err := c.conversation(ctx, sess.ID)
+	state, err := c.conversation(ctx, sess.ID, 0)
 	return err == nil && !state.alive
 }
 

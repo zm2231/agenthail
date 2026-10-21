@@ -118,7 +118,7 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	}
 }
 
-func TestLaterProcessSharingAConversationLeavesTheFirstAttached(t *testing.T) {
+func TestProcessesSharingAConversationAreHoldersAndAPIDTargetsOne(t *testing.T) {
 	home := t.TempDir()
 	sessionsDir := filepath.Join(home, ".claude", "sessions")
 	if err := os.MkdirAll(sessionsDir, 0700); err != nil {
@@ -161,14 +161,14 @@ func TestLaterProcessSharingAConversationLeavesTheFirstAttached(t *testing.T) {
 
 	adapter := NewClaude(nil, home)
 	sessions, err := adapter.List(context.Background())
-	if err != nil || len(sessions) != 1 || sessions[0].PID != firstPID {
+	if err != nil || len(sessions) != 1 || sessions[0].PID != 0 || len(sessions[0].Holders) != 2 || sessions[0].Holders[0].PID != firstPID || sessions[0].Holders[1].PID != laterPID {
 		t.Fatalf("listed=%+v err=%v", sessions, err)
 	}
 	if _, _, found, err := adapter.nativeCaller(context.Background(), "shared"); err != nil || found {
 		t.Fatalf("a shared session id picked one process's socket: found=%v err=%v", found, err)
 	}
 	resolved, err := adapter.Resolve(context.Background(), strconv.Itoa(laterPID))
-	if err != nil || resolved.PID != laterPID {
+	if err != nil || resolved.PID != laterPID || resolved.HolderPID != laterPID || len(resolved.Holders) != 0 {
 		t.Fatalf("pid target=%+v err=%v", resolved, err)
 	}
 }

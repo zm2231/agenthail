@@ -776,6 +776,7 @@ func (a *App) cmdList(args []string) error {
 				session.Subagents = catalogSubagentRollup(record)
 				remoteRows[session.ID] = row
 				views[session.ID] = catalogListView(record)
+				session.Holders = views[session.ID].Holders
 				allSessions = append(allSessions, session)
 				continue
 			}
@@ -786,6 +787,7 @@ func (a *App) cmdList(args []string) error {
 				continue
 			}
 			session.Subagents = catalogSubagentRollup(record)
+			session.Holders = views[session.ID].Holders
 			allSessions = append(allSessions, session)
 		}
 		for _, record := range catalog.Surfaces {
@@ -1016,6 +1018,9 @@ func (a *App) cmdList(args []string) error {
 		if s.Subagents != nil {
 			last += fmt.Sprintf("  %d subagents, %d working", s.Subagents.Count, s.Subagents.Working)
 		}
+		if len(s.Holders) > 1 {
+			last += "  " + listHolders(s.Holders)
+		}
 		configRoot := ""
 		if wide && s.Surface == surface.KindClaude {
 			if view := views[s.ID].ClaudeConfigRoot; view != nil {
@@ -1033,6 +1038,20 @@ func (a *App) cmdList(args []string) error {
 		return fmt.Errorf("%d surface(s) failed discovery", len(surfaceErrors))
 	}
 	return nil
+}
+
+// listHolders names the terminals a conversation is open in, as
+// "2 terminals: 5799 ttys001, 31497 ttys021".
+func listHolders(holders []surface.Holder) string {
+	parts := make([]string, 0, len(holders))
+	for _, holder := range holders {
+		part := strconv.Itoa(holder.PID)
+		if holder.TTY != "" {
+			part += " " + holder.TTY
+		}
+		parts = append(parts, part)
+	}
+	return fmt.Sprintf("%d terminals: %s", len(holders), strings.Join(parts, ", "))
 }
 
 func listRootCell(wide bool, width int, value string) string {
