@@ -22,8 +22,9 @@ fi
 
 public_source=(README.md SECURITY.md docs skills internal native push-relay scripts ci .github)
 placeholder_users='demo|example|remote|agent|me|a|test|dev|fixture|runner|user|you'
+placeholder_volumes='work|My Shared Files'
 
-if rg -n -P "/(Users|home)/(?!(${placeholder_users})(/|\\b))[a-z][a-z0-9._-]*|/persist/|\\btail[0-9a-f]{4,}\\.ts\\.net|\\b[A-Z][a-z]+(['’]s |s-)(Mac|MacBook|iPhone|iPad)\\b|session_[[:alnum:]]{12,}" "${public_source[@]}" --glob '!scripts/check-public-copy.sh'; then
+if rg -n -P "(?i:/(Users|home)/(?!(${placeholder_users})(?![A-Za-z0-9._-]))[a-z][a-z0-9._-]*)|/Volumes/(?!(${placeholder_volumes})(/|\x27|\"|$))|/persist/|\\btail[0-9a-f]{4,}\\.ts\\.net|\\b[A-Z][a-z]+(['’]s |s-)(Mac|MacBook|iPhone|iPad)\\b|session_[[:alnum:]]{12,}" "${public_source[@]}" --glob '!scripts/check-public-copy.sh'; then
 	echo "Public source contains a personal home path, machine path, tailnet name, device name, or session value." >&2
 	exit 1
 fi

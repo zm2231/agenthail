@@ -274,7 +274,9 @@ The iPhone companion is distributed through TestFlight. [Request an iPhone invit
 
 After installing the iPhone app, install Tailscale on the iPhone and on the computer running Agenthail, and sign both into the same account. The phone connects only over Tailscale.
 
-On that computer, turn on **Private phone access** and choose **Pair an iPhone** in **Operations** in the Mac app, use **Open Agenthail on your phone** in the web dashboard's settings, or run `agenthail dashboard remote`. The iPhone app can then show current work, open conversations, send or steer messages, and notify you when an agent finishes or is waiting on you. The computer is not opened to the public internet.
+In the Mac app, open Settings > **Devices**, turn on **Phone access**, and choose **Show Pairing Code** under **Pair an iPhone**. The iPhone app can then show current work, open conversations, send or steer messages, and notify you when an agent finishes or is waiting on you. The computer is not opened to the public internet.
+
+The iPhone app pairs through the Mac app. On a computer without it, such as a Linux server, `agenthail dashboard remote` or **Open Agenthail on your phone** in the web dashboard's settings opens the dashboard on the phone in the browser instead, over the same Tailscale connection.
 
 Matching voice-enabled builds also offer **Talk to orchestrator**: a real Codex
 Voice conversation that can inspect agents, delegate work, and read replies through

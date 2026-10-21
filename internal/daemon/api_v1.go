@@ -531,7 +531,7 @@ func pairingEndpoint(r *http.Request) (string, error) {
 	}
 	status := RemoteAccessStatusForConfig(config)
 	if !status.Enabled || status.URL == "" {
-		message := "Enable private Tailscale access in Operations before pairing an iPhone."
+		message := "Turn on Phone access in Settings > Devices before pairing an iPhone."
 		if status.Error != "" {
 			message += " " + status.Error
 		}
