@@ -7,7 +7,7 @@ Use this runbook to release the iPhone app, manage internal tester access, and d
 Pushing a `v*` tag triggers Release. CI runs on pull requests and never uploads an IPA. Release also supports manual dispatch with a version:
 
 ```sh
-export GH_TOKEN="$(~/.config/github-apps/gh-app-token.sh zm2231)"
+# GH_TOKEN must allow running workflows in the repository.
 # Replace this example with the intended new release version.
 gh workflow run release.yml --repo zm2231/agenthail --ref main -f version=v0.2.22
 ```
@@ -91,7 +91,7 @@ An existing tester must already be associated with this app for `invite-existing
 Open [Actions → TestFlight management](https://github.com/zm2231/agenthail/actions/workflows/testflight.yml), choose **Run workflow**, use `main`, and supply the action's inputs. The same operations are available through GitHub CLI:
 
 ```sh
-export GH_TOKEN="$(~/.config/github-apps/gh-app-token.sh zm2231)"
+# GH_TOKEN must allow running workflows in the repository.
 # Read-only overview.
 gh workflow run testflight.yml --repo zm2231/agenthail --ref main -f action=status
 # Exact readiness check; use the version/build you intend to inspect.
