@@ -54,14 +54,24 @@ assert.equal(JSON.parse(vm.runInContext(programs.all,context)).events.length,6);
   assert.equal(JSON.parse(vm.runInContext(programs.all,context)).events.length,1000);
   assert.equal(JSON.parse(vm.runInContext(programs.voice,context)).lost,true);
 
+  // A request evicted from the bounded table is never offered to the service.
+  for(let i=0;i<257;i++)emit({type:'mcp-request',hostId:'local',request:{id:1000+i,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_projects'}}});
+  const offered=JSON.parse(vm.runInContext(programs.voice,context)).events.filter(e=>e.method==='item/tool/call').map(e=>e.params.requestId);
+  assert.equal(offered.includes('1000'),false);
+  assert.equal(offered.includes('1256'),true);
+  await bridge.respondDynamicToolCall('1256','operator',true,'[]');
+  assert.equal(sent[sent.length-1].response.id,1256);
+
   // A hook an earlier daemon installed is replaced, keeping its event cursor.
   const oldListeners=[],oldSent=[];
   const upgraded=vm.createContext({window:{addEventListener:(name,f)=>oldListeners.push(f)},electronBridge:{sendMessageFromView:message=>{if(message.type==='mcp-response')void message.response.id;oldSent.push(message)}},setTimeout,clearTimeout});
-  vm.runInContext("globalThis.__agenthailCodexDesktopRendererV2={events:[{sequence:7,method:'turn/started',params:{threadId:'operator'}}],sequence:7,next:3,pending:new Map(),request(){}}",upgraded);
+  vm.runInContext("globalThis.__agenthailCodexDesktopRendererV2={events:[{sequence:6,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_send_to_lead',requestId:'5'}},{sequence:7,method:'turn/started',params:{threadId:'operator'}}],sequence:7,next:3,pending:new Map(),request(){}}",upgraded);
   assert.equal(vm.runInContext(programs.hook,upgraded),'hooked');
   assert.equal(vm.runInContext(programs.hook,upgraded),'already');
   const fresh=upgraded.__agenthailCodexDesktopRendererV2;
   assert.equal(fresh.sequence,7);
+  // The earlier hook kept no way to answer its queued tool call, so it is not offered.
+  assert.deepEqual(JSON.parse(vm.runInContext(programs.voice,upgraded)).events.map(e=>e.method),['turn/started']);
   oldListeners[oldListeners.length-1]({data:{type:'mcp-request',hostId:'local',request:{id:9,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_projects'}}}});
   assert.equal(fresh.sequence,8);
   await fresh.respondDynamicToolCall('9','operator',true,'[]');
