@@ -65,6 +65,7 @@
 		B6D305B6D6F47E2203575903 /* PairingLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3085052480F0B14328A21215 /* PairingLink.swift */; };
 		B935C015C6F2FA2321613C35 /* SessionStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24B656FE4EB45788315815D /* SessionStyle.swift */; };
 		BA1BE89FDF679AB91E1F9396 /* VoiceSystemCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EDE788460A077CFD53DEB5B /* VoiceSystemCall.swift */; };
+		C7550AF149A2A94BF1F25789 /* HostConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F7C98CCED8E9A6D4C20F491 /* HostConnection.swift */; };
 		CB330794781001FBDB837948 /* LiveSessionActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F88B8E00B9B48773EC294B1B /* LiveSessionActivity.swift */; };
 		CBCA932E315251D8765B458D /* ActivityReadingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3244752A0EB724F241568485 /* ActivityReadingTests.swift */; };
 		CF8F58BBB065D68EA89FDB74 /* VoiceAudioBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BE85140BFF4D3D8B996F2AD /* VoiceAudioBridge.swift */; };
@@ -152,6 +153,7 @@
 		57BABF4D52336F4B67989152 /* AgenthailIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgenthailIOSApp.swift; sourceTree = "<group>"; };
 		5823A988D3C400FB16E2EB6A /* NeedsYouUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeedsYouUITests.swift; sourceTree = "<group>"; };
 		5EB73667A631B4855B108997 /* AgenthailAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgenthailAPI.swift; sourceTree = "<group>"; };
+		5F7C98CCED8E9A6D4C20F491 /* HostConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostConnection.swift; sourceTree = "<group>"; };
 		7039428BDACFBDD5CA67BBBB /* AgenthailIOSTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgenthailIOSTests.swift; sourceTree = "<group>"; };
 		70F31C89F20967C2A9D6B5BC /* VoiceAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAPI.swift; sourceTree = "<group>"; };
 		72CFB9B3A032677BE34153EF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -228,6 +230,7 @@
 				9BD2FB96608E03FFA524E352 /* ComposerAttachmentViews.swift */,
 				F61606F9A50CEDA19D8E2CEE /* HolderPicker.swift */,
 				FDA795678500D6988089B512 /* HostCatalog.swift */,
+				5F7C98CCED8E9A6D4C20F491 /* HostConnection.swift */,
 				72CFB9B3A032677BE34153EF /* Info.plist */,
 				EDE64B86C2BC64932A6DAD35 /* KeychainStore.swift */,
 				F88B8E00B9B48773EC294B1B /* LiveSessionActivity.swift */,
@@ -488,6 +491,7 @@
 				DB2AF99C9FAF1C8B32093333 /* HolderPicker.swift in Sources */,
 				79D778B9895C8D365EA2666A /* HolderPins.swift in Sources */,
 				099165D1DD05E11819B5E106 /* HostCatalog.swift in Sources */,
+				C7550AF149A2A94BF1F25789 /* HostConnection.swift in Sources */,
 				48BA7C313A4D114D16DA93BC /* KeychainStore.swift in Sources */,
 				CB330794781001FBDB837948 /* LiveSessionActivity.swift in Sources */,
 				80C27162BD625090EFA0DBCB /* MetadataOverlay.swift in Sources */,

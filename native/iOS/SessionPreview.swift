@@ -18,22 +18,23 @@ struct SessionPreview: View {
             detail.claudeRuns = metadata.claudeRuns
             detail.claudeSubagents = metadata.claudeSubagents
         }
-        self.detail = detail
-        session = snapshot.sessions.first(where: { $0.id == detail.session.id }) ?? SessionState(
-            id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
-            status: detail.session.status, lastActive: nil, queueCount: 0, open: false, current: false,
-            currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly,
-            readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd)
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [SessionPreviewProtocol.self]
         let model = AgenthailIOSModel(
             api: AgenthailAPI(baseURL: URL(string: "https://preview.invalid")!, token: "public-demo", session: URLSession(configuration: config)),
             paired: ProcessInfo.processInfo.arguments.contains("--preview-voice-entry")
         )
+        model.setHostSnapshot(snapshot)
+        detail.session.id = HostCatalog.qualify("computer", detail.session.id)
+        self.detail = detail
+        session = model.snapshot?.sessions.first(where: { $0.id == detail.session.id }) ?? SessionState(
+            id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
+            status: detail.session.status, lastActive: nil, queueCount: 0, open: false, current: false,
+            currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly,
+            readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd)
         model.selectedSessionID = session.id
         model.selectedDetail = detail
         if capture == nil { model.composer = "Keep the regression check with the fix." }
-        model.snapshot = snapshot
         if ProcessInfo.processInfo.arguments.contains("--preview-delivery") {
             model.deliveryStatus[session.id] = "Queued for the agent"
         }
