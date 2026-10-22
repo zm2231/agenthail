@@ -31,9 +31,16 @@ func (a *App) cmdDebug(args []string) error {
 		return dialer.DialContext(ctx, "unix", socket)
 	}}}
 	stamp := time.Now().UTC().Format("20060102T150405Z")
+	// Memory statistics come first: the heap profile collects garbage before
+	// it is written.
+	path := filepath.Join(dir, "memstats-"+stamp+".json")
+	if err := fetchDebugFile(client, "memstats", path); err != nil {
+		return fmt.Errorf("memory statistics: %w", err)
+	}
+	fmt.Println(path)
 	for _, name := range daemon.DebugProfiles {
 		path := filepath.Join(dir, fmt.Sprintf("%s-%s.pb.gz", name, stamp))
-		if err := fetchDebugProfile(client, name, path); err != nil {
+		if err := fetchDebugFile(client, "profiles/"+name, path); err != nil {
 			return fmt.Errorf("%s profile: %w", name, err)
 		}
 		fmt.Println(path)
@@ -45,10 +52,10 @@ var createProfileFile = func(path string) (io.WriteCloser, error) {
 	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 }
 
-func fetchDebugProfile(client *http.Client, name, path string) error {
+func fetchDebugFile(client *http.Client, endpoint, path string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://daemon/profiles/"+name, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://daemon/"+endpoint, nil)
 	if err != nil {
 		return err
 	}

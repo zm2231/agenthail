@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -79,6 +80,16 @@ func serveDebug(listener net.Listener, handler http.Handler, logf func(string, .
 
 func debugProfileHandler() http.Handler {
 	mux := http.NewServeMux()
+	// The runtime's own accounting, read as is: how much of the heap is live,
+	// idle, or returned to the system.
+	mux.HandleFunc("GET /memstats", func(w http.ResponseWriter, _ *http.Request) {
+		var stats runtime.MemStats
+		runtime.ReadMemStats(&stats)
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(stats); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	})
 	for _, name := range DebugProfiles {
 		mux.HandleFunc("GET /profiles/"+name, func(w http.ResponseWriter, _ *http.Request) {
 			if name == "heap" {
