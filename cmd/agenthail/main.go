@@ -43,11 +43,12 @@ func main() {
 	}
 	home, _ := os.UserHomeDir()
 	app := &cli.App{
-		OpenRegistry:   func() (*registry.Registry, error) { return registry.Open("") },
-		DefaultTimeout: 2 * time.Minute,
-		Version:        version,
-		Revision:       revision,
-		BuiltAt:        builtAt,
+		OpenRegistry:        func() (*registry.Registry, error) { return registry.Open("") },
+		OpenCurrentRegistry: func() (*registry.Registry, error) { return registry.OpenCurrent("") },
+		DefaultTimeout:      2 * time.Minute,
+		Version:             version,
+		Revision:            revision,
+		BuiltAt:             builtAt,
 	}
 
 	helpers := sidecarAvailable(runtime.GOOS, os.Getenv("AGENTHAIL_SIDECAR"))

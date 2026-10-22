@@ -331,6 +331,12 @@ func (d *Daemon) RunWithSignal() error {
 	} else {
 		defer stopPeers()
 	}
+	return d.Serve(ctx)
+}
+
+// Serve runs the daemon with its dashboard until ctx ends, then shuts the
+// dashboard down.
+func (d *Daemon) Serve(ctx context.Context) error {
 	dashboard, err := d.startDashboard()
 	if err != nil {
 		return err
