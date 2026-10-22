@@ -76,11 +76,15 @@ func (e *NewerSchemaError) Error() string {
 	return fmt.Sprintf("registry is schema %d; this agenthail supports %d; install a newer agenthail", e.Found, e.Supported)
 }
 
+func defaultPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".agenthail", "registry.db")
+}
+
 func Open(path string) (*Registry, error) {
 	private := path == ""
 	if private {
-		home, _ := os.UserHomeDir()
-		path = filepath.Join(home, ".agenthail", "registry.db")
+		path = defaultPath()
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, fmt.Errorf("create registry directory: %w", err)
@@ -90,6 +94,52 @@ func Open(path string) (*Registry, error) {
 			return nil, fmt.Errorf("restrict registry directory: %w", err)
 		}
 	}
+	r, err := connect(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.migrate(); err != nil {
+		r.Close()
+		return nil, err
+	}
+	// WAL mode is a property of the file, so it is set only once migrate has
+	// accepted the schema; a registry this build refuses keeps its journal mode.
+	if _, err := r.db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+		r.Close()
+		return nil, fmt.Errorf("enable registry WAL: %w", err)
+	}
+	return r, nil
+}
+
+// OpenCurrent opens an existing registry only when it already has this
+// build's schema, and changes nothing to get there: no directory, file,
+// migration or journal mode. Short-lived processes another program starts,
+// such as hooks, use it so an older or newer agenthail on the same machine
+// never has its registry migrated under it.
+func OpenCurrent(path string) (*Registry, error) {
+	if path == "" {
+		path = defaultPath()
+	}
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	r, err := connect(path)
+	if err != nil {
+		return nil, err
+	}
+	var version int
+	if err := r.read.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		r.Close()
+		return nil, err
+	}
+	if version != schemaVersion {
+		r.Close()
+		return nil, fmt.Errorf("registry is schema %d; this agenthail uses %d", version, schemaVersion)
+	}
+	return r, nil
+}
+
+func connect(path string) (*Registry, error) {
 	sep := "?"
 	if strings.Contains(path, "?") {
 		sep = "&"
@@ -107,18 +157,7 @@ func Open(path string) (*Registry, error) {
 	}
 	read.SetMaxOpenConns(readConnections)
 	read.SetMaxIdleConns(readConnections)
-	r := &Registry{db: db, read: read, path: path, now: time.Now}
-	if err := r.migrate(); err != nil {
-		r.Close()
-		return nil, err
-	}
-	// WAL mode is a property of the file, so it is set only once migrate has
-	// accepted the schema; a registry this build refuses keeps its journal mode.
-	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
-		r.Close()
-		return nil, fmt.Errorf("enable registry WAL: %w", err)
-	}
-	return r, nil
+	return &Registry{db: db, read: read, path: path, now: time.Now}, nil
 }
 
 func (r *Registry) Path() string { return r.path }
