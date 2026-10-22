@@ -269,6 +269,7 @@ struct SessionPaneTest {
         check(SessionPane.applying(event(row(105, "x")), to: page, older: &older) == nil, "a row without the page's item is not guessed at")
 
         var pageRequests = 0
+        var requestReads = 0
         let turnPageJSON = pageJSON.replacingOccurrences(of: #""journalSeq":100"#, with: #""journalSeq":104"#)
             .replacingOccurrences(of: #"{"id":"a","kind":"message","role":"assistant","title":"message","text":"a1","truncated":false},{"id":"b","kind":"message","role":"assistant","title":"message","text":"b1","truncated":false}"#, with: #"{"id":"c","kind":"message","role":"assistant","title":"message","text":"c1","truncated":false},{"id":"a","kind":"message","role":"assistant","title":"message","text":"a2","truncated":false},{"id":"d","kind":"done","role":"assistant","title":"done","text":"","truncated":false}"#)
         func frame(_ seq: Int, _ json: String) -> String { "id: \(seq)\nevent: item\ndata: \(json)\n\n" }
@@ -280,6 +281,10 @@ struct SessionPaneTest {
             if line.contains("/api/v1/session?") {
                 pageRequests += 1
                 return pageRequests == 1 ? StubServer.reply("200 OK", pageJSON) : StubServer.hold
+            }
+            if line.contains("/api/v1/requests?") {
+                requestReads += 1
+                return StubServer.hold
             }
             return StubServer.reply("404 Not Found", "{}")
         }
@@ -348,6 +353,25 @@ struct SessionPaneTest {
         streamingPane.reconcile()
         try? await Task.sleep(for: SessionPane.streamPublishInterval * 3)
         check(streamingPane.removedSession?.id == "D" && streamingPane.timelineItems.map(\.id) == shownBeforeRemoval, "a removed session does not publish a row it held back: \(streamingPane.timelineItems.map(\.id))")
+        let pagesBeforeReturn = pageRequests
+        streamingModel.snapshot = listing([streamedSession])
+        streamingPane.reconcile()
+        let reloadDeadline = Date().addingTimeInterval(5)
+        while pageRequests == pagesBeforeReturn, Date() < reloadDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        let responding = SessionState(id: "D", surface: "claude", name: "d", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(respond: true), readOnly: false, readOnlyReason: nil)
+        Task { await streamingPane.syncRequests(for: responding) }
+        let requestDeadline = Date().addingTimeInterval(5)
+        while requestReads == 0, Date() < requestDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        let pagesBeforeFailure = pageRequests
+        streamingModel.snapshot = listing([])
+        streamingPane.reconcile()
+        let failure = StubServer.reply("500 Internal Server Error", #"{"error":{"message":"gone"}}"#)
+        streamingServer.release(failure)
+        streamingServer.release(failure)
+        try? await Task.sleep(for: .milliseconds(1500))
+        check(pagesBeforeFailure > pagesBeforeReturn && requestReads == 1, "reads were open when the session was removed: pages \(pagesBeforeReturn)->\(pagesBeforeFailure), requests \(requestReads)")
+        check(streamingPane.detailLoadError == nil && !streamingPane.detailStale && pageRequests == pagesBeforeFailure, "a read that fails after removal neither reports nor retries: error \(streamingPane.detailLoadError ?? "nil"), stale \(streamingPane.detailStale), pages \(pageRequests)")
+        check(streamingPane.requestError == nil && streamingPane.requests == nil, "a request read that fails after removal is not shown: \(streamingPane.requestError ?? "nil")")
         streamingModel.closePane(streamingPane)
         streamingServer.stop()
 

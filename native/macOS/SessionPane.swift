@@ -175,7 +175,7 @@ final class SessionPane: ObservableObject, Identifiable {
             }
             return true
         } catch {
-            guard !closed, sessionLoadIsCurrent(id, selectedID: selectedSessionID), !error.isCancellation else { return true }
+            guard !closed, sessionLoadIsCurrent(id, selectedID: selectedSessionID), removedSession?.id != id, !error.isCancellation else { return true }
             detailLoadError = AgenthailAPIError.userMessage(error)
             if detail?.session.id == id {
                 detailStale = true
@@ -304,7 +304,7 @@ final class SessionPane: ObservableObject, Identifiable {
         Task {
             let succeeded = await model.performNow(action: action, sessionID: sessionID, model: modelID)
             controlPending = false
-            if succeeded, !closed, selectedSessionID == sessionID { startMetadataLoad(sessionID) }
+            if succeeded, !closed, selectedSessionID == sessionID, removedSession == nil { startMetadataLoad(sessionID) }
         }
     }
 
@@ -411,6 +411,8 @@ final class SessionPane: ObservableObject, Identifiable {
         sessionStreamTask?.cancel()
         dropUnpublishedDetail()
         metadataTask?.cancel()
+        detailLoadTask?.cancel()
+        detailLoadTask = nil
         detailReloadTask?.cancel()
         detailReloadTask = nil
         detailReloadPending = false
@@ -469,11 +471,11 @@ final class SessionPane: ObservableObject, Identifiable {
         guard let api = model.api else { return }
         do {
             let loaded = try await api.requests(sessionID: id)
-            guard selectedSessionID == id, requestsKey == key else { return }
+            guard selectedSessionID == id, requestsKey == key, removedSession == nil else { return }
             requests = loaded
             requestError = nil
         } catch {
-            guard selectedSessionID == id else { return }
+            guard selectedSessionID == id, removedSession == nil else { return }
             requestsKey = nil
             requestError = error.localizedDescription
         }
