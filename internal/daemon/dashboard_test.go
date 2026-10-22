@@ -712,21 +712,12 @@ func TestDashboardRecordsDefinitiveInitialDeliveryFailure(t *testing.T) {
 	if err != nil || len(problems) != 1 || problems[0].Status != "failed" || problems[0].SessionID != "started" {
 		t.Fatalf("problems=%+v err=%v", problems, err)
 	}
-	if got := registry.QueueCount(registrypkg.OperatorSessionID); got != 1 {
-		t.Fatalf("failure notice queue count=%d, want 1", got)
+	if got := registry.QueueCount(registrypkg.OperatorSessionID); got != 0 {
+		t.Fatalf("%d failure notices queued for the operator, which no session reads", got)
 	}
 	events, err := registry.CatalogEventsAfter(0, 20)
 	if err != nil || len(events.Events) == 0 {
 		t.Fatalf("catalog events=%+v err=%v", events, err)
-	}
-	queueEvent := false
-	for _, event := range events.Events {
-		if event.Type == "session.queue" && event.EntityID == registrypkg.OperatorSessionID {
-			queueEvent = true
-		}
-	}
-	if !queueEvent {
-		t.Fatalf("catalog events missing operator notice: %+v", events.Events)
 	}
 	type problemPayload struct {
 		DeliveryID      int64  `json:"deliveryId"`
