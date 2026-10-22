@@ -13,6 +13,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/google/uuid"
@@ -436,5 +437,23 @@ func TestAnAbortOfAMoveInWhileTwoProcessesHoldTheConversationAnswersRunning(t *t
 	}
 	if _, err := os.Stat(transcripts[0]); err != nil {
 		t.Fatalf("the transcript two processes run was set aside: %v", err)
+	}
+}
+
+func TestAMoveOfAConversationTwoProcessesHoldIsRefusedAndStopsNeither(t *testing.T) {
+	shared := newSharedConversation(t)
+	session := &surface.Session{ID: sharedConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
+	out, err := shared.adapter.PrepareMove(context.Background(), session, surface.AdoptRequest{StopTerminal: true})
+	if err == nil {
+		out.Release()
+		t.Fatal("prepared a move of a conversation two processes hold")
+	}
+	if !surface.IsDeliveryRefused(err) || !strings.Contains(err.Error(), "close the others first") {
+		t.Fatalf("err=%v, want a refusal asking to close the other terminals", err)
+	}
+	for _, holder := range []*claudetest.Holder{shared.first, shared.later} {
+		if err := syscall.Kill(holder.PID, 0); err != nil {
+			t.Fatalf("a refused move stopped process %d: %v", holder.PID, err)
+		}
 	}
 }

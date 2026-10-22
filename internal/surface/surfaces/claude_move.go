@@ -70,6 +70,13 @@ func (c *Claude) PrepareMove(ctx context.Context, sess *surface.Session, request
 	if root == "" {
 		return nil, fmt.Errorf("Claude conversation %s has no transcript in any config root", conversation)
 	}
+	_, records, err := c.records()
+	if err != nil {
+		return nil, err
+	}
+	if holders := holderRecords(records, conversation); len(holders) > 1 {
+		return nil, refuseSharedMove(conversation, holders)
+	}
 	holder, err := c.adoptHolder(ctx, conversation, root)
 	if err != nil {
 		return nil, err
