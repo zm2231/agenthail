@@ -43,12 +43,12 @@ type fixtureProvider struct {
 }
 
 type targetFixture struct {
-	mu              sync.Mutex
-	gate            *gate
+	mu   sync.Mutex
+	gate *gate
 	// perTurn gives each send its own turn, whose reply the test supplies.
-	perTurn bool
-	turns   int
-	replies map[string]chan string
+	perTurn         bool
+	turns           int
+	replies         map[string]chan string
 	session         surface.Session
 	sent            []string
 	stream          func(func(surface.StreamEvent))
@@ -120,6 +120,7 @@ func (f *targetFixture) Send(ctx context.Context, _ *surface.Session, message st
 	}
 	return &surface.SendResult{UUID: turnID, Accepted: true}, nil
 }
+
 // reply finishes a per-turn send's turn with text.
 func (f *targetFixture) reply(turnID, text string) {
 	f.mu.Lock()
@@ -283,7 +284,8 @@ func (p *fixtureProvider) Interrupt(ctx context.Context, _ *surface.Session) err
 	return nil
 }
 
-func (p *fixtureProvider) Release(threadID string) {
+func (p *fixtureProvider) Release(threadID string, _ Cursor) {
+	_ = p.gate.wait(context.Background(), "Release")
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.releases = append(p.releases, threadID)
@@ -711,12 +713,18 @@ func TestDeviceLeaseRejectsTakeoverAndHidesSDP(t *testing.T) {
 }
 
 func TestOperatorSourceLifecycleTracksOnlyActiveTransitions(t *testing.T) {
+	var mu sync.Mutex
 	var calls []string
 	f := newFixture(t, fixtureOptions{operatorSource: func(session *surface.Session, active bool) {
+		mu.Lock()
+		defer mu.Unlock()
 		calls = append(calls, session.ID+":"+strconv.FormatBool(active))
 	}})
 	connectFixture(t, f)
 	hangUp(t, f)
+	f.service.Close()
+	mu.Lock()
+	defer mu.Unlock()
 	if !reflect.DeepEqual(calls, []string{"operator:true", "operator:false"}) {
 		t.Fatalf("operator source calls=%v", calls)
 	}
@@ -940,11 +948,12 @@ func TestSpeechWaitingOnTheOperatorLeavesViewAndActionsResponsive(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("a control action waited past the speech deadline")
+	case <-time.After(time.Second):
+		t.Fatal("a hangup waited on speech the operator had not accepted")
 	}
-	if v := f.View(); !hasEvent(v, "voice/delegation/final-failed") || v.Phase == "connected" {
-		t.Fatalf("expired speech was not recorded before the stop: %+v", v)
+	f.service.Close()
+	if v := f.View(); hasEvent(v, "voice/delegation/final") || hasEvent(v, "voice/delegation/final-failed") || v.Phase == "connected" {
+		t.Fatalf("speech the hangup cancelled was recorded: %+v", v)
 	}
 }
 
@@ -1284,9 +1293,7 @@ func TestAStartWhoseStateCannotBeSavedReleasesTheCall(t *testing.T) {
 	if _, err := f.Apply(Action{Action: "start", AttemptID: "call-a", SDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"}); err == nil {
 		t.Fatal("a start with unpersistable state was accepted")
 	}
-	if releases := p.released(); !reflect.DeepEqual(releases, []string{"operator"}) {
-		t.Fatalf("releases=%v", releases)
-	}
+	waitForRelease(t, p, "operator")
 	if requests, _, _ := p.snapshot(); len(requests) != 0 {
 		t.Fatalf("realtime was started with unpersistable state: %v", requests)
 	}
@@ -1390,9 +1397,7 @@ func TestACallStartCodexRefusesEndsTheCallWithTheReason(t *testing.T) {
 	if view.Phase != "ended" || view.TerminalReason != "start_rejected" || !strings.Contains(view.Message, "codex login") {
 		t.Fatalf("view=%+v", view)
 	}
-	if releases := provider.released(); !reflect.DeepEqual(releases, []string{"operator"}) {
-		t.Fatalf("a refused call kept its event source: %v", releases)
-	}
+	waitForRelease(t, provider, "operator")
 	provider.failRequests(nil)
 	if _, err := f.Apply(Action{Action: "start", AttemptID: "call-b", SDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"}); err != nil {
 		t.Fatalf("the next call was refused after a definite rejection: %v", err)

@@ -95,6 +95,10 @@ func (s *Service) callTool(ctx context.Context, tool string, arguments map[strin
 		if (targetID == "") == (project == "") {
 			return "", errors.New("give exactly one of targetId or project")
 		}
+		// Finding a project's lead is part of the transfer, so it keeps its
+		// place among the call's actions.
+		s.op.Lock()
+		defer s.op.Unlock()
 		if project != "" {
 			if s.projects == nil {
 				return "", errors.New("project voice targets are unavailable on this host")
@@ -105,9 +109,7 @@ func (s *Service) callTool(ctx context.Context, tool string, arguments map[strin
 			}
 			targetID = id
 		}
-		s.op.Lock()
 		name, err := s.selectTarget(ctx, targetID, true)
-		s.op.Unlock()
 		if err != nil {
 			return "", err
 		}

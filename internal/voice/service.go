@@ -79,9 +79,9 @@ type Provider interface {
 	Poll(context.Context, Cursor, string) (Batch, error)
 	Request(context.Context, *surface.Session, string, map[string]any) error
 	Interrupt(context.Context, *surface.Session) error
-	// Release frees what Cursor opened for a call on the thread once nothing
-	// will poll it again.
-	Release(threadID string)
+	// Release frees what Cursor opened for one call on the thread, the call
+	// whose cursor it was, once nothing will poll it again.
+	Release(threadID string, cursor Cursor)
 }
 
 // DynamicToolResponder completes a caller-owned Agenthail tool invoked by the
@@ -147,18 +147,24 @@ type Service struct {
 	// mu guards the state and is never held across I/O.
 	mu sync.Mutex
 	// op keeps the actions that do I/O in arrival order.
-	op                      sync.Mutex
-	applying                sync.WaitGroup
-	call                    context.Context
-	cancelCall              context.CancelFunc
-	saving                  chan struct{}
-	generation              uint64
-	written                 uint64
-	unsaved                 []byte
-	spoken                  []spokenRequest
-	spokenInFlight          string
-	delivering              bool
-	cycled                  func()
+	op             sync.Mutex
+	applying       sync.WaitGroup
+	call           context.Context
+	cancelCall     context.CancelFunc
+	saving         chan struct{}
+	generation     uint64
+	written        uint64
+	unsaved        []byte
+	spoken         []spokenRequest
+	spokenInFlight string
+	delivering     bool
+	cycled         func()
+	// effects is work queued under s.mu that runs, in order, once the lock is
+	// released.
+	effects                 []func()
+	effectsWake             *sync.Cond
+	effectsStopped          bool
+	effectsDone             chan struct{}
 	provider                Provider
 	path                    string
 	state                   diskState
@@ -236,6 +242,8 @@ func NewWithTargetsAndOperatorSourceAndStream(path string, provider Provider, re
 func newService(path string, provider Provider, register func(context.Context, surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider, clock clock) *Service {
 	s := &Service{path: path, provider: provider, register: register, commandPath: commandPath, target: target, dispatcher: dispatcher, setOperatorSourceActive: setOperatorSourceActive, stream: stream, clock: clock, speechTimeout: delegatedSpeechTimeout, saving: make(chan struct{}, 1)}
 	s.background, s.stop = context.WithCancel(context.Background())
+	s.effectsWake, s.effectsDone = sync.NewCond(&s.mu), make(chan struct{})
+	go s.runEffects()
 	s.state.State = State{Protocol: 1, Phase: "idle", Events: []Event{}}
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -276,7 +284,41 @@ func (s *Service) syncOperatorSourceActive() {
 	if s.state.State.Session == nil || s.setOperatorSourceActive == nil {
 		return
 	}
-	s.setOperatorSourceActive(s.state.State.Session, active)
+	session, hold := *s.state.State.Session, s.setOperatorSourceActive
+	s.later(func() { hold(&session, active) })
+}
+
+// later queues work that must not run under s.mu, such as closing a
+// connection or holding a session source. It runs after the lock is released,
+// in the order it was queued. The caller holds s.mu.
+func (s *Service) later(effect func()) {
+	s.effects = append(s.effects, effect)
+	s.effectsWake.Signal()
+}
+
+func (s *Service) runEffects() {
+	defer close(s.effectsDone)
+	s.mu.Lock()
+	for {
+		for len(s.effects) == 0 && !s.effectsStopped {
+			s.effectsWake.Wait()
+		}
+		if len(s.effects) == 0 {
+			s.mu.Unlock()
+			return
+		}
+		effect := s.effects[0]
+		s.effects = s.effects[1:]
+		s.mu.Unlock()
+		effect()
+		s.mu.Lock()
+	}
+}
+
+// release frees the event source of the call whose cursor this is. The
+// caller holds s.mu.
+func (s *Service) release(threadID string, cursor Cursor) {
+	s.later(func() { s.provider.Release(threadID, cursor) })
 }
 
 // View never waits on s.mu. The owner's view starts the event poll when no one
@@ -599,7 +641,7 @@ func (s *Service) start(ctx context.Context, owner string, a Action) error {
 	}
 	s.mu.Lock()
 	if s.closed || s.active() || v.Session == nil || v.Session.ID != session.ID {
-		s.provider.Release(session.ID)
+		s.release(session.ID, cursor)
 		s.unlock()
 		return errors.New("the voice operator changed while the call was starting; start it again")
 	}
@@ -620,7 +662,7 @@ func (s *Service) start(ctx context.Context, owner string, a Action) error {
 	defer cancel()
 	if err := s.commit(); err != nil {
 		s.mu.Lock()
-		s.provider.Release(session.ID)
+		s.release(session.ID, cursor)
 		s.unlock()
 		return err
 	}
@@ -637,7 +679,7 @@ func (s *Service) start(ctx context.Context, owner string, a Action) error {
 		v.Phase, v.TerminalReason = "ended", "start_rejected"
 		v.Message = "Voice could not start: " + rejected.Reason
 		s.endCall()
-		s.provider.Release(session.ID)
+		s.release(session.ID, cursor)
 	case err != nil:
 		v.Phase = "unknown"
 		v.Message = "Call startup outcome is unknown: " + err.Error()
@@ -676,7 +718,7 @@ func (s *Service) hangup(ctx context.Context, attemptID string) error {
 	s.mu.Lock()
 	if attemptID != v.AttemptID || !s.active() {
 		if needCursor {
-			s.provider.Release(session.ID)
+			s.release(session.ID, cursor)
 		}
 		s.unlock()
 		return nil
@@ -749,7 +791,7 @@ func (s *Service) text(ctx context.Context, a Action) error {
 		return err
 	}
 	s.mu.Lock()
-	if v.AttemptID != a.AttemptID {
+	if !s.sameCall(a.AttemptID, session.ID, "") {
 		s.unlock()
 		return nil
 	}
@@ -815,7 +857,7 @@ func (s *Service) selectTarget(ctx context.Context, requested string, transfer b
 		}
 	}
 	s.mu.Lock()
-	if transfer && (v.AttemptID != attemptID || !s.active()) {
+	if transfer && (v.AttemptID != attemptID || !s.active() || v.Session == nil || v.Session.ID != session.ID) {
 		s.unlock()
 		return "", errors.New("the call ended before voice moved")
 	}
@@ -899,11 +941,11 @@ func (s *Service) delegate(ctx context.Context, a Action) error {
 	addressed := *target.Session
 	receipt, err := s.dispatcher.DeliverWithoutQueue(callCtx, target.Adapter, target.Session, a.Text, "voice:"+attemptID+":"+a.MessageID, surface.SendOptions{SourceSessionID: sourceID, Author: surface.AuthorPerson})
 	s.mu.Lock()
-	if v.AttemptID != attemptID {
+	if !s.sameCall(attemptID, sourceID, targetID) {
 		s.unlock()
 		cancelStream()
 		if err == nil {
-			err = errors.New("the call ended before the request's reply could be followed")
+			err = errors.New("the call ended or moved before the request's reply could be followed")
 		}
 		return err
 	}
@@ -929,20 +971,34 @@ func (s *Service) delegate(ctx context.Context, a Action) error {
 		held = "Target did not provide an authoritative turn ID; no uncorrelated reply will be spoken."
 	}
 	if held != "" {
-		cancelStream()
 		s.appendDelegationEvent(a.MessageID, target.Session, receipt, "held")
 		v.Message = held
-		return s.commit()
+		err := s.commit()
+		cancelStream()
+		return err
 	}
 	if woke {
 		v.Message = "Woke " + addressed.Name + " and sent the request."
 	}
 	s.appendDelegationEvent(a.MessageID, target.Session, receipt, "dispatched")
 	turnID, deliveredID := receipt.TurnID, target.Session.ID
-	if !s.spawn(func() { s.watchDelegation(attemptID, a.MessageID, deliveredID, turnID, streamSubscription) }) {
+	watching := s.spawn(func() { s.watchDelegation(attemptID, a.MessageID, deliveredID, turnID, streamSubscription) })
+	err = s.commit()
+	if !watching {
 		cancelStream()
 	}
-	return s.commit()
+	return err
+}
+
+// sameCall reports whether the connected call is still the one an action did
+// its I/O for: the same attempt and operator, and, when targetID is given, the
+// same selected target. The caller holds s.mu.
+func (s *Service) sameCall(attemptID, sessionID, targetID string) bool {
+	v := &s.state.State
+	if v.AttemptID != attemptID || v.Phase != "connected" || v.Session == nil || v.Session.ID != sessionID {
+		return false
+	}
+	return targetID == "" || (v.Target != nil && v.Target.ID == targetID)
 }
 
 // delegationAllowed checks a delegation against the current call. The caller
@@ -973,7 +1029,7 @@ func (s *Service) interruptTarget(ctx context.Context, a Action) error {
 		s.unlock()
 		return errors.New("select a connected target call before interrupting it")
 	}
-	targetID := v.Target.ID
+	targetID, sessionID := v.Target.ID, v.Session.ID
 	callCtx, cancel := s.callContext(ctx)
 	defer cancel()
 	s.unlock()
@@ -1009,7 +1065,7 @@ func (s *Service) interruptTarget(ctx context.Context, a Action) error {
 		return err
 	}
 	s.mu.Lock()
-	if v.AttemptID != a.AttemptID {
+	if !s.sameCall(a.AttemptID, sessionID, targetID) {
 		s.unlock()
 		return nil
 	}
@@ -1031,9 +1087,12 @@ func (s *Service) Close() {
 	s.tasks.Wait()
 	s.mu.Lock()
 	if s.provider != nil && s.state.State.Session != nil {
-		s.provider.Release(s.state.State.Session.ID)
+		s.release(s.state.State.Session.ID, s.cursor)
 	}
+	s.effectsStopped = true
+	s.effectsWake.Signal()
 	s.unlock()
+	<-s.effectsDone
 	_ = s.flush()
 	s.saving <- struct{}{}
 	<-s.saving
@@ -1056,10 +1115,10 @@ func (s *Service) spawn(task func()) bool {
 func (s *Service) watchDelegation(attemptID, messageID, targetID, turnID string, subscription sessionstream.Subscription) {
 	s.mu.Lock()
 	if s.target == nil || s.state.State.AttemptID != attemptID || s.state.State.Target == nil || s.state.State.Target.ID != targetID {
+		s.unlock()
 		if subscription.Cancel != nil {
 			subscription.Cancel()
 		}
-		s.unlock()
 		return
 	}
 	callCtx, endWatch := s.callContext(s.background)
@@ -1224,7 +1283,7 @@ func (s *Service) speakDelegation(attemptID, messageID string, target *surface.S
 	defer done()
 	err := s.provider.Request(ctx, &session, "thread/realtime/appendText", map[string]any{"threadId": session.ID, "text": text, "role": "developer"})
 	s.mu.Lock()
-	if v.AttemptID != attemptID {
+	if !s.sameCall(attemptID, session.ID, target.ID) {
 		s.unlock()
 		return
 	}
@@ -1239,7 +1298,7 @@ func (s *Service) speakDelegation(attemptID, messageID string, target *surface.S
 
 func (s *Service) recordDelegationFailure(attemptID, messageID, targetID string, err error) {
 	s.mu.Lock()
-	if s.state.State.AttemptID != attemptID || s.state.State.Target == nil || s.state.State.Target.ID != targetID {
+	if s.state.State.Session == nil || !s.sameCall(attemptID, s.state.State.Session.ID, targetID) {
 		s.unlock()
 		return
 	}
@@ -1358,7 +1417,7 @@ func (s *Service) stopObserving() {
 	s.running = false
 	s.endCall()
 	if s.state.State.Session != nil {
-		s.provider.Release(s.state.State.Session.ID)
+		s.release(s.state.State.Session.ID, s.cursor)
 	}
 }
 

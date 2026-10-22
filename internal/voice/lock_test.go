@@ -7,16 +7,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type gatedProjects struct{ gate *gate }
 
+// gatedStream prepares a session stream whose Cancel is held.
+type gatedStream struct{ gate func() *gate }
+
+func (s gatedStream) PrepareSessionStream(context.Context, *surface.Session) (sessionstream.Subscription, error) {
+	return sessionstream.Subscription{Events: make(chan sessionstream.Event), Cancel: func() {
+		_ = s.gate().wait(context.Background(), "Cancel")
+	}}, nil
+}
+
 func (p gatedProjects) List(ctx context.Context) ([]Project, error) {
 	return nil, p.gate.wait(ctx, "List")
 }
-func (gatedProjects) LeadSession(context.Context, string) (string, error) {
-	return "", errors.New("no lead")
+func (p gatedProjects) LeadSession(ctx context.Context, project string) (string, error) {
+	if project == "" {
+		return "", errors.New("no lead")
+	}
+	return project, p.gate.wait(ctx, "LeadSession")
 }
 func (gatedProjects) SendToLead(context.Context, string, string, string) (LeadReceipt, error) {
 	return LeadReceipt{}, errors.New("no lead")
@@ -50,9 +63,11 @@ func TestNoHeldCallMakesAHeartbeatAHangupOrAViewWait(t *testing.T) {
 		held string
 		// call says whether the held work belongs to a connected call, which
 		// a hangup must cancel.
-		call  bool
-		setup func(*testing.T, *voiceFixture, *targetFixture)
-		run   func(*voiceFixture) error
+		call bool
+		// stream gives the fixture a session stream whose Cancel is held.
+		stream bool
+		setup  func(*testing.T, *voiceFixture, *targetFixture)
+		run    func(*voiceFixture) error
 	}{
 		{name: "operator creation", held: "Create", run: func(f *voiceFixture) error { _, err := f.Apply(Action{Action: "prepare"}); return err }},
 		{name: "operator registration", held: "Register", setup: func(t *testing.T, f *voiceFixture, _ *targetFixture) {
@@ -81,10 +96,16 @@ func TestNoHeldCallMakesAHeartbeatAHangupOrAViewWait(t *testing.T) {
 		}, run: func(f *voiceFixture) error { _, err := f.Apply(Action{Action: "interrupt"}); return err }},
 		{name: "target selection", held: "Resolve", setup: func(t *testing.T, f *voiceFixture, _ *targetFixture) {
 			apply(t, f, Action{Action: "prepare"})
-		}, run: func(f *voiceFixture) error { _, err := f.Apply(Action{Action: "select", TargetID: "target-a"}); return err }},
+		}, run: func(f *voiceFixture) error {
+			_, err := f.Apply(Action{Action: "select", TargetID: "target-a"})
+			return err
+		}},
 		{name: "transfer", held: "Resolve", call: true, setup: func(t *testing.T, f *voiceFixture, _ *targetFixture) {
 			connectFixture(t, f)
-		}, run: func(f *voiceFixture) error { _, err := f.Apply(Action{Action: "transfer", TargetID: "target-a"}); return err }},
+		}, run: func(f *voiceFixture) error {
+			_, err := f.Apply(Action{Action: "transfer", TargetID: "target-a"})
+			return err
+		}},
 		{name: "delegation delivery", held: "Send", call: true, setup: func(t *testing.T, f *voiceFixture, target *targetFixture) {
 			selectAndConnect(t, f, target)
 		}, run: func(f *voiceFixture) error {
@@ -118,6 +139,26 @@ func TestNoHeldCallMakesAHeartbeatAHangupOrAViewWait(t *testing.T) {
 			f.target.reply("turn-1", "Done.")
 			return nil
 		}},
+		{name: "call source release", held: "Release", setup: func(t *testing.T, f *voiceFixture, _ *targetFixture) {
+			apply(t, f, Action{Action: "prepare"})
+			f.provider.failRequests(&RejectedError{Reason: "refused"})
+		}, run: func(f *voiceFixture) error {
+			_, err := f.Apply(Action{Action: "start", AttemptID: "call-a", SDP: sdp})
+			return err
+		}},
+		{name: "operator source hold", held: "Source", setup: func(t *testing.T, f *voiceFixture, _ *targetFixture) {
+			apply(t, f, Action{Action: "prepare"})
+		}, run: func(f *voiceFixture) error {
+			_, err := f.Apply(Action{Action: "start", AttemptID: "call-a", SDP: sdp})
+			return err
+		}},
+		{name: "stream cancel", held: "Cancel", stream: true, setup: func(t *testing.T, f *voiceFixture, target *targetFixture) {
+			target.turnID = target.session.ID
+			selectAndConnect(t, f, target)
+		}, run: func(f *voiceFixture) error {
+			_, err := f.Apply(Action{Action: "delegate", AttemptID: "call-a", MessageID: "m", Text: "Do work"})
+			return err
+		}},
 		{name: "event poll", held: "Poll", setup: func(t *testing.T, f *voiceFixture, _ *targetFixture) {
 			connectFixture(t, f)
 		}, run: func(f *voiceFixture) error {
@@ -128,9 +169,15 @@ func TestNoHeldCallMakesAHeartbeatAHangupOrAViewWait(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			target := interruptibleTarget()
 			var f *voiceFixture
-			f = newFixture(t, fixtureOptions{target: target, register: func(ctx context.Context, _ surface.Session) error {
+			options := fixtureOptions{target: target, register: func(ctx context.Context, _ surface.Session) error {
 				return f.gate.wait(ctx, "Register")
-			}})
+			}, operatorSource: func(*surface.Session, bool) {
+				_ = f.gate.wait(context.Background(), "Source")
+			}}
+			if test.stream {
+				options.stream = gatedStream{gate: func() *gate { return f.gate }}
+			}
+			f = newFixture(t, options)
 			f.target = target
 			if test.setup != nil {
 				test.setup(t, f, target)
@@ -237,5 +284,60 @@ func TestAToolCallAfterCloseIsAnsweredThatVoiceIsShuttingDown(t *testing.T) {
 	defer p.mu.Unlock()
 	if len(p.toolCalls) != 1 || p.toolCalls[0].success || !strings.Contains(p.toolCalls[0].text, "shutting down") {
 		t.Fatalf("toolCalls=%+v", p.toolCalls)
+	}
+}
+
+func TestDelegatedSpeechThatFinishesAfterTheCallEndedOrMovedRecordsNothing(t *testing.T) {
+	for _, change := range []string{"closed", "transfer"} {
+		t.Run(change, func(t *testing.T) {
+			target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Build session", Transport: "desktop"}, perTurn: true}
+			f := newFixture(t, fixtureOptions{target: target})
+			selectAndConnect(t, f, target)
+			apply(t, f, Action{Action: "delegate", AttemptID: "call-a", MessageID: "m", Text: "Do work"})
+			f.gate.hold("thread/realtime/appendText")
+			target.reply("turn-1", "Done.")
+			f.gate.reached(t, "thread/realtime/appendText")
+			if change == "closed" {
+				f.observe(Event{Method: "thread/realtime/closed", Params: map[string]any{}})
+			} else {
+				f.service.mu.Lock()
+				f.service.state.State.Target = &surface.Session{ID: "another-target", Surface: surface.KindCodex, Name: "Another"}
+				f.service.unlock()
+			}
+			before := f.View()
+			f.gate.release("thread/realtime/appendText")
+			f.service.Close()
+			after := f.View()
+			if len(after.Events) != len(before.Events) || after.Message != before.Message {
+				t.Fatalf("stale speech changed the call: before=%+v after=%+v", before.Events, after.Events)
+			}
+		})
+	}
+}
+
+func TestAProjectTransferKeepsItsPlaceAheadOfALaterTransfer(t *testing.T) {
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Build session", Transport: "desktop"}}
+	f := newFixture(t, fixtureOptions{target: target})
+	f.service.SetProjects(gatedProjects{gate: f.gate})
+	connectFixture(t, f)
+	f.gate.hold("LeadSession")
+	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "project", "threadId": "operator", "namespace": "agenthail", "tool": "voice_transfer", "arguments": map[string]any{"project": "target-a"}}})
+	f.gate.reached(t, "LeadSession")
+	later := make(chan error, 1)
+	go func() {
+		_, err := f.Apply(Action{Action: "transfer", TargetID: ""})
+		later <- err
+	}()
+	select {
+	case err := <-later:
+		t.Fatalf("a later transfer ran before the project transfer: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	f.gate.release("LeadSession")
+	if err := <-later; err != nil {
+		t.Fatal(err)
+	}
+	if got := f.View().Target; got != nil {
+		t.Fatalf("the earlier project transfer overwrote the later one: %+v", got)
 	}
 }
