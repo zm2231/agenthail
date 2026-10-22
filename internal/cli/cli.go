@@ -105,6 +105,17 @@ func (a *App) ResolveSignin(target signin.Target) (signin.Source, error) {
 	return r.ResolveSignin(target)
 }
 
+func (a *App) SigninCandidates(consumer signin.Consumer) ([]signin.Source, error) {
+	r, err := a.openRegistry()
+	if err != nil {
+		return nil, err
+	}
+	if r == nil {
+		return nil, errors.New("the registry is not available")
+	}
+	return r.SigninCandidates(consumer)
+}
+
 // Close closes the registry if a command opened it.
 func (a *App) Close() error {
 	a.registryMu.Lock()
@@ -3027,7 +3038,7 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		promptHook[root] = state
 	}
-	claudeConfigRoots, _ := surface.DescribeClaudeConfigRoots(home)
+	claudeConfigRoots, _ := a.claudeConfigRoots(ctx)
 	service := a.service()
 	serviceProblems := service.Problems()
 	if serviceProblems == nil {

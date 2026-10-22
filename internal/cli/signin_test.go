@@ -102,9 +102,13 @@ func TestSigninCommandsCallTheDaemonAPI(t *testing.T) {
 		}
 	}
 	got := api.requests
-	if len(got) != 6 {
+	if len(got) != 7 {
 		t.Fatalf("requests=%+v", got)
 	}
+	if got[1].Method != http.MethodGet || got[1].Path != "/api/v1/claude/roots" {
+		t.Fatalf("signin list must show each Claude account's profile: %+v", got[1])
+	}
+	got = append(got[:1], got[2:]...)
 	if got[1].Method != http.MethodPost || got[1].Body["browser"] != "chrome" || got[1].Body["profile"] != "Profile 2" || got[1].Body["label"] != "Work Chrome" {
 		t.Fatalf("add=%+v", got[1])
 	}

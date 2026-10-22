@@ -315,3 +315,49 @@ func TestOffConsumerSaysHowToTurnItBackOn(t *testing.T) {
 		}
 	}
 }
+
+func TestCandidatesListTheChoiceFirstThenEveryReadableProfile(t *testing.T) {
+	requireDesktopRoots(t)
+	home := t.TempDir()
+	chrome := chromiumRoot(home, Chrome)
+	writeFile(t, filepath.Join(chrome, "Default", "Cookies"), "")
+	writeFile(t, filepath.Join(chrome, "Profile 1", "Cookies"), "")
+	personal := Profile{ID: "sp_personal", Label: "personal", Browser: Chrome, Profile: "Default"}
+	work := Profile{ID: "sp_work", Label: "work", Browser: Chrome, Profile: "Profile 1"}
+	gone := Profile{ID: "sp_gone", Label: "gone", Browser: Chrome, Profile: "Profile 9"}
+	profiles := []Profile{gone, personal, work}
+
+	sources, err := CandidatesFor(home, Claude, Choice{Mode: Chosen, Profile: &work}, profiles)
+	if err != nil || len(sources) != 2 || sources[0].ProfileID != "sp_work" || sources[1].ProfileID != "sp_personal" {
+		t.Fatalf("sources=%+v err=%v", sources, err)
+	}
+	sources, err = CandidatesFor(home, Claude, Choice{Mode: Chosen, Profile: &gone}, profiles)
+	if err != nil || len(sources) != 2 || sources[0].ProfileID != "sp_personal" || sources[1].ProfileID != "sp_work" {
+		t.Fatalf("an unreadable choice still leaves the readable profiles: sources=%+v err=%v", sources, err)
+	}
+	if _, err := CandidatesFor(home, Claude, Choice{Mode: Chosen, Profile: &gone}, []Profile{gone}); err == nil || !strings.Contains(err.Error(), "no longer exists") {
+		t.Fatalf("with nothing readable the choice's problem is the answer: err=%v", err)
+	}
+	if sources, err := CandidatesFor(home, Claude, Choice{Mode: Off}, profiles); !IsOff(err) || sources != nil {
+		t.Fatalf("a consumer turned off reads no profile: sources=%+v err=%v", sources, err)
+	}
+}
+
+func TestCandidatesListTheAutomaticProfileOnceWhenItIsAlsoAdded(t *testing.T) {
+	requireDesktopRoots(t)
+	if runtime.GOOS != "darwin" {
+		t.Skip("LaunchServices is macOS only")
+	}
+	home := t.TempDir()
+	chrome := chromiumRoot(home, Chrome)
+	writeFile(t, filepath.Join(chrome, "Local State"), `{"profile":{"last_used":"Default","info_cache":{"Default":{"name":"Personal"},"Profile 1":{"name":"Work"}}}}`)
+	writeFile(t, filepath.Join(chrome, "Default", "Cookies"), "")
+	writeFile(t, filepath.Join(chrome, "Profile 1", "Cookies"), "")
+	setDefaultBrowser(t, home, browserID(Chrome))
+	profiles := []Profile{{ID: "sp_personal", Label: "personal", Browser: Chrome, Profile: "Default"}, {ID: "sp_work", Label: "work", Browser: Chrome, Profile: "Profile 1"}}
+
+	sources, err := CandidatesFor(home, Claude, Choice{Mode: Automatic}, profiles)
+	if err != nil || len(sources) != 2 || sources[0].Dir != filepath.Join(chrome, "Default") || sources[1].ProfileID != "sp_work" {
+		t.Fatalf("one cookie store is one candidate: sources=%+v err=%v", sources, err)
+	}
+}

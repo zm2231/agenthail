@@ -81,6 +81,10 @@ type switchableSignin struct{ source signin.Source }
 
 func (s *switchableSignin) ResolveSignin(signin.Target) (signin.Source, error) { return s.source, nil }
 
+func (s *switchableSignin) SigninCandidates(signin.Consumer) ([]signin.Source, error) {
+	return []signin.Source{s.source}, nil
+}
+
 func TestNotionWithSigninOffReadsNoCookiesAndSaysHowToTurnItOn(t *testing.T) {
 	fixture := newCookieFixture(t)
 	notion := NewNotion(nil, "", "")
@@ -145,6 +149,11 @@ type unreadableSignin struct{}
 
 func (unreadableSignin) ResolveSignin(target signin.Target) (signin.Source, error) {
 	return signin.Source{}, signin.ProblemError{Consumer: target.Consumer, Err: errors.New("permission denied reading Safari data at /fixture/Cookies.binarycookies")}
+}
+
+func (u unreadableSignin) SigninCandidates(consumer signin.Consumer) ([]signin.Source, error) {
+	_, err := u.ResolveSignin(signin.Target{Consumer: consumer})
+	return nil, err
 }
 
 func TestClaudeRemoteControlWithAnUnreadableProfileFailsBeforePosting(t *testing.T) {
@@ -228,6 +237,11 @@ func (s *lockedSignin) ResolveSignin(signin.Target) (signin.Source, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.source, nil
+}
+
+func (s *lockedSignin) SigninCandidates(signin.Consumer) ([]signin.Source, error) {
+	source, err := s.ResolveSignin(signin.Target{})
+	return []signin.Source{source}, err
 }
 
 func (s *lockedSignin) use(source signin.Source) {

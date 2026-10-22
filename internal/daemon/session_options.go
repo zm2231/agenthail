@@ -49,7 +49,7 @@ func (d *Daemon) sessionOptionsHandler(w http.ResponseWriter, r *http.Request) {
 		launchers = d.transportResolver.Options(r.Context())
 	}
 	claudeConfigRoots := []surface.ClaudeConfigRoot{}
-	if roots := d.claudeConfigRoots(); roots != nil {
+	if roots := d.liveClaudeConfigRoots(r.Context()); roots != nil {
 		claudeConfigRoots = roots
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"host": d.localHost(), "surfaces": options, "projects": projects, "launchers": launchers, "claudeConfigRoots": claudeConfigRoots})

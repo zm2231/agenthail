@@ -189,6 +189,19 @@ func (a *App) signinList(ctx context.Context, jsonOut bool) error {
 		}
 	}
 	fmt.Printf("  change: agenthail signin use <%s> <profile|auto|none>\n", consumerList())
+	if roots, err := a.claudeConfigRoots(ctx); err == nil && len(roots) > 0 {
+		fmt.Println("Claude config roots (Remote Control uses the profile signed into each root's login):")
+		for _, root := range roots {
+			if root.SignedInAs == nil {
+				continue
+			}
+			profile := root.Signin
+			if root.SigninProblem != "" {
+				profile = "no profile: " + root.SigninProblem
+			}
+			fmt.Printf("  %s  %s  %s\n", root.Name, root.SignedInAs.Email, profile)
+		}
+	}
 	fmt.Println("Sign-in profiles:")
 	if len(listing.Profiles) == 0 {
 		fmt.Println("  none; to pin a consumer to another profile: agenthail signin add <browser> <profile>")

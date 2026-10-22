@@ -47,6 +47,7 @@ type Claude struct {
 	host         *claudeHost
 	prompts      *claudePrompts
 	request      ClaudeRequest
+	webAccounts  claudeWebAccounts
 	localOnly    bool
 }
 
@@ -60,7 +61,7 @@ func NewClaudeWithRequest(signins signin.Resolver, home string, request ClaudeRe
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(), host: newClaudeHost(home), prompts: newClaudePrompts()}
+	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(), host: newClaudeHost(home), prompts: newClaudePrompts(), webAccounts: claudeWebAccounts{byProfile: map[string]claudeWebAccountEntry{}}}
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
@@ -153,7 +154,7 @@ func (c *Claude) Health(ctx context.Context) error {
 		}
 		return err
 	}
-	cookies, signinErr := c.cookieSource("")
+	cookies, signinErr := c.cookieSource(ctx, nil)
 	if signin.IsOff(signinErr) {
 		if bridged {
 			return signinErr
@@ -191,17 +192,6 @@ func signinTerminalKind(err error) surface.DeliveryTerminalKind {
 		return surface.DeliverySigninUnreadable
 	}
 	return surface.DeliveryAuthenticationNeeded
-}
-
-// cookieSource resolves the browser profile for one claude.ai request. It runs
-// before anything is posted, so an unset profile never becomes an uncertain
-// delivery.
-func (c *Claude) cookieSource(sessionID string) (CookieSource, error) {
-	source, err := signin.Resolve(c.signins, signin.Target{Consumer: signin.Claude, SessionID: sessionID})
-	if err != nil {
-		return CookieSource{}, err
-	}
-	return CookieSource{Bridge: c.cookieBridge, URL: "https://claude.ai/", Signin: source}, nil
 }
 
 func (c *Claude) headerMap(_, _ string) map[string]string {
@@ -1145,9 +1135,9 @@ func (c *Claude) postContent(ctx context.Context, sess *surface.Session, content
 	if sess.Bridge == "" {
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude conversation %s has no Remote Control attachment", sess.ID))
 	}
-	cookies, err := c.cookieSource(sess.ID)
+	cookies, err := c.cookieSource(ctx, sess)
 	if err != nil {
-		return nil, surface.DeliveryTerminal(err, signinTerminalKind(err))
+		return nil, cookieSourceError(err)
 	}
 	uuid := newUUID()
 	cse := toCse(sess.Bridge)
