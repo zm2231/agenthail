@@ -59,6 +59,7 @@
 		A722F7B0550D409685BAA667 /* TurnSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C7ED5DA9CEE19B4E507FE57 /* TurnSettings.swift */; };
 		A7579C815C6617411EC2AA6F /* ActivityPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D12B1DC6197256B5C3DBC /* ActivityPresentationTests.swift */; };
 		AB62E3BDE27A26B462335BEA /* SessionSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5754FCCBE0D9C3A064B3D17E /* SessionSelection.swift */; };
+		AC307D7B22335D90E69B08B8 /* UIConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39165C9FB624F0AFA9B6A590 /* UIConfig.swift */; };
 		B44C624C75C0ECD2F23A9F6B /* PushRelayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6106D394E6CAEE8B12827D6 /* PushRelayClient.swift */; };
 		B6D305B6D6F47E2203575903 /* PairingLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3085052480F0B14328A21215 /* PairingLink.swift */; };
 		B935C015C6F2FA2321613C35 /* SessionStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24B656FE4EB45788315815D /* SessionStyle.swift */; };
@@ -139,6 +140,7 @@
 		33AFDDC2552D1DC17F94ABC1 /* ComposerAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerAttachment.swift; sourceTree = "<group>"; };
 		352FB70958533EE6B1BD305F /* AgenthailIOSViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgenthailIOSViews.swift; sourceTree = "<group>"; };
 		35D92AE806F316D43805F232 /* ToolContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolContentView.swift; sourceTree = "<group>"; };
+		39165C9FB624F0AFA9B6A590 /* UIConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIConfig.swift; sourceTree = "<group>"; };
 		3F91185845FD3DB37E5314A7 /* MetadataOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataOverlay.swift; sourceTree = "<group>"; };
 		41DF0D6EBD30C6D301B896D2 /* TranscriptContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptContext.swift; sourceTree = "<group>"; };
 		4297F79B0E285D005AC6D64C /* SessionPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPreview.swift; sourceTree = "<group>"; };
@@ -291,6 +293,7 @@
 				0EBFE61CC399105A1DE63886 /* SessionTree.swift */,
 				EB53D9DA4DA0D72FCE6BE06B /* ToolPresentation.swift */,
 				9C7ED5DA9CEE19B4E507FE57 /* TurnSettings.swift */,
+				39165C9FB624F0AFA9B6A590 /* UIConfig.swift */,
 				70F31C89F20967C2A9D6B5BC /* VoiceAPI.swift */,
 				1BE85140BFF4D3D8B996F2AD /* VoiceAudioBridge.swift */,
 				C8E82B270A0825F319A10EBD /* VoiceCallDiagnostics.swift */,
@@ -506,6 +509,7 @@
 				FA9155E997577CAC5815DA96 /* TranscriptContext.swift in Sources */,
 				A722F7B0550D409685BAA667 /* TurnSettings.swift in Sources */,
 				974D95FB09748D667F1EC63B /* TurnSettingsView.swift in Sources */,
+				AC307D7B22335D90E69B08B8 /* UIConfig.swift in Sources */,
 				2F390DCA359AD2E249947755 /* VoiceAPI.swift in Sources */,
 				CF8F58BBB065D68EA89FDB74 /* VoiceAudioBridge.swift in Sources */,
 				71E1B11E844EB9A03D8BCCC4 /* VoiceCallCoordinator.swift in Sources */,

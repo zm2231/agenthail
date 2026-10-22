@@ -29,6 +29,7 @@ SOURCES=(
   MetadataOverlay.swift
   StatusRefreshPolicy.swift
   TurnSettings.swift
+  UIConfig.swift
   VoiceAPI.swift
   VoiceAudioBridge.swift
   VoiceCallDiagnostics.swift
@@ -45,6 +46,7 @@ SOURCES=(
   macOS/Overview.swift
   macOS/PeerEnvelope.swift
   macOS/QueueFacts.swift
+  macOS/ScrimField.swift
   macOS/SessionFacts.swift
   macOS/SessionHandle.swift
   macOS/SessionLaunch.swift
