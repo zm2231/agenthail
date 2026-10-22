@@ -27,10 +27,11 @@ struct SettingsRequestsTest {
         model.setCodexRecentHours(12)
         let config = await waitFor { $0.path == "/api/v1/settings" && $0.method == "POST" }
         check(config?.body["action"] as? String == "dashboard-config" && config?.body["codexRecentHours"] as? Int == 12 && config?.body["busyDelivery"] as? String == "steer", "the window change keeps the busy delivery: \(String(describing: config?.body))")
+        check(await waitFor { $0.path == "/api/v1/snapshot" } != nil, "the window change refreshes the snapshot")
         RecordingProtocol.reset()
         model.setCodexRecentHours(5)
         try? await Task.sleep(for: .milliseconds(200))
-        check(RecordingProtocol.requests.isEmpty, "choosing the current window sends nothing")
+        check(RecordingProtocol.requests.isEmpty, "choosing the current window sends nothing: \(RecordingProtocol.requests.map { "\($0.method) \($0.path)" })")
 
         RecordingProtocol.reset()
         model.performOperation(action: "relay-add", fromID: "@research", toID: "@builder", pattern: "READY", once: true)

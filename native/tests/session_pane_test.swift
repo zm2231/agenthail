@@ -45,6 +45,35 @@ struct SessionPaneTest {
         let idle = SessionState(id: "I", surface: "codex", name: "i", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
         check(!SessionPane.stopAvailable(idle, removed: false, draftEmpty: true) && !SessionPane.stopAvailable(nil, removed: false, draftEmpty: true), "nothing to stop when idle or unselected")
 
+        UserDefaults.standard.removeObject(forKey: "sessionTabs")
+        let tabbedModel = AgenthailModel(connecting: false)
+        let tabbed = tabbedModel.mainPane!
+        tabbed.select("A", keep: true)
+        tabbed.openNewSession()
+        let new = SessionTabs.newSession
+        check(tabbed.tabs.tabs.map(\.id) == ["A", new] && tabbed.tabs.active == new && tabbed.selectedSessionID == nil && tabbed.newSession != nil, "New Session opens its own tab and clears the selection")
+        tabbed.newSession?.form.message = "half written"
+        tabbed.activateTab("A")
+        check(tabbed.selectedSessionID == "A" && tabbed.newSession?.form.message == "half written", "switching away keeps the New Session draft")
+        tabbed.openNewSession()
+        check(tabbed.tabs.tabs.count == 2 && tabbed.selectedSessionID == nil, "New Session reuses its open tab")
+        tabbed.stepTab(-1)
+        tabbed.stepTab(1)
+        check(tabbed.selectedSessionID == nil && tabbed.tabs.active == new, "stepping onto the New Session tab shows it")
+        tabbed.showStarted("S")
+        check(tabbed.tabs.tabs.map(\.id) == ["A", "S"] && tabbed.tabs.active == "S" && tabbed.selectedSessionID == "S" && tabbed.newSession == nil, "a started session takes over the New Session tab")
+        tabbed.closeTab("A")
+        tabbed.closeTab("S")
+        check(tabbed.tabs.tabs.map(\.id) == [new] && tabbed.selectedSessionID == nil && tabbed.newSession?.form.message == "", "closing the last tab leaves a fresh New Session")
+        UserDefaults.standard.removeObject(forKey: "sessionTabs")
+
+        let plain = model.openPane()
+        plain.select("A")
+        plain.openNewSession()
+        check(plain.selectedSessionID == nil && plain.newSession != nil && plain.tabs.tabs.isEmpty, "without tabs New Session replaces the selection")
+        plain.select("B")
+        check(plain.newSession == nil && plain.selectedSessionID == "B", "choosing a session leaves New Session")
+
         let watched = model.openPane()
         watched.select("E")
         var changes = 0
@@ -249,6 +278,83 @@ struct SessionPaneTest {
         check(await received.finished, "cancelling a silent open stream ends it")
         openServer.stop()
 
+        var actions: [String] = []
+        var failUnarchive = false
+        let archive = try! StubServer { request, _ in
+            guard request.contains("session-unarchive") else { return StubServer.reply("200 OK", "{}") }
+            actions.append(request)
+            return failUnarchive ? StubServer.reply("500 Internal Server Error", #"{"error":{"message":"unarchive failed"}}"#) : StubServer.reply("200 OK", "{}")
+        }
+        let archivePort = await archive.ready()
+        let archiveModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(archivePort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
+        let archivePane = archiveModel.openPane()
+        let noticeA = SessionState(id: "NA", surface: "codex", name: "a", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
+        let noticeB = SessionState(id: "NB", surface: "codex", name: "b", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
+        archivePane.archivedTab = noticeA
+        archivePane.archivedTab = noticeB
+        await archivePane.unarchiveTab(noticeA)
+        check(actions.count == 1 && actions[0].contains("\"NA\"") && !actions[0].contains("\"NB\""), "Unarchive acts on the notice that was clicked: \(actions)")
+        check(archivePane.archivedTab?.id == "NB" && archivePane.archivedTabError == nil, "a newer notice stays after the older one is unarchived")
+        failUnarchive = true
+        await archivePane.unarchiveTab(noticeB)
+        check(archivePane.archivedTab?.id == "NB" && archivePane.archivedTabError?.contains("unarchive failed") == true, "a failed unarchive keeps the notice with the reason: \(String(describing: archivePane.archivedTabError))")
+        archivePane.archivedTab = nil
+        await archivePane.unarchiveTab(noticeA)
+        check(archivePane.archivedTab?.id == "NA" && archivePane.archivedTabError != nil, "a failure after dismissal brings the notice back with the reason")
+        archiveModel.closePane(archivePane)
+        archive.stop()
+        let unreachable = model.openPane()
+        unreachable.archivedTab = noticeA
+        await unreachable.unarchiveTab(noticeA)
+        check(unreachable.archivedTab?.id == "NA" && unreachable.archivedTabError?.contains("connected") == true, "without a connection the notice stays and says why")
+
+        let restoredTabs = { () -> SessionTabs in
+            var tabs = SessionTabs()
+            tabs.open("A", keep: true)
+            tabs.open(SessionTabs.newSession, keep: true)
+            return tabs
+        }()
+        UserDefaults.standard.set(try! JSONEncoder().encode(restoredTabs), forKey: "sessionTabs")
+        let restoredModel = AgenthailModel(connecting: false)
+        check(restoredModel.mainPane.tabs.active == SessionTabs.newSession && restoredModel.mainPane.newSession != nil, "a restored New Session tab has its draft before any snapshot")
+        UserDefaults.standard.removeObject(forKey: "sessionTabs")
+
+        let offlineModel = AgenthailModel(connecting: false)
+        offlineModel.openNewSession(message: "while offline")
+        let offlineDraft = offlineModel.mainPane.newSession
+        offlineDraft?.form.folder = "/work/sample"
+        check(offlineDraft?.form.message == "while offline" && offlineDraft?.canStart == false, "New Session opens while disconnected, and Start waits for the connection")
+        if let offlineDraft {
+            offlineDraft.hosts.receive(options: try! JSONDecoder().decode(SessionCreationOptions.self, from: Data(#"{"surfaces":[{"id":"claude","workspace":true}],"projects":[]}"#.utf8)), for: offlineDraft.hosts.generation)
+            await offlineDraft.loadModels()
+            check(offlineDraft.modelError == nil && offlineDraft.hosts.models["claude"] == nil, "models wait for the connection instead of failing, so reconnecting loads them")
+        }
+        UserDefaults.standard.removeObject(forKey: "sessionTabs")
+
+        let launch = try! StubServer { request, _ in
+            request.contains("\"surface\"") && request.contains("/api/v1/actions") ? StubServer.hold : StubServer.reply("200 OK", "{}")
+        }
+        let launchPort = await launch.ready()
+        let launchModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(launchPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
+        launchModel.snapshot = DashboardSnapshot(updatedAt: "2026-10-22T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        launchModel.openNewSession()
+        let launching = launchModel.mainPane.newSession!
+        launching.hosts.receive(options: try! JSONDecoder().decode(SessionCreationOptions.self, from: Data(#"{"surfaces":[{"id":"claude","workspace":true}],"projects":[]}"#.utf8)), for: launching.hosts.generation)
+        launching.form.folder = "/work/sample"
+        launching.form.message = "first"
+        check(launching.canStart, "a complete form can start: \(launching.form)")
+        launching.start()
+        launchModel.receiveSharedText("shared while starting")
+        check(launching.starting && launching.form.message == "first", "text shared while starting waits")
+        for _ in 0..<60 where launch.heldCount == 0 { try? await Task.sleep(for: .milliseconds(50)) }
+        launch.release(StubServer.reply("200 OK", #"{"ok":true,"accepted":true}"#))
+        for _ in 0..<60 where launching.submitted == nil { try? await Task.sleep(for: .milliseconds(50)) }
+        launchModel.receiveSharedText("shared after submitting")
+        check(launching.submitted != nil && launching.form.message == "first", "text shared after submitting waits: \(launching.form.message)")
+        launching.reset()
+        check(launching.form.message == "shared while starting\n\nshared after submitting", "held text arrives once the draft is editable, each piece once: \(launching.form.message)")
+        launch.stop()
+        UserDefaults.standard.removeObject(forKey: "sessionTabs")
         func row(_ seq: Int, _ id: String, op: String = "upsert", kind: String = "message", text: String? = nil, reason: String? = nil) -> String {
             let item = text.map { #","item":{"id":"\#(id)","kind":"\#(kind)","role":"assistant","title":"\#(kind)","text":"\#($0)","truncated":false}"# } ?? ""
             let why = reason.map { #","reason":"\#($0)""# } ?? ""
@@ -416,14 +522,30 @@ struct SessionPaneTest {
             listener.newConnectionHandler = { [self] connection in
                 connections.append(connection)
                 connection.start(queue: .main)
-                connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [self] data, _, _, _ in
-                    let line = data.flatMap { String(data: $0, encoding: .utf8) }?.components(separatedBy: "\r\n").first ?? ""
+                read(connection, Data()) { [self] request in
                     requests += 1
-                    lines[ObjectIdentifier(connection)] = line
-                    guard let reply = respond(line, requests) else { return }
+                    lines[ObjectIdentifier(connection)] = request
+                    guard let reply = respond(request, requests) else { return }
                     if reply == Self.hold { held.append(connection); return }
                     connection.send(content: Data(reply.utf8), completion: .contentProcessed { _ in })
                 }
+            }
+        }
+
+        /// Reads one request: the headers, then as much body as they declare.
+        private func read(_ connection: NWConnection, _ received: Data, then handle: @escaping (String) -> Void) {
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [self] data, _, complete, error in
+                let all = received + (data ?? Data())
+                let text = String(decoding: all, as: UTF8.self)
+                if let end = text.range(of: "\r\n\r\n") {
+                    let length = text[..<end.lowerBound].components(separatedBy: "\r\n")
+                        .first { $0.lowercased().hasPrefix("content-length:") }
+                        .flatMap { Int($0.split(separator: ":")[1].trimmingCharacters(in: .whitespaces)) } ?? 0
+                    if text[end.upperBound...].utf8.count >= length || complete || error != nil { return handle(text) }
+                } else if complete || error != nil {
+                    return handle(text)
+                }
+                read(connection, all, then: handle)
             }
         }
 
@@ -439,6 +561,8 @@ struct SessionPaneTest {
                 listener.start(queue: .main)
             }
         }
+
+        var heldCount: Int { held.count }
 
         func push(_ text: String, to path: String) {
             connections.filter { lines[ObjectIdentifier($0)]?.contains(path) == true }

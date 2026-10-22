@@ -179,6 +179,24 @@ final class AgenthailAPI: @unchecked Sendable {
         return data
     }
 
+    func uiConfig(device: String) async throws -> UIConfig {
+        var components = URLComponents()
+        components.path = "/api/v1/ui"
+        components.queryItems = [URLQueryItem(name: "class", value: "mac"), URLQueryItem(name: "device", value: device)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await get(path)
+    }
+
+    func uiBackground(path rel: String) async throws -> Data {
+        var components = URLComponents()
+        components.path = "/api/v1/ui/background"
+        components.queryItems = [URLQueryItem(name: "path", value: rel)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        let (data, response) = try await session.data(for: authorizedRequest(path: path))
+        try validate(response: response, data: data)
+        return data
+    }
+
     func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), busyDelivery: String? = nil, author: String? = nil, attachments: [String] = [], idempotencyKey: String? = nil) async throws -> ActionReceipt {
         let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings, busyDelivery: busyDelivery, author: author, attachments: attachments)
         return try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey)

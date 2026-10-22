@@ -336,6 +336,7 @@ Read the full [security and privacy model](SECURITY.md).
 
 - `agenthail doctor` checks connection and current-session discovery. Each delivery also checks that the target can accept input immediately before a turn starts.
 - [Native Mac and iPhone apps](docs/native-apps.md)
+- [Appearance with ui.conf](docs/ui-conf.md)
 - [Security and privacy](SECURITY.md)
 - [Maintainer documentation](docs/maintainers/)
 

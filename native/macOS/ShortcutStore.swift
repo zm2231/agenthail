@@ -34,6 +34,11 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case rename
     case openInNewWindow
     case refresh
+    case newTab
+    case closeTab
+    case nextTab
+    case previousTab
+    case keepTab
 
     var id: String { rawValue }
 
@@ -56,6 +61,11 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .rename: "Rename session"
         case .openInNewWindow: "Open session in new window"
         case .refresh: "Refresh"
+        case .newTab: "New tab"
+        case .closeTab: "Close tab"
+        case .nextTab: "Next tab"
+        case .previousTab: "Previous tab"
+        case .keepTab: "Keep tab open"
         }
     }
 
@@ -76,7 +86,11 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .sendAlternate: StoredShortcut(kVK_Return, cmdKey | optionKey)
         case .stop: StoredShortcut(kVK_ANSI_Period, cmdKey)
         case .refresh: StoredShortcut(kVK_ANSI_R, cmdKey)
-        case .rename, .openInNewWindow: nil
+        case .newTab: StoredShortcut(kVK_ANSI_T, cmdKey)
+        case .closeTab: StoredShortcut(kVK_ANSI_W, cmdKey)
+        case .nextTab: StoredShortcut(kVK_ANSI_RightBracket, cmdKey | shiftKey)
+        case .previousTab: StoredShortcut(kVK_ANSI_LeftBracket, cmdKey | shiftKey)
+        case .rename, .openInNewWindow, .keepTab: nil
         }
     }
 }

@@ -13,31 +13,14 @@ struct DesktopWindow: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            SessionSidebar(model: model, pane: pane)
-                .navigationSplitViewColumnWidth(min: 248, ideal: 264, max: 280)
-        } detail: {
-            ConversationPane(model: model, pane: pane)
-                .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
-                .ignoresSafeArea(.container, edges: .top)
-                .navigationSplitViewColumnWidth(min: 340, ideal: 892)
-                .inspector(isPresented: $pane.inspectorVisible) {
-                    SessionInspector(model: model, pane: pane)
-                        .ignoresSafeArea(.container, edges: .top)
-                        .inspectorColumnWidth(min: 270, ideal: 284, max: 300)
-                }
+        WindowChromeLayout(model: model, pane: pane, interface: model.interface) {
+            splitView
         }
         .disabled(model.paletteVisible)
-        .background(DesktopPalette.window)
-        .toolbar(removing: .sidebarToggle)
+        .windowBackdrop(model.interface)
         .environmentObject(model)
         .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
         .sheet(item: $pane.adoptingSession) { AdoptSessionSheet(model: model, session: $0) }
-        .sheet(isPresented: $model.newSessionVisible, onDismiss: {
-            if model.newSessionMessage != nil { model.newSessionVisible = true }
-        }) {
-            NewSessionSheet(model: model)
-        }
         .overlay(alignment: .top) {
             if model.paletteVisible {
                 ZStack(alignment: .top) {
@@ -58,6 +41,57 @@ struct DesktopWindow: View {
         .focusedSceneObject(pane)
         .onAppear { model.windowAppeared() }
         .onDisappear { model.windowDisappeared() }
+    }
+
+    private var splitView: some View {
+        NavigationSplitView {
+            SessionSidebar(model: model, pane: pane)
+                .belowWindowChrome()
+                .toolbar(removing: .sidebarToggle)
+                .navigationSplitViewColumnWidth(min: 248, ideal: 264, max: 280)
+        } detail: {
+            ConversationPane(model: model, pane: pane)
+                .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
+                .belowWindowChrome()
+                .ignoresSafeArea(.container, edges: .top)
+                .navigationSplitViewColumnWidth(min: 340, ideal: 892)
+                .inspector(isPresented: Binding(get: { pane.inspectorVisible && pane.displayedSession != nil }, set: { if pane.displayedSession != nil { pane.inspectorVisible = $0 } })) {
+                    SessionInspector(model: model, pane: pane)
+                        .belowWindowChrome()
+                        .ignoresSafeArea(.container, edges: .top)
+                        .inspectorColumnWidth(min: 270, ideal: 284, max: 300)
+                }
+        }
+    }
+}
+
+private struct WindowChromeLayout<Content: View>: View {
+    @ObservedObject var model: AgenthailModel
+    @ObservedObject var pane: SessionPane
+    @ObservedObject var interface: InterfaceStore
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        let tabs = pane.tabsEnabled
+        VStack(spacing: 0) {
+            content
+                .environment(\.windowChromeTop, tabs ? TitleBarStrip.height : 0)
+                .overlay(alignment: .top) {
+                    if tabs {
+                        TitleBarStrip(model: model, pane: pane, interface: interface)
+                            .ignoresSafeArea(.container, edges: .top)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if let session = pane.archivedTab {
+                        ArchivedTabNotice(pane: pane, session: session, label: interface.config.tabLabel)
+                            .padding(.bottom, 132)
+                            .transition(.opacity)
+                    }
+                }
+            if !interface.config.statusItems.isEmpty { StatusStrip(model: model, pane: pane, interface: interface) }
+        }
+        .background { if tabs { WindowRectReader { _, window in TitleBarStrip.placeWindowButtons(in: window) } } }
     }
 }
 
@@ -96,7 +130,7 @@ struct SessionSidebar: View {
                 Spacer()
                 SessionRefinementMenu(model: model)
                 Button {
-                    model.newSessionVisible = true
+                    model.openNewSession()
                 } label: {
                     Image(systemName: "square.and.pencil")
                 }
@@ -204,7 +238,7 @@ struct SessionSidebar: View {
 
             ConnectionFooter(model: model)
         }
-        .background(DesktopPalette.side)
+        .glassPane("sidebar", .sidebar, fallback: DesktopPalette.side)
         .background {
             let order = visibleOrder(tree)
             Button("") { step(order, by: -1) }
@@ -356,7 +390,7 @@ extension SessionSidebar {
         let selected = pane.selectedSessionID == session.id
         let needsYou = attention != nil
         return Button {
-            pane.select(session.id)
+            pane.select(session.id, keep: NSEvent.modifierFlags.contains(.command))
         } label: {
             SessionRowView(session: session, title: title, family: family, needsYou: needsYou, reason: showsReason ? attention?.reason : nil, finishedUnseen: model.finishedUnseen.contains(session.id))
                 .padding(.vertical, 6)
@@ -366,6 +400,7 @@ extension SessionSidebar {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture(count: 2).onEnded { pane.keepTab(session.id) })
         .accessibilityAddTraits(selected ? .isSelected : [])
         .contextMenu {
             Button("Open in New Window") { openWindow(id: "session", value: session.id) }
@@ -655,7 +690,7 @@ struct ConversationPane: View {
                         NSApplication.shared.activate()
                         openWindow(id: "voice")
                     })
-                    .background(DesktopPalette.window)
+                    .backdropSurface(DesktopPalette.window, paneID: "content")
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     if pane.removedSession?.id == session.id {
@@ -682,14 +717,17 @@ struct ConversationPane: View {
                             if let error = pane.requestError {
                                 Text(error).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, DesktopSpace.l).padding(.top, DesktopSpace.xs)
                                     .frame(maxWidth: .infinity)
-                                    .background(DesktopPalette.window)
+                                    .backdropSurface(DesktopPalette.window, paneID: "content")
                             }
                             ComposerView(model: model, pane: pane, session: session)
                         }
                     }
                 }
-            .background(DesktopPalette.window)
+            .glassPane("content", .content, fallback: DesktopPalette.window)
             .environmentObject(pane)
+        } else if let draft = pane.newSession {
+            NewSessionView(model: model, draft: draft)
+                .glassPane("content", .content, fallback: DesktopPalette.window)
         } else {
             ContentUnavailableView {
                 if model.isConnected {
@@ -712,7 +750,10 @@ struct ConversationPane: View {
                     Button("Start Agenthail") { model.restartDaemon() }
                 }
             }
-            .background(DesktopPalette.window)
+            .fixedSize()
+            .scrimText("empty")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .backdropSurface(DesktopPalette.window)
         }
     }
 }
@@ -1616,7 +1657,7 @@ struct ComposerView: View {
                     .padding(.top, 6)
                     .padding(.bottom, DesktopSpace.s)
                 }
-                .background(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
+                .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
                 .overlay(RoundedRectangle(cornerRadius: DesktopRadius.sheet).strokeBorder(dropTargeted ? DesktopPalette.accent : DesktopPalette.line, lineWidth: dropTargeted ? 2 : 1))
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
                 .onDrop(of: [.fileURL, .image], isTargeted: Binding(get: { dropTargeted }, set: { dropTargeted = $0 && session.capabilities.attach })) { providers in
@@ -1650,10 +1691,7 @@ struct ComposerView: View {
         .padding(.top, 40)
         .padding(.bottom, DesktopSpace.xl)
         .frame(maxWidth: .infinity)
-        .background(
-            LinearGradient(colors: [DesktopPalette.window.opacity(0), DesktopPalette.window], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.38))
-                .allowsHitTesting(false)
-        )
+        .backdropFade(DesktopPalette.window, paneID: "content", solidFrom: 0.38)
         .onAppear { focused = true }
     }
 
@@ -1970,7 +2008,7 @@ struct SessionInspector: View {
                 Spacer()
             }
         }
-        .background(DesktopPalette.side)
+        .glassPane("inspector", .sidebar, fallback: DesktopPalette.side)
     }
 }
 
