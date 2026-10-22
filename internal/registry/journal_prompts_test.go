@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -130,7 +131,7 @@ func TestJournalPromptsReadsThePromptIndex(t *testing.T) {
 	if _, err := r.JournalPrompts(JournalPromptQuery{Limit: 1}); err != nil {
 		t.Fatal(err)
 	}
-	for _, test := range []struct{ session, index string }{{"", "COVERING INDEX session_journal_prompts_at"}, {"a", "COVERING INDEX session_journal_prompts "}} {
+	for _, test := range []struct{ session, index string }{{"", "USING INDEX session_journal_prompts_at"}, {"a", "USING INDEX session_journal_prompts "}} {
 		rows, err := r.read.Query(`EXPLAIN QUERY PLAN `+journalPromptsSQL(test.session != ""), test.session, "", "", 0.0, 0, 1)
 		if err != nil {
 			t.Fatal(err)
@@ -149,5 +150,36 @@ func TestJournalPromptsReadsThePromptIndex(t *testing.T) {
 		if !strings.Contains(joined, test.index) || strings.Contains(joined, "TEMP B-TREE") {
 			t.Fatalf("session %q: plan does not read %s in order:\n%s", test.session, test.index, joined)
 		}
+	}
+}
+
+func TestJournalPromptColumnsTolerateAnyPayloadAndReopening(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, r, "a")
+	for _, entry := range []SessionJournalEntry{
+		{SessionID: "a", Kind: "message", ProviderKey: "raw", Payload: []byte("not json"), ObservedAt: time.Unix(1, 0)},
+		{SessionID: "a", Kind: "tool", ProviderKey: "tool", Payload: []byte("{"), ObservedAt: time.Unix(1, 0)},
+	} {
+		if _, _, err := r.AppendSessionJournalEntry(entry, SessionJournalRetention{Count: 100, Bytes: 1 << 20}); err != nil {
+			t.Fatalf("journal %s: %v", entry.Kind, err)
+		}
+	}
+	appendPrompt(t, r, "a", "k", "user", "", "typed", "2026-10-20T10:00:00Z")
+	r.Close()
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	prompts, err := r.JournalPrompts(JournalPromptQuery{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := promptBodies(t, prompts); len(got) != 1 || got[0] != "typed" {
+		t.Fatalf("prompts after reopening = %q", got)
 	}
 }
