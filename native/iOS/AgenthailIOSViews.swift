@@ -214,7 +214,8 @@ struct ConversationListView: View {
                 session.displayName.localizedCaseInsensitiveContains(search) || SessionFamilies.label(session).localizedCaseInsensitiveContains(search) || session.surface.localizedCaseInsensitiveContains(search) || (session.project?.displayName.localizedCaseInsensitiveContains(search) ?? false) || (session.cwd?.localizedCaseInsensitiveContains(search) ?? false)
             }
         }.flatMap(\.sessions)
-        return SessionTree.build(sessions, filter: scope, attentionSessionIDs: Set(model.snapshot?.attention.map(\.sessionId) ?? []))
+        let attention = SessionAttention.build(sessions: model.snapshot?.sessions ?? [], attention: model.snapshot?.attention ?? [], deliveryProblems: model.snapshot?.deliveryProblems ?? [])
+        return SessionTree.build(sessions, filter: scope, attention: attention)
     }
 
     private var families: [SessionFamily] {
