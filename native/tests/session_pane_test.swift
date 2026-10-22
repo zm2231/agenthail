@@ -320,8 +320,9 @@ struct SessionPaneTest {
         streamingServer.release(StubServer.reply("200 OK", pageAt(106, [("c", "c1"), ("e", "e1"), ("a", "a3")])))
         try? await Task.sleep(for: .milliseconds(300))
         streamingServer.release(StubServer.reply("200 OK", pageAt(105, [("c", "c1"), ("a", "a2"), ("e", "e1")])))
-        try? await Task.sleep(for: .milliseconds(300))
-        check(streamingPane.timelineItems.last?.id == "a" && streamingPane.timelineItems.last?.text == "a3", "an older page that lands last keeps an update streamed while both reads were open: \(streamingPane.timelineItems.map { "\($0.id)=\($0.text ?? "")" })")
+        let landedDeadline = Date().addingTimeInterval(5)
+        while streamingPane.pageReadsInFlight > 0, Date() < landedDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        check(streamingPane.timelineItems.last?.id == "a" && streamingPane.timelineItems.last?.text == "a3", "an older page that lands last keeps an update streamed while both reads were open: \(streamingPane.timelineItems.map { "\($0.id)=\($0.text)" })")
         check(streamingPane.streamedRows.isEmpty, "rows kept for overlapping reads are dropped once the last lands: \(streamingPane.streamedRows.count)")
         streamingModel.closePane(streamingPane)
         streamingServer.stop()

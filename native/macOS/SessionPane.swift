@@ -42,7 +42,7 @@ final class SessionPane: ObservableObject, Identifiable {
     /// Rows streamed while a page read is in flight, latest mutation last, so
     /// a page read before some of them arrived can be brought up to date.
     private(set) var streamedRows: [SessionStreamEvent] = []
-    private var pageReadsInFlight = 0
+    private(set) var pageReadsInFlight = 0
     private var streamAwaitsCursor = false
     private var streamUnsupported = false
     private var detailReloadTask: Task<Void, Never>?
