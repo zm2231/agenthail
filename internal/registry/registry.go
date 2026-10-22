@@ -828,6 +828,12 @@ CREATE TABLE IF NOT EXISTS session_journal (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_journal_provider_key
 	ON session_journal(session_id, provider_key) WHERE provider_key!='';
+CREATE INDEX IF NOT EXISTS session_journal_prompts
+	ON session_journal(session_id, COALESCE(julianday(json_extract(payload,'$.ts')),julianday(observed_at),0) DESC, seq DESC, kind, observed_at, body_ref, payload)
+	WHERE kind IN ('message','text') AND json_extract(payload,'$.role')='user';
+CREATE INDEX IF NOT EXISTS session_journal_prompts_at
+	ON session_journal(COALESCE(julianday(json_extract(payload,'$.ts')),julianday(observed_at),0) DESC, session_id DESC, seq DESC, kind, observed_at, body_ref, payload)
+	WHERE kind IN ('message','text') AND json_extract(payload,'$.role')='user';
 CREATE TABLE IF NOT EXISTS session_journal_state (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	next_seq INTEGER NOT NULL DEFAULT 0,

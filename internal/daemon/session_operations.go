@@ -31,6 +31,25 @@ func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Reques
 				return
 			}
 		}
+		if forkOptions.BeforeTurnID != "" {
+			if forkOptions.LastTurnID != "" {
+				writeAPIError(w, http.StatusBadRequest, "fork_point_conflict", "A fork takes lastTurnId or beforeTurnId, not both.")
+				return
+			}
+			previous, found, lookupErr := d.Registry.JournalTurnBefore(session.ID, forkOptions.BeforeTurnID)
+			switch {
+			case lookupErr != nil:
+				http.Error(w, fmt.Sprintf("read the session's turns: %s", lookupErr), http.StatusInternalServerError)
+				return
+			case !found:
+				writeAPIError(w, http.StatusConflict, "fork_turn_unknown", "Agenthail no longer holds that part of this conversation, so it can't fork from there.")
+				return
+			case previous == "":
+				writeAPIError(w, http.StatusConflict, "fork_first_turn", "That prompt started the conversation, so there is nothing before it to fork.")
+				return
+			}
+			forkOptions = surface.ForkOptions{Model: forkOptions.Model, LastTurnID: previous}
+		}
 		name, reserved := d.reserveStartName(w, forkName)
 		if !reserved {
 			return

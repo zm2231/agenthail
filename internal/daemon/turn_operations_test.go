@@ -65,7 +65,7 @@ func TestDashboardForkPersistsAndNativeQueuePreservesCursor(t *testing.T) {
 	d, r, fake, _, _ := daemonFixture(t)
 	adapter := &operationSurface{daemonSurface: fake}
 	d.Surfaces = []surface.Surface{adapter}
-	for _, body := range []string{`{"action":"session-fork","sessionId":"from","fork":{"lastTurnId":"turn-2","cwd":"/elsewhere","beforeTurnId":"turn-1"}}`, `{"action":"native-queue","sessionId":"from","nativeQueue":{"queueAction":"list","cursor":"page2"}}`} {
+	for _, body := range []string{`{"action":"session-fork","sessionId":"from","fork":{"lastTurnId":"turn-2","cwd":"/elsewhere"}}`, `{"action":"native-queue","sessionId":"from","nativeQueue":{"queueAction":"list","cursor":"page2"}}`} {
 		w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", body)
 		if w.Code != 200 {
 			t.Fatal(w.Code, w.Body.String())
