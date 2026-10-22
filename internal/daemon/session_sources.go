@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -711,6 +712,8 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 	transcriptIdentity := trustedIdentity
 	var end int64
 	var dropped []surface.TimelineItem
+	continued := false
+	readToStart := false
 	for {
 		s.providerMu.Lock()
 		read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Before: before, Limit: 40})
@@ -739,21 +742,22 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 		if transcriptIdentity == "" {
 			transcriptIdentity = read.TranscriptIdentity
 		} else if read.TranscriptIdentity != transcriptIdentity {
-			continued := false
-			if continuer, ok := s.adapter.(surface.TranscriptContinuer); ok && len(pages) == 0 {
-				s.providerMu.Lock()
-				dropped, continued, err = continuer.TranscriptContinuation(ctx, &s.session, trustedPath, transcriptIdentity)
-				s.providerMu.Unlock()
-				if err != nil {
-					return err
-				}
-			}
-			if !continued {
+			continuer, ok := s.adapter.(surface.TranscriptContinuer)
+			if !ok || len(pages) > 0 {
 				phase := "during catch-up"
 				if len(pages) == 0 {
 					phase = "before catch-up"
 				}
 				return fmt.Errorf("%s transcript was replaced %s: %w", s.session.Surface, phase, errTranscriptReplaced)
+			}
+			s.providerMu.Lock()
+			dropped, continued, err = continuer.TranscriptContinuation(ctx, &s.session, trustedPath, transcriptIdentity)
+			s.providerMu.Unlock()
+			if err != nil {
+				return err
+			}
+			if !continued {
+				return s.restartJournal(read)
 			}
 			transcriptIdentity = read.TranscriptIdentity
 		}
@@ -770,7 +774,11 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 			end = read.TranscriptOffset
 		}
 		pages = append(pages, read.Items)
-		if timelineItemsOverlapJournal(read.Items, known) || read.NextBefore == 0 {
+		if timelineItemsOverlapJournal(read.Items, known) {
+			break
+		}
+		if read.NextBefore == 0 {
+			readToStart = true
 			break
 		}
 		before = read.NextBefore
@@ -778,11 +786,110 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 	for index := len(pages) - 1; index >= 0; index-- {
 		s.appendSeedItems(pages[index])
 	}
-	s.removeDroppedItems(dropped, known)
+	if continued {
+		s.removeDroppedItems(dropped, known)
+	}
+	// Cursors into a continued transcript address its whole history, so a
+	// boundary recorded against the file it continues no longer holds once
+	// the journal has read that history back to its start.
+	if continued && readToStart {
+		if err := s.manager.registry.LowerSessionJournalHistoryBoundary(s.session.ID, 0); err != nil {
+			return err
+		}
+	}
 	if err := s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, transcriptIdentity); err != nil {
 		return err
 	}
 	return s.recordTranscriptCheckpoint(end, transcriptIdentity)
+}
+
+// restartJournal rebuilds the journal from a fresh read of a transcript that
+// replaced the one the journal was read from but cannot be shown to continue
+// it, with a notice saying so. Rows the fresh read does not hold are removed.
+func (s *sessionSource) restartJournal(read *surface.SessionReadResult) error {
+	notice := surface.TimelineItem{
+		ID:        "transcript-restart:" + read.TranscriptIdentity,
+		Kind:      "notice",
+		Title:     "Conversation reloaded",
+		Text:      "This conversation moved to a new transcript that could not be matched to the one shown before, so it was read again from the new transcript.",
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	var fresh []surface.StreamEvent
+	keep := map[string]bool{}
+	for _, item := range append(slices.Clone(read.Items), notice) {
+		if item.ID == "" {
+			continue
+		}
+		event := seedEvent(s.session.Surface, item)
+		keep[event.ProviderKey] = true
+		fresh = append(fresh, event)
+	}
+	var events []surface.StreamEvent
+	for before := uint64(0); ; {
+		page, err := s.manager.registry.ReadSessionJournalPage(s.session.ID, before, 200)
+		var gap *registry.SessionJournalHistoryGapError
+		if errors.As(err, &gap) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		for _, entry := range page.Entries {
+			var payload sessionJournalPayload
+			if json.Unmarshal(entry.Payload, &payload) != nil || payload.Op == "remove" || payload.Kind == "source-error" || payload.ProviderKey == "" || keep[payload.ProviderKey] {
+				continue
+			}
+			keep[payload.ProviderKey] = true
+			events = append(events, surface.StreamEvent{ID: payload.ItemID, ProviderKey: payload.ProviderKey, Operation: "remove", Kind: payload.Kind, TurnID: payload.TurnID, Final: true})
+		}
+		if page.NextBefore == 0 {
+			break
+		}
+		before = page.NextBefore
+	}
+	events = append(events, fresh...)
+	entries := make([]registry.SessionJournalEntry, 0, len(events))
+	bodies := map[string]string{}
+	for _, event := range events {
+		s.mu.Lock()
+		payload, bodyKey := s.normalizeLocked(event)
+		s.mu.Unlock()
+		entry, err := sessionJournalEntry(s.session.ID, payload)
+		if err != nil {
+			return err
+		}
+		if bodyKey != "" {
+			bodies[bodyKey] = payload.Body
+		}
+		entries = append(entries, entry)
+	}
+	derivation, err := s.manager.registry.SessionJournalDerivation(s.session.ID)
+	if err != nil {
+		return err
+	}
+	restarted, err := s.manager.registry.RestartSessionJournal(s.session.ID, entries, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes}, derivation, max(0, read.NextBefore))
+	if err != nil {
+		return err
+	}
+	s.session.TranscriptOffset = read.TranscriptOffset
+	s.session.TranscriptOffsetSet = read.TranscriptOffsetSet
+	s.session.CodexPendingEventUser = read.CodexPendingEventUser
+	s.session.CodexPendingEventTurn = read.CodexPendingEventTurn
+	s.session.CodexCurrentTurnID = read.CodexCurrentTurnID
+	s.session.ClaudeClosingTurn = read.ClaudeClosingTurn
+	s.session.TranscriptIdentity = read.TranscriptIdentity
+	s.mu.Lock()
+	for key, body := range bodies {
+		s.appendBodies[key] = body
+	}
+	s.mu.Unlock()
+	if len(restarted) > 0 {
+		s.wakeFollowers()
+	}
+	if err := s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.TranscriptIdentity); err != nil {
+		return err
+	}
+	return s.recordTranscriptCheckpoint(read.TranscriptOffset, read.TranscriptIdentity)
 }
 
 func (s *sessionSource) removeDroppedItems(items []surface.TimelineItem, known map[string]struct{}) {
