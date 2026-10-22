@@ -260,8 +260,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func connectionState(for sessionID: String) -> (error: String?, reconnecting: Bool) {
-        let hostID = catalog.route(for: sessionID)?.hostID ?? HostCatalog.owner(of: sessionID)
-        guard let connection = hostID.flatMap({ connections[$0] }) else { return (connectionError, reconnecting) }
+        let hostID = catalog.route(for: sessionID)?.hostID ?? catalog.server(of: sessionID) ?? HostCatalog.owner(of: sessionID)
+        guard let connection = hostID.flatMap({ connections[$0] }) else { return (nil, false) }
         return (connection.connectionError, connection.reconnecting)
     }
 

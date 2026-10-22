@@ -34,6 +34,7 @@ struct HostCatalog {
     private(set) var deliveryProblems: [DeliveryProblem] = []
     private(set) var hosts: [HostHealth] = []
     private var routesByID: [String: [SessionRoute]] = [:]
+    private var servers: [String: String] = [:]
     private var targets: [String: HostTarget] = [:]
 
     static func qualify(_ hostID: String, _ sessionID: String) -> String {
@@ -94,6 +95,7 @@ struct HostCatalog {
             }
             sessions.append(chosen.row)
             routesByID[id] = ranked.filter(\.reachable).map(\.route)
+            servers[id] = chosen.route.hostID
         }
         for host in paired {
             hosts.append(HostHealth(id: host.id, name: host.name, state: host.reachable ? "connected" : "unreachable"))
@@ -124,6 +126,8 @@ struct HostCatalog {
     }
 
     func target(forHost hostID: String) -> HostTarget? { targets[hostID] }
+
+    func server(of sessionID: String) -> String? { servers[sessionID] }
 
     private static func qualifyFamily(_ row: SessionState, host: String) -> SessionState {
         var row = row

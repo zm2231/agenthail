@@ -53,6 +53,16 @@ final class HostCatalogTests: XCTestCase {
         XCTAssertEqual(catalog.route(for: "hbuild::s9"), SessionRoute(hostID: "hlaptop", sessionID: "hbuild::s9"))
     }
 
+    func testAnUnreachableMirroredSessionKeepsTheComputerThatListedIt() {
+        let catalog = HostCatalog(hosts: [
+            host("hlaptop", "laptop", reachable: false, sessions: [mirrored("hbuild", "build", "s9")]),
+            host("hserver", "server", reachable: false, sessions: [local("s1")]),
+        ])
+        XCTAssertNil(catalog.route(for: "hbuild::s9"))
+        XCTAssertEqual(catalog.server(of: "hbuild::s9"), "hlaptop")
+        XCTAssertEqual(catalog.server(of: "hserver::s1"), "hserver")
+    }
+
     func testSubagentsAndProjectsOfALocalRowAreQualifiedWithItsComputer() {
         var child = local("child")
         child.subagent = SubagentIdentity(parentId: "parent", rootId: "parent", depth: 1)
