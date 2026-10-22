@@ -91,7 +91,7 @@ agenthail ui path
 
 - `get` prints the file; `--resolved` prints the value of every key for one device after overrides and defaults.
 - `set` and `unset` change single lines and keep the rest of the file, comments included. `--message` says why; it becomes the commit message.
-- `write` replaces the whole file. `set`, `unset` and `write` refuse a result with any problem and list the lines to fix, so nothing is saved that the apps would have to skip.
+- `set` refuses an unknown key or a bad value. `write` replaces the whole file and refuses a file with any problem, listing the lines to fix. A problem already in the file from a hand edit stays as it is through `set` and `unset`, and is still reported and skipped.
 - `check` reports problems in a file without saving it.
 - `log` lists changes, newest first, with who made each one. `diff` shows what a change did, or what changed since the last one.
 - `undo` reverts the last change, or the one you name, as a new change. If a later change edited the same lines, it says so and changes nothing.
