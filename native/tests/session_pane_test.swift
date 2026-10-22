@@ -110,6 +110,39 @@ struct SessionPaneTest {
         journaledModel.closePane(journaledPane)
         journaled.stop()
 
+        var lateStreamRequests: [String] = []
+        let lateStream = try! StubServer { line, _ in
+            if line.contains("/api/v1/session-stream?") {
+                lateStreamRequests.append(line)
+                if lateStreamRequests.count == 1 {
+                    return StubServer.reply("409 Conflict", #"{"error":{"code":"stream_unsupported","message":"This session does not expose a live stream."}}"#)
+                }
+                return "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
+            }
+            if line.contains("/api/v1/session?") { return StubServer.reply("200 OK", journaledJSON) }
+            return StubServer.reply("404 Not Found", "{}")
+        }
+        let lateStreamPort = await lateStream.ready()
+        let lateStreamModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(lateStreamPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
+        func newSession(stream: Bool) -> SessionState {
+            var capabilities = Capabilities()
+            capabilities.stream = stream
+            return SessionState(id: "R", surface: "claude", name: "new", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: capabilities, readOnly: nil, readOnlyReason: nil)
+        }
+        lateStreamModel.snapshot = DashboardSnapshot(updatedAt: "2026-10-22T08:28:26Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [newSession(stream: false)], totalSessions: 1, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        let lateStreamPane = lateStreamModel.mainPane!
+        lateStreamPane.select("R")
+        for _ in 0..<60 where lateStreamRequests.isEmpty { try? await Task.sleep(for: .milliseconds(50)) }
+        try? await Task.sleep(for: .milliseconds(300))
+        check(lateStreamRequests.count == 1, "a session without a stream yet is asked once: \(lateStreamRequests)")
+        let gainedStream = String(decoding: try! JSONEncoder().encode(newSession(stream: true)), as: UTF8.self)
+        let upserted = "{\"stream\":\"catalog\",\"seq\":2,\"type\":\"session.upserted\",\"data\":{\"session\":\(gainedStream)}}"
+        lateStreamModel.applyCatalogEvent(try! JSONDecoder().decode(CatalogStreamEvent.self, from: Data(upserted.utf8)))
+        for _ in 0..<60 where lateStreamRequests.count < 2 { try? await Task.sleep(for: .milliseconds(50)) }
+        check(lateStreamRequests.count >= 2 && lateStreamRequests[1].contains("after=100"), "the live stream starts once a new session gains it, from the reloaded journal position: \(lateStreamRequests)")
+        lateStreamPane.close()
+        lateStream.stop()
+
         let offline = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:9")!, token: "t", session: URLSession(configuration: .ephemeral)))
         let offlinePane = offline.openPane()
         offline.operationError = "An action failed."
