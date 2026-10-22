@@ -275,7 +275,9 @@ for a link the person opened, or `deny`.
 Do not answer them yourself unless your user asked you to.
 A Claude CLI in a terminal shows its prompts the same way once
 `agenthail hooks install` has added the PermissionRequest hook; the daemon
-holds the prompt, so `requests` and `answer` need it running.
+holds the prompt, so `requests` and `answer` need it running. The same command
+adds SessionStart and UserPromptSubmit hooks that give each Claude session its
+`agenthail help agent` brief at start and a line when it changes.
 `agenthail permission-mode <target> <mode>` changes the mode while it runs.
 A Claude session ID is the conversation ID (the transcript name). The process,
 messaging socket and Remote Control session are attachments; Remote Control is

@@ -2,7 +2,10 @@ package agentcard
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -60,6 +63,12 @@ type Card struct {
 }
 
 func Unresolved(reason string) Card { return Card{Reason: reason} }
+
+func (card Card) Fingerprint() string {
+	data, _ := json.Marshal(card)
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:16])
+}
 
 // Project returns nil for a folder outside every project. PromptsHeld
 // reports whether Agenthail holds a terminal Claude session's prompts.

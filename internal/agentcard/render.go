@@ -16,13 +16,7 @@ func Render(card Card) string {
 	}
 	var b strings.Builder
 	b.WriteString("[Agenthail] ")
-	b.WriteString(identityLine(card))
-	for _, line := range []string{startedLine(card), leadLine(card), askLine(card)} {
-		if line != "" {
-			b.WriteString(" ")
-			b.WriteString(line)
-		}
-	}
+	b.WriteString(summary(card))
 	b.WriteString("\n\n")
 	b.WriteString(Guide)
 	b.WriteString("\n")
@@ -34,6 +28,21 @@ func Render(card Card) string {
 		fmt.Fprintf(&b, "  %-*s  %s\n", width, command.Line, command.Use)
 	}
 	return b.String()
+}
+
+// RenderChange tells a session that already has its card what it says now.
+func RenderChange(card Card) string {
+	return "[Agenthail] Your Agenthail context changed. " + summary(card) + "\n"
+}
+
+func summary(card Card) string {
+	lines := []string{identityLine(card)}
+	for _, line := range []string{startedLine(card), leadLine(card), askLine(card)} {
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, " ")
 }
 
 func identityLine(card Card) string {
