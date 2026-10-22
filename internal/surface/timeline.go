@@ -7,6 +7,8 @@ import (
 )
 
 var ErrTranscriptUnavailable = errors.New("session transcript unavailable")
+var ErrTranscriptChanged = errors.New("session transcript was replaced")
+var ErrTranscriptBacklog = errors.New("session transcript holds more than a forward read takes")
 
 // TimelineItem preserves the ordered, user-visible contents of an agent transcript.
 type TimelineItem struct {

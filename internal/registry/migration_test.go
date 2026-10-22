@@ -888,3 +888,55 @@ func TestOpenHoldsNoNameForALaunchPendingAtTheVersionBefore(t *testing.T) {
 		t.Fatalf("a launch pending before the upgrade holds its name: %v", err)
 	}
 }
+
+func TestOpenAddsTheTranscriptCheckpointToARegistryAtVersion30(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, r, "session")
+	if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "item-1", Payload: []byte("one")}, SessionJournalRetention{Count: 10, Bytes: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`ALTER TABLE session_journal_state DROP COLUMN transcript_checkpoint`,
+		`PRAGMA user_version=30`,
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var version int
+	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("user_version=%d err=%v", version, err)
+	}
+	if checkpoint, found, err := r.SessionTranscriptCheckpoint("session"); err != nil || found {
+		t.Fatalf("an upgraded journal has checkpoint %+v found=%v err=%v, want none", checkpoint, found, err)
+	}
+	want := TranscriptCheckpoint{Offset: 4096, Identity: "1:2"}
+	if err := r.SetSessionTranscriptCheckpoint("session", want); err != nil {
+		t.Fatal(err)
+	}
+	if got, found, err := r.SessionTranscriptCheckpoint("session"); err != nil || !found || got != want {
+		t.Fatalf("checkpoint=%+v found=%v err=%v, want %+v", got, found, err, want)
+	}
+	window, err := r.SessionJournalAfter("session", 0, 10)
+	if err != nil || len(window.Entries) != 1 {
+		t.Fatalf("journal after upgrade = %+v err=%v", window, err)
+	}
+	if err := r.ClearSessionTranscriptCheckpoint("session"); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := r.SessionTranscriptCheckpoint("session"); err != nil || found {
+		t.Fatalf("cleared checkpoint found=%v err=%v", found, err)
+	}
+}
