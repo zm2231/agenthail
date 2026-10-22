@@ -16,7 +16,7 @@ import { parseArgs } from 'node:util';
 
 const PROTOCOL = 3;
 const LOCK_FD = 3;
-const MAX_EVENTS = 4096;
+const MAX_EVENTS = Number(process.env.AGENTHAIL_CLAUDE_HOST_MAX_EVENTS) || 4096;
 const MAX_LINE = 1 << 20;
 const MAX_SUBSCRIBER_BUFFER = 8 << 20;
 const MAX_IMAGE_BYTES = 5 << 20;

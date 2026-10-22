@@ -700,3 +700,150 @@ func TestAHostedTranscriptThatGoesMissingIsNotReadAsNewByTheNextSource(t *testin
 		t.Fatalf("a transcript that went missing is reported, not read as new: err=%v fromStart=%v", err, next.session.TranscriptFromStart)
 	}
 }
+
+// A request open on a session survives host updates: through one update, and
+// through a second one with a restarted daemon while the first retiring host
+// still holds it, the session waits on that request, the daemon lists it,
+// and the person's answer reaches Claude.
+func TestAnOpenRequestStaysAnswerableThroughHostUpdates(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		updates []string
+	}{
+		{name: "one update", updates: []string{"1.1.0"}},
+		{name: "two updates and a daemon restart", updates: []string{"1.1.0", "1.2.0"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := claudehosttest.New(t, "")
+			ctx := context.Background()
+			agents := filepath.Join(fixture.Home, "claude-agents")
+			if err := os.WriteFile(agents, []byte("#!/bin/sh\necho '[]'\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("AGENTHAIL_CLAUDE_BIN", agents)
+			client, err := fixture.Manager(t, "1.0.0").Ensure(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id := uuid.NewString()
+			opened := fixture.Open(t, client, id)
+			claude := surfaces.NewClaude(nil, fixture.Home)
+			session := hostedSession(t, claude, id)
+			r := hostRegistry(t)
+			if err := r.RegisterSession(session); err != nil {
+				t.Fatal(err)
+			}
+			fixture.Peer(t, opened.PID, "TOOL")
+			var request surface.Request
+			claudehosttest.WaitFor(t, "the request to be listed", func() bool {
+				state, err := claude.Requests(ctx, &session)
+				if err != nil || len(state.Requests) != 1 {
+					return false
+				}
+				request = state.Requests[0]
+				return true
+			})
+
+			var d *Daemon
+			for _, version := range test.updates {
+				claude = surfaces.NewClaude(nil, fixture.Home)
+				d = newTestDaemon(t, r, []surface.Surface{claude})
+				d.log = log.New(io.Discard, "", 0)
+				d.SetClaudeHost(fixture.Manager(t, version))
+				if check := d.checkClaudeHost(ctx, claudeHostCheck{}); check.status != "running" {
+					t.Fatalf("host after the update to %s = %+v", version, check)
+				}
+			}
+
+			observation, err := d.observeTurn(ctx, claude, &session)
+			if err != nil || observation.WaitingOn == nil || observation.WaitingOn.ID != request.ID || observation.WaitingOn.Kind != surface.WaitingApproval {
+				t.Fatalf("waiting after the updates = %+v, %v; want the open request %s", observation, err, request.ID)
+			}
+			state, err := claude.Requests(ctx, &session)
+			if err != nil || len(state.Requests) != 1 || state.Requests[0].ID != request.ID {
+				t.Fatalf("requests after the updates = %+v, %v; want %s", state, err, request.ID)
+			}
+			answer := httptest.NewRecorder()
+			d.respond(ctx, answer, claude, &session, request.ID, surface.Decision{Behavior: "allow"}, "the test")
+			if answer.Code != http.StatusOK {
+				t.Fatalf("answer after the updates = %d %s", answer.Code, answer.Body)
+			}
+			claudehosttest.WaitFor(t, "the answer to reach Claude", func() bool {
+				turns := fixture.Turns(t, id)
+				return len(turns) == 1 && turns[0].Reply == "tool:allow:"
+			})
+		})
+	}
+}
+
+// A retiring host that has dropped its oldest events is still followed: the
+// daemon picks up from the host's current event, keeps following it while it
+// serves a session, and asks for a catalog pass when its request is answered.
+func TestTheDaemonFollowsARetiringHostWhoseOldestEventsAreGone(t *testing.T) {
+	t.Setenv("AGENTHAIL_CLAUDE_HOST_MAX_EVENTS", "4")
+	fixture := claudehosttest.New(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client, err := fixture.Manager(t, "1.0.0").Ensure(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := uuid.NewString()
+	opened := fixture.Open(t, client, id)
+	for i := range 3 {
+		if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: id, UUID: uuid.NewString(), Text: fmt.Sprintf("turn %d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claudehosttest.WaitFor(t, "the turns", func() bool { return len(fixture.Turns(t, id)) == 3 })
+	fixture.Peer(t, opened.PID, "TOOL")
+	var request claudehost.Request
+	claudehosttest.WaitFor(t, "the request", func() bool {
+		listing, err := client.List(ctx)
+		if err != nil {
+			return false
+		}
+		for _, session := range listing.Sessions {
+			if session.SessionID == id && len(session.Requests) == 1 {
+				request = session.Requests[0]
+				return true
+			}
+		}
+		return false
+	})
+	if client, err = fixture.Manager(t, "1.1.0").Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	retiring := client.Retiring()
+	if len(retiring) != 1 {
+		t.Fatalf("retiring hosts = %v, want the old one", retiring)
+	}
+
+	d := newTestDaemon(t, hostRegistry(t), nil)
+	d.log = log.New(io.Discard, "", 0)
+	followed := make(chan struct{})
+	go func() {
+		defer close(followed)
+		d.watchRetiringClaudeHost(ctx, retiring[0])
+	}()
+	select {
+	case <-followed:
+		t.Fatal("the daemon stopped following the retiring host while it still serves a session")
+	case <-time.After(time.Second):
+	}
+	for drained := false; !drained; {
+		select {
+		case <-d.catalogNudge:
+		default:
+			drained = true
+		}
+	}
+	if _, err := client.Respond(ctx, id, request.RequestID, claudehost.Decision{Behavior: "allow"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-d.catalogNudge:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the answered request on the retiring host asked for no catalog pass")
+	}
+}
