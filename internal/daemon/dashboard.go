@@ -1168,6 +1168,13 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "approval policy is invalid", http.StatusBadRequest)
 			return
 		}
+		creator := strings.TrimSpace(request.SourceSessionID)
+		if creator != "" {
+			if _, err := d.Registry.Session(creator); err != nil {
+				http.Error(w, fmt.Sprintf("sourceSessionId %s is not a session here", creator), http.StatusBadRequest)
+				return
+			}
+		}
 		startOptions := func(cwd string) surface.SessionStartOptions {
 			return surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode, ConfigRoot: strings.TrimSpace(request.ConfigRoot)}
 		}
@@ -1285,6 +1292,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("persist session name: %s", err))
 				return
 			}
+			if err := d.Registry.RecordSessionOrigin(registry.OriginOf(session.ID, creator)); err != nil {
+				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("record who started the session: %s", err))
+				return
+			}
 			launchFields := map[string]any{"launcher": request.Launcher, "location": location, "sessionId": session.ID}
 			if launchResult.Session != nil {
 				d.writeStartedSessionOutcome(w, session, alias, messageUUID, request.Message, launchResult.Sent, startErr, launchFields)
@@ -1328,6 +1339,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			if aliasErr := d.Registry.BindReservedAlias(reservation, session.ID); aliasErr != nil {
 				writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but its name could not be persisted: %s; do not retry automatically", aliasErr), nil)
+				return
+			}
+			if originErr := d.Registry.RecordSessionOrigin(registry.OriginOf(session.ID, creator)); originErr != nil {
+				writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but who started it could not be recorded: %s; do not retry automatically", originErr), nil)
 				return
 			}
 			d.writeStartedSessionOutcome(w, session, alias, messageUUID, request.Message, sent, startErr, nil)

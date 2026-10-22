@@ -42,7 +42,7 @@ type threadCreateRequest struct {
 
 const threadNameMargin = 30 * time.Second
 
-const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree <name>] [--agent <name>] [--permission-mode <mode>] [--root <name|dir>] [--host <host>] [--timeout <duration>] [--json]
+const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree <name>] [--agent <name>] [--permission-mode <mode>] [--root <name|dir>] [--host <host>] [--from <session>] [--timeout <duration>] [--json]
        agenthail thread fork <target> [--model <model>] [--last-turn <id>] [--alias <name>] [--json]
        agenthail thread <status|stop|resume|logs> <target> [--json]
        agenthail thread <archive|unarchive> <target> [--json]
@@ -73,13 +73,17 @@ func (a *App) cmdThread(args []string) error {
 	if a.registry() == nil {
 		return fmt.Errorf("registry not available")
 	}
+	creator, err := a.sourceSessionID(context.Background(), flagVal(args, "--from"))
+	if err != nil {
+		return err
+	}
 	if hostText := strings.TrimSpace(flagVal(args, "--host")); hostText != "" {
 		local, err := a.isLocalHost(hostText)
 		if err != nil {
 			return err
 		}
 		if !local {
-			return a.createRemoteThread(hostText, request, args)
+			return a.createRemoteThread(hostText, request, creator, args)
 		}
 		if request.cwd, err = resolveThreadCwd(request.cwd); err != nil {
 			return err
@@ -115,6 +119,9 @@ func (a *App) cmdThread(args []string) error {
 		}
 		if err := a.registry().BindReservedAlias(reservation, session.ID); err != nil {
 			return emitCreateStorageFailure(request, session, fmt.Sprintf("thread %s was created, but its name could not be persisted: %s; do not retry automatically", session.ID, err))
+		}
+		if err := a.registry().RecordSessionOrigin(registry.OriginOf(session.ID, creator)); err != nil {
+			return emitCreateStorageFailure(request, session, fmt.Sprintf("thread %s was created, but who started it could not be recorded: %s; do not retry automatically", session.ID, err))
 		}
 	}
 
@@ -241,7 +248,7 @@ func parseThreadCreateRequest(args []string) (threadCreateRequest, error) {
 			continue
 		}
 		switch arg {
-		case "--message", "--cwd", "--alias", "--model", "--approval", "--timeout", "--effort", "--mode", "--service-tier", "--output-schema", "--name", "--worktree", "--agent", "--permission-mode", "--root", "--host":
+		case "--message", "--cwd", "--alias", "--model", "--approval", "--timeout", "--effort", "--mode", "--service-tier", "--output-schema", "--name", "--worktree", "--agent", "--permission-mode", "--root", "--host", "--from":
 			i++
 		case "--json":
 		default:

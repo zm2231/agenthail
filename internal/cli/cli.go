@@ -236,6 +236,9 @@ func (a *App) Run(args []string) (err error) {
 	case "update", "upgrade":
 		return a.cmdUpdate(rest)
 	case "help", "-h", "--help":
+		if len(rest) > 0 && rest[0] == "agent" {
+			return a.cmdHelpAgent(rest[1:])
+		}
 		a.usage()
 		return nil
 	default:
@@ -264,7 +267,8 @@ Session commands:
   project list|add <path>|remove <name>|archive <name>|unarchive <name>
                                  List, add or remove project folders, or hide a project
   runs [--json]                  Read verified Claude job and subagent records
-  whoami [--json]                Show the caller session bound to this process
+  whoami [--json]                Who the calling session is, who it reports to, how it reaches the person
+  help agent                    What the calling session can do through Agenthail
   roots [--json]                 List each Claude config directory and the login it currently holds
   search codex <query>           Search older Codex conversation history on demand
   send <target> "msg"|-       Send now when idle; queue when busy (use --no-queue to refuse delay)

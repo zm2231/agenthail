@@ -235,6 +235,16 @@ and delivery result. Keep the returned thread ID or alias. Valid approval modes
 are `untrusted`, `on-request`, and `never`. Use `--timeout` to bound the complete
 operation.
 
+Agenthail records the calling session as the new session's creator (or the
+person, when there is no calling session); `--from` names it explicitly, and a
+caller variable naming a session of another Agenthail is refused as for `send`.
+`agenthail whoami --json` returns the calling session's card: alias, project,
+coordinator (`lead`, with `self` for the coordinator itself), `startedBy`,
+`reportTo` and `ask` (the question tool, whether Agenthail can answer it, and
+whether a paired phone is notified). `agenthail help agent` renders it as a
+brief. Read it instead of guessing who you report to; send results to
+`reportTo`.
+
 Create a Notion thread non-interactively:
 
 ```bash

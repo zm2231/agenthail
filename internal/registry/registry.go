@@ -625,6 +625,12 @@ CREATE TABLE IF NOT EXISTS session_runtime (
 	waiting_since_ms INTEGER NOT NULL DEFAULT 0,
 	waiting_announced INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS session_origins (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	via TEXT NOT NULL,
+	creator_session_id TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS launcher_pending (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	launcher TEXT NOT NULL,
