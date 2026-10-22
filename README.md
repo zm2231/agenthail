@@ -6,7 +6,7 @@
 
 **Your agents are already working. Agenthail helps them work together.**
 
-[![CI](https://github.com/zm2231/agenthail/actions/workflows/ci.yml/badge.svg)](https://github.com/zm2231/agenthail/actions/workflows/ci.yml) ![macOS](https://img.shields.io/badge/macOS-black) ![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)
+[![Release](https://github.com/zm2231/agenthail/actions/workflows/release.yml/badge.svg)](https://github.com/zm2231/agenthail/actions/workflows/release.yml) ![macOS](https://img.shields.io/badge/macOS-black) ![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)
 
 Agenthail connects the Claude Code, Codex, and Notion conversations you already use. It gives them one shared place to pass work, keep going, and stay reachable when you leave your desk.
 
