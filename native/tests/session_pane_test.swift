@@ -333,6 +333,21 @@ struct SessionPaneTest {
         while streamingPane.pageReadsInFlight > 0, Date() < landedDeadline { try? await Task.sleep(for: .milliseconds(20)) }
         check(streamingPane.timelineItems.last?.id == "a" && streamingPane.timelineItems.last?.text == "a3", "an older page that lands last keeps an update streamed while both reads were open: \(streamingPane.timelineItems.map { "\($0.id)=\($0.text)" })")
         check(streamingPane.streamedRows.isEmpty, "rows kept for overlapping reads are dropped once the last lands: \(streamingPane.streamedRows.count)")
+
+        let streamedSession = SessionState(id: "D", surface: "claude", name: "d", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: false, readOnlyReason: nil)
+        func listing(_ sessions: [SessionState]) -> DashboardSnapshot {
+            DashboardSnapshot(updatedAt: "2026-10-04T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        }
+        streamingModel.snapshot = listing([streamedSession])
+        streamingPane.reconcile()
+        let shownBeforeRemoval = streamingPane.timelineItems.map(\.id)
+        streamingServer.push(frame(107, row(107, "f", text: "f1")), to: "session-stream")
+        let pendingDeadline = Date().addingTimeInterval(5)
+        while streamingPane.unpublishedDetail == nil, Date() < pendingDeadline { try? await Task.sleep(for: .milliseconds(5)) }
+        streamingModel.snapshot = listing([])
+        streamingPane.reconcile()
+        try? await Task.sleep(for: SessionPane.streamPublishInterval * 3)
+        check(streamingPane.removedSession?.id == "D" && streamingPane.timelineItems.map(\.id) == shownBeforeRemoval, "a removed session does not publish a row it held back: \(streamingPane.timelineItems.map(\.id))")
         streamingModel.closePane(streamingPane)
         streamingServer.stop()
 

@@ -45,7 +45,7 @@ final class SessionPane: ObservableObject, Identifiable {
     private(set) var pageReadsInFlight = 0
     /// Streamed rows apply here as they arrive and reach `detail` at most once
     /// per `streamPublishInterval`, so a burst of rows renders once.
-    private var unpublishedDetail: SessionDetail?
+    private(set) var unpublishedDetail: SessionDetail?
     private var publishTask: Task<Void, Never>?
     static let streamPublishInterval: Duration = .milliseconds(100)
     private var streamAwaitsCursor = false
@@ -409,6 +409,7 @@ final class SessionPane: ObservableObject, Identifiable {
     private func freezeRemovedSession() {
         streamAwaitsCursor = false
         sessionStreamTask?.cancel()
+        dropUnpublishedDetail()
         metadataTask?.cancel()
         detailReloadTask?.cancel()
         detailReloadTask = nil
