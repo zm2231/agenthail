@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -1213,6 +1214,8 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 	if path == "" || !fileExists(path) {
 		return fmt.Errorf("no local transcript for streaming")
 	}
+	wake := filewake.Follow(path)
+	defer wake.Release()
 	state, err := c.observeTranscript(ctx, path, sess)
 	if err != nil {
 		return err
@@ -1351,10 +1354,8 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		if completed {
 			return nil
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(transcriptPollInterval):
+		if err := awaitTranscript(ctx, wake); err != nil {
+			return err
 		}
 	}
 	return fmt.Errorf("stream timed out after %s: %w", timeout, surface.ErrStreamWindow)
