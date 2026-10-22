@@ -356,6 +356,35 @@ func TestCatalogRowKeepsBackgroundTasksUntilTheSessionGoesUnobserved(t *testing.
 	}
 }
 
+func TestCatalogRowKeepsAUsageLimitUntilTheSessionGoesUnobserved(t *testing.T) {
+	r := openTestRegistry(t)
+	observed := time.Date(2026, 10, 22, 17, 43, 40, 0, time.UTC)
+	limit := &surface.UsageLimit{ResetsAt: time.Date(2026, 10, 22, 18, 20, 0, 0, time.UTC)}
+	session := surface.Session{ID: "claude-limited", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle, LastActive: observed, UsageLimit: limit}
+	projection := `{"id":"claude-limited","surface":"claude","status":"idle","usageLimit":{"resetsAt":"2026-10-22T18:20:00Z"}}`
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "claude-limited:initial", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := r.Session(session.ID)
+	if err != nil || !surface.SameUsageLimit(stored.UsageLimit, limit) {
+		t.Fatalf("stored limit=%+v err=%v", stored.UsageLimit, err)
+	}
+	page, err := r.CatalogSnapshotPage(CatalogPageRequest{Limit: 10, Now: observed})
+	if err != nil || len(page.Sessions) != 1 || !surface.SameUsageLimit(page.Sessions[0].Session.UsageLimit, limit) {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	if _, err := r.RecordCatalogDiscovery(surface.KindClaude, map[string]struct{}{}, observed.Add(time.Hour), true, 2); err != nil {
+		t.Fatal(err)
+	}
+	page, err = r.CatalogSnapshotPage(CatalogPageRequest{Limit: 10, Now: observed.Add(time.Hour)})
+	if err != nil || len(page.Sessions) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	if retired := page.Sessions[0]; retired.Session.UsageLimit != nil || strings.Contains(retired.ProjectionFingerprint, "usageLimit") {
+		t.Fatalf("an unobserved session is still limited: %+v", retired)
+	}
+}
+
 func TestSessionMissingFromDiscoveryStopsBeingBusyOrCurrent(t *testing.T) {
 	r := openTestRegistry(t)
 	observed := time.Date(2026, 10, 7, 11, 0, 0, 0, time.UTC)
@@ -418,5 +447,23 @@ func TestCatalogSnapshotReadsSessionsInOrderWithoutSorting(t *testing.T) {
 	joined := strings.Join(plan, "\n")
 	if strings.Contains(joined, "TEMP B-TREE") || !strings.Contains(joined, "sessions_recent") {
 		t.Fatalf("plan:\n%s", joined)
+	}
+}
+
+// A paired host's row carries its session's usage limit as the host
+// projected it.
+func TestAHostCatalogRowKeepsItsUsageLimit(t *testing.T) {
+	r := openTestRegistry(t)
+	if _, err := r.AddHost(PairedHost{ID: "h00000000000b", Name: "server", Endpoint: "https://server.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	projection := `{"id":"remote-limited","surface":"claude","usageLimit":{"resetsAt":"2026-10-22T18:20:00Z"},"waitingOn":{"kind":"approval","id":"q1","answerable":true}}`
+	if _, _, err := r.ApplyHostCatalogRow("h00000000000b", HostCatalogRow{Session: surface.Session{ID: "remote-limited", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost}, EntityID: "remote-limited", Projection: json.RawMessage(projection)}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := r.Session("remote-limited")
+	want := &surface.UsageLimit{ResetsAt: time.Date(2026, 10, 22, 18, 20, 0, 0, time.UTC)}
+	if err != nil || !surface.SameUsageLimit(stored.UsageLimit, want) || stored.WaitingOn == nil || !stored.WaitingOn.Answerable {
+		t.Fatalf("stored=%+v err=%v", stored, err)
 	}
 }

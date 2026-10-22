@@ -274,6 +274,7 @@ func migrateTx(tx *sql.Tx) error {
 		{"waiting_id", `TEXT NOT NULL DEFAULT ''`},
 		{"waiting_since_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"waiting_announced", `INTEGER NOT NULL DEFAULT 0`},
+		{"waiting_answerable", `INTEGER NOT NULL DEFAULT 0`},
 	} {
 		if err := ensureColumn(tx, "session_runtime", column.name, column.decl); err != nil {
 			return err
@@ -351,6 +352,7 @@ func migrateTx(tx *sql.Tx) error {
 		{"waiting_on", `BLOB NOT NULL DEFAULT ''`},
 		{"host_queue_count", `INTEGER NOT NULL DEFAULT 0`},
 		{"background_tasks", `BLOB NOT NULL DEFAULT ''`},
+		{"usage_limit", `BLOB NOT NULL DEFAULT ''`},
 		{"current", `INTEGER NOT NULL DEFAULT 0`},
 		{"current_reason", `TEXT NOT NULL DEFAULT ''`},
 	} {
@@ -695,7 +697,8 @@ CREATE TABLE IF NOT EXISTS session_runtime (
 	waiting_kind TEXT NOT NULL DEFAULT '',
 	waiting_id TEXT NOT NULL DEFAULT '',
 	waiting_since_ms INTEGER NOT NULL DEFAULT 0,
-	waiting_announced INTEGER NOT NULL DEFAULT 0
+	waiting_announced INTEGER NOT NULL DEFAULT 0,
+	waiting_answerable INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS session_origins (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
@@ -949,6 +952,7 @@ CREATE TABLE IF NOT EXISTS catalog_sessions (
 	waiting_on BLOB NOT NULL DEFAULT '',
 	host_queue_count INTEGER NOT NULL DEFAULT 0,
 	background_tasks BLOB NOT NULL DEFAULT '',
+	usage_limit BLOB NOT NULL DEFAULT '',
 	current INTEGER NOT NULL DEFAULT 0,
 	current_reason TEXT NOT NULL DEFAULT ''
 );
@@ -2719,21 +2723,21 @@ func (r *Registry) SessionWaiting(sessionID string) (*surface.Waiting, error) {
 // WaitingState returns the recorded question and whether the user has been
 // told about it.
 func (r *Registry) WaitingState(sessionID string) (*surface.Waiting, bool, error) {
-	return scanWaiting(r.read.QueryRow(`SELECT waiting_kind,waiting_id,waiting_since_ms,waiting_announced FROM session_runtime WHERE session_id=?`, sessionID))
+	return scanWaiting(r.read.QueryRow(`SELECT waiting_kind,waiting_id,waiting_since_ms,waiting_announced,waiting_answerable FROM session_runtime WHERE session_id=?`, sessionID))
 }
 
 func scanWaiting(row *sql.Row) (*surface.Waiting, bool, error) {
 	var kind, id string
 	var sinceMS int64
-	var announced bool
-	err := row.Scan(&kind, &id, &sinceMS, &announced)
+	var announced, answerable bool
+	err := row.Scan(&kind, &id, &sinceMS, &announced, &answerable)
 	if err == sql.ErrNoRows || err == nil && id == "" {
 		return nil, false, nil
 	}
 	if err != nil {
 		return nil, false, err
 	}
-	return &surface.Waiting{Kind: surface.WaitingKind(kind), ID: id, Since: time.UnixMilli(sinceMS).UTC()}, announced, nil
+	return &surface.Waiting{Kind: surface.WaitingKind(kind), ID: id, Since: time.UnixMilli(sinceMS).UTC(), Answerable: answerable}, announced, nil
 }
 
 // WaitingRecord is the result of recording what a session waits on.
@@ -2766,7 +2770,7 @@ func (r *Registry) RecordWaiting(sessionID string, waiting *surface.Waiting, now
 		return WaitingRecord{}, err
 	}
 	defer tx.Rollback()
-	stored, announced, err := scanWaiting(tx.QueryRow(`SELECT waiting_kind,waiting_id,waiting_since_ms,waiting_announced FROM session_runtime WHERE session_id=?`, sessionID))
+	stored, announced, err := scanWaiting(tx.QueryRow(`SELECT waiting_kind,waiting_id,waiting_since_ms,waiting_announced,waiting_answerable FROM session_runtime WHERE session_id=?`, sessionID))
 	if err != nil {
 		return WaitingRecord{}, err
 	}
@@ -2774,7 +2778,7 @@ func (r *Registry) RecordWaiting(sessionID string, waiting *surface.Waiting, now
 		return WaitingRecord{Waiting: stored, Announce: stored != nil && !announced}, tx.Commit()
 	}
 	if waiting == nil {
-		if _, err := tx.Exec(`UPDATE session_runtime SET waiting_kind='',waiting_id='',waiting_since_ms=0,waiting_announced=0 WHERE session_id=?`, sessionID); err != nil {
+		if _, err := tx.Exec(`UPDATE session_runtime SET waiting_kind='',waiting_id='',waiting_since_ms=0,waiting_announced=0,waiting_answerable=0 WHERE session_id=?`, sessionID); err != nil {
 			return WaitingRecord{}, err
 		}
 		return WaitingRecord{Changed: true, Replaced: stored, ReplacedAnnounced: announced}, tx.Commit()
@@ -2783,8 +2787,8 @@ func (r *Registry) RecordWaiting(sessionID string, waiting *surface.Waiting, now
 	if next.Since.IsZero() {
 		next.Since = now.UTC()
 	}
-	if _, err := tx.Exec(`INSERT INTO session_runtime(session_id,waiting_kind,waiting_id,waiting_since_ms,waiting_announced,updated_at) SELECT ?,?,?,?,0,datetime('now') WHERE EXISTS(SELECT 1 FROM sessions WHERE id=?)
-		ON CONFLICT(session_id) DO UPDATE SET waiting_kind=excluded.waiting_kind,waiting_id=excluded.waiting_id,waiting_since_ms=excluded.waiting_since_ms,waiting_announced=0`, sessionID, string(next.Kind), next.ID, next.Since.UnixMilli(), sessionID); err != nil {
+	if _, err := tx.Exec(`INSERT INTO session_runtime(session_id,waiting_kind,waiting_id,waiting_since_ms,waiting_announced,waiting_answerable,updated_at) SELECT ?,?,?,?,0,?,datetime('now') WHERE EXISTS(SELECT 1 FROM sessions WHERE id=?)
+		ON CONFLICT(session_id) DO UPDATE SET waiting_kind=excluded.waiting_kind,waiting_id=excluded.waiting_id,waiting_since_ms=excluded.waiting_since_ms,waiting_announced=0,waiting_answerable=excluded.waiting_answerable`, sessionID, string(next.Kind), next.ID, next.Since.UnixMilli(), next.Answerable, sessionID); err != nil {
 		return WaitingRecord{}, err
 	}
 	return WaitingRecord{Waiting: &next, Announce: true, Changed: true, Replaced: stored, ReplacedAnnounced: announced}, tx.Commit()
@@ -3015,7 +3019,7 @@ func (r *Registry) GetSession(id string) (surface, name, cwd string, err error) 
 // waiting on and running in the background, so every API that returns a session agrees with the catalog.
 // status is the column expression for its status.
 func sessionSelect(status string) string {
-	return `SELECT s.id,s.surface,s.name,s.cwd,s.pid,` + status + `,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),COALESCE(cs.waiting_on,X''),COALESCE(cs.background_tasks,X''),` + sessionSubagentSelect
+	return `SELECT s.id,s.surface,s.name,s.cwd,s.pid,` + status + `,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),COALESCE(cs.waiting_on,X''),COALESCE(cs.background_tasks,X''),COALESCE(cs.usage_limit,X''),` + sessionSubagentSelect
 }
 
 const sessionJoins = ` LEFT JOIN session_runtime sr ON sr.session_id=s.id LEFT JOIN catalog_sessions cs ON cs.session_id=s.id`
@@ -3026,10 +3030,10 @@ func scanSession(scanner interface{ Scan(...any) error }) (surface.Session, erro
 	var hasLocal int
 	var lastActiveMS int64
 	var launcher string
-	var location, waitingOn, background []byte
+	var location, waitingOn, background, usageLimit []byte
 	var focusable int
 	var subagent subagentColumns
-	if err := scanner.Scan(append([]any{&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable, &waitingOn, &background}, subagent.targets()...)...); err != nil {
+	if err := scanner.Scan(append([]any{&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable, &waitingOn, &background, &usageLimit}, subagent.targets()...)...); err != nil {
 		return surface.Session{}, err
 	}
 	session.Surface = surface.SurfaceKind(kind)
@@ -3048,6 +3052,9 @@ func scanSession(scanner interface{ Scan(...any) error }) (surface.Session, erro
 		return surface.Session{}, err
 	}
 	if session.BackgroundTasks, err = decodeCatalogBackground(background); err != nil {
+		return surface.Session{}, err
+	}
+	if session.UsageLimit, err = decodeCatalogUsageLimit(usageLimit); err != nil {
 		return surface.Session{}, err
 	}
 	return session, nil
@@ -3084,6 +3091,27 @@ func encodeCatalogBackground(background *surface.BackgroundTasks) ([]byte, error
 		return []byte{}, nil
 	}
 	return json.Marshal(background)
+}
+
+// decodeCatalogUsageLimit reads a catalog row's usage_limit column.
+func decodeCatalogUsageLimit(raw []byte) (*surface.UsageLimit, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var limit *surface.UsageLimit
+	if err := json.Unmarshal(raw, &limit); err != nil {
+		return nil, fmt.Errorf("parse catalog usage limit: %w", err)
+	}
+	return limit, nil
+}
+
+// encodeCatalogUsageLimit writes a session's usage limit for its catalog row;
+// none is the empty value.
+func encodeCatalogUsageLimit(limit *surface.UsageLimit) ([]byte, error) {
+	if limit == nil {
+		return []byte{}, nil
+	}
+	return json.Marshal(limit)
 }
 
 func scanSessions(rows *sql.Rows) ([]surface.Session, error) {
