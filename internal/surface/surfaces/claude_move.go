@@ -461,7 +461,7 @@ func (c *Claude) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.
 	if err := extractMoveArchive(staging, in, archive); err != nil {
 		return nil, err
 	}
-	if _, alive, err := c.conversationProcess(ctx, in.Conversation); err != nil {
+	if _, alive, err := c.conversationProcess(ctx, in.Conversation, claudePin{}); err != nil && !alive {
 		return nil, err
 	} else if alive {
 		dest := filepath.Join(root, "projects", claudeProjectDirName(in.Cwd), in.Conversation+".jsonl")
@@ -564,10 +564,10 @@ func (c *Claude) DropMoveIn(ctx context.Context, conversation, moveID string, ad
 // dropMoveInLocked sets aside a move's placed copy unless a process here
 // holds the conversation. The caller holds the conversation lock.
 func (c *Claude) dropMoveInLocked(ctx context.Context, conversation, moveID string, roots []string) error {
-	if _, alive, err := c.conversationProcess(ctx, conversation); err != nil {
-		return fmt.Errorf("%w: %v", surface.ErrMoveInPlaced, err)
-	} else if alive {
+	if _, alive, err := c.conversationProcess(ctx, conversation, claudePin{}); alive {
 		return surface.ErrMoveInRunning
+	} else if err != nil {
+		return fmt.Errorf("%w: %v", surface.ErrMoveInPlaced, err)
 	}
 	placed := c.transcripts.pass(roots)(conversation)
 	_, archived, err := c.moveOrigin(roots, conversation, moveID)

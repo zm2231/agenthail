@@ -268,7 +268,7 @@ func TestAMovedConversationResumesInTheHostWithItsModelAndMode(t *testing.T) {
 			t.Fatalf("resume argv %q lacks %q", argv, want)
 		}
 	}
-	if _, running, err := c.conversationProcess(context.Background(), conversation); err != nil || !running {
+	if _, running, err := c.conversationProcess(context.Background(), conversation, claudePin{}); err != nil || !running {
 		t.Fatalf("running=%v err=%v", running, err)
 	}
 	if err := c.DropMoveIn(context.Background(), conversation, in.MoveID, admitMove, func() error { return nil }); !errors.Is(err, surface.ErrMoveInRunning) {
@@ -311,7 +311,7 @@ func TestPreparingAMoveClosesTheHostSessionAndDeclaresItsTranscript(t *testing.T
 	if err != nil || size != out.Size || sum != out.SHA256 {
 		t.Fatalf("declared %d/%s, file is %d/%s (%v)", out.Size, out.SHA256, size, sum, err)
 	}
-	if _, running, _ := c.conversationProcess(context.Background(), session.ID); running {
+	if _, running, _ := c.conversationProcess(context.Background(), session.ID, claudePin{}); running {
 		t.Fatal("a prepared move left a process holding the conversation")
 	}
 }
@@ -422,4 +422,19 @@ func waitForTranscript(t *testing.T, c *Claude, conversation string) {
 		roots, _ := surface.ClaudeConfigRoots(c.home)
 		return len(c.transcripts.pass(roots)(conversation)) == 1
 	})
+}
+
+func TestAnAbortOfAMoveInWhileTwoProcessesHoldTheConversationAnswersRunning(t *testing.T) {
+	shared := newSharedConversation(t)
+	transcripts := shared.adapter.transcripts.pass([]string{shared.fixture.Root})(sharedConversation)
+	if len(transcripts) != 1 {
+		t.Fatalf("transcripts=%v", transcripts)
+	}
+	err := shared.adapter.DropMoveIn(context.Background(), sharedConversation, "move-shared", func() error { return nil }, func() error { t.Fatal("aborted a move two processes run"); return nil })
+	if !errors.Is(err, surface.ErrMoveInRunning) {
+		t.Fatalf("err=%v, want %v", err, surface.ErrMoveInRunning)
+	}
+	if _, err := os.Stat(transcripts[0]); err != nil {
+		t.Fatalf("the transcript two processes run was set aside: %v", err)
+	}
 }
