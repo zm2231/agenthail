@@ -9,6 +9,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/agentcard"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type claudeHookInput struct {
@@ -17,12 +18,13 @@ type claudeHookInput struct {
 	Source    string `json:"source"`
 }
 
-// sessionContext is what the session-context hook adds to a Claude session:
-// its card once per start, then one line each time the card changes. Claude
-// runs the hook from every config root that has it at once, so each start
-// and each change is claimed in the registry and only the claimant prints.
-// Every failure prints nothing, so the hook never stands in a session's way.
-func (a *App) sessionContext(input io.Reader, parent int, now time.Time) map[string]any {
+// sessionContext is what the session-context hook adds to a Claude or Codex
+// session: its card once per start, then one line each time the card changes.
+// Copies of the hook can run at once, from several config roots or from both
+// a host and the person's settings, so each start and each change is claimed
+// in the registry and only the claimant prints. Every failure prints nothing,
+// so the hook never stands in a session's way.
+func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent int, now time.Time) map[string]any {
 	var hook claudeHookInput
 	if json.NewDecoder(io.LimitReader(input, claudeHookInputLimit)).Decode(&hook) != nil || hook.SessionID == "" {
 		return nil
@@ -38,7 +40,7 @@ func (a *App) sessionContext(input io.Reader, parent int, now time.Time) map[str
 	defer cancel()
 	session, err := store.Session(hook.SessionID)
 	if err != nil {
-		if session, _, err = a.resolveLocalTarget(ctx, "claude:"+hook.SessionID); err != nil {
+		if session, _, err = a.resolveLocalTarget(ctx, string(kind)+":"+hook.SessionID); err != nil {
 			return nil
 		}
 	}

@@ -31,7 +31,7 @@ func rootHooks(t *testing.T, store *registry.Registry, fake *cliSurface, roots i
 		var wg sync.WaitGroup
 		for _, app := range apps {
 			wg.Go(func() {
-				output := app.sessionContext(strings.NewReader(input), 4242, time.Now())
+				output := app.sessionContext(strings.NewReader(input), surface.KindClaude, 4242, time.Now())
 				if output == nil {
 					return
 				}

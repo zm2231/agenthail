@@ -788,6 +788,9 @@ func (c *Codex) PrepareManagedTerminalSession(ctx context.Context, cwd, model st
 
 func prepareManagedTerminalSession(ctx context.Context, client codexClient, cwd, model string) (*surface.Session, error) {
 	params := map[string]any{"threadSource": "agenthail-terminal", "serviceName": "agenthail"}
+	if config := codexThreadContextConfig(); config != nil {
+		params["config"] = config
+	}
 	if cwd != "" {
 		params["cwd"] = cwd
 	}
@@ -830,6 +833,9 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 		return nil, nil, fmt.Errorf("message is required")
 	}
 	params := map[string]any{"threadSource": "agenthail", "serviceName": "agenthail"}
+	if config := codexThreadContextConfig(); config != nil {
+		params["config"] = config
+	}
 	if options.Cwd != "" {
 		params["cwd"] = options.Cwd
 	}

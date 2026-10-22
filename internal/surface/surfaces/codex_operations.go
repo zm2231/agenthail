@@ -52,6 +52,9 @@ func applyCodexTurnOptions(ctx context.Context, client codexClient, session *sur
 
 func (c *Codex) ForkSession(ctx context.Context, session *surface.Session, options surface.ForkOptions) (*surface.Session, error) {
 	params := map[string]any{"threadId": session.ID, "deferGoalContinuation": true, "excludeTurns": true, "threadSource": "agenthail"}
+	if config := codexThreadContextConfig(); config != nil {
+		params["config"] = config
+	}
 	for k, v := range map[string]string{"model": options.Model, "lastTurnId": options.LastTurnID} {
 		if v != "" {
 			params[k] = v

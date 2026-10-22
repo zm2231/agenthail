@@ -55,18 +55,30 @@ var (
 
 func (a *App) cmdHook(args []string) error {
 	if len(args) > 0 && args[0] == "session-context" {
-		claude := os.Getppid()
-		if len(args) == 3 && args[1] == "--claude-pid" {
-			pid, err := strconv.Atoi(args[2])
-			if err != nil || pid <= 0 {
-				return errors.New("usage: agenthail hook session-context [--claude-pid <pid>]")
+		usage := errors.New("usage: agenthail hook session-context [--surface claude|codex] [--claude-pid <pid>]")
+		kind, parent := surface.KindClaude, os.Getppid()
+		for rest := args[1:]; len(rest) > 0; rest = rest[2:] {
+			if len(rest) < 2 {
+				return usage
 			}
-			claude = pid
-		} else if len(args) != 1 {
-			return errors.New("usage: agenthail hook session-context [--claude-pid <pid>]")
+			switch rest[0] {
+			case "--surface":
+				kind = surface.SurfaceKind(rest[1])
+				if kind != surface.KindClaude && kind != surface.KindCodex {
+					return usage
+				}
+			case "--claude-pid":
+				pid, err := strconv.Atoi(rest[1])
+				if err != nil || pid <= 0 {
+					return usage
+				}
+				parent = pid
+			default:
+				return usage
+			}
 		}
 		done := make(chan map[string]any, 1)
-		go func() { done <- a.sessionContext(os.Stdin, claude, time.Now()) }()
+		go func() { done <- a.sessionContext(os.Stdin, kind, parent, time.Now()) }()
 		select {
 		case output := <-done:
 			if output != nil {
