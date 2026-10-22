@@ -118,6 +118,14 @@ struct SessionPreview: View {
             waitingSessions[0]["runtime"] = ["launcher": "cmux", "focusable": true]
             snapshot["sessions"] = waitingSessions
         }
+        if ProcessInfo.processInfo.arguments.contains("--preview-holders") {
+            var sharedSessions = snapshot["sessions"] as! [[String: Any]]
+            sharedSessions[0]["holders"] = [
+                ["pid": 4101, "tty": "ttys001", "status": "busy", "startedAt": "2026-09-12T03:50:00Z"],
+                ["pid": 4102, "tty": "ttys002", "status": "idle", "startedAt": "2026-09-12T03:58:00Z"]
+            ]
+            snapshot["sessions"] = sharedSessions
+        }
         return String(data: try! JSONSerialization.data(withJSONObject: snapshot), encoding: .utf8)!
     }
 

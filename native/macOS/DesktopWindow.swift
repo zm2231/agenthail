@@ -510,6 +510,8 @@ struct SessionRowView: View {
                 .font(.system(size: 10.5))
                 .foregroundStyle(DesktopPalette.text2)
                 .help(SessionFacts.holdersHelp(session.sharedHolders))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(SessionFacts.holdersLabel(session.sharedHolders.count))
             }
             Text(relativeAge(session.lastActive))
                 .font(.system(size: 11))

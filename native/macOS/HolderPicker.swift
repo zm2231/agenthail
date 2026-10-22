@@ -27,7 +27,7 @@ struct HolderPicker: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "terminal")
-                Text(picked.map { "pid \($0.pid)" } ?? "Choose a terminal")
+                Text(verbatim: picked.map { "pid \(String($0.pid))" } ?? "Choose a terminal")
             }
             .font(.system(size: 11.5))
             .foregroundStyle(picked == nil ? DesktopPalette.amber : DesktopPalette.accentText)

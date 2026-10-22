@@ -25,7 +25,7 @@ struct IOSHolderPicker: View {
             }
         } label: {
             Label {
-                Text(picked.map { "Sending to \($0.label)" } ?? "Open in \(holders.count) terminals. Choose one")
+                Text(verbatim: picked.map { "Sending to \($0.label)" } ?? "Open in \(holders.count) terminals. Choose one")
                     .lineLimit(1)
             } icon: {
                 Image(systemName: "terminal")
