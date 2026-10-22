@@ -506,3 +506,24 @@ func TestCatalogActiveSessionsAreTheSnapshotRowsThatAreRecentlyActive(t *testing
 		t.Fatalf("active sessions %v, snapshot rows recently active %v", got, want)
 	}
 }
+
+func TestCatalogActiveSessionsBoundIsTheFirstStoredMillisecondAtOrAfterSince(t *testing.T) {
+	r := openTestRegistry(t)
+	active := time.UnixMilli(time.Now().UnixMilli())
+	session := surface.Session{ID: "edge", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: "/work", Status: surface.StatusIdle, LastActive: active}
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: active, ProjectionFingerprint: `{"id":"edge"}`}, CatalogEvent{DedupeKey: "edge", Type: "session.upserted", EntityID: "edge", Payload: []byte(`{"session":{"id":"edge"}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []struct {
+		since time.Time
+		want  int
+	}{{active, 1}, {active.Add(time.Microsecond), 0}, {active.Add(-time.Microsecond), 1}} {
+		rows, err := r.CatalogActiveSessions(check.since)
+		if err != nil || len(rows) != check.want {
+			t.Fatalf("since %s: %d rows err=%v, want %d", check.since.Sub(active), len(rows), err, check.want)
+		}
+		if now := check.since.Add(surface.ActiveWindow); surface.RecentlyActive(session, now) != (check.want == 1) {
+			t.Fatalf("since %s disagrees with RecentlyActive", check.since.Sub(active))
+		}
+	}
+}

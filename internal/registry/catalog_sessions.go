@@ -773,9 +773,15 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 // not offline and active since the given time, newest first. It reads only
 // those rows, so a caller that needs no other session skips the full snapshot.
 func (r *Registry) CatalogActiveSessions(since time.Time) ([]CatalogSessionState, error) {
+	// Activity is stored in whole milliseconds, so the first one at or after
+	// since is the bound.
+	sinceMS := since.UnixMilli()
+	if since.After(time.UnixMilli(sinceMS)) {
+		sinceMS++
+	}
 	rows, err := r.read.Query(catalogSessionSelect+`
 		WHERE s.status=? OR (s.status<>? AND s.last_active_ms>=?)
-		ORDER BY s.last_active_ms DESC,s.updated_at DESC,s.id`, string(surface.StatusBusy), string(surface.StatusOffline), since.UnixMilli())
+		ORDER BY s.last_active_ms DESC,s.updated_at DESC,s.id`, string(surface.StatusBusy), string(surface.StatusOffline), sinceMS)
 	if err != nil {
 		return nil, err
 	}
