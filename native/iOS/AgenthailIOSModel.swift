@@ -717,7 +717,8 @@ final class AgenthailIOSModel: ObservableObject {
 
     func pickHolder(_ holder: SessionHolder?, for sessionID: String) {
         HolderPins.shared.pick(holder.map(HolderPin.init), for: sessionID)
-        holderPicks = HolderPins.shared.all
+        let picks = HolderPins.shared.all
+        if holderPicks != picks { holderPicks = picks }
     }
 
     func send(to session: SessionState) {
