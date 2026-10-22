@@ -56,8 +56,10 @@ the journal, so turns written while no source ran appear on the next read.
 A Claude journal also keeps a transcript checkpoint in
 `session_journal_state.transcript_checkpoint`: the byte offset and file
 identity up to which it holds the transcript's items. The seed, each catch-up,
-and each live stream window record it after the items they appended; a
-window in which a journal append failed clears it instead. A source that starts
+and each live stream window record it after the items they appended. Once a
+journal write of a source has failed, that source clears the checkpoint at
+each of these points instead, so the next source pages back to the journal and
+appends what was lost. A source that starts
 with a checkpoint reads forward from that offset once, deriving items the same
 way a page does. It pages newest-first instead when there is no checkpoint, the
 file identity changed, or more than 32 MiB was written since the checkpoint.

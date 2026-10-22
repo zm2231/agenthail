@@ -67,15 +67,22 @@ func appendToFile(t *testing.T, path, data string) {
 	}
 }
 
-func coldCatchUp(t *testing.T, between func(r *registry.Registry, path string)) ([]string, *catchUpClaude) {
+const checkpointConversation = "checkpoint-conversation"
+
+type checkpointFixture struct {
+	registry *registry.Registry
+	session  surface.Session
+	adapter  *catchUpClaude
+}
+
+func newCheckpointFixture(t *testing.T) *checkpointFixture {
 	t.Helper()
 	fixture := claudetest.New(t)
-	const conversation = "checkpoint-conversation"
-	path := filepath.Join(fixture.Root, "projects", "checkpoint-project", conversation+".jsonl")
+	path := filepath.Join(fixture.Root, "projects", "checkpoint-project", checkpointConversation+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(claudeTurns(conversation, 1, 3)), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(claudeTurns(checkpointConversation, 1, 3)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
@@ -83,29 +90,31 @@ func coldCatchUp(t *testing.T, between func(r *registry.Registry, path string)) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	session := surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Transcript: path}
+	session := surface.Session{ID: checkpointConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Transcript: path}
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
-	adapter := &catchUpClaude{Claude: surfaces.NewClaude(nil, fixture.Home)}
-	start := func() {
-		t.Helper()
-		source := &sessionSource{manager: newSessionSourceManager(r), session: session, adapter: adapter, epoch: "checkpoint", ctx: context.Background(), appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
-		if err := source.loadSeed(); err != nil {
-			t.Fatal(err)
-		}
-	}
-	start()
-	if _, found, err := r.SessionTranscriptCheckpoint(conversation); err != nil || !found {
+	f := &checkpointFixture{registry: r, session: session, adapter: &catchUpClaude{Claude: surfaces.NewClaude(nil, fixture.Home)}}
+	f.start(t)
+	if _, found, err := r.SessionTranscriptCheckpoint(checkpointConversation); err != nil || !found {
 		t.Fatalf("seed left no checkpoint: found=%v err=%v", found, err)
 	}
-	appendToFile(t, path, claudeTurns(conversation, 4, 8))
-	if between != nil {
-		between(r, path)
+	return f
+}
+
+func (f *checkpointFixture) start(t *testing.T) *sessionSource {
+	t.Helper()
+	f.adapter.pages, f.adapter.forward = 0, 0
+	source := &sessionSource{manager: newSessionSourceManager(f.registry), session: f.session, adapter: f.adapter, epoch: "checkpoint", ctx: context.Background(), appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	if err := source.loadSeed(); err != nil {
+		t.Fatal(err)
 	}
-	adapter.pages, adapter.forward = 0, 0
-	start()
-	page, err := r.ReadSessionJournalPage(conversation, 0, 200)
+	return source
+}
+
+func (f *checkpointFixture) journal(t *testing.T) []string {
+	t.Helper()
+	page, err := f.registry.ReadSessionJournalPage(checkpointConversation, 0, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,14 +124,32 @@ func coldCatchUp(t *testing.T, between func(r *registry.Registry, path string)) 
 		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
 			t.Fatal(err)
 		}
-		items = append(items, fmt.Sprintf("%s %s %s %q", payload.ItemID, payload.Kind, payload.TurnID, payload.Body))
+		if payload.Kind != "source-error" {
+			items = append(items, fmt.Sprintf("%s %s %s %q", payload.ItemID, payload.Kind, payload.TurnID, payload.Body))
+		}
 	}
-	checkpoint, found, err := r.SessionTranscriptCheckpoint(conversation)
-	info, statErr := os.Stat(path)
+	return items
+}
+
+func (f *checkpointFixture) requireCheckpointAtEnd(t *testing.T) {
+	t.Helper()
+	checkpoint, found, err := f.registry.SessionTranscriptCheckpoint(checkpointConversation)
+	info, statErr := os.Stat(f.session.Transcript)
 	if err != nil || statErr != nil || !found || checkpoint.Offset != info.Size() {
 		t.Fatalf("checkpoint after catch-up %+v found=%v err=%v, want the transcript's end", checkpoint, found, err)
 	}
-	return items, adapter
+}
+
+func coldCatchUp(t *testing.T, between func(r *registry.Registry, path string)) ([]string, *catchUpClaude) {
+	t.Helper()
+	f := newCheckpointFixture(t)
+	appendToFile(t, f.session.Transcript, claudeTurns(checkpointConversation, 4, 8))
+	if between != nil {
+		between(f.registry, f.session.Transcript)
+	}
+	f.start(t)
+	f.requireCheckpointAtEnd(t)
+	return f.journal(t), f.adapter
 }
 
 func TestAColdSourceCatchesUpFromItsCheckpointToTheJournalPagingBackWouldBuild(t *testing.T) {
@@ -180,24 +207,48 @@ func TestAColdSourcePagesBackWhenTheBacklogIsPastTheForwardLimit(t *testing.T) {
 	}
 }
 
-func TestACheckpointAfterAFailedAppendIsClearedNotAdvanced(t *testing.T) {
-	_, r, _, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(r), session: from, adapter: &catchUpClaude{}, appendBodies: map[string]string{}}
-	if err := source.recordTranscriptCheckpoint(100, "transcript"); err != nil {
+func TestAnItemWhoseAppendFailedIsCaughtUpByTheNextSourceDespiteLaterCheckpoints(t *testing.T) {
+	f := newCheckpointFixture(t)
+	appendToFile(t, f.session.Transcript, claudeTurns(checkpointConversation, 4, 8))
+	checkpoint, _, err := f.registry.SessionTranscriptCheckpoint(checkpointConversation)
+	if err != nil {
 		t.Fatal(err)
 	}
-	source.appendFailed = true
-	if err := source.recordTranscriptCheckpoint(200, "transcript"); err != nil {
+	read, err := f.adapter.Claude.TranscriptItems(context.Background(), &f.session, surface.TranscriptItemsRequest{From: checkpoint.Offset})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if checkpoint, found, err := r.SessionTranscriptCheckpoint(from.ID); err != nil || found {
-		t.Fatalf("checkpoint after a failed append = %+v found=%v err=%v, want none", checkpoint, found, err)
+	var lost string
+	for _, item := range read.Items {
+		if item.Text == "answer 5" {
+			lost = "timeline:" + item.ID
+		}
 	}
-	if err := source.recordTranscriptCheckpoint(300, "transcript"); err != nil {
+	if lost == "" {
+		t.Fatal("no answer 5 in the backlog")
+	}
+	allow := rejectJournalWrites(t, f.registry, lost)
+	failed := f.start(t)
+	allow()
+	appendToFile(t, f.session.Transcript, claudeTurns(checkpointConversation, 9, 9))
+	info, err := os.Stat(f.session.Transcript)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if checkpoint, found, err := r.SessionTranscriptCheckpoint(from.ID); err != nil || !found || checkpoint.Offset != 300 {
-		t.Fatalf("next checkpoint = %+v found=%v err=%v", checkpoint, found, err)
+	if err := failed.recordTranscriptCheckpoint(info.Size(), read.Identity); err != nil {
+		t.Fatal(err)
+	}
+	if checkpoint, found, err := f.registry.SessionTranscriptCheckpoint(checkpointConversation); err != nil || found {
+		t.Fatalf("a source whose append failed recorded checkpoint %+v found=%v err=%v", checkpoint, found, err)
+	}
+	f.start(t)
+	if f.adapter.forward != 0 || f.adapter.pages == 0 {
+		t.Fatalf("%d forward reads, %d pages; the next source must page back", f.adapter.forward, f.adapter.pages)
+	}
+	f.requireCheckpointAtEnd(t)
+	journal := strings.Join(f.journal(t), "\n")
+	if strings.Count(journal, `"answer 5"`) != 1 || !strings.Contains(journal, `"answer 9"`) {
+		t.Fatalf("journal after the failed append:\n%s", journal)
 	}
 }
 
@@ -268,5 +319,39 @@ func TestALiveSourceLeavesItsCheckpointWhereItsStreamStopped(t *testing.T) {
 	got := readDashboardExchanges(t, handler, conversation, "")
 	if len(got) != 4 || got[3].User != "question 4" || got[3].Assistant != "answer 4" {
 		t.Fatalf("page after the source stopped=%+v", got)
+	}
+}
+
+func TestAFailedMergeIntoAJournalRowKeepsTheSourceFromRecordingACheckpoint(t *testing.T) {
+	f := newCheckpointFixture(t)
+	page, err := f.registry.ReadSessionJournalPage(checkpointConversation, 0, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row sessionJournalPayload
+	for _, entry := range page.Entries {
+		var payload sessionJournalPayload
+		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Body == "answer 2" {
+			row = payload
+		}
+	}
+	if row.ProviderKey == "" {
+		t.Fatal("no journal row for answer 2")
+	}
+	allow := rejectJournalWrites(t, f.registry, row.ProviderKey)
+	source := &sessionSource{manager: newSessionSourceManager(f.registry), session: f.session, adapter: f.adapter, epoch: "checkpoint", ctx: context.Background(), appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	item := surface.TimelineItem{ID: row.ItemID, Kind: row.Kind, Role: row.Role, Text: row.Body, TurnID: "another-turn"}
+	if !source.mergeSeedIntoAuthoritativeRow(row.ProviderKey, "upsert", item) {
+		t.Fatal("the item did not match its journal row")
+	}
+	allow()
+	if err := source.recordTranscriptCheckpoint(1, "transcript"); err != nil {
+		t.Fatal(err)
+	}
+	if checkpoint, found, err := f.registry.SessionTranscriptCheckpoint(checkpointConversation); err != nil || found {
+		t.Fatalf("a source whose merge failed recorded checkpoint %+v found=%v err=%v", checkpoint, found, err)
 	}
 }

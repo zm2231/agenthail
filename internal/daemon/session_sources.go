@@ -92,8 +92,9 @@ type sessionSource struct {
 	streamCursorErr error
 	anonymous       uint64
 	sourceVersion   uint64
-	// appendFailed records a journal append that failed since the last
-	// checkpoint, so the next checkpoint does not claim the items it lost.
+	// appendFailed records that a journal append of this source failed. The
+	// source then never records a checkpoint, since a later one would claim
+	// the items it lost.
 	appendFailed bool
 }
 
@@ -563,15 +564,14 @@ func (s *sessionSource) catchUpFromCheckpoint(ctx context.Context, trustedIdenti
 }
 
 // recordTranscriptCheckpoint records that the journal holds the transcript's
-// items before offset. It clears the checkpoint instead when an append failed
-// since the last one, so a cold start pages back to the journal.
+// items before offset. Once an append of this source failed it clears the
+// checkpoint instead, so the next source pages back to the journal.
 func (s *sessionSource) recordTranscriptCheckpoint(offset int64, identity string) error {
 	if _, ok := s.adapter.(surface.TranscriptItemReader); !ok || identity == "" {
 		return nil
 	}
 	s.mu.Lock()
 	failed := s.appendFailed
-	s.appendFailed = false
 	s.mu.Unlock()
 	if failed {
 		return s.manager.registry.ClearSessionTranscriptCheckpoint(s.session.ID)
@@ -983,7 +983,11 @@ func (s *sessionSource) mergeSeedIntoAuthoritativeRow(providerKey, operation str
 		return true
 	}
 	_, changed, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: merged.Kind, ProviderKey: journalKey, Payload: encoded, BodyRef: payload.BodyRef, FullBody: entry.FullBody, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
-	if err == nil && changed {
+	if err != nil {
+		s.mu.Lock()
+		s.appendFailed = true
+		s.mu.Unlock()
+	} else if changed {
 		s.wakeFollowers()
 	}
 	return true
