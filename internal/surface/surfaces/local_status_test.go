@@ -122,3 +122,34 @@ func TestCodexListAndLocalStatusShareTranscriptPrecedence(t *testing.T) {
 		t.Fatalf("provider busy overrode completed transcript: %s", listed.Status)
 	}
 }
+
+func TestClaudeLocalStatusDatesWorkingSessionByTranscriptWrites(t *testing.T) {
+	home := t.TempDir()
+	claude := NewClaude(nil, home)
+	pid := os.Getpid()
+	started := time.Now().Add(-40 * time.Minute).Truncate(time.Millisecond)
+	transcript := filepath.Join(t.TempDir(), "conversation-1.jsonl")
+	appendLine(t, transcript, `{"type":"user","uuid":"u1","timestamp":"`+started.UTC().Format(time.RFC3339Nano)+`","message":{"role":"user","content":"work"}}`)
+	written := time.Now().Add(-time.Minute).Truncate(time.Second)
+	if err := os.Chtimes(transcript, written, written); err != nil {
+		t.Fatal(err)
+	}
+	record := map[string]any{"pid": pid, "sessionId": "conversation-1", "status": "busy", "updatedAt": float64(started.UnixMilli())}
+	writePeerRecord(t, home, pid, record)
+	session := surface.Session{ID: "conversation-1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: pid, Status: surface.StatusBusy, Transcript: transcript, HasLocal: true}
+
+	busy, err := claude.LocalStatus(context.Background(), session)
+	if err != nil || busy.Status != surface.StatusBusy || !busy.LastActive.Equal(written) {
+		t.Fatalf("busy status=%s lastActive=%s want %s err=%v", busy.Status, busy.LastActive, written, err)
+	}
+
+	finished := written.Add(-30 * time.Second)
+	record["status"] = "idle"
+	record["peerFeatures"] = []any{"notify_idle"}
+	record["updatedAt"] = float64(finished.UnixMilli())
+	writePeerRecord(t, home, pid, record)
+	idle, err := claude.LocalStatus(context.Background(), busy)
+	if err != nil || idle.Status == surface.StatusBusy || !idle.LastActive.Equal(finished) {
+		t.Fatalf("idle status=%s lastActive=%s want record time %s err=%v", idle.Status, idle.LastActive, finished, err)
+	}
+}

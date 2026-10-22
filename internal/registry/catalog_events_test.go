@@ -395,3 +395,28 @@ func TestSessionMissingFromDiscoveryStopsBeingBusyOrCurrent(t *testing.T) {
 		t.Fatal("unobserved session with a queued message left current")
 	}
 }
+
+func TestCatalogSnapshotReadsSessionsInOrderWithoutSorting(t *testing.T) {
+	r := openTestRegistry(t)
+	rows, err := r.db.Query(`EXPLAIN QUERY PLAN ` + catalogSnapshotQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(plan, "\n")
+	if strings.Contains(joined, "TEMP B-TREE") || !strings.Contains(joined, "sessions_recent") {
+		t.Fatalf("plan:\n%s", joined)
+	}
+}
