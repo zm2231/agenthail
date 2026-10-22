@@ -103,6 +103,9 @@ func (c *toolVoice) await(t *testing.T, tool, id string) toolAnswer {
 func connectToolVoice(t *testing.T, node *federationNode) (*voice.Service, *toolVoice) {
 	t.Helper()
 	call := &toolVoice{answers: map[string]toolAnswer{}}
+	node.fake.mu.Lock()
+	node.fake.sessions["operator"] = surface.Session{ID: "operator", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Voice operator", Transport: "desktop", Status: surface.StatusIdle}
+	node.fake.mu.Unlock()
 	service := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(t.TempDir(), "voice", "operator.json"), call, node.daemon.registerVoiceOperator, "/fixture/agenthail", node.daemon.resolveVoiceTarget, node.daemon.dispatcher(), nil, daemonVoiceStreamProvider{daemon: node.daemon})
 	service.SetProjects(voiceProjects{d: node.daemon})
 	t.Cleanup(service.Close)
