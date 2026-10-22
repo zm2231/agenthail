@@ -1012,6 +1012,27 @@ struct TranscriptBlockView: View {
             .help(expanded ? "" : text)
         case .image(let attachment):
             AttachmentImageView(attachment: attachment)
+        case .instructions(let text):
+            VStack(alignment: .leading, spacing: 6) {
+                Button { expanded.toggle() } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        Text("Instructions")
+                    }
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(DesktopPalette.muted)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows what the agent was told")
+                if expanded {
+                    Text(text)
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .foregroundStyle(DesktopPalette.muted)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
         }
     }
 }

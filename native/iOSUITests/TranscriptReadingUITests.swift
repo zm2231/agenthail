@@ -26,7 +26,7 @@ final class TranscriptReadingUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Repository guidance"].isHittable)
         capture("Context and long message collapsed", app)
         context.tapWhenReady()
-        XCTAssertTrue(app.navigationBars["Repository instructions"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Instructions"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Copy text"].exists)
         app.buttons["Done"].tapWhenReady()
         let fullMessage = app.buttons["Read full message"]
