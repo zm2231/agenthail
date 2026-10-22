@@ -46,6 +46,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published private(set) var reconnecting = false
     @Published var operationError: String?
     @Published var pairing = false
+    @Published private(set) var completedPairings = 0
     let draft = ComposerDraft()
     var composer: String {
         get { draft.text }
@@ -579,6 +580,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 attachmentCacheBytes = 0
                 pairing = false
                 operationError = nil
+                completedPairings += 1
                 rebuild()
                 if automaticallyConnect {
                     connections[hostID]?.connect()

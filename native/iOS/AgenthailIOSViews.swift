@@ -103,8 +103,8 @@ struct PairingForm: View {
                     .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { scanning = false } } }
                 }
             }
-            .onChange(of: model.hosts.map(\.id)) { before, after in
-                if adding && after.count > before.count { dismiss() }
+            .onChange(of: model.completedPairings) {
+                if adding { dismiss() }
             }
     }
 }
