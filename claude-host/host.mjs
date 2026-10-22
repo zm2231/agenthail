@@ -679,12 +679,12 @@ function sessionContextHooks(s) {
   const run = (input, _toolUseID, { signal }) =>
     new Promise((resolve) => {
       const child = execFile(args.agenthail, ['hook', 'session-context', ...(s.pid ? ['--claude-pid', String(s.pid)] : [])], { signal, timeout: 8_000, maxBuffer: 1 << 20 }, (error, stdout) => {
-        if (error || !stdout.trim()) return resolve({});
+        let context;
         try {
-          resolve(JSON.parse(stdout));
-        } catch {
-          resolve({});
-        }
+          context = JSON.parse(stdout)?.hookSpecificOutput?.additionalContext;
+        } catch {}
+        if (error || typeof context !== 'string') return resolve({});
+        resolve({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: context } });
       });
       child.stdin.on('error', () => {});
       child.stdin.end(JSON.stringify(input));

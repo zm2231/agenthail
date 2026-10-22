@@ -188,6 +188,8 @@ const fs = require('node:fs');
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
 fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args: process.argv.slice(2), input }) + '\\n');
 if (input.prompt === 'FAIL') process.exit(1);
+if (input.prompt === 'NULL') process.exit(process.stdout.write('null') && 0);
+if (input.prompt === 'ARRAY') process.exit(process.stdout.write('[]') && 0);
 process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: 'card for ' + input.hook_event_name } }));
 `,
     { mode: 0o755 },
@@ -197,7 +199,7 @@ process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input
   await c.call('subscribe', { after: 0 });
   const id = randomUUID();
   const opened = await c.call('open', { sessionId: id, cwd: f.cwd });
-  for (const text of ['hello', 'FAIL']) {
+  for (const text of ['hello', 'FAIL', 'NULL', 'ARRAY']) {
     const uuid = randomUUID();
     await c.call('send', { sessionId: id, uuid, text, origin: { kind: 'human' } });
     await c.event(turnResult(id, uuid));
@@ -205,7 +207,11 @@ process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input
   const recorded = fs.readFileSync(path.join(f.claudeDir, 'hooks.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.deepEqual(
     recorded.map((r) => [r.event, r.output.hookSpecificOutput?.additionalContext ?? null]),
-    [['SessionStart', 'card for SessionStart'], ['UserPromptSubmit', 'card for UserPromptSubmit'], ['UserPromptSubmit', null]],
+    [['SessionStart', 'card for SessionStart'], ['UserPromptSubmit', 'card for UserPromptSubmit'], ['UserPromptSubmit', null], ['UserPromptSubmit', null], ['UserPromptSubmit', null]],
+  );
+  assert.deepEqual(
+    recorded.map((r) => r.output),
+    [{ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'card for SessionStart' } }, { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'card for UserPromptSubmit' } }, {}, {}, {}],
   );
   const ran = fs.readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.deepEqual(ran[0].args, ['hook', 'session-context', '--claude-pid', String(opened.pid)]);
