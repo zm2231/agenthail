@@ -176,6 +176,72 @@ final class StaleConnectionTests: XCTestCase {
     }
 
     @MainActor
+    func testAnOldComputersHistoryGapDoesNotStopOlderActivityOnItsReplacement() async throws {
+        KeychainStore.removeAll()
+        ServedSessionProtocol.state.reset(holdDetailOn: nil)
+        defer { ServedSessionProtocol.state.release(); KeychainStore.removeAll() }
+        try AgenthailIOSTests.pair("hsrv", "https://old.tailnet.ts.net", name: "srv")
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        model.connect()
+        for _ in 0..<150 where model.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
+        await model.loadSession("hsrv::demo")
+        let cursor = try XCTUnwrap(model.activityCursor)
+        ServedSessionProtocol.state.gap("old")
+        ServedSessionProtocol.state.hold("old", ["/api/v1/session"])
+        let older = Task { await model.loadOlderActivity() }
+        for _ in 0..<150 where !ServedSessionProtocol.state.holding { try await Task.sleep(for: .milliseconds(20)) }
+        model.handlePairingURL(AgenthailIOSTests.pairingLink("new", host: "hsrv", name: "srv"))
+        model.confirmPairing()
+        for _ in 0..<150 where model.completedPairings == 0 { try await Task.sleep(for: .milliseconds(20)) }
+        model.connect()
+        for _ in 0..<150 where model.selectedDetail?.session.status != "new" || model.activityCursor == nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(model.activityCursor, cursor)
+        ServedSessionProtocol.state.release()
+        await older.value
+        XCTAssertEqual(model.activityCursor, cursor)
+        XCTAssertNil(model.olderActivityError)
+        model.forgetHost("hsrv")
+    }
+
+    @MainActor
+    func testARouteMovedToAMirrorFetchesSubagentsAndAttachmentsThroughIt() async throws {
+        KeychainStore.removeAll()
+        ServedSessionProtocol.state.reset(holdDetailOn: nil)
+        defer { KeychainStore.removeAll() }
+        try AgenthailIOSTests.pair("hown", "https://own.tailnet.ts.net")
+        try AgenthailIOSTests.pair("hmirror", "https://mirror.tailnet.ts.net")
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        model.connect()
+        for _ in 0..<150 where model.connection("hown")?.reachable != true || model.connection("hmirror")?.reachable != true {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        await model.loadSession("hown::demo")
+        XCTAssertEqual(model.selectedDetail?.session.status, "own")
+        var parent = try XCTUnwrap(model.snapshot?.sessions.first { $0.id == "hown::demo" })
+        parent.hiddenSubagents = SubagentRollup(count: 1, working: 0)
+        await model.loadSubagents(of: parent)
+        XCTAssertEqual(model.fetchedSubagents.children(of: parent.id).map(\.name), ["child"], model.fetchedSubagents.errors[parent.id] ?? "")
+        XCTAssertTrue(model.fetchedSubagents.children(of: parent.id).allSatisfy { $0.id.hasSuffix("child-own") })
+        let item = TimelineItem(id: "image", kind: "attachment", role: "user", title: "Image", text: "Image attachment", timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil, attachment: SessionAttachment(id: "a1", mediaType: "image/png", width: nil, height: nil, bytes: nil))
+        let ownBytes = await model.sessionAttachment(for: item, sessionID: parent.id)
+        XCTAssertEqual(ownBytes, Data("own".utf8))
+        let revision = model.fetchedSubagents.revision(parent.id)
+
+        ServedSessionProtocol.state.takeOffline("own")
+        for _ in 0..<200 where model.selectedDetail?.session.status != "mirror" { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(model.selectedDetail?.session.status, "mirror")
+        XCTAssertNotEqual(model.fetchedSubagents.revision(parent.id), revision)
+        XCTAssertTrue(model.fetchedSubagents.children(of: parent.id).isEmpty)
+        let mirrorBytes = await model.sessionAttachment(for: item, sessionID: parent.id)
+        XCTAssertEqual(mirrorBytes, Data("mirror".utf8))
+        await model.loadSubagents(of: parent)
+        XCTAssertTrue(model.fetchedSubagents.children(of: parent.id).allSatisfy { $0.id.hasSuffix("child-mirror") })
+        XCTAssertFalse(model.fetchedSubagents.children(of: parent.id).isEmpty)
+        model.forgetHost("hown")
+        model.forgetHost("hmirror")
+    }
+
+    @MainActor
     func testRemovingTheMirrorServingASessionStopsItsStream() async throws {
         KeychainStore.removeAll()
         ServedSessionProtocol.state.reset(holdDetailOn: nil)
@@ -373,10 +439,15 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
         private var waiting = 0
         private var log: [(host: String, path: String)] = []
         private var streams: [String: ServedSessionProtocol] = [:]
+        private var opened: [String: [ServedSessionProtocol]] = [:]
+        private var down: Set<String> = []
+        private var gapOn: String?
+        func gap(_ host: String?) { condition.withLock { gapOn = host } }
+        func gapped(_ host: String) -> Bool { condition.withLock { gapOn == host } }
         var holding: Bool { condition.withLock { waiting > 0 } }
         var held: Int { condition.withLock { waiting } }
         func reset(holdDetailOn host: String?) {
-            condition.withLock { holdOn = host; holdPaths = ["/api/v1/session"]; waiting = 0; log = []; streams = [:]; condition.broadcast() }
+            condition.withLock { holdOn = host; holdPaths = ["/api/v1/session"]; waiting = 0; log = []; streams = [:]; opened = [:]; down = []; gapOn = nil; condition.broadcast() }
         }
         func hold(_ host: String, _ paths: Set<String>) { condition.withLock { holdOn = host; holdPaths = paths } }
         func release() { condition.withLock { holdOn = nil; condition.broadcast() } }
@@ -386,6 +457,12 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
         }
         func streaming(_ host: String) -> Bool { condition.withLock { streams[host] != nil } }
         func open(_ host: String, _ request: ServedSessionProtocol) { condition.withLock { streams[host] = request } }
+        func opened(_ host: String, _ request: ServedSessionProtocol) { condition.withLock { opened[host, default: []].append(request) } }
+        func offline(_ host: String) -> Bool { condition.withLock { down.contains(host) } }
+        func takeOffline(_ host: String) {
+            let open = condition.withLock { down.insert(host); return opened.removeValue(forKey: host) ?? [] }
+            for request in open { request.client?.urlProtocolDidFinishLoading(request) }
+        }
         func emit(_ host: String, _ json: String) {
             let stream = condition.withLock { streams[host] }
             stream?.client?.urlProtocol(stream!, didLoad: Data("id: 9\ndata: \(json)\n\n".utf8))
@@ -410,6 +487,14 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
         let host = request.url?.host?.split(separator: ".").first.map(String.init) ?? ""
         let path = request.url!.path
         Self.state.record(host, path)
+        if Self.state.offline(host) {
+            client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
+            return
+        }
+        if path == "/api/v1/snapshot", request.url?.query?.contains("parentId") == true {
+            respond(#"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"child-\#(host)","surface":"codex","name":"child","status":"idle","queueCount":0,"open":false,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"compact":true,"model":true,"interrupt":true,"steer":true},"subagent":{"parentId":"demo","rootId":"demo","depth":1}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24}"#)
+            return
+        }
         switch path {
         case "/api/v1/version": respond(#"{"protocol":1,"minimumProtocol":1,"maximumProtocol":1}"#)
         case "/api/v1/pair":
@@ -424,17 +509,23 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
                 return session
             }
             if host == "mirror" {
-                var sessions = value["sessions"] as! [[String: Any]]
+                let sessions = value["sessions"] as! [[String: Any]]
                 var mirrored = sessions[0]
                 mirrored["id"] = "s9"
                 mirrored["host"] = ["id": "hbuild", "name": "build", "state": "connected"]
-                value["sessions"] = sessions + [mirrored]
+                var owned = sessions.first { $0["id"] as? String == "demo" }!
+                owned["host"] = ["id": "hown", "name": "own", "state": "connected"]
+                value["sessions"] = sessions + [mirrored, owned]
             }
             respond(String(decoding: try! JSONSerialization.data(withJSONObject: value), as: UTF8.self))
         case "/api/v1/session":
             let older = request.url?.query?.contains("timelineBefore") == true
             DispatchQueue.global().async { [self] in
                 Self.state.waitIfHeld(host, path)
+                if older, Self.state.gapped(host) {
+                    respond(#"{"error":{"code":"history_gap","message":"Older history is no longer retained."}}"#, status: 409)
+                    return
+                }
                 var object = try! JSONSerialization.jsonObject(with: Data(SessionPreview.detailJSON.utf8)) as! [String: Any]
                 var session = object["session"] as! [String: Any]
                 session["status"] = host
@@ -453,7 +544,10 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/session-stream":
             Self.state.open(host, self)
             open()
-        case "/api/v1/events", "/api/v1/catalog-events": open()
+        case "/api/v1/session-attachment": respond(host)
+        case "/api/v1/events", "/api/v1/catalog-events":
+            Self.state.opened(host, self)
+            open()
         default: respond("{}")
         }
     }
@@ -462,8 +556,8 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/event-stream"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(": connected\n\n".utf8))
     }
-    private func respond(_ body: String) {
-        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+    private func respond(_ body: String, status: Int = 200) {
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }

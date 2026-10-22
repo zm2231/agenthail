@@ -116,6 +116,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published var pendingControls: Set<String> = []
     @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
     @Published private(set) var fetchedSubagents = SubagentPageCache()
+    private var subagentServers: [String: HostConnection] = [:]
 
     private var connections: [String: HostConnection] = [:]
     private var hostOrder: [String] = []
@@ -219,6 +220,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         reconnecting = ordered.contains(where: \.reconnecting)
         if let voice = voiceHostID, connections[voice] == nil { voiceHostID = nil }
         rebindSelectedSession()
+        refetchMovedSubagents()
+    }
+
+    private func refetchMovedSubagents() {
+        for (parent, recorded) in subagentServers where server(for: parent) !== recorded {
+            subagentServers[parent] = nil
+            if fetchedSubagents.holds(parent) { fetchedSubagents.refetch(parent) }
+        }
     }
 
     private func server(for sessionID: String) -> HostConnection? {
@@ -241,6 +250,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         olderActivity = []
         activityCursor = nil
         olderActivityError = nil
+        attachmentCache.removeAll()
+        attachmentCacheBytes = 0
         guard current != nil else { return }
         Task { [weak self] in
             await self?.reloadSelectedSession()
@@ -364,6 +375,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     func loadSubagents(of session: SessionState) async {
         guard (session.hiddenSubagents?.count ?? 0) > 0 else {
             fetchedSubagents.drop(session.id)
+            subagentServers[session.id] = nil
             return
         }
         let requestServer = server(for: session.id)
@@ -372,8 +384,11 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             let loaded = try await connection.api.subagents(of: route.sessionID)
             guard !Task.isCancelled, server(for: session.id) === connection else { return }
             fetchedSubagents.store(loaded.map { merged($0, from: route.hostID) }, for: session.id)
+            subagentServers[session.id] = connection
         } catch {
-            if !Task.isCancelled, server(for: session.id) === requestServer { fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id) }
+            guard !Task.isCancelled, server(for: session.id) === requestServer else { return }
+            fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id)
+            subagentServers[session.id] = requestServer
         }
     }
 
@@ -815,6 +830,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard let id = selectedSessionID, let cursor = activityCursor, cursor > 0, !loadingOlderActivity else { return }
         loadingOlderActivity = true
         defer { loadingOlderActivity = false }
+        let requestServer = server(for: id)
         do {
             let (connection, route) = try resolveServer(id)
             let page = try await connection.api.sessionDetail(id: route.sessionID, includeTimeline: true, timelineBefore: cursor)
@@ -827,7 +843,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             activityCursor = timeline.nextBefore
             olderActivityError = nil
         } catch {
-            if selectedSessionID == id, activityCursor == cursor {
+            if selectedSessionID == id, activityCursor == cursor, server(for: id) === requestServer {
                 if case AgenthailAPIError.historyGap = error { activityCursor = nil }
                 olderActivityError = error.localizedDescription
             }

@@ -621,6 +621,14 @@ struct SubagentPageCache {
         touch(parentID)
     }
 
+    func holds(_ parentID: String) -> Bool { rows[parentID] != nil || errors[parentID] != nil }
+
+    mutating func refetch(_ parentID: String) {
+        rows[parentID] = nil
+        errors[parentID] = nil
+        revisions[parentID, default: 0] += 1
+    }
+
     mutating func drop(_ parentID: String) {
         rows[parentID] = nil
         errors[parentID] = nil
