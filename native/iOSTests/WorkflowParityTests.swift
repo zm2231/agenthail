@@ -231,6 +231,27 @@ final class WorkflowParityTests: XCTestCase {
     }
 
     @MainActor
+    func testTakingBackAQueuedMessageFollowsItsSessionAcrossARekey() async throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"old","surface":"claude","name":"task","status":"working","queueCount":1,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24}"#.utf8)))
+        model.host(try XCTUnwrap(model.connection("computer")), rekeyed: ["old": "new"])
+        func queued(_ id: Int, _ message: String) throws -> QueueState {
+            var item = try JSONDecoder().decode(QueueState.self, from: Data(#"{"id":\#(id),"sessionId":"old","target":"old","message":"\#(message)","status":"pending","evidence":"","attempts":0,"queuedAt":"now"}"#.utf8))
+            item.hostID = "computer"
+            return item
+        }
+        try await model.takeBack(queued(9, "first"))
+        await model.loadSession("computer::old")
+        XCTAssertEqual(model.selectedSessionID, "computer::new")
+        XCTAssertEqual(model.composer, "first")
+        try await model.takeBack(queued(10, "second"))
+        XCTAssertEqual(model.composer, "second\n\nfirst")
+        XCTAssertEqual(ParityProtocol.state.actions.compactMap { $0["action"] as? String }, ["queue-cancel", "queue-cancel"])
+        XCTAssertEqual(ParityProtocol.state.actions.compactMap { $0["queueId"] as? Int }, [9, 10])
+    }
+
+    @MainActor
     func testCreatingOnAMirroredComputerKeysTheSessionByItsOwner() async throws {
         ParityProtocol.state.reset()
         let model = makeModel()
