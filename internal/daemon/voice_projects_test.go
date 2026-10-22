@@ -60,7 +60,7 @@ func (c *toolVoice) Request(context.Context, *surface.Session, string, map[strin
 
 func (c *toolVoice) Interrupt(context.Context, *surface.Session) error { return nil }
 
-func (c *toolVoice) RespondDynamicToolCall(_ context.Context, requestID string, success bool, text string) error {
+func (c *toolVoice) RespondDynamicToolCall(_ context.Context, requestID, _ string, success bool, text string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.answers[requestID] = toolAnswer{success, text}

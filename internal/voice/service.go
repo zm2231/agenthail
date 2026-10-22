@@ -80,7 +80,7 @@ type Provider interface {
 // persistent Codex operator. It is intentionally separate from Provider so
 // other voice transports remain usable without exposing a tool callback.
 type DynamicToolResponder interface {
-	RespondDynamicToolCall(context.Context, string, bool, string) error
+	RespondDynamicToolCall(ctx context.Context, requestID, threadID string, success bool, text string) error
 }
 
 // Target is the selected coding session behind a voice call. The audio plane
@@ -1110,15 +1110,15 @@ func (s *Service) handleDynamicToolCall(ctx context.Context, e Event) {
 	}
 	arguments, _ := e.Params["arguments"].(map[string]any)
 	if tool == "voice_send_to_lead" {
-		s.sendToLead(responder, requestID, arguments)
+		s.sendToLead(responder, requestID, threadID, arguments)
 		return
 	}
 	message, err := s.callTool(ctx, tool, arguments)
 	if err != nil {
-		_ = responder.RespondDynamicToolCall(ctx, requestID, false, err.Error())
+		_ = responder.RespondDynamicToolCall(ctx, requestID, threadID, false, err.Error())
 		return
 	}
-	if err := responder.RespondDynamicToolCall(ctx, requestID, true, message); err != nil {
+	if err := responder.RespondDynamicToolCall(ctx, requestID, threadID, true, message); err != nil {
 		s.state.State.Message = "Voice tool response could not be returned to Codex: " + err.Error()
 	}
 }

@@ -98,13 +98,13 @@ func (v *CodexVoice) Poll(ctx context.Context, after voice.Cursor, threadID stri
 	return voice.Batch{Cursor: voice.Cursor{Source: conn.target, Position: wire.Cursor}, Events: wire.Events, Lost: wire.Lost || conn.target != after.Source}, nil
 }
 
-func (v *CodexVoice) RespondDynamicToolCall(ctx context.Context, requestID string, success bool, text string) error {
+func (v *CodexVoice) RespondDynamicToolCall(ctx context.Context, requestID, threadID string, success bool, text string) error {
 	conn, err := v.Codex.dial(ctx)
 	if err != nil {
 		return err
 	}
 	defer conn.close()
-	value, err := conn.evaluate(ctx, codexDynamicToolResponseJS(requestID, success, text), 3*time.Second)
+	value, err := conn.evaluate(ctx, codexDynamicToolResponseJS(requestID, threadID, success, text), 3*time.Second)
 	if err != nil {
 		return err
 	}
