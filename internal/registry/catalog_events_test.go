@@ -467,3 +467,42 @@ func TestAHostCatalogRowKeepsItsUsageLimit(t *testing.T) {
 		t.Fatalf("stored=%+v err=%v", stored, err)
 	}
 }
+
+func TestCatalogActiveSessionsAreTheSnapshotRowsThatAreRecentlyActive(t *testing.T) {
+	r := openTestRegistry(t)
+	now := time.Now()
+	for _, session := range []surface.Session{
+		{ID: "busy-long-ago", Status: surface.StatusBusy, LastActive: now.Add(-72 * time.Hour)},
+		{ID: "idle-recent", Status: surface.StatusIdle, LastActive: now.Add(-time.Hour)},
+		{ID: "idle-long-ago", Status: surface.StatusIdle, LastActive: now.Add(-72 * time.Hour)},
+		{ID: "offline-recent", Status: surface.StatusOffline, LastActive: now.Add(-time.Minute)},
+		{ID: "never-active", Status: surface.StatusIdle},
+	} {
+		session.Surface, session.RuntimeKind, session.Cwd = surface.KindCodex, surface.RuntimeCodexDesktop, "/work"
+		projection := `{"id":"` + session.ID + `"}`
+		if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: now, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: session.ID, Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot, err := r.CatalogSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []string
+	for _, row := range snapshot.Sessions {
+		if surface.RecentlyActive(row.Session, now) {
+			want = append(want, row.Session.ID)
+		}
+	}
+	active, err := r.CatalogActiveSessions(now.Add(-surface.ActiveWindow))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, row := range active {
+		got = append(got, row.Session.ID)
+	}
+	if len(snapshot.Sessions) != 5 || strings.Join(got, ",") != strings.Join(want, ",") || strings.Join(got, ",") != "idle-recent,busy-long-ago" {
+		t.Fatalf("active sessions %v, snapshot rows recently active %v", got, want)
+	}
+}
