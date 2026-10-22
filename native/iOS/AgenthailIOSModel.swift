@@ -12,7 +12,8 @@ final class AgenthailIOSModel: ObservableObject {
         didSet {
             if let snapshot {
                 HolderPins.shared.prune(to: snapshot.sessions)
-                holderPicks = HolderPins.shared.all
+                let picks = HolderPins.shared.all
+                if holderPicks != picks { holderPicks = picks }
             }
         }
     }
@@ -26,7 +27,11 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var reconnecting = false
     @Published var operationError: String?
     @Published var pairing = false
-    @Published var composer = ""
+    let draft = ComposerDraft()
+    var composer: String {
+        get { draft.text }
+        set { draft.text = newValue }
+    }
     @Published var sessionError: String?
     @Published var loadingSession = false
     @Published var sendingSessionIDs: Set<String> = []
@@ -272,6 +277,9 @@ final class AgenthailIOSModel: ObservableObject {
     private var sessionMetadata = MetadataOverlay()
     private var stateRequests: UInt64 = 0
     private var selectedSessionStateSeq: UInt64 = 0
+    private var sessionStreamUnsupported = false
+    private var unsupportedRefreshTask: Task<Void, Never>?
+    private var sessionReload: (id: String, task: Task<Void, Never>)?
     private var connectionTask: Task<Void, Never>?
     private var snapshotCoversEventStream = false
     private var lastEventID: UInt64 = 0
@@ -281,6 +289,7 @@ final class AgenthailIOSModel: ObservableObject {
     private let automaticallyConnect: Bool
 
     var isPaired: Bool { endpoint != nil && token != nil }
+    var computerName: String? { endpoint?.host }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
 
     init(autoConnect: Bool = true, session: URLSession = .shared) {
@@ -309,6 +318,8 @@ final class AgenthailIOSModel: ObservableObject {
         eventRefreshTask?.cancel()
         catalogStreamTask?.cancel()
         sessionStreamTask?.cancel()
+        sessionReload?.task.cancel()
+        unsupportedRefreshTask?.cancel()
     }
 
     func handlePairingURL(_ url: URL) {
@@ -445,8 +456,9 @@ final class AgenthailIOSModel: ObservableObject {
         do {
             let loaded = try await api.snapshot(fresh: fresh)
             followRekeys(loaded.rekeyed ?? [:])
-            snapshot = loaded
+            if snapshot?.hasSamePresentation(as: loaded) != true { snapshot = loaded }
             syncSelectedSession(from: loaded, seq: seq)
+            resumeSessionStream(from: loaded)
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             if catalogHostEpoch != loaded.hostEpoch {
                 catalogHostEpoch = loaded.hostEpoch
@@ -471,9 +483,12 @@ final class AgenthailIOSModel: ObservableObject {
         }
         if selectedSessionID != id {
             sessionStreamTask?.cancel()
+            cancelSessionReload()
+            unsupportedRefreshTask?.cancel()
             sessionMetadataTask?.cancel()
             sessionStreamCursor = 0
             sessionMetadata = MetadataOverlay()
+            sessionStreamUnsupported = false
             composer = drafts[id] ?? ""
             composerAttachments = attachmentDrafts[id] ?? []
             attachmentProblem = nil
@@ -487,11 +502,8 @@ final class AgenthailIOSModel: ObservableObject {
         selectedSessionID = id
         sessionError = nil
         loadingSession = selectedDetail == nil
-        await refreshSession(id)
-        if selectedSessionID == id {
-            startSessionStream(id)
-            startSessionMetadata(id)
-        }
+        await reloadSelectedSession()
+        if selectedSessionID == id { startSessionMetadata(id) }
         if selectedSessionID == id { loadingSession = false }
     }
 
@@ -711,7 +723,8 @@ final class AgenthailIOSModel: ObservableObject {
 
     func pickHolder(_ holder: SessionHolder?, for sessionID: String) {
         HolderPins.shared.pick(holder.map(HolderPin.init), for: sessionID)
-        holderPicks = HolderPins.shared.all
+        let picks = HolderPins.shared.all
+        if holderPicks != picks { holderPicks = picks }
     }
 
     func send(to session: SessionState) {
@@ -841,6 +854,8 @@ final class AgenthailIOSModel: ObservableObject {
         eventRefreshTask?.cancel()
         catalogStreamTask?.cancel()
         sessionStreamTask?.cancel()
+        cancelSessionReload()
+        unsupportedRefreshTask?.cancel()
         sessionMetadataTask?.cancel()
         api = nil
         attachmentCache.removeAll()
@@ -1025,6 +1040,7 @@ final class AgenthailIOSModel: ObservableObject {
             current.totalSessions = current.sessions.count
             snapshot = current
             syncSelectedSession(from: current, seq: nextStateRequest())
+            resumeSessionStream(from: current)
         case "session.queue":
             guard let id = event.data.sessionId, let count = event.data.queueCount,
                   let index = current.sessions.firstIndex(where: { $0.id == id }) else { return }
@@ -1080,8 +1096,9 @@ final class AgenthailIOSModel: ObservableObject {
                     })
                 } catch {
                     if Task.isCancelled || selectedSessionID != id { return }
-                    if case AgenthailAPIError.streamUnsupported = error {
-                        await pollSession(id)
+                    if case AgenthailAPIError.streamUnsupported = error,
+                       snapshot?.sessions.first(where: { $0.id == id })?.capabilities.stream != true {
+                        sessionStreamUnsupported = true
                         return
                     }
                     if case AgenthailAPIError.streamGap = error {
@@ -1095,10 +1112,41 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
-    private func pollSession(_ id: String) async {
-        while !Task.isCancelled, selectedSessionID == id {
-            do { try await Task.sleep(for: .seconds(4)) } catch { return }
-            await refreshSession(id)
+    private func resumeSessionStream(from snapshot: DashboardSnapshot) {
+        guard sessionStreamUnsupported, let id = selectedSessionID,
+              snapshot.sessions.first(where: { $0.id == id })?.capabilities.stream == true else { return }
+        sessionStreamUnsupported = false
+        Task { await reloadSelectedSession() }
+    }
+
+    private func reloadSelectedSession() async {
+        guard let id = selectedSessionID else { return }
+        if let pending = sessionReload, pending.id == id {
+            await pending.task.value
+            return
+        }
+        let task = Task { [weak self] in
+            await self?.refreshSession(id)
+            guard !Task.isCancelled, let self, self.selectedSessionID == id else { return }
+            self.startSessionStream(id)
+        }
+        sessionReload = (id, task)
+        await task.value
+        if sessionReload?.task == task { sessionReload = nil }
+    }
+
+    private func cancelSessionReload() {
+        sessionReload?.task.cancel()
+        sessionReload = nil
+    }
+
+    private func refreshUnsupportedSession(_ id: String) {
+        guard sessionStreamUnsupported, selectedSessionID == id else { return }
+        unsupportedRefreshTask?.cancel()
+        unsupportedRefreshTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, let self, self.sessionStreamUnsupported, self.selectedSessionID == id else { return }
+            await self.refreshSession(id)
         }
     }
 
@@ -1180,8 +1228,9 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
-    private func receive(_ event: AgenthailEvent) async {
+    func receive(_ event: AgenthailEvent) async {
         lastEventID = event.type == "stream.reset" ? 0 : max(lastEventID, event.id)
+        if let entity = event.entityId { refreshUnsupportedSession(entity) }
         guard Self.shouldRefreshSnapshot(for: event.type) else { return }
         eventRefreshTask?.cancel()
         eventRefreshTask = Task { [weak self] in
@@ -1197,10 +1246,9 @@ final class AgenthailIOSModel: ObservableObject {
             snapshotCoversEventStream = false
         } else {
             _ = await refresh(fresh: true)
-            if let id = selectedSessionID { await refreshSession(id) }
         }
+        await reloadSelectedSession()
         startCatalogStream()
-        if let id = selectedSessionID { startSessionStream(id) }
     }
 
     func recordStreamInterruption(probeError: Error?) {
@@ -1236,4 +1284,8 @@ final class AgenthailIOSModel: ObservableObject {
             KeychainStore.remove(account)
         }
     }
+}
+
+final class ComposerDraft: ObservableObject {
+    @Published var text = ""
 }

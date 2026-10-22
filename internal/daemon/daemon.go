@@ -328,12 +328,23 @@ func (d *Daemon) RunWithSignal() error {
 			d.log.Printf("warn: remove pidfile: %s", removeErr)
 		}
 	}()
+	if stopDebug, err := d.startDebugSocket(); err != nil {
+		d.log.Printf("debug socket unavailable: %s", err)
+	} else {
+		defer stopDebug()
+	}
 	stopPeers, err := d.startClaudePeers(ctx)
 	if err != nil {
 		d.log.Printf("Claude peer registration unavailable: %s", err)
 	} else {
 		defer stopPeers()
 	}
+	return d.Serve(ctx)
+}
+
+// Serve runs the daemon with its dashboard until ctx ends, then shuts the
+// dashboard down.
+func (d *Daemon) Serve(ctx context.Context) error {
 	dashboard, err := d.startDashboard()
 	if err != nil {
 		return err

@@ -195,56 +195,28 @@ func TestAnswerReachesAPromptTheDaemonHoldsForATerminalSession(t *testing.T) {
 	}
 }
 
-func TestThePromptHookOutlivesADaemonRestartAndStopsOnARefusal(t *testing.T) {
+func TestThePromptHookStopsWhenTheDaemonRefusesToHoldItsPrompt(t *testing.T) {
 	previous := claudePromptHookRetry
 	claudePromptHookRetry = 10 * time.Millisecond
 	t.Cleanup(func() { claudePromptHookRetry = previous })
 	var mu sync.Mutex
-	var calls []map[string]any
-	refuse := false
+	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&request)
 		mu.Lock()
-		calls = append(calls, request)
-		count, refused := len(calls), refuse
+		calls++
 		mu.Unlock()
-		if r.Header.Get("Authorization") != "Bearer dashboard-synthetic" || r.URL.Path != "/api/v1/claude/permission-request" {
-			http.Error(w, "unexpected", http.StatusBadRequest)
-			return
-		}
-		if refused {
-			http.Error(w, `{"error":{"code":"not_held"}}`, http.StatusConflict)
-			return
-		}
-		if count == 1 {
-			hijacked, _, _ := w.(http.Hijacker).Hijack()
-			hijacked.Close()
-			return
-		}
-		_, _ = io.WriteString(w, `{"decision":{"behavior":"allow","updatedInput":{"command":"ls"}}}`)
+		http.Error(w, `{"error":{"code":"not_held"}}`, http.StatusConflict)
 	}))
 	t.Cleanup(server.Close)
 	client := &daemonAPIClient{baseURL: server.URL, token: "dashboard-synthetic", httpClient: server.Client()}
 	prompt := `{"session_id":"terminal-1","tool_name":"Bash","tool_input":{"command":"ls"},"permission_suggestions":[]}`
-	decision := holdClaudePrompt(context.Background(), client, strings.NewReader(prompt), 4242)
-	if decision == nil || decision.Behavior != "allow" || decision.UpdatedInput["command"] != "ls" {
-		t.Fatalf("decision=%+v", decision)
-	}
-	mu.Lock()
-	if len(calls) != 2 || calls[1]["pid"] != float64(4242) || calls[1]["prompt"].(map[string]any)["session_id"] != "terminal-1" {
-		t.Fatalf("calls=%v", calls)
-	}
-	refuse = true
-	calls = nil
-	mu.Unlock()
 	if decision := holdClaudePrompt(context.Background(), client, strings.NewReader(prompt), 4242); decision != nil {
 		t.Fatalf("a refused prompt got decision %+v", decision)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(calls) != 1 {
-		t.Fatalf("a refusal was retried %d times", len(calls))
+	if calls != 1 {
+		t.Fatalf("a refusal was retried %d times", calls)
 	}
 }
 

@@ -1093,6 +1093,7 @@ struct AttachmentImageView: View {
     let attachment: SessionAttachment
     @State private var image: NSImage?
     @State private var failed = false
+    @State private var retryCount = 0
 
     var body: some View {
         Group {
@@ -1113,9 +1114,17 @@ struct AttachmentImageView: View {
                         }
                     }
             } else if failed {
-                Text("Image couldn't be loaded")
+                HStack(spacing: DesktopSpace.s) {
+                    Text("Image couldn't be loaded")
+                        .font(.system(size: DesktopType.meta))
+                        .foregroundStyle(DesktopPalette.muted)
+                    Button("Try again") {
+                        failed = false
+                        retryCount += 1
+                    }
+                    .buttonStyle(.link)
                     .font(.system(size: DesktopType.meta))
-                    .foregroundStyle(DesktopPalette.muted)
+                }
             } else {
                 RoundedRectangle(cornerRadius: DesktopRadius.card)
                     .fill(DesktopPalette.bubble)
@@ -1123,7 +1132,7 @@ struct AttachmentImageView: View {
                     .overlay { ProgressView().controlSize(.small) }
             }
         }
-        .task(id: attachment.id) { await load() }
+        .task(id: "\(attachment.id)-\(retryCount)") { await load() }
     }
 
     private func load() async {

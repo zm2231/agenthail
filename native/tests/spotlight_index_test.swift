@@ -66,7 +66,7 @@ struct SpotlightIndexTest {
         let sync = SpotlightSync(store: store, retryDelay: .milliseconds(20), failed: { _ in failures += 1 })
         store.hold = "deleteAll"
         sync.update([builder, plain])
-        for _ in 0..<5 { await Task.yield() }
+        await until { store.operations == ["deleteAll"] }
         check(store.operations == ["deleteAll"], "nothing is indexed until clearing earlier items finishes")
         store.release()
         await sync.settle()
@@ -78,9 +78,14 @@ struct SpotlightIndexTest {
         check(store.operations.isEmpty, "an unchanged catalog writes nothing")
 
         store.failNext = "index"
+        store.hold = "index"
         sync.update([builder, renamed])
-        for _ in 0..<5 { await Task.yield() }
+        await until { !store.operations.isEmpty }
+        store.release()
+        store.hold = "index"
+        await until { store.operations.count == 2 }
         check(failures == 1 && sync.indexed["b"]?.title == "Fix tests", "a failed write leaves the confirmed state unchanged")
+        store.release()
         await sync.settle()
         check(sync.indexed["b"]?.title == "Fix flaky tests", "a failed write is retried without another update")
 
@@ -88,7 +93,7 @@ struct SpotlightIndexTest {
         store.failNext = "delete"
         store.hold = "delete"
         sync.update([renamed])
-        for _ in 0..<5 { await Task.yield() }
+        await until { store.operations == ["delete a"] }
         sync.update([builder, renamed, session("c", name: "Docs", cwd: nil)])
         store.release()
         await sync.settle()
@@ -98,7 +103,7 @@ struct SpotlightIndexTest {
         let patient = SpotlightSync(store: slow, retryDelay: .seconds(60))
         slow.failNext = "deleteAll"
         patient.update([builder])
-        for _ in 0..<5 { await Task.yield() }
+        await until { slow.operations == ["deleteAll"] }
         patient.clear()
         await patient.settle()
         check(slow.operations == ["deleteAll", "deleteAll"] && patient.indexed.isEmpty, "a new target does not wait out the retry delay")
@@ -129,6 +134,13 @@ struct SpotlightIndexTest {
 
     private static func session(_ id: String, alias: String? = nil, name: String = "", cwd: String?) -> SessionState {
         SessionState(id: id, surface: "codex", name: name, alias: alias, status: "idle", lastActive: nil, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: Capabilities(), readOnly: false, readOnlyReason: nil, cwd: cwd)
+    }
+
+    /// Waits for the sync to reach a state, so a check does not depend on how
+    /// many scheduler turns it took to get there.
+    private static func until(_ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(5)
+        while !condition(), Date() < deadline { await Task.yield() }
     }
 
     private static func check(_ condition: Bool, _ message: String) {

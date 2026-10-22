@@ -45,8 +45,11 @@ type App struct {
 	// Registry is the open registry. When it is nil, the first command that
 	// needs it opens one with OpenRegistry, so help, version and argument
 	// errors never create or migrate a registry.
-	Registry                  *registry.Registry
-	OpenRegistry              func() (*registry.Registry, error)
+	Registry     *registry.Registry
+	OpenRegistry func() (*registry.Registry, error)
+	// OpenCurrentRegistry opens the registry only if it already has this
+	// build's schema. Hooks use it in place of OpenRegistry.
+	OpenCurrentRegistry       func() (*registry.Registry, error)
 	registryMu                sync.Mutex
 	registryErr               error
 	Surfaces                  []SurfaceEntry
@@ -221,6 +224,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdDaemon(rest)
 	case "daemon-run":
 		return a.daemonRun()
+	case "debug":
+		return a.cmdDebug(rest)
 	case "launch":
 		return a.cmdLaunch(rest)
 	case "doctor":
@@ -370,6 +375,7 @@ Background service:
                                 Native macOS completion notifications
   daemon install                Keep Agenthail running after login and restarts
   daemon uninstall              Stop Agenthail from starting automatically
+  debug heap <dir>              Write the daemon's heap, allocation and goroutine profiles to <dir>
 
 Claude hooks (answer terminal Claude prompts from Agenthail; tell each session who it is):
   hooks install                 Add Agenthail's hooks to every Claude config root

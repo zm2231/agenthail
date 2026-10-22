@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
@@ -28,11 +29,13 @@ func (d *Daemon) claudePrompts() claudePromptHolder {
 }
 
 // ClaudePermissionRequest is what `agenthail hook permission-request` posts:
-// the hook's input as Claude passed it, and the pid of the Claude process
-// that ran the hook.
+// the hook's input as Claude passed it, the pid of the Claude process that
+// ran the hook, and when it ran.
 type ClaudePermissionRequest struct {
 	Prompt surfaces.ClaudePermissionPrompt `json:"prompt"`
 	PID    int                             `json:"pid"`
+	// AskedAtMS is when the hook read the prompt, in Unix milliseconds.
+	AskedAtMS int64 `json:"askedAt,omitempty"`
 }
 
 type ClaudePermissionResponse struct {
@@ -62,13 +65,19 @@ func (d *Daemon) claudePermissionRequestHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	request.Prompt.PID = request.PID
+	if request.AskedAtMS > 0 {
+		request.Prompt.AskedAt = time.UnixMilli(request.AskedAtMS)
+	}
 	decision, err := holder.HoldPrompt(r.Context(), request.Prompt)
 	switch {
 	case errors.Is(err, surfaces.ErrPromptNotHeld):
 		writeAPIError(w, http.StatusConflict, "not_held", err.Error())
 		return
 	case r.Context().Err() != nil:
-		return
+		// The daemon is stopping or the hook left. A handler that returns
+		// without writing still sends 200, which the hook would take as
+		// settled; dropping the connection tells it to post again.
+		panic(http.ErrAbortHandler)
 	case err != nil:
 		writeAPIError(w, http.StatusBadRequest, "invalid_prompt", err.Error())
 		return

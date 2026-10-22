@@ -217,11 +217,9 @@ struct ConversationListView: View {
         return SessionTree.build(sessions, filter: scope, attention: attention)
     }
 
-    private var families: [SessionFamily] {
-        tree.projects.flatMap { $0.checkouts.flatMap(\.families) }
-    }
-
     var body: some View {
+        let tree = tree
+        let families = tree.projects.flatMap { $0.checkouts.flatMap(\.families) }
         List {
             if let error = model.connectionError {
                 Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(.secondary)
@@ -237,7 +235,6 @@ struct ConversationListView: View {
                 VoiceOperatorEntry(model: model)
                     .listRowSeparator(.hidden)
             }
-            let tree = tree
             if !tree.needsYou.isEmpty {
                 Section {
                     ForEach(tree.needsYou) { session in
@@ -539,7 +536,7 @@ struct SessionScreen: View {
                             Label(detail.readOnlyReason.isEmpty ? "This session does not support messages." : detail.readOnlyReason, systemImage: "lock")
                                 .font(.footnote).foregroundStyle(.secondary).padding().frame(maxWidth: .infinity)
                         } else {
-                            IOSComposer(model: model, session: session, detail: detail)
+                            IOSComposer(model: model, draft: model.draft, session: session, detail: detail)
                         }
                     }
                 }
@@ -608,6 +605,7 @@ struct SessionScreen: View {
 
 struct IOSComposer: View {
     @ObservedObject var model: AgenthailIOSModel
+    @ObservedObject var draft: ComposerDraft
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let session: SessionState
     let detail: SessionDetail
@@ -620,7 +618,7 @@ struct IOSComposer: View {
 
     private var canSend: Bool {
         !sending && !model.pendingControls.contains(session.id)
-            && !ComposerAttachments.isEmpty(text: model.composer, attachments: model.composerAttachments)
+            && !ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerAttachments)
             && (steering || detail.capabilities.send)
     }
 
@@ -646,7 +644,7 @@ struct IOSComposer: View {
                 if !session.sharedHolders.isEmpty {
                     IOSHolderPicker(model: model, session: session)
                 }
-                TextField(steering ? "Steer this turn…" : "Message this agent…", text: $model.composer, axis: .vertical)
+                TextField(steering ? "Steer this turn…" : "Message this agent…", text: $draft.text, axis: .vertical)
                     .font(.body).lineLimit(1...6).textFieldStyle(.plain)
                     .padding(.horizontal, 8).padding(.top, 8)
                     .accessibilityLabel(steering ? "Instruction for the current turn" : "Message to this agent")
@@ -1241,7 +1239,9 @@ func formatGoalDuration(_ seconds: Int) -> String {
 
 extension ISO8601DateFormatter {
     static func sessionDate(_ value: String) -> Date? {
-        (try? fractionalSessionDate.parse(value)) ?? (try? wholeSecondSessionDate.parse(value))
+        guard let date = (try? fractionalSessionDate.parse(value)) ?? (try? wholeSecondSessionDate.parse(value)),
+              date.timeIntervalSince1970 > 0 else { return nil }
+        return date
     }
 
     private static let fractionalSessionDate = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
@@ -1356,13 +1356,16 @@ struct SettingsView: View {
                 Section("Connections") {
                     ForEach(attentionSurfaces) { surface in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(surface.name.capitalized).font(.headline)
-                            if surface.runtime?.advice.isEmpty ?? true, let detail = surface.healthDetail {
-                                Text(detail).font(.footnote).foregroundStyle(.secondary)
+                            LabeledContent(surface.name.capitalized, value: surface.connected ? "Needs attention" : "Unavailable")
+                            DisclosureGroup("Details") {
+                                if surface.runtime?.advice.isEmpty ?? true, let detail = surface.healthDetail {
+                                    Text(detail).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                                }
+                                ForEach(surface.runtime?.advice ?? [], id: \.self) { line in
+                                    Text(line).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                                }
                             }
-                            ForEach(surface.runtime?.advice ?? [], id: \.self) { line in
-                                Text(line).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
-                            }
+                            .font(.footnote)
                         }
                     }
                 }
@@ -1426,7 +1429,7 @@ struct SettingsView: View {
     private var connectionLabel: String {
         if model.connectionError != nil { return "Connection interrupted" }
         if model.reconnecting { return "Reconnecting live updates" }
-        return "Connected over Tailscale"
+        return model.computerName.map { "Connected to \($0)" } ?? "Connected"
     }
 
     private var connectionIcon: String {
