@@ -8,6 +8,19 @@ final class SessionPane: ObservableObject, Identifiable {
     unowned let model: AgenthailModel
 
     @Published private(set) var selectedSessionID: String?
+    @Published private(set) var tabs = SessionTabs() {
+        didSet {
+            if restoresSelection, tabs != oldValue, let data = try? JSONEncoder().encode(tabs) {
+                UserDefaults.standard.set(data, forKey: Self.tabsKey)
+            }
+            if tabsEnabled { syncNewSessionDraft() }
+        }
+    }
+    @Published private(set) var newSession: NewSessionDraft?
+    @Published var archivedTab: SessionState? {
+        didSet { if archivedTab?.id != oldValue?.id { archivedTabError = nil } }
+    }
+    @Published private(set) var archivedTabError: String?
     @Published private(set) var detail: SessionDetail?
     @Published private(set) var detailStale = false
     @Published private(set) var detailRefreshFailed = false
@@ -68,8 +81,24 @@ final class SessionPane: ObservableObject, Identifiable {
     init(model: AgenthailModel, restoresSelection: Bool) {
         self.model = model
         self.restoresSelection = restoresSelection
+        if restoresSelection, let data = UserDefaults.standard.data(forKey: Self.tabsKey), let saved = try? JSONDecoder().decode(SessionTabs.self, from: data) {
+            tabs = saved
+        }
         observeDraft()
     }
+
+    /// Keeps a draft exactly while a New Session tab is open.
+    private func syncNewSessionDraft() {
+        if !tabs.tabs.contains(where: { $0.id == SessionTabs.newSession }) {
+            newSession = nil
+        } else if newSession == nil {
+            newSession = NewSessionDraft(model: model, selected: selectedSession)
+        }
+    }
+
+    private static let tabsKey = "sessionTabs"
+
+    var tabsEnabled: Bool { restoresSelection && model.interface.config.tabs }
 
     private func observeDraft() {
         draftObservation = composerDraft.$text.combineLatest(composerDraft.$attachments)
@@ -85,8 +114,128 @@ final class SessionPane: ObservableObject, Identifiable {
     var displayedSession: SessionState? { selectedSession ?? removedSession }
     var timelineItems: [TimelineItem] { olderItems + (detail?.timeline?.items ?? []) }
 
-    func select(_ id: String) {
+    /// Shows a session. With tabs, it opens in the preview tab unless kept,
+    /// or switches to the tab it is already in.
+    func select(_ id: String, keep: Bool = false) {
         let id = model.resolveSessionID(id)
+        if tabsEnabled, !closed {
+            tabs.open(id, keep: keep, preview: model.interface.config.tabPreview)
+        } else {
+            newSession = nil
+        }
+        show(id)
+    }
+
+    /// Shows New Session: with tabs, in its own tab, opened once.
+    func openNewSession(message: String? = nil) {
+        guard !closed else { return }
+        if newSession == nil { newSession = NewSessionDraft(model: model, selected: selectedSession) }
+        if tabsEnabled { tabs.open(SessionTabs.newSession, keep: true) }
+        if let message { newSession?.take(message) }
+        clearSelection()
+    }
+
+    /// Shows a session started from New Session, in the tab New Session
+    /// was in.
+    func showStarted(_ id: String) {
+        let id = model.resolveSessionID(id)
+        let shared = newSession?.takeHeld() ?? []
+        if tabsEnabled, !closed {
+            tabs.replace(SessionTabs.newSession, with: id)
+        } else {
+            newSession = nil
+        }
+        show(id)
+        guard !shared.isEmpty, !closed else { return }
+        guard tabsEnabled else {
+            shared.forEach { openNewSession(message: $0) }
+            return
+        }
+        let draft = NewSessionDraft(model: model, selected: selectedSession)
+        shared.forEach(draft.take)
+        newSession = draft
+        tabs.add(SessionTabs.newSession)
+    }
+
+    func activateTab(_ id: String) {
+        tabs.activate(id)
+        showActiveTab()
+    }
+
+    func keepTab(_ id: String) {
+        tabs.keep(id)
+    }
+
+    func closeTab(_ id: String) {
+        let wasActive = tabs.active == id
+        tabs.close(id)
+        if wasActive { showActiveTab() }
+    }
+
+    /// Unarchives a session whose tab closed when it was archived, and opens
+    /// its tab again. On failure the notice stays, with the reason.
+    func unarchiveTab(_ session: SessionState) async {
+        if archivedTab?.id == session.id { archivedTabError = nil }
+        var unarchived = false
+        if model.api != nil { unarchived = await model.performNow(action: "session-unarchive", sessionID: session.id) }
+        if unarchived {
+            if archivedTab?.id == session.id { archivedTab = nil }
+            select(session.id, keep: true)
+        } else if archivedTab == nil || archivedTab?.id == session.id {
+            archivedTab = session
+            archivedTabError = model.api == nil ? "Agenthail isn't connected, so the session stays archived." : model.operationError ?? "The session couldn't be unarchived."
+        }
+    }
+
+    func closeOtherTabs(_ id: String) {
+        tabs.closeOthers(id)
+        showActiveTab()
+    }
+
+    func stepTab(_ offset: Int) {
+        guard let next = tabs.neighbour(offset) else { return }
+        tabs.activate(next)
+        showActiveTab()
+    }
+
+    private func showActiveTab() {
+        guard let active = tabs.active, active != SessionTabs.newSession else {
+            openNewSession()
+            return
+        }
+        show(active)
+    }
+
+    private func clearSelection() {
+        guard selectedSessionID != nil || removedSession != nil else { return }
+        sessionStreamTask?.cancel()
+        detailReloadTask?.cancel()
+        detailReloadTask = nil
+        detailReloadPending = false
+        removedSession = nil
+        selectedSnapshot = nil
+        detail = nil
+        detailStale = false
+        composerDraft = ComposerDraft()
+        selectedSessionID = nil
+    }
+
+    private func reconcileTabs(_ sessions: [SessionState]) {
+        if tabs.tabs.isEmpty, let selected = selectedSessionID {
+            tabs.open(selected, keep: true)
+        }
+        let byID = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let dropped = tabs.reconcile(resolve: model.resolveSessionID) { id in
+            id == SessionTabs.newSession || byID[id].map { $0.archived != true } == true
+        }
+        if let archived = dropped.lazy.compactMap({ byID[self.model.resolveSessionID($0)] }).first(where: { $0.archived == true }) {
+            archivedTab = archived
+        }
+        let shown = tabs.active == SessionTabs.newSession ? nil : tabs.active
+        if shown != selectedSessionID || shown == nil && newSession == nil { showActiveTab() }
+    }
+
+    private func show(_ id: String) {
         guard !closed, id != selectedSessionID || detail == nil else { return }
         removedSession = nil
         selectedSnapshot = model.knownSessions.first { $0.id == id }
@@ -227,8 +376,11 @@ final class SessionPane: ObservableObject, Identifiable {
     func reconcile() {
         guard !closed, model.snapshot != nil else { return }
         let sessions = model.knownSessions
+        if tabsEnabled {
+            reconcileTabs(sessions)
+        }
         if let selected = selectedSessionID, model.resolveSessionID(selected) != selected {
-            select(selected)
+            show(model.resolveSessionID(selected))
             return
         }
         if let selected = selectedSessionID {
@@ -253,9 +405,12 @@ final class SessionPane: ObservableObject, Identifiable {
             }
             if removedSession != nil || sessions.contains(where: { $0.id == selected }) { return }
         }
-        guard restoresSelection else { return }
+        guard restoresSelection, !tabsEnabled, newSession == nil else { return }
         let next = reconciledSelection(selected: (selectedSessionID ?? UserDefaults.standard.string(forKey: "lastSelectedSessionID")).map(model.resolveSessionID), sessions: sessions)
-        guard next != selectedSessionID else { return }
+        guard next != selectedSessionID else {
+            if next == nil { openNewSession() }
+            return
+        }
         sessionStreamTask?.cancel()
         detailReloadTask?.cancel()
         detailReloadTask = nil
@@ -265,7 +420,7 @@ final class SessionPane: ObservableObject, Identifiable {
         detailStale = false
         composerDraft = ComposerDraft()
         selectedSessionID = nil
-        if let next { select(next) }
+        if let next { show(next) } else { openNewSession() }
     }
 
     func closeRemovedSession() {
@@ -328,6 +483,7 @@ final class SessionPane: ObservableObject, Identifiable {
         let attachments = composerDraft.attachments
         composer = ""
         composerDraft.attachments = []
+        tabs.keep(sessionID)
         send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery)
     }
 
