@@ -72,8 +72,12 @@ func TestClaudeTranscriptIndexRelistsOnlyChangedProjects(t *testing.T) {
 	home := t.TempDir()
 	index := newClaudeTranscriptIndex()
 	roots := []string{filepath.Join(home, ".claude")}
+	settled := time.Now().Add(-time.Hour)
 	for _, dir := range []string{"-a", "-b", "-c"} {
-		writeClaudeProjectTranscript(t, home, dir, "seed"+dir)
+		project := filepath.Dir(writeClaudeProjectTranscript(t, home, dir, "seed"+dir))
+		if err := os.Chtimes(project, settled, settled); err != nil {
+			t.Fatal(err)
+		}
 	}
 	index.pass(roots)
 	stale := filepath.Join(home, ".claude", "projects", "-b", "unindexed.jsonl")
@@ -95,6 +99,28 @@ func TestClaudeTranscriptIndexRelistsOnlyChangedProjects(t *testing.T) {
 	}
 	if _, ok := index.dirs[filepath.Join(roots[0], "projects", "-c")]; ok {
 		t.Fatal("a removed project stayed in the index")
+	}
+}
+
+// A directory's modification time has coarse granularity: a transcript
+// created in the same tick as the listing that cached it leaves the time as it
+// was, so a listing that recent is not trusted.
+func TestATranscriptCreatedInTheTickOfTheLastListingIsFound(t *testing.T) {
+	home := t.TempDir()
+	index := newClaudeTranscriptIndex()
+	roots := []string{filepath.Join(home, ".claude")}
+	project := filepath.Dir(writeClaudeProjectTranscript(t, home, "-a", "seed"))
+	index.pass(roots)
+	cached := index.dirs[project].modified
+	created := filepath.Join(project, "late.jsonl")
+	if err := os.WriteFile(created, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(project, cached, cached); err != nil {
+		t.Fatal(err)
+	}
+	if got := onlyTranscript(index.pass(roots)("late")); got != created {
+		t.Fatalf("a transcript created in the tick of the last listing resolved to %q, want %q", got, created)
 	}
 }
 

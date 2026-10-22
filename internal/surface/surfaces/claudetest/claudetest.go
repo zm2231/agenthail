@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/claudetestenv"
 )
 
 const script = `#!/bin/sh
@@ -48,6 +50,7 @@ type Fixture struct {
 
 func New(t testing.TB) *Fixture {
 	t.Helper()
+	claudetestenv.Isolate(t)
 	process := exec.Command("sleep", "3600")
 	if err := process.Start(); err != nil {
 		t.Fatal(err)
