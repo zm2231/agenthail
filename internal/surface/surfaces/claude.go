@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -107,7 +108,7 @@ func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities
 	capabilities := c.Capabilities()
 	capabilities.GoalSet = sess == nil || c.canSendHumanTurn(sess)
 	if claudeHosted(sess) {
-		capabilities.Stream = sess.HasLocal && sess.Transcript != ""
+		capabilities.Stream = true
 		capabilities.Compact = false
 		capabilities.Commands = false
 		capabilities.Respond = true
@@ -1214,8 +1215,15 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 	if err != nil {
 		return err
 	}
+	fromStart := sess.TranscriptFromStart
 	if path == "" || !fileExists(path) {
-		return fmt.Errorf("no local transcript for streaming")
+		if !claudeHosted(sess) {
+			return fmt.Errorf("no local transcript for streaming")
+		}
+		if path, err = c.awaitHostTranscript(ctx, sess, timeout); err != nil {
+			return err
+		}
+		fromStart = true
 	}
 	wake := filewake.Follow(path)
 	defer wake.Release()
@@ -1235,6 +1243,10 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		// in between are delivered once without replaying history the seed bounded away.
 		offset = sess.TranscriptOffset
 		closing = sess.ClaudeClosingTurn
+	} else if !sess.TranscriptOffsetSet && fromStart {
+		// The transcript was created after this stream or its source's seed looked for it, so
+		// everything in it is new.
+		offset = 0
 	}
 	if uuid != "" && offset > 0 {
 		file, openErr := os.Open(path)
@@ -1465,3 +1477,51 @@ func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surf
 	}
 	return read.Exchanges, nil
 }
+
+// awaitHostTranscript waits for a hosted session's first transcript write.
+// Claude creates the file when the first turn starts, in a project folder it
+// names itself. Each tick checks the folder Claude usually picks for the
+// session's working directory, which costs a stat per config root; a lookup
+// across every project folder, which costs a directory listing of each, runs
+// when that file appears and every few seconds otherwise, so a transcript in
+// a folder named some other way is still found.
+func (c *Claude) awaitHostTranscript(ctx context.Context, sess *surface.Session, timeout time.Duration) (string, error) {
+	roots, err := surface.ClaudeConfigRoots(c.home)
+	if err != nil {
+		return "", err
+	}
+	var likely []string
+	if sess.Cwd != "" && claudeConversationID(sess.ID) {
+		for _, root := range roots {
+			likely = append(likely, filepath.Join(root, "projects", claudeProjectDirName(sess.Cwd), sess.ID+".jsonl"))
+		}
+	}
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(claudeHostTranscriptTick)
+	defer tick.Stop()
+	probe := *sess
+	probe.Transcript = ""
+	for ticks := 0; ; ticks++ {
+		if ticks%claudeHostTranscriptLookupTicks == 0 || slices.ContainsFunc(likely, fileExists) {
+			path, err := c.sessionTranscript(&probe)
+			if err != nil {
+				return "", err
+			}
+			if path != "" && fileExists(path) {
+				return path, nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-deadline.C:
+			return "", surface.ErrStreamWindow
+		case <-tick.C:
+		}
+	}
+}
+
+const claudeHostTranscriptTick = 250 * time.Millisecond
+
+var claudeHostTranscriptLookupTicks = 8

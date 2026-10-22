@@ -51,6 +51,8 @@ To connect it:
 
 The pairing code expires after five minutes and works once. You can disconnect a phone from either device: in the app's Settings, in the web dashboard, in the Mac app, or with `agenthail devices remove <device>`.
 
+The app can pair with several computers. To add one, open Settings > **Add a computer** and pair as above; scanning a code from a computer that is already paired reconnects it instead of adding it again. Sessions from every paired computer appear in one list, each marked with the computer it runs on. A session stays usable while any computer that lists it can be reached: when the phone can't reach the computer that runs it, the app works with the session through another paired computer that has that computer paired as a host. Settings shows each computer's connection, surfaces and notifications, with **Reconnect** and **Remove**.
+
 On iPhone, **Sessions** is the place to find, start, and continue work. **Inbox** separates current delivery decisions from completed instructions. **Settings** manages the connection and notifications.
 
 Tap the compose button in Sessions to start work with a configured Claude, Codex or Notion runtime. Choose one of the host's projects by name or enter an existing folder for Claude/Codex, optionally choose a model, and write the first instruction. Runtime permission defaults remain in effect unless you change the Claude permission setting; approvals may require attention on that computer. If creation cannot be confirmed, check the agent catalog on that computer before retrying. A returned session with uncertain first-instruction delivery opens with that uncertainty visible.
@@ -78,7 +80,8 @@ a conversational Codex Voice call. Ask about your agents, discuss a plan, or ask
 the orchestrator to create an agent and send it work. It uses one persistent Codex
 Desktop thread with the packaged Agenthail Operations skill, not on-device
 dictation. Your Codex account must support native Voice, and a paired phone must
-have control permission.
+have control permission. With several computers paired, Settings > **Voice**
+chooses which one runs the orchestrator.
 
 Live conversation and agent activity remain visible. **Open full timeline**
 opens the same ordinary session. Enter a session ID or alias to route the call to
@@ -107,7 +110,7 @@ Notifications are optional. Agenthail can tell you whether a Claude Code, Codex,
 
 When a session the Claude host runs waits on a tool approval or a question, the alert says only that the agent is waiting on you and names the request by an opaque ID. Before iOS shows it, Agenthail's notification service asks your paired computer for that request directly over Tailscale, within five seconds, and the alert then shows what is asked, with the same buttons as on the Mac, including **Reply…** or **Deny with message…** to type an answer. Several questions, or one that takes several answers, show the first question and no buttons; tapping opens the session at the request. If that computer can't be reached in time or the request is no longer open, the alert arrives as it was sent, and tapping it opens the session. A button needs your phone unlocked; the app, not the notification service, sends the answer to your paired computer. If sending fails, a notification says why and repeats what you typed.
 
-Turning notifications off removes that phone's notification registration. You can also forget the paired computer from the iPhone app if it is no longer available.
+Each paired computer registers the phone for its own notifications, and an alert's buttons answer through the computer that sent it. Turning notifications off removes that phone's notification registration from every paired computer. You can also forget a paired computer from the iPhone app if it is no longer available.
 
 ## Privacy
 

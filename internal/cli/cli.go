@@ -45,8 +45,11 @@ type App struct {
 	// Registry is the open registry. When it is nil, the first command that
 	// needs it opens one with OpenRegistry, so help, version and argument
 	// errors never create or migrate a registry.
-	Registry                  *registry.Registry
-	OpenRegistry              func() (*registry.Registry, error)
+	Registry     *registry.Registry
+	OpenRegistry func() (*registry.Registry, error)
+	// OpenCurrentRegistry opens the registry only if it already has this
+	// build's schema. Hooks use it in place of OpenRegistry.
+	OpenCurrentRegistry       func() (*registry.Registry, error)
 	registryMu                sync.Mutex
 	registryErr               error
 	Surfaces                  []SurfaceEntry
@@ -221,6 +224,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdDaemon(rest)
 	case "daemon-run":
 		return a.daemonRun()
+	case "debug":
+		return a.cmdDebug(rest)
 	case "launch":
 		return a.cmdLaunch(rest)
 	case "doctor":
@@ -370,11 +375,15 @@ Background service:
                                 Native macOS completion notifications
   daemon install                Keep Agenthail running after login and restarts
   daemon uninstall              Stop Agenthail from starting automatically
+  debug heap <dir>              Write the daemon's heap, allocation and goroutine profiles to <dir>
 
 Claude hooks (answer terminal Claude prompts from Agenthail; tell each session who it is):
   hooks install                 Add Agenthail's hooks to every Claude config root
   hooks uninstall               Remove them
   hooks status                  Show where they are installed
+  hooks install codex           Tell Codex sessions who they are (AGENTS.md and trusted hooks)
+  hooks uninstall codex         Remove them
+  hooks status codex            Show whether they are installed
 
 Dashboard (optional):
   dashboard enable              Enable the local dashboard and open it
@@ -701,7 +710,7 @@ func validateCommandFlags(command string, args []string) error {
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
 		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
 		"permission-mode": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "requests": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
-		"answer": {values: map[string]bool{"--timeout": true, "--request": true, "--reason": true, "--answers": true}, bools: map[string]bool{"--json": true}}, "interrupt": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "steer": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "control": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "identify": {}, "coordinator": {values: map[string]bool{"--name": true, "--instructions": true, "--permission-mode": true, "--cwd": true, "--model": true, "--host": true}, bools: map[string]bool{"--json": true, "--replace": true}}, "relay": {}, "daemon": {}, "daemon-run": {}, "hook": {values: map[string]bool{"--claude-pid": true}}, "hooks": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
+		"answer": {values: map[string]bool{"--timeout": true, "--request": true, "--reason": true, "--answers": true}, bools: map[string]bool{"--json": true}}, "interrupt": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "steer": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "control": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "identify": {}, "coordinator": {values: map[string]bool{"--name": true, "--instructions": true, "--permission-mode": true, "--cwd": true, "--model": true, "--host": true}, bools: map[string]bool{"--json": true, "--replace": true}}, "relay": {}, "daemon": {}, "daemon-run": {}, "hook": {values: map[string]bool{"--claude-pid": true, "--surface": true}}, "hooks": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
 	}
 	spec, known := specs[command]
 	if !known {
@@ -3092,6 +3101,12 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		claudeHookStates[root] = state
 	}
+	codexHooks := ""
+	if executable, err := os.Executable(); err == nil {
+		callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		codexHooks, _ = surfaces.CodexContextState(callCtx, executable)
+		cancel()
+	}
 	claudeConfigRoots, _ := a.claudeConfigRoots(ctx)
 	service := a.service()
 	serviceProblems := service.Problems()
@@ -3108,7 +3123,7 @@ func (a *App) cmdDoctor(args []string) error {
 		grants = &report
 	}
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeConfigRoots": claudeConfigRoots, "signin": signins}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins}
 		if claudeRootsErr != nil {
 			report["claudeConfigError"] = claudeRootsErr.Error()
 		}
@@ -3139,6 +3154,14 @@ func (a *App) cmdDoctor(args []string) error {
 			case claudeHookOutdated:
 				fmt.Printf("  hooks: outdated; terminal prompts may not reach Agenthail, and terminal sessions may not be told who they are, until you run: agenthail hooks install\n")
 			}
+		}
+		switch codexHooks {
+		case surfaces.CodexHooksMissing:
+			fmt.Printf("codex hooks: missing; Codex sessions, including the ones Agenthail starts, aren't told who they are until you run: agenthail hooks install codex\n")
+		case surfaces.CodexHooksOutdated:
+			fmt.Printf("codex hooks: outdated; Codex sessions may not be told who they are until you run: agenthail hooks install codex\n")
+		case surfaces.CodexHooksUntrusted:
+			fmt.Printf("codex hooks: Codex hook not trusted yet: run agenthail hooks install codex or trust it in Codex\n")
 		}
 		if len(serviceProblems) > 0 {
 			fmt.Printf("[daemon] supervisor: %s\n", service.Name())

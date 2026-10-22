@@ -285,7 +285,7 @@ func (r *Registry) ReconcileDeliveryIntent(targetSessionID, providerKey string) 
 	if strings.TrimSpace(targetSessionID) == "" || strings.TrimSpace(providerKey) == "" {
 		return false, fmt.Errorf("delivery reconciliation requires target and provider key")
 	}
-	res, err := r.db.Exec(`UPDATE delivery_intents SET status=?,evidence=?,failure='',updated_at=datetime('now') WHERE target_session_id=? AND provider_key=? AND status IN (?,?,?,?,?)`, DeliveryIntentDelivered, surface.EvidenceDelivered, targetSessionID, providerKey, DeliveryIntentSubmitted, DeliveryIntentSent, DeliveryIntentQueued, DeliveryIntentUnknown, DeliveryIntentHeld)
+	res, err := r.db.Exec(`UPDATE delivery_intents SET status=?,evidence=?,failure='',updated_at=datetime('now') WHERE target_session_id=? AND provider_key=? AND provider_key!='' AND status IN (?,?,?,?,?)`, DeliveryIntentDelivered, surface.EvidenceDelivered, targetSessionID, providerKey, DeliveryIntentSubmitted, DeliveryIntentSent, DeliveryIntentQueued, DeliveryIntentUnknown, DeliveryIntentHeld)
 	if err != nil {
 		return false, err
 	}
@@ -348,7 +348,7 @@ func (r *Registry) QueueDeliveryUsingIntent(intentID int64, message, deliveryKey
 			return 0, 0, err
 		}
 		var queueID, existingIntentID int64
-		if scanErr := tx.QueryRow(`SELECT id FROM message_queue WHERE delivery_key=?`, deliveryKey).Scan(&queueID); scanErr != nil {
+		if scanErr := tx.QueryRow(`SELECT id FROM message_queue WHERE delivery_key=? AND delivery_key!=''`, deliveryKey).Scan(&queueID); scanErr != nil {
 			return 0, 0, scanErr
 		}
 		scanErr := tx.QueryRow(`SELECT id FROM delivery_intents WHERE queue_id=?`, queueID).Scan(&existingIntentID)
@@ -610,7 +610,7 @@ func deliveryIntentByID(q deliveryIntentQuerier, id int64) (*DeliveryIntent, err
 }
 
 func deliveryIntentByProviderKey(q deliveryIntentQuerier, targetSessionID, providerKey string) (*DeliveryIntent, bool, error) {
-	intent, err := scanDeliveryIntent(q.QueryRow(`SELECT id,uuid,sender_session_id,target_session_id,provider_key,message,queue_id,relayed,status,evidence,failure,COALESCE(notification_queue_id,0),retries,created_at,updated_at FROM delivery_intents WHERE target_session_id=? AND provider_key=?`, targetSessionID, providerKey))
+	intent, err := scanDeliveryIntent(q.QueryRow(`SELECT id,uuid,sender_session_id,target_session_id,provider_key,message,queue_id,relayed,status,evidence,failure,COALESCE(notification_queue_id,0),retries,created_at,updated_at FROM delivery_intents WHERE target_session_id=? AND provider_key=? AND provider_key!=''`, targetSessionID, providerKey))
 	if err == sql.ErrNoRows {
 		return nil, false, nil
 	}

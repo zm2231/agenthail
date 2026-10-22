@@ -177,6 +177,29 @@ test('open, send and stream a turn bound to the message uuid', async () => {
   c.close();
 });
 
+for (const [setting, retained] of [['4', 4], ['5000', 4096], ['Infinity', 4096]]) {
+  test(`AGENTHAIL_CLAUDE_HOST_MAX_EVENTS=${setting} retains the last ${retained} events`, async () => {
+    const f = fixture();
+    await startHost(f, { env: { AGENTHAIL_CLAUDE_HOST_MAX_EVENTS: setting } });
+    const c = new Client(f.socket);
+    await c.call('subscribe');
+    const id = randomUUID();
+    await c.call('open', { sessionId: id, cwd: f.cwd });
+    const uuid = randomUUID();
+    await c.call('send', { sessionId: id, uuid, text: 'BURST 4200', origin: { kind: 'human' } });
+    await c.event(turnResult(id, uuid));
+    c.close();
+    const late = new Client(f.socket);
+    const start = await late.call('subscribe', { after: 0 });
+    assert.equal(start.gap, true);
+    for (let i = 0; i < 200 && late.events.length < retained; i++) await sleep(25);
+    await sleep(100);
+    assert.equal(late.events.length, retained);
+    assert.equal(late.events.at(-1).seq, start.seq);
+    late.close();
+  });
+}
+
 test('each session is told who it is by the session-context hook, keyed by its Claude process', async () => {
   const f = fixture();
   const calls = path.join(f.root, 'agenthail-calls.jsonl');

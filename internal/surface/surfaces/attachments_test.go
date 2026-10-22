@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -309,5 +310,27 @@ func TestCodexTranscriptNormalizesInterruptionWrapperAndTypedToolOutput(t *testi
 	mixed := byCall["call_mixed"]
 	if len(mixed) != 1 || !strings.Contains(mixed[0].Text, `"input_audio"`) || !strings.Contains(mixed[0].Text, `"kept"`) {
 		t.Fatalf("unknown mixed output was not kept losslessly: %+v", mixed)
+	}
+}
+
+func TestAnAttachmentReadThatRanOutOfTimeIsNotReportedMissing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	line := `{"type":"user","message":{"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + testPNG + `"}}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := base64.StdEncoding.DecodeString(testPNG)
+	id := attachmentID(0, 0, data)
+	if _, _, err := readTranscriptAttachment(context.Background(), &surface.Session{Transcript: path}, id, "claude", nil); err != nil {
+		t.Fatalf("read in time: %v", err)
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	_, _, err := readTranscriptAttachment(ctx, &surface.Session{Transcript: path}, id, "claude", nil)
+	if status, code, _ := AttachmentHTTPStatus(err); status != http.StatusGatewayTimeout || code != "attachment_timeout" {
+		t.Fatalf("err=%v status=%d code=%s, want 504 attachment_timeout", err, status, code)
+	}
+	if status, code, _ := AttachmentHTTPStatus(ErrAttachmentNotFound); status != http.StatusNotFound || code != "attachment_not_found" {
+		t.Fatalf("not found: status=%d code=%s", status, code)
 	}
 }

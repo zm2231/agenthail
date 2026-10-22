@@ -1,4 +1,5 @@
 @testable import AgenthailHelpers
+import Combine
 import Foundation
 import Network
 
@@ -331,7 +332,7 @@ struct SessionPaneTest {
         UserDefaults.standard.removeObject(forKey: "sessionTabs")
 
         let launch = try! StubServer { request, _ in
-            request.contains("\"surface\"") && request.contains("/api/v1/actions") ? nil : StubServer.reply("200 OK", "{}")
+            request.contains("\"surface\"") && request.contains("/api/v1/actions") ? StubServer.hold : StubServer.reply("200 OK", "{}")
         }
         let launchPort = await launch.ready()
         let launchModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(launchPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
@@ -354,6 +355,148 @@ struct SessionPaneTest {
         check(launching.form.message == "shared while starting\n\nshared after submitting", "held text arrives once the draft is editable, each piece once: \(launching.form.message)")
         launch.stop()
         UserDefaults.standard.removeObject(forKey: "sessionTabs")
+        func row(_ seq: Int, _ id: String, op: String = "upsert", kind: String = "message", text: String? = nil, reason: String? = nil) -> String {
+            let item = text.map { #","item":{"id":"\#(id)","kind":"\#(kind)","role":"assistant","title":"\#(kind)","text":"\#($0)","truncated":false}"# } ?? ""
+            let why = reason.map { #","reason":"\#($0)""# } ?? ""
+            return #"{"stream":"session","sessionId":"D","seq":\#(seq),"type":"item","data":{"itemId":"\#(id)","version":1,"op":"\#(op)","kind":"\#(kind)","ts":"2026-10-04T12:00:00Z","truncated":false\#(why)}\#(item)}"#
+        }
+        func event(_ json: String) -> SessionStreamEvent { try! JSONDecoder().decode(SessionStreamEvent.self, from: Data(json.utf8)) }
+        let pageJSON = #"{"session":{"id":"D","surface":"claude","name":"d","status":"busy","lastActive":"2026-10-04T12:00:00Z"},"journalSeq":100,"exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"readOnly":false,"readOnlyReason":"","timeline":{"items":[{"id":"a","kind":"message","role":"assistant","title":"message","text":"a1","truncated":false},{"id":"b","kind":"message","role":"assistant","title":"message","text":"b1","truncated":false}],"nextBefore":null,"truncated":false}}"#
+        let page = try! JSONDecoder().decode(SessionDetail.self, from: Data(pageJSON.utf8))
+        var older = [try! JSONDecoder().decode(TimelineItem.self, from: Data(#"{"id":"old","kind":"message","title":"message","text":"o","truncated":false}"#.utf8))]
+        let updated = SessionPane.applying(event(row(101, "a", text: "a2")), to: page, older: &older)
+        check(updated?.timeline?.items.map(\.id) == ["b", "a"] && updated?.timeline?.items.last?.text == "a2", "an updated row moves to the end with its new content, as a reload reads it")
+        let removed = SessionPane.applying(event(row(102, "old", op: "remove")), to: updated!, older: &older)
+        check(removed != nil && older.isEmpty, "a removed row leaves the older rows too")
+        let sourceFailed = SessionPane.applying(event(row(103, "e:source", op: "reset", kind: "source-error", reason: "source down")), to: removed!, older: &older)
+        check(sourceFailed?.timeline?.unavailableReason == "source down" && sourceFailed?.timeline?.items.count == 2, "a source error is shown as the page shows it, without dropping rows")
+        let recovered = SessionPane.applying(event(row(104, "c", text: "c1")), to: sourceFailed!, older: &older)
+        check(recovered?.timeline?.unavailableReason == nil, "a later row clears the source error, as a reload does")
+        check(SessionPane.applying(event(row(105, "x")), to: page, older: &older) == nil, "a row without the page's item is not guessed at")
+
+        var pageRequests = 0
+        var requestReads = 0
+        let turnPageJSON = pageJSON.replacingOccurrences(of: #""journalSeq":100"#, with: #""journalSeq":104"#)
+            .replacingOccurrences(of: #"{"id":"a","kind":"message","role":"assistant","title":"message","text":"a1","truncated":false},{"id":"b","kind":"message","role":"assistant","title":"message","text":"b1","truncated":false}"#, with: #"{"id":"c","kind":"message","role":"assistant","title":"message","text":"c1","truncated":false},{"id":"a","kind":"message","role":"assistant","title":"message","text":"a2","truncated":false},{"id":"d","kind":"done","role":"assistant","title":"done","text":"","truncated":false}"#)
+        func frame(_ seq: Int, _ json: String) -> String { "id: \(seq)\nevent: item\ndata: \(json)\n\n" }
+        let turnRows = [frame(101, row(101, "c", text: "c1")), frame(102, row(102, "a", text: "a2")), frame(103, row(103, "b", op: "remove"))]
+        let streamingServer = try! StubServer { line, _ in
+            if line.contains("/api/v1/session-stream?") {
+                return "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n" + turnRows.joined()
+            }
+            if line.contains("/api/v1/session?") {
+                pageRequests += 1
+                return pageRequests == 1 ? StubServer.reply("200 OK", pageJSON) : StubServer.hold
+            }
+            if line.contains("/api/v1/requests?") {
+                requestReads += 1
+                return requestReads == 1 || requestReads == 3 ? StubServer.hold : StubServer.reply("200 OK", #"{"permissionMode":"default","requests":[]}"#)
+            }
+            return StubServer.reply("404 Not Found", "{}")
+        }
+        let streamingPort = await streamingServer.ready()
+        let streamingModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(streamingPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
+        let streamingPane = streamingModel.openPane()
+        var shownTimelines: [[String]] = []
+        let shown = streamingPane.$detail.sink { shownTimelines.append($0?.timeline?.items.map(\.id) ?? []) }
+        var olderPublishes = 0
+        let olderShown = streamingPane.$olderItems.sink { _ in olderPublishes += 1 }
+        streamingPane.select("D")
+        let rowsDeadline = Date().addingTimeInterval(5)
+        while streamingPane.timelineItems.map(\.id) != ["c", "a"], Date() < rowsDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        try? await Task.sleep(for: .milliseconds(600))
+        check(pageRequests == 1, "streamed rows apply without reading the page again: \(pageRequests) page reads, rows \(streamingPane.timelineItems.map(\.id))")
+        check(streamingPane.streamedRows.isEmpty, "rows applied with no page read in flight are not kept: \(streamingPane.streamedRows.count)")
+        check(!shownTimelines.contains(["a", "b", "c"]) && !shownTimelines.contains(["b", "c", "a"]), "rows that arrive together render once: \(shownTimelines)")
+        check(olderPublishes <= 3, "rows that leave the earlier pages alone do not publish them: \(olderPublishes) publishes")
+        shown.cancel()
+        olderShown.cancel()
+        streamingServer.push(frame(104, row(104, "d", kind: "done", text: "")), to: "session-stream")
+        let turnDeadline = Date().addingTimeInterval(5)
+        while pageRequests < 2, Date() < turnDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        streamingServer.push(frame(105, row(105, "e", text: "e1")), to: "session-stream")
+        let lateDeadline = Date().addingTimeInterval(5)
+        while streamingPane.timelineItems.last?.id != "e", Date() < lateDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        streamingServer.release(StubServer.reply("200 OK", turnPageJSON))
+        try? await Task.sleep(for: .milliseconds(600))
+        check(pageRequests == 2, "a streamed turn reloads the page once, when it finishes, not per row: \(pageRequests) page reads")
+        check(streamingPane.timelineItems.map(\.id) == ["c", "a", "d", "e"] && streamingPane.timelineItems[1].text == "a2", "a row streamed while the reload was in flight survives it, in the order a reload would show: \(streamingPane.timelineItems.map(\.id))")
+        check(streamingPane.streamedRows.isEmpty, "the rows kept for a page read are dropped once it lands: \(streamingPane.streamedRows.count)")
+
+        func pageAt(_ seq: Int, _ items: [(String, String)]) -> String {
+            let rows = items.map { #"{"id":"\#($0.0)","kind":"message","role":"assistant","title":"message","text":"\#($0.1)","truncated":false}"# }.joined(separator: ",")
+            return pageJSON.replacingOccurrences(of: #""journalSeq":100"#, with: #""journalSeq":\#(seq)"#)
+                .replacingOccurrences(of: #"{"id":"a","kind":"message","role":"assistant","title":"message","text":"a1","truncated":false},{"id":"b","kind":"message","role":"assistant","title":"message","text":"b1","truncated":false}"#, with: rows)
+        }
+        Task { await streamingPane.loadSession("D") }
+        let firstReadDeadline = Date().addingTimeInterval(5)
+        while pageRequests < 3, Date() < firstReadDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        Task { await streamingPane.loadSession("D") }
+        let secondReadDeadline = Date().addingTimeInterval(5)
+        while pageRequests < 4, Date() < secondReadDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        streamingServer.push(frame(106, row(106, "a", text: "a3")), to: "session-stream")
+        let updateDeadline = Date().addingTimeInterval(5)
+        while streamingPane.timelineItems.last?.text != "a3", Date() < updateDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        streamingServer.release(StubServer.reply("200 OK", pageAt(106, [("c", "c1"), ("e", "e1"), ("a", "a3")])))
+        try? await Task.sleep(for: .milliseconds(300))
+        streamingServer.release(StubServer.reply("200 OK", pageAt(105, [("c", "c1"), ("a", "a2"), ("e", "e1")])))
+        let landedDeadline = Date().addingTimeInterval(5)
+        while streamingPane.pageReadsInFlight > 0, Date() < landedDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        check(streamingPane.timelineItems.last?.id == "a" && streamingPane.timelineItems.last?.text == "a3", "an older page that lands last keeps an update streamed while both reads were open: \(streamingPane.timelineItems.map { "\($0.id)=\($0.text)" })")
+        check(streamingPane.streamedRows.isEmpty, "rows kept for overlapping reads are dropped once the last lands: \(streamingPane.streamedRows.count)")
+
+        let streamedSession = SessionState(id: "D", surface: "claude", name: "d", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: false, readOnlyReason: nil)
+        func listing(_ sessions: [SessionState]) -> DashboardSnapshot {
+            DashboardSnapshot(updatedAt: "2026-10-04T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        }
+        streamingModel.snapshot = listing([streamedSession])
+        streamingPane.reconcile()
+        let shownBeforeRemoval = streamingPane.timelineItems.map(\.id)
+        streamingServer.push(frame(107, row(107, "f", text: "f1")), to: "session-stream")
+        let pendingDeadline = Date().addingTimeInterval(5)
+        while streamingPane.unpublishedDetail == nil, Date() < pendingDeadline { try? await Task.sleep(for: .milliseconds(5)) }
+        streamingModel.snapshot = listing([])
+        streamingPane.reconcile()
+        try? await Task.sleep(for: SessionPane.streamPublishInterval * 3)
+        check(streamingPane.removedSession?.id == "D" && streamingPane.timelineItems.map(\.id) == shownBeforeRemoval, "a removed session does not publish a row it held back: \(streamingPane.timelineItems.map(\.id))")
+        let pagesBeforeReturn = pageRequests
+        streamingModel.snapshot = listing([streamedSession])
+        streamingPane.reconcile()
+        let reloadDeadline = Date().addingTimeInterval(5)
+        while pageRequests == pagesBeforeReturn, Date() < reloadDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        let responding = SessionState(id: "D", surface: "claude", name: "d", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(respond: true), readOnly: false, readOnlyReason: nil)
+        Task { await streamingPane.syncRequests(for: responding) }
+        let requestDeadline = Date().addingTimeInterval(5)
+        while requestReads == 0, Date() < requestDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        let pagesBeforeFailure = pageRequests
+        streamingModel.snapshot = listing([])
+        streamingPane.reconcile()
+        let failure = StubServer.reply("500 Internal Server Error", #"{"error":{"message":"gone"}}"#)
+        streamingServer.release(failure, to: "/api/v1/session?")
+        streamingServer.release(failure, to: "/api/v1/requests?")
+        try? await Task.sleep(for: .milliseconds(1500))
+        check(pagesBeforeFailure > pagesBeforeReturn && requestReads == 1, "reads were open when the session was removed: pages \(pagesBeforeReturn)->\(pagesBeforeFailure), requests \(requestReads)")
+        check(streamingPane.detailLoadError == nil && !streamingPane.detailStale && pageRequests == pagesBeforeFailure, "a read that fails after removal neither reports nor retries: error \(streamingPane.detailLoadError ?? "nil"), stale \(streamingPane.detailStale), pages \(pageRequests)")
+        check(streamingPane.requestError == nil && streamingPane.requests == nil, "a request read that fails after removal is not shown: \(streamingPane.requestError ?? "nil")")
+        streamingModel.snapshot = listing([responding])
+        streamingPane.reconcile()
+        let resyncDeadline = Date().addingTimeInterval(5)
+        while streamingPane.requests == nil, Date() < resyncDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        check(requestReads == 2 && streamingPane.requests?.permissionMode == "default", "a session that comes back reads its requests again: reads \(requestReads)")
+        Task { await streamingPane.setPermissionMode("plan") }
+        let heldReadDeadline = Date().addingTimeInterval(5)
+        while requestReads < 3, Date() < heldReadDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        streamingModel.snapshot = listing([])
+        streamingPane.reconcile()
+        streamingModel.snapshot = listing([responding])
+        streamingPane.reconcile()
+        let freshReadDeadline = Date().addingTimeInterval(5)
+        while streamingPane.requests == nil || requestReads < 4, Date() < freshReadDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        streamingServer.release(StubServer.reply("200 OK", #"{"permissionMode":"plan","requests":[]}"#), to: "/api/v1/requests?")
+        try? await Task.sleep(for: .milliseconds(300))
+        check(requestReads == 4 && streamingPane.requests?.permissionMode == "default", "a request read from before the session left does not replace the one after it came back: \(streamingPane.requests?.permissionMode ?? "nil"), reads \(requestReads)")
+        streamingModel.closePane(streamingPane)
+        streamingServer.stop()
 
         let delivered = await model.reply("  answer from a notification  ", to: "D", connectionTimeout: .milliseconds(50))
         check(!delivered && model.draft(for: "D").text == "answer from a notification", "an undeliverable reply waits in the session's draft")
@@ -369,7 +512,9 @@ struct SessionPaneTest {
     final class StubServer: @unchecked Sendable {
         private let listener: NWListener
         private var connections: [NWConnection] = []
+        private var lines: [ObjectIdentifier: String] = [:]
         private var held: [NWConnection] = []
+        static let hold = "HOLD"
         private var requests = 0
 
         init(respond: @escaping (String, Int) -> String?) throws {
@@ -379,10 +524,9 @@ struct SessionPaneTest {
                 connection.start(queue: .main)
                 read(connection, Data()) { [self] request in
                     requests += 1
-                    guard let reply = respond(request, requests) else {
-                        held.append(connection)
-                        return
-                    }
+                    lines[ObjectIdentifier(connection)] = request
+                    guard let reply = respond(request, requests) else { return }
+                    if reply == Self.hold { held.append(connection); return }
                     connection.send(content: Data(reply.utf8), completion: .contentProcessed { _ in })
                 }
             }
@@ -420,10 +564,14 @@ struct SessionPaneTest {
 
         var heldCount: Int { held.count }
 
-        /// Answers every request the responder left waiting.
-        func release(_ reply: String) {
-            held.forEach { $0.send(content: Data(reply.utf8), completion: .contentProcessed { _ in }) }
-            held = []
+        func push(_ text: String, to path: String) {
+            connections.filter { lines[ObjectIdentifier($0)]?.contains(path) == true }
+                .forEach { $0.send(content: Data(text.utf8), completion: .contentProcessed { _ in }) }
+        }
+
+        func release(_ reply: String, to path: String? = nil) {
+            guard let index = held.firstIndex(where: { path == nil || lines[ObjectIdentifier($0)]?.contains(path!) == true }) else { return }
+            held.remove(at: index).send(content: Data(reply.utf8), completion: .contentProcessed { _ in })
         }
 
         func stop() {

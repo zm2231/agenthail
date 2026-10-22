@@ -26,6 +26,10 @@ struct SubagentPagesTest {
         check(cache.children(of: "root").isEmpty && cache.session("A") == nil, "a removed subagent leaves the page at once")
         cache.store([session("B", parent: "root")], for: "root")
         check(cache.children(of: "root").map(\.id) == ["B"] && cache.session("A") == nil, "swapping A for B at the same count shows B only")
+        let served = SubagentFetchKey(parent, revision: cache.revision("root"))
+        cache.refetch("root")
+        check(!cache.holds("root") && cache.loading(parent) && SubagentFetchKey(parent, revision: cache.revision("root")) != served, "a page whose serving computer changed is fetched again")
+        cache.store([session("B", parent: "root")], for: "root")
 
         let listedB = session("B", parent: "root", status: "busy")
         let merged = SessionFamilies.children(of: "root", listed: [listedB], fetched: cache.children(of: "root"))

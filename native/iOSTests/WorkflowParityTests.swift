@@ -29,8 +29,8 @@ final class WorkflowParityTests: XCTestCase {
         let settings = ClaudeCreationSettings(name: "phone-task", worktree: "phone-work", agent: "reviewer", effort: "high", permissionMode: "plan")
         let created = await model.createSession(surface: "claude", message: "Build", cwd: "/project", model: "sonnet", claude: settings)
         XCTAssertTrue(created)
-        XCTAssertEqual(model.requestedSessionID, "native-claude")
-        XCTAssertEqual(model.deliveryStatus["native-claude"], "Session started. Waiting for activity.")
+        XCTAssertEqual(model.requestedSessionID, "computer::native-claude")
+        XCTAssertEqual(model.deliveryStatus["computer::native-claude"], "Session started. Waiting for activity.")
         let sent = ParityProtocol.state.actions[0]
         for (key,value) in settings.fields { XCTAssertEqual(sent[key] as? String, value) }
         XCTAssertNil(sent["approvalPolicy"])
@@ -154,8 +154,8 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertEqual(options.projects.map(\.rootPath), ["/project"])
         let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen")
         XCTAssertTrue(created)
-        XCTAssertEqual(model.requestedSessionID, "created")
-        XCTAssertEqual(model.deliveryStatus["created"], "Submitted to codex.")
+        XCTAssertEqual(model.requestedSessionID, "computer::created")
+        XCTAssertEqual(model.deliveryStatus["computer::created"], "Submitted to codex.")
         XCTAssertEqual(ParityProtocol.state.actions.first?["cwd"] as? String, "/project")
         XCTAssertEqual(ParityProtocol.state.actions.first?["model"] as? String, "chosen")
         model.creatingSession = true
@@ -213,10 +213,13 @@ final class WorkflowParityTests: XCTestCase {
     func testGoalAliasAndQueueSendExactOperations() async throws {
         ParityProtocol.state.reset()
         let model = makeModel()
-        model.selectedDetail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
-        try await model.editSession(id: "demo", action: "goal-set", text: "Verify release")
-        try await model.editSession(id: "demo", action: "alias", text: "release")
-        let queue = try JSONDecoder().decode(QueueState.self, from: Data(#"{"id":7,"sessionId":"demo","target":"demo","message":"next","status":"dead","evidence":"failed","attempts":1,"queuedAt":"now"}"#.utf8))
+        var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        detail.session.id = "computer::demo"
+        model.selectedDetail = detail
+        try await model.editSession(id: "computer::demo", action: "goal-set", text: "Verify release")
+        try await model.editSession(id: "computer::demo", action: "alias", text: "release")
+        var queue = try JSONDecoder().decode(QueueState.self, from: Data(#"{"id":7,"sessionId":"demo","target":"demo","message":"next","status":"dead","evidence":"failed","attempts":1,"queuedAt":"now"}"#.utf8))
+        queue.hostID = "computer"
         try await model.updateQueue(queue, retry: true)
         try await model.updateQueue(queue, retry: false)
         let actions = ParityProtocol.state.actions
@@ -225,6 +228,17 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertEqual(actions[1]["alias"] as? String, "release")
         XCTAssertEqual(actions[2]["queueId"] as? Int, 7)
         XCTAssertTrue(model.pendingControls.isEmpty)
+    }
+
+    @MainActor
+    func testCreatingOnAMirroredComputerKeysTheSessionByItsOwner() async throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"now","daemon":{"running":true,"hosts":[{"id":"hpeer","name":"peer","state":"connected"}]},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5}"#.utf8)))
+        let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", host: "hpeer")
+        XCTAssertTrue(created)
+        XCTAssertEqual(ParityProtocol.state.actions.first?["host"] as? String, "hpeer")
+        XCTAssertEqual(model.requestedSessionID, "hpeer::created")
     }
 
     @MainActor private func makeModel() -> AgenthailIOSModel {

@@ -9,7 +9,8 @@ final class AgenthailModel: ObservableObject {
             pruneDetailCache()
             if let snapshot {
                 HolderPins.shared.prune(to: snapshot.sessions)
-                holderPicks = HolderPins.shared.all
+                let picks = HolderPins.shared.all
+                if holderPicks != picks { holderPicks = picks }
             }
             if snapshot != nil, let reference = pendingSessionReference {
                 pendingSessionReference = nil
@@ -133,7 +134,8 @@ final class AgenthailModel: ObservableObject {
 
     func pickHolder(_ holder: SessionHolder?, for sessionID: String) {
         HolderPins.shared.pick(holder.map(HolderPin.init), for: sessionID)
-        holderPicks = HolderPins.shared.all
+        let picks = HolderPins.shared.all
+        if holderPicks != picks { holderPicks = picks }
     }
 
     func connect() {

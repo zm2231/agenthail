@@ -18,22 +18,23 @@ struct SessionPreview: View {
             detail.claudeRuns = metadata.claudeRuns
             detail.claudeSubagents = metadata.claudeSubagents
         }
-        self.detail = detail
-        session = snapshot.sessions.first(where: { $0.id == detail.session.id }) ?? SessionState(
-            id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
-            status: detail.session.status, lastActive: nil, queueCount: 0, open: false, current: false,
-            currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly,
-            readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd)
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [SessionPreviewProtocol.self]
         let model = AgenthailIOSModel(
             api: AgenthailAPI(baseURL: URL(string: "https://preview.invalid")!, token: "public-demo", session: URLSession(configuration: config)),
             paired: ProcessInfo.processInfo.arguments.contains("--preview-voice-entry")
         )
+        model.setHostSnapshot(snapshot)
+        detail.session.id = HostCatalog.qualify("computer", detail.session.id)
+        self.detail = detail
+        session = model.snapshot?.sessions.first(where: { $0.id == detail.session.id }) ?? SessionState(
+            id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
+            status: detail.session.status, lastActive: nil, queueCount: 0, open: false, current: false,
+            currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly,
+            readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd)
         model.selectedSessionID = session.id
         model.selectedDetail = detail
         if capture == nil { model.composer = "Keep the regression check with the fix." }
-        model.snapshot = snapshot
         if ProcessInfo.processInfo.arguments.contains("--preview-delivery") {
             model.deliveryStatus[session.id] = "Queued for the agent"
         }
@@ -102,7 +103,7 @@ struct SessionPreview: View {
     }
 
     nonisolated static var snapshotJSON: String {
-        let capabilities: [String: Bool] = ["send": true, "stream": true, "reply": true, "goal": true, "goalSet": true, "goalStatus": true, "compact": true, "model": true, "interrupt": true, "steer": true]
+        let capabilities: [String: Bool] = ["send": true, "stream": true, "reply": true, "goal": true, "goalSet": true, "goalStatus": true, "compact": true, "model": true, "interrupt": true, "steer": true, "attach": true]
         let sessions: [[String: Any]] = [
             ["id": "demo", "project": ["id": "project-fieldnotes", "displayName": "fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "kind": "git"], "name": "Make the build reliable", "surface": "claude", "cwd": "/Users/demo/projects/fieldnotes", "status": "busy", "lastActive": "2026-09-12T04:03:00Z", "queueCount": 1, "open": true, "current": true, "capabilities": capabilities],
             ["id": "codex-demo", "project": ["id": "project-fieldnotes", "displayName": "fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "kind": "git"], "name": "Review the release pipeline", "surface": "codex", "cwd": "/Users/demo/projects/fieldnotes", "status": "idle", "lastActive": "2026-09-12T03:45:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities],
@@ -141,7 +142,7 @@ struct SessionPreview: View {
     {
       "session":{"id":"demo","surface":"claude","name":"Make the build reliable","status":"busy","lastActive":"2026-09-07T12:05:00Z","cwd":"/Users/demo/projects/fieldnotes","source":"cli","transport":"local"},
       "journalSeq":2048,
-      "exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"goalSet":true,"goalStatus":true,"compact":true,"model":true,"interrupt":true,"steer":true},
+      "exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"goalSet":true,"goalStatus":true,"compact":true,"model":true,"interrupt":true,"steer":true,"attach":true},
       "readOnly":false,"readOnlyReason":"","model":"Claude Sonnet",
       "models":[{"id":"sonnet","displayName":"Claude Sonnet"},{"id":"opus","displayName":"Claude Opus"}],
       "context":{"usedTokens":86400,"contextWindow":200000,"cumulativeTokens":312000,"compacting":false,"compactionCount":1,"reclaimedTokens":42000,"inputTokens":83000,"cachedInputTokens":60000,"outputTokens":3400},

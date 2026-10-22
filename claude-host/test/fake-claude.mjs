@@ -173,6 +173,10 @@ async function turn(message) {
     permissionMode = text.split(' ')[1];
     write({ type: 'system', subtype: 'status', status: null, permissionMode, uuid: crypto.randomUUID(), session_id: sessionId });
     reply = `mode:${permissionMode}`;
+  } else if (text.startsWith('BURST')) {
+    const count = Number(text.split(' ')[1]);
+    for (let i = 0; i < count; i++) write({ type: 'system', subtype: 'status', status: null, burst: i });
+    reply = `burst:${count}`;
   } else if (text.startsWith('SLOW')) {
     const ms = Number(text.split(' ')[1] ?? 30000);
     const interrupted = await new Promise((resolve) => {
