@@ -39,7 +39,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published var sessionRequests: SessionRequests?
     @Published var answeringRequest: String?
     private var sessionRequestsKey: String?
-    @Published var selectedSessionID: String?
+    @Published var selectedSessionID: String? {
+        didSet { if selectedSessionID != oldValue { sessionServer = selectedSessionID.flatMap(server(for:)) } }
+    }
     @Published private(set) var connectionError: String?
     @Published private(set) var reconnecting = false
     @Published var operationError: String?
@@ -119,6 +121,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     private var catalog = HostCatalog()
     private var sessionStreamTask: Task<Void, Never>?
     private var sessionMetadataTask: Task<Void, Never>?
+    private var sessionServer: HostConnection?
     private(set) var sessionStreamCursor: UInt64 = 0
     private var sessionMetadata = MetadataOverlay()
     private var stateRequests: UInt64 = 0
@@ -214,13 +217,42 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         else { connectionError = failing.map { "\($0.name): \($0.connectionError ?? "")" }.joined(separator: "\n") }
         reconnecting = ordered.contains(where: \.reconnecting)
         if let voice = voiceHostID, connections[voice] == nil { voiceHostID = nil }
+        rebindSelectedSession()
+    }
+
+    private func server(for sessionID: String) -> HostConnection? {
+        catalog.route(for: sessionID).flatMap { connections[$0.hostID] }
+    }
+
+    private func rebindSelectedSession() {
+        guard let id = selectedSessionID else { return }
+        let current = server(for: id)
+        guard current !== sessionServer else { return }
+        sessionServer = current
+        sessionStreamTask?.cancel()
+        cancelSessionReload()
+        unsupportedRefreshTask?.cancel()
+        sessionMetadataTask?.cancel()
+        sessionStreamCursor = 0
+        sessionStreamUnsupported = false
+        guard current != nil else { return }
+        Task { [weak self] in
+            await self?.reloadSelectedSession()
+            guard let self, self.selectedSessionID == id else { return }
+            self.startSessionMetadata(id)
+        }
     }
 
     private func resolve(_ sessionID: String) throws -> (api: AgenthailAPI, route: SessionRoute) {
+        let (connection, route) = try resolveServer(sessionID)
+        return (connection.api, route)
+    }
+
+    private func resolveServer(_ sessionID: String) throws -> (connection: HostConnection, route: SessionRoute) {
         guard let route = catalog.route(for: sessionID), let connection = connections[route.hostID] else {
             throw AgenthailAPIError.unavailable(unreachableMessage(for: sessionID))
         }
-        return (connection.api, route)
+        return (connection, route)
     }
 
     private func reach(_ hostID: String?) throws -> (api: AgenthailAPI, target: HostTarget) {
@@ -632,11 +664,12 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         let requestID = UUID()
         sessionRequestID = requestID
         let seq = nextStateRequest()
+        let requestServer = server(for: id)
         do {
-            let (api, route) = try resolve(id)
-            var detail = try await api.sessionDetail(id: route.sessionID, includeTimeline: true)
+            let (connection, route) = try resolveServer(id)
+            var detail = try await connection.api.sessionDetail(id: route.sessionID, includeTimeline: true)
             detail.session.id = id
-            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID else { return }
+            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID, server(for: id) === connection else { return }
             if !olderActivity.isEmpty {
                 let retained = Set(olderActivity.map(\.id) + (detail.timeline?.items.map(\.id) ?? []))
                 olderActivity += (selectedDetail?.timeline?.items ?? []).filter { !retained.contains($0.id) }
@@ -656,7 +689,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             if olderActivity.isEmpty { activityCursor = detail.timeline?.nextBefore }
             sessionError = nil
         } catch {
-            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID else { return }
+            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID, server(for: id) === requestServer else { return }
             sessionError = error.localizedDescription
         }
         await refreshDeliveries()
@@ -747,15 +780,15 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     private func startSessionMetadata(_ id: String) {
         sessionMetadataTask?.cancel()
-        guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), case let (api, route)? = try? resolve(id) else { return }
+        guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), case let (connection, route)? = try? resolveServer(id) else { return }
         sessionMetadata.metadataRequested()
-        sessionMetadataTask = Task { [weak self, api] in
+        sessionMetadataTask = Task { [weak self, connection] in
             do {
-                let metadata = try await api.sessionMetadata(id: route.sessionID)
-                guard !Task.isCancelled else { return }
+                let metadata = try await connection.api.sessionMetadata(id: route.sessionID)
+                guard !Task.isCancelled, self?.server(for: id) === connection else { return }
                 self?.updateSessionMetadata(for: id) { $0.absorb(metadata) }
             } catch {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, self?.server(for: id) === connection else { return }
                 self?.updateSessionMetadata(for: id) { $0.metadataFailed() }
             }
         }
@@ -1178,17 +1211,17 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     private func startSessionStream(_ id: String) {
         sessionStreamTask?.cancel()
-        guard selectedSessionID == id, case let (api, route)? = try? resolve(id) else { return }
+        guard selectedSessionID == id, case let (connection, route)? = try? resolveServer(id) else { return }
         sessionStreamTask = Task {
             let backoff = EventRetryBackoff()
-            while !Task.isCancelled, selectedSessionID == id {
+            while !Task.isCancelled, selectedSessionID == id, server(for: id) === connection {
                 do {
-                    try await api.streamSession(id: route.sessionID, after: sessionStreamCursor, onConnected: {}, onEvent: { [weak self] event in
+                    try await connection.api.streamSession(id: route.sessionID, after: sessionStreamCursor, onConnected: {}, onEvent: { [weak self] event in
                         backoff.reset()
-                        await self?.applySessionStreamEvent(event, route: route)
+                        await self?.applySessionStreamEvent(event, route: route, server: connection)
                     })
                 } catch {
-                    if Task.isCancelled || selectedSessionID != id { return }
+                    if Task.isCancelled || selectedSessionID != id || server(for: id) !== connection { return }
                     if case AgenthailAPIError.streamUnsupported = error,
                        snapshot?.sessions.first(where: { $0.id == id })?.capabilities.stream != true {
                         sessionStreamUnsupported = true
@@ -1260,13 +1293,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func applySessionStreamEvent(_ event: SessionStreamEvent) {
-        guard let id = selectedSessionID, let route = catalog.route(for: id) else { return }
-        applySessionStreamEvent(event, route: route)
+        guard let id = selectedSessionID, let route = catalog.route(for: id), let connection = connections[route.hostID] else { return }
+        applySessionStreamEvent(event, route: route, server: connection)
     }
 
-    private func applySessionStreamEvent(_ event: SessionStreamEvent, route: SessionRoute) {
+    private func applySessionStreamEvent(_ event: SessionStreamEvent, route: SessionRoute, server connection: HostConnection) {
         guard event.stream == "session", event.sessionId == route.sessionID, let selected = selectedSessionID,
-              catalog.route(for: selected) == route, var detail = selectedDetail, detail.session.id == selected else { return }
+              catalog.route(for: selected) == route, server(for: selected) === connection,
+              var detail = selectedDetail, detail.session.id == selected else { return }
         sessionStreamCursor = max(sessionStreamCursor, event.seq)
         if event.data.kind == "context" {
             sessionMetadata.stream(context: event.data.context)
