@@ -242,6 +242,38 @@ final class StaleConnectionTests: XCTestCase {
     }
 
     @MainActor
+    func testSubagentsThatFailedWhileUnreachableLoadOnceTheComputerIsBack() async throws {
+        KeychainStore.removeAll()
+        ServedSessionProtocol.state.reset(holdDetailOn: nil)
+        defer { KeychainStore.removeAll() }
+        try AgenthailIOSTests.pair("hown", "https://own.tailnet.ts.net")
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        model.connect()
+        for _ in 0..<150 where model.connection("hown")?.reachable != true { try await Task.sleep(for: .milliseconds(20)) }
+        var parent = try XCTUnwrap(model.snapshot?.sessions.first { $0.id == "hown::demo" })
+        parent.hiddenSubagents = SubagentRollup(count: 1, working: 0)
+        await model.loadSubagents(of: parent)
+        XCTAssertFalse(model.fetchedSubagents.children(of: parent.id).isEmpty)
+
+        ServedSessionProtocol.state.takeOffline("own")
+        let cached = model.fetchedSubagents.revision(parent.id)
+        for _ in 0..<200 where model.fetchedSubagents.revision(parent.id) == cached { try await Task.sleep(for: .milliseconds(20)) }
+        await model.loadSubagents(of: parent)
+        XCTAssertNotNil(model.fetchedSubagents.errors[parent.id])
+
+        ServedSessionProtocol.state.bringOnline("own")
+        let failed = model.fetchedSubagents.revision(parent.id)
+        model.reconnect(host: "hown")
+        for _ in 0..<200 where model.fetchedSubagents.revision(parent.id) == failed { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertNotEqual(model.fetchedSubagents.revision(parent.id), failed)
+        await model.loadSubagents(of: parent)
+        XCTAssertNil(model.fetchedSubagents.errors[parent.id])
+        XCTAssertTrue(model.fetchedSubagents.children(of: parent.id).allSatisfy { $0.id.hasSuffix("child-own") })
+        XCTAssertFalse(model.fetchedSubagents.children(of: parent.id).isEmpty)
+        model.forgetHost("hown")
+    }
+
+    @MainActor
     func testRemovingTheMirrorServingASessionStopsItsStream() async throws {
         KeychainStore.removeAll()
         ServedSessionProtocol.state.reset(holdDetailOn: nil)
@@ -459,6 +491,7 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
         func open(_ host: String, _ request: ServedSessionProtocol) { condition.withLock { streams[host] = request } }
         func opened(_ host: String, _ request: ServedSessionProtocol) { condition.withLock { opened[host, default: []].append(request) } }
         func offline(_ host: String) -> Bool { condition.withLock { down.contains(host) } }
+        func bringOnline(_ host: String) { condition.withLock { _ = down.remove(host) } }
         func takeOffline(_ host: String) {
             let open = condition.withLock { down.insert(host); return opened.removeValue(forKey: host) ?? [] }
             for request in open { request.client?.urlProtocolDidFinishLoading(request) }

@@ -116,7 +116,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published var pendingControls: Set<String> = []
     @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
     @Published private(set) var fetchedSubagents = SubagentPageCache()
-    private var subagentServers: [String: HostConnection] = [:]
+    private var subagentServers: [String: HostConnection?] = [:]
 
     private var connections: [String: HostConnection] = [:]
     private var hostOrder: [String] = []
@@ -384,11 +384,11 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             let loaded = try await connection.api.subagents(of: route.sessionID)
             guard !Task.isCancelled, server(for: session.id) === connection else { return }
             fetchedSubagents.store(loaded.map { merged($0, from: route.hostID) }, for: session.id)
-            subagentServers[session.id] = connection
+            subagentServers.updateValue(connection, forKey: session.id)
         } catch {
             guard !Task.isCancelled, server(for: session.id) === requestServer else { return }
             fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id)
-            subagentServers[session.id] = requestServer
+            subagentServers.updateValue(requestServer, forKey: session.id)
         }
     }
 
