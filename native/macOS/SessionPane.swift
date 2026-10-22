@@ -13,7 +13,7 @@ final class SessionPane: ObservableObject, Identifiable {
             if restoresSelection, tabs != oldValue, let data = try? JSONEncoder().encode(tabs) {
                 UserDefaults.standard.set(data, forKey: Self.tabsKey)
             }
-            if tabsEnabled, !tabs.tabs.contains(where: { $0.id == SessionTabs.newSession }) { newSession = nil }
+            if tabsEnabled { syncNewSessionDraft() }
         }
     }
     @Published private(set) var newSession: NewSessionDraft?
@@ -77,6 +77,15 @@ final class SessionPane: ObservableObject, Identifiable {
         observeDraft()
     }
 
+    /// Keeps a draft exactly while a New Session tab is open.
+    private func syncNewSessionDraft() {
+        if !tabs.tabs.contains(where: { $0.id == SessionTabs.newSession }) {
+            newSession = nil
+        } else if newSession == nil {
+            newSession = NewSessionDraft(model: model, selected: selectedSession)
+        }
+    }
+
     private static let tabsKey = "sessionTabs"
 
     var tabsEnabled: Bool { restoresSelection && model.interface.config.tabs }
@@ -110,8 +119,8 @@ final class SessionPane: ObservableObject, Identifiable {
     /// Shows New Session: with tabs, in its own tab, opened once.
     func openNewSession(message: String? = nil) {
         guard !closed else { return }
-        if tabsEnabled { tabs.open(SessionTabs.newSession, keep: true) }
         if newSession == nil { newSession = NewSessionDraft(model: model, selected: selectedSession) }
+        if tabsEnabled { tabs.open(SessionTabs.newSession, keep: true) }
         if let message { newSession?.take(message) }
         clearSelection()
     }
@@ -120,12 +129,22 @@ final class SessionPane: ObservableObject, Identifiable {
     /// was in.
     func showStarted(_ id: String) {
         let id = model.resolveSessionID(id)
+        let shared = newSession?.takeHeld() ?? []
         if tabsEnabled, !closed {
             tabs.replace(SessionTabs.newSession, with: id)
         } else {
             newSession = nil
         }
         show(id)
+        guard !shared.isEmpty, !closed else { return }
+        guard tabsEnabled else {
+            shared.forEach { openNewSession(message: $0) }
+            return
+        }
+        let draft = NewSessionDraft(model: model, selected: selectedSession)
+        shared.forEach(draft.take)
+        newSession = draft
+        tabs.add(SessionTabs.newSession)
     }
 
     func activateTab(_ id: String) {

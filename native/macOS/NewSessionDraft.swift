@@ -14,6 +14,7 @@ final class NewSessionDraft: ObservableObject {
     @Published var error: String?
     @Published private(set) var submitted: String?
     @Published private(set) var canStartAgain = false
+    private var held: [String] = []
 
     init(model: AgenthailModel, selected: SessionState?) {
         self.model = model
@@ -40,14 +41,32 @@ final class NewSessionDraft: ObservableObject {
     var listedDefault: ModelOption? { agentModels.first { $0.default == true } }
     var efforts: [String] { form.setsEffort ? form.efforts(models: agentModels) : [] }
 
+    var editable: Bool { !starting && submitted == nil }
+
     var canStart: Bool {
-        !starting && submitted == nil && form.isComplete && hosts.canStart
+        model.isConnected && !starting && submitted == nil && form.isComplete && hosts.canStart
             && (form.launcher == nil || launchers.contains { $0.id == form.launcher?.id && $0.available })
     }
 
+    /// Adds shared text to the first message, or holds it until the draft
+    /// can be edited again.
     func take(_ message: String) {
-        guard !starting, submitted == nil else { return }
+        guard editable else {
+            held.append(message)
+            return
+        }
         form.message = form.trimmedMessage.isEmpty ? message : "\(form.message)\n\n\(message)"
+    }
+
+    /// Hands over text that arrived while a launch was in flight.
+    func takeHeld() -> [String] {
+        defer { held = [] }
+        return held
+    }
+
+    private func releaseHeld() {
+        guard editable else { return }
+        takeHeld().forEach(take)
     }
 
     func daemonChanged() {
@@ -124,6 +143,7 @@ final class NewSessionDraft: ObservableObject {
             case .uncertain(let failure), .failed(let failure): error = failure
             }
             canStartAgain = outcome.offersStartAgain
+            releaseHeld()
         }
     }
 
@@ -139,5 +159,6 @@ final class NewSessionDraft: ObservableObject {
         submitted = nil
         canStartAgain = false
         error = nil
+        releaseHeld()
     }
 }

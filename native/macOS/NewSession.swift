@@ -51,7 +51,9 @@ struct NewSessionView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .backdropSurface(DesktopPalette.window)
         .onAppear { focused = true }
-        .task(id: draft.hosts.generation) { await draft.loadOptions() }
+        .task(id: "\(draft.hosts.generation)/\(model.isConnected)") {
+            if model.isConnected { await draft.loadOptions() }
+        }
         .task(id: "\(draft.hosts.generation)/\(draft.form.agent)/\(draft.hosts.options != nil)") { await draft.loadModels() }
         .onChange(of: model.snapshot?.daemon) { draft.daemonChanged() }
         .onChange(of: draft.form.agent) { draft.error = nil }
@@ -171,9 +173,17 @@ struct NewSessionView: View {
     }
 
     @ViewBuilder private var status: some View {
-        let lines = [draft.hosts.loadError, draft.modelError].compactMap { $0 }
-        if !lines.isEmpty || draft.error != nil || draft.submitted != nil {
+        let lines = model.isConnected ? [draft.hosts.loadError, draft.modelError].compactMap { $0 } : []
+        if !model.isConnected || !lines.isEmpty || draft.error != nil || draft.submitted != nil {
             VStack(alignment: .leading, spacing: DesktopSpace.xs) {
+                if !model.isConnected {
+                    HStack(spacing: DesktopSpace.s) {
+                        Text(model.daemonSlow ? "Agenthail is running but took too long to answer. Retrying." : model.connectionError ?? "The app can't reach the Agenthail daemon.")
+                            .foregroundStyle(DesktopPalette.text2)
+                        Spacer(minLength: 0)
+                        if !model.daemonSlow { Button("Start Agenthail") { model.restartDaemon() } }
+                    }
+                }
                 ForEach(lines, id: \.self) { Text($0).foregroundStyle(DesktopPalette.text2) }
                 if let error = draft.error { Text(error).foregroundStyle(DesktopPalette.failed) }
                 if let submitted = draft.submitted {

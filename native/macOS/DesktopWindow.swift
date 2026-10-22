@@ -723,7 +723,7 @@ struct ConversationPane: View {
                 }
             .glassPane("content", .content, fallback: DesktopPalette.window)
             .environmentObject(pane)
-        } else if model.isConnected, let draft = pane.newSession {
+        } else if let draft = pane.newSession {
             NewSessionView(model: model, draft: draft)
                 .glassPane("content", .content, fallback: DesktopPalette.window)
         } else {

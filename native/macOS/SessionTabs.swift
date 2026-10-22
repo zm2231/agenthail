@@ -48,6 +48,13 @@ struct SessionTabs: Codable, Equatable {
         active = new
     }
 
+    /// Opens a kept tab beside the active one without switching to it.
+    mutating func add(_ id: String) {
+        guard !tabs.contains(where: { $0.id == id }) else { return }
+        let index = active.flatMap { id in tabs.firstIndex { $0.id == id } }.map { $0 + 1 } ?? tabs.count
+        tabs.insert(Tab(id: id, kept: true), at: index)
+    }
+
     mutating func keep(_ id: String) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         tabs[index].kept = true

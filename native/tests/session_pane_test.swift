@@ -307,6 +307,49 @@ struct SessionPaneTest {
         await unreachable.unarchiveTab(noticeA)
         check(unreachable.archivedTab?.id == "NA" && unreachable.archivedTabError?.contains("connected") == true, "without a connection the notice stays and says why")
 
+        let restoredTabs = { () -> SessionTabs in
+            var tabs = SessionTabs()
+            tabs.open("A", keep: true)
+            tabs.open(SessionTabs.newSession, keep: true)
+            return tabs
+        }()
+        UserDefaults.standard.set(try! JSONEncoder().encode(restoredTabs), forKey: "sessionTabs")
+        let restoredModel = AgenthailModel(connecting: false)
+        check(restoredModel.mainPane.tabs.active == SessionTabs.newSession && restoredModel.mainPane.newSession != nil, "a restored New Session tab has its draft before any snapshot")
+        UserDefaults.standard.removeObject(forKey: "sessionTabs")
+
+        let offlineModel = AgenthailModel(connecting: false)
+        offlineModel.openNewSession(message: "while offline")
+        let offlineDraft = offlineModel.mainPane.newSession
+        offlineDraft?.form.folder = "/work/sample"
+        check(offlineDraft?.form.message == "while offline" && offlineDraft?.canStart == false, "New Session opens while disconnected, and Start waits for the connection")
+        UserDefaults.standard.removeObject(forKey: "sessionTabs")
+
+        let launch = try! StubServer { request, _ in
+            request.contains("\"surface\"") && request.contains("/api/v1/actions") ? nil : StubServer.reply("200 OK", "{}")
+        }
+        let launchPort = await launch.ready()
+        let launchModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(launchPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
+        launchModel.snapshot = DashboardSnapshot(updatedAt: "2026-10-22T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        launchModel.openNewSession()
+        let launching = launchModel.mainPane.newSession!
+        launching.hosts.receive(options: try! JSONDecoder().decode(SessionCreationOptions.self, from: Data(#"{"surfaces":[{"id":"claude","workspace":true}],"projects":[]}"#.utf8)), for: launching.hosts.generation)
+        launching.form.folder = "/work/sample"
+        launching.form.message = "first"
+        check(launching.canStart, "a complete form can start: \(launching.form)")
+        launching.start()
+        launchModel.receiveSharedText("shared while starting")
+        check(launching.starting && launching.form.message == "first", "text shared while starting waits")
+        for _ in 0..<60 where launch.heldCount == 0 { try? await Task.sleep(for: .milliseconds(50)) }
+        launch.release(StubServer.reply("200 OK", #"{"ok":true,"accepted":true}"#))
+        for _ in 0..<60 where launching.submitted == nil { try? await Task.sleep(for: .milliseconds(50)) }
+        launchModel.receiveSharedText("shared after submitting")
+        check(launching.submitted != nil && launching.form.message == "first", "text shared after submitting waits: \(launching.form.message)")
+        launching.reset()
+        check(launching.form.message == "shared while starting\n\nshared after submitting", "held text arrives once the draft is editable, each piece once: \(launching.form.message)")
+        launch.stop()
+        UserDefaults.standard.removeObject(forKey: "sessionTabs")
+
         let delivered = await model.reply("  answer from a notification  ", to: "D", connectionTimeout: .milliseconds(50))
         check(!delivered && model.draft(for: "D").text == "answer from a notification", "an undeliverable reply waits in the session's draft")
     }
@@ -321,6 +364,7 @@ struct SessionPaneTest {
     final class StubServer: @unchecked Sendable {
         private let listener: NWListener
         private var connections: [NWConnection] = []
+        private var held: [NWConnection] = []
         private var requests = 0
 
         init(respond: @escaping (String, Int) -> String?) throws {
@@ -330,7 +374,10 @@ struct SessionPaneTest {
                 connection.start(queue: .main)
                 read(connection, Data()) { [self] request in
                     requests += 1
-                    guard let reply = respond(request, requests) else { return }
+                    guard let reply = respond(request, requests) else {
+                        held.append(connection)
+                        return
+                    }
                     connection.send(content: Data(reply.utf8), completion: .contentProcessed { _ in })
                 }
             }
@@ -364,6 +411,14 @@ struct SessionPaneTest {
                 }
                 listener.start(queue: .main)
             }
+        }
+
+        var heldCount: Int { held.count }
+
+        /// Answers every request the responder left waiting.
+        func release(_ reply: String) {
+            held.forEach { $0.send(content: Data(reply.utf8), completion: .contentProcessed { _ in }) }
+            held = []
         }
 
         func stop() {
