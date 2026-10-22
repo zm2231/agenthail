@@ -45,6 +45,12 @@ struct DesktopWindow: View {
                         .onTapGesture { model.paletteVisible = false }
                     CommandPalette(model: model, pane: pane)
                         .padding(.top, 72)
+                    // Escape closes the palette wherever focus is, not only from its field.
+                    Button("Close palette") { model.paletteVisible = false }
+                        .keyboardShortcut(.cancelAction)
+                        .opacity(0)
+                        .frame(width: 0, height: 0)
+                        .accessibilityHidden(true)
                 }
             }
         }
@@ -641,7 +647,7 @@ struct ConversationPane: View {
     var body: some View {
         if let session = pane.displayedSession {
             TranscriptView(model: model, pane: pane, session: session)
-                .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)") { await pane.syncRequests(for: session) }
+                .task(id: SessionPane.requestSyncKey(session)) { await pane.syncRequests(for: session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.modelLabel, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)
@@ -673,6 +679,8 @@ struct ConversationPane: View {
                             }
                             if let error = pane.requestError {
                                 Text(error).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 4)
+                                    .frame(maxWidth: .infinity)
+                                    .background(DesktopPalette.window)
                             }
                             ComposerView(model: model, pane: pane, session: session)
                         }
@@ -1052,9 +1060,9 @@ struct AttachmentImageView: View {
                     .resizable()
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: 520, maxHeight: 360, alignment: .leading)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(DesktopPalette.line))
+                    .frame(maxWidth: 520, maxHeight: 360, alignment: .leading)
                     .onTapGesture(count: 2) { open(image) }
                     .contextMenu {
                         Button("Open in Preview") { open(image) }
@@ -2025,8 +2033,21 @@ struct DetailsTab: View {
                 }
                 detailRow("Surface", session.surface.capitalized)
                 if let configRoot = session.claudeConfigRoot {
-                    detailRow("Config folder", configRoot.summary)
-                        .help(configRoot.root)
+                    GridRow {
+                        Text("Config folder").foregroundStyle(DesktopPalette.text2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(configRoot.name)
+                            if let account = configRoot.signedInAs, !account.isEmpty {
+                                Text(account)
+                                    .foregroundStyle(DesktopPalette.text2)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                        }
+                        .font(.system(size: 12.5))
+                        .textSelection(.enabled)
+                    }
+                    .help(configRoot.summary + "\n" + configRoot.root)
                 }
                 if let detail = pane.detail {
                     detailRow("Exchanges", SessionFacts.exchangeLabel(detail.exchanges.count))

@@ -25,6 +25,7 @@ struct VoiceCallView: View {
     let openSession: (String) -> Void
     @Environment(\.openWindow) private var openWindow
     @State private var confirmTargetInterrupt = false
+    @State private var confirmNewConversation = false
 
     private var routeIsEmpty: Bool { call.targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var callActive: Bool { call.state?.hasCall == true || call.audioConnected || call.dialing }
@@ -50,7 +51,7 @@ struct VoiceCallView: View {
                         }
                         .font(.system(size: 12))
                     }
-                    if let id = call.state?.attemptId {
+                    if callActive, let id = call.state?.attemptId {
                         Text("Call ID \(id)")
                             .font(.system(size: 11).monospaced())
                             .foregroundStyle(DesktopPalette.muted)
@@ -72,6 +73,12 @@ struct VoiceCallView: View {
             Button("Stop selected session", role: .destructive) { Task { await call.interruptTarget() } }
         } message: {
             Text("This does not hang up the call or stop another agent.")
+        }
+        .confirmationDialog("Start a new orchestrator conversation?", isPresented: $confirmNewConversation, titleVisibility: .visible) {
+            Button("Start new conversation") { Task { await call.startNewConversation() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This creates a separate Codex thread. The current conversation remains available in Sessions.")
         }
     }
 
@@ -96,6 +103,12 @@ struct VoiceCallView: View {
             }
             Spacer()
             if call.working || call.dialing { ProgressView().controlSize(.small) }
+            Button("New conversation", systemImage: "square.and.pencil") { confirmNewConversation = true }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .help("New conversation")
+                .disabled(!call.canStartNewConversation)
+                .accessibilityIdentifier("new-voice-conversation")
         }
         .padding(.horizontal, 20)
         .padding(.top, 36)
