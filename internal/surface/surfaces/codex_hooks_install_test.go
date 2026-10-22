@@ -43,7 +43,7 @@ func requireCodexState(t *testing.T, want string) {
 func TestHooksInstallCodexKeepsThePersonsConfigAndIsUndoneByUninstall(t *testing.T) {
 	home := isolatedCodexHome(t)
 	config := filepath.Join(home, "config.toml")
-	original := "# my settings\nmodel = \"x\"\n\n[hooks]\nStop = [{ hooks = [{ type = \"command\", command = \"notify\" }] }]\n"
+	original := "# my settings\nmodel = \"x\"\n\n[hooks]\nStop = [{ hooks = [{ type = \"command\", command = \"notify\" }] }]\nUserPromptSubmit = [{ hooks = [{ type = \"prompt\", prompt = \"Stay on task\" }] }]\n"
 	memory := filepath.Join(home, "AGENTS.md")
 	notes := "# My notes\n\nPrefer small commits.\n"
 	for path, text := range map[string]string{config: original, memory: notes} {
@@ -76,7 +76,7 @@ func TestHooksInstallCodexKeepsThePersonsConfigAndIsUndoneByUninstall(t *testing
 	}
 	requireCodexState(t, CodexHooksMissing)
 	written, _ = os.ReadFile(config)
-	if strings.Contains(string(written), "session-context") || strings.Contains(string(written), "trusted_hash") || !strings.Contains(string(written), "# my settings") || !strings.Contains(string(written), `command = "notify"`) {
+	if strings.Contains(string(written), "session-context") || strings.Contains(string(written), "trusted_hash") || !strings.Contains(string(written), "# my settings") || !strings.Contains(string(written), `command = "notify"`) || !strings.Contains(string(written), `prompt = "Stay on task"`) {
 		t.Fatalf("config after uninstall:\n%s", written)
 	}
 	if instructions, _ := os.ReadFile(memory); string(instructions) != notes {
@@ -87,7 +87,8 @@ func TestHooksInstallCodexKeepsThePersonsConfigAndIsUndoneByUninstall(t *testing
 func TestHooksInstallCodexWritesIntoAHooksFileThePersonAlreadyUses(t *testing.T) {
 	home := isolatedCodexHome(t)
 	hooks := filepath.Join(home, "hooks.json")
-	if err := os.WriteFile(hooks, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"my-start"}]}]}}`), 0640); err != nil {
+	mine := `[{"matcher":"startup","hooks":[{"type":"prompt","prompt":"Read the plan"},{"type":"command","command":"my-start"}]}]`
+	if err := os.WriteFile(hooks, []byte(`{"hooks":{"SessionStart":`+mine+`}}`), 0640); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := InstallCodexContext(codexContext(t), testAgenthail); err != nil {
@@ -95,7 +96,7 @@ func TestHooksInstallCodexWritesIntoAHooksFileThePersonAlreadyUses(t *testing.T)
 	}
 	requireCodexState(t, CodexHooksInstalled)
 	data, _ := os.ReadFile(hooks)
-	if start := gjson.GetBytes(data, "hooks.SessionStart").Array(); len(start) != 2 || start[0].Get("hooks.0.command").String() != "my-start" || !ownsCodexContextHook(start[1].Get("hooks.0.command").String()) {
+	if start := gjson.GetBytes(data, "hooks.SessionStart").Array(); len(start) != 2 || start[0].Raw != gjson.Get(mine, "0").Raw || !ownsCodexContextHook(start[1].Get("hooks.0.command").String()) {
 		t.Fatalf("hooks.json after install: %s", data)
 	}
 	if config, _ := os.ReadFile(filepath.Join(home, "config.toml")); strings.Contains(string(config), "session-context") {
@@ -109,7 +110,7 @@ func TestHooksInstallCodexWritesIntoAHooksFileThePersonAlreadyUses(t *testing.T)
 		t.Fatal(err)
 	}
 	data, _ = os.ReadFile(hooks)
-	if start := gjson.GetBytes(data, "hooks.SessionStart").Array(); len(start) != 1 || start[0].Get("hooks.0.command").String() != "my-start" || gjson.GetBytes(data, "hooks.UserPromptSubmit").Exists() {
+	if string(data) != `{"hooks":{"SessionStart":`+mine+`}}` {
 		t.Fatalf("hooks.json after uninstall: %s", data)
 	}
 	requireCodexState(t, CodexHooksMissing)
@@ -129,5 +130,35 @@ func TestHooksInstallCodexWithoutCodexWritesNothing(t *testing.T) {
 	}
 	if state, err := CodexContextState(codexContext(t), testAgenthail); err != nil || state != "" {
 		t.Fatalf("state=%q err=%v, want nothing to report", state, err)
+	}
+}
+
+func TestHooksInstallCodexLeavesThePersonsAgentsFileByteForByte(t *testing.T) {
+	for _, notes := range []string{"", "no final newline", "one final newline\n", "blank lines after\n\n\n"} {
+		home := isolatedCodexHome(t)
+		memory := filepath.Join(home, "AGENTS.md")
+		if notes != "" {
+			if err := os.WriteFile(memory, []byte(notes), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for range 2 {
+			if _, err := InstallCodexContext(codexContext(t), testAgenthail); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if installed, _ := os.ReadFile(memory); !strings.HasPrefix(string(installed), notes) || strings.Count(string(installed), codexMemoryBegin) != 1 {
+			t.Fatalf("AGENTS.md after install over %q:\n%q", notes, installed)
+		}
+		if _, err := UninstallCodexContext(codexContext(t)); err != nil {
+			t.Fatal(err)
+		}
+		after, err := os.ReadFile(memory)
+		if notes == "" && !os.IsNotExist(err) {
+			t.Fatalf("uninstall left AGENTS.md %q where there was none (err=%v)", after, err)
+		}
+		if notes != "" && string(after) != notes {
+			t.Fatalf("AGENTS.md after uninstall %q, want %q", after, notes)
+		}
 	}
 }

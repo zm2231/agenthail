@@ -110,28 +110,25 @@ func InstallCodexContext(ctx context.Context, executable string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	edited, err := editCodexHooks(ctx, client, func(groups []any) []any { return withCodexContextHook(groups, command) })
+	edited, err := editCodexHooks(ctx, client, command)
 	if err != nil {
 		return false, err
 	}
 	changed = changed || edited
-	owned, err := listCodexHooks(ctx, client)
-	if err != nil {
-		return false, err
-	}
-	var trust []map[string]any
-	for _, hook := range owned {
-		if hook.TrustStatus != "trusted" {
-			trust = append(trust, map[string]any{"keyPath": codexHookStateKey(hook.Key) + ".trusted_hash", "mergeStrategy": "replace", "value": hook.CurrentHash})
+	trusted, err := writeCodexUserConfig(ctx, client, func(map[string]any) ([]map[string]any, error) {
+		owned, err := listCodexHooks(ctx, client)
+		if err != nil {
+			return nil, err
 		}
-	}
-	if len(trust) > 0 {
-		if _, err := client.Request(ctx, "config/batchWrite", map[string]any{"edits": trust}, 30*time.Second); err != nil {
-			return false, err
+		var trust []map[string]any
+		for _, hook := range owned {
+			if hook.TrustStatus != "trusted" {
+				trust = append(trust, map[string]any{"keyPath": codexHookStateKey(hook.Key) + ".trusted_hash", "mergeStrategy": "replace", "value": hook.CurrentHash})
+			}
 		}
-		changed = true
-	}
-	return changed, nil
+		return trust, nil
+	})
+	return changed || trusted, err
 }
 
 func UninstallCodexContext(ctx context.Context) (bool, error) {
@@ -148,22 +145,19 @@ func UninstallCodexContext(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	edited, err := editCodexHooks(ctx, client, withoutCodexContextHook)
+	edited, err := editCodexHooks(ctx, client, "")
 	if err != nil {
 		return false, err
 	}
 	changed = changed || edited
-	var untrust []map[string]any
-	for _, hook := range owned {
-		untrust = append(untrust, map[string]any{"keyPath": codexHookStateKey(hook.Key), "mergeStrategy": "replace", "value": nil})
-	}
-	if len(untrust) > 0 {
-		if _, err := client.Request(ctx, "config/batchWrite", map[string]any{"edits": untrust}, 30*time.Second); err != nil {
-			return false, err
+	untrusted, err := writeCodexUserConfig(ctx, client, func(map[string]any) ([]map[string]any, error) {
+		var untrust []map[string]any
+		for _, hook := range owned {
+			untrust = append(untrust, map[string]any{"keyPath": codexHookStateKey(hook.Key), "mergeStrategy": "replace", "value": nil})
 		}
-		changed = true
-	}
-	return changed, nil
+		return untrust, nil
+	})
+	return changed || untrusted, err
 }
 
 // CodexContextState is installed when both hooks run this binary trusted
@@ -221,8 +215,7 @@ func withoutCodexContextHook(groups []any) []any {
 		var others []any
 		for _, handler := range handlers {
 			hook, _ := handler.(map[string]any)
-			text, ok := hook["command"].(string)
-			if !ok || ownsCodexContextHook(text) {
+			if text, ok := hook["command"].(string); ok && ownsCodexContextHook(text) {
 				continue
 			}
 			others = append(others, handler)
@@ -236,32 +229,20 @@ func withoutCodexContextHook(groups []any) []any {
 	return kept
 }
 
-// editCodexHooks applies edit to each event's matcher groups in the hooks
-// file the person uses: hooks.json as a file Agenthail rewrites by path,
-// config.toml through Codex, which keeps the rest of it as written.
-func editCodexHooks(ctx context.Context, client *codexStdioClient, edit func([]any) []any) (bool, error) {
+// editCodexHooks puts Agenthail's hook running command in each event of the
+// hooks file the person uses, or takes it out when command is empty:
+// hooks.json edited by path so every other byte stays, config.toml through
+// Codex, which keeps the rest of it as written.
+func editCodexHooks(ctx context.Context, client *codexStdioClient, command string) (bool, error) {
+	edit := withoutCodexContextHook
+	if command != "" {
+		edit = func(groups []any) []any { return withCodexContextHook(groups, command) }
+	}
 	path := filepath.Join(codexHome(), "hooks.json")
 	if data, err := os.ReadFile(path); err == nil {
-		updated := data
-		for _, e := range codexContextEvents {
-			var groups []any
-			if raw := gjson.GetBytes(data, "hooks."+e.event); raw.Exists() {
-				if err := json.Unmarshal([]byte(raw.Raw), &groups); err != nil {
-					return false, fmt.Errorf("read %s: %w", path, err)
-				}
-			}
-			next := edit(groups)
-			if equalJSON(groups, next) {
-				continue
-			}
-			if len(next) == 0 {
-				updated, err = sjson.DeleteBytes(updated, "hooks."+e.event)
-			} else {
-				updated, err = sjson.SetBytes(updated, "hooks."+e.event, next)
-			}
-			if err != nil {
-				return false, err
-			}
+		updated, err := editCodexHooksFile(data, command)
+		if err != nil {
+			return false, fmt.Errorf("edit %s: %w", path, err)
 		}
 		if string(updated) == string(data) {
 			return false, nil
@@ -274,43 +255,103 @@ func editCodexHooks(ctx context.Context, client *codexStdioClient, edit func([]a
 	} else if !os.IsNotExist(err) {
 		return false, err
 	}
-	response, err := client.Request(ctx, "config/read", map[string]any{"includeLayers": true}, 30*time.Second)
-	if err != nil {
-		return false, err
-	}
-	var user map[string]any
-	version := ""
-	for _, layer := range gjson.Get(codexJSON(response), "result.layers").Array() {
-		if layer.Get("name.type").String() == "user" {
-			_ = json.Unmarshal([]byte(layer.Get("config").Raw), &user)
-			version = layer.Get("version").String()
+	return writeCodexUserConfig(ctx, client, func(user map[string]any) ([]map[string]any, error) {
+		hooks, _ := user["hooks"].(map[string]any)
+		var edits []map[string]any
+		for _, e := range codexContextEvents {
+			groups, _ := hooks[e.event].([]any)
+			next := edit(cloneJSON(groups))
+			if equalJSON(groups, next) {
+				continue
+			}
+			var value any = next
+			if len(next) == 0 {
+				value = nil
+			}
+			edits = append(edits, map[string]any{"keyPath": "hooks." + e.event, "mergeStrategy": "replace", "value": value})
+		}
+		return edits, nil
+	})
+}
+
+// writeCodexUserConfig writes the edits built from the user config layer
+// only if that layer is still the version they were built from, and builds
+// them again when another writer, such as a running Codex, got there first.
+func writeCodexUserConfig(ctx context.Context, client *codexStdioClient, build func(user map[string]any) ([]map[string]any, error)) (bool, error) {
+	var err error
+	for range 3 {
+		var response map[string]any
+		if response, err = client.Request(ctx, "config/read", map[string]any{"includeLayers": true}, 30*time.Second); err != nil {
+			return false, err
+		}
+		var user map[string]any
+		version := ""
+		for _, layer := range gjson.Get(codexJSON(response), "result.layers").Array() {
+			if layer.Get("name.type").String() == "user" {
+				_ = json.Unmarshal([]byte(layer.Get("config").Raw), &user)
+				version = layer.Get("version").String()
+			}
+		}
+		var edits []map[string]any
+		if edits, err = build(user); err != nil || len(edits) == 0 {
+			return false, err
+		}
+		params := map[string]any{"edits": edits}
+		if version != "" {
+			params["expectedVersion"] = version
+		}
+		if _, err = client.Request(ctx, "config/batchWrite", params, 30*time.Second); err == nil {
+			return true, nil
 		}
 	}
-	hooks, _ := user["hooks"].(map[string]any)
-	var edits []map[string]any
+	return false, err
+}
+
+func editCodexHooksFile(data []byte, command string) ([]byte, error) {
 	for _, e := range codexContextEvents {
-		groups, _ := hooks[e.event].([]any)
-		next := edit(cloneJSON(groups))
-		if equalJSON(groups, next) {
-			continue
+		key := "hooks." + e.event
+		before := gjson.GetBytes(data, key)
+		updated := data
+		var err error
+		groups := before.Array()
+		for gi := len(groups) - 1; gi >= 0; gi-- {
+			handlers := groups[gi].Get("hooks").Array()
+			var ours []int
+			for hi, handler := range handlers {
+				if ownsCodexContextHook(handler.Get("command").String()) {
+					ours = append(ours, hi)
+				}
+			}
+			if len(ours) > 0 && len(ours) == len(handlers) {
+				if updated, err = sjson.DeleteBytes(updated, fmt.Sprintf("%s.%d", key, gi)); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			for i := len(ours) - 1; i >= 0; i-- {
+				if updated, err = sjson.DeleteBytes(updated, fmt.Sprintf("%s.%d.hooks.%d", key, gi, ours[i])); err != nil {
+					return nil, err
+				}
+			}
 		}
-		var value any = next
-		if len(next) == 0 {
-			value = nil
+		if command != "" {
+			group, _ := json.Marshal(map[string]any{"hooks": []any{map[string]any{"type": "command", "command": command, "timeout": codexContextHookTimeout}}})
+			if updated, err = sjson.SetRawBytes(updated, key+".-1", group); err != nil {
+				return nil, err
+			}
+		} else if len(groups) > 0 && len(gjson.GetBytes(updated, key).Array()) == 0 {
+			if updated, err = sjson.DeleteBytes(updated, key); err != nil {
+				return nil, err
+			}
 		}
-		edits = append(edits, map[string]any{"keyPath": "hooks." + e.event, "mergeStrategy": "replace", "value": value})
+		var was, now any
+		_ = json.Unmarshal([]byte(before.Raw), &was)
+		_ = json.Unmarshal([]byte(gjson.GetBytes(updated, key).Raw), &now)
+		if codexJSON(was) != codexJSON(now) {
+			data = updated
+		}
 	}
-	if len(edits) == 0 {
-		return false, nil
-	}
-	params := map[string]any{"edits": edits}
-	if version != "" {
-		params["expectedVersion"] = version
-	}
-	if _, err := client.Request(ctx, "config/batchWrite", params, 30*time.Second); err != nil {
-		return false, err
-	}
-	return true, nil
+	return data, nil
 }
 
 func writeCodexMemory(install bool) (bool, error) {
@@ -320,7 +361,7 @@ func writeCodexMemory(install bool) (bool, error) {
 		return false, err
 	}
 	text := string(data)
-	without := text
+	updated := text
 	if start := strings.Index(text, codexMemoryBegin); start >= 0 {
 		end := strings.Index(text[start:], codexMemoryEnd)
 		if end < 0 {
@@ -330,16 +371,18 @@ func writeCodexMemory(install bool) (bool, error) {
 		if end < len(text) && text[end] == '\n' {
 			end++
 		}
-		without = text[:start] + text[end:]
+		// Install puts one newline between the person's text and the block,
+		// so removing it leaves their text byte for byte.
+		if start > 0 && text[start-1] == '\n' {
+			start--
+		}
+		updated = text[:start] + text[end:]
 	}
-	updated := strings.TrimRight(without, "\n")
 	if install {
 		if updated != "" {
-			updated += "\n\n"
+			updated += "\n"
 		}
 		updated += codexMemoryBlock()
-	} else if updated != "" {
-		updated += "\n"
 	}
 	if updated == text {
 		return false, nil

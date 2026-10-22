@@ -15,7 +15,8 @@ import (
 
 // codexStdioClient runs its own `codex app-server` over stdio for one task,
 // with the environment it is given, so it never reaches a thread or a daemon
-// another process runs.
+// another process runs. The process lives no longer than the context it was
+// started with.
 type codexStdioClient struct {
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
@@ -26,7 +27,7 @@ type codexStdioClient struct {
 }
 
 func startCodexStdio(ctx context.Context, binary string, env []string) (*codexStdioClient, error) {
-	cmd := exec.Command(binary, "app-server")
+	cmd := exec.CommandContext(ctx, binary, "app-server")
 	cmd.Env = env
 	cmd.Stderr = nil
 	stdin, err := cmd.StdinPipe()
