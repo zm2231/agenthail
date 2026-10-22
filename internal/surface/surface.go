@@ -152,6 +152,11 @@ type Session struct {
 	CodexPendingEventTurn string            `json:"-"`
 	CodexCurrentTurnID    string            `json:"-"`
 	ClaudeClosingTurn     ClaudeClosingTurn `json:"-"`
+
+	// TranscriptFromStart says the session source has seen none of the
+	// transcript, so a stream with no offset reads it from the start rather
+	// than from its end.
+	TranscriptFromStart bool `json:"-"`
 }
 
 // Holder is one of several live processes that hold a conversation open, as
