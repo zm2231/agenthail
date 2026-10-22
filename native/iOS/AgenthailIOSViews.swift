@@ -654,6 +654,8 @@ struct IOSComposer: View {
                     if detail.capabilities.attach && detail.capabilities.send {
                         ComposerAttachmentMenu(model: model)
                             .disabled(sending)
+                        ComposerPasteButton(model: model)
+                            .disabled(sending)
                     }
                     if detail.capabilities.model {
                         Button { showingModels = true } label: { modelLabel }

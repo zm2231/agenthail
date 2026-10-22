@@ -711,6 +711,14 @@ final class AgenthailIOSModel: ObservableObject {
         attachmentProblem = (problem ?? added.problem)?.message
     }
 
+    func paste(_ providers: [NSItemProvider]) async {
+        guard let pasted = await ComposerAttachments.pasted(from: providers) else {
+            addAttachments([], problem: .unreadable("The pasted image"))
+            return
+        }
+        addAttachments(pasted.attachments, problem: pasted.problem)
+    }
+
     func removeAttachment(_ id: UUID) {
         composerAttachments.removeAll { $0.id == id }
         attachmentProblem = nil
