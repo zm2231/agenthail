@@ -170,3 +170,24 @@ func TestHooksInstallCodexLeavesThePersonsAgentsFileByteForByte(t *testing.T) {
 		}
 	}
 }
+
+func TestCodexHooksStateReturnsByItsDeadlineWhenCodexWillNotExit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", home)
+	bin := t.TempDir()
+	stubborn := "#!/bin/sh\nwhile read line; do\n  id=$(printf '%s' \"$line\" | sed -n 's/.*\"id\":\\([0-9]*\\).*/\\1/p')\n  [ -n \"$id\" ] && printf '{\"id\":%s,\"result\":{\"data\":[]}}\\n' \"$id\"\ndone\nexec sleep 60\n"
+	if err := os.WriteFile(filepath.Join(bin, "codex"), []byte(stubborn), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":/usr/bin:/bin")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	started := time.Now()
+	if state, err := CodexContextState(ctx, testAgenthail); err != nil || state != CodexHooksMissing {
+		t.Fatalf("state=%q err=%v", state, err)
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("the state check took %s past its 2s deadline", elapsed)
+	}
+}

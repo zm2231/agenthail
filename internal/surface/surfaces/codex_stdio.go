@@ -18,6 +18,7 @@ import (
 // another process runs. The process lives no longer than the context it was
 // started with.
 type codexStdioClient struct {
+	ctx     context.Context
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
 	mu      sync.Mutex
@@ -41,7 +42,7 @@ func startCodexStdio(ctx context.Context, binary string, env []string) (*codexSt
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start codex app-server: %w", err)
 	}
-	c := &codexStdioClient{cmd: cmd, stdin: stdin, waiting: map[int]chan map[string]any{}, done: make(chan struct{})}
+	c := &codexStdioClient{ctx: ctx, cmd: cmd, stdin: stdin, waiting: map[int]chan map[string]any{}, done: make(chan struct{})}
 	go c.read(stdout)
 	if _, err := c.Request(ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "agenthail", "version": "0"}}, 30*time.Second); err != nil {
 		c.Close()
@@ -122,6 +123,8 @@ func (c *codexStdioClient) Close() error {
 	c.stdin.Close()
 	select {
 	case <-c.done:
+	case <-c.ctx.Done():
+		_ = c.cmd.Process.Signal(os.Kill)
 	case <-time.After(5 * time.Second):
 		_ = c.cmd.Process.Signal(os.Kill)
 	}
