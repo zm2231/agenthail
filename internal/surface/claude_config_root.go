@@ -12,28 +12,33 @@ import (
 )
 
 // ClaudeConfigRoot is one configured Claude config directory. SignedInAs is
-// the login the directory holds now: Claude Code processes started from it
-// later use that login, while running ones keep the login they started with,
-// so it says nothing about which account an existing session spends.
+// the login the directory holds now. Every Claude Code process of the root
+// uses it from its next request on, including processes that started under an
+// earlier login, and a login change drops their Remote Control bridges.
+// Signin is the browser sign-in profile signed into that login on claude.ai,
+// and Usage its limits as claude.ai reports them; both are filled only by the
+// process that reads browser cookies.
 type ClaudeConfigRoot struct {
-	Name       string       `json:"name"`
-	Root       string       `json:"root"`
-	Primary    bool         `json:"primary"`
-	SignedInAs *ClaudeLogin `json:"signedInAs,omitempty"`
-	Usage      *ClaudeUsage `json:"usage,omitempty"`
-	Error      string       `json:"error,omitempty"`
+	Name          string       `json:"name"`
+	Root          string       `json:"root"`
+	Primary       bool         `json:"primary"`
+	SignedInAs    *ClaudeLogin `json:"signedInAs,omitempty"`
+	Signin        string       `json:"signin,omitempty"`
+	SigninProblem string       `json:"signinProblem,omitempty"`
+	Usage         *ClaudeUsage `json:"usage,omitempty"`
+	UsageProblem  string       `json:"usageProblem,omitempty"`
+	Error         string       `json:"error,omitempty"`
 }
 
 type ClaudeLogin struct {
-	Email        string `json:"email,omitempty"`
-	Organization string `json:"organization,omitempty"`
-	Plan         string `json:"plan,omitempty"`
-	AccountID    string `json:"-"`
+	Email          string `json:"email,omitempty"`
+	Organization   string `json:"organization,omitempty"`
+	Plan           string `json:"plan,omitempty"`
+	AccountID      string `json:"-"`
+	OrganizationID string `json:"-"`
 }
 
-// ClaudeUsage is the usage Claude Code last cached for a root's current
-// login. Claude Code refreshes it only when its own usage view runs, so
-// FetchedAt can be days old.
+// ClaudeUsage is a login's limits as claude.ai reported them at FetchedAt.
 type ClaudeUsage struct {
 	FetchedAt time.Time          `json:"fetchedAt"`
 	Limits    []ClaudeUsageLimit `json:"limits,omitempty"`
@@ -138,7 +143,7 @@ func ResolveClaudeConfigRoot(home, choice string) (string, error) {
 
 // claudeRootName is "default" for the primary root and otherwise the root's
 // directory name, or its parent's when the root is a .claude directory, so
-// ~/.gentle-claude/.claude is "gentle-claude".
+// ~/.work/.claude is "work".
 func claudeRootName(root string, primary bool) string {
 	if primary {
 		return "default"
@@ -233,31 +238,15 @@ type claudeGlobalConfig struct {
 	OAuthAccount *struct {
 		AccountUUID      string `json:"accountUuid"`
 		EmailAddress     string `json:"emailAddress"`
+		OrganizationUUID string `json:"organizationUuid"`
 		OrganizationName string `json:"organizationName"`
 		OrganizationType string `json:"organizationType"`
 	} `json:"oauthAccount"`
-	CachedUsage *struct {
-		FetchedAtMs float64 `json:"fetchedAtMs"`
-		AccountUUID string  `json:"accountUuid"`
-		Utilization struct {
-			Limits []struct {
-				Kind     string  `json:"kind"`
-				Group    string  `json:"group"`
-				Percent  float64 `json:"percent"`
-				Severity string  `json:"severity"`
-				ResetsAt string  `json:"resets_at"`
-				Scope    *struct {
-					Model *struct {
-						DisplayName string `json:"display_name"`
-					} `json:"model"`
-				} `json:"scope"`
-			} `json:"limits"`
-		} `json:"utilization"`
-	} `json:"cachedUsageUtilization"`
 }
 
-// parseClaudeGlobalConfig reads the login a root holds and the usage cached
-// for that same login; usage cached for an earlier login is dropped.
+// parseClaudeGlobalConfig reads the login a root holds. Claude Code's own
+// usage cache is not read: it is refreshed only when Claude's usage view runs
+// and is dropped when the root signs into another account.
 func parseClaudeGlobalConfig(path string) ClaudeConfigRoot {
 	file, err := os.Open(path)
 	if err != nil {
@@ -278,27 +267,13 @@ func parseClaudeGlobalConfig(path string) ClaudeConfigRoot {
 	if config.OAuthAccount == nil || config.OAuthAccount.AccountUUID == "" {
 		return ClaudeConfigRoot{}
 	}
-	login := &ClaudeLogin{
-		Email:        config.OAuthAccount.EmailAddress,
-		Organization: config.OAuthAccount.OrganizationName,
-		Plan:         strings.TrimPrefix(config.OAuthAccount.OrganizationType, "claude_"),
-		AccountID:    config.OAuthAccount.AccountUUID,
-	}
-	root := ClaudeConfigRoot{SignedInAs: login}
-	if usage := config.CachedUsage; usage != nil && usage.AccountUUID == login.AccountID && usage.FetchedAtMs > 0 {
-		root.Usage = &ClaudeUsage{FetchedAt: time.UnixMilli(int64(usage.FetchedAtMs)).UTC()}
-		for _, limit := range usage.Utilization.Limits {
-			out := ClaudeUsageLimit{Kind: limit.Kind, Group: limit.Group, Percent: limit.Percent, Severity: limit.Severity}
-			if limit.Scope != nil && limit.Scope.Model != nil {
-				out.Scope = limit.Scope.Model.DisplayName
-			}
-			if at, err := time.Parse(time.RFC3339Nano, limit.ResetsAt); err == nil {
-				out.ResetsAt = at.UTC()
-			}
-			root.Usage.Limits = append(root.Usage.Limits, out)
-		}
-	}
-	return root
+	return ClaudeConfigRoot{SignedInAs: &ClaudeLogin{
+		Email:          config.OAuthAccount.EmailAddress,
+		Organization:   config.OAuthAccount.OrganizationName,
+		Plan:           strings.TrimPrefix(config.OAuthAccount.OrganizationType, "claude_"),
+		AccountID:      config.OAuthAccount.AccountUUID,
+		OrganizationID: config.OAuthAccount.OrganizationUUID,
+	}}
 }
 
 // SessionConfigRoot is the config root holding a Claude session's

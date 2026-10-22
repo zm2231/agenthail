@@ -2,20 +2,7 @@ import SwiftUI
 
 enum TranscriptContext {
     static func title(for item: TimelineItem) -> String? {
-        guard item.kind == "message" else { return nil }
-        if item.role == "system" { return "System instructions" }
-        if item.role == "developer" { return "Agent instructions" }
-        guard item.role == "user" else { return nil }
-        let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.contains("## My request:") else { return nil }
-        if text.hasPrefix("# AGENTS.md instructions for ") { return "Repository instructions" }
-        if text.hasPrefix("<environment_context>"), text.hasSuffix("</environment_context>") {
-            return "Session environment"
-        }
-        if text.hasPrefix("<permissions instructions>"), text.hasSuffix("</permissions instructions>") {
-            return "Session permissions"
-        }
-        return nil
+        item.isInstructions ? "Instructions" : nil
     }
 }
 

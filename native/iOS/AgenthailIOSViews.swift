@@ -921,7 +921,7 @@ struct IOSTimelineRow: View {
     private var messageLabel: String {
         if item.role == "user" { return "You" }
         if item.isPeerMessage { return item.peerLabel }
-        if item.role == "system" || item.role == "developer" { return "Context" }
+        if item.isInstructions { return "Instructions" }
         if item.title.contains("commentary") { return "Update" }
         if item.title.contains("analysis") { return "Reasoning" }
         return "Assistant"

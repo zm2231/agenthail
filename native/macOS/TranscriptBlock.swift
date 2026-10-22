@@ -8,6 +8,7 @@ struct TranscriptBlock: Identifiable, Equatable {
         case tools([TimelineItem])
         case annotation(String)
         case notice(String)
+        case instructions(String)
         case image(SessionAttachment)
     }
 
@@ -24,6 +25,13 @@ struct TranscriptBlock: Identifiable, Equatable {
             tools = []
         }
         for item in items {
+            if item.isInstructions {
+                flushTools()
+                if !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    blocks.append(TranscriptBlock(id: item.id, kind: .instructions(item.text), source: item))
+                }
+                continue
+            }
             switch item.kind {
             case "message", "text":
                 flushTools()

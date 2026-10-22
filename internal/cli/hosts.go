@@ -22,11 +22,11 @@ import (
 
 const hostsUsage = `usage: agenthail hosts [list] [--json]
        agenthail hosts invite
-       agenthail hosts add <pairing-link> [--address <tailnet-ip>] [--name <name>]
+       agenthail hosts add <pairing-link> [--address <host-tailscale-ip>] [--name <name>]
        agenthail hosts remove <host>
        agenthail hosts name [new-name]
 
-Paired hosts are other Agenthail daemons on your tailnet. Target their sessions as host::target.`
+Paired hosts are other Agenthail daemons, reached over Tailscale. Target their sessions as host::target.`
 
 type hostRef struct {
 	ID    string `json:"id"`

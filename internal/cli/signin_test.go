@@ -102,9 +102,13 @@ func TestSigninCommandsCallTheDaemonAPI(t *testing.T) {
 		}
 	}
 	got := api.requests
-	if len(got) != 6 {
+	if len(got) != 7 {
 		t.Fatalf("requests=%+v", got)
 	}
+	if got[1].Method != http.MethodGet || got[1].Path != "/api/v1/claude/roots" {
+		t.Fatalf("signin list must show each Claude account's profile: %+v", got[1])
+	}
+	got = append(got[:1], got[2:]...)
 	if got[1].Method != http.MethodPost || got[1].Body["browser"] != "chrome" || got[1].Body["profile"] != "Profile 2" || got[1].Body["label"] != "Work Chrome" {
 		t.Fatalf("add=%+v", got[1])
 	}
@@ -177,5 +181,22 @@ func TestDoctorShowsTheResolvedSigninAndHowToChangeIt(t *testing.T) {
 	}
 	if err != nil || json.Unmarshal([]byte(output), &report) != nil || len(report.Signin) != 2 || report.Signin[0].Mode != signin.Automatic || report.Signin[0].Profile != "Profile 2" || report.Signin[1].Mode != signin.Off {
 		t.Fatalf("err=%v output=%s", err, output)
+	}
+}
+
+func TestRootsSayWhyTheDaemonGaveNoSignin(t *testing.T) {
+	app, _ := signinCLIFixture(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"oauthAccount":{"accountUuid":"a","emailAddress":"a@example.com"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureStdout(t, func() error { return app.Run([]string{"roots"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "no sign-in: the Agenthail daemon did not answer") || strings.Contains(output, "not running") {
+		t.Fatalf("a running daemon that failed the call is not a stopped daemon: %q", output)
 	}
 }

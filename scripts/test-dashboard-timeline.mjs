@@ -111,6 +111,15 @@ for (const text of ["Synthetic **request**", "Synthetic handoff", "Synthetic pee
 assert.equal((conversation.match(/class="turn-action" type="button" data-copy-text=/g) || []).length, 4, "every message offers Copy");
 assert.equal((conversation.match(/data-edit-message=/g) || []).length, 1, "only your own typed message offers Edit");
 assert(conversation.includes('data-edit-message="Synthetic **request**"'), "Edit carries the message text");
+const injected = context.renderTimeline([
+  { id: "i-codex", kind: "instructions", title: "Instructions", text: "# AGENTS.md instructions for /work" },
+  { id: "i-developer", kind: "message", role: "developer", text: "<canon-recall>recalled</canon-recall>" },
+  { id: "i-system", kind: "message", role: "system", text: "System context" },
+], session);
+assert.equal((injected.match(/<details class="timeline-item timeline-instructions timeline-collapsible"/g) || []).length, 3, "injected context renders as collapsed instructions");
+assert.equal((injected.match(/<summary>Instructions<\/summary>/g) || []).length, 3, "each injection is labelled Instructions");
+assert(injected.includes("AGENTS.md instructions") && injected.includes("System context"), "instructions expand to their text");
+assert(!injected.includes("data-copy-text") && !injected.includes('class="turn-action'), "instructions are not shown as a message from anyone");
 const quoted = context.renderTimeline([{ id: "result-2", kind: "toolResult", title: "Result", text: `say "hi" <b>` }], session);
 assert(quoted.includes('data-copy-text="say &quot;hi&quot; &lt;b&gt;"'), "copied text must be attribute-escaped");
 assert(!html.includes("<script>alert"), "timeline body must not permit arbitrary HTML");

@@ -133,6 +133,14 @@ struct SessionConfigRoot: Codable, Hashable {
     }
 }
 
+/// One config root's current usage, read from claude.ai after the new-session
+/// form has shown the roots.
+struct ClaudeRootUsage: Decodable {
+    let root: String
+    var usage: ClaudeConfigRootOption.Usage? = nil
+    var usageProblem: String? = nil
+}
+
 struct SessionCreationOptions: Decodable {
     struct Surface: Decodable, Identifiable { let id: String; let workspace: Bool; var connected: Bool? = nil }
     var host: SessionHost? = nil
@@ -228,6 +236,11 @@ struct CreationHostPicker {
         guard loaded == generation else { return }
         options = next
         loadError = nil
+    }
+
+    mutating func receive(usage next: ClaudeRootUsage, for loaded: Int) {
+        guard loaded == generation, let index = options?.claudeConfigRoots?.firstIndex(where: { $0.root == next.root }) else { return }
+        options?.claudeConfigRoots?[index].usage = next.usage
     }
 
     mutating func receive(models next: [ModelOption], agent: String, for loaded: Int) {
@@ -1487,6 +1500,11 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     var resetsAt: String? = nil
 
     var isPeerMessage: Bool { kind == "message" && role == "peer" }
+    /// Model input a provider injected, such as project instructions or hook
+    /// context, rather than conversation.
+    var isInstructions: Bool {
+        kind == "instructions" || ((kind == "message" || kind == "text") && (role == "developer" || role == "system"))
+    }
     var peerSender: String { sender.flatMap { $0.isEmpty ? nil : $0 } ?? "another agent" }
     var peerLabel: String { "From \(peerSender)" }
 
