@@ -113,17 +113,21 @@ type Profile struct {
 
 type Source struct {
 	ProfileID string
+	Label     string
 	Browser   Browser
 	Dir       string
 }
 
 type Target struct {
-	Consumer  Consumer
-	SessionID string
+	Consumer Consumer
 }
 
+// Resolver resolves a consumer's choice. SigninCandidates lists every
+// readable profile the consumer may read, its choice first, for a consumer
+// that must find the profile signed into a particular account.
 type Resolver interface {
 	ResolveSignin(Target) (Source, error)
+	SigninCandidates(Consumer) ([]Source, error)
 }
 
 // Mode is how a consumer picks its browser profile: the system default
@@ -225,12 +229,52 @@ type Fixed Source
 
 func (f Fixed) ResolveSignin(Target) (Source, error) { return Source(f), nil }
 
+func (f Fixed) SigninCandidates(Consumer) ([]Source, error) { return []Source{Source(f)}, nil }
+
 // A nil resolver reads no browser.
 func Resolve(resolver Resolver, target Target) (Source, error) {
 	if resolver == nil {
 		return Source{}, OffError{Consumer: target.Consumer}
 	}
 	return resolver.ResolveSignin(target)
+}
+
+func Candidates(resolver Resolver, consumer Consumer) ([]Source, error) {
+	if resolver == nil {
+		return nil, OffError{Consumer: consumer}
+	}
+	return resolver.SigninCandidates(consumer)
+}
+
+// CandidatesFor is the consumer's chosen source, when it resolves, followed
+// by every other profile whose cookie store opens. A consumer turned off has
+// none. When nothing opens, the choice's problem is returned.
+func CandidatesFor(home string, consumer Consumer, choice Choice, profiles []Profile) ([]Source, error) {
+	_, chosen, err := Select(home, consumer, choice)
+	if IsOff(err) {
+		return nil, err
+	}
+	var sources []Source
+	seen := map[string]bool{}
+	add := func(source Source) {
+		key := string(source.Browser) + "\x00" + source.Dir
+		if !seen[key] {
+			seen[key] = true
+			sources = append(sources, source)
+		}
+	}
+	if err == nil {
+		add(chosen)
+	}
+	for _, profile := range profiles {
+		if source, sourceErr := SourceFor(home, profile); sourceErr == nil {
+			add(source)
+		}
+	}
+	if len(sources) == 0 && err != nil {
+		return nil, err
+	}
+	return sources, nil
 }
 
 // Select resolves a consumer's choice to a browser profile and checks that
@@ -268,7 +312,7 @@ func Select(home string, consumer Consumer, choice Choice) (Selection, Source, e
 // SourceFor locates a profile's directory and opens its cookie store to prove
 // it is readable. The store is closed unread.
 func SourceFor(home string, profile Profile) (Source, error) {
-	source := Source{ProfileID: profile.ID, Browser: profile.Browser}
+	source := Source{ProfileID: profile.ID, Label: profile.Label, Browser: profile.Browser}
 	switch {
 	case profile.Browser == Safari:
 		if runtime.GOOS != "darwin" {

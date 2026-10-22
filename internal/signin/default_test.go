@@ -62,7 +62,7 @@ func TestAutomaticUsesTheDefaultBrowsersLastUsedProfile(t *testing.T) {
 	if selection != (Selection{Mode: Automatic, Browser: Chrome, BrowserLabel: "Google Chrome", Profile: "Profile 2", Name: "Work"}) {
 		t.Fatalf("selection=%+v", selection)
 	}
-	if source != (Source{Browser: Chrome, Dir: filepath.Join(chrome, "Profile 2")}) {
+	if source != (Source{Label: "Work", Browser: Chrome, Dir: filepath.Join(chrome, "Profile 2")}) {
 		t.Fatalf("source=%+v", source)
 	}
 
@@ -122,7 +122,7 @@ func TestSafariIsTheDefaultUntilTheUserPicksAnotherBrowser(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, filepath.Join(home, "Library", "Cookies", "Cookies.binarycookies"), "")
 	selection, source, err := Select(home, Notion, Choice{Mode: Automatic})
-	if err != nil || selection != (Selection{Mode: Automatic, Browser: Safari, BrowserLabel: "Safari", Profile: SafariProfile, Name: "Safari"}) || source != (Source{Browser: Safari}) {
+	if err != nil || selection != (Selection{Mode: Automatic, Browser: Safari, BrowserLabel: "Safari", Profile: SafariProfile, Name: "Safari"}) || source != (Source{Label: "Safari", Browser: Safari}) {
 		t.Fatalf("selection=%+v source=%+v err=%v", selection, source, err)
 	}
 }

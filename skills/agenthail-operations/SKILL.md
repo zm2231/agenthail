@@ -47,8 +47,10 @@ agenthail doctor --json
 AgentHail targets macOS and runs headless on Linux. Native Claude messages use local sockets and require
 the daemon. Claude Remote Control and Notion read cookies from the system default browser's
 last used profile unless pinned with `agenthail signin use <notion|claude> <profile>`;
-`auto` returns to the default and `none` turns a consumer's sign-in off. `agenthail signin list`
-shows what each consumer resolves to and any problem with its fix. Codex
+`auto` returns to the default and `none` turns a consumer's sign-in off. Claude Remote Control
+uses, per session, the profile signed into claude.ai as its config root's account, trying that
+choice first; `agenthail signin list` shows what each consumer and each Claude account resolves
+to and any problem with its fix. Codex
 Desktop uses AgentHail's loopback Desktop bridge (`agenthail launch codex`).
 Without Desktop, AgentHail uses Codex's app-server daemon and starts it when a
 conversation needs it. Codex 0.151 and older can only start that daemon from the
@@ -78,8 +80,10 @@ overrides in the service; rerun it after changing them. Claude Code state is
 read from `CLAUDE_CONFIG_DIR` when it is set, otherwise `~/.claude`, plus every
 root listed as `claudeConfigDirs` in `~/.agenthail/config.json`. `doctor` shows
 each root. A conversation present in two roots is refused rather than guessed.
-`agenthail roots [--json]` shows the login each root currently holds and its
-cached usage; a root is a config folder, not an account. `thread create claude
+`agenthail roots [--json]` shows the login each root currently holds, the
+sign-in profile signed into it and its current usage from claude.ai; a root is
+a config folder, not an account, and `/login` moves every session of the root,
+running ones included, to the new login. `thread create claude
 --root <name|dir>` starts the session in that root; `list --wide` shows the
 config folder each Claude session lives in.
 A `send --reply` that fails with "out of usage" means the session
@@ -612,13 +616,15 @@ nonzero so the caller can report which deliveries failed.
 
 ## Paired Hosts
 
-Another Agenthail daemon on the tailnet can be paired so its sessions appear
-here. Pairing needs remote access on the other host and both daemons running.
+Another Agenthail daemon can be paired so its sessions appear here. Paired
+daemons reach each other over Tailscale. Pairing needs remote access on the
+other host and both daemons running; `--address` takes the other host's
+Tailscale IP when `tailscale status` cannot name it.
 
 ```bash
 agenthail hosts                     # this host, paired hosts, state, session counts
 agenthail hosts invite              # on the other host: prints a pairing link
-agenthail hosts add '<link>' --address <tailnet-ip>
+agenthail hosts add '<link>' --address <host-tailscale-ip>
 agenthail hosts remove server
 agenthail hosts name laptop
 ```

@@ -189,3 +189,19 @@ func (r *Registry) ResolveSignin(target signin.Target) (signin.Source, error) {
 	_, source, err := r.SigninSelection(target.Consumer)
 	return source, err
 }
+
+func (r *Registry) SigninCandidates(consumer signin.Consumer) ([]signin.Source, error) {
+	choice, err := r.SigninChoice(consumer)
+	if err != nil {
+		return nil, err
+	}
+	profiles, err := r.ListSigninProfiles()
+	if err != nil {
+		return nil, err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	return signin.CandidatesFor(home, consumer, choice, profiles)
+}

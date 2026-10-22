@@ -92,8 +92,8 @@ and selectors are stored; cookies are not. Removing a pinned profile returns
 its consumers to automatic. There is no process-wide profile and no
 environment override.
 
-Each request resolves one `signin.Source` through `signin.Resolver` with a
-`signin.Target{Consumer, SessionID}` before anything is sent
+Each request resolves its `signin.Source` through `signin.Resolver` before
+anything is sent
 ([`signin.go`](../../internal/signin/signin.go),
 [`registry/signin.go`](../../internal/registry/signin.go)). The cookie cache,
 the per-key read lock and invalidation are keyed on that source
@@ -120,8 +120,35 @@ through `PUT /api/v1/signin/bindings` with a profile ID or label, `auto` or
 scope. The CLI (`agenthail signin`), the web dashboard and the Mac app use
 these endpoints.
 
-`SessionID` is carried but not yet used. Per-session Claude profile bindings
-attach behind the same resolver without changing callers.
+A Remote Control session belongs to the claude.ai account its process was
+signed into, and Claude drops every bridge of a config root when that root
+signs into another account (`/login` prints "Remote Control disconnected"), so
+a bridge always belongs to its root's current account. A Remote Control request
+about a session therefore carries the cookies of the profile signed into the
+`oauthAccount` of the root that holds the session's transcript, or its session
+record before the transcript exists ([`claude_signin.go`](../../internal/surface/surfaces/claude_signin.go)):
+`signin.Resolver.SigninCandidates` lists the consumer's choice first, then
+every other readable profile, and the first whose `GET /api/account` names that
+account's `accountUuid` is used. Each profile's account is kept for five
+minutes. When every profile answered, as another account or as signed out
+(HTTP 401 or 403 answered by claude.ai's API), the request fails as terminal `signin_unreadable` naming the
+account and each profile's answer. When a profile could not be asked (cookie
+bridge failure, a claude.ai error, or a Cloudflare page in front of claude.ai) or the root's `.claude.json`
+cannot be read, the request is held. Off still means no cookies. A request with
+no session (the health probe) or for a root without a claude.ai login uses the
+choice.
+
+`GET /api/v1/claude/roots` (settings scope) lists each config root's login
+with the profile signed into it (`signin`, or `signinProblem`) and its current
+limits from `GET /api/organizations/<organizationUuid>/usage` (`usage`, or
+`usageProblem`). `agenthail roots`, `agenthail signin list` and `doctor` read
+it. The new-session forms never wait on claude.ai: `/api/v1/session-options`
+(read scope) lists the roots from their `.claude.json` alone, and the form then
+asks `GET /api/v1/session-options/claude-usage?root=<root>` for each signed-in
+root at once and fills in each root's usage as its answer arrives. That route
+reads one root, gives up after five seconds, and answers `usage` or
+`usageProblem`; a login with no matching profile gets a problem that names no
+profile or account. Both routes are answered by the chosen host.
 
 ## Planned account model
 

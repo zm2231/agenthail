@@ -200,6 +200,13 @@ final class AgenthailAPI: @unchecked Sendable {
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
         return try await get(path)
     }
+    func claudeRootUsage(root: String, host: String? = nil) async throws -> ClaudeRootUsage {
+        var components = URLComponents()
+        components.path = "/api/v1/session-options/claude-usage"
+        components.queryItems = [URLQueryItem(name: "root", value: root)] + (host.map { [URLQueryItem(name: "host", value: $0)] } ?? [])
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await get(path)
+    }
     /// Opens a Claude session that runs in a terminal or background job in
     /// Agenthail's host. A refusal the person can act on (busy, or a terminal
     /// process to stop) is an outcome, not an error.
