@@ -496,11 +496,8 @@ final class AgenthailIOSModel: ObservableObject {
         selectedSessionID = id
         sessionError = nil
         loadingSession = selectedDetail == nil
-        await refreshSession(id)
-        if selectedSessionID == id {
-            startSessionStream(id)
-            startSessionMetadata(id)
-        }
+        await reloadSelectedSession()
+        if selectedSessionID == id { startSessionMetadata(id) }
         if selectedSessionID == id { loadingSession = false }
     }
 
@@ -1240,11 +1237,10 @@ final class AgenthailIOSModel: ObservableObject {
         reconnecting = false
         if snapshotCoversEventStream {
             snapshotCoversEventStream = false
-            if let id = selectedSessionID, sessionReload?.id != id { startSessionStream(id) }
         } else {
             _ = await refresh(fresh: true)
-            await reloadSelectedSession()
         }
+        await reloadSelectedSession()
         startCatalogStream()
     }
 
