@@ -35,6 +35,10 @@ func serveFakeDebugSocket(t *testing.T, handler http.HandlerFunc) {
 
 func TestDebugHeapWritesEachProfileTheDaemonServes(t *testing.T) {
 	serveFakeDebugSocket(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/memstats" {
+			w.Write([]byte(`{"HeapSys":1}`))
+			return
+		}
 		w.Write([]byte("profile:" + strings.TrimPrefix(r.URL.Path, "/profiles/")))
 	})
 	dir := filepath.Join(t.TempDir(), "profiles")
@@ -44,11 +48,17 @@ func TestDebugHeapWritesEachProfileTheDaemonServes(t *testing.T) {
 		t.Fatal(err)
 	}
 	paths := strings.Fields(output)
-	if len(paths) != len(daemon.DebugProfiles) {
+	if len(paths) != 1+len(daemon.DebugProfiles) {
 		t.Fatalf("output=%q", output)
 	}
+	if !strings.HasPrefix(filepath.Base(paths[0]), "memstats-") || !strings.HasSuffix(paths[0], ".json") {
+		t.Fatalf("memory statistics written to %s, before the profiles", paths[0])
+	}
+	if data, err := os.ReadFile(paths[0]); err != nil || string(data) != `{"HeapSys":1}` {
+		t.Fatalf("memstats: %q %v", data, err)
+	}
 	for index, name := range daemon.DebugProfiles {
-		path := paths[index]
+		path := paths[index+1]
 		if filepath.Dir(path) != dir || !strings.HasPrefix(filepath.Base(path), name+"-") || !strings.HasSuffix(path, ".pb.gz") {
 			t.Fatalf("%s written to %s", name, path)
 		}
