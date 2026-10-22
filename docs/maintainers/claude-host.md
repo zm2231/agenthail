@@ -214,6 +214,26 @@ opens or resolves. For a session the host runs, the oldest open request is what
 the session waits on: its `Waiting` id is the `requestId`, so each request is
 announced once.
 
+A wait carries `answerable`, kept in `session_runtime.waiting_answerable`. It is
+true only for a request a host holds or a prompt the permission hook holds,
+which `agenthail answer` and the clients' request cards reach. A wait read only
+from Claude's process record (`status: waiting` with its `waitingFor`) is not
+answerable. A terminal session answers it in its terminal. A hosted or
+background session has nothing that shows it, so the clients say Agenthail
+can't reach it and offer to stop and resume the session, which clears it.
+
+## Usage limits
+
+When a usage limit refuses a turn, Claude writes an API error record with
+`apiError: usage_limit_reached` (or `error: rate_limit`) and the reset time in
+`quotaLimits.resetsAt`. A session whose latest turn is such a refusal carries
+`usageLimit{resetsAt}` on the session, its catalog row
+(`catalog_sessions.usage_limit`) and the dashboard projection, until the reset
+time passes or a later turn starts. `resetsAt` is absent when Claude did not
+say. The limit outranks a wait read from the process record, which is stale
+once the turn has ended. The clients list the session under Needs you with
+its reset time, and the transcript notice names it too.
+
 ## Background tasks
 
 A turn can end with work still running: a Bash call run in the background, an

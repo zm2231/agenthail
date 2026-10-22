@@ -698,8 +698,9 @@ struct ConversationPane: View {
                     } else {
                         VStack(spacing: 0) {
                             if let waiting = session.waitingOn, ElsewhereWaitCard.shows(waiting, readOnly: pane.detail?.readOnly == true, respond: session.capabilities.respond) {
-                                ElsewhereWaitCard(waiting: waiting, surface: session.surface, hostName: session.runtime?.hostName, accent: DesktopPalette.accentText,
-                                                  open: session.runtime?.focusable == true ? { model.focusInTerminal(session) } : nil)
+                                ElsewhereWaitCard(waiting: waiting, place: session.waitingPlace ?? .elsewhere, surface: session.surface, hostName: session.runtime?.hostName, accent: DesktopPalette.accentText,
+                                                  open: session.runtime?.focusable == true ? { model.focusInTerminal(session) } : nil,
+                                                  restart: { model.stopAndResume(session.id) })
                                     .id(waiting.id)
                                     .frame(maxWidth: 720)
                                     .padding(.horizontal, DesktopSpace.l)
@@ -811,7 +812,7 @@ struct ConversationHeader: View {
             Spacer()
             HStack(spacing: 6) {
                 StatusIndicator(session: session, needsYou: false)
-                Text(session.isWaitingOnYou ? "Waiting on you" : session.isWorking ? "Working" : session.isWaitingOnBackground ? "Waiting on background work" : session.open ? "Idle" : "Closed")
+                Text(session.waitingPlace?.label ?? (session.isWorking ? "Working" : session.usageLimit?.label ?? (session.isWaitingOnBackground ? "Waiting on background work" : session.open ? "Idle" : "Closed")))
             }
             .font(.system(size: DesktopType.secondary))
             .foregroundStyle(DesktopPalette.text2)
@@ -906,7 +907,7 @@ struct TranscriptView: View {
                 if session.isWorking {
                     HStack(spacing: DesktopSpace.s) {
                         StatusIndicator(session: session, needsYou: false)
-                        Text(session.isWaitingOnYou ? "Waiting on you" : "Working")
+                        Text(session.waitingPlace?.label ?? "Working")
                     }
                     .font(.system(size: DesktopType.body))
                     .foregroundStyle(DesktopPalette.text2)

@@ -29,9 +29,11 @@ type claudeTurn struct {
 	Closing     bool
 	Interrupted bool
 	// APIError is the message Claude Code wrote in place of a reply the API
-	// refused; UsageLimited marks a refusal by a usage limit.
-	APIError     string
-	UsageLimited bool
+	// refused; UsageLimited marks a refusal by a usage limit, which lifts at
+	// UsageResetsAt when Claude said when.
+	APIError      string
+	UsageLimited  bool
+	UsageResetsAt time.Time
 }
 
 type claudeRecord struct {
@@ -48,6 +50,14 @@ type claudeRecord struct {
 	IsAPIErrorMessage bool   `json:"isApiErrorMessage"`
 	Error             string `json:"error"`
 	APIError          string `json:"apiError"`
+	QuotaLimits       struct {
+		ResetsAt float64 `json:"resetsAt"`
+	} `json:"quotaLimits"`
+	APIErrorParams struct {
+		RateLimitInfo struct {
+			ResetsAt float64 `json:"resetsAt"`
+		} `json:"rate_limit_info"`
+	} `json:"apiErrorParams"`
 	Origin            struct {
 		Kind string `json:"kind"`
 	} `json:"origin"`
@@ -191,6 +201,13 @@ func appendClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 		if record.IsAPIErrorMessage {
 			turn.APIError = strings.TrimSpace(transcriptText(record.Message.Content))
 			turn.UsageLimited = record.Error == "rate_limit" || record.APIError == "usage_limit_reached"
+			turn.UsageResetsAt = time.Time{}
+			for _, seconds := range []float64{record.QuotaLimits.ResetsAt, record.APIErrorParams.RateLimitInfo.ResetsAt} {
+				if turn.UsageLimited && seconds > 0 {
+					turn.UsageResetsAt = time.Unix(int64(seconds), 0).UTC()
+					break
+				}
+			}
 			turn.Done, turn.Closing, turn.Interrupted = true, false, false
 			turn.TerminalAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
 			return turns

@@ -38,11 +38,14 @@ const (
 )
 
 // Waiting marks a busy turn that cannot continue until its user answers. ID
-// is stable for one question, so a new ID means a new question.
+// is stable for one question, so a new ID means a new question. Answerable is
+// a question Agenthail holds and can answer; any other is answered where the
+// session runs, or not at all if nothing there shows it.
 type Waiting struct {
-	Kind  WaitingKind `json:"kind"`
-	ID    string      `json:"id"`
-	Since time.Time   `json:"since,omitzero"`
+	Kind       WaitingKind `json:"kind"`
+	ID         string      `json:"id"`
+	Since      time.Time   `json:"since,omitzero"`
+	Answerable bool        `json:"answerable"`
 }
 
 // BackgroundTasks is work a session started that runs on after its turn ends:
@@ -86,6 +89,20 @@ func BackgroundRunning(tasks *BackgroundTasks) bool {
 	return tasks != nil && tasks.Running
 }
 
+// UsageLimit is a session whose last turn a usage limit refused. ResetsAt is
+// when the limit lifts, when Claude said.
+type UsageLimit struct {
+	ResetsAt time.Time `json:"resetsAt,omitzero"`
+}
+
+// SameUsageLimit reports whether two readings name the same limit.
+func SameUsageLimit(left, right *UsageLimit) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.ResetsAt.Equal(right.ResetsAt)
+}
+
 // SameBackground reports whether two readings list the same background work.
 func SameBackground(left, right *BackgroundTasks) bool {
 	if left == nil || right == nil {
@@ -108,7 +125,7 @@ func SameWaiting(left, right *Waiting) bool {
 	if left == nil || right == nil {
 		return left == right
 	}
-	return left.Kind == right.Kind && left.ID == right.ID
+	return left.Kind == right.Kind && left.ID == right.ID && left.Answerable == right.Answerable
 }
 
 // Session is one conversation. ID is the provider's native conversation id
@@ -126,6 +143,7 @@ type Session struct {
 	Status                SessionStatus     `json:"status"`
 	WaitingOn             *Waiting          `json:"waitingOn,omitempty"`
 	BackgroundTasks       *BackgroundTasks  `json:"backgroundTasks,omitempty"`
+	UsageLimit            *UsageLimit       `json:"usageLimit,omitempty"`
 	Transcript            string            `json:"transcript"`
 	HasLocal              bool              `json:"hasLocal"`
 	Source                string            `json:"source,omitempty"`
@@ -644,6 +662,7 @@ type TurnObservation struct {
 	InputTurnID     string           `json:"inputTurnId,omitempty"`
 	WaitingOn       *Waiting         `json:"waitingOn,omitempty"`
 	BackgroundTasks *BackgroundTasks `json:"backgroundTasks,omitempty"`
+	UsageLimit      *UsageLimit      `json:"usageLimit,omitempty"`
 	Reply           *ReplyResult     `json:"reply,omitempty"`
 }
 

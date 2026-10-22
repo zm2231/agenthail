@@ -604,7 +604,12 @@ target whose turn is waiting on its user (a Claude question, plan approval,
 permission prompt or dialog open in its terminal, a Codex approval or
 input request) carries `waitingOn` and lists as `wait`; messages to it,
 including steers, are queued until the user answers. Do not interrupt it to get
-a message through. A Claude session between turns whose background tasks
+a message through. `waitingOn.answerable` is true when Agenthail holds the
+prompt and `agenthail answer` reaches it. Otherwise it is answered where the
+session runs; a hosted or background Claude session's prompt that nothing
+shows is cleared by `agenthail thread stop` then `thread resume`. A Claude
+session whose last turn a usage limit refused carries `usageLimit` with its
+`resetsAt` until the limit resets or a new turn starts. A Claude session between turns whose background tasks
 (a background shell, an async agent, a Monitor) still run carries
 `backgroundTasks` with `running: true` and lists as `bg`: its work is not done,
 and Claude starts a turn of its own when a task reports. Ambient tasks, such as

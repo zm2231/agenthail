@@ -181,6 +181,29 @@ struct SessionTreeTest {
         let ordered = SessionTree.needsYou(pool, attention: reasons).map(\.id)
         expect(ordered == ["approver", "both", "asker", "target", "mixed", "sender", "fanout"], "requests come first, then decisions on failed messages, then undelivered sends, newest first within each: \(ordered)")
         expect(SessionTree.build(pool, filter: .all, attention: reasons).needsYou.map(\.id) == ordered, "the tree shows the same Needs you list")
+
+        var terminal = waiting("terminal", kind: "approval")
+        terminal.runtimeKind = "claude-cli"
+        func hostedSession(_ id: String, waiting: WaitingState) -> SessionState {
+            var state = SessionState(id: id, surface: "claude", name: id, alias: nil, status: "busy", lastActive: "2026-10-04T11:00:00Z", queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(respond: true, lifecycle: SessionLifecycle(stop: true, resume: true)), readOnly: nil, readOnlyReason: nil)
+            state.runtimeKind = "claude-host"
+            state.waitingOn = waiting
+            return state
+        }
+        let hostedWait = hostedSession("hosted", waiting: WaitingState(kind: "approval", id: "r0"))
+        let held = hostedSession("held", waiting: WaitingState(kind: "approval", id: "r1", answerable: true))
+        var limited = session("limited", status: "idle", lastActive: "2026-10-04T11:40:00Z", project: "agenthail", checkout: "main", branch: "main")
+        limited.usageLimit = UsageLimitState(resetsAt: "2026-10-04T18:20:00Z")
+        var unknownReset = session("unknown-reset", status: "idle", lastActive: "2026-10-04T11:39:00Z", project: "agenthail", checkout: "main", branch: "main")
+        unknownReset.usageLimit = UsageLimitState()
+        let places = SessionAttention.build(sessions: [terminal, hostedWait, held, limited, unknownReset], attention: [], deliveryProblems: [])
+        expect(places["terminal"]?.reason == "Waiting in its terminal", "a terminal prompt Agenthail does not hold is answered in its terminal: \(String(describing: places["terminal"]))")
+        expect(places["hosted"]?.reason == "Waiting on a prompt Agenthail can't reach. Stop and resume to clear it", "a hosted prompt no one holds says how to clear it: \(String(describing: places["hosted"]))")
+        expect(places["held"]?.reason == "Needs your approval", "a request Agenthail holds asks for the answer")
+        let resets = ISO8601DateFormatter().date(from: "2026-10-04T18:20:00Z")!.formatted(date: .omitted, time: .shortened)
+        expect(places["limited"] == SessionAttention(kind: .usageLimit, reason: "Usage limit, resets \(resets)"), "a usage limit names when it resets: \(String(describing: places["limited"]))")
+        expect(places["unknown-reset"]?.reason == "Usage limit reached", "a limit with no reset time says it was reached")
+        expect(SessionTree.needsYou([limited, terminal], attention: places).map(\.id) == ["terminal", "limited"], "a usage limit comes after waits on the person")
         print("session tree tests passed")
     }
 

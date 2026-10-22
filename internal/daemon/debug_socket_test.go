@@ -2,12 +2,14 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -70,6 +72,16 @@ func TestTheDebugSocketServesEachRuntimeProfileToItsOwnerOnly(t *testing.T) {
 		if !found {
 			t.Fatalf("%s profile has no %s samples: %v", name, sample, parsed.SampleType)
 		}
+	}
+	response, err := client.Get("http://daemon/memstats")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stats runtime.MemStats
+	err = json.NewDecoder(response.Body).Decode(&stats)
+	response.Body.Close()
+	if err != nil || response.StatusCode != http.StatusOK || stats.HeapSys == 0 || stats.Sys < stats.HeapSys || stats.HeapIdle < stats.HeapReleased {
+		t.Fatalf("memstats: status=%d err=%v %+v", response.StatusCode, err, stats)
 	}
 	if response, err := client.Get("http://daemon/profiles/cpu"); err != nil || response.StatusCode != http.StatusNotFound {
 		t.Fatalf("an unlisted profile was served: %v %v", response, err)
