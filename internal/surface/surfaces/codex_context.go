@@ -133,29 +133,9 @@ func codexTranscriptPath(sess *surface.Session) string {
 	if sess.Transcript != "" {
 		return sess.Transcript
 	}
-	at := uuidV7Time(sess.ID)
-	if at.IsZero() {
-		return ""
-	}
-	home := strings.TrimSpace(os.Getenv("CODEX_HOME"))
-	if home == "" {
-		userHome, _ := os.UserHomeDir()
-		home = filepath.Join(userHome, ".codex")
-	}
-	dates := []time.Time{at.In(time.Local), at}
-	for _, base := range append([]time.Time(nil), dates...) {
-		dates = append(dates, base.AddDate(0, 0, -1), base.AddDate(0, 0, 1))
-	}
-	seen := map[string]bool{}
 	var matches []string
-	for _, date := range dates {
-		day := date.Format("2006/01/02")
-		if seen[day] {
-			continue
-		}
-		seen[day] = true
-		pattern := filepath.Join(home, "sessions", date.Format("2006"), date.Format("01"), date.Format("02"), "*"+sess.ID+"*.jsonl")
-		found, _ := filepath.Glob(pattern)
+	for _, day := range codexRolloutDays(uuidV7Time(sess.ID)) {
+		found, _ := filepath.Glob(filepath.Join(codexHome(), "sessions", day, "*"+sess.ID+"*.jsonl"))
 		matches = append(matches, found...)
 	}
 	sort.Strings(matches)
