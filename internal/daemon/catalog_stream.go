@@ -492,6 +492,12 @@ func (d *Daemon) forgetCatalogLive(kind surface.SurfaceKind, keep map[string]str
 // other fields follow discovery.
 func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 	defer d.publishUnarchivedProjects()
+	published := false
+	defer func() {
+		if published {
+			d.requestObservation()
+		}
+	}()
 	var config *DashboardConfig
 	var counts map[string]int
 	var view catalogViewState
@@ -536,6 +542,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 		}
 		if d.publishCatalogSession(ctx, live.adapter, refreshed, live.identity, live.alias, counts[id], live.open, *config, view, time.Now().UTC()) {
 			live.session = refreshed
+			published = true
 		} else {
 			live.stamps = nil
 		}
