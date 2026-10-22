@@ -163,8 +163,11 @@ func cancelWhenOrphaned(ctx context.Context, parent int, cancel func()) {
 }
 
 func (a *App) cmdHooks(args []string) error {
-	if len(args) != 1 || (args[0] != "install" && args[0] != "uninstall" && args[0] != "status") {
-		return errors.New("usage: agenthail hooks install|uninstall|status")
+	if len(args) < 1 || len(args) > 2 || (args[0] != "install" && args[0] != "uninstall" && args[0] != "status") || (len(args) == 2 && args[1] != "codex") {
+		return errors.New("usage: agenthail hooks install|uninstall|status [codex]")
+	}
+	if len(args) == 2 {
+		return cmdCodexHooks(args[0])
 	}
 	home, _ := os.UserHomeDir()
 	roots, err := surface.ClaudeConfigRoots(home)
@@ -393,4 +396,39 @@ func (h claudeHook) state(data []byte) string {
 		}
 	}
 	return state
+}
+
+// cmdCodexHooks has the person's own Codex sessions told who they are. It
+// needs a Codex that can run `codex app-server`, which writes its own config.
+func cmdCodexHooks(action string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("locate agenthail binary: %w", err)
+	}
+	switch action {
+	case "install":
+		changed, err := surfaces.InstallCodexContext(ctx, executable)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("codex: %s\n", map[bool]string{true: "installed", false: "already installed"}[changed])
+	case "uninstall":
+		changed, err := surfaces.UninstallCodexContext(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("codex: %s\n", map[bool]string{true: "removed", false: "not installed"}[changed])
+	case "status":
+		state, err := surfaces.CodexContextState(ctx, executable)
+		if err != nil {
+			return err
+		}
+		if state == surfaces.CodexHooksOutdated {
+			state += "; run: agenthail hooks install codex"
+		}
+		fmt.Printf("codex: %s\n", state)
+	}
+	return nil
 }

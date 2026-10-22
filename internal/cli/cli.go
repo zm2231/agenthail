@@ -374,6 +374,9 @@ Claude hooks (answer terminal Claude prompts from Agenthail; tell each session w
   hooks install                 Add Agenthail's hooks to every Claude config root
   hooks uninstall               Remove them
   hooks status                  Show where they are installed
+  hooks install codex           Tell your own Codex sessions who they are (AGENTS.md and hooks)
+  hooks uninstall codex         Remove them
+  hooks status codex            Show whether they are installed
 
 Dashboard (optional):
   dashboard enable              Enable the local dashboard and open it
@@ -3080,6 +3083,12 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		claudeHookStates[root] = state
 	}
+	codexHooks := ""
+	if executable, err := os.Executable(); err == nil {
+		callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		codexHooks, _ = surfaces.CodexContextState(callCtx, executable)
+		cancel()
+	}
 	claudeConfigRoots, _ := a.claudeConfigRoots(ctx)
 	service := a.service()
 	serviceProblems := service.Problems()
@@ -3096,7 +3105,7 @@ func (a *App) cmdDoctor(args []string) error {
 		grants = &report
 	}
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeConfigRoots": claudeConfigRoots, "signin": signins}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins}
 		if claudeRootsErr != nil {
 			report["claudeConfigError"] = claudeRootsErr.Error()
 		}
@@ -3127,6 +3136,12 @@ func (a *App) cmdDoctor(args []string) error {
 			case claudeHookOutdated:
 				fmt.Printf("  hooks: outdated; terminal prompts may not reach Agenthail, and terminal sessions may not be told who they are, until you run: agenthail hooks install\n")
 			}
+		}
+		switch codexHooks {
+		case surfaces.CodexHooksMissing:
+			fmt.Printf("codex hooks: missing; your own Codex sessions aren't told who they are until you run: agenthail hooks install codex\n")
+		case surfaces.CodexHooksOutdated:
+			fmt.Printf("codex hooks: outdated; your own Codex sessions may not be told who they are until you run: agenthail hooks install codex\n")
 		}
 		if len(serviceProblems) > 0 {
 			fmt.Printf("[daemon] supervisor: %s\n", service.Name())
