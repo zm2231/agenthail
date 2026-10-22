@@ -45,7 +45,7 @@ func (c *Claude) OpenSessions(ctx context.Context, sessions []surface.Session) m
 // is still the one that wrote it for sess.
 func (c *Claude) liveRecord(sess surface.Session) (map[string]any, bool) {
 	if sess.PID <= 0 {
-		return nil, false
+		return c.sharedLiveRecord(sess)
 	}
 	_, record, found := c.pidRecord(sess.PID)
 	if !found || str(record, "sessionId") != sess.ID || !claudeRecordLive(record) {
