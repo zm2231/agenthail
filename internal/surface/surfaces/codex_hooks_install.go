@@ -101,15 +101,15 @@ func listCodexHooks(ctx context.Context, client *codexStdioClient) ([]codexListe
 // instructions in a marked block of CODEX_HOME/AGENTS.md.
 func InstallCodexContext(ctx context.Context, executable string) (bool, error) {
 	command := CodexContextHookCommand(executable)
-	changed, err := writeCodexMemory(true)
-	if err != nil {
-		return false, err
-	}
 	client, err := openCodexConfig(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer client.Close()
+	changed, err := writeCodexMemory(true)
+	if err != nil {
+		return false, err
+	}
 	edited, err := editCodexHooks(ctx, client, func(groups []any) []any { return withCodexContextHook(groups, command) })
 	if err != nil {
 		return false, err
@@ -135,15 +135,15 @@ func InstallCodexContext(ctx context.Context, executable string) (bool, error) {
 }
 
 func UninstallCodexContext(ctx context.Context) (bool, error) {
-	changed, err := writeCodexMemory(false)
-	if err != nil {
-		return false, err
-	}
 	client, err := openCodexConfig(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer client.Close()
+	changed, err := writeCodexMemory(false)
+	if err != nil {
+		return false, err
+	}
 	owned, err := listCodexHooks(ctx, client)
 	if err != nil {
 		return false, err

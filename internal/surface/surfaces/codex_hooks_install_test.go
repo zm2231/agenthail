@@ -114,3 +114,20 @@ func TestHooksInstallCodexWritesIntoAHooksFileThePersonAlreadyUses(t *testing.T)
 	}
 	requireCodexState(t, CodexHooksMissing)
 }
+
+func TestHooksInstallCodexWithoutCodexWritesNothing(t *testing.T) {
+	home := t.TempDir()
+	codexHome := filepath.Join(home, ".codex")
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("PATH", t.TempDir())
+	if _, err := InstallCodexContext(codexContext(t), testAgenthail); err == nil {
+		t.Fatal("install succeeded without a Codex to write its config")
+	}
+	if _, err := os.Stat(codexHome); !os.IsNotExist(err) {
+		t.Fatalf("install left %s behind: %v", codexHome, err)
+	}
+	if state, err := CodexContextState(codexContext(t), testAgenthail); err != nil || state != "" {
+		t.Fatalf("state=%q err=%v, want nothing to report", state, err)
+	}
+}

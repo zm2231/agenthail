@@ -403,9 +403,9 @@ func (h claudeHook) state(data []byte) string {
 func cmdCodexHooks(action string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	executable, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("locate agenthail binary: %w", err)
+	executable := surfaces.AgenthailExecutable()
+	if executable == "" {
+		return errors.New("run this from the installed agenthail binary; Codex hooks name the binary that wrote them")
 	}
 	switch action {
 	case "install":
@@ -425,7 +425,10 @@ func cmdCodexHooks(action string) error {
 		if err != nil {
 			return err
 		}
-		if state == surfaces.CodexHooksOutdated {
+		switch state {
+		case "":
+			state = "Codex is not set up for this user"
+		case surfaces.CodexHooksOutdated:
 			state += "; run: agenthail hooks install codex"
 		}
 		fmt.Printf("codex: %s\n", state)
