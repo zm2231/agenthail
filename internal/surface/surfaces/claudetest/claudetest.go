@@ -362,3 +362,93 @@ func (m *PeerManager) matching(match func(string) bool) int {
 	}
 	return count
 }
+
+// Holder is a further live Claude process in the fixture: a child process
+// with its own session record and messaging socket, as when a conversation is
+// resumed or branched into a second terminal. Its socket records every
+// message frame it receives.
+type Holder struct {
+	PID       int
+	f         *Fixture
+	socket    string
+	cwd       string
+	startedAt int64
+	kill      func()
+	mu        sync.Mutex
+	received  []string
+}
+
+// Holder starts a live process whose record names conversation. Each holder
+// starts later than the ones before it.
+func (f *Fixture) Holder(conversation, cwd string) *Holder {
+	f.t.Helper()
+	process := exec.Command("sleep", "3600")
+	if err := process.Start(); err != nil {
+		f.t.Fatal(err)
+	}
+	exited := make(chan struct{})
+	go func() {
+		_ = process.Wait()
+		close(exited)
+	}()
+	h := &Holder{PID: process.Process.Pid, f: f, cwd: cwd, startedAt: time.Now().UnixMilli()}
+	h.kill = func() {
+		_ = process.Process.Kill()
+		<-exited
+	}
+	f.t.Cleanup(h.kill)
+	h.socket = ClaimSocket(f.t, h.PID)
+	listener, err := net.Listen("unix", h.socket)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				var frame struct {
+					Message json.RawMessage `json:"message"`
+				}
+				if json.NewDecoder(conn).Decode(&frame) == nil {
+					h.mu.Lock()
+					h.received = append(h.received, string(frame.Message))
+					h.mu.Unlock()
+				}
+			}()
+		}
+	}()
+	h.Record(conversation, "idle")
+	time.Sleep(2 * time.Millisecond)
+	return h
+}
+
+// Record rewrites the holder's session record to name conversation with
+// status, as Claude does after /resume or /branch in the same process.
+func (h *Holder) Record(conversation, status string) {
+	h.f.t.Helper()
+	record := map[string]any{"pid": h.PID, "sessionId": conversation, "cwd": h.cwd, "status": status, "kind": "interactive", "entrypoint": "cli", "peerFeatures": []string{"notify_idle"}, "startedAt": h.startedAt, "messagingSocketPath": h.socket}
+	data, _ := json.Marshal(record)
+	h.f.write(filepath.Join("sessions", fmt.Sprint(h.PID)+".json"), string(data))
+}
+
+// Exit ends the holder's process and removes its record.
+func (h *Holder) Exit() {
+	h.f.t.Helper()
+	h.kill()
+	_ = os.Remove(filepath.Join(h.f.Root, "sessions", fmt.Sprint(h.PID)+".json"))
+}
+
+// Received returns the messages the holder's socket has taken.
+func (h *Holder) Received() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.received...)
+}
+
+// Socket is the messaging socket the holder's record names.
+func (h *Holder) Socket() string { return h.socket }

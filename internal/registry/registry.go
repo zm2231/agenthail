@@ -921,6 +921,16 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 	if owner != "" {
 		return SessionOwnedError{SessionID: s.ID, HostID: owner}
 	}
+	if s.HolderPID > 0 {
+		// A session addressed to one of the processes that hold its
+		// conversation is a write target, not an observation of which
+		// processes hold it; discovery records that. The row only has to
+		// exist for the write's history.
+		_, err := tx.Exec(`INSERT INTO sessions (id,surface,name,cwd,status,transcript,has_local,source,runtime_kind,updated_at)
+			VALUES (?,?,?,?,?,?,?,?,?,datetime('now')) ON CONFLICT(id) DO NOTHING`,
+			s.ID, string(s.Surface), s.Name, s.Cwd, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, string(s.RuntimeKind))
+		return err
+	}
 	lastActiveMS := int64(0)
 	if !s.LastActive.IsZero() {
 		lastActiveMS = s.LastActive.UnixMilli()
@@ -972,9 +982,18 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 			return err
 		}
 	}
-	if s.Surface == surface.KindClaude && s.PID > 0 {
-		if _, err := tx.Exec(`UPDATE sessions SET pid=0,bridge='',updated_at=datetime('now') WHERE surface=? AND pid=? AND id<>?`, string(surface.KindClaude), s.PID, s.ID); err != nil {
-			return err
+	if s.Surface == surface.KindClaude {
+		pids := make([]int, 0, 1+len(s.Holders))
+		if s.PID > 0 {
+			pids = append(pids, s.PID)
+		}
+		for _, holder := range s.Holders {
+			pids = append(pids, holder.PID)
+		}
+		for _, pid := range pids {
+			if _, err := tx.Exec(`UPDATE sessions SET pid=0,bridge='',updated_at=datetime('now') WHERE surface=? AND pid=? AND id<>?`, string(surface.KindClaude), pid, s.ID); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

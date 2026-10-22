@@ -14,6 +14,7 @@ const calls = [];
 const responses = [];
 const context = {
   app: { selected: { id: "session-1" }, pendingIdempotency: new Map() },
+  withHolder: (_sessionID, payload) => payload,
   crypto: { randomUUID: (() => { let n = 0; return () => `key-${++n}`; })() },
   fetch: async (_url, request) => {
     calls.push({ key: request.headers["Idempotency-Key"], body: JSON.parse(request.body) });
