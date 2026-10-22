@@ -68,8 +68,50 @@ type Daemon struct {
 	threads map[string]*Thread
 	order   []string
 	loaded  map[string]bool
+	conns   map[*connection]bool
+	called  chan struct{}
 	next    int
 	server  *http.Server
+}
+
+// connection is one client of the fake. Like the app-server, it receives a
+// thread's item, turn and token notifications only once it has started or
+// resumed that thread.
+type connection struct {
+	ws         *websocket.Conn
+	writeMu    sync.Mutex
+	subscribed map[string]bool
+}
+
+func (c *connection) write(message map[string]any) {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	_ = c.ws.WriteJSON(message)
+}
+
+// broadcastNotifications reach every connection, subscribed or not, as the
+// app-server sends them.
+var broadcastNotifications = map[string]bool{"thread/status/changed": true, "thread/goal/cleared": true}
+
+func (c *connection) receives(notification map[string]any) bool {
+	method, _ := notification["method"].(string)
+	params, _ := notification["params"].(map[string]any)
+	threadID, _ := params["threadId"].(string)
+	return threadID == "" || broadcastNotifications[method] || c.subscribed[threadID]
+}
+
+// takeLocked removes and returns the pending notifications c receives.
+func (d *Daemon) takeLocked(c *connection) []map[string]any {
+	var taken, kept []map[string]any
+	for _, notification := range d.pending {
+		if c.receives(notification) {
+			taken = append(taken, notification)
+		} else {
+			kept = append(kept, notification)
+		}
+	}
+	d.pending = kept
+	return taken
 }
 
 // Home creates an isolated CODEX_HOME and HOME. The control socket path must
@@ -111,7 +153,7 @@ func Serve(t testing.TB, home string, respond Responder) *Daemon {
 		t.Error(err)
 		return nil
 	}
-	daemon := &Daemon{Home: home, respond: respond, threads: map[string]*Thread{}, loaded: map[string]bool{}}
+	daemon := &Daemon{Home: home, respond: respond, threads: map[string]*Thread{}, loaded: map[string]bool{}, conns: map[*connection]bool{}, called: make(chan struct{})}
 	upgrader := websocket.Upgrader{}
 	daemon.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		connection, err := upgrader.Upgrade(w, r, nil)
@@ -135,10 +177,19 @@ func (d *Daemon) Stop() {
 	d.mu.Unlock()
 }
 
-func (d *Daemon) serve(connection *websocket.Conn) {
+func (d *Daemon) serve(ws *websocket.Conn) {
+	conn := &connection{ws: ws, subscribed: map[string]bool{}}
+	d.mu.Lock()
+	d.conns[conn] = true
+	d.mu.Unlock()
+	defer func() {
+		d.mu.Lock()
+		delete(d.conns, conn)
+		d.mu.Unlock()
+	}()
 	for {
 		var request map[string]any
-		if connection.ReadJSON(&request) != nil {
+		if ws.ReadJSON(&request) != nil {
 			return
 		}
 		id, hasID := request["id"]
@@ -149,26 +200,35 @@ func (d *Daemon) serve(connection *websocket.Conn) {
 		params, _ := request["params"].(map[string]any)
 		d.mu.Lock()
 		d.calls = append(d.calls, Call{Method: method, Params: params})
+		close(d.called)
+		d.called = make(chan struct{})
 		d.mu.Unlock()
 		result := d.respond(method, params)
 		if result != nil && result["drop"] == true {
 			return
 		}
 		result = d.lifecycle(method, params, result)
-		var notifications []map[string]any
-		if method == "thread/read" {
-			d.mu.Lock()
-			notifications, d.pending = d.pending, nil
-			d.mu.Unlock()
+		_, failed := result["error"]
+		d.mu.Lock()
+		if !failed && (method == "thread/start" || method == "thread/resume") {
+			threadID, _ := params["threadId"].(string)
+			if thread, _ := result["thread"].(map[string]any); threadID == "" && thread != nil {
+				threadID, _ = thread["id"].(string)
+			}
+			if threadID != "" {
+				conn.subscribed[threadID] = true
+			}
 		}
+		notifications := d.takeLocked(conn)
+		d.mu.Unlock()
 		for _, notification := range notifications {
-			_ = connection.WriteJSON(notification)
+			conn.write(notification)
 		}
 		response := map[string]any{"id": id, "result": result}
-		if rpcError, failed := result["error"]; failed {
-			response = map[string]any{"id": id, "error": rpcError}
+		if failed {
+			response = map[string]any{"id": id, "error": result["error"]}
 		}
-		_ = connection.WriteJSON(response)
+		conn.write(response)
 	}
 }
 
@@ -184,6 +244,13 @@ func (d *Daemon) Calls(method string) []map[string]any {
 	return params
 }
 
+// CallMade closes when the fake records its next call.
+func (d *Daemon) CallMade() <-chan struct{} {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.called
+}
+
 func (d *Daemon) Methods() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -194,12 +261,39 @@ func (d *Daemon) Methods() []string {
 	return methods
 }
 
-// Notify queues a notification ahead of the next thread/read response, the
-// way the app-server interleaves them.
+// Notify sends a notification to every connection that receives it. With
+// none connected yet, it waits and goes out ahead of the next response to a
+// connection that does.
 func (d *Daemon) Notify(method string, params map[string]any) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.pending = append(d.pending, map[string]any{"method": method, "params": params})
+	deliveries := map[*connection][]map[string]any{}
+	for conn := range d.conns {
+		for _, notification := range d.pending {
+			if conn.receives(notification) {
+				deliveries[conn] = append(deliveries[conn], notification)
+			}
+		}
+	}
+	if len(deliveries) > 0 {
+		var kept []map[string]any
+		for _, notification := range d.pending {
+			delivered := false
+			for conn := range deliveries {
+				delivered = delivered || conn.receives(notification)
+			}
+			if !delivered {
+				kept = append(kept, notification)
+			}
+		}
+		d.pending = kept
+	}
+	d.mu.Unlock()
+	for conn, notifications := range deliveries {
+		for _, notification := range notifications {
+			conn.write(notification)
+		}
+	}
 }
 
 func (d *Daemon) AddThread(thread Thread) {

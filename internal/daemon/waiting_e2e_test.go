@@ -409,11 +409,15 @@ func TestCodexPendingApprovalShowsWaitingAndHoldsSteerUntilApproved(t *testing.T
 }
 
 // awaitThreadReads returns once the daemon has read Codex threads n more
-// times.
+// times, by either read the app-server offers.
 func awaitThreadReads(t *testing.T, lifecycle *codextest.Lifecycle, n int) {
 	t.Helper()
-	target := len(lifecycle.Daemon().Calls("thread/read")) + n
-	eventually(t, fmt.Sprintf("%d more thread reads", n), func() bool { return len(lifecycle.Daemon().Calls("thread/read")) >= target })
+	reads := func() int {
+		fake := lifecycle.Daemon()
+		return len(fake.Calls("thread/read")) + len(fake.Calls("thread/turns/list"))
+	}
+	target := reads() + n
+	eventually(t, fmt.Sprintf("%d more thread reads", n), func() bool { return reads() >= target })
 }
 
 func TestQuestionRecordedButNotAnnouncedIsAnnouncedAfterRestart(t *testing.T) {

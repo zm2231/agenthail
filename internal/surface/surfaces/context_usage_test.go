@@ -286,26 +286,28 @@ func newLiveContext(t *testing.T, records ...string) *liveContext {
 	t.Helper()
 	live := &liveContext{}
 	var fake *codextest.Daemon
-	fake = startManagedCodex(t, func(method string, _ map[string]any) map[string]any {
-		if method != "thread/read" {
+	fake = startManagedCodex(t, func(method string, params map[string]any) map[string]any {
+		if method != "thread/read" && method != "thread/turns/list" {
 			return nil
 		}
 		live.mu.Lock()
 		defer live.mu.Unlock()
 		live.reads++
 		if live.reads%2 == 1 {
-			return managedTurn("turn", "inProgress")
+			return managedReadAnswer(method, params, managedTurn("turn", "inProgress"))
 		}
 		for _, notification := range live.batch {
 			fake.Notify(notification.method, notification.params)
 		}
 		live.batch = nil
-		return managedTurn("turn", "completed", agentMessage("final", "final_answer", "done"))
+		return managedReadAnswer(method, params, managedTurn("turn", "completed", agentMessage("final", "final_answer", "done")))
 	})
 	path := filepath.Join(t.TempDir(), "codex.jsonl")
 	writeTestTranscript(t, path, records...)
 	live.codex = isolatedManagedRuntime(t)
 	live.session = &surface.Session{ID: "019f6930-0000-7000-8000-000000000000", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: codexTransportManaged, Transcript: path}
+	fake.AddThread(codextest.Thread{ID: live.session.ID})
+	fake.Load(live.session.ID)
 	return live
 }
 

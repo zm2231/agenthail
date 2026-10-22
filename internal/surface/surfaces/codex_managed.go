@@ -33,11 +33,34 @@ func (c *desktopCodexClient) Request(ctx context.Context, method string, params 
 
 func (c *desktopCodexClient) Close() error { return c.conn.close() }
 
+// managedCodexClient is one connection to Codex's app-server. A single reader
+// goroutine owns every socket read: it hands each response to the request
+// waiting on its id and buffers everything else as a notification.
 type managedCodexClient struct {
-	ws            *websocket.Conn
+	ws      *websocket.Conn
+	writeMu sync.Mutex
+
 	mu            sync.Mutex
 	next          int
+	waiters       map[int]chan map[string]any
 	notifications []codexEvent
+	err           error
+	closed        chan struct{}
+	notified      chan struct{}
+}
+
+const managedNotificationLimit = 1000
+
+func newManagedCodexClient(ws *websocket.Conn) *managedCodexClient {
+	client := &managedCodexClient{
+		ws:       ws,
+		next:     1,
+		waiters:  map[int]chan map[string]any{},
+		closed:   make(chan struct{}),
+		notified: make(chan struct{}, 1),
+	}
+	go client.read()
+	return client
 }
 
 func managedCodexSocketPath() string {
@@ -62,7 +85,7 @@ func dialManagedCodex(ctx context.Context) (*managedCodexClient, error) {
 		}
 		return nil, fmt.Errorf("connect managed Codex app-server: %w", err)
 	}
-	client := &managedCodexClient{ws: ws, next: 1}
+	client := newManagedCodexClient(ws)
 	if _, err := client.Request(ctx, "initialize", map[string]any{
 		"clientInfo":   map[string]any{"name": "agenthail", "version": "1"},
 		"capabilities": map[string]any{"experimentalApi": true},
@@ -78,47 +101,113 @@ func dialManagedCodex(ctx context.Context) (*managedCodexClient, error) {
 }
 
 func (c *managedCodexClient) notify(method string, params map[string]any) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	return c.ws.WriteJSON(map[string]any{"method": method, "params": params})
 }
 
-func (c *managedCodexClient) Request(ctx context.Context, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	id := c.next
-	c.next++
-	if err := c.ws.WriteJSON(map[string]any{"id": id, "method": method, "params": params}); err != nil {
-		return nil, err
-	}
-	deadline := time.Now().Add(wait)
-	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
-		deadline = contextDeadline
-	}
-	if err := c.ws.SetReadDeadline(deadline); err != nil {
-		return nil, err
-	}
+func (c *managedCodexClient) read() {
 	for {
-		var response map[string]any
-		if err := c.ws.ReadJSON(&response); err != nil {
-			return nil, err
+		var message map[string]any
+		if err := c.ws.ReadJSON(&message); err != nil {
+			c.fail(fmt.Errorf("managed Codex app-server connection closed: %w", err))
+			return
 		}
-		responseID, ok := response["id"].(float64)
-		if !ok || int(responseID) != id {
-			if method, _ := response["method"].(string); method != "" {
-				params, _ := response["params"].(map[string]any)
-				c.notifications = append(c.notifications, codexEvent{Method: method, Params: params})
-				if len(c.notifications) > 1000 {
-					c.notifications = c.notifications[len(c.notifications)-1000:]
+		method, _ := message["method"].(string)
+		if method == "" {
+			if id, ok := message["id"].(float64); ok {
+				c.mu.Lock()
+				waiter := c.waiters[int(id)]
+				delete(c.waiters, int(id))
+				c.mu.Unlock()
+				if waiter != nil {
+					waiter <- message
 				}
 			}
 			continue
 		}
+		params, _ := message["params"].(map[string]any)
+		c.mu.Lock()
+		c.notifications = append(c.notifications, codexEvent{Method: method, Params: params})
+		if len(c.notifications) > managedNotificationLimit {
+			c.notifications = c.notifications[len(c.notifications)-managedNotificationLimit:]
+		}
+		c.mu.Unlock()
+		select {
+		case c.notified <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// fail ends the connection: every pending and later request returns err.
+func (c *managedCodexClient) fail(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.err != nil {
+		return
+	}
+	c.err = err
+	c.waiters = map[int]chan map[string]any{}
+	close(c.closed)
+}
+
+func (c *managedCodexClient) Request(ctx context.Context, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
+	waiter := make(chan map[string]any, 1)
+	c.mu.Lock()
+	if c.err != nil {
+		err := c.err
+		c.mu.Unlock()
+		return nil, err
+	}
+	id := c.next
+	c.next++
+	c.waiters[id] = waiter
+	c.mu.Unlock()
+	forget := func() {
+		c.mu.Lock()
+		delete(c.waiters, id)
+		c.mu.Unlock()
+	}
+	c.writeMu.Lock()
+	err := c.ws.WriteJSON(map[string]any{"id": id, "method": method, "params": params})
+	c.writeMu.Unlock()
+	if err != nil {
+		forget()
+		return nil, err
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case response := <-waiter:
 		if envelope, ok := response["error"].(map[string]any); ok {
-			return nil, fmt.Errorf("%s RPC error (%v): %s", method, envelope["code"], str(envelope, "message"))
+			code, _ := envelope["code"].(float64)
+			return nil, &codexRPCError{Method: method, Code: int(code), Message: str(envelope, "message")}
 		}
 		return response, nil
+	case <-ctx.Done():
+		forget()
+		return nil, ctx.Err()
+	case <-timer.C:
+		forget()
+		return nil, fmt.Errorf("%s: app-server request timed out after %s: %w", method, wait, os.ErrDeadlineExceeded)
+	case <-c.closed:
+		c.mu.Lock()
+		err := c.err
+		c.mu.Unlock()
+		return nil, err
 	}
+}
+
+// codexRPCError is a JSON-RPC error the app-server answered a request with.
+type codexRPCError struct {
+	Method  string
+	Code    int
+	Message string
+}
+
+func (e *codexRPCError) Error() string {
+	return fmt.Sprintf("%s RPC error (%d): %s", e.Method, e.Code, e.Message)
 }
 
 func (c *managedCodexClient) DrainNotifications() []codexEvent {
@@ -128,6 +217,9 @@ func (c *managedCodexClient) DrainNotifications() []codexEvent {
 	c.notifications = nil
 	return events
 }
+
+// Notified fires after a notification arrives; DrainNotifications returns it.
+func (c *managedCodexClient) Notified() <-chan struct{} { return c.notified }
 
 func (c *managedCodexClient) Close() error { return c.ws.Close() }
 

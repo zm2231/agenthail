@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -133,11 +134,46 @@ func (c *Codex) readObservationThread(ctx context.Context, conn codexClient, thr
 	return c.readThreadWithOptions(ctx, conn, threadID, 3, false)
 }
 
+// codexTurnsNotListedYet reports the app-server refusing to list a new
+// thread's turns until its first turn ends. The refusals carry no data and
+// generic codes, so they are matched by code and exact text: a change to
+// either reads as a real error rather than as a thread with no turns.
+func codexTurnsNotListedYet(err error) bool {
+	var rpc *codexRPCError
+	if !errors.As(err, &rpc) {
+		return false
+	}
+	switch rpc.Code {
+	case -32600:
+		return strings.HasPrefix(rpc.Message, "thread ") && strings.HasSuffix(rpc.Message, " is not materialized yet; thread/turns/list is unavailable before first user message")
+	case -32601:
+		return rpc.Message == "list_turns is not supported yet" || rpc.Message == "paginated_threads is not supported yet"
+	}
+	return false
+}
+
+// readLatestTurn reads the thread's newest turn with all of its items. A new
+// thread whose turns cannot be listed yet reads as having none.
+func (c *Codex) readLatestTurn(ctx context.Context, conn codexClient, threadID string) (*codexThread, error) {
+	turns, err := c.listThreadTurnsView(ctx, conn, threadID, 1, "full")
+	if codexTurnsNotListedYet(err) {
+		return &codexThread{ID: threadID, Status: surface.StatusUnknown}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return c.threadFromTurns(ctx, conn, threadID, turns, true)
+}
+
 func (c *Codex) readThreadWithOptions(ctx context.Context, conn codexClient, threadID string, turnLimit int, hydrateAll bool) (*codexThread, error) {
 	turns, err := c.listThreadTurns(ctx, conn, threadID, turnLimit)
 	if err != nil {
 		return nil, err
 	}
+	return c.threadFromTurns(ctx, conn, threadID, turns, hydrateAll)
+}
+
+func (c *Codex) threadFromTurns(ctx context.Context, conn codexClient, threadID string, turns []any, hydrateAll bool) (*codexThread, error) {
 	thread := &codexThread{ID: threadID, Status: surface.StatusUnknown}
 	hydrate := codexHydrationCandidates(turns, hydrateAll)
 	for index, rawTurn := range turns {
@@ -204,14 +240,24 @@ func codexHydrationCandidates(turns []any, hydrateAll bool) map[int]bool {
 }
 
 func (c *Codex) listThreadTurns(ctx context.Context, conn codexClient, threadID string, limit int) ([]any, error) {
+	return c.listThreadTurnsView(ctx, conn, threadID, limit, "")
+}
+
+// listThreadTurnsView lists the newest limit turns, oldest first. itemsView
+// "full" returns every item of each turn; empty leaves the server's summary.
+func (c *Codex) listThreadTurnsView(ctx context.Context, conn codexClient, threadID string, limit int, itemsView string) ([]any, error) {
 	if limit < 1 {
 		limit = 1
 	}
-	response, err := conn.Request(ctx, "thread/turns/list", map[string]any{
+	params := map[string]any{
 		"threadId":      threadID,
-		"page":          map[string]any{"limit": limit},
+		"limit":         limit,
 		"sortDirection": "desc",
-	}, 5*time.Second)
+	}
+	if itemsView != "" {
+		params["itemsView"] = itemsView
+	}
+	response, err := conn.Request(ctx, "thread/turns/list", params, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("thread/turns/list: %w", err)
 	}
@@ -227,7 +273,7 @@ func (c *Codex) listThreadItems(ctx context.Context, conn codexClient, threadID,
 	response, err := conn.Request(ctx, "thread/items/list", map[string]any{
 		"threadId": threadID,
 		"turnId":   turnID,
-		"page":     map[string]any{"limit": 100},
+		"limit":    100,
 	}, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("thread/items/list: %w", err)
