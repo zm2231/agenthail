@@ -288,7 +288,7 @@ one persistent operator. [Voice setup, flow, and current limits](docs/maintainer
 
 ## See agents on your other machines
 
-Pair the Agenthail daemon on another machine and its sessions appear in the same list, app and phone. Pair as many machines as you like, on macOS or Linux. Paired daemons reach each other over Tailscale, the same private connection the phone uses, so each machine needs Tailscale signed into the same account. Run `agenthail hosts invite` there and `agenthail hosts add '<link>'` here, then address its sessions as `server::@builder`. If a machine goes offline, its sessions stay listed as unavailable, and messages to them wait until it returns; they never expire. [How paired hosts work](docs/maintainers/hosts.md).
+Pair the Agenthail daemon on another machine and its sessions appear in the same list, app and phone. Pair as many machines as you like, on macOS or Linux. Paired daemons reach each other over Tailscale, the same private connection the phone uses, so each machine needs Tailscale on a network they share. Run `agenthail hosts invite` there and `agenthail hosts add '<link>'` here, then address its sessions as `server::@builder`. If a machine goes offline, its sessions stay listed as unavailable, and messages to them wait until it returns; they never expire. [How paired hosts work](docs/maintainers/hosts.md).
 
 ## What Agenthail remembers
 

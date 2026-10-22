@@ -88,7 +88,7 @@ func (d *Daemon) claudeRootUsageHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	problem := root.UsageProblem
-	if root.SigninProblem != "" {
+	if problem == "" && root.SigninProblem != "" {
 		problem = "no browser sign-in profile here is signed into this login on claude.ai; agenthail signin list shows which accounts they hold"
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"root": root.Root, "usage": root.Usage, "usageProblem": problem})

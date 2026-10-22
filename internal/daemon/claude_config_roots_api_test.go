@@ -111,3 +111,27 @@ type candidates []signin.Source
 
 func (c candidates) ResolveSignin(signin.Target) (signin.Source, error)        { return c[0], nil }
 func (c candidates) SigninCandidates(signin.Consumer) ([]signin.Source, error) { return c, nil }
+
+func TestClaudeRootUsageSaysClaudeAICouldNotBeAskedWhenTheAccountCheckFails(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	config, _ := json.Marshal(map[string]any{"oauthAccount": map[string]any{"accountUuid": "acct-work", "emailAddress": "work@example.com", "organizationUuid": "org-work"}})
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), config, 0600); err != nil {
+		t.Fatal(err)
+	}
+	d.Surfaces = []surface.Surface{surfaces.NewClaudeWithRequest(candidates([]signin.Source{{ProfileID: "sp_work", Label: "work", Browser: signin.Chrome, Dir: "/work"}}), home, func(context.Context, string, string, map[string]string, string, surfaces.CookieSource, time.Duration) (int, string, error) {
+		return 503, `{"type":"error"}`, nil
+	})}
+	api := signinAPIClient{t: t, handler: d.dashboardHandler(&dashboardServer{token: "secret"}), token: "secret"}
+	var usage struct {
+		UsageProblem string `json:"usageProblem"`
+	}
+	if code := api.do(http.MethodGet, "/api/v1/session-options/claude-usage?root="+url.QueryEscape(filepath.Join(home, ".claude")), "", &usage); code != http.StatusOK {
+		t.Fatalf("status=%d", code)
+	}
+	if !strings.Contains(usage.UsageProblem, "could not be asked") || strings.Contains(usage.UsageProblem, "no browser sign-in profile") {
+		t.Fatalf("an outage is not a missing profile: %q", usage.UsageProblem)
+	}
+}

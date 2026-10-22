@@ -234,6 +234,12 @@ func (c *Claude) describeLogin(ctx context.Context, root *surface.ClaudeConfigRo
 	source, err := c.accountCookies(ctx, *root)
 	if err != nil {
 		root.SigninProblem = err.Error()
+		switch {
+		case signin.IsOff(err):
+			root.UsageProblem = "browser sign-in is off for Claude, so usage is not read"
+		case surface.IsDeliveryUnavailable(err):
+			root.UsageProblem = "claude.ai could not be asked which profile holds this login; usage is shown once it answers"
+		}
 		return
 	}
 	root.Signin = signinLabel(source.Signin)

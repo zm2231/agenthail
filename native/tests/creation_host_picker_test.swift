@@ -43,7 +43,9 @@ struct CreationHostPickerTest {
         let usage = try JSONDecoder().decode(ClaudeRootUsage.self, from: Data(#"{"root":"/home/me/.work/.claude","usage":{"limits":[{"kind":"session","percent":100,"resetsAt":"\#(resets)"}]}}"#.utf8))
         picker.receive(usage: usage, for: picker.generation)
         expect(picker.claudeConfigRoots[0].usage == nil && picker.claudeConfigRoots[1].exhaustedUntil() != nil, "a root's usage fills in that root alone")
-        picker.receive(usage: usage, for: picker.generation - 1)
+        let late = try JSONDecoder().decode(ClaudeRootUsage.self, from: Data(#"{"root":"/home/me/.claude","usage":{"limits":[{"kind":"session","percent":100,"resetsAt":"\#(resets)"}]}}"#.utf8))
+        picker.receive(usage: late, for: picker.generation - 1)
+        expect(picker.claudeConfigRoots[0].usage == nil, "usage read for an earlier load is dropped")
         picker.receive(options: local, for: picker.generation)
 
         let stale = picker.generation
