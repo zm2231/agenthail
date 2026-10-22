@@ -73,6 +73,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     private var searchQuery = ""
     private var sessionRequestID = UUID()
     private var drafts: [String: String] = [:]
+    @Published private(set) var stashes: [String: ComposerStash] = [:]
     @Published var composerAttachments: [ComposerAttachment] = []
     @Published var attachmentProblem: String?
     private var attachmentDrafts: [String: [ComposerAttachment]] = [:]
@@ -455,6 +456,84 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         } else {
             drafts[id] = QueueTakeBack.text(queued: [item.message], draft: drafts[id] ?? "")
         }
+    }
+
+    /// Stashes the open session's draft, or brings its stash back into an
+    /// empty composer; stashing while a stash is held swaps the two.
+    func toggleStash() {
+        guard let id = selectedSessionID else { return }
+        let empty = ComposerAttachments.isEmpty(text: composer, attachments: composerAttachments)
+        if !empty {
+            let current = ComposerStash(text: composer, attachments: composerAttachments)
+            composer = stashes[id]?.text ?? ""
+            composerAttachments = stashes[id]?.attachments ?? []
+            stashes[id] = current
+        } else if let held = stashes.removeValue(forKey: id) {
+            composer = held.text
+            composerAttachments = held.attachments
+        }
+    }
+
+    /// What was typed into one session or, without one, into every computer
+    /// this phone can reach. A computer that cannot answer is reported by name.
+    func recentPrompts(sessionID: String?, query: String) async -> (prompts: [PromptItem], problems: [String]) {
+        if let sessionID {
+            do {
+                let (connection, route) = try resolveServer(sessionID)
+                let page = try await connection.api.prompts(sessionID: route.sessionID, query: query, limit: 100)
+                return (page.prompts.map { qualified($0, as: sessionID) }, [])
+            } catch {
+                return ([], [AgenthailAPIError.userMessage(error)])
+            }
+        }
+        var prompts: [PromptItem] = []
+        var problems: [String] = []
+        for host in catalog.hosts {
+            do {
+                let (api, target) = try reach(host.id)
+                let page = try await api.prompts(query: query, limit: 100, host: target.remote)
+                prompts += page.prompts.map { qualified($0, as: HostCatalog.qualify(host.id, $0.sessionId)) }
+            } catch {
+                problems.append("\(host.name): \(AgenthailAPIError.userMessage(error))")
+            }
+        }
+        return (prompts.sorted { ($0.sentAt ?? .distantPast) > ($1.sentAt ?? .distantPast) }, problems)
+    }
+
+    private func qualified(_ prompt: PromptItem, as sessionID: String) -> PromptItem {
+        var prompt = prompt
+        prompt.sessionId = sessionID
+        return prompt
+    }
+
+    func canFork(_ session: SessionState) -> Bool { session.surface == "codex" && !session.isReadOnly }
+
+    /// Forks a Codex session from just before a prompt and opens the fork with
+    /// that prompt in its composer.
+    func fork(_ session: SessionState, before prompt: PromptItem) async throws {
+        guard canFork(session), let turnID = prompt.turnId else { return }
+        let (connection, route) = try resolveServer(session.id)
+        let response: ForkResponse = try await connection.api.postAction(ForkRequest(sessionId: route.sessionID, fork: ForkRequest.Point(beforeTurnId: turnID)), idempotencyKey: UUID().uuidString)
+        guard let forked = response.result?.session.id else { throw AgenthailAPIError.invalidResponse }
+        let id = HostCatalog.qualify(HostCatalog.owner(of: route.sessionID) ?? route.hostID, forked)
+        drafts[id] = prompt.text
+        await refresh(host: route.hostID)
+        openSession(id)
+    }
+
+    private struct ForkRequest: Encodable {
+        struct Point: Encodable { let beforeTurnId: String }
+        var action = "session-fork"
+        let sessionId: String
+        let fork: Point
+    }
+
+    private struct ForkResponse: Decodable {
+        struct Result: Decodable {
+            struct Session: Decodable { let id: String }
+            let session: Session
+        }
+        let result: Result?
     }
 
     private func draftKey(for item: QueueState) -> String {
@@ -916,6 +995,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard !rekeys.isEmpty else { return }
         _ = rekeys.carry(&drafts)
         _ = rekeys.carry(&attachmentDrafts)
+        var held = stashes
+        if rekeys.carry(&held) { stashes = held }
         _ = rekeys.carry(&pendingSendRequests)
         var settings = turnSettingsDrafts
         if rekeys.carry(&settings) { turnSettingsDrafts = settings }
@@ -986,6 +1067,15 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         composerAttachments = []
         attachmentDrafts[session.id] = []
         attachmentProblem = nil
+        if let held = stashes.removeValue(forKey: session.id) {
+            if selectedSessionID == session.id {
+                composer = held.text
+                composerAttachments = held.attachments
+            } else {
+                drafts[session.id] = held.text
+                attachmentDrafts[session.id] = held.attachments
+            }
+        }
         Task {
             defer { sendingSessionIDs.remove(session.id) }
             do {
@@ -1113,6 +1203,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
         drafts = drafts.filter { !owned($0.key) }
         attachmentDrafts = attachmentDrafts.filter { !owned($0.key) }
+        stashes = stashes.filter { !owned($0.key) }
         pendingSendRequests = pendingSendRequests.filter { !owned($0.key) }
         deliveryStatus = deliveryStatus.filter { !owned($0.key) }
         deliveryQueueIDs = deliveryQueueIDs.filter { !owned($0.key) }

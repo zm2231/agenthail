@@ -623,6 +623,7 @@ struct IOSComposer: View {
     let detail: SessionDetail
     @State private var showingModels = false
     @State private var showingTurnSettings = false
+    @State private var showingPrompts = false
     @State private var loadedModels: [ModelOption]?
 
     private var steering: Bool { detail.session.status == "busy" && detail.session.waitingOn == nil && detail.capabilities.steer && model.busyDelivery(for: detail.session.id) == "steer" }
@@ -630,6 +631,20 @@ struct IOSComposer: View {
     private var permissionMode: String? {
         guard detail.capabilities.permissionMode else { return nil }
         return model.sessionRequests?.permissionMode
+    }
+
+    private var stashActionTitle: String {
+        let empty = ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerAttachments)
+        if !empty { return model.stashes[session.id] == nil ? "Stash draft" : "Swap with stashed draft" }
+        return "Bring back stashed draft"
+    }
+
+    @ViewBuilder private var composerMenu: some View {
+        Button { showingPrompts = true } label: { Label("Recent Prompts", systemImage: "clock.arrow.circlepath") }
+        let empty = ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerAttachments)
+        if !empty || model.stashes[session.id] != nil {
+            Button { model.toggleStash() } label: { Label(stashActionTitle, systemImage: "tray.and.arrow.down") }
+        }
     }
 
     private var canSend: Bool {
@@ -659,6 +674,17 @@ struct IOSComposer: View {
                 }
                 if !session.sharedHolders.isEmpty {
                     IOSHolderPicker(model: model, session: session)
+                }
+                if model.stashes[session.id] != nil {
+                    let empty = ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerAttachments)
+                    Button { model.toggleStash() } label: {
+                        Label(empty ? "Bring back stashed draft" : "Draft stashed · returns after you send", systemImage: "tray.and.arrow.down")
+                            .font(.footnote).foregroundStyle(.secondary)
+                            .padding(.horizontal, 8).frame(minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!empty)
+                    .accessibilityIdentifier("composer-stash")
                 }
                 TextField(steering ? "Steer this turn…" : "Message this agent…", text: $draft.text, axis: .vertical)
                     .font(.body).lineLimit(1...6).textFieldStyle(.plain)
@@ -736,6 +762,9 @@ struct IOSComposer: View {
                         .background(canSend ? SessionStyle.accent : Color.primary.opacity(0.08), in: Circle())
                         .accessibilityLabel(steering ? "Send steering instruction" : "Send message")
                         .disabled(!canSend)
+                        .contextMenu { composerMenu }
+                        .accessibilityAction(named: "Recent prompts") { showingPrompts = true }
+                        .accessibilityAction(named: stashActionTitle) { model.toggleStash() }
                     }
                 }
             }
@@ -746,6 +775,11 @@ struct IOSComposer: View {
         .frame(maxWidth: SessionStyle.readingWidth)
         .frame(maxWidth: .infinity)
         .padding(.horizontal).padding(.vertical, 10)
+        .sheet(isPresented: $showingPrompts) {
+            RecentPromptsSheet(model: model, session: session) { text in
+                draft.text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? text : draft.text + "\n\n" + text
+            }
+        }
         .sheet(isPresented: $showingModels) {
             SearchableModelSelectionSheet(initialOptions: loadedModels ?? detail.models ?? [], currentSelectedID: detail.model, allowsDefault: false, onSelect: { value in
                 if let value {
@@ -1546,6 +1580,84 @@ struct IOSAdoptSessionSheet: View {
         Task {
             await controller.adopt(api: api, stopTerminal: stopTerminal)
             if case .done = controller.phase { _ = await model.refresh(fresh: true) }
+        }
+    }
+}
+
+struct RecentPromptsSheet: View {
+    @ObservedObject var model: AgenthailIOSModel
+    let session: SessionState
+    let use: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var allSessions = false
+    @State private var prompts: [PromptItem] = []
+    @State private var problems: [String] = []
+    @State private var loading = true
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Picker("Show", selection: $allSessions) {
+                    Text("This session").tag(false)
+                    Text("All sessions").tag(true)
+                }
+                .pickerStyle(.segmented)
+                ForEach(problems, id: \.self) { Text($0).font(.footnote).foregroundStyle(.red) }
+                if prompts.isEmpty && !loading {
+                    Text(query.isEmpty ? "Nothing sent yet." : "No sent prompt matches.").foregroundStyle(.secondary)
+                }
+                ForEach(prompts) { prompt in
+                    Button {
+                        use(prompt.text)
+                        dismiss()
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(prompt.text).lineLimit(3).foregroundStyle(.primary)
+                            if allSessions, let title = model.snapshot?.sessions.first(where: { $0.id == prompt.sessionId })?.title {
+                                Text(title).font(.footnote).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .swipeActions(edge: .trailing) {
+                        if !allSessions, model.canFork(session), prompt.turnId != nil {
+                            Button("Fork from here") { fork(prompt) }.tint(SessionStyle.accent)
+                        }
+                    }
+                    .contextMenu {
+                        Button { use(prompt.text); dismiss() } label: { Label("Use This Prompt", systemImage: "text.insert") }
+                        if !allSessions, model.canFork(session), prompt.turnId != nil {
+                            Button { fork(prompt) } label: { Label("Fork from Here", systemImage: "arrow.triangle.branch") }
+                        }
+                    }
+                }
+            }
+            .searchable(text: $query, prompt: "Search what you sent")
+            .navigationTitle("Recent Prompts")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+            .task(id: "\(allSessions)\u{0}\(query)") {
+                loading = true
+                try? await Task.sleep(for: .milliseconds(query.isEmpty ? 0 : 250))
+                guard !Task.isCancelled else { return }
+                let found = await model.recentPrompts(sessionID: allSessions ? nil : session.id, query: query.trimmingCharacters(in: .whitespacesAndNewlines))
+                guard !Task.isCancelled else { return }
+                var seen = Set<String>()
+                prompts = found.prompts.filter { seen.insert($0.text).inserted }
+                problems = found.problems
+                loading = false
+            }
+        }
+    }
+
+    private func fork(_ prompt: PromptItem) {
+        Task {
+            do {
+                try await model.fork(session, before: prompt)
+                dismiss()
+            } catch {
+                problems = [AgenthailAPIError.userMessage(error)]
+            }
         }
     }
 }
