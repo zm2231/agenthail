@@ -113,7 +113,7 @@ func appendCatalogEventTx(tx *sql.Tx, input CatalogEvent) (CatalogEvent, bool, e
 		return CatalogEvent{}, false, err
 	}
 	input.Seq = uint64(sequence)
-	if _, err := tx.Exec(`DELETE FROM catalog_events WHERE seq NOT IN (SELECT seq FROM catalog_events ORDER BY seq DESC LIMIT ?)`, catalogEventRetention); err != nil {
+	if _, err := tx.Exec(`DELETE FROM catalog_events WHERE seq<=?`, sequence-catalogEventRetention); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	return input, true, nil

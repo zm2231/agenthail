@@ -356,6 +356,8 @@ func sessionRowMatchesTx(tx catalogQuerier, s surface.Session) (bool, error) {
 
 // MarkCatalogDiscoveryFailure preserves the last discovered rows while making
 // the failed observation visible to snapshot readers and catalog subscribers.
+// Only a row that turns stale here publishes an event; a row that is already
+// stale has nothing new to show, so a repeated failure only counts it.
 func (r *Registry) MarkCatalogDiscoveryFailure(kind surface.SurfaceKind, reason string, observedAt time.Time) ([]CatalogEvent, error) {
 	if kind == "" || strings.TrimSpace(reason) == "" {
 		return nil, fmt.Errorf("catalog discovery failure surface and reason are required")
@@ -370,7 +372,10 @@ func (r *Registry) MarkCatalogDiscoveryFailure(kind surface.SurfaceKind, reason 
 		return nil, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.Query(`SELECT cs.session_id,cs.projection_fingerprint,cs.projection_generation,cs.observed_at,s.surface,s.name,s.cwd,s.status FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.surface=? AND s.host_id=''`, string(kind))
+	if _, err := tx.Exec(`UPDATE catalog_sessions SET misses=0,discovery_failures=discovery_failures+1 WHERE (misses>0 OR discovery_failures>0) AND session_id IN (SELECT id FROM sessions WHERE surface=? AND host_id='')`, string(kind)); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(`SELECT cs.session_id,cs.projection_fingerprint,cs.projection_generation,cs.observed_at,s.surface,s.name,s.cwd,s.status FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.surface=? AND s.host_id='' AND cs.misses=0 AND cs.discovery_failures=0`, string(kind))
 	if err != nil {
 		return nil, err
 	}
@@ -397,7 +402,7 @@ func (r *Registry) MarkCatalogDiscoveryFailure(kind surface.SurfaceKind, reason 
 	events := make([]CatalogEvent, 0, len(failed))
 	for _, row := range failed {
 		generation := row.generation + 1
-		if _, err := tx.Exec(`UPDATE catalog_sessions SET misses=0,discovery_failures=discovery_failures+1,projection_generation=? WHERE session_id=?`, generation, row.id); err != nil {
+		if _, err := tx.Exec(`UPDATE catalog_sessions SET discovery_failures=1,projection_generation=? WHERE session_id=?`, generation, row.id); err != nil {
 			return nil, err
 		}
 		lastObserved, err := time.Parse(time.RFC3339Nano, row.observedAt)

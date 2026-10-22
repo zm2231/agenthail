@@ -1330,7 +1330,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		}
 		offset = next
 		if uuid == "" {
-			goal, version, changed, goalErr := c.streamGoal(ctx, sess)
+			goal, version, changed, goalErr := c.streamGoal(ctx, path)
 			if goalErr != nil {
 				return goalErr
 			}
