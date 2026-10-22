@@ -7,6 +7,10 @@ final class AgenthailModel: ObservableObject {
         didSet {
             trackFinishedSessions(from: oldValue)
             pruneDetailCache()
+            if let snapshot {
+                HolderPins.shared.prune(to: snapshot.sessions)
+                holderPicks = HolderPins.shared.all
+            }
             if snapshot != nil, let reference = pendingSessionReference {
                 pendingSessionReference = nil
                 openSession(reference: reference)
@@ -14,6 +18,7 @@ final class AgenthailModel: ObservableObject {
         }
     }
     @Published private(set) var finishedUnseen: Set<String> = []
+    @Published private(set) var holderPicks: [String: HolderPin] = [:]
     @Published private(set) var snapshotLoadedAt: Date?
     @Published var newSessionVisible = false
     @Published var newSessionMessage: String?
@@ -123,6 +128,11 @@ final class AgenthailModel: ObservableObject {
         refreshTask?.cancel()
         statusRefreshTask?.cancel()
         catalogStreamTask?.cancel()
+    }
+
+    func pickHolder(_ holder: SessionHolder?, for sessionID: String) {
+        HolderPins.shared.pick(holder.map(HolderPin.init), for: sessionID)
+        holderPicks = HolderPins.shared.all
     }
 
     func connect() {
@@ -697,7 +707,8 @@ final class AgenthailModel: ObservableObject {
                 operationError = nil
                 completion?(true)
             } catch {
-                updateLocalSend(send.id, in: sessionID) { $0.failure = AgenthailAPIError.userMessage(error) }
+                let failure = AgenthailAPIError.userMessage(error)
+                updateLocalSend(send.id, in: sessionID) { $0.failure = failure }
                 completion?(false)
             }
         }

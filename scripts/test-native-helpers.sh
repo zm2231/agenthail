@@ -19,6 +19,7 @@ SOURCES=(
   ComposerAttachment.swift
   DuplicateApplicationPolicy.swift
   EventRetryBackoff.swift
+  HolderPins.swift
   OperationsRefreshPolicy.swift
   RequestAnswer.swift
   RequestCard.swift

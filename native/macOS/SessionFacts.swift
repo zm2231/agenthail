@@ -27,12 +27,21 @@ enum SessionFacts {
         "\(count) queued"
     }
 
+    static func holdersLabel(_ count: Int) -> String {
+        "\(count) terminals"
+    }
+
+    static func holdersHelp(_ holders: [SessionHolder]) -> String {
+        "Open in \(holders.count) terminals: " + holders.map(\.label).joined(separator: "; ")
+    }
+
     static func rowDetail(_ session: SessionState) -> String {
         var parts = [SessionRefinement.surfaceLabel(session.surface), presenceLabel(session)]
         if let host = session.remoteHostName {
             parts[1] = session.isUnavailable ? "Unavailable on \(host)" : "\(parts[1]) on \(host)"
         }
         if session.queueCount > 0 { parts.append(queuedLabel(session.queueCount)) }
+        if !session.sharedHolders.isEmpty { parts.append(holdersLabel(session.sharedHolders.count)) }
         return parts.joined(separator: " · ")
     }
 

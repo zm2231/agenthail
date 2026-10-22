@@ -640,6 +640,9 @@ struct IOSComposer: View {
                     Text(problem).font(.footnote).foregroundStyle(.red).padding(.horizontal, 8)
                         .accessibilityIdentifier("attachment-problem")
                 }
+                if !session.sharedHolders.isEmpty {
+                    IOSHolderPicker(model: model, session: session)
+                }
                 TextField(steering ? "Steer this turn…" : "Message this agent…", text: $model.composer, axis: .vertical)
                     .font(.body).lineLimit(1...6).textFieldStyle(.plain)
                     .padding(.horizontal, 8).padding(.top, 8)
@@ -1300,7 +1303,7 @@ struct IOSSessionRow: View {
             if session.isUnavailable, let reason = session.unavailableReason {
                 Text(reason).font(.caption).foregroundStyle(.secondary)
             }
-            if session.queueCount > 0 || session.isReadOnly || (family?.subagentCount ?? 0) > 0 {
+            if session.queueCount > 0 || session.isReadOnly || (family?.subagentCount ?? 0) > 0 || !session.sharedHolders.isEmpty {
                 layout {
                     if let family, family.subagentCount > 0 {
                         Label(SessionFamilies.subagentSummary(family), systemImage: "person.2")
@@ -1308,6 +1311,7 @@ struct IOSSessionRow: View {
                             .foregroundStyle(family.workingSubagents > 0 ? SessionStyle.accent : .secondary)
                     }
                     if session.queueCount > 0 { Label("\(session.queueCount) waiting", systemImage: "tray").font(.caption) }
+                    if !session.sharedHolders.isEmpty { Label("\(session.sharedHolders.count) terminals", systemImage: "terminal").font(.caption) }
                     if session.isReadOnly { Label("Read only", systemImage: "lock").font(.caption) }
                 }.foregroundStyle(.secondary)
             }

@@ -7,7 +7,7 @@ enum RequestAnswer {
         do {
             _ = try await api().respond(sessionID: sessionID, requestID: requestID, decision: RequestDecision(choice: choice, message: text))
             return
-        } catch AgenthailAPIError.request(409, _) {
+        } catch AgenthailAPIError.requestStale {
             failure = "That request was already answered or has expired."
         } catch {
             failure = "Agenthail could not send your answer: \(error.localizedDescription) Open the session to answer it."
