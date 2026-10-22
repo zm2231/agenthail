@@ -16,7 +16,7 @@ import { parseArgs } from 'node:util';
 
 const PROTOCOL = 3;
 const LOCK_FD = 3;
-const MAX_EVENTS = Number(process.env.AGENTHAIL_CLAUDE_HOST_MAX_EVENTS) || 4096;
+const MAX_EVENTS = Math.min(Number(process.env.AGENTHAIL_CLAUDE_HOST_MAX_EVENTS) || 4096, 4096);
 const MAX_LINE = 1 << 20;
 const MAX_SUBSCRIBER_BUFFER = 8 << 20;
 const MAX_IMAGE_BYTES = 5 << 20;
@@ -209,7 +209,7 @@ class Session {
       this.measuring.then(() => this.retireIfDone({ turnEnded }));
       return;
     }
-    process.stderr.write(`claude-host: retiring session ${this.id} (pid ${this.pid}), now idle\n`);
+    log(`retiring session ${this.id} (pid ${this.pid}), now idle`);
     this.end();
     this.query.close();
   }
@@ -339,7 +339,7 @@ const methods = {
     }
     s.end();
     if (!(await by(deadline, s.done.then(() => true)))) {
-      process.stderr.write(`claude-host: Claude ${s.pid} for session ${s.id} did not exit ${CLOSE_GRACE_MS} ms after close; killing it\n`);
+      log(`Claude ${s.pid} for session ${s.id} did not exit ${CLOSE_GRACE_MS} ms after close; killing it`);
       killSession(s);
       if (!(await by(Date.now() + KILL_WAIT_MS, s.done.then(() => true)))) {
         throw new HostError('stuck', `Claude ${s.pid} for session ${s.id} did not exit after it was killed`);
@@ -757,7 +757,7 @@ async function run(s, exit) {
         s.turnStarted();
         if (!stateEventsMissing) {
           stateEventsMissing = true;
-          process.stderr.write(`claude-host: Claude ${s.pid} sent a turn result without session state events; idle is read from turn results, which miss turns Claude starts itself\n`);
+          log(`Claude ${s.pid} sent a turn result without session state events; idle is read from turn results, which miss turns Claude starts itself`);
         }
         s.setState('idle');
         s.retireIfDone({ turnEnded: true });
@@ -994,7 +994,7 @@ function shutdown(code) {
 async function retire() {
   const socket = `${args.socket.replace(/\.sock$/, '')}.${process.pid}.sock`;
   const next = net.createServer(serve);
-  next.on('error', (error) => process.stderr.write(`claude-host: ${error.message}\n`));
+  next.on('error', (error) => log(`${error.message}`));
   try {
     fs.unlinkSync(socket);
   } catch {}
@@ -1020,11 +1020,11 @@ async function retire() {
     for (const subscriber of following) subscriber.end();
   });
   fs.closeSync(LOCK_FD);
-  process.stderr.write(`claude-host: pid ${process.pid} retiring with ${sessions.size} sessions on ${socket}\n`);
+  log(`pid ${process.pid} retiring with ${sessions.size} sessions on ${socket}`);
 }
 
 function fail(message) {
-  process.stderr.write(`claude-host: ${message}\n`);
+  log(`${message}`);
   process.exit(2);
 }
 
@@ -1036,12 +1036,12 @@ let server = net.createServer(serve);
 // accept costs that one client, not the sessions this host runs.
 server.on('error', (error) => {
   if (!server.listening) fail(`cannot listen on ${args.socket}: ${error.message}`);
-  process.stderr.write(`claude-host: ${error.message}\n`);
+  log(`${error.message}`);
 });
 server.listen(args.socket, () => {
   fs.chmodSync(args.socket, 0o600);
   writeState();
-  process.stderr.write(`claude-host: pid ${process.pid} protocol ${PROTOCOL} version ${args.version} listening on ${args.socket}\n`);
+  log(`pid ${process.pid} protocol ${PROTOCOL} version ${args.version} listening on ${args.socket}`);
 });
 process.on('exit', () => {
   exiting = true;
@@ -1050,3 +1050,7 @@ process.on('SIGTERM', () => shutdown(0));
 process.on('SIGINT', () => shutdown(0));
 // stderr is host.log. A log that cannot be written loses lines, not sessions.
 process.stderr.on('error', () => {});
+
+function log(message) {
+  process.stderr.write(`${new Date().toISOString()} claude-host: ${message}\n`);
+}
