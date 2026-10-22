@@ -177,6 +177,7 @@ final class AgenthailIOSTests: XCTestCase {
         XCTAssertEqual(fraction.map { $0.timeIntervalSince1970 }, 1_791_129_480.25)
         XCTAssertNotNil(ISO8601DateFormatter.sessionDate("2026-10-04T15:58:00.123456789Z"))
         XCTAssertNil(ISO8601DateFormatter.sessionDate("yesterday"))
+        XCTAssertNil(ISO8601DateFormatter.sessionDate("0001-01-01T00:00:00Z"))
     }
 
     @MainActor

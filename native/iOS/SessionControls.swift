@@ -123,7 +123,8 @@ struct QueueListView: View {
         .navigationTitle(sessionID == nil ? "Inbox" : "Session inbox")
         .task { await reload() }
         .refreshable { _ = await model.refresh(fresh: true); await reload() }
-        .onChange(of: model.snapshot?.updatedAt) { _, _ in Task { await reload() } }
+        .onChange(of: model.snapshot?.queue) { _, _ in Task { await reload() } }
+        .onChange(of: model.snapshot?.history) { _, _ in Task { await reload() } }
         .confirmationDialog("Send this instruction again?", isPresented: Binding(get: { retryCandidate != nil }, set: { if !$0 { retryCandidate = nil } }), titleVisibility: .visible) {
             if let item = retryCandidate {
                 Button("Send again") { update(item, retry: true); retryCandidate = nil }

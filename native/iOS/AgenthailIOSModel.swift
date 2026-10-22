@@ -12,7 +12,8 @@ final class AgenthailIOSModel: ObservableObject {
         didSet {
             if let snapshot {
                 HolderPins.shared.prune(to: snapshot.sessions)
-                holderPicks = HolderPins.shared.all
+                let picks = HolderPins.shared.all
+                if holderPicks != picks { holderPicks = picks }
             }
         }
     }
@@ -26,7 +27,11 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var reconnecting = false
     @Published var operationError: String?
     @Published var pairing = false
-    @Published var composer = ""
+    let draft = ComposerDraft()
+    var composer: String {
+        get { draft.text }
+        set { draft.text = newValue }
+    }
     @Published var sessionError: String?
     @Published var loadingSession = false
     @Published var sendingSessionIDs: Set<String> = []
@@ -281,6 +286,7 @@ final class AgenthailIOSModel: ObservableObject {
     private let automaticallyConnect: Bool
 
     var isPaired: Bool { endpoint != nil && token != nil }
+    var computerName: String? { endpoint?.host }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
 
     init(autoConnect: Bool = true, session: URLSession = .shared) {
@@ -445,7 +451,7 @@ final class AgenthailIOSModel: ObservableObject {
         do {
             let loaded = try await api.snapshot(fresh: fresh)
             followRekeys(loaded.rekeyed ?? [:])
-            snapshot = loaded
+            if snapshot?.hasSamePresentation(as: loaded) != true { snapshot = loaded }
             syncSelectedSession(from: loaded, seq: seq)
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             if catalogHostEpoch != loaded.hostEpoch {
@@ -1236,4 +1242,8 @@ final class AgenthailIOSModel: ObservableObject {
             KeychainStore.remove(account)
         }
     }
+}
+
+final class ComposerDraft: ObservableObject {
+    @Published var text = ""
 }
