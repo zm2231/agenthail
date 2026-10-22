@@ -584,15 +584,6 @@ struct SessionScreen: View {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
             }
-            .task(id: "activity-" + session.id) {
-#if DEBUG
-                guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
-#endif
-                while !Task.isCancelled {
-                    do { try await Task.sleep(for: .seconds(4)) } catch { return }
-                    await model.refreshSession(session.id)
-                }
-            }
             .onChange(of: detail?.timeline?.items) { _, _ in
                 if followingLatest { proxy.scrollTo("bottom", anchor: .bottom) }
             }

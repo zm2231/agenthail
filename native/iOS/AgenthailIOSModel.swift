@@ -13,6 +13,7 @@ final class AgenthailIOSModel: ObservableObject {
             if let snapshot {
                 HolderPins.shared.prune(to: snapshot.sessions)
                 holderPicks = HolderPins.shared.all
+                syncSelectedSession(from: snapshot)
             }
         }
     }
@@ -269,7 +270,7 @@ final class AgenthailIOSModel: ObservableObject {
     private var sessionStreamTask: Task<Void, Never>?
     private var sessionMetadataTask: Task<Void, Never>?
     private(set) var sessionStreamCursor: UInt64 = 0
-    private var sessionStreamMetadataFields: Set<String> = []
+    private var sessionMetadata = MetadataOverlay()
     private var connectionTask: Task<Void, Never>?
     private var lastEventID: UInt64 = 0
     private var pushRelayURL: URL?
@@ -464,7 +465,7 @@ final class AgenthailIOSModel: ObservableObject {
             sessionStreamTask?.cancel()
             sessionMetadataTask?.cancel()
             sessionStreamCursor = 0
-            sessionStreamMetadataFields.removeAll()
+            sessionMetadata = MetadataOverlay()
             composer = drafts[id] ?? ""
             composerAttachments = attachmentDrafts[id] ?? []
             attachmentProblem = nil
@@ -481,7 +482,7 @@ final class AgenthailIOSModel: ObservableObject {
         await refreshSession(id)
         if selectedSessionID == id {
             startSessionStream(id)
-            startSessionMetadata(id, requestID: sessionRequestID)
+            startSessionMetadata(id)
         }
         if selectedSessionID == id { loadingSession = false }
     }
@@ -497,7 +498,7 @@ final class AgenthailIOSModel: ObservableObject {
                 let retained = Set(olderActivity.map(\.id) + (detail.timeline?.items.map(\.id) ?? []))
                 olderActivity += (selectedDetail?.timeline?.items ?? []).filter { !retained.contains($0.id) }
             }
-            selectedDetail = detail
+            selectedDetail = sessionMetadata.apply(to: detail)
             if let journalSeq = detail.journalSeq {
                 sessionStreamCursor = journalSeq
             }
@@ -592,42 +593,26 @@ final class AgenthailIOSModel: ObservableObject {
         } catch {}
     }
 
-    private func startSessionMetadata(_ id: String, requestID: UUID) {
+    private func startSessionMetadata(_ id: String) {
         sessionMetadataTask?.cancel()
         guard let api, sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
+        sessionMetadata.metadataRequested()
         sessionMetadataTask = Task { [weak self, api] in
             do {
                 let metadata = try await api.sessionMetadata(id: id)
                 guard !Task.isCancelled else { return }
-                self?.applySessionMetadata(metadata, for: id, requestID: requestID)
+                self?.updateSessionMetadata(for: id) { $0.absorb(metadata) }
             } catch {
                 guard !Task.isCancelled else { return }
-                self?.clearSessionMetadata(for: id, requestID: requestID)
+                self?.updateSessionMetadata(for: id) { $0.metadataFailed() }
             }
         }
     }
 
-    private func applySessionMetadata(_ metadata: SessionMetadata, for id: String, requestID: UUID) {
-        guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID,
-              var detail = selectedDetail, detail.session.id == id else { return }
-        if !sessionStreamMetadataFields.contains("context"), let context = metadata.context { detail.context = context }
-        if !sessionStreamMetadataFields.contains("goal"), let goal = metadata.goal { detail.goal = goal }
-        if let model = metadata.model { detail.model = model }
-        detail.pendingModel = metadata.pendingModel
-        if let models = metadata.models { detail.models = models }
-        detail.claudeRuns = metadata.claudeRuns
-        detail.claudeSubagents = metadata.claudeSubagents
-        detail.metadataErrors = metadata.errors
-        selectedDetail = detail
-    }
-
-    private func clearSessionMetadata(for id: String, requestID: UUID) {
-        guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID,
-              var detail = selectedDetail, detail.session.id == id else { return }
-        detail.claudeRuns = nil
-        detail.claudeSubagents = nil
-        detail.metadataErrors = nil
-        selectedDetail = detail
+    private func updateSessionMetadata(for id: String, _ change: (inout MetadataOverlay) -> Void) {
+        guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), let detail = selectedDetail, detail.session.id == id else { return }
+        change(&sessionMetadata)
+        selectedDetail = sessionMetadata.apply(to: detail)
     }
 
     func loadOlderActivity() async {
@@ -1064,7 +1049,10 @@ final class AgenthailIOSModel: ObservableObject {
                     })
                 } catch {
                     if Task.isCancelled || selectedSessionID != id { return }
-                    if case AgenthailAPIError.streamUnsupported = error { return }
+                    if case AgenthailAPIError.streamUnsupported = error {
+                        await pollSession(id)
+                        return
+                    }
                     if case AgenthailAPIError.streamGap = error {
                         sessionStreamCursor = 0
                         await refreshSession(id)
@@ -1076,15 +1064,31 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
+    private func pollSession(_ id: String) async {
+        while !Task.isCancelled, selectedSessionID == id {
+            do { try await Task.sleep(for: .seconds(4)) } catch { return }
+            await refreshSession(id)
+        }
+    }
+
+    private func syncSelectedSession(from snapshot: DashboardSnapshot) {
+        guard var detail = selectedDetail, let live = snapshot.sessions.first(where: { $0.id == detail.session.id }),
+              detail.session.status != live.status || detail.session.waitingOn != live.waitingOn || detail.session.backgroundTasks != live.backgroundTasks else { return }
+        detail.session.status = live.status
+        detail.session.waitingOn = live.waitingOn
+        detail.session.backgroundTasks = live.backgroundTasks
+        selectedDetail = detail
+    }
+
     func applySessionStreamEvent(_ event: SessionStreamEvent) {
         guard event.stream == "session", event.sessionId == selectedSessionID, var detail = selectedDetail, detail.session.id == event.sessionId else { return }
         sessionStreamCursor = max(sessionStreamCursor, event.seq)
         if event.data.kind == "context" {
+            sessionMetadata.stream(context: event.data.context)
             detail.context = event.data.context
-            sessionStreamMetadataFields.insert("context")
         } else if event.data.kind == "goal" {
+            sessionMetadata.stream(goal: event.data.goal)
             detail.goal = event.data.goal
-            sessionStreamMetadataFields.insert("goal")
         }
         selectedDetail = detail
         if event.data.op == "reset", event.data.kind == "source-error" {
