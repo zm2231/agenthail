@@ -316,6 +316,55 @@ func TestStatusPassPublishesWhileDiscoveryIsBlocked(t *testing.T) {
 	}
 }
 
+func TestAStatusPublishCannotOutliveTheDiscoveryThatDroppedItsSession(t *testing.T) {
+	d, _, source := localStatusFixture(t)
+	d.discoverCatalog(context.Background())
+	d.refreshCatalogStatus(context.Background())
+	var armed atomic.Bool
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	d.catalogSelected = func(id string) {
+		if id == "from" && armed.CompareAndSwap(true, false) {
+			close(entered)
+			<-release
+		}
+	}
+	source.sessions = map[string]surface.Session{"to": source.sessions["to"]}
+	source.writeStatus(t, "from", surface.StatusBusy)
+	armed.Store(true)
+	statusDone := make(chan struct{})
+	go func() {
+		defer close(statusDone)
+		d.refreshCatalogStatus(context.Background())
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("status pass did not publish")
+	}
+	discoveryDone := make(chan struct{})
+	go func() {
+		defer close(discoveryDone)
+		d.discoverCatalog(context.Background())
+	}()
+	select {
+	case <-discoveryDone:
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(release)
+	<-statusDone
+	<-discoveryDone
+	state, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range state.Sessions {
+		if session.ID == "from" {
+			t.Fatalf("dropped session was republished as %s", session.Status)
+		}
+	}
+}
+
 var (
 	commitHookOnce sync.Once
 	commitCounters sync.Map

@@ -444,20 +444,23 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			identityCancel()
 			open := openSessions[session.ID]
 			alias := aliasByID[session.ID]
-			if !d.publishCatalogSession(ctx, adapter, session, identity, alias, counts[session.ID], open, config, view, observedAt) || source == nil {
-				d.catalogLiveMu.Lock()
-				delete(d.catalogLive, session.ID)
-				d.catalogLiveMu.Unlock()
-				continue
+			var live *catalogLiveSession
+			if source != nil {
+				live = &catalogLiveSession{adapter: adapter, session: session, identity: identity, alias: alias, open: open, files: source.LocalStatusFiles(session)}
+				// Stamps taken before List date the evidence List used, so a
+				// file change during the pass still triggers a status refresh.
+				if prior, found := priorStamps[session.ID]; found && equalStrings(prior.files, live.files) {
+					live.stamps = prior.stamps
+				}
 			}
-			live := &catalogLiveSession{adapter: adapter, session: session, identity: identity, alias: alias, open: open, files: source.LocalStatusFiles(session)}
-			// Stamps taken before List date the evidence List used, so a file
-			// change during the pass still triggers a status refresh.
-			if prior, found := priorStamps[session.ID]; found && equalStrings(prior.files, live.files) {
-				live.stamps = prior.stamps
-			}
+			// The row and the entry the status pass follows change together,
+			// so a status publish lands wholly before or after them.
 			d.catalogLiveMu.Lock()
-			d.catalogLive[session.ID] = live
+			if d.publishCatalogSession(ctx, adapter, session, identity, alias, counts[session.ID], open, config, view, observedAt) && live != nil {
+				d.catalogLive[session.ID] = live
+			} else {
+				delete(d.catalogLive, session.ID)
+			}
 			d.catalogLiveMu.Unlock()
 		}
 		d.forgetCatalogLive(adapter.Name(), seen)
@@ -520,9 +523,10 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 		sessions = append(sessions, followed{id: id, live: live, session: live.session, stamps: live.stamps})
 	}
 	d.catalogLiveMu.Unlock()
-	// current applies change to a followed session unless discovery replaced
-	// or dropped it meanwhile; discovery's entry then carries the stamps its
-	// listing was read against, so the next pass rereads anything newer.
+	// current applies change to a followed session, under the lock, unless
+	// discovery replaced or dropped it meanwhile; discovery's entry then
+	// carries the stamps its listing was read against, so the next pass
+	// rereads anything newer.
 	current := func(entry followed, change func(*catalogLiveSession)) bool {
 		d.catalogLiveMu.Lock()
 		defer d.catalogLiveMu.Unlock()
@@ -574,15 +578,16 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 				return
 			}
 		}
-		if !current(entry, func(*catalogLiveSession) {}) {
-			continue
-		}
-		if d.publishCatalogSession(ctx, live.adapter, refreshed, live.identity, live.alias, counts[entry.id], live.open, *config, view, time.Now().UTC()) {
-			current(entry, func(live *catalogLiveSession) { live.session = refreshed })
-			published = true
-		} else {
-			current(entry, func(live *catalogLiveSession) { live.stamps = nil })
-		}
+		// Publishing under the lock keeps discovery from replacing or
+		// dropping the entry between this check and the row it writes.
+		current(entry, func(live *catalogLiveSession) {
+			if d.publishCatalogSession(ctx, live.adapter, refreshed, live.identity, live.alias, counts[entry.id], live.open, *config, view, time.Now().UTC()) {
+				live.session = refreshed
+				published = true
+			} else {
+				live.stamps = nil
+			}
+		})
 	}
 }
 
