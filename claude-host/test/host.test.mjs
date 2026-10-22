@@ -242,6 +242,20 @@ test('every session the host opens has the task tools unless the host turns them
   d.close();
 });
 
+test("every session runs with Claude Code's system prompt and the terminal's settings", async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('open', { sessionId: randomUUID(), cwd: f.cwd });
+  await c.call('open', { resume: randomUUID(), cwd: f.cwd });
+  const spawns = fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  for (const spawn of spawns) assert.ok(spawn.argv.includes('--setting-sources=user,project,local'), spawn.argv.join(' '));
+  const inits = fs.readFileSync(path.join(f.claudeDir, 'initialize.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(inits.length, 2);
+  for (const init of inits) assert.equal(init.systemPrompt, null, 'a session that sends its own system prompt replaces Claude Code\'s');
+  c.close();
+});
+
 test('logs returns what an open session wrote to stderr', async () => {
   const f = fixture();
   await startHost(f);

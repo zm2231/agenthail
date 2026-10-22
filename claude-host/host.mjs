@@ -414,6 +414,11 @@ async function open(params) {
         // the host's own environment can still turn them off.
         env: { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.configDir ? { CLAUDE_CONFIG_DIR: params.configDir } : {}) },
         pathToClaudeCodeExecutable: args.claude,
+        // Without a system prompt the SDK sends an empty one and Claude runs
+        // with a minimal prompt instead of Claude Code's. A conversation keeps
+        // the prompt it started with until it is compacted.
+        systemPrompt: { type: 'preset', preset: 'claude_code' },
+        settingSources: ['user', 'project', 'local'],
         ...(params.resume ? { resume: id } : { sessionId: id }),
         ...(permissionMode ? { permissionMode } : {}),
         ...(model ? { model } : {}),

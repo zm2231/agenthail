@@ -292,6 +292,9 @@ lines.on('line', (line) => {
     const subtype = message.request.subtype;
     if (subtype === 'interrupt') interrupt?.();
     if (subtype === 'set_model') model = message.request.model || 'claude-opus-5-5';
+    if (subtype === 'initialize') {
+      fs.appendFileSync(path.join(dir, 'initialize.jsonl'), JSON.stringify({ sessionId, systemPrompt: message.request.systemPrompt ?? null, appendSystemPrompt: message.request.appendSystemPrompt ?? null }) + '\n');
+    }
     if (subtype === 'set_model' || subtype === 'set_permission_mode') {
       fs.appendFileSync(path.join(dir, 'controls.jsonl'), JSON.stringify({ sessionId, pid: process.pid, ...message.request }) + '\n');
     }

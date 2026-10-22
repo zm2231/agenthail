@@ -301,6 +301,16 @@ default for the CLI, the dashboard and the apps. An open whose answer is lost
 still names the session, so creation reports it as unknown rather than failed.
 Without a running host nothing is created.
 
+Every session runs with Claude Code's own system prompt (`systemPrompt: {type:
+'preset', preset: 'claude_code'}`) and reads the same settings a terminal
+session does (`settingSources: user, project, local`): CLAUDE.md files,
+settings, hooks and skills. The SDK sends an empty system prompt when none is
+given, and Claude then runs with a one-line prompt instead of Claude Code's.
+Claude records a conversation's system prompt on its first request and resends
+it on every later request and resume until the conversation is compacted, so a
+conversation keeps the prompt it started with. Claude Code's prompt adds about
+2,200 input tokens per request, which the prompt cache serves after the first.
+
 `Claude.reach` resumes a conversation no process holds with `open({resume})`
 and waits until the host lists the process. When the conversation lives in a
 Claude config root other than the primary one, the open carries
