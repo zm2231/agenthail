@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/agentcard"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -29,11 +30,11 @@ func TestWhoamiUsesBoundSessionInsteadOfSharedCWD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got whoamiResult
+	var got agentcard.Card
 	if err := json.Unmarshal([]byte(output), &got); err != nil {
 		t.Fatal(err)
 	}
-	if !got.Resolved || got.Session != "codex-two" || got.Alias != "builder" || got.Project != "agenthail" || got.Cwd != sharedCwd {
+	if !got.Resolved || got.Session != "codex-two" || got.Alias != "builder" || got.Project != nil || got.Cwd != sharedCwd {
 		t.Fatalf("whoami=%+v", got)
 	}
 }
@@ -49,7 +50,7 @@ func TestWhoamiReportsUnboundShellWithoutGuessingFromCWD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got whoamiResult
+	var got agentcard.Card
 	if err := json.Unmarshal([]byte(output), &got); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +84,7 @@ func TestSessionFromAnotherAgenthailIsRefusedWithRemedies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got whoamiResult
+	var got agentcard.Card
 	if err := json.Unmarshal([]byte(output), &got); err != nil {
 		t.Fatal(err)
 	}

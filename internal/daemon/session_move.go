@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,6 +37,16 @@ type moveManifest struct {
 	Size           int64               `json:"size"`
 	SHA256         string              `json:"sha256"`
 	PartsSize      int64               `json:"partsSize"`
+	Origin         *moveOrigin         `json:"origin,omitempty"`
+}
+
+// moveOrigin is who started a moving session, named by the host that owns
+// the creator so the target can find it among its own and mirrored sessions.
+type moveOrigin struct {
+	Via         registry.OriginVia `json:"via"`
+	CreatorHost string             `json:"creatorHost,omitempty"`
+	Creator     string             `json:"creator,omitempty"`
+	CreatorName string             `json:"creatorName,omitempty"`
 }
 
 type moveStatus struct {
@@ -137,7 +148,11 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 		return sessionMoveResult{}, MoveRefusedError{Reason: err.Error()}
 	}
 	alias, _ := d.Registry.ReverseAlias(session.ID)
-	manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize}
+	origin, err := d.outgoingOrigin(session.ID)
+	if err != nil {
+		return sessionMoveResult{}, err
+	}
+	manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize, Origin: origin}
 	encoded, err := json.Marshal(manifest)
 	if err != nil {
 		return sessionMoveResult{}, err
@@ -684,8 +699,13 @@ func (d *Daemon) apiMoveTransferHandler(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusConflict, "move_refused", refusal.Error())
 		return
 	}
+	origin, err := d.incomingOrigin(session.ID, manifest.Origin)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "move_unrecorded", fmt.Sprintf("Session %s resumed here, but who started it could not be recorded: %s", session.ID, err))
+		return
+	}
 	d.catalog.mu.Lock()
-	_, err = d.Registry.TakeMovedSession(move.ID, *session, manifest.Alias)
+	_, err = d.Registry.TakeMovedSession(move.ID, *session, manifest.Alias, origin)
 	if err == nil {
 		d.publishCommittedHostWriteLocked("move " + move.ID)
 	}
@@ -750,4 +770,52 @@ func (d *Daemon) apiMoveAbortHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeDashboardJSON(w, http.StatusOK, moveStatus{State: move.State, Detail: move.Detail})
 	}
+}
+
+func (d *Daemon) outgoingOrigin(sessionID string) (*moveOrigin, error) {
+	stored, found, err := d.Registry.SessionOrigin(sessionID)
+	if err != nil || !found {
+		return nil, err
+	}
+	origin := &moveOrigin{Via: stored.Via}
+	if stored.CreatorID == "" {
+		return origin, nil
+	}
+	origin.CreatorName = d.senderName(stored.CreatorID)
+	if hostID, raw, ok := surface.UnrepliableSenderOf(stored.CreatorID); ok {
+		origin.CreatorHost, origin.Creator = hostID, raw
+		return origin, nil
+	}
+	owner, err := d.Registry.SessionHost(stored.CreatorID)
+	if err != nil {
+		return nil, fmt.Errorf("find the host of %s, which started %s: %w", stored.CreatorID, sessionID, err)
+	}
+	if owner == "" {
+		owner = d.hostIdentity().ID
+	}
+	origin.CreatorHost, origin.Creator = owner, stored.CreatorID
+	return origin, nil
+}
+
+// incomingOrigin names a moved session's creator as this host knows it: its
+// own session, a paired host's mirrored one, or a stand-in with no reply
+// address.
+func (d *Daemon) incomingOrigin(sessionID string, origin *moveOrigin) (*registry.SessionOrigin, error) {
+	if origin == nil {
+		return nil, nil
+	}
+	recorded := &registry.SessionOrigin{SessionID: sessionID, Via: origin.Via}
+	if origin.Creator == "" {
+		return recorded, nil
+	}
+	owner, err := d.Registry.SessionHost(origin.Creator)
+	switch {
+	case err == nil && (owner == origin.CreatorHost || owner == "" && origin.CreatorHost == d.hostIdentity().ID):
+		recorded.CreatorID = origin.Creator
+		return recorded, nil
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return nil, err
+	}
+	recorded.CreatorID, err = d.Registry.EnsureUnrepliableSender(origin.CreatorHost, origin.Creator, origin.CreatorName)
+	return recorded, err
 }

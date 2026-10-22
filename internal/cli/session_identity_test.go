@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/agentcard"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
@@ -40,11 +41,11 @@ func branchTranscript(t *testing.T, fixture *claudetest.Fixture, conversation, p
 	}
 }
 
-func whoami(t *testing.T, app *App, conversation string) whoamiResult {
+func whoami(t *testing.T, app *App, conversation string) agentcard.Card {
 	t.Helper()
 	t.Setenv("CLAUDE_CODE_SESSION_ID", conversation)
 	output, err := captureStdout(t, func() error { return app.Run([]string{"whoami", "--json"}) })
-	var result whoamiResult
+	var result agentcard.Card
 	if err != nil || json.Unmarshal([]byte(output), &result) != nil {
 		t.Fatalf("whoami output=%q err=%v", output, err)
 	}

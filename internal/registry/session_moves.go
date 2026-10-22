@@ -273,7 +273,7 @@ func (r *Registry) AbortMoveIn(id, conversation, sourceHost string) (SessionMove
 // host and records its move as resumed, in one transaction. The row the
 // source host mirrored here is taken over; a row another host owns is not.
 // The source's alias is bound here when it is free.
-func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alias string) ([]CatalogEvent, error) {
+func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alias string, origin *SessionOrigin) ([]CatalogEvent, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return nil, err
@@ -335,6 +335,14 @@ func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alia
 				return nil, err
 			}
 		case err != nil:
+			return nil, err
+		}
+	}
+	if origin != nil {
+		if err := origin.valid(); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(`INSERT INTO session_origins(session_id,via,creator_session_id) VALUES(?,?,?) ON CONFLICT(session_id) DO UPDATE SET via=excluded.via,creator_session_id=excluded.creator_session_id`, session.ID, string(origin.Via), origin.CreatorID); err != nil {
 			return nil, err
 		}
 	}

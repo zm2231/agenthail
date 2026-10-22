@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -103,6 +104,18 @@ func TestThreadForkPassesLastTurnAndRejectsRemovedFlags(t *testing.T) {
 	if len(adapter.options) != 1 {
 		t.Fatal("a rejected flag reached the surface", adapter.options)
 	}
+	if origin, found, err := app.Registry.SessionOrigin("forked"); err != nil || !found || origin.Via != registry.OriginPerson {
+		t.Fatalf("a fork from a terminal is not recorded as the person's: origin=%+v found=%v err=%v", origin, found, err)
+	}
+	if err := app.Run([]string{"thread", "fork", "@src", "--from", "@nobody"}); err == nil || len(adapter.options) != 1 {
+		t.Fatalf("an unknown --from forked: err=%v", err)
+	}
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"thread", "fork", "@src", "--from", "@src", "--json"}) }); err != nil {
+		t.Fatal(err)
+	}
+	if origin, _, err := app.Registry.SessionOrigin("forked-2"); err != nil || origin != registry.OriginOf("forked-2", "source") {
+		t.Fatalf("a fork --from @src is not recorded as started by it: origin=%+v err=%v", origin, err)
+	}
 }
 
 type forkCLISurface struct {
@@ -114,5 +127,8 @@ func (s *forkCLISurface) ForkSession(_ context.Context, session *surface.Session
 	s.options = append(s.options, options)
 	fork := *session
 	fork.ID = "forked"
+	if len(s.options) > 1 {
+		fork.ID = fmt.Sprintf("forked-%d", len(s.options))
+	}
 	return &fork, nil
 }

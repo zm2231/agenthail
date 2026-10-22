@@ -68,6 +68,16 @@ func UnrepliableSender(hostID, sessionID, name string) Session {
 // IsUnrepliableSender reports whether id names an unrepliable stand-in.
 func IsUnrepliableSender(id string) bool { return strings.HasPrefix(id, unrepliablePrefix) }
 
+// UnrepliableSenderOf names the host and session an unrepliable stand-in
+// speaks for.
+func UnrepliableSenderOf(id string) (hostID, sessionID string, ok bool) {
+	rest, ok := strings.CutPrefix(id, unrepliablePrefix)
+	if !ok {
+		return "", "", false
+	}
+	return strings.Cut(rest, ":")
+}
+
 // NoReplyRouteError refuses a message to one of Agenthail's own
 // pseudo-sessions: no model reads them, so nothing sent there is delivered.
 // Host and Sender name the original sender an unrepliable stand-in speaks

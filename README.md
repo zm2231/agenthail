@@ -266,6 +266,15 @@ agenthail thread create claude "Investigate the build failure" --alias investiga
 
 The session starts in your current folder unless you choose another project with `--cwd`. Claude sessions run in the Claude host and support status, logs, stop and resume; logs is what the session's Claude process wrote to stderr while it is open, and `agenthail last` reads the conversation. Codex supports forks, its native input queue, reasoning effort, plan mode, service tier and structured output. These controls are available in the CLI and web dashboard; the Mac app offers one-click forks, the native queue, effort and plan mode; see [session operations](docs/maintainers/session-operations.md) for commands and retry behavior.
 
+Agenthail records who started each session: the agent whose command created it, or you when it came from the dashboard, an app or a terminal with no calling session. `--from @alias` names the creator explicitly. Any agent can ask what it is inside Agenthail:
+
+```bash
+agenthail whoami --json   # alias, project, coordinator, who started it, who it reports to, how it reaches you
+agenthail help agent      # the same as a short brief with the commands that act on it
+```
+
+A session an agent started reports to that agent; one you started reports to the project's coordinator, which also sees every report in history. The brief says whether a question the agent asks reaches you in Agenthail and on your phone, or only tells you so you can answer where the session runs.
+
 Notion threads can start the same way:
 
 ```bash

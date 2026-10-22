@@ -145,6 +145,13 @@ func (a *App) threadOperationRemote(ctx context.Context, remote *remoteTarget, o
 		payload["action"] = "session-fork"
 		payload["fork"] = surface.ForkOptions{Model: flagVal(args, "--model"), LastTurnID: flagVal(args, "--last-turn")}
 		payload["alias"] = strings.TrimPrefix(flagVal(args, "--alias"), "@")
+		creator, err := a.sourceSessionID(ctx, flagVal(args, "--from"))
+		if err != nil {
+			return err
+		}
+		if creator != "" {
+			payload["sourceSessionId"] = creator
+		}
 	case "queue":
 		if len(positional) < 3 {
 			return fmt.Errorf("native queue action is required")

@@ -236,6 +236,9 @@ func (a *App) Run(args []string) (err error) {
 	case "update", "upgrade":
 		return a.cmdUpdate(rest)
 	case "help", "-h", "--help":
+		if len(rest) > 0 && rest[0] == "agent" {
+			return a.cmdHelpAgent(rest[1:])
+		}
 		a.usage()
 		return nil
 	default:
@@ -264,7 +267,8 @@ Session commands:
   project list|add <path>|remove <name>|archive <name>|unarchive <name>
                                  List, add or remove project folders, or hide a project
   runs [--json]                  Read verified Claude job and subagent records
-  whoami [--json]                Show the caller session bound to this process
+  whoami [--json]                Who the calling session is, who it reports to, how it reaches the person
+  help agent                    What the calling session can do through Agenthail
   roots [--json]                 List each Claude config directory and the login it currently holds
   search codex <query>           Search older Codex conversation history on demand
   send <target> "msg"|-       Send now when idle; queue when busy (use --no-queue to refuse delay)
@@ -671,7 +675,7 @@ func validateCommandFlags(command string, args []string) error {
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {values: map[string]bool{"--before": true, "--timeout": true, "--max-bytes": true}, bools: map[string]bool{"--json": true, "--report": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true, "--max-bytes": true}, bools: map[string]bool{"--full": true, "--json": true, "--report": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true, "--max-bytes": true}, bools: map[string]bool{"--full": true, "--json": true, "--report": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
-		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--root": true, "--host": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--wait": true}, bools: map[string]bool{"--json": true, "--help": true, "--stop-terminal": true}},
+		"thread":  {values: map[string]bool{"--message": true, "--from": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--root": true, "--host": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--wait": true}, bools: map[string]bool{"--json": true, "--help": true, "--stop-terminal": true}},
 		"channel": {},
 		"project": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}}, "projects": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}},
 		"hosts":   {values: map[string]bool{"--address": true, "--name": true}, bools: map[string]bool{"--json": true, "--help": true}},

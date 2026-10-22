@@ -133,6 +133,12 @@ func TestAnIdleClaudeSessionMovesToAPairedHostAndRunsThere(t *testing.T) {
 	if err := source.reg.SetAlias("builder", session.ID); err != nil {
 		t.Fatal(err)
 	}
+	if err := source.reg.RegisterSession(surface.Session{ID: "planner-conversation", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+		t.Fatal(err)
+	}
+	if err := source.reg.RecordSessionOrigin(registry.OriginOf(session.ID, "planner-conversation")); err != nil {
+		t.Fatal(err)
+	}
 	queued, err := source.reg.QueueMessageWithOptions(session.ID, "sent while moving", "key-moving", surface.SendOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -174,6 +180,14 @@ func TestAnIdleClaudeSessionMovesToAPairedHostAndRunsThere(t *testing.T) {
 	}
 	if alias, _ := target.reg.LookupAlias("builder"); alias != session.ID {
 		t.Fatalf("target alias=%q", alias)
+	}
+	origin, found, err := target.reg.SessionOrigin(session.ID)
+	creatorHost, creator, standIn := surface.UnrepliableSenderOf(origin.CreatorID)
+	if mirroredOwner, _ := target.reg.SessionHost(origin.CreatorID); !standIn {
+		creatorHost, creator = mirroredOwner, origin.CreatorID
+	}
+	if err != nil || !found || origin.Via != registry.OriginAgent || creator != "planner-conversation" || creatorHost != source.daemon.hostIdentity().ID {
+		t.Fatalf("the target lost who started the session: origin=%+v found=%v err=%v", origin, found, err)
 	}
 	placed := filepath.Join(target.host.Home, ".claude", "projects", regexp.MustCompile(`[^A-Za-z0-9]`).ReplaceAllString(resolved, "-"), session.ID+".jsonl")
 	data, err := os.ReadFile(placed)

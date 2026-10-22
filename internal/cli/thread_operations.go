@@ -66,6 +66,10 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 		if !ok {
 			return surface.ErrUnsupported
 		}
+		creator, err := a.sourceSessionID(ctx, flagVal(args, "--from"))
+		if err != nil {
+			return err
+		}
 		var name registry.AliasReservation
 		if a.registry() != nil {
 			if name, err = a.registry().ReserveAlias(strings.TrimPrefix(flagVal(args, "--alias"), "@"), time.Now().Add(timeout+threadNameMargin)); err != nil {
@@ -86,6 +90,9 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 			}
 			if err := a.registry().BindReservedAlias(name, fork.ID); err != nil {
 				return err
+			}
+			if err := a.registry().RecordSessionOrigin(registry.OriginOf(fork.ID, creator)); err != nil {
+				return fmt.Errorf("fork %s was created, but who started it could not be recorded: %w", fork.ID, err)
 			}
 		}
 		output = map[string]any{"session": fork}
@@ -131,7 +138,7 @@ func validateThreadOperationArgs(args []string) error {
 	allowed := map[string]bool{"--timeout": true, "--json": true}
 	switch args[0] {
 	case "fork":
-		for _, flag := range []string{"--model", "--last-turn", "--alias"} {
+		for _, flag := range []string{"--model", "--last-turn", "--alias", "--from"} {
 			allowed[flag] = true
 		}
 	case "queue":
