@@ -39,9 +39,10 @@ final class SessionPane: ObservableObject, Identifiable {
     private var frozenOlderCursor: Int64?
     private var sessionStreamTask: Task<Void, Never>?
     private var sessionCursor: UInt64 = 0
-    /// Rows streamed since the page was read, latest mutation last, so a page
-    /// read before some of them arrived can be brought up to date.
-    private var streamedRows: [SessionStreamEvent] = []
+    /// Rows streamed while a page read is in flight, latest mutation last, so
+    /// a page read before some of them arrived can be brought up to date.
+    private(set) var streamedRows: [SessionStreamEvent] = []
+    private var pageReadsInFlight = 0
     private var streamAwaitsCursor = false
     private var streamUnsupported = false
     private var detailReloadTask: Task<Void, Never>?
@@ -129,6 +130,11 @@ final class SessionPane: ObservableObject, Identifiable {
         guard !closed, let api = model.api else { return false }
         detailRequestGeneration &+= 1
         let generation = detailRequestGeneration
+        pageReadsInFlight += 1
+        defer {
+            pageReadsInFlight -= 1
+            if pageReadsInFlight == 0 { streamedRows = [] }
+        }
         do {
             let loaded = try await api.sessionDetail(id: id, includeTimeline: true)
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), generation > detailAppliedGeneration, removedSession?.id != id else { return true }
@@ -581,8 +587,10 @@ final class SessionPane: ObservableObject, Identifiable {
     private func applyStreamedRow(_ event: SessionStreamEvent) -> Bool {
         guard removedSession == nil, let current = detail, current.session.id == event.sessionId,
               let updated = Self.applying(event, to: current, older: &olderItems) else { return false }
-        streamedRows.removeAll { $0.data.itemId == event.data.itemId && !event.data.itemId.isEmpty }
-        streamedRows.append(event)
+        if pageReadsInFlight > 0 {
+            streamedRows.removeAll { $0.data.itemId == event.data.itemId && !event.data.itemId.isEmpty }
+            streamedRows.append(event)
+        }
         detail = updated
         model.detailLoaded(updated, for: event.sessionId)
         return true

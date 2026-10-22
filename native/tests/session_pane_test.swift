@@ -268,6 +268,8 @@ struct SessionPaneTest {
         check(SessionPane.applying(event(row(105, "x")), to: page, older: &older) == nil, "a row without the page's item is not guessed at")
 
         var pageRequests = 0
+        let turnPageJSON = pageJSON.replacingOccurrences(of: #""journalSeq":100"#, with: #""journalSeq":104"#)
+            .replacingOccurrences(of: #"{"id":"a","kind":"message","role":"assistant","title":"message","text":"a1","truncated":false},{"id":"b","kind":"message","role":"assistant","title":"message","text":"b1","truncated":false}"#, with: #"{"id":"c","kind":"message","role":"assistant","title":"message","text":"c1","truncated":false},{"id":"a","kind":"message","role":"assistant","title":"message","text":"a2","truncated":false},{"id":"d","kind":"done","role":"assistant","title":"done","text":"","truncated":false}"#)
         func frame(_ seq: Int, _ json: String) -> String { "id: \(seq)\nevent: item\ndata: \(json)\n\n" }
         let turnRows = [frame(101, row(101, "c", text: "c1")), frame(102, row(102, "a", text: "a2")), frame(103, row(103, "b", op: "remove"))]
         let streamingServer = try! StubServer { line, _ in
@@ -276,7 +278,7 @@ struct SessionPaneTest {
             }
             if line.contains("/api/v1/session?") {
                 pageRequests += 1
-                return StubServer.reply("200 OK", pageJSON)
+                return pageRequests == 1 ? StubServer.reply("200 OK", pageJSON) : StubServer.hold
             }
             return StubServer.reply("404 Not Found", "{}")
         }
@@ -288,12 +290,18 @@ struct SessionPaneTest {
         while streamingPane.timelineItems.map(\.id) != ["c", "a"], Date() < rowsDeadline { try? await Task.sleep(for: .milliseconds(20)) }
         try? await Task.sleep(for: .milliseconds(600))
         check(pageRequests == 1, "streamed rows apply without reading the page again: \(pageRequests) page reads, rows \(streamingPane.timelineItems.map(\.id))")
-        streamingServer.push(frame(104, row(104, "d", kind: "done", text: "")))
+        check(streamingPane.streamedRows.isEmpty, "rows applied with no page read in flight are not kept: \(streamingPane.streamedRows.count)")
+        streamingServer.push(frame(104, row(104, "d", kind: "done", text: "")), to: "session-stream")
         let turnDeadline = Date().addingTimeInterval(5)
         while pageRequests < 2, Date() < turnDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        streamingServer.push(frame(105, row(105, "e", text: "e1")), to: "session-stream")
+        let lateDeadline = Date().addingTimeInterval(5)
+        while streamingPane.timelineItems.last?.id != "e", Date() < lateDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        streamingServer.release(StubServer.reply("200 OK", turnPageJSON))
         try? await Task.sleep(for: .milliseconds(600))
         check(pageRequests == 2, "a streamed turn reloads the page once, when it finishes, not per row: \(pageRequests) page reads")
-        check(streamingPane.timelineItems.map(\.id) == ["c", "a", "d"] && streamingPane.timelineItems[1].text == "a2", "a reload read before the streamed rows keeps them, in the order a reload would show: \(streamingPane.timelineItems.map(\.id))")
+        check(streamingPane.timelineItems.map(\.id) == ["c", "a", "d", "e"] && streamingPane.timelineItems[1].text == "a2", "a row streamed while the reload was in flight survives it, in the order a reload would show: \(streamingPane.timelineItems.map(\.id))")
+        check(streamingPane.streamedRows.isEmpty, "the rows kept for a page read are dropped once it lands: \(streamingPane.streamedRows.count)")
         streamingModel.closePane(streamingPane)
         streamingServer.stop()
 
@@ -311,6 +319,9 @@ struct SessionPaneTest {
     final class StubServer: @unchecked Sendable {
         private let listener: NWListener
         private var connections: [NWConnection] = []
+        private var lines: [ObjectIdentifier: String] = [:]
+        private var held: [NWConnection] = []
+        static let hold = "HOLD"
         private var requests = 0
 
         init(respond: @escaping (String, Int) -> String?) throws {
@@ -321,7 +332,9 @@ struct SessionPaneTest {
                 connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [self] data, _, _, _ in
                     let line = data.flatMap { String(data: $0, encoding: .utf8) }?.components(separatedBy: "\r\n").first ?? ""
                     requests += 1
+                    lines[ObjectIdentifier(connection)] = line
                     guard let reply = respond(line, requests) else { return }
+                    if reply == Self.hold { held.append(connection); return }
                     connection.send(content: Data(reply.utf8), completion: .contentProcessed { _ in })
                 }
             }
@@ -340,8 +353,14 @@ struct SessionPaneTest {
             }
         }
 
-        func push(_ text: String) {
-            connections.forEach { $0.send(content: Data(text.utf8), completion: .contentProcessed { _ in }) }
+        func push(_ text: String, to path: String) {
+            connections.filter { lines[ObjectIdentifier($0)]?.contains(path) == true }
+                .forEach { $0.send(content: Data(text.utf8), completion: .contentProcessed { _ in }) }
+        }
+
+        func release(_ reply: String) {
+            held.forEach { $0.send(content: Data(reply.utf8), completion: .contentProcessed { _ in }) }
+            held = []
         }
 
         func stop() {
