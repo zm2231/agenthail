@@ -905,11 +905,16 @@ func TestRealtimeSettingsUseAudioOnlyTargetUpdatesAndNoCredentials(t *testing.T)
 		}
 	}
 	initial := p["initialItems"].([]map[string]any)
-	boundInitial := StartParams("operator", "call", "offer", true)["initialItems"].([]map[string]any)
-	orchestrator, _ := initial[0]["text"].(string)
-	sessionBound, _ := boundInitial[0]["text"].(string)
-	if len(initial) != 1 || len(boundInitial) != 1 || initial[0]["role"] != "developer" || boundInitial[0]["role"] != "developer" || orchestrator == "" || sessionBound == "" || orchestrator == sessionBound {
-		t.Fatalf("session-bound calls need their own developer instructions: orchestrator=%v bound=%v", initial, boundInitial)
+	if text, _ := initial[0]["text"].(string); len(initial) != 1 || initial[0]["role"] != "developer" || !strings.Contains(text, "Agenthail orchestrator") {
+		t.Fatalf("orchestrator calls need their developer instructions: %v", initial)
+	}
+	if _, ok := p["prompt"]; ok || p["includeStartupContext"] != true {
+		t.Fatalf("an orchestrator call replaced Codex's realtime prompt: %v", p)
+	}
+	bound := StartParams("operator", "call", "offer", true)
+	prompt, _ := bound["prompt"].(string)
+	if !strings.Contains(prompt, "never do the work, hand it to anyone else") || bound["includeStartupContext"] != false || bound["initialItems"] != nil {
+		t.Fatalf("a session-bound call must replace Codex's delegating prompt: %v", bound)
 	}
 }
 
