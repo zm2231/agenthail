@@ -395,7 +395,7 @@ struct SurfaceRuntime: Decodable, Equatable {
 }
 
 struct SessionState: Codable, Identifiable, Hashable {
-    let id: String
+    var id: String
     let surface: String
     let name: String
     let alias: String?
@@ -917,8 +917,11 @@ struct DeliveryProblem: Decodable, Identifiable, Equatable {
     let reason: String
     let status: String?
     let at: String
+    /// The paired computer the problem came from, on a phone that merges
+    /// several; delivery ids are only unique on one computer.
+    var hostID: String? = nil
 
-    var id: Int64 { deliveryId }
+    var id: String { "\(hostID ?? "")/\(deliveryId)" }
 
     var reasonText: String {
         let words = reason.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
