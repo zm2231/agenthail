@@ -889,7 +889,7 @@ func TestOpenHoldsNoNameForALaunchPendingAtTheVersionBefore(t *testing.T) {
 	}
 }
 
-func TestOpenAddsTheTranscriptCheckpointToARegistryAtVersion30(t *testing.T) {
+func TestOpenAddsTheTranscriptCheckpointToARegistryAtVersion31(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	r, err := Open(path)
 	if err != nil {
@@ -901,7 +901,7 @@ func TestOpenAddsTheTranscriptCheckpointToARegistryAtVersion30(t *testing.T) {
 	}
 	for _, statement := range []string{
 		`ALTER TABLE session_journal_state DROP COLUMN transcript_checkpoint`,
-		`PRAGMA user_version=30`,
+		`PRAGMA user_version=31`,
 	} {
 		if _, err := r.db.Exec(statement); err != nil {
 			t.Fatal(err)
