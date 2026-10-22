@@ -51,6 +51,26 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testOlderSnapshotDoesNotOverwriteNewerMatchingSnapshot() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        let model = makeModel()
+        model.selectedSessionID = "demo"
+        await model.refreshSession("demo")
+        SessionRefreshProtocol.state.set(snapshotStatus: "idle")
+        SessionRefreshProtocol.state.holdSnapshot()
+        let older = Task { await model.refresh() }
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.snapshotHeld }
+
+        SessionRefreshProtocol.state.set(snapshotStatus: "busy")
+        SessionRefreshProtocol.state.passNextSnapshot()
+        await model.refresh()
+        SessionRefreshProtocol.state.releaseSnapshot()
+        await older.value
+
+        XCTAssertEqual(model.selectedDetail?.session.status, "busy")
+    }
+
+    @MainActor
     func testOlderDetailDoesNotOverwriteNewerSnapshot() async throws {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
@@ -121,13 +141,15 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         func reset(streamUnsupported: Bool) {
             condition.withLock {
                 fetches = 0; unsupported = streamUnsupported; detail = "busy"; snapshot = "busy"
-                holdingSnapshot = false; holdingDetail = false; snapshotWaiting = false; detailWaiting = false
+                holdingSnapshot = false; holdingDetail = false; snapshotWaiting = false; detailWaiting = false; passing = 0
                 condition.broadcast()
             }
         }
         func set(detailStatus: String) { condition.withLock { detail = detailStatus } }
         func set(snapshotStatus: String) { condition.withLock { snapshot = snapshotStatus } }
+        private var passing = 0
         func holdSnapshot() { condition.withLock { holdingSnapshot = true } }
+        func passNextSnapshot() { condition.withLock { passing += 1 } }
         func holdDetail() { condition.withLock { holdingDetail = true } }
         func releaseSnapshot() { condition.withLock { holdingSnapshot = false; condition.broadcast() } }
         func releaseDetail() { condition.withLock { holdingDetail = false; condition.broadcast() } }
@@ -147,7 +169,9 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         func snapshotResponse() -> String {
             condition.lock(); defer { condition.unlock() }
             let status = snapshot
-            if holdingSnapshot {
+            if passing > 0 {
+                passing -= 1
+            } else if holdingSnapshot {
                 snapshotWaiting = true
                 while holdingSnapshot { condition.wait() }
                 snapshotWaiting = false

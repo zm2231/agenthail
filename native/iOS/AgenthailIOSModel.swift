@@ -1090,13 +1090,14 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     private func syncSelectedSession(from snapshot: DashboardSnapshot, seq: UInt64) {
-        guard seq > selectedSessionStateSeq, var detail = selectedDetail, let live = snapshot.sessions.first(where: { $0.id == detail.session.id }),
-              detail.session.status != live.status || detail.session.waitingOn != live.waitingOn || detail.session.backgroundTasks != live.backgroundTasks else { return }
+        guard seq > selectedSessionStateSeq, var detail = selectedDetail,
+              let live = snapshot.sessions.first(where: { $0.id == detail.session.id }) else { return }
+        selectedSessionStateSeq = seq
+        guard detail.session.status != live.status || detail.session.waitingOn != live.waitingOn || detail.session.backgroundTasks != live.backgroundTasks else { return }
         detail.session.status = live.status
         detail.session.waitingOn = live.waitingOn
         detail.session.backgroundTasks = live.backgroundTasks
         selectedDetail = detail
-        selectedSessionStateSeq = seq
     }
 
     func applySessionStreamEvent(_ event: SessionStreamEvent) {
