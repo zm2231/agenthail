@@ -839,16 +839,36 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func removeQueued(_ item: QueueState, restoreToComposer: Bool = false) {
+    func removeQueued(_ item: QueueState) {
         guard let api else { return }
         Task {
             do {
                 try await api.action("queue-cancel", queueID: item.id)
-                if restoreToComposer { self.restoreToComposer(item.message, sessionID: item.sessionId) }
                 operationError = nil
             } catch {
                 operationError = AgenthailAPIError.userMessage(error)
             }
+            _ = await refresh(fresh: true)
+        }
+    }
+
+    /// Cancels queued messages oldest first and puts each one that was still
+    /// waiting back ahead of the draft; a message already on its way stays queued.
+    func takeBackQueued(_ items: [QueueState], sessionID: String) {
+        guard let api else { return }
+        Task {
+            var taken: [String] = []
+            operationError = nil
+            for item in items.sorted(by: { $0.id < $1.id }) {
+                do {
+                    try await api.action("queue-cancel", queueID: item.id)
+                    taken.append(item.message)
+                } catch {
+                    operationError = AgenthailAPIError.userMessage(error)
+                    break
+                }
+            }
+            if !taken.isEmpty { draft(for: sessionID).takeBack(taken) }
             _ = await refresh(fresh: true)
         }
     }
@@ -1092,5 +1112,9 @@ final class ComposerDraft: ObservableObject {
             text = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? restored : "\(text)\n\n\(restored)"
         }
         attachments = ComposerAttachments.adding(restoredAttachments, to: attachments).attachments
+    }
+
+    func takeBack(_ queued: [String]) {
+        text = QueueTakeBack.text(queued: queued, draft: text)
     }
 }

@@ -6,6 +6,9 @@ enum ComposerCommand: CaseIterable {
     case deleteToLineStart
     case deleteWordBackward
     case paste
+    case sendNow
+    case cycleMode
+    case interrupt
 
     var appCommand: AppCommand {
         switch self {
@@ -13,16 +16,20 @@ enum ComposerCommand: CaseIterable {
         case .deleteToLineStart: .composerDeleteToLineStart
         case .deleteWordBackward: .composerDeleteWordBackward
         case .paste: .composerPaste
+        case .sendNow: .composerSendNow
+        case .cycleMode: .composerCycleMode
+        case .interrupt: .composerInterrupt
         }
     }
 
     // Text-system actions, so each edit joins the text view's undo and kill ring.
-    var selector: Selector {
+    var selector: Selector? {
         switch self {
         case .newline: #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:))
         case .deleteToLineStart: #selector(NSResponder.deleteToBeginningOfParagraph(_:))
         case .deleteWordBackward: #selector(NSResponder.deleteWordBackward(_:))
         case .paste: #selector(NSText.paste(_:))
+        case .sendNow, .cycleMode, .interrupt: nil
         }
     }
 

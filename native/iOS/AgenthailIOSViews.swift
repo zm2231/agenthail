@@ -627,6 +627,10 @@ struct IOSComposer: View {
 
     private var steering: Bool { detail.session.status == "busy" && detail.session.waitingOn == nil && detail.capabilities.steer && model.busyDelivery(for: detail.session.id) == "steer" }
     private var sending: Bool { model.sendingSessionIDs.contains(session.id) }
+    private var permissionMode: String? {
+        guard detail.capabilities.permissionMode else { return nil }
+        return model.sessionRequests?.permissionMode
+    }
 
     private var canSend: Bool {
         !sending && !model.pendingControls.contains(session.id)
@@ -676,6 +680,32 @@ struct IOSComposer: View {
                         .accessibilityLabel("Change model, " + modelName)
                         .accessibilityIdentifier("composer-model-picker")
                     } else { modelLabel }
+                    if let mode = permissionMode {
+                        Button { Task { await model.setPermissionMode(SessionRequests.cycled(from: mode), sessionID: session.id) } } label: {
+                            Text(SessionRequests.permissionModeLabel(mode)).font(.footnote.weight(.medium))
+                                .padding(.horizontal, 10).frame(minHeight: 44)
+                                .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.4)).frame(height: 28))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Mode, " + SessionRequests.permissionModeLabel(mode))
+                        .accessibilityHint("Changes to the next mode")
+                        .accessibilityIdentifier("composer-mode")
+                    } else if session.surface == "codex" && detail.capabilities.send {
+                        let mode = model.turnSettings(for: session.id).mode
+                        Button {
+                            var settings = model.turnSettings(for: session.id)
+                            settings.mode = TurnSettings.Mode.cycled(from: settings.mode)
+                            model.setTurnSettings(settings, for: session.id)
+                        } label: {
+                            Text(mode == .plan ? "Plan" : mode == .default ? "Work" : "Session mode").font(.footnote.weight(.medium))
+                                .padding(.horizontal, 10).frame(minHeight: 44)
+                                .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.4)).frame(height: 28))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Mode, " + (mode == .plan ? "Plan" : mode == .default ? "Work" : "session setting"))
+                        .accessibilityHint("Switches between Work and Plan for the next message")
+                        .accessibilityIdentifier("composer-mode")
+                    }
                     if session.surface == "codex" && detail.capabilities.send {
                         Button { showingTurnSettings = true } label: {
                             Image(systemName: model.turnSettings(for: session.id).isEmpty ? "slider.horizontal.3" : "slider.horizontal.3.circle.fill")

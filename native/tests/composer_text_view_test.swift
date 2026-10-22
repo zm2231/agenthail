@@ -18,7 +18,7 @@ struct ComposerTextViewTest {
         window.contentView = textView
         window.makeFirstResponder(textView)
         var lookups = 0
-        textView.command = { lookups += 1; return ComposerCommand.matching($0, in: store)?.selector }
+        textView.command = { lookups += 1; return ComposerCommand.matching($0, in: store) }
         var submits = 0
         textView.onSubmit = { submits += 1 }
 
@@ -135,6 +135,33 @@ struct ComposerTextViewTest {
         check(abs(height("a\n", 1...10) - line * 2) <= 1, "a trailing newline counts as a line: \(height("a\n", 1...10) / line)")
         check(height(String(repeating: "word ", count: 40), 1...10) > line * 2, "long text wraps and grows at the given width")
         check(height(String(repeating: "x\n", count: 40)) == ceil(line * 10), "past ten lines the composer scrolls instead of growing")
+
+        var commands: [ComposerCommand] = []
+        var handles = true
+        textView.onCommand = { commands.append($0); return handles }
+        type("draft")
+        press(kVK_Return, "\r", .control)
+        press(kVK_Tab, "\u{19}", .shift)
+        press(kVK_Escape, "\u{1B}")
+        check(commands == [.sendNow, .cycleMode, .interrupt] && textView.string == "draft", "⌃Return, ⇧Tab and Esc go to the composer's own actions: \(commands)")
+        handles = false
+        press(kVK_Return, "\r", .control)
+        check(textView.string == "draft\n", "⌃Return with nothing to send makes a plain newline, never a line separator: \(textView.string.debugDescription)")
+        textView.onCommand = nil
+
+        var ups = 0
+        var takesBack = true
+        textView.onUpFromFirstLine = { ups += 1; return takesBack }
+        type("one\ntwo")
+        textView.doCommand(by: #selector(NSResponder.moveUp(_:)))
+        check(ups == 0 && textView.selectedRange().location < 7, "↑ on a later line moves the caret up as usual")
+        textView.setSelectedRange(NSRange(location: 2, length: 0))
+        textView.doCommand(by: #selector(NSResponder.moveUp(_:)))
+        check(ups == 1 && textView.selectedRange().location == 2, "↑ on the first line takes queued messages back instead of moving")
+        takesBack = false
+        textView.doCommand(by: #selector(NSResponder.moveUp(_:)))
+        check(ups == 2 && textView.selectedRange().location == 0, "with nothing queued, ↑ on the first line moves to the start as usual")
+        textView.onUpFromFirstLine = nil
 
         check(ComposerReturn.continuation(in: "a\\", caret: 2) == NSRange(location: 1, length: 1), "a backslash before the caret is found")
         check(ComposerReturn.continuation(in: "a\\b", caret: 3) == nil, "a backslash elsewhere is ignored")

@@ -446,6 +446,23 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         await connection.refresh(fresh: true)
     }
 
+    /// Cancels a queued message and puts it back ahead of its session's draft.
+    func takeBack(_ item: QueueState) async throws {
+        try await updateQueue(item, retry: false)
+        let id = draftKey(for: item)
+        if selectedSessionID == id {
+            composer = QueueTakeBack.text(queued: [item.message], draft: composer)
+        } else {
+            drafts[id] = QueueTakeBack.text(queued: [item.message], draft: drafts[id] ?? "")
+        }
+    }
+
+    private func draftKey(for item: QueueState) -> String {
+        let known = Set((snapshot?.sessions ?? []).map(\.id))
+        let qualified = item.hostID.map { HostCatalog.qualify($0, item.sessionId) }
+        return rekeys.resolve(qualified.flatMap { known.contains($0) ? $0 : nil } ?? item.sessionId)
+    }
+
     func sessionOptions(host: String?) async throws -> SessionCreationOptions {
         let (api, target) = try reach(host)
         return try await api.sessionOptions(host: target.remote)

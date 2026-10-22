@@ -1733,6 +1733,14 @@ struct SessionRequests: Decodable, Hashable {
     /// the settings' default, which a session can start in but not be set to.
     static let permissionModes = ["acceptEdits", "auto", "plan", "manual", "dontAsk", "bypassPermissions"]
 
+    // Bypass permissions and Don't ask stay menu-only, so a key press never lands a session there.
+    static let cyclingModes = ["manual", "acceptEdits", "plan", "auto"]
+
+    static func cycled(from mode: String) -> String {
+        guard let index = cyclingModes.firstIndex(of: mode) else { return mode == "" || mode == "default" ? "acceptEdits" : "manual" }
+        return cyclingModes[(index + 1) % cyclingModes.count]
+    }
+
     static func permissionModeLabel(_ mode: String) -> String {
         switch mode {
         case "": return "Default (Claude settings)"
@@ -1795,5 +1803,13 @@ enum MetadataLabels {
         guard let next, next != current else { return current ?? "Choose" }
         guard let current else { return "\(next) from next turn" }
         return "\(current) · \(next) from next turn"
+    }
+}
+
+enum QueueTakeBack {
+    /// Queued messages go back ahead of the draft, oldest first, as they would have been sent.
+    static func text(queued: [String], draft: String) -> String {
+        let parts = queued.filter { !$0.isEmpty } + (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : [draft])
+        return parts.joined(separator: "\n\n")
     }
 }

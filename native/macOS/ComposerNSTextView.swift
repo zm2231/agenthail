@@ -4,7 +4,9 @@ final class ComposerNSTextView: NSTextView {
     static let font = NSFont.systemFont(ofSize: DesktopType.prose)
 
     var placeholder = ""
-    var command: ((StoredShortcut) -> Selector?)?
+    var command: ((StoredShortcut) -> ComposerCommand?)?
+    var onCommand: ((ComposerCommand) -> Bool)?
+    var onUpFromFirstLine: (() -> Bool)?
     var onSubmit: (() -> Void)?
     var focusChanged: ((Bool) -> Void)?
     var pasteAttachments: ((PastedAttachments) -> Void)? {
@@ -104,9 +106,12 @@ final class ComposerNSTextView: NSTextView {
 
     private func perform(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown, !hasMarkedText(),
-              let selector = command?(StoredShortcut(keyCode: event.keyCode, modifiers: event.modifierFlags)) else { return false }
-        doCommand(by: selector)
-        return true
+              let command = command?(StoredShortcut(keyCode: event.keyCode, modifiers: event.modifierFlags)) else { return false }
+        if let selector = command.selector {
+            doCommand(by: selector)
+            return true
+        }
+        return onCommand?(command) ?? false
     }
 
     override func doCommand(by selector: Selector) {
@@ -119,6 +124,8 @@ final class ComposerNSTextView: NSTextView {
             } else {
                 onSubmit?()
             }
+        case #selector(moveUp(_:)):
+            if !(selectedRange().length == 0 && onFirstLine && onUpFromFirstLine?() == true) { super.doCommand(by: selector) }
         case #selector(insertLineBreak(_:)):
             insertNewlineIgnoringFieldEditor(nil)
         case #selector(insertTab(_:)):
@@ -130,6 +137,15 @@ final class ComposerNSTextView: NSTextView {
         default:
             super.doCommand(by: selector)
         }
+    }
+
+    var onFirstLine: Bool {
+        let caret = selectedRange().location
+        guard caret > 0 else { return true }
+        var actual = NSRange()
+        let start = firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: &actual)
+        let here = firstRect(forCharacterRange: NSRange(location: caret, length: 0), actualRange: &actual)
+        return abs(here.midY - start.midY) < 1
     }
 
     override func becomeFirstResponder() -> Bool {

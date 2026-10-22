@@ -4,6 +4,8 @@ struct TurnSettings: Codable, Equatable, Sendable {
     enum Mode: String, Codable, CaseIterable, Sendable {
         case `default`
         case plan
+
+        static func cycled(from mode: Mode?) -> Mode { mode == .plan ? .default : .plan }
     }
 
     var effort: String?

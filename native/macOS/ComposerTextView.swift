@@ -8,6 +8,8 @@ struct ComposerTextView: NSViewRepresentable {
     var accessibilityLabel: String? = nil
     var lines: ClosedRange<Int> = 2...10
     var onPaste: ((PastedAttachments) -> Void)? = nil
+    var onCommand: ((ComposerCommand) -> Bool)? = nil
+    var onUpFromFirstLine: (() -> Bool)? = nil
     let onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -19,7 +21,9 @@ struct ComposerTextView: NSViewRepresentable {
         textView.setAccessibilityPlaceholderValue(placeholder)
         textView.setAccessibilityLabel(accessibilityLabel ?? placeholder)
         textView.string = text
-        textView.command = { ComposerCommand.matching($0, in: .shared)?.selector }
+        textView.command = { ComposerCommand.matching($0, in: .shared) }
+        textView.onCommand = { [weak coordinator = context.coordinator] in coordinator?.parent.onCommand?($0) ?? false }
+        textView.onUpFromFirstLine = { [weak coordinator = context.coordinator] in coordinator?.parent.onUpFromFirstLine?() ?? false }
         textView.onSubmit = { [weak coordinator = context.coordinator] in coordinator?.parent.onSubmit() }
         textView.focusChanged = { [weak coordinator = context.coordinator] isFocused in
             coordinator?.focusChanged(isFocused)

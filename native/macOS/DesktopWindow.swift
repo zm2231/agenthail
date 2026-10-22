@@ -1533,6 +1533,8 @@ struct ComposerView: View {
     let session: SessionState
     @State private var focused = false
     @State private var dropTargeted = false
+    @State private var dismissedSlash: String?
+    @State private var modeChanged = false
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
     private var followUp: FollowUpAction { model.busyDelivery }
@@ -1597,7 +1599,7 @@ struct ComposerView: View {
                     .padding(.horizontal, 10)
                 }
                 VStack(spacing: 0) {
-                    ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", onPaste: pasteAttachments) { submit(alternate: false) }
+                    ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: takeBackQueued) { submit(alternate: false) }
                         .id(session.id)
                         .padding(.horizontal, 15)
                         .padding(.top, 13)
@@ -1617,6 +1619,20 @@ struct ComposerView: View {
                         }
                         if session.surface == "codex" {
                             TurnSettingsMenu(model: model, sessionID: session.id, detail: pane.detail)
+                        }
+                        if let mode = permissionMode {
+                            Button(action: cycleMode) {
+                                Text(SessionRequests.permissionModeLabel(mode))
+                                    .font(.system(size: DesktopType.meta, weight: .medium))
+                                    .foregroundStyle(mode == "" || mode == "manual" ? DesktopPalette.text2 : DesktopPalette.accentText)
+                                    .padding(.horizontal, 8)
+                                    .frame(height: 22)
+                                    .background(modeChanged ? DesktopPalette.accent.opacity(0.18) : .clear, in: Capsule())
+                                    .overlay(Capsule().strokeBorder(DesktopPalette.line))
+                            }
+                            .buttonStyle(.plain)
+                            .help(shortcuts.help("Change mode", .composerCycleMode))
+                            .accessibilityLabel("Mode, \(SessionRequests.permissionModeLabel(mode))")
                         }
                         if !session.sharedHolders.isEmpty {
                             HolderPicker(model: model, session: session)
@@ -1699,7 +1715,7 @@ struct ComposerView: View {
     }
     private var showsSteerNow: Bool { session.isWorking && canSteer && hasText && !draftIsCommand && resolvedAction(alternate: false) == .queue }
     private var slashSuggestions: [SlashCommandMenu.Suggestion] {
-        guard draft.attachments.isEmpty else { return [] }
+        guard draft.attachments.isEmpty, dismissedSlash != draft.text else { return [] }
         if let query = SlashCommand.modelQuery(for: draft.text), session.capabilities.model {
             let options = pane.detail?.models ?? []
             if options.contains(where: { $0.id == query }) { return [] }
@@ -1711,6 +1727,61 @@ struct ComposerView: View {
         return SlashCommand.suggestions(for: draft.text, available: available).map {
             SlashCommandMenu.Suggestion(id: $0.token, title: $0.token, detail: $0.summary, insertion: $0.token + ($0.needsArgument ? " " : ""))
         }
+    }
+
+    private var permissionMode: String? {
+        guard session.capabilities.permissionMode, !session.isReadOnly else { return nil }
+        return pane.requests?.permissionMode
+    }
+
+    private func perform(_ command: ComposerCommand) -> Bool {
+        switch command {
+        case .sendNow:
+            if hasText {
+                if session.isWorking && canSteer { pane.submit(busyDelivery: FollowUpAction.steer.rawValue) } else { submit(alternate: false) }
+            }
+            return true
+        case .cycleMode:
+            if permissionMode != nil || session.surface == "codex" {
+                cycleMode()
+                return true
+            }
+            return false
+        case .interrupt:
+            if !slashSuggestions.isEmpty {
+                dismissedSlash = draft.text
+                return true
+            }
+            if session.isWorking && session.capabilities.interrupt && !session.isReadOnly {
+                pane.interrupt()
+                return true
+            }
+            return false
+        case .newline, .deleteToLineStart, .deleteWordBackward, .paste:
+            return false
+        }
+    }
+
+    private func cycleMode() {
+        if let mode = permissionMode {
+            Task { await pane.setPermissionMode(SessionRequests.cycled(from: mode)) }
+        } else if session.surface == "codex" {
+            var settings = model.turnSettings(for: session.id)
+            settings.mode = TurnSettings.Mode.cycled(from: settings.mode)
+            model.setTurnSettings(settings, for: session.id)
+        }
+        withAnimation(.easeOut(duration: 0.15)) { modeChanged = true }
+        Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            withAnimation(.easeOut(duration: 0.4)) { modeChanged = false }
+        }
+    }
+
+    private func takeBackQueued() -> Bool {
+        let queued = model.queuedItems(for: session.id)
+        guard !queued.isEmpty else { return false }
+        model.takeBackQueued(queued, sessionID: session.id)
+        return true
     }
 
     private func chooseAttachments() {
@@ -1877,7 +1948,7 @@ struct QueueDock: View {
                             .disabled(true)
                         Button("Interrupt and send now") { model.perform(action: "interrupt", sessionID: item.sessionId) }
                         Divider()
-                        Button("Edit") { model.removeQueued(item, restoreToComposer: true) }
+                        Button("Edit") { model.takeBackQueued([item], sessionID: item.sessionId) }
                         Button("Copy text") {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(item.message, forType: .string)
