@@ -118,8 +118,13 @@ func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waitin
 	d.announcing[session.ID] = waiting.ID
 	d.announceMu.Unlock()
 	conversationID := session.ConversationID()
-	desktopMessage := elsewhereWaitingMessage(d.resolveDisplay(conversationID), waiting.Kind)
-	mobileMessage := elsewhereWaitingMessage(notificationSurfaceName(session.Surface), waiting.Kind)
+	restartable := false
+	if adapter, err := d.adapters().For(&session); err == nil {
+		lifecycle := surface.EffectiveCapabilities(adapter, &session).Lifecycle
+		restartable = lifecycle.Stop && lifecycle.Resume
+	}
+	desktopMessage := elsewhereWaitingMessage(d.resolveDisplay(conversationID), waiting, session.RuntimeKind, restartable)
+	mobileMessage := elsewhereWaitingMessage(notificationSurfaceName(session.Surface), waiting, session.RuntimeKind, restartable)
 	key := waitingNotificationKey(session.ID, waiting.ID)
 	sessionID, questionID := session.ID, waiting.ID
 	finished := func() {
@@ -206,18 +211,27 @@ func (d *Daemon) waitingRequest(ctx context.Context, session surface.Session, wa
 }
 
 // elsewhereWaitingMessage says what a session waits on when Agenthail
-// cannot read the prompt itself.
-func elsewhereWaitingMessage(name string, kind surface.WaitingKind) string {
-	switch kind {
-	case surface.WaitingQuestion:
-		return fmt.Sprintf("%s asks you a question", name)
-	case surface.WaitingInput:
-		return fmt.Sprintf("%s needs your input", name)
-	case surface.WaitingDialog:
-		return fmt.Sprintf("%s has a dialog open in its terminal", name)
-	default:
-		return fmt.Sprintf("%s needs your approval", name)
+// cannot read the prompt itself. A terminal session's prompt that Agenthail
+// does not hold is answered in its terminal; a hosted or background one has
+// nowhere to answer it, so stopping and resuming the session clears it.
+func elsewhereWaitingMessage(name string, waiting surface.Waiting, runtime surface.RuntimeKind, restartable bool) string {
+	asks := map[surface.WaitingKind]string{
+		surface.WaitingQuestion: "asks you a question",
+		surface.WaitingInput:    "needs your input",
+		surface.WaitingDialog:   "has a dialog open in its terminal",
+	}[waiting.Kind]
+	if asks == "" {
+		asks = "needs your approval"
 	}
+	if !waiting.Answerable && waiting.Kind != surface.WaitingDialog {
+		switch {
+		case restartable:
+			return fmt.Sprintf("%s is waiting on a prompt Agenthail can't reach. Stop and resume it to clear it", name)
+		case runtime == surface.RuntimeClaudeCLI:
+			return fmt.Sprintf("%s %s in its terminal", name, asks)
+		}
+	}
+	return fmt.Sprintf("%s %s", name, asks)
 }
 
 // waitingNotificationKey names one question's notifications within the 64

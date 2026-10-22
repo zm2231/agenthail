@@ -56,18 +56,35 @@ struct SessionPreview: View {
     /// The question a waiting preview session asks in its terminal.
     nonisolated static let previewWaiting: [String: String] = ["kind": "question", "id": "preview-question"]
 
+    /// With --preview-unreachable the session runs in the host and waits on an
+    /// approval Agenthail does not hold, and another session is stopped by a
+    /// usage limit.
+    nonisolated static var previewUnreachable: [String: Any] { ["kind": "approval", "id": "preview-approval", "answerable": false] }
+    nonisolated static let previewHostedLifecycle: [String: Bool] = ["status": true, "logs": true, "stop": true, "resume": true]
+    nonisolated static let previewUsageLimit: [String: String] = ["resetsAt": "2026-09-12T18:20:00Z"]
+
     /// With --preview-waiting the detail reports the question too; with
     /// --preview-waiting-catalog-only only the catalog does. With
     /// --preview-claude-goal the session reports a blocked goal it sets and
     /// clears but cannot pause or budget.
     nonisolated static var previewDetailJSON: String {
         let arguments = ProcessInfo.processInfo.arguments
-        guard arguments.contains("--preview-waiting") || arguments.contains("--preview-claude-goal") else { return basePreviewDetailJSON }
+        guard arguments.contains("--preview-waiting") || arguments.contains("--preview-claude-goal") || arguments.contains("--preview-unreachable") else { return basePreviewDetailJSON }
         var detail = try! JSONSerialization.jsonObject(with: Data(basePreviewDetailJSON.utf8)) as! [String: Any]
         if arguments.contains("--preview-waiting") {
             var session = detail["session"] as! [String: Any]
             session["waitingOn"] = previewWaiting
             detail["session"] = session
+        }
+        if arguments.contains("--preview-unreachable") {
+            var session = detail["session"] as! [String: Any]
+            session["waitingOn"] = previewUnreachable
+            session["runtimeKind"] = "claude-host"
+            detail["session"] = session
+            var capabilities = detail["capabilities"] as! [String: Any]
+            capabilities["respond"] = true
+            capabilities["lifecycle"] = previewHostedLifecycle
+            detail["capabilities"] = capabilities
         }
         if arguments.contains("--preview-claude-goal") {
             var capabilities = detail["capabilities"] as! [String: Any]
@@ -118,6 +135,18 @@ struct SessionPreview: View {
             waitingSessions[0]["waitingOn"] = previewWaiting
             waitingSessions[0]["runtime"] = ["launcher": "cmux", "focusable": true]
             snapshot["sessions"] = waitingSessions
+        }
+        if ProcessInfo.processInfo.arguments.contains("--preview-unreachable") {
+            var limited = snapshot["sessions"] as! [[String: Any]]
+            limited[0]["waitingOn"] = previewUnreachable
+            limited[0]["runtimeKind"] = "claude-host"
+            var hostedCapabilities: [String: Any] = capabilities
+            hostedCapabilities["respond"] = true
+            hostedCapabilities["lifecycle"] = previewHostedLifecycle
+            limited[0]["capabilities"] = hostedCapabilities
+            limited[4]["usageLimit"] = previewUsageLimit
+            limited[4]["status"] = "idle"
+            snapshot["sessions"] = limited
         }
         if ProcessInfo.processInfo.arguments.contains("--preview-attention") {
             snapshot["attention"] = [["id": 1, "sessionId": "codex-demo", "target": "Review the release pipeline", "queueId": 2, "reason": "Delivery outcome could not be confirmed", "requestedAction": "review", "createdAt": "2026-09-11T18:20:00Z"]]

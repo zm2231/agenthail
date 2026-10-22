@@ -137,7 +137,7 @@ struct SessionTree: Equatable {
     }
 
     /// Sessions that need the person: anything waiting on an answer first,
-    /// then delivery decisions, newest first within each.
+    /// then delivery decisions, then usage limits, newest first within each.
     static func needsYou(_ sessions: [SessionState], attention: [String: SessionAttention]) -> [SessionState] {
         let flagged = sessions.compactMap { session in attention[session.id].map { (session: session, kind: $0.kind) } }
         return SessionAttention.Kind.allCases.flatMap { kind in
@@ -219,6 +219,8 @@ struct SessionAttention: Equatable {
         case incoming
         /// Messages this session sent were not delivered.
         case outgoing
+        /// A usage limit refused the session's last turn.
+        case usageLimit
     }
 
     let kind: Kind
@@ -248,8 +250,11 @@ struct SessionAttention: Equatable {
             result[id] = SessionAttention(kind: .incoming, reason: reason)
         }
         for session in live.values {
-            guard let waiting = session.waitingOn else { continue }
-            result[session.id] = SessionAttention(kind: .request, reason: requestReason(waiting.kind))
+            if let waiting = session.waitingOn {
+                result[session.id] = SessionAttention(kind: .request, reason: requestReason(waiting.kind, place: session.waitingPlace ?? .elsewhere))
+            } else if let limit = session.usageLimit, result[session.id] == nil {
+                result[session.id] = SessionAttention(kind: .usageLimit, reason: limit.label)
+            }
         }
         return result
     }
@@ -258,7 +263,12 @@ struct SessionAttention: Equatable {
         session.archived != true && !session.isUnavailable && !["unknown", "notLoaded"].contains(session.status)
     }
 
-    static func requestReason(_ kind: String) -> String {
+    static func requestReason(_ kind: String, place: WaitingPlace = .elsewhere) -> String {
+        switch place {
+        case .terminal: return "Waiting in its terminal"
+        case .restart: return "Waiting on a prompt Agenthail can't reach. Stop and resume to clear it"
+        default: break
+        }
         switch kind {
         case "question": return "Asks you a question"
         case "input": return "Needs your input"

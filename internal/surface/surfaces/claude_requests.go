@@ -20,7 +20,7 @@ func (c *Claude) hostWaiting(ctx context.Context, sess *surface.Session) *surfac
 		return nil
 	}
 	oldest := listed.Requests[0]
-	return &surface.Waiting{Kind: claudeRequestKind(oldest.Kind), ID: oldest.RequestID, Since: oldest.CreatedAt.UTC()}
+	return &surface.Waiting{Kind: claudeRequestKind(oldest.Kind), ID: oldest.RequestID, Since: oldest.CreatedAt.UTC(), Answerable: true}
 }
 
 // Requests lists the open requests of a session the host runs, oldest first,
