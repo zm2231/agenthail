@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -465,5 +466,72 @@ func TestAHostCatalogRowKeepsItsUsageLimit(t *testing.T) {
 	want := &surface.UsageLimit{ResetsAt: time.Date(2026, 10, 22, 18, 20, 0, 0, time.UTC)}
 	if err != nil || !surface.SameUsageLimit(stored.UsageLimit, want) || stored.WaitingOn == nil || !stored.WaitingOn.Answerable {
 		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+}
+
+func recordCatalogProjection(t *testing.T, r *Registry, id, name string) (CatalogEvent, bool) {
+	t.Helper()
+	projection := fmt.Sprintf(`{"id":%q,"surface":"codex","name":%q,"cwd":"/work","status":"idle"}`, id, name)
+	event, created, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: name, Cwd: "/work"}, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "session.upserted:" + id, Type: "session.upserted", EntityID: id, Payload: []byte(`{"session":` + projection + `}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return event, created
+}
+
+func catalogGeneration(t *testing.T, r *Registry, id string) int64 {
+	t.Helper()
+	var generation int64
+	if err := r.db.QueryRow(`SELECT projection_generation FROM catalog_sessions WHERE session_id=?`, id).Scan(&generation); err != nil {
+		t.Fatal(err)
+	}
+	return generation
+}
+
+func TestARecreatedCatalogRowTakesANewGenerationAndPublishesItsProjection(t *testing.T) {
+	r := openTestRegistry(t)
+	if _, created := recordCatalogProjection(t, r, "s", "First"); !created {
+		t.Fatal("the first projection was not published")
+	}
+	recordCatalogProjection(t, r, "other", "Other")
+	first := catalogGeneration(t, r, "s")
+	if _, err := r.db.Exec(`DELETE FROM catalog_sessions WHERE session_id='s'`); err != nil {
+		t.Fatal(err)
+	}
+	event, created := recordCatalogProjection(t, r, "s", "Second")
+	if !created || !strings.Contains(string(event.Payload), `"Second"`) {
+		t.Fatalf("the re-created row's projection was not published: created=%v event=%s", created, event.Payload)
+	}
+	if again := catalogGeneration(t, r, "s"); again <= first || again == catalogGeneration(t, r, "other") {
+		t.Fatalf("generation %d after %d, other at %d: a generation must never repeat", again, first, catalogGeneration(t, r, "other"))
+	}
+}
+
+func TestOpenStartsTheProjectionClockAboveEveryStoredGeneration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordCatalogProjection(t, r, "s", "First")
+	recordCatalogProjection(t, r, "s", "Second")
+	recordCatalogProjection(t, r, "s", "Third")
+	stored := catalogGeneration(t, r, "s")
+	for _, statement := range []string{`ALTER TABLE catalog_state DROP COLUMN projection_clock`} {
+		if _, err := r.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	recordCatalogProjection(t, r, "t", "New")
+	if got := catalogGeneration(t, r, "t"); got <= stored {
+		t.Fatalf("a new projection took generation %d at or below the stored %d", got, stored)
 	}
 }

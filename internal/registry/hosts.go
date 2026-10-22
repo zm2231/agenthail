@@ -402,7 +402,10 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 		}
 		return CatalogEvent{}, false, tx.Commit()
 	}
-	generation := prior.generation + 1
+	generation, err := nextProjectionGenerationTx(tx)
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
 	observedAt := row.ObservedAt.UTC()
 	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,host_queue_count,waiting_on,background_tasks,usage_limit)
 		VALUES(?,?,?,?,?,?,?,0,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,checkout=excluded.checkout,
@@ -481,7 +484,10 @@ func (r *Registry) RefreshHostQueueCounts() (int, error) {
 		if entityID == "" {
 			continue
 		}
-		generation := row.generation + 1
+		generation, err := nextProjectionGenerationTx(tx)
+		if err != nil {
+			return 0, err
+		}
 		if _, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=?,projection_generation=? WHERE session_id=?`, string(encoded), generation, row.id); err != nil {
 			return 0, err
 		}

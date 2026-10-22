@@ -211,7 +211,9 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 		return CatalogEvent{}, false, tx.Commit()
 	}
 	if changed {
-		priorGeneration++
+		if priorGeneration, err = nextProjectionGenerationTx(tx); err != nil {
+			return CatalogEvent{}, false, err
+		}
 	}
 	if err := registerSessionTx(tx, state.Session); err != nil {
 		return CatalogEvent{}, false, err
@@ -405,7 +407,10 @@ func (r *Registry) MarkCatalogDiscoveryFailure(kind surface.SurfaceKind, reason 
 	}
 	events := make([]CatalogEvent, 0, len(failed))
 	for _, row := range failed {
-		generation := row.generation + 1
+		generation, err := nextProjectionGenerationTx(tx)
+		if err != nil {
+			return nil, err
+		}
 		if _, err := tx.Exec(`UPDATE catalog_sessions SET discovery_failures=1,projection_generation=? WHERE session_id=?`, generation, row.id); err != nil {
 			return nil, err
 		}
@@ -473,7 +478,9 @@ func (r *Registry) UpdateCatalogSessionProjection(sessionID, priorFingerprint, n
 	if err != nil {
 		return CatalogEvent{}, false, fmt.Errorf("parse catalog observation: %w", err)
 	}
-	generation++
+	if generation, err = nextProjectionGenerationTx(tx); err != nil {
+		return CatalogEvent{}, false, err
+	}
 	if _, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=?,projection_generation=? WHERE session_id=?`, nextFingerprint, generation, sessionID); err != nil {
 		return CatalogEvent{}, false, err
 	}
@@ -634,7 +641,9 @@ func (r *Registry) retireUnobservedSessionTx(tx *sql.Tx, sessionID string, now t
 	if err != nil {
 		return CatalogEvent{}, false, fmt.Errorf("parse catalog observation: %w", err)
 	}
-	generation++
+	if generation, err = nextProjectionGenerationTx(tx); err != nil {
+		return CatalogEvent{}, false, err
+	}
 	if _, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=?,projection_generation=?,waiting_on=?,background_tasks=?,usage_limit=? WHERE session_id=?`, string(next), generation, []byte{}, []byte{}, []byte{}, sessionID); err != nil {
 		return CatalogEvent{}, false, err
 	}
