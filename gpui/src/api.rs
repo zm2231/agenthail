@@ -25,7 +25,10 @@ impl Api {
     pub fn from_env() -> Result<Self> {
         let base = std::env::var("AGENTHAIL_API_URL").context("AGENTHAIL_API_URL is not set")?;
         let token = std::env::var("AGENTHAIL_API_TOKEN").context("AGENTHAIL_API_TOKEN is not set")?;
-        let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(5)).build();
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(5))
+            .max_idle_connections(0)
+            .build();
         Ok(Self { base: base.trim_end_matches('/').to_string(), token, agent })
     }
 

@@ -28,6 +28,7 @@ pub struct AppView {
     pane: Option<Entity<SessionPane>>,
     error: Option<String>,
     focus: gpui::FocusHandle,
+    native: Option<crate::native::Native>,
     _tasks: Vec<gpui::Task<()>>,
 }
 
@@ -50,6 +51,19 @@ impl AppView {
             });
         })
         .detach();
+        let native = crate::native::Native::install().map(|(native, hotkeys)| {
+            cx.spawn_in(window, async move |_, cx| {
+                while hotkeys.recv().await.is_ok() {
+                    probe::record("hotkey", "pressed");
+                    let _ = cx.update(|window, cx| {
+                        cx.activate(true);
+                        window.activate_window();
+                    });
+                }
+            })
+            .detach();
+            native
+        });
         let mut this = Self {
             api,
             sessions: Vec::new(),
@@ -59,9 +73,20 @@ impl AppView {
             pane: None,
             error: None,
             focus: cx.focus_handle(),
+            native,
             _tasks: Vec::new(),
         };
         this.load_snapshot(cx);
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(3)).await;
+            let _ = this.update(cx, |this, cx| {
+                let needs = this.sessions.iter().filter(|s| this.needs_you(s)).count();
+                if let Some(native) = this.native.as_mut() {
+                    native.refresh(needs);
+                }
+            });
+        })
+        .detach();
         this
     }
 
@@ -347,6 +372,10 @@ fn sync_theme(window: &mut Window, cx: &mut gpui::App) {
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = Palette::for_appearance(window.appearance());
+        let needs = self.sessions.iter().filter(|s| self.needs_you(s)).count();
+        if let Some(native) = self.native.as_mut() {
+            native.set_needs(needs);
+        }
         let detail: AnyElement = match (&self.pane, &self.error) {
             (Some(pane), _) => pane.clone().into_any_element(),
             (None, Some(error)) => div().p(px(space::XL)).text_color(palette.failed).child(error.clone()).into_any_element(),

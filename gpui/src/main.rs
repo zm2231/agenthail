@@ -1,6 +1,7 @@
 mod api;
 mod app;
 mod model;
+mod native;
 mod palette;
 mod pane;
 mod probe;
