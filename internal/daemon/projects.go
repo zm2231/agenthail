@@ -339,6 +339,16 @@ func (d *Daemon) coordinatorHostRef(hostID string) dashboardHost {
 	return dashboardHost{ID: hostID, Name: hostID, State: hostStateUnreachable}
 }
 
+// requestObservation runs the observer pass now instead of at its next tick,
+// so a session that just went idle receives its queued messages and its
+// completion is published without waiting out the poll interval.
+func (d *Daemon) requestObservation() {
+	select {
+	case d.observerNudge <- struct{}{}:
+	default:
+	}
+}
+
 func (d *Daemon) requestCatalogDiscovery() {
 	select {
 	case d.catalogNudge <- struct{}{}:
