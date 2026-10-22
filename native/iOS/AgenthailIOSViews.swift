@@ -51,7 +51,7 @@ struct PairingScreen: View {
                 .frame(width: 112, height: 112)
                 VStack(spacing: 8) {
                     Text("Connect to your agents").font(.largeTitle.bold()).multilineTextAlignment(.center)
-                    Text("On a computer running Agenthail, run agenthail devices pair, or open Settings > Devices in its web dashboard or Mac app, and show a pairing code.")
+                    Text("On a computer running Agenthail, run agenthail devices pair, or open Settings in its web dashboard or Mac app, and show a pairing code.")
                         .foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
                 .padding(.horizontal)

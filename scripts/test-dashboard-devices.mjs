@@ -68,6 +68,29 @@ await reply(200, { id: "pairing-2", state: "expired" });
 assert(node("#device-pairing").innerHTML.includes("expired"), "an expired code says so");
 
 context.startDevicePairing();
+context.startDevicePairing();
+await reply(201, { id: "pairing-3", pairingURL: "agenthail://pair?x", expiresAt: "2026-10-22T10:05:00Z", qr: "data:image/png;base64,AAAA" });
+await settle();
+const stillPolling = pending.shift();
+assert.equal(stillPolling?.url, "/api/v1/pairings?id=pairing-3", "a second click while the code is made asks for no second code");
+assert.equal(pending.length, 0, "only one code is made and watched");
+context.cancelDevicePairing();
+assert(node("#device-pairing").innerHTML.includes("data-device-pair"), "cancel puts the pair button back");
+stillPolling.resolve({ ok: true, status: 200, text: async () => JSON.stringify({ id: "pairing-3", state: "pending" }) });
+await settle();
+await settle();
+assert.equal(pending.length, 0, "a canceled code is not watched any more");
+
+context.startDevicePairing();
+await reply(201, { id: "pairing-4", pairingURL: "agenthail://pair?x", expiresAt: "2000-01-01T00:00:00Z", qr: "data:image/png;base64,AAAA" });
+await settle();
+pending.shift().resolve({ ok: false, status: 502, text: async () => JSON.stringify({ error: { message: "unreachable" } }) });
+await settle();
+await settle();
+assert(node("#device-pairing").innerHTML.includes("expired"), "a code past its expiry stops waiting when the daemon cannot be reached");
+pending.splice(0);
+
+context.startDevicePairing();
 await reply(409, { error: { code: "remote_access_required", message: "Turn on remote access before pairing: run agenthail dashboard remote." } });
 assert(node("#device-pairing").innerHTML.includes("agenthail dashboard remote"), "the reason a code cannot be made is shown");
 

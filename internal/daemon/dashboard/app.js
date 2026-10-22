@@ -1006,6 +1006,8 @@ function renderDevices() {
   ).join("") || '<div class="empty-card">No iPhone is paired with this computer.</div>';
 }
 async function startDevicePairing() {
+  if (app.devicePairingStarting || app.devicePairing) return;
+  app.devicePairingStarting = true;
   app.devicePairingError = "";
   try {
     const pairing = await signinRequest("/api/v1/pairings", { method: "POST", body: JSON.stringify({ name: "", scopes: ["read", "control"], qr: true }) });
@@ -1015,7 +1017,18 @@ async function startDevicePairing() {
   } catch (error) {
     app.devicePairingError = error.message;
     renderDevices();
+  } finally {
+    app.devicePairingStarting = false;
   }
+}
+function cancelDevicePairing() {
+  app.devicePairing = null;
+  renderDevices();
+}
+function expireDevicePairing() {
+  app.devicePairing = null;
+  app.devicePairingError = "The pairing code expired. Pair again to show a new one.";
+  renderDevices();
 }
 async function watchDevicePairing(id) {
   while (app.devicePairing?.id === id) {
@@ -1025,6 +1038,7 @@ async function watchDevicePairing(id) {
     try {
       status = await signinRequest(`/api/v1/pairings?id=${encodeURIComponent(id)}`);
     } catch {
+      if (app.devicePairing?.id === id && Date.now() >= new Date(app.devicePairing.expiresAt).getTime()) expireDevicePairing();
       continue;
     }
     if (app.devicePairing?.id !== id) return;
@@ -1035,9 +1049,7 @@ async function watchDevicePairing(id) {
       return;
     }
     if (status.state === "expired") {
-      app.devicePairing = null;
-      app.devicePairingError = "The pairing code expired. Pair again to show a new one.";
-      renderDevices();
+      expireDevicePairing();
       return;
     }
   }
@@ -2877,8 +2889,7 @@ $("#devices-card").addEventListener("click", (event) => {
     return;
   }
   if (event.target.closest("[data-device-pair-cancel]")) {
-    app.devicePairing = null;
-    renderDevices();
+    cancelDevicePairing();
     return;
   }
   const remove = event.target.closest("[data-device-remove]");

@@ -206,3 +206,23 @@ func TestTerminalQRPaintsItsOwnColorsOnlyOnATerminal(t *testing.T) {
 		t.Fatalf("painted=%q", painted)
 	}
 }
+
+func TestDevicesPairSaysWhatToDoWhenItCannotShowACode(t *testing.T) {
+	app, _ := devicesFixture(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":{"code":"remote_access_required","message":"Turn on remote access before pairing: run agenthail dashboard remote."}}`))
+	}))
+	t.Cleanup(server.Close)
+	app.daemonAPIOverride = func() (*daemonAPIClient, error) {
+		return &daemonAPIClient{baseURL: server.URL, token: "dashboard-synthetic", httpClient: server.Client()}, nil
+	}
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"devices", "pair"}) }); err == nil || !strings.Contains(err.Error(), "agenthail dashboard remote") {
+		t.Fatalf("remote access off: err=%v", err)
+	}
+	app.catalogDaemonRunning = func() bool { return false }
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"devices", "pair"}) }); err == nil || !strings.Contains(err.Error(), "agenthail daemon start") {
+		t.Fatalf("daemon stopped: err=%v", err)
+	}
+}
