@@ -517,11 +517,11 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     /// Stops a session and resumes it, which clears a prompt nothing shows.
     func stopAndResume(_ sessionID: String) {
-        guard let api else { return }
+        guard case let (api, route)? = try? resolve(sessionID) else { return }
         Task {
             do {
-                try await api.action("session-lifecycle-stop", sessionID: sessionID)
-                try await api.action("session-lifecycle-resume", sessionID: sessionID)
+                try await api.action("session-lifecycle-stop", sessionID: route.sessionID)
+                try await api.action("session-lifecycle-resume", sessionID: route.sessionID)
                 operationError = nil
             } catch {
                 operationError = error.localizedDescription

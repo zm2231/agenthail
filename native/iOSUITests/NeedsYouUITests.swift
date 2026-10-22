@@ -28,7 +28,7 @@ final class NeedsYouUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-app", "--preview-unreachable"]
         app.launch()
-        let stranded = app.buttons["needs-you-demo"]
+        let stranded = app.buttons["needs-you-computer::demo"]
         let limited = app.buttons["needs-you-h0123456789ab::remote-demo-2"]
         XCTAssertTrue(stranded.waitForExistence(timeout: 10))
         XCTAssertTrue(limited.exists)
