@@ -566,7 +566,7 @@ func resolveCatalogCheckout(ctx context.Context, checkout *catalogCheckout) stri
 	} else {
 		return "repository head is unavailable"
 	}
-	porcelain, err := catalogGit(ctx, root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	porcelain, err := catalogGit(ctx, root, "status", "--porcelain=v1", "-z", "--untracked-files=normal")
 	if err != nil {
 		return "repository status is unavailable"
 	}

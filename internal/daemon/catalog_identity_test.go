@@ -338,3 +338,19 @@ func TestAWorkspaceWhoseGitFailsIsNotReadAgainBeforeItExpires(t *testing.T) {
 		t.Fatalf("failed workspace read again: %d git calls", calls()-before)
 	}
 }
+
+func TestAnUntrackedFileInANewFolderMakesTheCheckoutDirty(t *testing.T) {
+	repo := catalogTestRepo(t)
+	if clean := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, time.Now(), noStoredProject); clean.Checkout.Dirty {
+		t.Fatalf("clean checkout reads dirty: %+v", clean.Checkout)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "notes", "drafts"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "notes", "drafts", "idea.md"), []byte("idea\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if dirty := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, time.Now(), noStoredProject); !dirty.Checkout.Dirty {
+		t.Fatalf("untracked file did not make the checkout dirty: %+v", dirty.Checkout)
+	}
+}
