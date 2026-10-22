@@ -1348,6 +1348,7 @@ struct SigninConsumerState: Codable, Identifiable, Equatable {
     let profile: String?
     let profileName: String?
     let problem: String?
+    let unavailable: String?
 
     var choice: String {
         switch mode {

@@ -2989,14 +2989,15 @@ func (a *App) cmdDoctor(args []string) error {
 	}
 	ctx := context.Background()
 	type doctorResult struct {
-		Surface      string                 `json:"surface"`
-		Capabilities []string               `json:"capabilities"`
-		Sessions     int                    `json:"sessions"`
-		WritePath    string                 `json:"writePath"`
-		OK           bool                   `json:"ok"`
-		Error        string                 `json:"error,omitempty"`
-		SigninOff    string                 `json:"signinOff,omitempty"`
-		Runtime      *surface.RuntimeStatus `json:"runtime,omitempty"`
+		Surface           string                 `json:"surface"`
+		Capabilities      []string               `json:"capabilities"`
+		Sessions          int                    `json:"sessions"`
+		WritePath         string                 `json:"writePath"`
+		OK                bool                   `json:"ok"`
+		Error             string                 `json:"error,omitempty"`
+		SigninOff         string                 `json:"signinOff,omitempty"`
+		SigninUnavailable string                 `json:"signinUnavailable,omitempty"`
+		Runtime           *surface.RuntimeStatus `json:"runtime,omitempty"`
 	}
 	var results []doctorResult
 	failures := 0
@@ -3039,9 +3040,13 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		var sessions []surface.Session
 		var err error
-		signinOff := ""
+		signinOff, signinUnavailable := "", ""
 		if signin.IsOff(healthErr) {
 			signinOff = healthErr.Error()
+			healthErr = nil
+		}
+		if signin.IsUnavailable(healthErr) {
+			signinUnavailable = healthErr.Error()
 			healthErr = nil
 		}
 		if healthErr == nil {
@@ -3053,7 +3058,11 @@ func (a *App) cmdDoctor(args []string) error {
 			signinOff = err.Error()
 			err = nil
 		}
-		result := doctorResult{Surface: e.Name, Capabilities: enabled, Sessions: len(sessions), WritePath: "checked immediately before delivery", OK: err == nil, SigninOff: signinOff}
+		if signin.IsUnavailable(err) {
+			signinUnavailable = err.Error()
+			err = nil
+		}
+		result := doctorResult{Surface: e.Name, Capabilities: enabled, Sessions: len(sessions), WritePath: "checked immediately before delivery", OK: err == nil, SigninOff: signinOff, SigninUnavailable: signinUnavailable}
 		if provider, ok := e.Surface.(surface.RuntimeStatusProvider); ok {
 			runtimeStatus := provider.RuntimeStatus(ctx)
 			if runtimeStatus.Name != "" {
@@ -3180,6 +3189,9 @@ func (a *App) cmdDoctor(args []string) error {
 			if status.Problem != "" {
 				fmt.Printf("  problem: %s\n", status.Problem)
 			}
+			if status.Unavailable != "" {
+				fmt.Printf("  unavailable: %s\n", status.Unavailable)
+			}
 			fmt.Printf("  change: agenthail signin use %s <profile|auto|none>, or Settings > Browser Sign-in\n", status.ID)
 		}
 		for _, result := range results {
@@ -3211,6 +3223,9 @@ func (a *App) cmdDoctor(args []string) error {
 			}
 			if result.SigninOff != "" {
 				fmt.Printf("  sign-in off: %s\n", result.SigninOff)
+			}
+			if result.SigninUnavailable != "" {
+				fmt.Printf("  sign-in unavailable: %s\n", result.SigninUnavailable)
 			}
 			if result.OK {
 				fmt.Printf("  sessions: %d\n", result.Sessions)

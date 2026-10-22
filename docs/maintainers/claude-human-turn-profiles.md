@@ -87,8 +87,12 @@ for Remote Control) is automatic, pinned to one profile through
 `signin_bindings`, or off through `signin_off`. Automatic means the system
 default browser (the LaunchServices https handler on macOS, Safari when none is
 set; `xdg-settings get default-web-browser` on Linux) and the profile that
-browser last used ([`default.go`](../../internal/signin/default.go)). Choices
-and selectors are stored; cookies are not. Removing a pinned profile returns
+browser last used ([`default.go`](../../internal/signin/default.go)). A
+computer with no default browser, such as a Linux server with no desktop, is a
+limit rather than a problem: an automatic consumer reports it as
+`unavailable` (`signin_unavailable` in surface health) with the
+`agenthail signin use` remedy, and reads no cookies until a profile is pinned.
+Choices and selectors are stored; cookies are not. Removing a pinned profile returns
 its consumers to automatic. There is no process-wide profile and no
 environment override.
 

@@ -50,6 +50,10 @@ func launchServicesPlist(home string) string {
 	return filepath.Join(home, "Library", "Preferences", "com.apple.LaunchServices", "com.apple.launchservices.secure.plist")
 }
 
+// ErrNoDefaultBrowser is a computer with no default browser, such as a Linux
+// server without a desktop, where xdg-settings is missing or names none.
+var ErrNoDefaultBrowser = errors.New("this computer has no default browser")
+
 // DefaultBrowser is the LaunchServices https handler on macOS, which is
 // Safari until the user picks another, and xdg-settings' default-web-browser
 // on Linux. The raw identifier names an unsupported browser.
@@ -71,10 +75,7 @@ func DefaultBrowser(home string) (Browser, string, error) {
 	case "linux":
 		entry, err := xdgDefaultBrowser()
 		if err != nil || entry == "" {
-			if err == nil {
-				err = errors.New("no default browser is set")
-			}
-			return "", "", fmt.Errorf("could not read the default browser with `xdg-settings get default-web-browser`: %v", err)
+			return "", "", ErrNoDefaultBrowser
 		}
 		browser, ok := linuxBrowsers[strings.TrimSuffix(entry, ".desktop")]
 		if !ok {

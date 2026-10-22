@@ -1009,6 +1009,11 @@ func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Sur
 		entry.HealthDetail = listErr.Error()
 		return entry
 	}
+	if signin.IsUnavailable(listErr) {
+		entry.Health = "signin_unavailable"
+		entry.HealthDetail = listErr.Error()
+		return entry
+	}
 	if listErr != nil {
 		entry.Error = listErr.Error()
 		entry.Health = "unavailable"
@@ -1017,7 +1022,10 @@ func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Sur
 	healthCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if checker, ok := adapter.(surface.HealthChecker); ok {
-		if err := checker.Health(healthCtx); err != nil {
+		if err := checker.Health(healthCtx); signin.IsUnavailable(err) {
+			entry.Health = "signin_unavailable"
+			entry.HealthDetail = err.Error()
+		} else if err != nil {
 			if entry.Connected {
 				entry.Health = "degraded"
 			}

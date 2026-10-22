@@ -5,6 +5,7 @@ struct SurfaceOverview: Identifiable, Equatable {
         case healthy
         case degraded
         case signinOff
+        case signinUnavailable
         case unavailable
     }
 
@@ -26,6 +27,7 @@ struct SurfaceOverview: Identifiable, Equatable {
         case .healthy: return "Healthy"
         case .degraded: return "Needs attention"
         case .signinOff: return "Sign-in off"
+        case .signinUnavailable: return "No browser here"
         case .unavailable: return "Unavailable"
         }
     }
@@ -53,6 +55,7 @@ struct SurfaceOverview: Identifiable, Equatable {
         case "healthy": return .healthy
         case "degraded": return .degraded
         case "signin_off": return .signinOff
+        case "signin_unavailable": return .signinUnavailable
         default: return .unavailable
         }
     }
@@ -63,6 +66,9 @@ struct SurfaceOverview: Identifiable, Equatable {
             let claude = raw.hasPrefix("Claude Remote Control")
             let consumer = claude ? "Claude sessions reached over Remote Control read" : "Notion reads"
             return "Browser sign-in is off, so \(consumer) no cookies. Turn it on in Settings > Browser Sign-in, or run agenthail signin use \(claude ? "claude" : "notion") auto."
+        }
+        if surface.health == "signin_unavailable" {
+            return raw.range(of: ": ").map { String(raw[$0.upperBound...]) } ?? raw
         }
         if raw.range(of: "cookie bridge", options: .caseInsensitive) != nil {
             return "Claude Code needs to reconnect to your signed-in account."

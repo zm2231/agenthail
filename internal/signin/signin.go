@@ -175,6 +175,9 @@ type Status struct {
 	Profile      string  `json:"profile,omitempty"`
 	ProfileName  string  `json:"profileName,omitempty"`
 	Problem      string  `json:"problem,omitempty"`
+	// Unavailable says why browser sign-in cannot work on this computer at
+	// all, as a limit of the computer rather than a problem to fix.
+	Unavailable string `json:"unavailable,omitempty"`
 }
 
 func NewStatus(consumer ConsumerInfo, selection Selection, err error) Status {
@@ -184,8 +187,11 @@ func NewStatus(consumer ConsumerInfo, selection Selection, err error) Status {
 		status.ProfileID = &id
 	}
 	var problem ProblemError
+	var unavailable UnavailableError
 	switch {
 	case err == nil || IsOff(err):
+	case errors.As(err, &unavailable):
+		status.Unavailable = unavailable.Reason()
 	case errors.As(err, &problem):
 		status.Problem = problem.Err.Error()
 	default:
@@ -210,6 +216,26 @@ func (e OffError) Error() string {
 
 func IsOff(err error) bool {
 	var target OffError
+	return errors.As(err, &target)
+}
+
+// UnavailableError is a consumer left on the system default browser on a
+// computer that has none, so it reads no cookies here until a profile is
+// pinned.
+type UnavailableError struct {
+	Consumer Consumer
+}
+
+func (e UnavailableError) Reason() string {
+	return fmt.Sprintf("No browser on this computer, so %s sign-in is unavailable here. If a browser is installed, pin one of its profiles with `agenthail signin use %s <profile>` (see `agenthail signin list`).", e.Consumer.Label(), e.Consumer)
+}
+
+func (e UnavailableError) Error() string {
+	return fmt.Sprintf("%s: %s", e.Consumer.Label(), e.Reason())
+}
+
+func IsUnavailable(err error) bool {
+	var target UnavailableError
 	return errors.As(err, &target)
 }
 
@@ -294,7 +320,9 @@ func Select(home string, consumer Consumer, choice Choice) (Selection, Source, e
 		selection.ProfileID = profile.ID
 	case Automatic:
 		var err error
-		if profile, err = DefaultProfile(home); err != nil {
+		if profile, err = DefaultProfile(home); errors.Is(err, ErrNoDefaultBrowser) {
+			return selection, Source{}, UnavailableError{Consumer: consumer}
+		} else if err != nil {
 			selection.Browser, selection.BrowserLabel = profile.Browser, profile.Browser.Label()
 			return selection, Source{}, ProblemError{Consumer: consumer, Err: err}
 		}

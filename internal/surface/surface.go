@@ -439,6 +439,7 @@ const (
 	DeliveryOwnershipConflict    DeliveryTerminalKind = "ownership_conflict"
 	DeliverySigninOff            DeliveryTerminalKind = "signin_off"
 	DeliverySigninUnreadable     DeliveryTerminalKind = "signin_unreadable"
+	DeliverySigninUnavailable    DeliveryTerminalKind = "signin_unavailable"
 )
 
 type DeliveryTerminalError struct {
@@ -469,6 +470,8 @@ func deliveryTerminalLabel(kind DeliveryTerminalKind) string {
 		return "browser sign-in turned off"
 	case DeliverySigninUnreadable:
 		return "browser sign-in unreadable"
+	case DeliverySigninUnavailable:
+		return "no browser on this computer"
 	default:
 		return "delivery rejected"
 	}
