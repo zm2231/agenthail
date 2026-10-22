@@ -5,6 +5,7 @@ These notes cover Agenthail's implementation, packaging, release automation, and
 - [Packaging and releases](../packaging.md)
 - [Self-hosted CI runners](self-hosted-ci.md)
 - [Linux daemon: systemd service, updates and doctor](linux-daemon.md)
+- [Daemon runtime profiles: capturing heap, allocs and goroutines](debug-profiles.md)
 - [Claude session host](claude-host.md)
 - [Claude goals: transcript records, statuses and clients](claude-goals.md)
 - [Codex integration decisions](../codex-protocol.md)

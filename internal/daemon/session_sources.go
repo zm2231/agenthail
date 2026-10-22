@@ -302,6 +302,7 @@ func (s *sessionSource) run() {
 		current.CodexPendingEventTurn = s.session.CodexPendingEventTurn
 		current.CodexCurrentTurnID = s.session.CodexCurrentTurnID
 		current.ClaudeClosingTurn = s.session.ClaudeClosingTurn
+		current.TranscriptFromStart = s.session.TranscriptFromStart
 		streamErr := s.adapter.Stream(s.ctx, &current, "", s.append, 30*time.Minute)
 		if current.Transcript == s.session.Transcript && current.TranscriptIdentity != "" && (current.TranscriptIdentity == s.session.TranscriptIdentity || !s.session.TranscriptOffsetSet) && current.TranscriptOffsetSet && current.TranscriptOffset >= s.session.TranscriptOffset {
 			s.session.TranscriptOffset = current.TranscriptOffset
@@ -311,6 +312,7 @@ func (s *sessionSource) run() {
 			s.session.CodexPendingEventTurn = current.CodexPendingEventTurn
 			s.session.CodexCurrentTurnID = current.CodexCurrentTurnID
 			s.session.ClaudeClosingTurn = current.ClaudeClosingTurn
+			s.session.TranscriptFromStart = false
 		}
 		if errors.Is(streamErr, surface.ErrUnsupported) {
 			<-s.ctx.Done()
@@ -487,6 +489,7 @@ func (s *sessionSource) loadSeed() error {
 	} else if localTranscript {
 		return fmt.Errorf("Codex local transcript is unavailable")
 	}
+	s.session.TranscriptFromStart = !read.TranscriptOffsetSet
 	if localTranscript && read.TranscriptIdentity == "" {
 		return fmt.Errorf("Codex local transcript identity is unavailable: %w", surface.ErrTranscriptUnavailable)
 	}
@@ -543,6 +546,18 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 			return err
 		}
 		if !read.TranscriptOffsetSet {
+			if len(pages) == 0 && trustedIdentity == "" && s.session.Surface == surface.KindClaude {
+				// A seed that ran before the first turn, with nothing from a transcript journaled
+				// since, means none was written: whatever is written next is new.
+				held, err := s.journalHoldsTranscript()
+				if err != nil {
+					return err
+				}
+				if !held {
+					s.session.TranscriptFromStart = true
+					return nil
+				}
+			}
 			return fmt.Errorf("%s transcript is unavailable", s.session.Surface)
 		}
 		if transcriptIdentity == "" {
@@ -707,6 +722,33 @@ func transcriptItemOffset(itemID string) (int64, bool) {
 	}
 	offset, err := strconv.ParseInt(digits, 10, 64)
 	return offset, err == nil && offset >= 0
+}
+
+// journalHoldsTranscript reports whether anything journaled for the session
+// came from its transcript; a source's own errors are the only entries that
+// do not.
+func (s *sessionSource) journalHoldsTranscript() (bool, error) {
+	before := uint64(0)
+	for {
+		page, err := s.manager.registry.ReadSessionJournalPage(s.session.ID, before, 200)
+		if err != nil {
+			var gap *registry.SessionJournalHistoryGapError
+			if errors.As(err, &gap) {
+				// Retention dropped older entries, so the journal once held more than errors.
+				return true, nil
+			}
+			return false, err
+		}
+		for _, entry := range page.Entries {
+			if entry.Kind != "source-error" {
+				return true, nil
+			}
+		}
+		if page.NextBefore == 0 {
+			return false, nil
+		}
+		before = page.NextBefore
+	}
 }
 
 func (s *sessionSource) knownJournalItems() (map[string]struct{}, error) {

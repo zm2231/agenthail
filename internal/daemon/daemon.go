@@ -320,6 +320,11 @@ func (d *Daemon) RunWithSignal() error {
 			d.log.Printf("warn: remove pidfile: %s", removeErr)
 		}
 	}()
+	if stopDebug, err := d.startDebugSocket(); err != nil {
+		d.log.Printf("debug socket unavailable: %s", err)
+	} else {
+		defer stopDebug()
+	}
 	stopPeers, err := d.startClaudePeers(ctx)
 	if err != nil {
 		d.log.Printf("Claude peer registration unavailable: %s", err)

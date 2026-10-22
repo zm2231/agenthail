@@ -316,3 +316,104 @@ func TestTheClaudeHostInheritsAConfiguredPrimaryConfigDirAndDropsABlankOne(t *te
 		}
 	}
 }
+
+func TestANewHostSessionStreamsItsFirstReplyBeforeItsTranscriptExists(t *testing.T) {
+	cases := []struct {
+		name        string
+		folder      func(cwd string) string
+		lookupTicks int
+	}{
+		// The folder Claude usually picks is checked on every tick; the full
+		// lookup is pushed out of reach so only that check can find it.
+		{"in the folder Claude usually picks", claudeProjectDirName, 1 << 20},
+		// Claude names the folder itself, so one named some other way is
+		// found by the lookup across every project folder.
+		{"in a folder named some other way", func(string) string { return "a-folder-claude-named" }, claudeHostTranscriptLookupTicks},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func(ticks int) { claudeHostTranscriptLookupTicks = ticks }(claudeHostTranscriptLookupTicks)
+			claudeHostTranscriptLookupTicks = tc.lookupTicks
+			c, fixture := hostedClaude(t)
+			client := fixture.Start(t)
+			id := uuid.NewString()
+			fixture.Open(t, client, id)
+			sess := listedSession(t, c, id)
+			if sess.Transcript != "" || !surface.EffectiveCapabilities(c, sess).Stream {
+				t.Fatalf("a new host session offers its stream before its transcript exists: transcript %q, stream %v", sess.Transcript, surface.EffectiveCapabilities(c, sess).Stream)
+			}
+			path := filepath.Join(fixture.Home, ".claude", "projects", tc.folder(sess.Cwd), id+".jsonl")
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			got := make(chan string, 16)
+			streamed := make(chan error, 1)
+			go func() {
+				streamed <- c.Stream(ctx, sess, "", func(event surface.StreamEvent) { got <- event.Text }, 15*time.Second)
+			}()
+			time.Sleep(300 * time.Millisecond)
+			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+				t.Fatal(err)
+			}
+			transcript := `{"type":"user","uuid":"u1","message":{"content":"say hello"}}` + "\n" +
+				`{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"the first reply"}]}}` + "\n"
+			if err := os.WriteFile(path, []byte(transcript), 0600); err != nil {
+				t.Fatal(err)
+			}
+			for {
+				select {
+				case text := <-got:
+					if text == "the first reply" {
+						cancel()
+						<-streamed
+						return
+					}
+				case err := <-streamed:
+					t.Fatalf("the stream ended before the first reply: %v", err)
+				case <-ctx.Done():
+					t.Fatal("the first reply written after the stream opened never arrived")
+				}
+			}
+		})
+	}
+}
+
+func TestAStreamWhoseSourceSawNoTranscriptReadsOneCreatedBeforeItStartedFromTheStart(t *testing.T) {
+	c, fixture := hostedClaude(t)
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	sess := listedSession(t, c, id)
+	// The source seeded before the first turn, and the transcript appeared
+	// before its stream opened.
+	sess.TranscriptFromStart = true
+	path := filepath.Join(fixture.Home, ".claude", "projects", "a-folder-claude-named", id+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	transcript := `{"type":"user","uuid":"u1","message":{"content":"say hello"}}` + "\n" +
+		`{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"the first reply"}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(transcript), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	got := make(chan string, 16)
+	streamed := make(chan error, 1)
+	go func() {
+		streamed <- c.Stream(ctx, sess, "", func(event surface.StreamEvent) { got <- event.Text }, 8*time.Second)
+	}()
+	for {
+		select {
+		case text := <-got:
+			if text == "the first reply" {
+				cancel()
+				<-streamed
+				return
+			}
+		case err := <-streamed:
+			t.Fatalf("the stream ended before the first reply: %v", err)
+		case <-ctx.Done():
+			t.Fatal("a reply written before the stream opened, after the seed found nothing, was skipped")
+		}
+	}
+}
