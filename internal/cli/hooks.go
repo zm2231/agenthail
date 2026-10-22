@@ -45,15 +45,12 @@ var (
 // included, well inside the hook's timeout: a prompt never waits on it.
 const claudeSessionContextLimit = 5 * time.Second
 
-// A daemon restarting, as it does on update, drops the held prompt's
-// connection; the hook reconnects for this long so the prompt stays
-// answerable from Agenthail.
-var (
-	claudePromptHookReconnect = 2 * time.Minute
-	claudePromptHookRetry     = 2 * time.Second
-)
+// claudePromptHookRetry is how often the hook posts its prompt again while
+// no daemon answers, as while one restarts for an update.
+var claudePromptHookRetry = 2 * time.Second
 
 func (a *App) cmdHook(args []string) error {
+	a.OpenRegistry = a.OpenCurrentRegistry
 	if len(args) > 0 && args[0] == "session-context" {
 		usage := errors.New("usage: agenthail hook session-context [--surface claude|codex] [--claude-pid <pid>]")
 		kind, parent := surface.KindClaude, os.Getppid()
@@ -110,15 +107,17 @@ func (a *App) cmdHook(args []string) error {
 }
 
 // holdClaudePrompt passes the prompt to the daemon and waits for a person's
-// decision. Every failure returns none, which leaves the prompt to Claude's
-// own dialog.
+// decision. A dropped or refused connection is posted again until Claude
+// ends the hook or exits, so a prompt outlives a daemon restart; any answer
+// from the daemon without a decision returns none, which leaves the prompt
+// to Claude's own dialog.
 func holdClaudePrompt(ctx context.Context, client *daemonAPIClient, input io.Reader, parent int) *surfaces.ClaudePromptDecision {
 	var request daemon.ClaudePermissionRequest
 	if err := json.NewDecoder(io.LimitReader(input, claudeHookInputLimit)).Decode(&request.Prompt); err != nil {
 		return nil
 	}
 	request.PID = parent
-	reconnectUntil := time.Now().Add(claudePromptHookReconnect)
+	request.AskedAtMS = time.Now().UnixMilli()
 	var body []byte
 	for {
 		var status int
@@ -127,7 +126,7 @@ func holdClaudePrompt(ctx context.Context, client *daemonAPIClient, input io.Rea
 		if err == nil && status == http.StatusOK {
 			break
 		}
-		if status != 0 || ctx.Err() != nil || time.Now().After(reconnectUntil) {
+		if status != 0 || ctx.Err() != nil {
 			return nil
 		}
 		select {

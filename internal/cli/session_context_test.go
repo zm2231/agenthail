@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"database/sql"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -156,5 +159,59 @@ func TestTheCodexContextHookTellsARegisteredThreadWhoItIsAndLeavesAnyOtherAlone(
 	}
 	if _, err := store.Session("unknown-thread"); err == nil {
 		t.Fatal("the hook registered a thread Agenthail didn't know")
+	}
+}
+
+func TestTheSessionContextHookNeverMigratesTheRegistry(t *testing.T) {
+	for _, offset := range []int{-1, 0, 1} {
+		path := filepath.Join(t.TempDir(), "registry.db")
+		store, err := registry.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.RegisterSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir()}); err != nil {
+			t.Fatal(err)
+		}
+		store.Close()
+		version := registry.SchemaVersion() + offset
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
+			t.Fatal(err)
+		}
+		app := &App{
+			OpenRegistry:         func() (*registry.Registry, error) { return registry.Open(path) },
+			OpenCurrentRegistry:  func() (*registry.Registry, error) { return registry.OpenCurrent(path) },
+			Surfaces:             []SurfaceEntry{{Name: string(surface.KindClaude), Surface: &cliSurface{kind: surface.KindClaude}}},
+			DefaultTimeout:       time.Second,
+			catalogDaemonRunning: func() bool { return false },
+		}
+		stdin, err := os.CreateTemp(t.TempDir(), "hook-input")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := stdin.WriteString(`{"session_id":"s1","hook_event_name":"SessionStart","source":"startup"}`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := stdin.Seek(0, 0); err != nil {
+			t.Fatal(err)
+		}
+		previous := os.Stdin
+		os.Stdin = stdin
+		output, err := captureStdout(t, func() error { return app.Run([]string{"hook", "session-context", "--claude-pid", "4242"}) })
+		os.Stdin = previous
+		if app.Registry != nil {
+			app.Registry.Close()
+		}
+		var after int
+		if scanErr := db.QueryRow(`PRAGMA user_version`).Scan(&after); scanErr != nil || after != version {
+			t.Fatalf("a hook against schema %d left user_version %d err=%v", version, after, scanErr)
+		}
+		db.Close()
+		if printed := strings.TrimSpace(output); err != nil || (offset == 0) != (printed != "") {
+			t.Fatalf("a hook against schema %d printed %q err=%v", version, printed, err)
+		}
 	}
 }

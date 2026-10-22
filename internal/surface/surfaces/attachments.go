@@ -369,5 +369,8 @@ func AttachmentHTTPStatus(err error) (int, string, string) {
 	if errors.Is(err, ErrAttachmentInvalid) {
 		return http.StatusUnsupportedMediaType, "attachment_invalid", "The referenced attachment is not a supported image."
 	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return http.StatusGatewayTimeout, "attachment_timeout", "Reading the attachment took too long; try again."
+	}
 	return http.StatusNotFound, "attachment_not_found", "The referenced attachment was not found."
 }

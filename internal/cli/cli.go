@@ -45,8 +45,11 @@ type App struct {
 	// Registry is the open registry. When it is nil, the first command that
 	// needs it opens one with OpenRegistry, so help, version and argument
 	// errors never create or migrate a registry.
-	Registry                  *registry.Registry
-	OpenRegistry              func() (*registry.Registry, error)
+	Registry     *registry.Registry
+	OpenRegistry func() (*registry.Registry, error)
+	// OpenCurrentRegistry opens the registry only if it already has this
+	// build's schema. Hooks use it in place of OpenRegistry.
+	OpenCurrentRegistry       func() (*registry.Registry, error)
 	registryMu                sync.Mutex
 	registryErr               error
 	Surfaces                  []SurfaceEntry
