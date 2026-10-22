@@ -41,9 +41,7 @@ func applyCodexTranscriptStatus(session *surface.Session, info os.FileInfo) {
 		return
 	}
 	session.Status = status
-	if status == surface.StatusBusy && info.ModTime().After(session.LastActive) {
-		session.LastActive = info.ModTime()
-	}
+	advanceBusyActivity(session, info.ModTime())
 }
 
 // LocalStatusFiles watches the pending model record even before the
