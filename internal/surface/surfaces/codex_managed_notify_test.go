@@ -219,26 +219,36 @@ func streamManagedInBackground(t *testing.T, onEvent func(surface.StreamEvent)) 
 
 func awaitCalls(t *testing.T, fake *codextest.Daemon, method string, count int) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for len(fake.Calls(method)) < count {
-		if time.Now().After(deadline) {
+	deadline := time.After(5 * time.Second)
+	for {
+		called := fake.CallMade()
+		if len(fake.Calls(method)) >= count {
+			return
+		}
+		select {
+		case <-called:
+		case <-deadline:
 			t.Fatalf("%s called %d times, want %d", method, len(fake.Calls(method)), count)
 		}
-		time.Sleep(time.Millisecond)
 	}
 }
 
-func countHandledNotifications(t *testing.T) *atomic.Int64 {
+func handledNotifications(t *testing.T) <-chan struct{} {
 	t.Helper()
-	count := &atomic.Int64{}
-	managedNotificationsHandled = func() { count.Add(1) }
+	handled := make(chan struct{}, 64)
+	managedNotificationsHandled = func() {
+		select {
+		case handled <- struct{}{}:
+		default:
+		}
+	}
 	t.Cleanup(func() { managedNotificationsHandled = nil })
-	return count
+	return handled
 }
 
 func TestAManagedStreamReadsAsSoonAsItsThreadReportsAChange(t *testing.T) {
 	slowManagedPoll(t)
-	handledBefore := countHandledNotifications(t)
+	handled := handledNotifications(t)
 	turn := &switchableTurn{}
 	fake := startManagedCodex(t, turn.respond)
 	fake.AddThread(codextest.Thread{ID: "thread"})
@@ -256,14 +266,14 @@ func TestAManagedStreamReadsAsSoonAsItsThreadReportsAChange(t *testing.T) {
 	awaitCalls(t, fake, "thread/turns/list", 2)
 
 	reads := len(fake.Calls("thread/turns/list"))
-	handled := handledBefore.Load()
+	for len(handled) > 0 {
+		<-handled
+	}
 	fake.Notify("item/agentMessage/delta", map[string]any{"threadId": "thread", "delta": "fin"})
-	deadline := time.Now().Add(5 * time.Second)
-	for handledBefore.Load() == handled {
-		if time.Now().After(deadline) {
-			t.Fatal("the stream never handled the delta")
-		}
-		time.Sleep(time.Millisecond)
+	select {
+	case <-handled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream never handled the delta")
 	}
 	if got := len(fake.Calls("thread/turns/list")); got != reads {
 		t.Fatalf("a text delta caused %d reads", got-reads)

@@ -69,6 +69,7 @@ type Daemon struct {
 	order   []string
 	loaded  map[string]bool
 	conns   map[*connection]bool
+	called  chan struct{}
 	next    int
 	server  *http.Server
 }
@@ -152,7 +153,7 @@ func Serve(t testing.TB, home string, respond Responder) *Daemon {
 		t.Error(err)
 		return nil
 	}
-	daemon := &Daemon{Home: home, respond: respond, threads: map[string]*Thread{}, loaded: map[string]bool{}, conns: map[*connection]bool{}}
+	daemon := &Daemon{Home: home, respond: respond, threads: map[string]*Thread{}, loaded: map[string]bool{}, conns: map[*connection]bool{}, called: make(chan struct{})}
 	upgrader := websocket.Upgrader{}
 	daemon.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		connection, err := upgrader.Upgrade(w, r, nil)
@@ -199,6 +200,8 @@ func (d *Daemon) serve(ws *websocket.Conn) {
 		params, _ := request["params"].(map[string]any)
 		d.mu.Lock()
 		d.calls = append(d.calls, Call{Method: method, Params: params})
+		close(d.called)
+		d.called = make(chan struct{})
 		d.mu.Unlock()
 		result := d.respond(method, params)
 		if result != nil && result["drop"] == true {
@@ -239,6 +242,13 @@ func (d *Daemon) Calls(method string) []map[string]any {
 		}
 	}
 	return params
+}
+
+// CallMade closes when the fake records its next call.
+func (d *Daemon) CallMade() <-chan struct{} {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.called
 }
 
 func (d *Daemon) Methods() []string {
