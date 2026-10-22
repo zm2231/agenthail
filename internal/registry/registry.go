@@ -1613,7 +1613,7 @@ func enqueueMessageTx(tx *sql.Tx, now time.Time, sessionID, message, deliveryKey
 	if err != nil {
 		if deliveryKey != "" && strings.Contains(strings.ToLower(err.Error()), "unique") {
 			var id int64
-			if err := tx.QueryRow(`SELECT id FROM message_queue WHERE delivery_key=?`, deliveryKey).Scan(&id); err != nil {
+			if err := tx.QueryRow(`SELECT id FROM message_queue WHERE delivery_key=? AND delivery_key!=''`, deliveryKey).Scan(&id); err != nil {
 				return 0, 0, err
 			}
 			deliveryID, err := queuedDeliveryIntentID(tx, id)

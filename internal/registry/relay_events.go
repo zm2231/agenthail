@@ -163,7 +163,7 @@ func relayCompletionHops(tx *sql.Tx, key string, event surface.Completion) (int,
 	}
 	var queueID int64
 	var hops int
-	err := tx.QueryRow(`SELECT id,relay_hops FROM message_queue WHERE delivery_key=? AND relay_hops>0 AND session_id IN (SELECT s.id FROM sessions s WHERE `+relaySourceKey+`=?)`, "relay:"+match[1]+":"+match[2], key).Scan(&queueID, &hops)
+	err := tx.QueryRow(`SELECT id,relay_hops FROM message_queue WHERE delivery_key=? AND delivery_key!='' AND relay_hops>0 AND session_id IN (SELECT s.id FROM sessions s WHERE `+relaySourceKey+`=?)`, "relay:"+match[1]+":"+match[2], key).Scan(&queueID, &hops)
 	if err == sql.ErrNoRows {
 		return 0, nil
 	}
