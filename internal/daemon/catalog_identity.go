@@ -10,8 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/project"
@@ -62,17 +64,29 @@ const catalogIdentityTTL = 2 * time.Minute
 
 const catalogIdentityGitTimeout = 3 * time.Second
 
-// catalogIdentityCache resolves each workspace path at most once per TTL. It
-// is owned by the catalog discovery goroutine and is not safe for concurrent
-// use.
+// catalogIdentityRefreshes bounds the git work re-resolving expired
+// identities in the background at once.
+const catalogIdentityRefreshes = 4
+
+// catalogIdentityCache resolves each workspace path once, then serves it
+// while at most one background refresh per path re-reads an entry that
+// expired or whose HEAD or index changed. A discovery pass runs git only for
+// a path it has never seen or whose repository config changed.
 type catalogIdentityCache struct {
+	mu      sync.Mutex
 	entries map[string]catalogIdentityEntry
 	// known keeps the last resolved project per path past the TTL, so a git
 	// failure that is not "not a repository" never moves a session.
 	known        map[string]*CatalogProject
 	projects     []registry.ProjectRecord
-	repositories catalogRepositoryCache
+	generation   uint64
+	repositories *catalogRepositoryCache
 	roots        map[string]catalogRootEntry
+	refreshing   map[string]struct{}
+	slots        chan struct{}
+	inflight     sync.WaitGroup
+	// changed runs after a background refresh changed a path's identity.
+	changed func()
 }
 
 type catalogRootEntry struct {
@@ -84,15 +98,22 @@ type catalogRootEntry struct {
 }
 
 type catalogIdentityEntry struct {
-	identity   catalogIdentity
-	gitDirs    catalogGitDirs
-	gitStamp   string
-	resolvedAt time.Time
+	identity catalogIdentity
+	gitDirs  catalogGitDirs
+	gitStamp string
+	// configStamp fingerprints the repository config alone: a remote change
+	// moves the session to another project, so it re-resolves at once.
+	configStamp string
+	resolvedAt  time.Time
+	usedAt      time.Time
 }
 
 func newCatalogIdentityCache() *catalogIdentityCache {
-	return &catalogIdentityCache{entries: map[string]catalogIdentityEntry{}, known: map[string]*CatalogProject{}, repositories: catalogRepositoryCache{}, roots: map[string]catalogRootEntry{}}
+	return &catalogIdentityCache{entries: map[string]catalogIdentityEntry{}, known: map[string]*CatalogProject{}, repositories: &catalogRepositoryCache{entries: map[string]catalogRepositoryEntry{}}, roots: map[string]catalogRootEntry{}, refreshing: map[string]struct{}{}, slots: make(chan struct{}, catalogIdentityRefreshes)}
 }
+
+// wait returns once no background refresh is running.
+func (c *catalogIdentityCache) wait() { c.inflight.Wait() }
 
 // setProjects replaces the added projects. A changed set drops the cached
 // identities, since a path may now belong to another project.
@@ -103,12 +124,15 @@ func (c *catalogIdentityCache) setProjects(records []registry.ProjectRecord) {
 			added = append(added, record)
 		}
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if slices.EqualFunc(c.projects, added, func(left, right registry.ProjectRecord) bool {
 		return left.ID == right.ID && left.WorkspaceRoot == right.WorkspaceRoot && left.Title == right.Title && left.Key == right.Key
 	}) {
 		return
 	}
 	c.projects = added
+	c.generation++
 	c.entries = map[string]catalogIdentityEntry{}
 }
 
@@ -116,7 +140,10 @@ func (c *catalogIdentityCache) setProjects(records []registry.ProjectRecord) {
 // ok is false when git failed for a reason other than the folder being
 // outside a repository, so the stored key is kept.
 func (c *catalogIdentityCache) rootRepository(ctx context.Context, root string, now time.Time) (key string, repository []byte, ok bool) {
-	if entry, found := c.roots[root]; found && now.Sub(entry.resolvedAt) < catalogIdentityTTL && catalogGitStamp(entry.gitDirs) == entry.gitStamp {
+	c.mu.Lock()
+	entry, found := c.roots[root]
+	c.mu.Unlock()
+	if found && now.Sub(entry.resolvedAt) < catalogIdentityTTL && catalogGitStamp(entry.gitDirs) == entry.gitStamp {
 		return entry.key, entry.repository, true
 	}
 	resolved, notRepository, err := resolveCatalogRepository(ctx, root, c.repositories)
@@ -131,7 +158,9 @@ func (c *catalogIdentityCache) rootRepository(ctx context.Context, root string, 
 			repository, _ = json.Marshal(resolved.repository)
 		}
 	}
+	c.mu.Lock()
 	c.roots[root] = catalogRootEntry{key: key, repository: repository, gitDirs: dirs, gitStamp: catalogGitStamp(dirs), resolvedAt: now}
+	c.mu.Unlock()
 	return key, repository, true
 }
 
@@ -143,30 +172,90 @@ func (c *catalogIdentityCache) identity(ctx context.Context, session surface.Ses
 	if err != nil || path == "" {
 		return catalogIdentity{Project: prior(), UnavailableReason: "workspace path is unavailable"}
 	}
-	if entry, found := c.entries[path]; found && now.Sub(entry.resolvedAt) < catalogIdentityTTL && catalogGitStamp(entry.gitDirs) == entry.gitStamp {
-		return entry.identity
+	c.mu.Lock()
+	entry, found := c.entries[path]
+	if found {
+		entry.usedAt = now
+		c.entries[path] = entry
 	}
-	identity, gitDirs, transient := resolveCatalogIdentity(ctx, path, c.projects, c.repositories)
+	c.mu.Unlock()
+	if !found || catalogConfigStamp(entry.gitDirs) != entry.configStamp {
+		return c.resolve(ctx, path, now, prior)
+	}
+	if now.Sub(entry.resolvedAt) >= catalogIdentityTTL || catalogGitStamp(entry.gitDirs) != entry.gitStamp {
+		c.refreshLater(ctx, path, now, prior)
+	}
+	return entry.identity
+}
+
+// resolve reads path's identity with git and caches it, a failed read too,
+// so a workspace whose git fails is retried once per TTL rather than on
+// every discovery pass.
+func (c *catalogIdentityCache) resolve(ctx context.Context, path string, now time.Time, prior func() *CatalogProject) catalogIdentity {
+	c.mu.Lock()
+	projects, generation := c.projects, c.generation
+	c.mu.Unlock()
+	identity, gitDirs, transient := resolveCatalogIdentity(ctx, path, projects, c.repositories)
 	if transient {
-		if known, found := c.known[path]; found {
+		c.mu.Lock()
+		known, found := c.known[path]
+		c.mu.Unlock()
+		if found {
 			identity.Project = known
 		} else {
 			identity.Project = prior()
 		}
-	} else {
-		c.known[path] = identity.Project
 	}
-	if identity.UnavailableReason != "" {
-		delete(c.entries, path)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if generation != c.generation {
 		return identity
 	}
-	c.entries[path] = catalogIdentityEntry{identity: identity, gitDirs: gitDirs, gitStamp: catalogGitStamp(gitDirs), resolvedAt: now}
+	if !transient {
+		c.known[path] = identity.Project
+	}
+	c.entries[path] = catalogIdentityEntry{identity: identity, gitDirs: gitDirs, gitStamp: catalogGitStamp(gitDirs), configStamp: catalogConfigStamp(gitDirs), resolvedAt: now, usedAt: now}
 	return identity
 }
 
+// refreshLater re-resolves path in the background unless a refresh of it is
+// already running or every refresh slot is taken; a later pass retries.
+func (c *catalogIdentityCache) refreshLater(ctx context.Context, path string, now time.Time, prior func() *CatalogProject) {
+	c.mu.Lock()
+	if _, running := c.refreshing[path]; running {
+		c.mu.Unlock()
+		return
+	}
+	select {
+	case c.slots <- struct{}{}:
+	default:
+		c.mu.Unlock()
+		return
+	}
+	c.refreshing[path] = struct{}{}
+	before := c.entries[path].identity
+	c.inflight.Add(1)
+	c.mu.Unlock()
+	go func() {
+		defer c.inflight.Done()
+		after := c.resolve(context.WithoutCancel(ctx), path, now, prior)
+		c.mu.Lock()
+		delete(c.refreshing, path)
+		<-c.slots
+		changed := c.changed
+		c.mu.Unlock()
+		if changed != nil && !reflect.DeepEqual(before, after) {
+			changed()
+		}
+	}()
+}
+
+// prune forgets the paths no listed session asked for within the TTL.
 func (c *catalogIdentityCache) prune(now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	for path, entry := range c.entries {
-		if now.Sub(entry.resolvedAt) >= catalogIdentityTTL {
+		if now.Sub(entry.usedAt) >= catalogIdentityTTL {
 			delete(c.entries, path)
 		}
 	}
@@ -203,6 +292,12 @@ func catalogGitStamp(dirs catalogGitDirs) string {
 	return stamp.String()
 }
 
+// catalogConfigStamp fingerprints the repository config, which holds the
+// remote the project key comes from.
+func catalogConfigStamp(dirs catalogGitDirs) string {
+	return catalogGitStamp(catalogGitDirs{common: dirs.common})
+}
+
 // resolveCatalogIdentity returns the workspace's identity, the git
 // directories it was read from (empty outside a repository), and whether the project could not
 // be resolved for a reason other than the path not being in a repository.
@@ -211,7 +306,7 @@ func catalogGitStamp(dirs catalogGitDirs) string {
 // the same place in the repository's main checkout, so a linked worktree's
 // session finds the projects added in the main checkout. Without one, a
 // repository is an implicit project at its main checkout.
-func resolveCatalogIdentity(ctx context.Context, path string, projects []registry.ProjectRecord, repositories catalogRepositoryCache) (catalogIdentity, catalogGitDirs, bool) {
+func resolveCatalogIdentity(ctx context.Context, path string, projects []registry.ProjectRecord, repositories *catalogRepositoryCache) (catalogIdentity, catalogGitDirs, bool) {
 	identity := catalogIdentity{Checkout: catalogCheckout{ID: catalogPathID("checkout", path), Path: path}}
 	existing := nearestExistingDirectory(path)
 	repository, notRepository, err := resolveCatalogRepository(ctx, existing, repositories)
@@ -328,28 +423,39 @@ func catalogWithin(root, path string) bool {
 }
 
 // catalogRepositoryCache holds each repository's identity by its common
-// directory until the repository's config changes.
-type catalogRepositoryCache map[string]catalogRepositoryEntry
+// directory until the repository's config changes. A nil cache reads every
+// time.
+type catalogRepositoryCache struct {
+	mu      sync.Mutex
+	entries map[string]catalogRepositoryEntry
+}
 
 type catalogRepositoryEntry struct {
 	repository *project.Repository
 	stamp      string
 }
 
-func (repositories catalogRepositoryCache) repository(ctx context.Context, commonDir string) (*project.Repository, error) {
+func (repositories *catalogRepositoryCache) repository(ctx context.Context, commonDir string) (*project.Repository, error) {
 	stamp := "missing"
 	if info, err := os.Stat(filepath.Join(commonDir, "config")); err == nil {
 		stamp = fmt.Sprintf("%d:%d", info.ModTime().UnixNano(), info.Size())
 	}
-	if entry, found := repositories[commonDir]; found && entry.stamp == stamp {
-		return entry.repository, nil
+	if repositories != nil {
+		repositories.mu.Lock()
+		entry, found := repositories.entries[commonDir]
+		repositories.mu.Unlock()
+		if found && entry.stamp == stamp {
+			return entry.repository, nil
+		}
 	}
 	repository, err := readCatalogRepository(ctx, commonDir)
 	if err != nil {
 		return nil, err
 	}
 	if repositories != nil {
-		repositories[commonDir] = catalogRepositoryEntry{repository: repository, stamp: stamp}
+		repositories.mu.Lock()
+		repositories.entries[commonDir] = catalogRepositoryEntry{repository: repository, stamp: stamp}
+		repositories.mu.Unlock()
 	}
 	return repository, nil
 }
@@ -402,7 +508,7 @@ func nearestExistingDirectory(path string) string {
 // checkout: the parent of a ".git" common directory, the checkout itself
 // when it owns its git directory (a submodule), and the common directory of
 // a bare repository.
-func resolveCatalogRepository(ctx context.Context, path string, repositories catalogRepositoryCache) (repository catalogRepository, notRepository bool, err error) {
+func resolveCatalogRepository(ctx context.Context, path string, repositories *catalogRepositoryCache) (repository catalogRepository, notRepository bool, err error) {
 	gitCtx, cancel := context.WithTimeout(ctx, catalogIdentityGitTimeout)
 	defer cancel()
 	toplevel, err := catalogGit(gitCtx, path, "rev-parse", "--show-toplevel")

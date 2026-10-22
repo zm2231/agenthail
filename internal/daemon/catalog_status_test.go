@@ -443,12 +443,18 @@ func TestCatalogIdentityCacheReusesResolvedCheckout(t *testing.T) {
 	if edited := cache.identity(context.Background(), session, now.Add(time.Minute), noStoredProject); edited.Checkout.Dirty || calls() != resolved {
 		t.Fatalf("working tree edit re-resolved before expiry: dirty=%v calls=%d", edited.Checkout.Dirty, calls()-resolved)
 	}
-	if expired := cache.identity(context.Background(), session, now.Add(catalogIdentityTTL), noStoredProject); !expired.Checkout.Dirty || calls() == resolved {
-		t.Fatalf("expired entry was reused: %+v", expired.Checkout)
+	if expired := cache.identity(context.Background(), session, now.Add(catalogIdentityTTL), noStoredProject); expired.Checkout.Dirty {
+		t.Fatalf("expired entry was not served while it refreshes: %+v", expired.Checkout)
+	}
+	cache.wait()
+	if refreshed := cache.identity(context.Background(), session, now.Add(catalogIdentityTTL), noStoredProject); !refreshed.Checkout.Dirty || calls() == resolved {
+		t.Fatalf("expired entry was not refreshed: %+v", refreshed.Checkout)
 	}
 
 	gitRun(t, repo, "checkout", "-q", "-b", "feature/cache")
 	switched := calls()
+	cache.identity(context.Background(), session, now.Add(catalogIdentityTTL), noStoredProject)
+	cache.wait()
 	if branch := cache.identity(context.Background(), session, now.Add(catalogIdentityTTL), noStoredProject); branch.Checkout.Branch != "feature/cache" || calls() == switched {
 		t.Fatalf("branch switch did not invalidate: %+v", branch.Checkout)
 	}

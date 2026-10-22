@@ -159,6 +159,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		d.log.Printf("catalog surfaces: %s", err)
 	}
 	d.catalog = newCatalogHub(reg)
+	d.catalogIdentities.changed = d.requestCatalogDiscovery
 	if prompts := d.claudePrompts(); prompts != nil {
 		prompts.OnPromptChange(d.claudePromptChanged)
 	}
@@ -296,6 +297,7 @@ func (d *Daemon) runCatalog(ctx context.Context) {
 		d.runCatalogStatus(ctx)
 	}()
 	defer func() { <-statusDone }()
+	defer d.catalogIdentities.wait()
 	discoveryTicker := time.NewTicker(catalogDiscoveryInterval)
 	defer discoveryTicker.Stop()
 	d.discoverCatalog(ctx)
