@@ -54,13 +54,20 @@ assert.equal(JSON.parse(vm.runInContext(programs.all,context)).events.length,6);
   assert.equal(JSON.parse(vm.runInContext(programs.all,context)).events.length,1000);
   assert.equal(JSON.parse(vm.runInContext(programs.voice,context)).lost,true);
 
-  // A request evicted from the bounded table is never offered to the service.
-  for(let i=0;i<257;i++)emit({type:'mcp-request',hostId:'local',request:{id:1000+i,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_projects'}}});
+  // A request being answered stays answerable however many follow it.
+  emit({type:'mcp-request',hostId:'local',request:{id:900,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_send_to_lead'}}});
+  for(let i=0;i<300;i++)emit({type:'mcp-request',hostId:'local',request:{id:1000+i,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_projects'}}});
+  await bridge.respondDynamicToolCall('900','operator',true,'sent');
+  assert.equal(sent[sent.length-1].response.id,900);
+  // An expired request is neither offered to the service nor answerable.
+  bridge.toolRequests.get('1000').at=0;
+  emit({type:'mcp-request',hostId:'local',request:{id:2000,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_projects'}}});
   const offered=JSON.parse(vm.runInContext(programs.voice,context)).events.filter(e=>e.method==='item/tool/call').map(e=>e.params.requestId);
   assert.equal(offered.includes('1000'),false);
-  assert.equal(offered.includes('1256'),true);
-  await bridge.respondDynamicToolCall('1256','operator',true,'[]');
-  assert.equal(sent[sent.length-1].response.id,1256);
+  assert.equal(offered.includes('2000'),true);
+  await assert.rejects(bridge.respondDynamicToolCall('1000','operator',true,'[]'),/no longer available/);
+  await bridge.respondDynamicToolCall('1299','operator',true,'[]');
+  assert.equal(sent[sent.length-1].response.id,1299);
 
   // A hook an earlier daemon installed is replaced, keeping its event cursor.
   const oldListeners=[],oldSent=[];

@@ -43,8 +43,14 @@ const codexHookJS = `
     }
     if (data.type === 'mcp-request' && data.request && data.request.method === 'item/tool/call' && data.request.id != null) {
       const params = data.request.params || {};
-      bridge.toolRequests.set(String(data.request.id), {id: data.request.id, threadId: params.threadId});
-      if (bridge.toolRequests.size > 256) bridge.toolRequests.delete(bridge.toolRequests.keys().next().value);
+      // Desktop answers its own threads' tool calls where this bridge can't
+      // see it, so requests expire by age; one being answered is far younger.
+      const now = Date.now();
+      for (const [key, request] of bridge.toolRequests) {
+        if (now - request.at < 600000 && bridge.toolRequests.size < 4096) break;
+        bridge.toolRequests.delete(key);
+      }
+      bridge.toolRequests.set(String(data.request.id), {id: data.request.id, threadId: params.threadId, at: now});
       bridge.events.push({sequence: ++bridge.sequence, method: 'item/tool/call', params: {...params, requestId: String(data.request.id)}});
       if (bridge.events.length > 1000) bridge.events.splice(0, bridge.events.length - 1000);
     }
