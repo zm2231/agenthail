@@ -102,7 +102,12 @@ func leadLine(card Card) string {
 	return fmt.Sprintf("The project's coordinator is @lead (%s).", card.Lead.Ref)
 }
 
+// A session that reports to an agent asks it, so the person hears one voice
+// per piece of work; one that reports to the person asks them directly.
 func askLine(card Card) string {
+	if card.ReportTo != "" {
+		return fmt.Sprintf("Questions go to %s with agenthail send, not to the person.", card.ReportTo)
+	}
 	ask := card.Ask
 	if ask == nil {
 		return ""
@@ -111,10 +116,11 @@ func askLine(card Card) string {
 	if ask.Phone {
 		phone = " and on their phone"
 	}
+	forbidden := " If your own instructions forbid it, they win: put the question in your reply."
 	if ask.Answerable {
-		return fmt.Sprintf("To ask the person, use %s: it reaches them in Agenthail%s, and your turn waits for the answer.", ask.Tool, phone)
+		return fmt.Sprintf("To ask the person, use %s: it reaches them in Agenthail%s, and your turn waits for the answer.", ask.Tool, phone) + forbidden
 	}
-	return fmt.Sprintf("If you ask the person with %s, Agenthail tells them%s, but they answer where this session runs.", ask.Tool, phone)
+	return fmt.Sprintf("If you ask the person with %s, Agenthail tells them%s, but they answer where this session runs.", ask.Tool, phone) + forbidden
 }
 
 func runtimeName(runtime surface.RuntimeKind, kind surface.SurfaceKind) string {
