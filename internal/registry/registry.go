@@ -54,7 +54,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 30
+	schemaVersion   = 31
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
