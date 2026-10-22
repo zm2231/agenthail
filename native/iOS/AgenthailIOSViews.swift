@@ -239,6 +239,15 @@ struct ConversationListView: View {
                     .listRowSeparator(.hidden)
             }
             let tree = tree
+            if !tree.needsYou.isEmpty {
+                Section {
+                    ForEach(tree.needsYou) { session in
+                        sessionButton(session, reason: tree.attention[session.id]?.reason, identifierPrefix: "needs-you-")
+                    }
+                } header: {
+                    Text("Needs you").font(.subheadline.weight(.semibold)).foregroundStyle(.primary).textCase(nil)
+                }
+            }
             ForEach(tree.projects) { project in
                 let collapsed = collapsedProjects.contains(project.id)
                 Section {
@@ -342,11 +351,14 @@ struct ConversationListView: View {
         if !expandedFamilies.insert(family.id).inserted { expandedFamilies.remove(family.id) }
     }
 
-    private func sessionButton(_ session: SessionState, title: String? = nil, family: SessionFamily? = nil, snippet: String? = nil) -> some View {
+    private func sessionButton(_ session: SessionState, title: String? = nil, family: SessionFamily? = nil, snippet: String? = nil, reason: String? = nil, identifierPrefix: String = "session-") -> some View {
         Button { openSession(session.id) } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
                     IOSSessionRow(session: session, title: title, family: family)
+                    if let reason {
+                        Text(reason).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                    }
                     if let snippet, !snippet.isEmpty {
                         Text(snippet).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                     }
@@ -364,7 +376,7 @@ struct ConversationListView: View {
                 }
             }
         }
-        .accessibilityIdentifier("session-" + session.id)
+        .accessibilityIdentifier(identifierPrefix + session.id)
     }
 }
 
