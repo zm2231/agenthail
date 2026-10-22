@@ -242,7 +242,7 @@ func (p *fixtureProvider) spoken() []string {
 }
 
 type fixtureOptions struct {
-	register       func(surface.Session) error
+	register       func(context.Context, surface.Session) error
 	target         *targetFixture
 	operatorSource func(*surface.Session, bool)
 	stream         SessionStreamProvider
@@ -429,7 +429,7 @@ func TestPersistentOperatorLoadsLiteralSkillWithoutStartingTurn(t *testing.T) {
 
 func TestNewOperatorCreatesDistinctPersistentThreadAndRetainsOldThread(t *testing.T) {
 	var registered []string
-	f := newFixture(t, fixtureOptions{register: func(session surface.Session) error {
+	f := newFixture(t, fixtureOptions{register: func(_ context.Context, session surface.Session) error {
 		registered = append(registered, session.ID)
 		return nil
 	}})
