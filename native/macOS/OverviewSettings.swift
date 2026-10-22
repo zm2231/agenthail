@@ -9,7 +9,7 @@ struct OverviewSettings: View {
             if let snapshot = model.snapshot {
                 Section {
                     Text(OverviewSummary.line(snapshot))
-                        .foregroundStyle(snapshot.daemon.stale == true ? DesktopPalette.amber : DesktopPalette.text2)
+                        .foregroundStyle(snapshot.daemon.stale == true ? DesktopPalette.failed : DesktopPalette.text2)
                 }
                 PermissionsSection(model: model)
                 Section("Surfaces") {
@@ -39,15 +39,15 @@ private struct PermissionsSection: View {
             if let state = model.permissions, state.supported {
                 Section {
                     if let problem = state.problem {
-                        Text(problem).font(.system(size: 12)).foregroundStyle(DesktopPalette.amber).textSelection(.enabled)
+                        Text(problem).font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.failed).textSelection(.enabled)
                     }
                     ForEach(state.grants) { grant in
-                        HStack(spacing: 8) {
-                            Text(grant.title).font(.system(size: 13))
+                        HStack(spacing: DesktopSpace.s) {
+                            Text(grant.title).font(.system(size: DesktopType.body))
                             Label(grant.stateLabel, systemImage: "circle.fill")
                                 .labelStyle(StatusDotLabelStyle())
-                                .font(.system(size: 12))
-                                .foregroundStyle(grant.state == "granted" ? DesktopPalette.green : DesktopPalette.amber)
+                                .font(.system(size: DesktopType.secondary))
+                                .foregroundStyle(grant.state == "granted" ? DesktopPalette.done : DesktopPalette.failed)
                             Spacer()
                             if grant.state != "granted", let url = URL(string: grant.url) {
                                 Button("Open Settings") { NSWorkspace.shared.open(url) }
@@ -58,7 +58,7 @@ private struct PermissionsSection: View {
                     if state.grants.contains(where: { $0.state == "missing" }) {
                         HStack {
                             Text("macOS lists Agenthail Daemon in these panes once it has asked.")
-                                .font(.system(size: 12))
+                                .font(.system(size: DesktopType.secondary))
                                 .foregroundStyle(DesktopPalette.text2)
                             Spacer()
                             if asking { ProgressView().controlSize(.small) }
@@ -76,12 +76,12 @@ private struct PermissionsSection: View {
                     Text("Privacy Permissions")
                 } footer: {
                     if let holder = state.holder {
-                        Text("Held by \(holder)").font(.system(size: 11)).foregroundStyle(DesktopPalette.text2).textSelection(.enabled)
+                        Text("Held by \(holder)").font(.system(size: DesktopType.caption)).foregroundStyle(DesktopPalette.text2).textSelection(.enabled)
                     }
                 }
             } else if let error = model.permissionsError {
                 Section("Privacy Permissions") {
-                    Text(error).font(.system(size: 12)).foregroundStyle(DesktopPalette.amber).textSelection(.enabled)
+                    Text(error).font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.failed).textSelection(.enabled)
                 }
             }
         }
@@ -99,12 +99,12 @@ private struct SurfaceCard: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text(overview.name).font(.system(size: 13, weight: .semibold))
+        VStack(alignment: .leading, spacing: DesktopSpace.s) {
+            HStack(spacing: DesktopSpace.s) {
+                Text(overview.name).font(.system(size: DesktopType.body, weight: .semibold))
                 Label(overview.stateLabel, systemImage: "circle.fill")
                     .labelStyle(StatusDotLabelStyle())
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(color)
                 Spacer()
                 if let label = overview.surface.repairLabel, overview.surface.repairAction != nil {
@@ -127,20 +127,20 @@ private struct SurfaceCard: View {
                 stat("Queued", overview.queued, note: nil)
             }
             Text(overview.detail)
-                .font(.system(size: 12))
-                .foregroundStyle(overview.health == .healthy ? DesktopPalette.text2 : DesktopPalette.amber)
+                .font(.system(size: DesktopType.secondary))
+                .foregroundStyle(overview.health == .healthy ? DesktopPalette.text2 : DesktopPalette.failed)
                 .textSelection(.enabled)
             if let availability = overview.availability {
-                Text(availability).font(.system(size: 12)).foregroundStyle(DesktopPalette.text2)
+                Text(availability).font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.text2)
             }
             ForEach(overview.advice, id: \.self) { line in
                 Text(line)
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
                     .textSelection(.enabled)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, DesktopSpace.xs)
     }
 
     private func showSessions() {
@@ -153,19 +153,19 @@ private struct SurfaceCard: View {
 
     private var color: Color {
         switch overview.health {
-        case .healthy: return DesktopPalette.green
-        case .degraded: return DesktopPalette.amber
+        case .healthy: return DesktopPalette.done
+        case .degraded: return DesktopPalette.failed
         case .signinOff: return DesktopPalette.text2
-        case .unavailable: return DesktopPalette.red
+        case .unavailable: return DesktopPalette.failed
         }
     }
 
     private func stat(_ title: String, _ value: Int, note: String?) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(title).font(.system(size: 11)).foregroundStyle(DesktopPalette.text2)
-            Text("\(value)").font(.system(size: 15, weight: .medium)).monospacedDigit()
+            Text(title).font(.system(size: DesktopType.caption)).foregroundStyle(DesktopPalette.text2)
+            Text("\(value)").font(.system(size: DesktopType.title, weight: .medium)).monospacedDigit()
             if let note {
-                Text(note).font(.system(size: 10.5)).foregroundStyle(DesktopPalette.muted)
+                Text(note).font(.system(size: DesktopType.caption)).foregroundStyle(DesktopPalette.muted)
             }
         }
     }
@@ -173,7 +173,7 @@ private struct SurfaceCard: View {
 
 private struct StatusDotLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: DesktopSpace.xs) {
             configuration.icon.font(.system(size: 7))
             configuration.title
         }
@@ -193,17 +193,17 @@ struct RecentOutcomesSection: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
                         Text("\(outcome.label) · \(outcome.target)")
-                            .foregroundStyle(outcome.tone == .problem ? DesktopPalette.red : DesktopPalette.text)
+                            .foregroundStyle(outcome.tone == .problem ? DesktopPalette.failed : DesktopPalette.text)
                             .textSelection(.enabled)
                         Spacer()
                         Text(relativeAge(outcome.createdAt))
-                            .font(.system(size: 11))
+                            .font(.system(size: DesktopType.caption))
                             .foregroundStyle(DesktopPalette.text2)
                             .help(outcome.createdAt)
                     }
                     Text(outcome.detail)
-                        .font(.system(size: 12))
-                        .foregroundStyle(outcome.isError ? DesktopPalette.red : DesktopPalette.text2)
+                        .font(.system(size: DesktopType.secondary))
+                        .foregroundStyle(outcome.isError ? DesktopPalette.failed : DesktopPalette.text2)
                         .textSelection(.enabled)
                 }
             }
@@ -227,7 +227,7 @@ struct BrowserAccessSection: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(qrVisible ? remote.dnsName ?? "Browser link" : "Browser link hidden")
                         Text("The link signs in to this Agenthail. Share it only with your own devices. On iPhone, open it, tap Share, then Add to Home Screen.")
-                            .font(.system(size: 12))
+                            .font(.system(size: DesktopType.secondary))
                             .foregroundStyle(DesktopPalette.text2)
                         HStack {
                             Button(copied ? "Copied" : "Copy Browser Link") {

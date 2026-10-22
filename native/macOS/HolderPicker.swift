@@ -25,12 +25,12 @@ struct HolderPicker: View {
             }
             .pickerStyle(.inline)
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: DesktopSpace.xs) {
                 Image(systemName: "terminal")
                 Text(verbatim: picked.map { "pid \(String($0.pid))" } ?? "Choose a terminal")
             }
-            .font(.system(size: 11.5))
-            .foregroundStyle(picked == nil ? DesktopPalette.amber : DesktopPalette.accentText)
+            .font(.system(size: DesktopType.meta))
+            .foregroundStyle(DesktopPalette.accentText)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)

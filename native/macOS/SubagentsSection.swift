@@ -29,12 +29,12 @@ struct SubagentsSection: View {
                     Button {
                         model.openSubagent(child, in: pane)
                     } label: {
-                        HStack(spacing: 8) {
+                        HStack(spacing: DesktopSpace.s) {
                             StatusIndicator(session: child, needsYou: false)
                             Text(SessionFamilies.label(child)).lineLimit(1)
                             Spacer(minLength: 4)
                             Text(relativeAge(child.lastActive))
-                                .font(.system(size: 11))
+                                .font(.system(size: DesktopType.caption))
                                 .foregroundStyle(DesktopPalette.text2)
                         }
                         .contentShape(Rectangle())
@@ -44,7 +44,7 @@ struct SubagentsSection: View {
                 }
                 if loading || error != nil {
                     Text(error ?? "Loading subagents")
-                        .font(.system(size: 11.5))
+                        .font(.system(size: DesktopType.meta))
                         .foregroundStyle(DesktopPalette.text2)
                 }
                 ForEach(observed) { link in
@@ -60,9 +60,9 @@ private struct ClaudeSubagentRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 8) {
+            HStack(spacing: DesktopSpace.s) {
                 Circle()
-                    .fill(link.working == true ? DesktopPalette.work : DesktopPalette.muted)
+                    .fill(link.working == true ? DesktopPalette.working : DesktopPalette.muted)
                     .frame(width: 7, height: 7)
                     .frame(width: 12, height: 12)
                     .accessibilityHidden(true)
@@ -71,28 +71,28 @@ private struct ClaudeSubagentRow: View {
                 Spacer(minLength: 4)
                 if let lastActive = link.lastActive {
                     Text(relativeAge(lastActive))
-                        .font(.system(size: 11))
+                        .font(.system(size: DesktopType.caption))
                         .foregroundStyle(DesktopPalette.text2)
                 }
             }
             if let description = link.description, !description.isEmpty {
                 Text(description)
-                    .font(.system(size: 11.5))
+                    .font(.system(size: DesktopType.meta))
                     .foregroundStyle(DesktopPalette.text2)
                     .lineLimit(2)
-                    .padding(.leading, 20)
+                    .padding(.leading, DesktopSpace.xl)
             }
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: link.transcriptPath)])
             } label: {
                 Text((link.transcriptPath as NSString).abbreviatingWithTildeInPath)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: DesktopType.caption, design: .monospaced))
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
             .buttonStyle(.plain)
             .foregroundStyle(DesktopPalette.text2)
-            .padding(.leading, 20)
+            .padding(.leading, DesktopSpace.xl)
             .help("Show transcript in Finder")
         }
         .accessibilityElement(children: .combine)

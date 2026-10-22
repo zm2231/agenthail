@@ -43,17 +43,17 @@ struct NewSessionSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesktopSpace.l) {
             HStack {
                 Text("New session")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: DesktopType.title, weight: .semibold))
                 Spacer()
                 if hosts.isVisible { hostButton }
             }
             if let failure = hosts.loadError {
                 Text(failure)
-                    .font(.system(size: 12))
-                    .foregroundStyle(DesktopPalette.red)
+                    .font(.system(size: DesktopType.secondary))
+                    .foregroundStyle(DesktopPalette.failed)
             }
             Form {
                 Section {
@@ -117,12 +117,12 @@ struct NewSessionSheet: View {
             .formStyle(.grouped)
             if let message = error {
                 Text(message)
-                    .font(.system(size: 12))
-                    .foregroundStyle(DesktopPalette.red)
+                    .font(.system(size: DesktopType.secondary))
+                    .foregroundStyle(DesktopPalette.failed)
             }
             if let submitted {
                 Text(submitted)
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
             HStack {
@@ -145,7 +145,7 @@ struct NewSessionSheet: View {
                 }
             }
         }
-        .padding(20)
+        .padding(DesktopSpace.xl)
         .frame(width: 520)
         .disabled(starting)
         .task {
@@ -187,7 +187,7 @@ struct NewSessionSheet: View {
         }
         if let modelError {
             Text(modelError)
-                .font(.system(size: 12))
+                .font(.system(size: DesktopType.secondary))
                 .foregroundStyle(DesktopPalette.text2)
         }
     }
