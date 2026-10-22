@@ -45,4 +45,4 @@ The row survives a Claude rekey (`rekeySessionTx`), as both the session and the 
 
 ## Tests
 
-`go test ./internal/cli -run 'TestASession|TestThreadCreate|TestThreadFork|Whoami|TestAClaudeSession|Hooks'`, `go test ./internal/registry -run Schema28` and `go test ./internal/daemon -run 'TestDashboardRecordsWhichSession|TestAnIdleClaudeSessionMovesToAPairedHost'`.
+`go test ./internal/cli -run 'TestASession|TestThreadCreate|TestThreadFork|Whoami|TestAClaudeSession|Hooks'`, `go test ./internal/registry -run Schema29` and `go test ./internal/daemon -run 'TestDashboardRecordsWhichSession|TestAnIdleClaudeSessionMovesToAPairedHost'`.
