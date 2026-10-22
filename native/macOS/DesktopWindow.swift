@@ -815,7 +815,6 @@ struct TranscriptView: View {
     let session: SessionState
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var following = true
-    @State private var prepending = false
     @State private var underfilled = false
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
@@ -876,7 +875,7 @@ struct TranscriptView: View {
             .padding(.bottom, 12 + MessageActions.height)
             .frame(maxWidth: .infinity)
         }
-        .transcriptFollow(session.id, holdBottom: prepending, position: $position, following: $following)
+        .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, position: $position, following: $following)
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentSize.height < geometry.containerSize.height * 1.5
         } action: { _, value in
@@ -950,12 +949,7 @@ struct TranscriptView: View {
                 ProgressView().controlSize(.mini)
             } else if (pane.olderCursor ?? 0) > 0 {
                 Button("Load earlier") {
-                    prepending = true
-                    Task {
-                        await pane.loadOlder()
-                        try? await Task.sleep(for: .milliseconds(300))
-                        prepending = false
-                    }
+                    Task { await pane.loadOlder() }
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(DesktopPalette.accentText)
@@ -970,12 +964,7 @@ struct TranscriptView: View {
 
     private func fillViewport() {
         guard pane.detail != nil, let cursor = pane.olderCursor, cursor > 0, !pane.loadingOlder, pane.olderError == nil else { return }
-        prepending = true
-        Task {
-            await pane.loadOlder()
-            try? await Task.sleep(for: .milliseconds(300))
-            prepending = false
-        }
+        Task { await pane.loadOlder() }
     }
 
     private func resend(_ text: String, attachments: [ComposerAttachment] = []) {

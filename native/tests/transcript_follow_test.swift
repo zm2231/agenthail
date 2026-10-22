@@ -12,7 +12,6 @@ final class Feed: ObservableObject {
     @Published var transcript = "A"
     @Published var rows: [Row] = []
     @Published var inset: CGFloat = 100
-    @Published var holdBottom = false
     var following = true
 }
 
@@ -35,7 +34,7 @@ struct Transcript: View {
             }
             .padding(24)
         }
-        .transcriptFollow(feed.transcript, holdBottom: feed.holdBottom, position: $position, following: $following)
+        .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, position: $position, following: $following)
         .safeAreaInset(edge: .bottom, spacing: 0) { Color.gray.frame(height: feed.inset) }
         .onChange(of: following) { feed.following = following }
         .onReceive(NotificationCenter.default.publisher(for: .jumpToLatest)) { _ in
@@ -85,13 +84,18 @@ struct TranscriptFollowTest {
         expect(offset(scroll) == 200 && !feed.following, "a reader who scrolled up stays put when new rows arrive, got offset \(offset(scroll))")
 
         move(scroll, to: 400)
-        feed.holdBottom = true
-        spin(0.1)
         let fromBottom = gap(scroll)
         feed.rows = rows("Co", 10) + feed.rows
-        spin(0.5)
-        feed.holdBottom = false
-        expect(abs(gap(scroll) - fromBottom) < 2, "loading earlier rows keeps the reader's place, distance from bottom \(fromBottom) became \(gap(scroll))")
+        expectEventually(abs(gap(scroll) - fromBottom) < 2, "loading earlier rows keeps the reader's place, distance from bottom \(fromBottom) became \(gap(scroll))")
+        spin(0.6)
+        expect(abs(gap(scroll) - fromBottom) < 2, "the reader's place holds after earlier rows settle, distance from bottom \(fromBottom) became \(gap(scroll))")
+
+        move(scroll, to: 300)
+        feed.rows = rows("Cq", 10) + feed.rows
+        feed.transcript = "C2"
+        feed.rows = rows("C2", 50)
+        spin(0.8)
+        expectBottom(scroll, "switching while earlier rows were being placed in the previous transcript shows the new live edge")
 
         NotificationCenter.default.post(name: .jumpToLatest, object: nil)
         spin(0.8)
@@ -139,13 +143,9 @@ struct TranscriptFollowTest {
         feed.rows = rows("G", 4)
         spin(0.3)
         for page in 0..<4 {
-            feed.holdBottom = true
-            spin(0.05)
             feed.rows = rows("Gp\(page)-", 20) + feed.rows
             spin(0.35)
-            feed.holdBottom = false
         }
-        spin(0.4)
         expectBottom(scroll, "a short transcript that fills the viewport with earlier pages stays at the live edge")
 
         for index in 0..<5 {
@@ -187,7 +187,14 @@ struct TranscriptFollowTest {
 
     @MainActor
     private static func expectBottom(_ scroll: NSScrollView, _ message: String) {
-        expect(abs(gap(scroll)) < 2, "\(message), \(Int(gap(scroll))) points short of the bottom at offset \(Int(offset(scroll)))")
+        expectEventually(abs(gap(scroll)) < 2, "\(message), \(Int(gap(scroll))) points short of the bottom at offset \(Int(offset(scroll)))")
+    }
+
+    @MainActor
+    private static func expectEventually(_ condition: @autoclosure () -> Bool, _ message: @autoclosure () -> String) {
+        let deadline = Date().addingTimeInterval(2)
+        while !condition(), Date() < deadline { spin(0.02) }
+        expect(condition(), message())
     }
 
     private static func expect(_ condition: Bool, _ message: String) {

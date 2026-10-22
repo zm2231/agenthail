@@ -110,6 +110,27 @@ struct SessionPaneTest {
         journaledModel.closePane(journaledPane)
         journaled.stop()
 
+        func page(_ range: ClosedRange<Int>, before: Int) -> String {
+            let items = range.map { #"{"id":"i\#($0)","kind":"message","role":"assistant","title":"assistant","text":"row \#($0)","truncated":false}"# }.joined(separator: ",")
+            return detailJSON.replacingOccurrences(of: #""timeline":{"items":[],"nextBefore":null,"truncated":false}"#, with: #""timeline":{"items":["# + items + #"],"nextBefore":\#(before),"truncated":false}"#)
+        }
+        var pages = [page(1...20, before: 50), page(2...21, before: 51), page(40...59, before: 70)]
+        let paging = try! StubServer { line, _ in
+            guard line.contains("/api/v1/session?") else { return StubServer.reply("404 Not Found", "{}") }
+            return StubServer.reply("200 OK", pages.count > 1 ? pages.removeFirst() : pages[0])
+        }
+        let pagingPort = await paging.ready()
+        let pagingModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(pagingPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
+        let pagingPane = pagingModel.openPane()
+        pagingPane.select("R")
+        for _ in 0..<60 where pagingPane.detail == nil { try? await Task.sleep(for: .milliseconds(50)) }
+        await pagingPane.loadSession("R")
+        check(pagingPane.timelineItems.map(\.id) == (1...21).map { "i\($0)" } && pagingPane.olderCursor == 50, "a refreshed page keeps the rows that fell off its start, in order, with the earlier cursor: \(pagingPane.timelineItems.map(\.id)) \(String(describing: pagingPane.olderCursor))")
+        await pagingPane.loadSession("R")
+        check(pagingPane.timelineItems.map(\.id) == (40...59).map { "i\($0)" } && pagingPane.olderCursor == 70, "a page that does not overlap the shown rows replaces them rather than joining across a gap: \(pagingPane.timelineItems.map(\.id))")
+        pagingModel.closePane(pagingPane)
+        paging.stop()
+
         let offline = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:9")!, token: "t", session: URLSession(configuration: .ephemeral)))
         let offlinePane = offline.openPane()
         offline.operationError = "An action failed."
