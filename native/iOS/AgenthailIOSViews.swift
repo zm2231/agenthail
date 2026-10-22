@@ -1359,6 +1359,9 @@ struct SettingsView: View {
     @ObservedObject var model: AgenthailIOSModel
     var body: some View {
         List {
+            Section {
+                NavigationLink("Add a computer") { PairingForm(model: model, adding: true) }
+            }
             ForEach(model.hosts) { host in
                 Section {
                     Label(connectionLabel(host), systemImage: connectionIcon(host))
@@ -1393,7 +1396,7 @@ struct SettingsView: View {
                                 Text(detail).font(.footnote).foregroundStyle(.secondary)
                             }
                             if let notice = peer.notice, !notice.isEmpty {
-                                Text(notice).font(.footnote).foregroundStyle(.orange)
+                                Text(notice).font(.footnote).foregroundStyle(.orange).lineLimit(3)
                             }
                         }
                     }
@@ -1409,9 +1412,6 @@ struct SettingsView: View {
                         Text(host.address)
                     }
                 }
-            }
-            Section {
-                NavigationLink("Add a computer") { PairingForm(model: model, adding: true) }
             }
             if model.hosts.count > 1 {
                 Section {

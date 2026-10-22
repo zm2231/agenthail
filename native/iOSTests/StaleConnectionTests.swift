@@ -25,7 +25,7 @@ final class StaleConnectionTests: XCTestCase {
     func testAComputerRemovedMidRefreshDoesNotApplyItsLateSnapshot() async throws {
         KeychainStore.removeAll()
         try AgenthailIOSTests.pair("hheld", "https://held.tailnet.ts.net", token: "fixture")
-        HeldSnapshotProtocol.state.reset()
+        HeldSnapshotProtocol.state.reset(holdAt: 1)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [HeldSnapshotProtocol.self]
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
@@ -42,6 +42,28 @@ final class StaleConnectionTests: XCTestCase {
         XCTAssertNil(model.snapshot)
         XCTAssertTrue(model.hosts.isEmpty)
     }
+
+    @MainActor
+    func testAComputerRemovedDuringItsStreamRefreshStartsNoCatalogStream() async throws {
+        KeychainStore.removeAll()
+        try AgenthailIOSTests.pair("hheld", "https://held.tailnet.ts.net", token: "fixture")
+        HeldSnapshotProtocol.state.reset(holdAt: 2)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HeldSnapshotProtocol.self]
+        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        defer { KeychainStore.removeAll() }
+        model.connect()
+        for _ in 0..<150 where !HeldSnapshotProtocol.state.holding {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(HeldSnapshotProtocol.state.connected)
+        XCTAssertTrue(HeldSnapshotProtocol.state.holding)
+        model.forgetHost("hheld")
+        HeldSnapshotProtocol.state.release()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(HeldSnapshotProtocol.state.catalogRequests, 0)
+        XCTAssertNil(model.snapshot)
+    }
 }
 
 private final class HeldSnapshotProtocol: URLProtocol, @unchecked Sendable {
@@ -49,11 +71,22 @@ private final class HeldSnapshotProtocol: URLProtocol, @unchecked Sendable {
         private let lock = NSLock()
         private var held: HeldSnapshotProtocol?
         private var stream = false
+        private var holdAt = 1
+        private var snapshots = 0
+        private var catalogs = 0
         var holding: Bool { lock.withLock { held != nil } }
         var connected: Bool { lock.withLock { stream } }
-        func reset() { lock.withLock { held = nil; stream = false } }
-        func hold(_ request: HeldSnapshotProtocol) { lock.withLock { held = request } }
+        var catalogRequests: Int { lock.withLock { catalogs } }
+        func reset(holdAt: Int) { lock.withLock { held = nil; stream = false; self.holdAt = holdAt; snapshots = 0; catalogs = 0 } }
+        func snapshot(_ request: HeldSnapshotProtocol) -> Bool {
+            lock.withLock {
+                snapshots += 1
+                if snapshots == holdAt { held = request }
+                return snapshots == holdAt
+            }
+        }
         func connect() { lock.withLock { stream = true } }
+        func catalog() { lock.withLock { catalogs += 1 } }
         func release() {
             guard let request = lock.withLock({ held }) else { return }
             request.respond(SessionPreview.snapshotJSON)
@@ -64,7 +97,15 @@ private final class HeldSnapshotProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         switch request.url!.path {
-        case "/api/v1/snapshot": Self.state.hold(self)
+        case "/api/v1/snapshot":
+            if !Self.state.snapshot(self) {
+                var value = try! JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as! [String: Any]
+                value["daemon"] = ["running": true, "stale": true]
+                respond(String(data: try! JSONSerialization.data(withJSONObject: value), encoding: .utf8)!)
+            }
+        case "/api/v1/catalog-events":
+            Self.state.catalog()
+            respond(": connected\n\n")
         case "/api/v1/events":
             Self.state.connect()
             respond(": connected\n\n")

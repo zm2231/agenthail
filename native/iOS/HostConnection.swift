@@ -73,7 +73,7 @@ final class HostConnection {
         delegate?.hostDidChange(self)
         connectionTask = Task {
             let backoff = EventRetryBackoff()
-            while !Task.isCancelled {
+            while !Task.isCancelled, !stopped {
                 do {
                     let version = try await api.version()
                     guard !Task.isCancelled, !stopped else { return }
@@ -82,13 +82,14 @@ final class HostConnection {
                         try? KeychainStore.set(value, account: Self.relayAccount(id))
                     }
                     if await refresh(fresh: true) {
-                        guard !Task.isCancelled else { return }
+                        guard !Task.isCancelled, !stopped else { return }
                         snapshotCoversEventStream = snapshot?.daemon.stale != true
                         startEvents()
                         delegate?.hostConnected(self)
                         return
                     }
                 } catch {
+                    guard !stopped else { return }
                     connectionError = error.localizedDescription
                     reachable = false
                     if let apiError = error as? AgenthailAPIError, case .incompatible = apiError {
@@ -161,7 +162,7 @@ final class HostConnection {
         eventTask?.cancel()
         eventTask = Task {
             let backoff = EventRetryBackoff()
-            while !Task.isCancelled {
+            while !Task.isCancelled, !stopped {
                 do {
                     try await api.streamEvents(
                         after: lastEventID,
@@ -172,12 +173,14 @@ final class HostConnection {
                         }
                     )
                 } catch {
-                    if Task.isCancelled { return }
+                    if Task.isCancelled || stopped { return }
                     reconnecting = true
                     do {
                         _ = try await api.version()
+                        guard !stopped else { return }
                         recordStreamInterruption(probeError: nil)
                     } catch {
+                        guard !stopped else { return }
                         recordStreamInterruption(probeError: error)
                     }
                     let delay = backoff.nextDelay()
@@ -191,8 +194,13 @@ final class HostConnection {
         guard !stopped else { return }
         reconnecting = false
         let refreshed = !snapshotCoversEventStream
-        if refreshed { _ = await refresh(fresh: true) } else { snapshotCoversEventStream = false }
+        if refreshed { _ = await refresh(fresh: true) } else {
+            snapshotCoversEventStream = false
+            delegate?.hostDidChange(self)
+        }
+        guard !stopped else { return }
         await delegate?.hostEventStreamConnected(self, refreshed: refreshed)
+        guard !stopped else { return }
         startCatalogStream()
     }
 
@@ -219,14 +227,14 @@ final class HostConnection {
         catalogStreamTask?.cancel()
         catalogStreamTask = Task {
             let backoff = EventRetryBackoff()
-            while !Task.isCancelled {
+            while !Task.isCancelled, !stopped {
                 do {
                     try await api.streamCatalog(after: catalogStreamCursor, onConnected: {}, onEvent: { [weak self] event in
                         backoff.reset()
                         await self?.receiveCatalog(event)
                     })
                 } catch {
-                    if Task.isCancelled { return }
+                    if Task.isCancelled || stopped { return }
                     if case AgenthailAPIError.streamGap = error {
                         catalogStreamCursor = 0
                         _ = await refresh(fresh: true)

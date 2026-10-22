@@ -358,9 +358,14 @@ final class AgenthailIOSTests: XCTestCase {
         for _ in 0..<150 where !FlakyConnectionURLProtocol.state.connected {
             try await Task.sleep(for: .milliseconds(20))
         }
+        for _ in 0..<150 where model.reconnecting {
+            try await Task.sleep(for: .milliseconds(20))
+        }
         XCTAssertGreaterThanOrEqual(FlakyConnectionURLProtocol.state.versionRequests, 2)
         XCTAssertTrue(FlakyConnectionURLProtocol.state.connected)
         XCTAssertNotNil(model.snapshot)
+        XCTAssertFalse(model.reconnecting)
+        XCTAssertEqual(model.hosts.first?.reconnecting, false)
         model.forgetHost("hmac")
         KeychainStore.removeAll()
     }

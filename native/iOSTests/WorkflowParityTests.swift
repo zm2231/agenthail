@@ -230,6 +230,17 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertTrue(model.pendingControls.isEmpty)
     }
 
+    @MainActor
+    func testCreatingOnAMirroredComputerKeysTheSessionByItsOwner() async throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"now","daemon":{"running":true,"hosts":[{"id":"hpeer","name":"peer","state":"connected"}]},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5}"#.utf8)))
+        let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", host: "hpeer")
+        XCTAssertTrue(created)
+        XCTAssertEqual(ParityProtocol.state.actions.first?["host"] as? String, "hpeer")
+        XCTAssertEqual(model.requestedSessionID, "hpeer::created")
+    }
+
     @MainActor private func makeModel() -> AgenthailIOSModel {
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [ParityProtocol.self]
         return AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string:"https://fixture.invalid")!, token:"fixture", session: URLSession(configuration: config)))
