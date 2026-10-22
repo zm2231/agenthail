@@ -82,7 +82,9 @@ func ToolsDigest() string {
 
 const toolsOutdatedNotice = "This voice conversation was created before Agenthail's current voice tools (projects and their coordinators). Choose New conversation to use them; Codex cannot add tools to an existing conversation."
 
-func (s *Service) callTool(ctx context.Context, tool string, arguments map[string]any) (string, error) {
+// callTool runs one voice tool for the operator source. The caller holds no
+// lock.
+func (s *Service) callTool(ctx context.Context, tool string, arguments map[string]any, source string) (string, error) {
 	text := func(key string) string {
 		value, _ := arguments[key].(string)
 		return strings.TrimSpace(value)
@@ -103,12 +105,18 @@ func (s *Service) callTool(ctx context.Context, tool string, arguments map[strin
 			}
 			targetID = id
 		}
-		if err := s.selectTarget(ctx, targetID, true); err != nil {
+		s.op.Lock()
+		name, err := s.selectTarget(ctx, targetID, true)
+		s.op.Unlock()
+		if err != nil {
 			return "", err
 		}
-		return "Voice transferred to " + s.state.State.Target.Name + ".", nil
+		return "Voice transferred to " + name + ".", nil
 	case "voice_return_to_orchestrator":
-		if err := s.selectTarget(ctx, "", true); err != nil {
+		s.op.Lock()
+		_, err := s.selectTarget(ctx, "", true)
+		s.op.Unlock()
+		if err != nil {
 			return "", err
 		}
 		return "Voice is now with the Agenthail orchestrator.", nil
@@ -122,55 +130,27 @@ func (s *Service) callTool(ctx context.Context, tool string, arguments map[strin
 		}
 		data, err := json.Marshal(map[string]any{"projects": list})
 		return string(data), err
-	}
-	return "", errors.New("unsupported Agenthail voice tool")
-}
-
-const leadSendTimeout = 30 * time.Second
-
-// sendToLead answers voice_send_to_lead off the service lock: a relay to a
-// slow paired host must not stall the call's other events.
-func (s *Service) sendToLead(responder DynamicToolResponder, requestID, threadID string, arguments map[string]any) {
-	project, _ := arguments["project"].(string)
-	message, _ := arguments["message"].(string)
-	projects, source := s.projects, s.state.State.Session.ID
-	send := func(ctx context.Context) (string, error) {
-		project, message := strings.TrimSpace(project), strings.TrimSpace(message)
+	case "voice_send_to_lead":
+		project, message := text("project"), text("message")
 		if project == "" || message == "" {
 			return "", errors.New("a project and a message are required")
 		}
-		if projects == nil {
+		if s.projects == nil {
 			return "", errors.New("projects are unavailable on this host")
 		}
-		receipt, err := projects.SendToLead(ctx, project, message, source)
+		receipt, err := s.projects.SendToLead(ctx, project, message, source)
 		if err != nil {
 			return "", err
 		}
 		data, err := json.Marshal(receipt)
 		return string(data), err
 	}
-	s.spawn(func() {
-		ctx, cancel := context.WithTimeout(s.background, leadSendTimeout)
-		defer cancel()
-		answer, err := send(ctx)
-		if err != nil {
-			_ = responder.RespondDynamicToolCall(ctx, requestID, threadID, false, err.Error())
-			return
-		}
-		if err := responder.RespondDynamicToolCall(ctx, requestID, threadID, true, answer); err != nil {
-			s.mu.Lock()
-			if s.state.State.Session == nil || s.state.State.Session.ID != source {
-				s.mu.Unlock()
-				return
-			}
-			s.state.State.Message = "Voice tool response could not be returned to Codex: " + err.Error()
-			if err := s.save(); err != nil {
-				s.loadErr = err
-			}
-			s.unlock()
-		}
-	})
+	return "", errors.New("unsupported Agenthail voice tool")
 }
+
+// leadSendTimeout bounds a send to a project lead, which may relay to a
+// paired host.
+const leadSendTimeout = 30 * time.Second
 
 // SetProjects gives the operator's project tools their resolver. The daemon
 // calls it once, before the service handles events.
