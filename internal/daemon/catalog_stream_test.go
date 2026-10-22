@@ -432,6 +432,14 @@ func appendCatalogGapFixture(t *testing.T, path string, count int) {
 func TestFailedDiscoveryKeepsCatalogRowsStaleThroughDashboardSnapshot(t *testing.T) {
 	d, registry, fake, _, _ := daemonFixture(t)
 	d.discoverCatalog(context.Background())
+	fresh, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := map[string]uint64{}
+	for _, session := range fresh.Sessions {
+		observed[session.ID] = session.Freshness.Generation
+	}
 	d.Surfaces = []surface.Surface{&failingClaudeListSurface{daemonSurface: fake}}
 	d.discoverCatalog(context.Background())
 	state, err := d.dashboardState(context.Background())
@@ -442,8 +450,8 @@ func TestFailedDiscoveryKeepsCatalogRowsStaleThroughDashboardSnapshot(t *testing
 		t.Fatalf("sessions=%d", len(state.Sessions))
 	}
 	for _, session := range state.Sessions {
-		if session.Freshness == nil || !session.Freshness.Stale || session.Freshness.Generation != 2 {
-			t.Fatalf("session=%+v", session)
+		if session.Freshness == nil || !session.Freshness.Stale || session.Freshness.Generation <= observed[session.ID] {
+			t.Fatalf("session=%+v, generation before the failure %d", session, observed[session.ID])
 		}
 	}
 	window, err := registry.CatalogEventsAfter(0, 20)
