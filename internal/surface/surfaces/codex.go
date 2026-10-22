@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1053,14 +1054,76 @@ func codexAuthoritativeStreamEventWithKey(key, turnID string, item codexAssistan
 	return surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: "upsert", Final: true, TurnID: turnID, Kind: "text", Text: item.Text}
 }
 
+// codexNotifier is a client that delivers app-server notifications as they
+// arrive rather than only alongside a response.
+type codexNotifier interface {
+	DrainNotifications() []codexEvent
+	Notified() <-chan struct{}
+}
+
+// managedStreamRead reads what the stream follows: the newest turn, or the
+// whole thread when the stream's turn is no longer the newest.
+func (c *Codex) managedStreamRead(ctx context.Context, client codexClient, threadID, turnID string) (*codexThread, error) {
+	thread, err := c.readLatestTurn(ctx, client, threadID)
+	if err != nil {
+		return nil, err
+	}
+	if turnID != "" && codexTurnByID(thread, turnID) == nil {
+		return c.readThread(ctx, client, threadID)
+	}
+	return thread, nil
+}
+
+// subscribeManagedThread asks the app-server to send this connection the
+// thread's item, turn and token notifications. It subscribes only to a loaded
+// thread, since resuming one that is not loaded would load it.
+func (c *Codex) subscribeManagedThread(ctx context.Context, client codexClient, threadID string) bool {
+	loaded, err := c.loadedThreadIDs(ctx, client, 0)
+	if err != nil || !slices.Contains(loaded, threadID) {
+		return false
+	}
+	_, err = client.Request(ctx, "thread/resume", map[string]any{"threadId": threadID, "excludeTurns": true}, 5*time.Second)
+	return err == nil
+}
+
 func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
 	emitted := ""
 	baselineTurnID := ""
 	finalEmitted := false
 	var lastContext surface.ContextUsage
 	var nextContextPoll time.Time
+	notifier, _ := client.(codexNotifier)
+	subscribed := notifier != nil && c.subscribeManagedThread(ctx, client, sess.ID)
+	// handle forwards the thread's notifications and reports whether one may
+	// have changed what a read returns.
+	handle := func() bool {
+		if notifier == nil {
+			return false
+		}
+		changed := false
+		for _, event := range notifier.DrainNotifications() {
+			if !codexContainsID(event.Params, sess.ID) {
+				continue
+			}
+			if !strings.HasSuffix(event.Method, "/delta") {
+				changed = true
+			}
+			if event.Method == "thread/status/changed" && !subscribed {
+				subscribed = c.subscribeManagedThread(ctx, client, sess.ID)
+			}
+			if goalEvent, ok := codexGoalStreamEvent(event); ok {
+				onEvent(goalEvent)
+				continue
+			}
+			if usage, matched := c.applyContextEvent(sess, event, lastContext); matched {
+				lastContext = *usage
+				onEvent(surface.StreamEvent{Kind: "context", Context: usage})
+			}
+		}
+		return changed
+	}
 	if uuid == "" {
-		thread, readErr := c.readThread(ctx, client, sess.ID)
+		thread, readErr := c.readLatestTurn(ctx, client, sess.ID)
 		if readErr != nil {
 			return readErr
 		}
@@ -1073,27 +1136,18 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 			}
 		}
 	}
+	var notified <-chan struct{}
+	if notifier != nil {
+		notified = notifier.Notified()
+	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		thread, err := c.readThread(ctx, client, sess.ID)
+		thread, err := c.managedStreamRead(ctx, client, sess.ID, uuid)
 		if err != nil {
 			return err
 		}
-		if source, ok := client.(interface{ DrainNotifications() []codexEvent }); ok {
-			for _, event := range source.DrainNotifications() {
-				if !codexContainsID(event.Params, sess.ID) {
-					continue
-				}
-				if goalEvent, ok := codexGoalStreamEvent(event); ok {
-					onEvent(goalEvent)
-					continue
-				}
-				if usage, matched := c.applyContextEvent(sess, event, lastContext); matched {
-					lastContext = *usage
-					onEvent(surface.StreamEvent{Kind: "context", Context: usage})
-				}
-			}
-		}
+		// A change reported while reading may postdate the read.
+		reread := handle()
 		if !time.Now().Before(nextContextPoll) {
 			nextContextPoll = time.Now().Add(time.Second)
 			if usage, usageErr := c.ContextUsage(ctx, sess); usageErr == nil && usage != nil && *usage != lastContext {
@@ -1135,11 +1189,27 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 				return nil
 			}
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(transcriptPollInterval):
+		if reread {
+			continue
 		}
+		// Wait for a notification that may change the turn, or the poll
+		// interval, which still covers anything the app-server does not send.
+		timer := time.NewTimer(transcriptPollInterval)
+	wait:
+		for {
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-notified:
+				if handle() {
+					break wait
+				}
+			case <-timer.C:
+				break wait
+			}
+		}
+		timer.Stop()
 	}
 	return fmt.Errorf("stream timed out after %s: %w", timeout, surface.ErrStreamWindow)
 }
