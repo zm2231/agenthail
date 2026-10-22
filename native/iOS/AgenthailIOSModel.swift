@@ -236,11 +236,17 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         sessionMetadataTask?.cancel()
         sessionStreamCursor = 0
         sessionStreamUnsupported = false
+        sessionRequests = nil
+        sessionRequestsKey = nil
+        olderActivity = []
+        activityCursor = nil
+        olderActivityError = nil
         guard current != nil else { return }
         Task { [weak self] in
             await self?.reloadSelectedSession()
             guard let self, self.selectedSessionID == id else { return }
             self.startSessionMetadata(id)
+            if let session = self.snapshot?.sessions.first(where: { $0.id == id }) { await self.syncRequests(for: session) }
         }
     }
 
@@ -360,12 +366,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             fetchedSubagents.drop(session.id)
             return
         }
+        let requestServer = server(for: session.id)
         do {
-            let (api, route) = try resolve(session.id)
-            let loaded = try await api.subagents(of: route.sessionID)
-            if !Task.isCancelled { fetchedSubagents.store(loaded.map { merged($0, from: route.hostID) }, for: session.id) }
+            let (connection, route) = try resolveServer(session.id)
+            let loaded = try await connection.api.subagents(of: route.sessionID)
+            guard !Task.isCancelled, server(for: session.id) === connection else { return }
+            fetchedSubagents.store(loaded.map { merged($0, from: route.hostID) }, for: session.id)
         } catch {
-            if !Task.isCancelled { fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id) }
+            if !Task.isCancelled, server(for: session.id) === requestServer { fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id) }
         }
     }
 
@@ -493,12 +501,12 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func sessionAttachment(for item: TimelineItem, sessionID: String) async -> Data? {
-        guard let attachment = item.attachment, selectedSessionID == sessionID, case let (api, route)? = try? resolve(sessionID) else { return nil }
+        guard let attachment = item.attachment, selectedSessionID == sessionID, case let (connection, route)? = try? resolveServer(sessionID) else { return nil }
         let cacheKey = "\(sessionID):\(attachment.id)"
         if let cached = attachmentCache[cacheKey] { return cached }
         do {
-            let data = try await api.sessionAttachment(sessionID: route.sessionID, id: attachment.id)
-            guard !Task.isCancelled, selectedSessionID == sessionID else { return nil }
+            let data = try await connection.api.sessionAttachment(sessionID: route.sessionID, id: attachment.id)
+            guard !Task.isCancelled, selectedSessionID == sessionID, server(for: sessionID) === connection else { return nil }
             if data.count <= attachmentCacheLimit {
                 if attachmentCacheBytes + data.count > attachmentCacheLimit {
                     attachmentCache.removeAll()
@@ -710,13 +718,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     private func fetchRequests(_ id: String, key: String?) async {
+        let requestServer = server(for: id)
         do {
-            let (api, route) = try resolve(id)
-            let requests = try await api.requests(sessionID: route.sessionID)
-            guard selectedSessionID == id, sessionRequestsKey == key else { return }
+            let (connection, route) = try resolveServer(id)
+            let requests = try await connection.api.requests(sessionID: route.sessionID)
+            guard selectedSessionID == id, sessionRequestsKey == key, server(for: id) === connection else { return }
             sessionRequests = requests
         } catch {
-            guard selectedSessionID == id else { return }
+            guard selectedSessionID == id, server(for: id) === requestServer else { return }
             sessionRequestsKey = nil
             operationError = error.localizedDescription
         }
@@ -807,9 +816,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         loadingOlderActivity = true
         defer { loadingOlderActivity = false }
         do {
-            let (api, route) = try resolve(id)
-            let page = try await api.sessionDetail(id: route.sessionID, includeTimeline: true, timelineBefore: cursor)
-            guard selectedSessionID == id else { return }
+            let (connection, route) = try resolveServer(id)
+            let page = try await connection.api.sessionDetail(id: route.sessionID, includeTimeline: true, timelineBefore: cursor)
+            guard selectedSessionID == id, server(for: id) === connection, activityCursor == cursor else { return }
             guard let timeline = page.timeline, timeline.unavailableReason == nil else {
                 throw AgenthailAPIError.unavailable(page.timeline?.unavailableReason ?? "Older activity is unavailable.")
             }
@@ -818,7 +827,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             activityCursor = timeline.nextBefore
             olderActivityError = nil
         } catch {
-            if selectedSessionID == id {
+            if selectedSessionID == id, activityCursor == cursor {
                 if case AgenthailAPIError.historyGap = error { activityCursor = nil }
                 olderActivityError = error.localizedDescription
             }
@@ -1332,7 +1341,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func retainedSessionBody(for item: TimelineItem, start: Int = 0) async -> RetainedBodyResult? {
-        guard let id = selectedSessionID, let ref = item.bodyRef, case let (api, route)? = try? resolve(id) else { return nil }
+        guard let id = selectedSessionID, let ref = item.bodyRef, case let (connection, route)? = try? resolveServer(id) else { return nil }
         let chunkSize = 16 << 10
         let maximum = 8 << 20
         var cursor = max(0, start)
@@ -1342,7 +1351,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         do {
             while cursor < (total ?? maximum) {
                 let requestedEnd = min(cursor + chunkSize, maximum)
-                let chunk = try await api.sessionStreamBody(id: route.sessionID, ref: ref, start: cursor, end: requestedEnd)
+                let chunk = try await connection.api.sessionStreamBody(id: route.sessionID, ref: ref, start: cursor, end: requestedEnd)
+                guard server(for: id) === connection else { return nil }
                 if total == nil { total = chunk.total }
                 guard chunk.total == total, chunk.start == cursor, chunk.end > cursor, chunk.end <= maximum else {
                     return RetainedBodyResult(text: chunks.joined(), error: "The retained body returned an invalid range.")
@@ -1359,6 +1369,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             }
             return RetainedBodyResult(text: chunks.joined(), error: "The retained body could not be completed.")
         } catch {
+            guard server(for: id) === connection else { return nil }
             return RetainedBodyResult(text: chunks.joined(), error: error.localizedDescription)
         }
     }

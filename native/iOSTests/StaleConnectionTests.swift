@@ -141,6 +141,41 @@ final class StaleConnectionTests: XCTestCase {
     }
 
     @MainActor
+    func testReconnectingAComputerDropsItsOldRequestsAndOlderActivity() async throws {
+        KeychainStore.removeAll()
+        ServedSessionProtocol.state.reset(holdDetailOn: nil)
+        defer { ServedSessionProtocol.state.release(); KeychainStore.removeAll() }
+        try AgenthailIOSTests.pair("hsrv", "https://old.tailnet.ts.net", name: "srv")
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        model.connect()
+        for _ in 0..<150 where model.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
+        await model.loadSession("hsrv::demo")
+        let session = try XCTUnwrap(model.snapshot?.sessions.first { $0.id == "hsrv::demo" })
+        XCTAssertTrue(session.capabilities.respond)
+        XCTAssertEqual(model.selectedDetail?.session.status, "old")
+        XCTAssertNotNil(model.activityCursor)
+        ServedSessionProtocol.state.hold("old", ["/api/v1/requests", "/api/v1/session"])
+        let requests = Task { await model.syncRequests(for: session) }
+        let older = Task { await model.loadOlderActivity() }
+        for _ in 0..<150 where ServedSessionProtocol.state.held < 2 { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(ServedSessionProtocol.state.held, 2)
+        model.handlePairingURL(AgenthailIOSTests.pairingLink("new", host: "hsrv", name: "srv"))
+        model.confirmPairing()
+        for _ in 0..<150 where model.completedPairings == 0 { try await Task.sleep(for: .milliseconds(20)) }
+        model.connect()
+        for _ in 0..<150 where model.sessionRequests?.permissionMode != "new" { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(model.selectedDetail?.session.status, "new")
+        ServedSessionProtocol.state.release()
+        await requests.value
+        await older.value
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(model.sessionRequests?.permissionMode, "new")
+        XCTAssertTrue(model.olderActivity.isEmpty)
+        XCTAssertNil(model.olderActivityError)
+        model.forgetHost("hsrv")
+    }
+
+    @MainActor
     func testRemovingTheMirrorServingASessionStopsItsStream() async throws {
         KeychainStore.removeAll()
         ServedSessionProtocol.state.reset(holdDetailOn: nil)
@@ -334,13 +369,16 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
     final class State: @unchecked Sendable {
         private let condition = NSCondition()
         private var holdOn: String?
-        private var waiting = false
+        private var holdPaths: Set<String> = []
+        private var waiting = 0
         private var log: [(host: String, path: String)] = []
         private var streams: [String: ServedSessionProtocol] = [:]
-        var holding: Bool { condition.withLock { waiting } }
+        var holding: Bool { condition.withLock { waiting > 0 } }
+        var held: Int { condition.withLock { waiting } }
         func reset(holdDetailOn host: String?) {
-            condition.withLock { holdOn = host; waiting = false; log = []; streams = [:]; condition.broadcast() }
+            condition.withLock { holdOn = host; holdPaths = ["/api/v1/session"]; waiting = 0; log = []; streams = [:]; condition.broadcast() }
         }
+        func hold(_ host: String, _ paths: Set<String>) { condition.withLock { holdOn = host; holdPaths = paths } }
         func release() { condition.withLock { holdOn = nil; condition.broadcast() } }
         func record(_ host: String, _ path: String) { condition.withLock { log.append((host, path)) } }
         func sessionRequests(_ host: String) -> [String] {
@@ -352,12 +390,12 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
             let stream = condition.withLock { streams[host] }
             stream?.client?.urlProtocol(stream!, didLoad: Data("id: 9\ndata: \(json)\n\n".utf8))
         }
-        func waitIfHeld(_ host: String) {
+        func waitIfHeld(_ host: String, _ path: String) {
             condition.lock(); defer { condition.unlock() }
-            guard holdOn == host else { return }
-            waiting = true
+            guard holdOn == host, holdPaths.contains(path) else { return }
+            waiting += 1
             while holdOn == host { condition.wait() }
-            waiting = false
+            waiting -= 1
         }
     }
     static let state = State()
@@ -378,6 +416,13 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
             respond(#"{"device":{"id":"d","name":"Phone","scopes":["read","control"],"createdAt":"now","pushEnabled":false},"token":"new-token","protocol":1,"host":{"id":"hsrv","name":"srv"}}"#)
         case "/api/v1/snapshot":
             var value = try! JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as! [String: Any]
+            value["sessions"] = (value["sessions"] as! [[String: Any]]).map { session in
+                var session = session
+                var capabilities = session["capabilities"] as? [String: Any] ?? [:]
+                capabilities["respond"] = true
+                session["capabilities"] = capabilities
+                return session
+            }
             if host == "mirror" {
                 var sessions = value["sessions"] as! [[String: Any]]
                 var mirrored = sessions[0]
@@ -387,13 +432,23 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
             }
             respond(String(decoding: try! JSONSerialization.data(withJSONObject: value), as: UTF8.self))
         case "/api/v1/session":
+            let older = request.url?.query?.contains("timelineBefore") == true
             DispatchQueue.global().async { [self] in
-                Self.state.waitIfHeld(host)
+                Self.state.waitIfHeld(host, path)
                 var object = try! JSONSerialization.jsonObject(with: Data(SessionPreview.detailJSON.utf8)) as! [String: Any]
                 var session = object["session"] as! [String: Any]
                 session["status"] = host
                 object["session"] = session
+                if older, var timeline = object["timeline"] as? [String: Any], let items = timeline["items"] as? [[String: Any]] {
+                    timeline["items"] = items.map { item in var item = item; item["id"] = "older-\(host)-\(item["id"] ?? "")"; return item }
+                    object["timeline"] = timeline
+                }
                 respond(String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self))
+            }
+        case "/api/v1/requests":
+            DispatchQueue.global().async { [self] in
+                Self.state.waitIfHeld(host, path)
+                respond(#"{"permissionMode":"\#(host)","requests":[]}"#)
             }
         case "/api/v1/session-stream":
             Self.state.open(host, self)
