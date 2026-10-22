@@ -284,7 +284,7 @@ struct SessionPaneTest {
             }
             if line.contains("/api/v1/requests?") {
                 requestReads += 1
-                return requestReads == 1 ? StubServer.hold : StubServer.reply("200 OK", #"{"permissionMode":"default","requests":[]}"#)
+                return requestReads == 1 || requestReads == 3 ? StubServer.hold : StubServer.reply("200 OK", #"{"permissionMode":"default","requests":[]}"#)
             }
             return StubServer.reply("404 Not Found", "{}")
         }
@@ -366,8 +366,8 @@ struct SessionPaneTest {
         streamingModel.snapshot = listing([])
         streamingPane.reconcile()
         let failure = StubServer.reply("500 Internal Server Error", #"{"error":{"message":"gone"}}"#)
-        streamingServer.release(failure)
-        streamingServer.release(failure)
+        streamingServer.release(failure, to: "/api/v1/session?")
+        streamingServer.release(failure, to: "/api/v1/requests?")
         try? await Task.sleep(for: .milliseconds(1500))
         check(pagesBeforeFailure > pagesBeforeReturn && requestReads == 1, "reads were open when the session was removed: pages \(pagesBeforeReturn)->\(pagesBeforeFailure), requests \(requestReads)")
         check(streamingPane.detailLoadError == nil && !streamingPane.detailStale && pageRequests == pagesBeforeFailure, "a read that fails after removal neither reports nor retries: error \(streamingPane.detailLoadError ?? "nil"), stale \(streamingPane.detailStale), pages \(pageRequests)")
@@ -377,6 +377,18 @@ struct SessionPaneTest {
         let resyncDeadline = Date().addingTimeInterval(5)
         while streamingPane.requests == nil, Date() < resyncDeadline { try? await Task.sleep(for: .milliseconds(20)) }
         check(requestReads == 2 && streamingPane.requests?.permissionMode == "default", "a session that comes back reads its requests again: reads \(requestReads)")
+        Task { await streamingPane.setPermissionMode("plan") }
+        let heldReadDeadline = Date().addingTimeInterval(5)
+        while requestReads < 3, Date() < heldReadDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        streamingModel.snapshot = listing([])
+        streamingPane.reconcile()
+        streamingModel.snapshot = listing([responding])
+        streamingPane.reconcile()
+        let freshReadDeadline = Date().addingTimeInterval(5)
+        while streamingPane.requests == nil || requestReads < 4, Date() < freshReadDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        streamingServer.release(StubServer.reply("200 OK", #"{"permissionMode":"plan","requests":[]}"#), to: "/api/v1/requests?")
+        try? await Task.sleep(for: .milliseconds(300))
+        check(requestReads == 4 && streamingPane.requests?.permissionMode == "default", "a request read from before the session left does not replace the one after it came back: \(streamingPane.requests?.permissionMode ?? "nil"), reads \(requestReads)")
         streamingModel.closePane(streamingPane)
         streamingServer.stop()
 
@@ -433,9 +445,9 @@ struct SessionPaneTest {
                 .forEach { $0.send(content: Data(text.utf8), completion: .contentProcessed { _ in }) }
         }
 
-        func release(_ reply: String) {
-            guard !held.isEmpty else { return }
-            held.removeFirst().send(content: Data(reply.utf8), completion: .contentProcessed { _ in })
+        func release(_ reply: String, to path: String? = nil) {
+            guard let index = held.firstIndex(where: { path == nil || lines[ObjectIdentifier($0)]?.contains(path!) == true }) else { return }
+            held.remove(at: index).send(content: Data(reply.utf8), completion: .contentProcessed { _ in })
         }
 
         func stop() {

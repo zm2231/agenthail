@@ -43,6 +43,7 @@ final class SessionPane: ObservableObject, Identifiable {
     /// a page read before some of them arrived can be brought up to date.
     private(set) var streamedRows: [SessionStreamEvent] = []
     private(set) var pageReadsInFlight = 0
+    private var requestGeneration = 0
     /// Streamed rows apply here as they arrive and reach `detail` at most once
     /// per `streamPublishInterval`, so a burst of rows renders once.
     private(set) var unpublishedDetail: SessionDetail?
@@ -415,6 +416,7 @@ final class SessionPane: ObservableObject, Identifiable {
         detailLoadTask?.cancel()
         detailLoadTask = nil
         requestsKey = nil
+        requestGeneration &+= 1
         detailReloadTask?.cancel()
         detailReloadTask = nil
         detailReloadPending = false
@@ -471,13 +473,15 @@ final class SessionPane: ObservableObject, Identifiable {
 
     private func fetchRequests(_ id: String, key: String?) async {
         guard let api = model.api else { return }
+        requestGeneration &+= 1
+        let generation = requestGeneration
         do {
             let loaded = try await api.requests(sessionID: id)
-            guard selectedSessionID == id, requestsKey == key, removedSession == nil else { return }
+            guard requestGeneration == generation, selectedSessionID == id, requestsKey == key, removedSession == nil else { return }
             requests = loaded
             requestError = nil
         } catch {
-            guard selectedSessionID == id, removedSession == nil else { return }
+            guard requestGeneration == generation, selectedSessionID == id, removedSession == nil else { return }
             requestsKey = nil
             requestError = error.localizedDescription
         }
