@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"slices"
 	"strings"
@@ -376,6 +378,9 @@ func (c *Claude) TranscriptItems(ctx context.Context, session *surface.Session, 
 		return nil, err
 	}
 	file, err := os.Open(path)
+	if request.Identity != "" && errors.Is(err, fs.ErrNotExist) {
+		return nil, surface.ErrTranscriptChanged
+	}
 	if err != nil {
 		return nil, err
 	}

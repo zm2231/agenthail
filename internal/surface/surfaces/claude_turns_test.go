@@ -202,6 +202,9 @@ func TestClaudeTranscriptItemsRefuseAReplacedTranscriptAndABacklogPastTheLimit(t
 	if _, err := claude.TranscriptItems(context.Background(), session, surface.TranscriptItemsRequest{From: whole.End + 1, Identity: whole.Identity}); !errors.Is(err, surface.ErrTranscriptChanged) {
 		t.Fatalf("an offset past a shrunk transcript: err=%v", err)
 	}
+	if _, err := claude.TranscriptItems(context.Background(), &surface.Session{Transcript: path + ".gone", Status: surface.StatusIdle}, surface.TranscriptItemsRequest{Identity: whole.Identity}); !errors.Is(err, surface.ErrTranscriptChanged) {
+		t.Fatalf("a removed transcript: err=%v", err)
+	}
 	replacement := path + ".new"
 	data, err := os.ReadFile(path)
 	if err != nil {
