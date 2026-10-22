@@ -72,13 +72,17 @@ assert.equal(JSON.parse(vm.runInContext(programs.all,context)).events.length,6);
   // A hook an earlier daemon installed is replaced, keeping its event cursor.
   const oldListeners=[],oldSent=[];
   const upgraded=vm.createContext({window:{addEventListener:(name,f)=>oldListeners.push(f)},electronBridge:{sendMessageFromView:message=>{if(message.type==='mcp-response')void message.response.id;oldSent.push(message)}},setTimeout,clearTimeout});
-  vm.runInContext("globalThis.__agenthailCodexDesktopRendererV2={events:[{sequence:6,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_send_to_lead',requestId:'5'}},{sequence:7,method:'turn/started',params:{threadId:'operator'}}],sequence:7,next:3,pending:new Map(),request(){}}",upgraded);
+  vm.runInContext("globalThis.__agenthailCodexDesktopRendererV2={abi:2,toolRequests:new Map([['77',{id:77,threadId:'operator'}]]),events:[{sequence:5,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_send_to_lead',requestId:'77'}},{sequence:6,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_send_to_lead',requestId:'5'}},{sequence:7,method:'turn/started',params:{threadId:'operator'}}],sequence:7,next:3,pending:new Map(),request(){}}",upgraded);
   assert.equal(vm.runInContext(programs.hook,upgraded),'hooked');
   assert.equal(vm.runInContext(programs.hook,upgraded),'already');
   const fresh=upgraded.__agenthailCodexDesktopRendererV2;
   assert.equal(fresh.sequence,7);
-  // The earlier hook kept no way to answer its queued tool call, so it is not offered.
-  assert.deepEqual(JSON.parse(vm.runInContext(programs.voice,upgraded)).events.map(e=>e.method),['turn/started']);
+  assert.notEqual(fresh.abi,2);
+  // A request the earlier hook recorded stays answerable; one it kept no way to answer is not offered.
+  assert.deepEqual(JSON.parse(vm.runInContext(programs.voice,upgraded)).events.map(e=>[e.method,e.params.requestId]),[['item/tool/call','77'],['turn/started',undefined]]);
+  await fresh.respondDynamicToolCall('77','operator',true,'sent');
+  assert.equal(oldSent[0].response.id,77);
+  oldSent.length=0;
   oldListeners[oldListeners.length-1]({data:{type:'mcp-request',hostId:'local',request:{id:9,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_projects'}}}});
   assert.equal(fresh.sequence,8);
   await fresh.respondDynamicToolCall('9','operator',true,'[]');

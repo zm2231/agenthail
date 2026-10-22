@@ -2,27 +2,37 @@ package surfaces
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-const codexHookJS = `
+// codexHookSource is installed with its own hash as its ABI, so any change to
+// it replaces the hook a running Desktop already holds.
+const codexHookSource = `
 (() => {
   if (!globalThis.electronBridge || typeof globalThis.electronBridge.sendMessageFromView !== 'function') return 'no-renderer-bridge';
   const current = globalThis.__agenthailCodexDesktopRendererV2;
-  if (current && current.abi === 2 && typeof current.request === 'function') return 'already';
+  if (current && current.abi === __ABI__ && typeof current.request === 'function') return 'already';
   const bridge = {
-    abi: 2,
+    abi: __ABI__,
     events: current && Array.isArray(current.events) ? current.events.slice() : [],
     sequence: current && Number.isSafeInteger(current.sequence) ? current.sequence : 0,
     next: current && Number.isSafeInteger(current.next) ? current.next : 0,
     pending: current && current.pending instanceof Map ? current.pending : new Map(),
     toolRequests: new Map(),
   };
+  if (current && current.toolRequests instanceof Map) {
+    for (const [key, request] of current.toolRequests) {
+      if (request && request.id != null) bridge.toolRequests.set(key, {id: request.id, threadId: request.threadId, at: Number.isFinite(request.at) ? request.at : Date.now()});
+    }
+  }
   if (current) current.retired = true;
   window.addEventListener('message', event => {
     const data = event.data;
@@ -77,6 +87,11 @@ const codexHookJS = `
   return 'hooked';
 })()
 `
+
+var codexHookJS = func() string {
+	sum := sha256.Sum256([]byte(codexHookSource))
+	return strings.ReplaceAll(codexHookSource, "__ABI__", strconvQuote(hex.EncodeToString(sum[:8])))
+}()
 
 func codexRPCJSONJS(method, paramsJSON string, timeout time.Duration) string {
 	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop renderer bridge is unavailable'}});return JSON.stringify(await b.request(%s,%s,%d))}catch(e){return JSON.stringify({error:{code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`,
