@@ -446,7 +446,7 @@ func (p *claudePrompts) waiting(sessionID string) *surface.Waiting {
 		return nil
 	}
 	oldest := open[0].request
-	return &surface.Waiting{Kind: oldest.Kind, ID: oldest.ID, Since: oldest.CreatedAt}
+	return &surface.Waiting{Kind: oldest.Kind, ID: oldest.ID, Since: oldest.CreatedAt, Answerable: true}
 }
 
 func (p *claudePrompts) requests(sessionID string) []surface.Request {

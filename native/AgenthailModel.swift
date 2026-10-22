@@ -388,6 +388,14 @@ final class AgenthailModel: ObservableObject {
         perform(action: "session-focus", sessionID: session.id)
     }
 
+    /// Stops a session and resumes it, which clears a prompt nothing shows.
+    func stopAndResume(_ sessionID: String) {
+        Task {
+            guard await performNow(action: "session-lifecycle-stop", sessionID: sessionID) else { return }
+            await performNow(action: "session-lifecycle-resume", sessionID: sessionID)
+        }
+    }
+
     func search(_ query: String) {
         searchQuery = query
         searchTask?.cancel()

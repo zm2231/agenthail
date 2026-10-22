@@ -1061,3 +1061,43 @@ func TestAStopReachesASessionPastARetiringHostThatDoesNotAnswer(t *testing.T) {
 		})
 	}
 }
+
+// A request the host holds is answerable, and stays so once the daemon has
+// recorded it.
+func TestAHostRequestIsRecordedAsAnswerable(t *testing.T) {
+	fixture := claudehosttest.New(t, "")
+	ctx := context.Background()
+	agents := filepath.Join(fixture.Home, "claude-agents")
+	if err := os.WriteFile(agents, []byte("#!/bin/sh\necho '[]'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CLAUDE_BIN", agents)
+	client, err := fixture.Manager(t, "1.0.0").Ensure(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := uuid.NewString()
+	opened := fixture.Open(t, client, id)
+	claude := surfaces.NewClaude(nil, fixture.Home)
+	session := hostedSession(t, claude, id)
+	r := hostRegistry(t)
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	d := newTestDaemon(t, r, []surface.Surface{claude})
+	d.log = log.New(io.Discard, "", 0)
+	fixture.Peer(t, opened.PID, "TOOL")
+	var observed *surface.Waiting
+	claudehosttest.WaitFor(t, "the session to wait on the request", func() bool {
+		observation, err := d.observeTurn(ctx, claude, &session)
+		if err != nil || observation.WaitingOn == nil {
+			return false
+		}
+		observed = observation.WaitingOn
+		return true
+	})
+	recorded, err := r.SessionWaiting(id)
+	if err != nil || recorded == nil || !observed.Answerable || !recorded.Answerable || recorded.ID != observed.ID {
+		t.Fatalf("observed %+v, recorded %+v, %v; want the host's request, answerable", observed, recorded, err)
+	}
+}

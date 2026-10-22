@@ -411,3 +411,24 @@ func TestAnAnswerIsForgottenWhenItsSessionExits(t *testing.T) {
 		t.Fatal("an exited session's answer is still remembered")
 	}
 }
+
+// A terminal prompt the hook holds is answered through Agenthail; one only
+// the process record reports is answered in the terminal.
+func TestOnlyAHeldPromptIsAnswerable(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	writeClaudeRecord(t, home, map[string]any{"kind": "interactive", "entrypoint": "cli", "status": "waiting", "waitingFor": "permission prompt", "statusUpdatedAt": time.Now().UnixMilli()})
+	claude := NewClaude(nil, home)
+	session := terminalSession(t)
+	observation, err := claude.Observe(context.Background(), session)
+	if err != nil || observation.WaitingOn == nil || observation.WaitingOn.Answerable {
+		t.Fatalf("record-only wait = %+v, %v; want one Agenthail cannot answer", observation.WaitingOn, err)
+	}
+	_, cancel := holdInBackground(claude, ClaudePermissionPrompt{SessionID: "conversation", ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"ls"}`), PID: os.Getpid()})
+	defer cancel()
+	request := awaitRequests(t, claude, session)[0]
+	observation, err = claude.Observe(context.Background(), session)
+	if err != nil || observation.WaitingOn == nil || observation.WaitingOn.ID != request.ID || !observation.WaitingOn.Answerable {
+		t.Fatalf("held wait = %+v, %v; want the held request %s, answerable", observation.WaitingOn, err, request.ID)
+	}
+}

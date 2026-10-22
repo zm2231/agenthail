@@ -218,7 +218,7 @@ const backgroundSession = {
 assert.equal(context.presenceLabel(backgroundSession), "Waiting on background work", "a session between turns with background work says so");
 assert.equal(context.presenceTone(backgroundSession), "background", "background work has its own tone");
 assert.equal(context.presenceLabel({ ...backgroundSession, status: "busy" }), "Working", "a turn in progress still reads as working");
-assert.equal(context.presenceLabel({ ...backgroundSession, waitingOn: { kind: "approval", id: "r1" } }), "Waiting on you", "a question outranks background work");
+assert.equal(context.presenceLabel({ ...backgroundSession, waitingOn: { kind: "approval", id: "r1", answerable: true } }), "Waiting on you", "a question outranks background work");
 assert.notEqual(context.presenceLabel({ ...backgroundSession, backgroundTasks: { running: false, source: "host", tasks: [{ id: "m1", kind: "monitor", ambient: true }] } }), "Waiting on background work", "ambient tasks alone do not hold the session");
 context.renderBackgroundTasks(backgroundSession);
 const backgroundPanel = elements["#background-panel"].innerHTML;
@@ -238,7 +238,7 @@ context.renderRequests();
 assert(elements["#request-panel"].innerHTML.includes("builder has a dialog open in its terminal") && !elements["#request-panel"].hidden, "a dialog says where to settle it even in a session that takes answers");
 assert(!elements["#request-panel"].innerHTML.includes("data-request") && !elements["#request-panel"].innerHTML.includes("Run ls"), "a dialog shows no request still listed from before it opened");
 context.app.requests = { requests: [] };
-context.app.selected.waitingOn = { kind: "approval", id: "session-dialog:approval:1" };
+context.app.selected.waitingOn = { kind: "approval", id: "session-dialog:approval:1", answerable: true };
 context.renderRequests();
 assert(elements["#request-panel"].hidden, "an approval with no request yet shows no card until its request is read");
 context.app.requests = { requests: [{ id: "live", kind: "approval", title: "Run ls" }] };

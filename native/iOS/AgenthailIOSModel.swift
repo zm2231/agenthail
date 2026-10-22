@@ -515,6 +515,21 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
     }
 
+    /// Stops a session and resumes it, which clears a prompt nothing shows.
+    func stopAndResume(_ sessionID: String) {
+        guard case let (api, route)? = try? resolve(sessionID) else { return }
+        Task {
+            do {
+                try await api.action("session-lifecycle-stop", sessionID: route.sessionID)
+                try await api.action("session-lifecycle-resume", sessionID: route.sessionID)
+                operationError = nil
+            } catch {
+                operationError = error.localizedDescription
+            }
+            await refreshSession(sessionID)
+        }
+    }
+
     func sessionAttachment(for item: TimelineItem, sessionID: String) async -> Data? {
         guard let attachment = item.attachment, selectedSessionID == sessionID, case let (connection, route)? = try? resolveServer(sessionID) else { return nil }
         let cacheKey = "\(sessionID):\(attachment.id)"
@@ -704,6 +719,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 merged.session.status = current.status
                 merged.session.waitingOn = current.waitingOn
                 merged.session.backgroundTasks = current.backgroundTasks
+                merged.session.usageLimit = current.usageLimit
             } else {
                 selectedSessionStateSeq = seq
             }
@@ -1320,10 +1336,11 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard seq > selectedSessionStateSeq, var detail = selectedDetail,
               let live = snapshot.sessions.first(where: { $0.id == detail.session.id }) else { return }
         selectedSessionStateSeq = seq
-        guard detail.session.status != live.status || detail.session.waitingOn != live.waitingOn || detail.session.backgroundTasks != live.backgroundTasks else { return }
+        guard detail.session.status != live.status || detail.session.waitingOn != live.waitingOn || detail.session.backgroundTasks != live.backgroundTasks || detail.session.usageLimit != live.usageLimit else { return }
         detail.session.status = live.status
         detail.session.waitingOn = live.waitingOn
         detail.session.backgroundTasks = live.backgroundTasks
+        detail.session.usageLimit = live.usageLimit
         selectedDetail = detail
     }
 
