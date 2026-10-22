@@ -34,9 +34,9 @@ function fixture() {
   return { root, state, claudeDir, cwd, socket: path.join(root, 'h.sock') };
 }
 
-async function startHost(f, { lock = true, version = 'test', env = {}, claude = fakeClaude } = {}) {
+async function startHost(f, { lock = true, version = 'test', env = {}, claude = fakeClaude, agenthail = '' } = {}) {
   const fd = lock ? fs.openSync(path.join(f.state, 'lock'), 'r') : null;
-  const host = spawn(process.execPath, [hostScript, '--socket', f.socket, '--state', f.state, '--claude', claude, '--version', version], {
+  const host = spawn(process.execPath, [hostScript, '--socket', f.socket, '--state', f.state, '--claude', claude, '--version', version, ...(agenthail ? ['--agenthail', agenthail] : [])], {
     env: { ...process.env, ...ownerEnv, FAKE_CLAUDE_DIR: f.claudeDir, ...env },
     stdio: lock ? ['ignore', 'ignore', 'pipe', fd] : ['ignore', 'ignore', 'pipe'],
   });
@@ -173,6 +173,50 @@ test('open, send and stream a turn bound to the message uuid', async () => {
   assert.ok(c.events.some((e) => e.kind === 'state' && e.state === 'busy'));
   const seqs = c.events.map((e) => e.seq);
   assert.deepEqual(seqs, [...seqs].sort((a, b) => a - b));
+  assert.ok(!fs.existsSync(path.join(f.claudeDir, 'hooks.jsonl')), 'a host given no agenthail binary registered hooks');
+  c.close();
+});
+
+test('each session is told who it is by the session-context hook, keyed by its Claude process', async () => {
+  const f = fixture();
+  const calls = path.join(f.root, 'agenthail-calls.jsonl');
+  const agenthail = path.join(f.root, 'agenthail');
+  fs.writeFileSync(
+    agenthail,
+    `#!${process.execPath}
+const fs = require('node:fs');
+const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args: process.argv.slice(2), input }) + '\\n');
+if (input.prompt === 'FAIL') process.exit(1);
+if (input.prompt === 'NULL') process.exit(process.stdout.write('null') && 0);
+if (input.prompt === 'ARRAY') process.exit(process.stdout.write('[]') && 0);
+process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: 'card for ' + input.hook_event_name } }));
+`,
+    { mode: 0o755 },
+  );
+  await startHost(f, { agenthail });
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  const opened = await c.call('open', { sessionId: id, cwd: f.cwd });
+  for (const text of ['hello', 'FAIL', 'NULL', 'ARRAY']) {
+    const uuid = randomUUID();
+    await c.call('send', { sessionId: id, uuid, text, origin: { kind: 'human' } });
+    await c.event(turnResult(id, uuid));
+  }
+  const recorded = fs.readFileSync(path.join(f.claudeDir, 'hooks.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(
+    recorded.map((r) => [r.event, r.output.hookSpecificOutput?.additionalContext ?? null]),
+    [['SessionStart', 'card for SessionStart'], ['UserPromptSubmit', 'card for UserPromptSubmit'], ['UserPromptSubmit', null], ['UserPromptSubmit', null], ['UserPromptSubmit', null]],
+  );
+  assert.deepEqual(
+    recorded.map((r) => r.output),
+    [{ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'card for SessionStart' } }, { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'card for UserPromptSubmit' } }, {}, {}, {}],
+  );
+  const ran = fs.readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(ran[0].args, ['hook', 'session-context', '--claude-pid', String(opened.pid)]);
+  assert.equal(ran[0].input.session_id, id);
+  assert.equal(ran[0].input.source, 'startup');
   c.close();
 });
 

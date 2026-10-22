@@ -275,7 +275,7 @@ agenthail help agent      # the same as a short brief with the commands that act
 
 A session an agent started reports to that agent; one you started reports to the project's coordinator, which also sees every report in history. The brief says whether a question the agent asks reaches you in Agenthail and on your phone, or only tells you so you can answer where the session runs.
 
-A Claude session doesn't have to ask once you run `agenthail hooks install`: its `SessionStart` and `UserPromptSubmit` hooks give the session the brief when it starts, resumes, clears or compacts, and one line when its alias, coordinator or project changes. A session Agenthail doesn't know gets nothing.
+A Claude session doesn't have to ask: it gets the brief when it starts, resumes, clears or compacts, and one line when its alias, coordinator or project changes. A session Agenthail starts gets it on its own; a terminal Claude gets it once you run `agenthail hooks install`, which adds `SessionStart` and `UserPromptSubmit` hooks. A session Agenthail doesn't know gets nothing.
 
 Notion threads can start the same way:
 

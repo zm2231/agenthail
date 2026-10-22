@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,9 +54,19 @@ var (
 )
 
 func (a *App) cmdHook(args []string) error {
-	if len(args) == 1 && args[0] == "session-context" {
+	if len(args) > 0 && args[0] == "session-context" {
+		claude := os.Getppid()
+		if len(args) == 3 && args[1] == "--claude-pid" {
+			pid, err := strconv.Atoi(args[2])
+			if err != nil || pid <= 0 {
+				return errors.New("usage: agenthail hook session-context [--claude-pid <pid>]")
+			}
+			claude = pid
+		} else if len(args) != 1 {
+			return errors.New("usage: agenthail hook session-context [--claude-pid <pid>]")
+		}
 		done := make(chan map[string]any, 1)
-		go func() { done <- a.sessionContext(os.Stdin, os.Getppid(), time.Now()) }()
+		go func() { done <- a.sessionContext(os.Stdin, claude, time.Now()) }()
 		select {
 		case output := <-done:
 			if output != nil {

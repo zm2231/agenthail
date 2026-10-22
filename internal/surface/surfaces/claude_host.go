@@ -201,5 +201,9 @@ func ClaudeHostLaunch(home, version string) (claudehost.Launch, error) {
 	if err != nil {
 		return claudehost.Launch{}, err
 	}
-	return claudehost.Launch{Node: node, Script: script, Claude: claude, Version: version, Env: claudeCommandEnv(home)}, nil
+	launch := claudehost.Launch{Node: node, Script: script, Claude: claude, Version: version, Env: claudeCommandEnv(home)}
+	if executable, err := os.Executable(); err == nil && filepath.Base(executable) == "agenthail" {
+		launch.Agenthail = executable
+	}
+	return launch, nil
 }
