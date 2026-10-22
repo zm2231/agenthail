@@ -128,6 +128,26 @@ func TestAnAgentMessageToAHostSessionArrivesOverItsNativeSocket(t *testing.T) {
 	}
 }
 
+// Claude holds a peer message for a session that runs without permission
+// prompts unless the sender states that it runs the same way, and a hosted
+// session has no prompt to release it.
+func TestAnAgentMessageBetweenSessionsThatBypassPromptsRunsATurn(t *testing.T) {
+	c, fixture := hostedClaude(t)
+	client := fixture.Start(t)
+	sender, target := uuid.NewString(), uuid.NewString()
+	fixture.OpenInMode(t, client, sender, "bypassPermissions")
+	fixture.OpenInMode(t, client, target, "bypassPermissions")
+	listedSession(t, c, sender)
+	sess := listedSession(t, c, target)
+	if _, err := c.Send(surface.WithSourceSessionID(context.Background(), sender), sess, "from a bypassing session"); err != nil {
+		t.Fatal(err)
+	}
+	claudehosttest.WaitFor(t, "the peer turn", func() bool { return len(fixture.Turns(t, target)) == 1 })
+	if turn := fixture.Turns(t, target)[0]; !strings.Contains(turn.Text, `from-mode="bypass"`) {
+		t.Fatalf("turn = %+v, want the sender's permission class stated", turn)
+	}
+}
+
 func TestSteerAndInterruptAHostSession(t *testing.T) {
 	c, fixture := hostedClaude(t)
 	client := fixture.Start(t)
