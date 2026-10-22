@@ -2,9 +2,13 @@ import AppKit
 import SwiftUI
 
 enum DesktopPalette {
-    static let side = dynamic(light: 0xF3F3F4, dark: 0x1D1E21)
-    static let window = dynamic(light: 0xFFFFFF, dark: 0x17181A)
-    static let raised = dynamic(light: 0xFFFFFF, dark: 0x232427)
+    private static let windowHex: (light: UInt32, dark: UInt32) = (0xFFFFFF, 0x17181A)
+    private static let sideHex: (light: UInt32, dark: UInt32) = (0xF3F3F4, 0x1D1E21)
+    private static let raisedHex: (light: UInt32, dark: UInt32) = (0xFFFFFF, 0x232427)
+
+    static let side = dynamic(sideHex)
+    static let window = dynamic(windowHex)
+    static let raised = dynamic(raisedHex)
     static let line = dynamic(light: 0xE3E3E6, dark: 0x2E2F33)
     static let line2 = dynamic(light: 0xECECEE, dark: 0x26272A)
     static let text = dynamic(light: 0x1D1D1F, dark: 0xECECEE)
@@ -16,14 +20,22 @@ enum DesktopPalette {
     static let stop = dynamic(light: 0x3D3E42, dark: 0x48494D)
 
     static let accent = Color(nsColor: .controlAccentColor)
-    static let accentText = Color(nsColor: .controlAccentColor)
-    static let onAccent = Color.white
-    static let selection = Color(nsColor: NSColor.controlAccentColor.withAlphaComponent(0.18))
+    static let accentText = Color(nsColor: NSColor(name: nil) { appearance in
+        let dark = isDark(appearance)
+        let surfaces = [windowHex, sideHex, raisedHex].map { AccentContrast.RGB(hex: dark ? $0.dark : $0.light) }
+        return AccentContrast.readable(AccentContrast.rgb(.controlAccentColor, in: appearance), on: surfaces, dark: dark).nsColor
+    })
+    static let onAccent = Color(nsColor: NSColor(name: nil) { appearance in
+        AccentContrast.foreground(on: AccentContrast.rgb(.controlAccentColor, in: appearance)).nsColor
+    })
+    static let selection = Color(nsColor: NSColor(name: nil) { appearance in
+        AccentContrast.rgb(.controlAccentColor, in: appearance).nsColor.withAlphaComponent(0.18)
+    })
 
-    static let attention = dynamic(light: 0xB26B00, dark: 0xFFB224)
+    static let attention = dynamic(light: 0x965A00, dark: 0xFFB224)
     static let attentionBackground = dynamic(light: 0xFFF5E0, dark: 0x2E2414)
     static let attentionLine = dynamic(light: 0xF2D9A6, dark: 0x5C4415)
-    static let working = dynamic(light: 0x2F6BD8, dark: 0x7AA7FF)
+    static let working = dynamic(light: 0x2A64CC, dark: 0x7AA7FF)
     static let done = dynamic(light: 0x1A7F4E, dark: 0x4CC38A)
     static let failed = dynamic(light: 0xC4271B, dark: 0xFF6B61)
     static let failedBackground = dynamic(light: 0xFDEDEC, dark: 0x2E1A19)
@@ -36,11 +48,18 @@ enum DesktopPalette {
         return muted
     }
 
+    private static func dynamic(_ pair: (light: UInt32, dark: UInt32)) -> Color {
+        dynamic(light: pair.light, dark: pair.dark)
+    }
+
     private static func dynamic(light: UInt32, dark: UInt32) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            return color(isDark ? dark : light)
+            color(isDark(appearance) ? dark : light)
         })
+    }
+
+    private static func isDark(_ appearance: NSAppearance) -> Bool {
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
     }
 
     private static func color(_ hex: UInt32) -> NSColor {

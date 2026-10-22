@@ -104,7 +104,7 @@ struct CommandPalette: View {
                         if items.isEmpty {
                             Text("No matches")
                                 .font(.system(size: DesktopType.body))
-                                .foregroundStyle(DesktopPalette.muted)
+                                .foregroundStyle(DesktopPalette.text2)
                                 .padding(14)
                         }
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, entry in
