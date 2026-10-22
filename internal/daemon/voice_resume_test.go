@@ -32,7 +32,7 @@ func (c *voiceCall) Create(_ context.Context, cwd, _ string) (*surface.Session, 
 	return &surface.Session{ID: "operator", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Voice operator", Cwd: cwd, Transport: "desktop"}, nil
 }
 
-func (c *voiceCall) Cursor(context.Context) (voice.Cursor, error) {
+func (c *voiceCall) Cursor(context.Context, *surface.Session) (voice.Cursor, error) {
 	return voice.Cursor{Source: "fixture", Position: 10}, nil
 }
 
@@ -59,6 +59,7 @@ func (c *voiceCall) Request(_ context.Context, _ *surface.Session, method string
 }
 
 func (c *voiceCall) Interrupt(context.Context, *surface.Session) error { return nil }
+func (c *voiceCall) Release(string)                                    {}
 
 func (c *voiceCall) said(text string) bool {
 	c.mu.Lock()

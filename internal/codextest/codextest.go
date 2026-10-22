@@ -57,21 +57,24 @@ type Thread struct {
 	// Model is the thread's model. thread/resume changes it only for a thread
 	// that is not loaded; turn/start with a model changes it for good.
 	Model string
+	// Name is what thread/name/set last gave the thread.
+	Name string
 }
 
 type Daemon struct {
-	Home    string
-	mu      sync.Mutex
-	respond Responder
-	calls   []Call
-	pending []map[string]any
-	threads map[string]*Thread
-	order   []string
-	loaded  map[string]bool
-	conns   map[*connection]bool
-	called  chan struct{}
-	next    int
-	server  *http.Server
+	Home      string
+	mu        sync.Mutex
+	respond   Responder
+	calls     []Call
+	pending   []map[string]any
+	threads   map[string]*Thread
+	order     []string
+	loaded    map[string]bool
+	conns     map[*connection]bool
+	called    chan struct{}
+	next      int
+	server    *http.Server
+	responses []map[string]any
 }
 
 // connection is one client of the fake. Like the app-server, it receives a
@@ -197,6 +200,12 @@ func (d *Daemon) serve(ws *websocket.Conn) {
 			continue
 		}
 		method, _ := request["method"].(string)
+		if method == "" {
+			d.mu.Lock()
+			d.responses = append(d.responses, request)
+			d.mu.Unlock()
+			continue
+		}
 		params, _ := request["params"].(map[string]any)
 		d.mu.Lock()
 		d.calls = append(d.calls, Call{Method: method, Params: params})
@@ -265,8 +274,32 @@ func (d *Daemon) Methods() []string {
 // none connected yet, it waits and goes out ahead of the next response to a
 // connection that does.
 func (d *Daemon) Notify(method string, params map[string]any) {
+	d.deliver(map[string]any{"method": method, "params": params})
+}
+
+// Request sends a server request, such as item/tool/call, the way Notify
+// sends a notification. The client's answer is in Responses.
+func (d *Daemon) Request(id any, method string, params map[string]any) {
+	d.deliver(map[string]any{"id": id, "method": method, "params": params})
+}
+
+// Responses are the answers clients sent to server requests.
+// Connections counts the clients connected now.
+func (d *Daemon) Connections() int {
 	d.mu.Lock()
-	d.pending = append(d.pending, map[string]any{"method": method, "params": params})
+	defer d.mu.Unlock()
+	return len(d.conns)
+}
+
+func (d *Daemon) Responses() []map[string]any {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]map[string]any(nil), d.responses...)
+}
+
+func (d *Daemon) deliver(message map[string]any) {
+	d.mu.Lock()
+	d.pending = append(d.pending, message)
 	deliveries := map[*connection][]map[string]any{}
 	for conn := range d.conns {
 		for _, notification := range d.pending {
@@ -440,6 +473,13 @@ func (d *Daemon) lifecycle(method string, params map[string]any, result map[stri
 		}
 		d.loaded[threadID] = true
 		return map[string]any{"thread": d.threadJSON(thread, false), "model": thread.Model}
+	case "thread/name/set":
+		thread := d.threads[threadID]
+		if thread == nil {
+			return rpcError("thread not found: " + threadID)
+		}
+		thread.Name, _ = params["name"].(string)
+		return map[string]any{}
 	case "thread/read":
 		thread := d.threads[threadID]
 		if thread == nil {
@@ -571,6 +611,9 @@ func (d *Daemon) threadJSON(thread *Thread, includeTurns bool) map[string]any {
 	}
 	if thread.Model != "" {
 		value["model"] = thread.Model
+	}
+	if thread.Name != "" {
+		value["name"] = thread.Name
 	}
 	if thread.Originator == "" {
 		delete(value, "originator")

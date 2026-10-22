@@ -56,6 +56,11 @@ type Event struct {
 	Params   map[string]any `json:"params"`
 }
 
+// RejectedError is a call start Codex definitely refused, so the call ended.
+type RejectedError struct{ Reason string }
+
+func (e *RejectedError) Error() string { return e.Reason }
+
 type Batch struct {
 	Cursor Cursor
 	Events []Event
@@ -70,10 +75,13 @@ type Deliverer interface {
 
 type Provider interface {
 	Create(context.Context, string, string) (*surface.Session, error)
-	Cursor(context.Context) (Cursor, error)
+	Cursor(context.Context, *surface.Session) (Cursor, error)
 	Poll(context.Context, Cursor, string) (Batch, error)
 	Request(context.Context, *surface.Session, string, map[string]any) error
 	Interrupt(context.Context, *surface.Session) error
+	// Release frees what Cursor opened for a call on the thread once nothing
+	// will poll it again.
+	Release(threadID string)
 }
 
 // DynamicToolResponder completes a caller-owned Agenthail tool invoked by the
@@ -148,6 +156,7 @@ type Service struct {
 	loadErr                 error
 	boundAttempt            string
 	eventGap                bool
+	disconnectedAt          time.Time
 	commandPath             string
 	target                  TargetResolver
 	projects                Projects
@@ -288,7 +297,7 @@ func (s *Service) capture() *snapshot {
 	}
 	if s.provider == nil {
 		v.Phase = "blocked"
-		v.Message = "Codex Desktop voice is not configured on this host."
+		v.Message = "Codex voice is not configured on this host."
 	}
 	if s.toolsOutdated() {
 		v.Message = strings.TrimSpace(v.Message + "\n\n" + toolsOutdatedNotice)
@@ -348,7 +357,7 @@ func (s *Service) Apply(ctx context.Context, owner string, a Action) (State, err
 		return s.view(owner), s.loadErr
 	}
 	if s.provider == nil {
-		return s.view(owner), errors.New("Codex Desktop voice is unavailable")
+		return s.view(owner), errors.New("Codex voice is unavailable on this host")
 	}
 	if owner == "" {
 		return s.view(owner), errors.New("a paired device identity is required")
@@ -413,27 +422,37 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 		if s.active() {
 			return errors.New("end the previous call before starting a new audio connection")
 		}
-		cursor, err := s.provider.Cursor(ctx)
+		cursor, err := s.provider.Cursor(ctx, v.Session)
 		if err != nil {
 			return err
 		}
 		s.cursor = cursor
-		s.boundAttempt, s.eventGap = "", false
+		s.boundAttempt, s.eventGap, s.disconnectedAt = "", false, time.Time{}
 		s.state.Owner = owner
 		s.state.Messages = nil
+		v.Events, v.Truncated = []Event{}, false
 		v.AttemptID, v.Phase, v.SDP, v.Message, v.TerminalReason = a.AttemptID, "starting", "", "", ""
 		s.state.NativeHeartbeatEnrolled = false
 		v.AudioProvider = "openai-realtime-via-codex"
 		if err := s.save(); err != nil {
 			s.loadErr = err
+			s.provider.Release(v.Session.ID)
 			return err
 		}
 		err = s.provider.Request(ctx, v.Session, "thread/realtime/start", StartParams(v.Session.ID, a.AttemptID, a.SDP, v.Target != nil))
-		if err != nil {
+		var rejected *RejectedError
+		switch {
+		case errors.As(err, &rejected):
+			v.Phase, v.TerminalReason = "ended", "start_rejected"
+			v.Message = "Voice could not start: " + rejected.Reason
+			s.provider.Release(v.Session.ID)
+		case err != nil:
 			v.Phase = "unknown"
 			v.Message = "Call startup outcome is unknown: " + err.Error()
 		}
-		s.observe()
+		if v.Phase != "ended" {
+			s.observe()
+		}
 		if saveErr := s.save(); saveErr != nil {
 			s.loadErr = saveErr
 			return saveErr
@@ -461,7 +480,7 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 			v.TerminalReason = "local_hangup"
 		}
 		if s.cursor.Source == "" {
-			cursor, err := s.provider.Cursor(ctx)
+			cursor, err := s.provider.Cursor(ctx, v.Session)
 			if err != nil {
 				return err
 			}
@@ -705,15 +724,20 @@ func (s *Service) interruptTarget(ctx context.Context, a Action) error {
 
 // Close stops the service's background work. It cancels first, so work that
 // holds s.mu while waiting on the service context gives the lock back, then
-// waits for an action in progress, refuses later ones, and waits for every
+// waits for an action in progress, refuses later ones, waits for every
 // delegation watch and event poll to return, so nothing writes the state file
-// after it returns.
+// after it returns, and releases the call's event source.
 func (s *Service) Close() {
 	s.stop()
 	s.mu.Lock()
 	s.closed = true
 	s.unlock()
 	s.tasks.Wait()
+	s.mu.Lock()
+	if s.provider != nil && s.state.State.Session != nil {
+		s.provider.Release(s.state.State.Session.ID)
+	}
+	s.unlock()
 }
 
 // spawn starts background work the service owns, unless it is closed. The
@@ -992,20 +1016,20 @@ func (s *Service) observe() {
 			select {
 			case <-s.background.Done():
 				s.mu.Lock()
-				s.running = false
+				s.stopObserving()
 				s.unlock()
 				return
 			case _, open := <-ticks:
 				if !open {
 					s.mu.Lock()
-					s.running = false
+					s.stopObserving()
 					s.unlock()
 					return
 				}
 			}
 			s.mu.Lock()
 			if !s.active() {
-				s.running = false
+				s.stopObserving()
 				s.unlock()
 				return
 			}
@@ -1015,20 +1039,37 @@ func (s *Service) observe() {
 			if err != nil {
 				s.state.State.Message = "Voice event connection interrupted: " + err.Error()
 			}
-			if s.clock.now().Sub(time.Unix(0, s.lastSeen.Load())) > 40*time.Second {
+			// After a phone disconnect the poll keeps running until Codex
+			// confirms the hangup, or gives up once it has waited long enough.
+			if !s.disconnectedAt.IsZero() && s.clock.now().Sub(s.disconnectedAt) > 30*time.Second {
+				s.state.State.Phase = "unknown"
+				s.state.State.Message = "Phone disconnected; Codex did not confirm the audio hangup. Agent work remains in the operator thread."
+				_ = s.save()
+				s.stopObserving()
+				s.unlock()
+				return
+			}
+			if s.disconnectedAt.IsZero() && s.clock.now().Sub(time.Unix(0, s.lastSeen.Load())) > 40*time.Second {
 				ctx, cancel := context.WithTimeout(s.background, 10*time.Second)
+				s.disconnectedAt = s.clock.now()
 				s.state.State.TerminalReason = "phone_disconnected"
 				_ = s.apply(ctx, s.state.Owner, Action{Action: "stop", AttemptID: s.state.State.AttemptID})
 				cancel()
 				s.state.State.Message = "Phone disconnected; audio hangup requested. Agent work remains in the operator thread."
 				_ = s.save()
-				s.running = false
-				s.unlock()
-				return
 			}
 			s.unlock()
 		}
 	})
+}
+
+// stopObserving ends the event poll and releases the call's event source. The
+// caller holds s.mu, so a call started afterwards keeps its own source.
+func (s *Service) stopObserving() {
+	s.running = false
+	if s.state.State.Session != nil {
+		s.provider.Release(s.state.State.Session.ID)
+	}
 }
 
 func (s *Service) poll(ctx context.Context) error {
@@ -1046,6 +1087,9 @@ func (s *Service) poll(ctx context.Context) error {
 	}
 	s.cursor = b.Cursor
 	for _, e := range b.Events {
+		if id, ok := e.Params["realtimeSessionId"].(string); ok && id != v.AttemptID {
+			continue
+		}
 		if e.Method == "item/tool/call" {
 			s.handleDynamicToolCall(ctx, e)
 		}

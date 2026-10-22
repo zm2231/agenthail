@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -108,11 +109,20 @@ func (c *managedCodexClient) notify(method string, params map[string]any) error 
 
 func (c *managedCodexClient) read() {
 	for {
-		var message map[string]any
-		if err := c.ws.ReadJSON(&message); err != nil {
+		_, data, err := c.ws.ReadMessage()
+		if err != nil {
 			c.fail(fmt.Errorf("managed Codex app-server connection closed: %w", err))
 			return
 		}
+		var message map[string]any
+		var envelope struct {
+			ID json.RawMessage `json:"id"`
+		}
+		if err := json.Unmarshal(data, &message); err != nil {
+			c.fail(fmt.Errorf("managed Codex app-server sent invalid JSON: %w", err))
+			return
+		}
+		_ = json.Unmarshal(data, &envelope)
 		method, _ := message["method"].(string)
 		if method == "" {
 			if id, ok := message["id"].(float64); ok {
@@ -128,7 +138,9 @@ func (c *managedCodexClient) read() {
 		}
 		params, _ := message["params"].(map[string]any)
 		c.mu.Lock()
-		c.notifications = append(c.notifications, codexEvent{Method: method, Params: params})
+		// A server request carries an id the answer must repeat exactly,
+		// whether Codex sent a number or a string.
+		c.notifications = append(c.notifications, codexEvent{Method: method, Params: params, RequestID: envelope.ID})
 		if len(c.notifications) > managedNotificationLimit {
 			c.notifications = c.notifications[len(c.notifications)-managedNotificationLimit:]
 		}
@@ -210,12 +222,25 @@ func (e *codexRPCError) Error() string {
 	return fmt.Sprintf("%s RPC error (%d): %s", e.Method, e.Code, e.Message)
 }
 
+// Respond answers a server request on this connection.
+func (c *managedCodexClient) Respond(id json.RawMessage, result any) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return c.ws.WriteJSON(map[string]any{"id": id, "result": result})
+}
+
 func (c *managedCodexClient) DrainNotifications() []codexEvent {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	events := c.notifications
 	c.notifications = nil
 	return events
+}
+
+func (c *managedCodexClient) failed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.err != nil
 }
 
 // Notified fires after a notification arrives; DrainNotifications returns it.
