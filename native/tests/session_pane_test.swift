@@ -248,6 +248,55 @@ struct SessionPaneTest {
         check(await received.finished, "cancelling a silent open stream ends it")
         openServer.stop()
 
+        func row(_ seq: Int, _ id: String, op: String = "upsert", kind: String = "message", text: String? = nil, reason: String? = nil) -> String {
+            let item = text.map { #","item":{"id":"\#(id)","kind":"\#(kind)","role":"assistant","title":"\#(kind)","text":"\#($0)","truncated":false}"# } ?? ""
+            let why = reason.map { #","reason":"\#($0)""# } ?? ""
+            return #"{"stream":"session","sessionId":"D","seq":\#(seq),"type":"item","data":{"itemId":"\#(id)","version":1,"op":"\#(op)","kind":"\#(kind)","ts":"2026-10-04T12:00:00Z","truncated":false\#(why)}\#(item)}"#
+        }
+        func event(_ json: String) -> SessionStreamEvent { try! JSONDecoder().decode(SessionStreamEvent.self, from: Data(json.utf8)) }
+        let pageJSON = #"{"session":{"id":"D","surface":"claude","name":"d","status":"busy","lastActive":"2026-10-04T12:00:00Z"},"journalSeq":100,"exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"readOnly":false,"readOnlyReason":"","timeline":{"items":[{"id":"a","kind":"message","role":"assistant","title":"message","text":"a1","truncated":false},{"id":"b","kind":"message","role":"assistant","title":"message","text":"b1","truncated":false}],"nextBefore":null,"truncated":false}}"#
+        let page = try! JSONDecoder().decode(SessionDetail.self, from: Data(pageJSON.utf8))
+        var older = [try! JSONDecoder().decode(TimelineItem.self, from: Data(#"{"id":"old","kind":"message","title":"message","text":"o","truncated":false}"#.utf8))]
+        let updated = SessionPane.applying(event(row(101, "a", text: "a2")), to: page, older: &older)
+        check(updated?.timeline?.items.map(\.id) == ["b", "a"] && updated?.timeline?.items.last?.text == "a2", "an updated row moves to the end with its new content, as a reload reads it")
+        let removed = SessionPane.applying(event(row(102, "old", op: "remove")), to: updated!, older: &older)
+        check(removed != nil && older.isEmpty, "a removed row leaves the older rows too")
+        let sourceFailed = SessionPane.applying(event(row(103, "e:source", op: "reset", kind: "source-error", reason: "source down")), to: removed!, older: &older)
+        check(sourceFailed?.timeline?.unavailableReason == "source down" && sourceFailed?.timeline?.items.count == 2, "a source error is shown as the page shows it, without dropping rows")
+        let recovered = SessionPane.applying(event(row(104, "c", text: "c1")), to: sourceFailed!, older: &older)
+        check(recovered?.timeline?.unavailableReason == nil, "a later row clears the source error, as a reload does")
+        check(SessionPane.applying(event(row(105, "x")), to: page, older: &older) == nil, "a row without the page's item is not guessed at")
+
+        var pageRequests = 0
+        func frame(_ seq: Int, _ json: String) -> String { "id: \(seq)\nevent: item\ndata: \(json)\n\n" }
+        let turnRows = [frame(101, row(101, "c", text: "c1")), frame(102, row(102, "a", text: "a2")), frame(103, row(103, "b", op: "remove"))]
+        let streamingServer = try! StubServer { line, _ in
+            if line.contains("/api/v1/session-stream?") {
+                return "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n" + turnRows.joined()
+            }
+            if line.contains("/api/v1/session?") {
+                pageRequests += 1
+                return StubServer.reply("200 OK", pageJSON)
+            }
+            return StubServer.reply("404 Not Found", "{}")
+        }
+        let streamingPort = await streamingServer.ready()
+        let streamingModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(streamingPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
+        let streamingPane = streamingModel.openPane()
+        streamingPane.select("D")
+        let rowsDeadline = Date().addingTimeInterval(5)
+        while streamingPane.timelineItems.map(\.id) != ["c", "a"], Date() < rowsDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        try? await Task.sleep(for: .milliseconds(600))
+        check(pageRequests == 1, "streamed rows apply without reading the page again: \(pageRequests) page reads, rows \(streamingPane.timelineItems.map(\.id))")
+        streamingServer.push(frame(104, row(104, "d", kind: "done", text: "")))
+        let turnDeadline = Date().addingTimeInterval(5)
+        while pageRequests < 2, Date() < turnDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        try? await Task.sleep(for: .milliseconds(600))
+        check(pageRequests == 2, "a streamed turn reloads the page once, when it finishes, not per row: \(pageRequests) page reads")
+        check(streamingPane.timelineItems.map(\.id) == ["c", "a", "d"] && streamingPane.timelineItems[1].text == "a2", "a reload read before the streamed rows keeps them, in the order a reload would show: \(streamingPane.timelineItems.map(\.id))")
+        streamingModel.closePane(streamingPane)
+        streamingServer.stop()
+
         let delivered = await model.reply("  answer from a notification  ", to: "D", connectionTimeout: .milliseconds(50))
         check(!delivered && model.draft(for: "D").text == "answer from a notification", "an undeliverable reply waits in the session's draft")
     }
@@ -289,6 +338,10 @@ struct SessionPaneTest {
                 }
                 listener.start(queue: .main)
             }
+        }
+
+        func push(_ text: String) {
+            connections.forEach { $0.send(content: Data(text.utf8), completion: .contentProcessed { _ in }) }
         }
 
         func stop() {

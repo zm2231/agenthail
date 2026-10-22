@@ -39,6 +39,9 @@ final class SessionPane: ObservableObject, Identifiable {
     private var frozenOlderCursor: Int64?
     private var sessionStreamTask: Task<Void, Never>?
     private var sessionCursor: UInt64 = 0
+    /// Rows streamed since the page was read, latest mutation last, so a page
+    /// read before some of them arrived can be brought up to date.
+    private var streamedRows: [SessionStreamEvent] = []
     private var streamAwaitsCursor = false
     private var streamUnsupported = false
     private var detailReloadTask: Task<Void, Never>?
@@ -88,6 +91,7 @@ final class SessionPane: ObservableObject, Identifiable {
         olderCursor = nil
         olderError = nil
         requestError = nil
+        streamedRows = []
         selectionGeneration &+= 1
         detailAppliedGeneration = detailRequestGeneration
         if restoresSelection { UserDefaults.standard.set(id, forKey: "lastSelectedSessionID") }
@@ -140,7 +144,10 @@ final class SessionPane: ObservableObject, Identifiable {
                 olderCursor = loaded.timeline?.nextBefore
             }
             metadata.absorb(context: loaded.context, goal: loaded.goal, model: loaded.model, models: loaded.models)
-            let merged = metadata.apply(to: loaded)
+            var merged = metadata.apply(to: loaded)
+            let pageSeq = loaded.journalSeq ?? 0
+            streamedRows.removeAll { $0.seq <= pageSeq }
+            for row in streamedRows { merged = Self.applying(row, to: merged, older: &olderItems) ?? merged }
             detail = merged
             detailStale = false
             detailRefreshFailed = false
@@ -559,8 +566,49 @@ final class SessionPane: ObservableObject, Identifiable {
             guard removedSession == nil else { return }
             if event.data.kind == "context" { metadata.stream(context: event.data.context) } else { metadata.stream(goal: event.data.goal) }
             applyMetadata(to: event.sessionId)
+            applyStreamedRow(event)
             return
         }
-        scheduleDetailReload(event.sessionId)
+        guard applyStreamedRow(event) else {
+            scheduleDetailReload(event.sessionId)
+            return
+        }
+        // A finished turn reloads once, so exchanges and paging come from the daemon.
+        if event.data.kind == "done" { scheduleDetailReload(event.sessionId) }
+    }
+
+    @discardableResult
+    private func applyStreamedRow(_ event: SessionStreamEvent) -> Bool {
+        guard removedSession == nil, let current = detail, current.session.id == event.sessionId,
+              let updated = Self.applying(event, to: current, older: &olderItems) else { return false }
+        streamedRows.removeAll { $0.data.itemId == event.data.itemId && !event.data.itemId.isEmpty }
+        streamedRows.append(event)
+        detail = updated
+        model.detailLoaded(updated, for: event.sessionId)
+        return true
+    }
+
+    /// Applies a streamed journal row as a session page reads it: an updated
+    /// row moves to the end, as its journal entry does, so a later reload shows
+    /// the same rows in the same order. Returns nil for a row it cannot apply.
+    static func applying(_ event: SessionStreamEvent, to detail: SessionDetail, older: inout [TimelineItem]) -> SessionDetail? {
+        guard var timeline = detail.timeline else { return nil }
+        let id = event.data.itemId
+        if event.data.kind == "source-error" {
+            timeline.unavailableReason = event.data.reason
+        } else if event.data.op == "remove" {
+            timeline.items.removeAll { $0.id == id }
+            older.removeAll { $0.id == id }
+        } else if let item = event.item {
+            timeline.items.removeAll { $0.id == item.id }
+            older.removeAll { $0.id == item.id }
+            timeline.items.append(item)
+            timeline.unavailableReason = nil
+        } else {
+            return nil
+        }
+        var updated = detail
+        updated.timeline = timeline
+        return updated
     }
 }

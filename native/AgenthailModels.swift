@@ -1387,7 +1387,7 @@ struct SessionTimeline: Decodable {
     var items: [TimelineItem]
     let source: String?
     let truncated: Bool
-    let unavailableReason: String?
+    var unavailableReason: String?
 }
 
 struct SessionAttachment: Decodable, Equatable, Hashable {
@@ -1455,6 +1455,8 @@ struct SessionStreamEvent: Decodable {
     let seq: UInt64
     let type: String
     let data: SessionStreamItem
+    /// The row as a session page reads it; absent for rows a page leaves out.
+    var item: TimelineItem? = nil
 }
 
 struct CatalogStreamEvent: Decodable {
