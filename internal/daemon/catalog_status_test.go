@@ -412,3 +412,79 @@ func countGitCalls(t *testing.T) func() int {
 		return strings.Count(string(raw), "\n")
 	}
 }
+
+// activityStatusSurface dates a working session by its status file's last
+// write, as the provider surfaces date one by its transcript.
+type activityStatusSurface struct{ *localStatusSurface }
+
+func (s *activityStatusSurface) List(ctx context.Context) ([]surface.Session, error) {
+	sessions, err := s.daemonSurface.List(ctx)
+	for index := range sessions {
+		if local, localErr := s.LocalStatus(ctx, sessions[index]); localErr == nil {
+			sessions[index] = local
+		}
+	}
+	return sessions, err
+}
+
+func (s *activityStatusSurface) LocalStatus(ctx context.Context, session surface.Session) (surface.Session, error) {
+	session, err := s.localStatusSurface.LocalStatus(ctx, session)
+	if err != nil {
+		return session, err
+	}
+	if info, statErr := os.Stat(s.statusPath(session.ID)); statErr == nil && session.Status == surface.StatusBusy {
+		session.LastActive = info.ModTime()
+	}
+	return session, nil
+}
+
+func catalogLastActive(t *testing.T, store *registry.Registry, sessionID string) time.Time {
+	t.Helper()
+	snapshot, err := store.CatalogSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range snapshot.Sessions {
+		if record.Session.ID == sessionID {
+			return record.Session.LastActive
+		}
+	}
+	t.Fatalf("session %s not in catalog", sessionID)
+	return time.Time{}
+}
+
+func TestWorkingSessionActivityPublishesAtDiscoveryCadence(t *testing.T) {
+	d, store, source := localStatusFixture(t)
+	activity := &activityStatusSurface{localStatusSurface: source}
+	d.Surfaces = []surface.Surface{activity}
+	source.writeStatus(t, "from", surface.StatusBusy)
+	started := time.Now().Add(-40 * time.Minute).Truncate(time.Second)
+	if err := os.Chtimes(source.statusPath("from"), started, started); err != nil {
+		t.Fatal(err)
+	}
+	d.discoverCatalog(context.Background())
+	d.refreshCatalogStatus(context.Background())
+	if got := catalogLastActive(t, store, "from"); !got.Equal(started) {
+		t.Fatalf("lastActive=%s want %s", got, started)
+	}
+
+	after := latestCatalogSeq(t, store)
+	for step := 1; step <= 3; step++ {
+		written := started.Add(time.Duration(step) * time.Minute)
+		if err := os.Chtimes(source.statusPath("from"), written, written); err != nil {
+			t.Fatal(err)
+		}
+		d.refreshCatalogStatus(context.Background())
+	}
+	if statuses := catalogStatusEvents(t, store, after, "from"); len(statuses) != 0 {
+		t.Fatalf("status pass published activity without a status change: %v", statuses)
+	}
+
+	d.discoverCatalog(context.Background())
+	if statuses := catalogStatusEvents(t, store, after, "from"); len(statuses) != 1 {
+		t.Fatalf("discovery events=%v want one", statuses)
+	}
+	if got, want := catalogLastActive(t, store, "from"), started.Add(3*time.Minute); !got.Equal(want) {
+		t.Fatalf("lastActive=%s want %s", got, want)
+	}
+}

@@ -220,6 +220,11 @@ func migrateTx(tx *sql.Tx) error {
 			return err
 		}
 	}
+	// The catalog lists sessions most recent first; reading them in index order
+	// spares sorting every row's projection on each snapshot.
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS sessions_recent ON sessions(last_active_ms DESC, updated_at DESC, id)`); err != nil {
+		return err
+	}
 	for _, column := range []struct{ name, decl string }{
 		{"relay_hops", `INTEGER NOT NULL DEFAULT 0`},
 		{"notification_armed", `INTEGER NOT NULL DEFAULT 0`},
