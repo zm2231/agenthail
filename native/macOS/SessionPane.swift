@@ -160,7 +160,9 @@ final class SessionPane: ObservableObject, Identifiable {
             metadata.absorb(context: loaded.context, goal: loaded.goal, model: loaded.model, models: loaded.models)
             var merged = metadata.apply(to: loaded)
             let pageSeq = loaded.journalSeq ?? 0
-            for row in streamedRows where row.seq > pageSeq { merged = Self.applying(row, to: merged, older: &olderItems) ?? merged }
+            var older = olderItems
+            for row in streamedRows where row.seq > pageSeq { merged = Self.applying(row, to: merged, older: &older) ?? merged }
+            if older != olderItems { olderItems = older }
             dropUnpublishedDetail()
             detail = merged
             detailStale = false
@@ -596,8 +598,12 @@ final class SessionPane: ObservableObject, Identifiable {
 
     @discardableResult
     private func applyStreamedRow(_ event: SessionStreamEvent) -> Bool {
+        // A row that leaves the earlier pages alone must not publish them, or
+        // every row re-renders the window.
+        var older = olderItems
         guard removedSession == nil, let current = unpublishedDetail ?? detail, current.session.id == event.sessionId,
-              let updated = Self.applying(event, to: current, older: &olderItems) else { return false }
+              let updated = Self.applying(event, to: current, older: &older) else { return false }
+        if older != olderItems { olderItems = older }
         if pageReadsInFlight > 0 {
             streamedRows.removeAll { $0.data.itemId == event.data.itemId && !event.data.itemId.isEmpty }
             streamedRows.append(event)

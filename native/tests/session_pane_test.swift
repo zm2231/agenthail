@@ -288,6 +288,8 @@ struct SessionPaneTest {
         let streamingPane = streamingModel.openPane()
         var shownTimelines: [[String]] = []
         let shown = streamingPane.$detail.sink { shownTimelines.append($0?.timeline?.items.map(\.id) ?? []) }
+        var olderPublishes = 0
+        let olderShown = streamingPane.$olderItems.sink { _ in olderPublishes += 1 }
         streamingPane.select("D")
         let rowsDeadline = Date().addingTimeInterval(5)
         while streamingPane.timelineItems.map(\.id) != ["c", "a"], Date() < rowsDeadline { try? await Task.sleep(for: .milliseconds(20)) }
@@ -295,7 +297,9 @@ struct SessionPaneTest {
         check(pageRequests == 1, "streamed rows apply without reading the page again: \(pageRequests) page reads, rows \(streamingPane.timelineItems.map(\.id))")
         check(streamingPane.streamedRows.isEmpty, "rows applied with no page read in flight are not kept: \(streamingPane.streamedRows.count)")
         check(!shownTimelines.contains(["a", "b", "c"]) && !shownTimelines.contains(["b", "c", "a"]), "rows that arrive together render once: \(shownTimelines)")
+        check(olderPublishes <= 3, "rows that leave the earlier pages alone do not publish them: \(olderPublishes) publishes")
         shown.cancel()
+        olderShown.cancel()
         streamingServer.push(frame(104, row(104, "d", kind: "done", text: "")), to: "session-stream")
         let turnDeadline = Date().addingTimeInterval(5)
         while pageRequests < 2, Date() < turnDeadline { try? await Task.sleep(for: .milliseconds(20)) }
