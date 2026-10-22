@@ -43,6 +43,19 @@ type DevicePairing struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
+type DevicePairingStatus struct {
+	ID        string    `json:"id"`
+	State     string    `json:"state"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	Device    *Device   `json:"device,omitempty"`
+}
+
+const (
+	PairingPending = "pending"
+	PairingPaired  = "paired"
+	PairingExpired = "expired"
+)
+
 type DevicePushTarget struct {
 	DeviceID       string `json:"deviceId"`
 	InstallationID string `json:"installationId"`
@@ -145,6 +158,38 @@ func (r *Registry) CompleteDevicePairing(secret, name, hostID string) (Device, s
 		return Device{}, "", err
 	}
 	return device, token, nil
+}
+
+// CompleteDevicePairing stamps a code's consumed_at and its device's
+// created_at with the same instant in one transaction, which is how a paired
+// code finds its device.
+func (r *Registry) PairingStatus(id string) (DevicePairingStatus, error) {
+	var consumedAt, expiresAt string
+	var deviceID, name, scopes, hostID, createdAt, lastSeenAt, revokedAt sql.NullString
+	err := r.read.QueryRow(`SELECT p.consumed_at,p.expires_at,d.id,d.name,d.scopes,d.host_id,d.created_at,d.last_seen_at,d.revoked_at
+		FROM device_pairings p LEFT JOIN paired_devices d ON p.consumed_at<>'' AND d.created_at=p.consumed_at
+		WHERE p.id=?`, strings.TrimSpace(id)).Scan(&consumedAt, &expiresAt, &deviceID, &name, &scopes, &hostID, &createdAt, &lastSeenAt, &revokedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DevicePairingStatus{}, ErrPairingInvalid
+	}
+	if err != nil {
+		return DevicePairingStatus{}, err
+	}
+	expires, err := time.Parse(time.RFC3339Nano, expiresAt)
+	if err != nil {
+		return DevicePairingStatus{}, err
+	}
+	status := DevicePairingStatus{ID: strings.TrimSpace(id), State: PairingPending, ExpiresAt: expires}
+	switch {
+	case consumedAt != "":
+		status.State = PairingPaired
+		if deviceID.Valid {
+			status.Device = &Device{ID: deviceID.String, Name: name.String, Scopes: splitDeviceScopes(scopes.String), HostID: hostID.String, CreatedAt: createdAt.String, LastSeenAt: lastSeenAt.String, RevokedAt: revokedAt.String}
+		}
+	case !time.Now().UTC().Before(expires):
+		status.State = PairingExpired
+	}
+	return status, nil
 }
 
 const deviceLastSeenResolution = time.Minute
