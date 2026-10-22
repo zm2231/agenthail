@@ -152,8 +152,7 @@ final class SessionPane: ObservableObject, Identifiable {
             metadata.absorb(context: loaded.context, goal: loaded.goal, model: loaded.model, models: loaded.models)
             var merged = metadata.apply(to: loaded)
             let pageSeq = loaded.journalSeq ?? 0
-            streamedRows.removeAll { $0.seq <= pageSeq }
-            for row in streamedRows { merged = Self.applying(row, to: merged, older: &olderItems) ?? merged }
+            for row in streamedRows where row.seq > pageSeq { merged = Self.applying(row, to: merged, older: &olderItems) ?? merged }
             detail = merged
             detailStale = false
             detailRefreshFailed = false

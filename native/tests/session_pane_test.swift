@@ -302,6 +302,27 @@ struct SessionPaneTest {
         check(pageRequests == 2, "a streamed turn reloads the page once, when it finishes, not per row: \(pageRequests) page reads")
         check(streamingPane.timelineItems.map(\.id) == ["c", "a", "d", "e"] && streamingPane.timelineItems[1].text == "a2", "a row streamed while the reload was in flight survives it, in the order a reload would show: \(streamingPane.timelineItems.map(\.id))")
         check(streamingPane.streamedRows.isEmpty, "the rows kept for a page read are dropped once it lands: \(streamingPane.streamedRows.count)")
+
+        func pageAt(_ seq: Int, _ items: [(String, String)]) -> String {
+            let rows = items.map { #"{"id":"\#($0.0)","kind":"message","role":"assistant","title":"message","text":"\#($0.1)","truncated":false}"# }.joined(separator: ",")
+            return pageJSON.replacingOccurrences(of: #""journalSeq":100"#, with: #""journalSeq":\#(seq)"#)
+                .replacingOccurrences(of: #"{"id":"a","kind":"message","role":"assistant","title":"message","text":"a1","truncated":false},{"id":"b","kind":"message","role":"assistant","title":"message","text":"b1","truncated":false}"#, with: rows)
+        }
+        Task { await streamingPane.loadSession("D") }
+        let firstReadDeadline = Date().addingTimeInterval(5)
+        while pageRequests < 3, Date() < firstReadDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        Task { await streamingPane.loadSession("D") }
+        let secondReadDeadline = Date().addingTimeInterval(5)
+        while pageRequests < 4, Date() < secondReadDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        streamingServer.push(frame(106, row(106, "a", text: "a3")), to: "session-stream")
+        let updateDeadline = Date().addingTimeInterval(5)
+        while streamingPane.timelineItems.last?.text != "a3", Date() < updateDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        streamingServer.release(StubServer.reply("200 OK", pageAt(106, [("c", "c1"), ("e", "e1"), ("a", "a3")])))
+        try? await Task.sleep(for: .milliseconds(300))
+        streamingServer.release(StubServer.reply("200 OK", pageAt(105, [("c", "c1"), ("a", "a2"), ("e", "e1")])))
+        try? await Task.sleep(for: .milliseconds(300))
+        check(streamingPane.timelineItems.last?.id == "a" && streamingPane.timelineItems.last?.text == "a3", "an older page that lands last keeps an update streamed while both reads were open: \(streamingPane.timelineItems.map { "\($0.id)=\($0.text ?? "")" })")
+        check(streamingPane.streamedRows.isEmpty, "rows kept for overlapping reads are dropped once the last lands: \(streamingPane.streamedRows.count)")
         streamingModel.closePane(streamingPane)
         streamingServer.stop()
 
@@ -359,8 +380,8 @@ struct SessionPaneTest {
         }
 
         func release(_ reply: String) {
-            held.forEach { $0.send(content: Data(reply.utf8), completion: .contentProcessed { _ in }) }
-            held = []
+            guard !held.isEmpty else { return }
+            held.removeFirst().send(content: Data(reply.utf8), completion: .contentProcessed { _ in })
         }
 
         func stop() {
