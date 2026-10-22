@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -133,13 +134,29 @@ func (c *Codex) readObservationThread(ctx context.Context, conn codexClient, thr
 	return c.readThreadWithOptions(ctx, conn, threadID, 3, false)
 }
 
-// readLatestTurn reads the thread's newest turn with all of its items. Until
-// a new thread's first turn ends, the app-server refuses to list its turns
-// ("not materialized yet", then "paginated_threads is not supported yet");
-// the thread then reads as having no turns.
+// codexTurnsNotListedYet reports the app-server refusing to list a new
+// thread's turns until its first turn ends. The refusals carry no data and
+// generic codes, so they are matched by code and exact text: a change to
+// either reads as a real error rather than as a thread with no turns.
+func codexTurnsNotListedYet(err error) bool {
+	var rpc *codexRPCError
+	if !errors.As(err, &rpc) {
+		return false
+	}
+	switch rpc.Code {
+	case -32600:
+		return strings.HasPrefix(rpc.Message, "thread ") && strings.HasSuffix(rpc.Message, " is not materialized yet; thread/turns/list is unavailable before first user message")
+	case -32601:
+		return rpc.Message == "list_turns is not supported yet" || rpc.Message == "paginated_threads is not supported yet"
+	}
+	return false
+}
+
+// readLatestTurn reads the thread's newest turn with all of its items. A new
+// thread whose turns cannot be listed yet reads as having none.
 func (c *Codex) readLatestTurn(ctx context.Context, conn codexClient, threadID string) (*codexThread, error) {
 	turns, err := c.listThreadTurnsView(ctx, conn, threadID, 1, "full")
-	if err != nil && (strings.Contains(err.Error(), "is not materialized yet") || strings.Contains(err.Error(), "paginated_threads is not supported yet")) {
+	if codexTurnsNotListedYet(err) {
 		return &codexThread{ID: threadID, Status: surface.StatusUnknown}, nil
 	}
 	if err != nil {
@@ -256,7 +273,7 @@ func (c *Codex) listThreadItems(ctx context.Context, conn codexClient, threadID,
 	response, err := conn.Request(ctx, "thread/items/list", map[string]any{
 		"threadId": threadID,
 		"turnId":   turnID,
-		"page":     map[string]any{"limit": 100},
+		"limit":    100,
 	}, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("thread/items/list: %w", err)

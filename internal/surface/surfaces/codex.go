@@ -731,7 +731,7 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 func (c *Codex) activeTurnID(ctx context.Context, conn codexClient, threadID string) (string, error) {
 	response, err := conn.Request(ctx, "thread/turns/list", map[string]any{
 		"threadId":      threadID,
-		"page":          map[string]any{"limit": 1},
+		"limit":         1,
 		"sortDirection": "desc",
 	}, 5*time.Second)
 	if err != nil {
@@ -1054,6 +1054,10 @@ func codexAuthoritativeStreamEventWithKey(key, turnID string, item codexAssistan
 	return surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: "upsert", Final: true, TurnID: turnID, Kind: "text", Text: item.Text}
 }
 
+// managedNotificationsHandled, when set by a test, runs after a managed
+// stream has handled the notifications it drained.
+var managedNotificationsHandled func()
+
 // codexNotifier is a client that delivers app-server notifications as they
 // arrive rather than only alongside a response.
 type codexNotifier interface {
@@ -1119,6 +1123,9 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 				lastContext = *usage
 				onEvent(surface.StreamEvent{Kind: "context", Context: usage})
 			}
+		}
+		if managedNotificationsHandled != nil {
+			managedNotificationsHandled()
 		}
 		return changed
 	}

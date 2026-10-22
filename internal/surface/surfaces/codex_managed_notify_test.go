@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -37,9 +38,11 @@ func dialTestManagedCodex(t *testing.T) *managedCodexClient {
 func TestAManagedRequestEndsOnItsContextOrTimeoutWithoutBlockingOthers(t *testing.T) {
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
+	holding := make(chan struct{})
 	var held atomic.Bool
 	startManagedCodex(t, func(method string, _ map[string]any) map[string]any {
 		if method == "test/hold" && held.CompareAndSwap(false, true) {
+			close(holding)
 			<-release
 		}
 		return nil
@@ -52,7 +55,7 @@ func TestAManagedRequestEndsOnItsContextOrTimeoutWithoutBlockingOthers(t *testin
 		_, err := client.Request(ctx, "test/hold", map[string]any{}, time.Minute)
 		done <- err
 	}()
-	time.Sleep(50 * time.Millisecond)
+	<-holding
 	cancel()
 	select {
 	case err := <-done:
@@ -131,6 +134,50 @@ func TestThreadTurnsAreListedByTheTopLevelLimit(t *testing.T) {
 	if last := calls[len(calls)-1]; last["limit"] != float64(1) || last["itemsView"] != "full" {
 		t.Fatalf("stream read=%v, want the newest turn with every item", last)
 	}
+
+	client := dialTestManagedCodex(t)
+	if _, err := codex.activeTurnID(context.Background(), client, "thread"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := codex.listThreadItems(context.Background(), client, "thread", "turn"); err != nil {
+		t.Fatal(err)
+	}
+	for _, method := range []string{"thread/turns/list", "thread/items/list"} {
+		for _, params := range fake.Calls(method) {
+			if _, paged := params["page"]; paged {
+				t.Fatalf("%s nests its limit under page: %v", method, params)
+			}
+			if limit, ok := params["limit"].(float64); !ok || limit < 1 {
+				t.Fatalf("%s without a top-level limit: %v", method, params)
+			}
+		}
+	}
+	if active := fake.Calls("thread/turns/list"); active[len(active)-1]["limit"] != float64(1) {
+		t.Fatalf("active turn lookup=%v, want only the newest turn", active[len(active)-1])
+	}
+}
+
+func TestOnlyTheAppServersFirstTurnRefusalsReadAsNoTurnsYet(t *testing.T) {
+	for _, test := range []struct {
+		code    int
+		message string
+		want    bool
+	}{
+		{-32600, "thread 01a163dd-6cbf-7c83-9637-51e60a7c3033 is not materialized yet; thread/turns/list is unavailable before first user message", true},
+		{-32601, "list_turns is not supported yet", true},
+		{-32601, "paginated_threads is not supported yet", true},
+		{-32601, "Method not found", false},
+		{-32600, "thread not found: 01a163dd-6cbf-7c83-9637-51e60a7c3033", false},
+		{-32603, "list_turns is not supported yet", false},
+	} {
+		err := fmt.Errorf("thread/turns/list: %w", &codexRPCError{Method: "thread/turns/list", Code: test.code, Message: test.message})
+		if got := codexTurnsNotListedYet(err); got != test.want {
+			t.Errorf("%d %q: got %v, want %v", test.code, test.message, got, test.want)
+		}
+	}
+	if codexTurnsNotListedYet(errors.New("thread/turns/list RPC error (-32601): list_turns is not supported yet")) {
+		t.Error("an error that is not the app-server's answer matched by its text")
+	}
 }
 
 type switchableTurn struct {
@@ -181,8 +228,17 @@ func awaitCalls(t *testing.T, fake *codextest.Daemon, method string, count int) 
 	}
 }
 
+func countHandledNotifications(t *testing.T) *atomic.Int64 {
+	t.Helper()
+	count := &atomic.Int64{}
+	managedNotificationsHandled = func() { count.Add(1) }
+	t.Cleanup(func() { managedNotificationsHandled = nil })
+	return count
+}
+
 func TestAManagedStreamReadsAsSoonAsItsThreadReportsAChange(t *testing.T) {
 	slowManagedPoll(t)
+	handledBefore := countHandledNotifications(t)
 	turn := &switchableTurn{}
 	fake := startManagedCodex(t, turn.respond)
 	fake.AddThread(codextest.Thread{ID: "thread"})
@@ -200,8 +256,15 @@ func TestAManagedStreamReadsAsSoonAsItsThreadReportsAChange(t *testing.T) {
 	awaitCalls(t, fake, "thread/turns/list", 2)
 
 	reads := len(fake.Calls("thread/turns/list"))
+	handled := handledBefore.Load()
 	fake.Notify("item/agentMessage/delta", map[string]any{"threadId": "thread", "delta": "fin"})
-	time.Sleep(50 * time.Millisecond)
+	deadline := time.Now().Add(5 * time.Second)
+	for handledBefore.Load() == handled {
+		if time.Now().After(deadline) {
+			t.Fatal("the stream never handled the delta")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	if got := len(fake.Calls("thread/turns/list")); got != reads {
 		t.Fatalf("a text delta caused %d reads", got-reads)
 	}

@@ -181,7 +181,8 @@ func (c *managedCodexClient) Request(ctx context.Context, method string, params 
 	select {
 	case response := <-waiter:
 		if envelope, ok := response["error"].(map[string]any); ok {
-			return nil, fmt.Errorf("%s RPC error (%v): %s", method, envelope["code"], str(envelope, "message"))
+			code, _ := envelope["code"].(float64)
+			return nil, &codexRPCError{Method: method, Code: int(code), Message: str(envelope, "message")}
 		}
 		return response, nil
 	case <-ctx.Done():
@@ -196,6 +197,17 @@ func (c *managedCodexClient) Request(ctx context.Context, method string, params 
 		c.mu.Unlock()
 		return nil, err
 	}
+}
+
+// codexRPCError is a JSON-RPC error the app-server answered a request with.
+type codexRPCError struct {
+	Method  string
+	Code    int
+	Message string
+}
+
+func (e *codexRPCError) Error() string {
+	return fmt.Sprintf("%s RPC error (%d): %s", e.Method, e.Code, e.Message)
 }
 
 func (c *managedCodexClient) DrainNotifications() []codexEvent {
