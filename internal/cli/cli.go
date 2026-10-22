@@ -374,7 +374,7 @@ Claude hooks (answer terminal Claude prompts from Agenthail; tell each session w
   hooks install                 Add Agenthail's hooks to every Claude config root
   hooks uninstall               Remove them
   hooks status                  Show where they are installed
-  hooks install codex           Tell your own Codex sessions who they are (AGENTS.md and hooks)
+  hooks install codex           Tell Codex sessions who they are (AGENTS.md and trusted hooks)
   hooks uninstall codex         Remove them
   hooks status codex            Show whether they are installed
 
@@ -3139,9 +3139,11 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		switch codexHooks {
 		case surfaces.CodexHooksMissing:
-			fmt.Printf("codex hooks: missing; your own Codex sessions aren't told who they are until you run: agenthail hooks install codex\n")
+			fmt.Printf("codex hooks: missing; Codex sessions, including the ones Agenthail starts, aren't told who they are until you run: agenthail hooks install codex\n")
 		case surfaces.CodexHooksOutdated:
-			fmt.Printf("codex hooks: outdated; your own Codex sessions may not be told who they are until you run: agenthail hooks install codex\n")
+			fmt.Printf("codex hooks: outdated; Codex sessions may not be told who they are until you run: agenthail hooks install codex\n")
+		case surfaces.CodexHooksUntrusted:
+			fmt.Printf("codex hooks: Codex hook not trusted yet: run agenthail hooks install codex or trust it in Codex\n")
 		}
 		if len(serviceProblems) > 0 {
 			fmt.Printf("[daemon] supervisor: %s\n", service.Name())

@@ -105,6 +105,14 @@ func TestHooksInstallCodexWritesIntoAHooksFileThePersonAlreadyUses(t *testing.T)
 	if info, err := os.Stat(hooks); err != nil || info.Mode().Perm() != 0640 {
 		t.Fatalf("hooks.json mode=%v err=%v", info.Mode().Perm(), err)
 	}
+	if err := os.Remove(filepath.Join(home, "config.toml")); err != nil {
+		t.Fatal(err)
+	}
+	requireCodexState(t, CodexHooksUntrusted)
+	if _, err := InstallCodexContext(codexContext(t), testAgenthail); err != nil {
+		t.Fatal(err)
+	}
+	requireCodexState(t, CodexHooksInstalled)
 
 	if _, err := UninstallCodexContext(codexContext(t)); err != nil {
 		t.Fatal(err)

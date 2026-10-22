@@ -40,6 +40,13 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 	defer cancel()
 	session, err := store.Session(hook.SessionID)
 	if err != nil {
+		// Codex runs the hook inside the app-server that holds the thread
+		// and runs it for every thread, codex exec and review threads
+		// included, so a thread the registry doesn't know gets nothing
+		// rather than a lookup through Codex.
+		if kind != surface.KindClaude {
+			return nil
+		}
 		if session, _, err = a.resolveLocalTarget(ctx, string(kind)+":"+hook.SessionID); err != nil {
 			return nil
 		}

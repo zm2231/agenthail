@@ -430,6 +430,8 @@ func cmdCodexHooks(action string) error {
 			state = "Codex is not set up for this user"
 		case surfaces.CodexHooksOutdated:
 			state += "; run: agenthail hooks install codex"
+		case surfaces.CodexHooksUntrusted:
+			state = "hook not trusted yet; run agenthail hooks install codex or trust it in Codex"
 		}
 		fmt.Printf("codex: %s\n", state)
 	}

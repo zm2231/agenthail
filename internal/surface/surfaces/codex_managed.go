@@ -336,9 +336,6 @@ func codexResumeParams(sess *surface.Session) map[string]any {
 	if sess.Cwd != "" {
 		params["cwd"] = sess.Cwd
 	}
-	if config := codexThreadContextConfig(); config != nil {
-		params["config"] = config
-	}
 	return params
 }
 

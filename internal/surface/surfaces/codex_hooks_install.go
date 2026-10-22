@@ -16,9 +16,31 @@ import (
 	"github.com/zm2231/agenthail/internal/agentcard"
 )
 
+const codexContextHookTimeout = 10
+
+var codexContextEvents = []struct{ event, key string }{
+	{"SessionStart", "session_start"},
+	{"UserPromptSubmit", "user_prompt_submit"},
+}
+
+// AgenthailExecutable is the running agenthail binary, or "" when this
+// process is not one, such as a test binary, which must never run as a hook.
+func AgenthailExecutable() string {
+	executable, err := os.Executable()
+	if err != nil || filepath.Base(executable) != "agenthail" {
+		return ""
+	}
+	return executable
+}
+
+func CodexContextHookCommand(executable string) string {
+	return "exec '" + strings.ReplaceAll(executable, "'", `'\''`) + "' hook session-context --surface codex"
+}
+
 const (
 	CodexHooksMissing   = "missing"
 	CodexHooksOutdated  = "outdated"
+	CodexHooksUntrusted = "untrusted"
 	CodexHooksInstalled = "installed"
 )
 
@@ -160,9 +182,10 @@ func UninstallCodexContext(ctx context.Context) (bool, error) {
 	return changed || untrusted, err
 }
 
-// CodexContextState is installed when both hooks run this binary trusted
-// and AGENTS.md has the current block, missing when none of it is there, and
-// empty when this user has no Codex.
+// CodexContextState is installed when both hooks run this binary, Codex
+// trusts them and AGENTS.md has the current block; untrusted when only
+// Codex's trust is missing; missing when none of it is there; outdated
+// otherwise; and empty when this user has no Codex.
 func CodexContextState(ctx context.Context, executable string) (string, error) {
 	if _, err := os.Stat(codexHome()); os.IsNotExist(err) {
 		return "", nil
@@ -184,17 +207,21 @@ func CodexContextState(ctx context.Context, executable string) (string, error) {
 	if len(owned) == 0 && !hasBlock {
 		return CodexHooksMissing, nil
 	}
-	current := map[string]bool{}
+	declared, trusted := map[string]bool{}, true
 	command := CodexContextHookCommand(executable)
 	for _, hook := range owned {
-		if hook.Command == command && hook.TrustStatus == "trusted" && hook.TimeoutSec == codexContextHookTimeout {
-			current[hook.EventName] = true
+		if hook.Command == command && hook.TimeoutSec == codexContextHookTimeout {
+			declared[hook.EventName] = true
+			trusted = trusted && hook.TrustStatus == "trusted"
 		}
 	}
-	if current["sessionStart"] && current["userPromptSubmit"] && len(owned) == len(codexContextEvents) && strings.Contains(string(memory), codexMemoryBlock()) {
-		return CodexHooksInstalled, nil
+	if !declared["sessionStart"] || !declared["userPromptSubmit"] || len(owned) != len(codexContextEvents) || !strings.Contains(string(memory), codexMemoryBlock()) {
+		return CodexHooksOutdated, nil
 	}
-	return CodexHooksOutdated, nil
+	if !trusted {
+		return CodexHooksUntrusted, nil
+	}
+	return CodexHooksInstalled, nil
 }
 
 func codexHookStateKey(key string) string {
@@ -296,11 +323,10 @@ func writeCodexUserConfig(ctx context.Context, client *codexStdioClient, build f
 		if edits, err = build(user); err != nil || len(edits) == 0 {
 			return false, err
 		}
-		params := map[string]any{"edits": edits}
-		if version != "" {
-			params["expectedVersion"] = version
+		if version == "" {
+			return false, errors.New("codex did not report the version of the user config, so it can't be written safely")
 		}
-		if _, err = client.Request(ctx, "config/batchWrite", params, 30*time.Second); err == nil {
+		if _, err = client.Request(ctx, "config/batchWrite", map[string]any{"edits": edits, "expectedVersion": version}, 30*time.Second); err == nil {
 			return true, nil
 		}
 	}
