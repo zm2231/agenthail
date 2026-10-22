@@ -28,9 +28,12 @@ An agent Agenthail manages has no other way to learn its alias, who started it, 
 - `thread create` resolves the caller as `send` does (`--from`, then `AGENTHAIL_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`) before it starts anything. A caller variable naming a session this registry does not know is refused with the same remedies as `send`. No caller is the person.
 - The dashboard's `session-create` takes `sourceSessionId`; without it the person started the session. `thread create --host` sends the caller as `sourceSessionId`, which host forwarding qualifies like any sender (`routeSource`): the receiving host stores the mirrored row or the no-reply stand-in.
 - A coordinator conversation Agenthail starts is recorded as `coordinator`.
+- `thread fork` records the caller the same way, in the CLI, the API's `session-fork` and on a paired host.
+- A move to another host carries the origin in its manifest. The target names the creator as its own session, the source's mirrored one, or a stand-in with no reply address (`incomingOrigin`).
+- A session the person starts outside Agenthail, including `agenthail codex`, is discovered and has no origin.
 
 The row survives a Claude rekey (`rekeySessionTx`), as both the session and the creator.
 
 ## Tests
 
-`go test ./internal/cli -run 'TestASession|TestThreadCreateRefuses|Whoami'` and `go test ./internal/daemon -run TestDashboardRecordsWhichSession`.
+`go test ./internal/cli -run 'TestASession|TestThreadCreate|TestThreadFork|Whoami'` and `go test ./internal/daemon -run 'TestDashboardRecordsWhichSession|TestAnIdleClaudeSessionMovesToAPairedHost'`.

@@ -29,6 +29,14 @@ func OriginOf(sessionID, creatorID string) SessionOrigin {
 
 // A session is started once, so a second record for it is ignored.
 func (r *Registry) RecordSessionOrigin(origin SessionOrigin) error {
+	if err := origin.valid(); err != nil {
+		return err
+	}
+	_, err := r.db.Exec(`INSERT INTO session_origins(session_id,via,creator_session_id) VALUES(?,?,?) ON CONFLICT(session_id) DO NOTHING`, origin.SessionID, string(origin.Via), origin.CreatorID)
+	return err
+}
+
+func (origin SessionOrigin) valid() error {
 	if origin.SessionID == "" {
 		return errors.New("session origin needs a session id")
 	}
@@ -44,8 +52,7 @@ func (r *Registry) RecordSessionOrigin(origin SessionOrigin) error {
 	default:
 		return fmt.Errorf("unknown session origin %q", origin.Via)
 	}
-	_, err := r.db.Exec(`INSERT INTO session_origins(session_id,via,creator_session_id) VALUES(?,?,?) ON CONFLICT(session_id) DO NOTHING`, origin.SessionID, string(origin.Via), origin.CreatorID)
-	return err
+	return nil
 }
 
 func (r *Registry) SessionOrigin(sessionID string) (SessionOrigin, bool, error) {

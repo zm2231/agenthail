@@ -43,7 +43,7 @@ type threadCreateRequest struct {
 const threadNameMargin = 30 * time.Second
 
 const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree <name>] [--agent <name>] [--permission-mode <mode>] [--root <name|dir>] [--host <host>] [--from <session>] [--timeout <duration>] [--json]
-       agenthail thread fork <target> [--model <model>] [--last-turn <id>] [--alias <name>] [--json]
+       agenthail thread fork <target> [--model <model>] [--last-turn <id>] [--alias <name>] [--from <session>] [--json]
        agenthail thread <status|stop|resume|logs> <target> [--json]
        agenthail thread <archive|unarchive> <target> [--json]
        agenthail thread adopt <target> [--wait <duration>] [--stop-terminal] [--json]

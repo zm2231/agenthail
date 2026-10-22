@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -102,6 +103,9 @@ func TestThreadForkPassesLastTurnAndRejectsRemovedFlags(t *testing.T) {
 	}
 	if len(adapter.options) != 1 {
 		t.Fatal("a rejected flag reached the surface", adapter.options)
+	}
+	if origin, found, err := app.Registry.SessionOrigin("forked"); err != nil || !found || origin.Via != registry.OriginPerson {
+		t.Fatalf("a fork from a terminal is not recorded as the person's: origin=%+v found=%v err=%v", origin, found, err)
 	}
 }
 

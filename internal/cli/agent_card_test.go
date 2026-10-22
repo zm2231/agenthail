@@ -111,3 +111,19 @@ func TestThreadCreateRefusesACallerFromAnotherAgenthail(t *testing.T) {
 		t.Fatalf("err=%v starts=%d", err, len(starter.options))
 	}
 }
+
+func TestThreadCreateFromNamesTheCreator(t *testing.T) {
+	app, starter, cwd := cardFixture(t)
+	if err := app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", cwd, "--from", "@nobody"}); err == nil || len(starter.options) != 0 {
+		t.Fatalf("an unknown --from started a thread: err=%v", err)
+	}
+	if _, err := captureStdout(t, func() error {
+		return app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", cwd, "--from", "@planner", "--json"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	card := callerCardJSON(t, app, "CODEX_THREAD_ID", "thread-new")
+	if card.StartedBy == nil || card.StartedBy.Ref != "@planner" || len(starter.options) != 1 || starter.options[0].Message != "Build it" {
+		t.Fatalf("startedBy=%+v options=%+v", card.StartedBy, starter.options)
+	}
+}
