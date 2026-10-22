@@ -219,6 +219,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdDaemon(rest)
 	case "daemon-run":
 		return a.daemonRun()
+	case "debug":
+		return a.cmdDebug(rest)
 	case "launch":
 		return a.cmdLaunch(rest)
 	case "doctor":
@@ -366,6 +368,7 @@ Background service:
                                 Native macOS completion notifications
   daemon install                Keep Agenthail running after login and restarts
   daemon uninstall              Stop Agenthail from starting automatically
+  debug heap <dir>              Write the daemon's heap, allocation and goroutine profiles to <dir>
 
 Claude hooks (answer terminal Claude prompts from Agenthail; tell each session who it is):
   hooks install                 Add Agenthail's hooks to every Claude config root
