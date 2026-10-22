@@ -371,13 +371,9 @@ func (c Client) close(ctx context.Context, sessionID string, ifIdle bool) error 
 	if !(IsCode(err, "not_open") || IsCode(err, "held") || errors.Is(err, ErrNotRunning)) {
 		return err
 	}
-	for _, host := range c.Retiring() {
-		retiringErr := host.closeOn(ctx, sessionID, ifIdle)
-		if IsCode(retiringErr, "not_open") || errors.Is(retiringErr, ErrNotRunning) {
-			continue
-		}
-		return retiringErr
-	}
+	_, err = c.onRetiring(ctx, err, func(ctx context.Context, host Client) (json.RawMessage, error) {
+		return nil, host.closeOn(ctx, sessionID, ifIdle)
+	})
 	return err
 }
 
@@ -451,14 +447,32 @@ func processStart(pid int) (string, error) {
 
 // sessionCall runs a request for one session on the host that runs it. The
 // current host answers not_open for a session it does not run, or held for
-// one a retiring host still runs; the retiring hosts are asked then, all at
-// once, so one that does not answer holds up only a session it may run. A
-// host that has the session answers for it, whatever its answer.
+// one a retiring host still runs; the retiring hosts are asked then. A host
+// that has the session answers for it, whatever its answer.
 func (c Client) sessionCall(ctx context.Context, method string, params, out any) error {
 	err := c.call(ctx, method, params, out)
 	if !(IsCode(err, "not_open") || IsCode(err, "held") || errors.Is(err, ErrNotRunning)) {
 		return err
 	}
+	result, err := c.onRetiring(ctx, err, func(ctx context.Context, host Client) (json.RawMessage, error) {
+		var result json.RawMessage
+		var target any
+		if out != nil {
+			target = &result
+		}
+		err := host.call(ctx, method, params, target)
+		return result, err
+	})
+	if err == nil && out != nil && result != nil {
+		return json.Unmarshal(result, out)
+	}
+	return err
+}
+
+// onRetiring runs call on every retiring host at once and returns the answer
+// of the one that has the session, so a host that does not answer holds up
+// only a session it may run. When none has it, the answer is notOpen.
+func (c Client) onRetiring(ctx context.Context, notOpen error, call func(context.Context, Client) (json.RawMessage, error)) (json.RawMessage, error) {
 	retiring := c.Retiring()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -469,12 +483,7 @@ func (c Client) sessionCall(ctx context.Context, method string, params, out any)
 	answers := make(chan answer, len(retiring))
 	for _, host := range retiring {
 		go func() {
-			var result json.RawMessage
-			var target any
-			if out != nil {
-				target = &result
-			}
-			err := host.call(ctx, method, params, target)
+			result, err := call(ctx, host)
 			answers <- answer{result: result, err: err}
 		}()
 	}
@@ -483,12 +492,9 @@ func (c Client) sessionCall(ctx context.Context, method string, params, out any)
 		if IsCode(answer.err, "not_open") || errors.Is(answer.err, ErrNotRunning) {
 			continue
 		}
-		if answer.err == nil && out != nil {
-			return json.Unmarshal(answer.result, out)
-		}
-		return answer.err
+		return answer.result, answer.err
 	}
-	return err
+	return nil, notOpen
 }
 
 // List is every session the current and retiring hosts run. A process a
