@@ -26,24 +26,24 @@ final class SessionExperienceTests: XCTestCase {
     func testDraftsAreScopedAndFreshCapabilitiesGateSending() async throws {
         SessionExperienceProtocol.state.reset()
         let model = makeModel()
-        await model.loadSession("A")
+        await model.loadSession("computer::A")
         model.composer = "Only for A"
-        await model.loadSession("B")
+        await model.loadSession("computer::B")
         XCTAssertEqual(model.composer, "")
         model.composer = "Only for B"
-        await model.loadSession("A")
+        await model.loadSession("computer::A")
         XCTAssertEqual(model.composer, "Only for A")
-        let stale = session(id: "A", busy: true)
+        let stale = session(id: "computer::A", busy: true)
         model.send(to: stale)
-        for _ in 0..<100 where model.sendingSessionIDs.contains("A") { try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<100 where model.sendingSessionIDs.contains("computer::A") { try await Task.sleep(for: .milliseconds(10)) }
         let calls = SessionExperienceProtocol.state.actions
         XCTAssertEqual(calls.count, 1)
         XCTAssertEqual(calls.first?["action"] as? String, "send")
         XCTAssertEqual(calls.first?["message"] as? String, "Only for A")
-        XCTAssertEqual(model.deliveryStatus["A"], "Queued for A; sends when current turn ends.")
-        await model.loadSession("B")
+        XCTAssertEqual(model.deliveryStatus["computer::A"], "Queued for A; sends when current turn ends.")
+        await model.loadSession("computer::B")
         XCTAssertEqual(model.composer, "Only for B")
-        model.send(to: session(id: "B", busy: false))
+        model.send(to: session(id: "computer::B", busy: false))
         XCTAssertEqual(SessionExperienceProtocol.state.actions.count, 1, "read-only detail must override writable list row")
     }
 
@@ -75,14 +75,14 @@ final class SessionExperienceTests: XCTestCase {
     func testFailedSessionAndSearchAreRecoverable() async throws {
         SessionExperienceProtocol.state.reset()
         let model = makeModel()
-        await model.loadSession("missing")
+        await model.loadSession("computer::missing")
         XCTAssertNotNil(model.sessionError)
         XCTAssertFalse(model.loadingSession)
-        await model.loadSession("A")
+        await model.loadSession("computer::A")
         XCTAssertNil(model.sessionError)
-        XCTAssertEqual(model.selectedDetail?.session.id, "A")
+        XCTAssertEqual(model.selectedDetail?.session.id, "computer::A")
         await model.searchSessions("build")
-        XCTAssertEqual(model.searchResults.first?.session.id, "older")
+        XCTAssertEqual(model.searchResults.first?.session.id, "computer::older")
         XCTAssertFalse(model.searching)
         await model.searchSessions("")
         XCTAssertTrue(model.searchResults.isEmpty)
@@ -92,9 +92,9 @@ final class SessionExperienceTests: XCTestCase {
     func testSessionMetadataLoadsAfterJournalWithoutBlockingThePage() async throws {
         SessionExperienceProtocol.state.reset()
         let model = makeModel()
-        await model.loadSession("metadata")
+        await model.loadSession("computer::metadata")
         XCTAssertFalse(model.loadingSession)
-        XCTAssertEqual(model.selectedDetail?.session.id, "metadata")
+        XCTAssertEqual(model.selectedDetail?.session.id, "computer::metadata")
         for _ in 0..<100 where model.selectedDetail?.model != "Metadata model" {
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -111,9 +111,9 @@ final class SessionExperienceTests: XCTestCase {
     @MainActor
     func testSessionMetadataFailureDoesNotHideJournal() async throws {
         let model = makeModel()
-        await model.loadSession("metadata-fails")
+        await model.loadSession("computer::metadata-fails")
         XCTAssertFalse(model.loadingSession)
-        XCTAssertEqual(model.selectedDetail?.session.id, "metadata-fails")
+        XCTAssertEqual(model.selectedDetail?.session.id, "computer::metadata-fails")
         XCTAssertNil(model.sessionError)
     }
 
@@ -121,32 +121,32 @@ final class SessionExperienceTests: XCTestCase {
     func testSessionMetadataErrorClearsPreviouslyAppliedClaudeEvidence() async throws {
         SessionExperienceProtocol.state.reset()
         let model = makeModel()
-        await model.loadSession("metadata")
+        await model.loadSession("computer::metadata")
         try await waitUntil { model.selectedDetail?.claudeRuns?.isEmpty == false }
         SessionExperienceProtocol.state.failNextMetadata()
-        await model.loadSession("metadata")
+        await model.loadSession("computer::metadata")
         try await waitUntil { SessionExperienceProtocol.state.metadataRequests.count >= 2 }
         try await Task.sleep(for: .milliseconds(50))
         XCTAssertNil(model.selectedDetail?.claudeRuns)
         XCTAssertNil(model.selectedDetail?.claudeSubagents)
         XCTAssertNil(model.selectedDetail?.metadataErrors)
-        XCTAssertEqual(model.selectedDetail?.session.id, "metadata")
+        XCTAssertEqual(model.selectedDetail?.session.id, "computer::metadata")
     }
 
     @MainActor
     func testSessionMetadataClearsOmittedClaudeEvidenceAndRejectsLatePreviousSession() async throws {
         SessionExperienceProtocol.state.reset()
         let model = makeModel()
-        await model.loadSession("metadata")
+        await model.loadSession("computer::metadata")
         try await waitUntil { model.selectedDetail?.claudeRuns?.isEmpty == false }
 
-        await model.loadSession("metadata-slow")
+        await model.loadSession("computer::metadata-slow")
         try await waitUntil { SessionExperienceProtocol.state.metadataRequests.contains("metadata-slow") }
-        await model.loadSession("metadata-empty")
-        try await waitUntil { model.selectedDetail?.session.id == "metadata-empty" && SessionExperienceProtocol.state.metadataRequests.contains("metadata-empty") }
+        await model.loadSession("computer::metadata-empty")
+        try await waitUntil { model.selectedDetail?.session.id == "computer::metadata-empty" && SessionExperienceProtocol.state.metadataRequests.contains("metadata-empty") }
         try await Task.sleep(for: .milliseconds(250))
 
-        XCTAssertEqual(model.selectedDetail?.session.id, "metadata-empty")
+        XCTAssertEqual(model.selectedDetail?.session.id, "computer::metadata-empty")
         XCTAssertNil(model.selectedDetail?.claudeRuns)
         XCTAssertNil(model.selectedDetail?.claudeSubagents)
         XCTAssertNil(model.selectedDetail?.metadataErrors)

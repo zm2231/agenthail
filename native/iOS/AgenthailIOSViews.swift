@@ -20,14 +20,14 @@ struct AgenthailIOSRoot: View {
         } message: {
             Text(model.operationError ?? "")
         }
-        .confirmationDialog("This computer could not be reached", isPresented: $model.showForgetMacConfirmation, titleVisibility: .visible) {
-            Button("Forget this computer on iPhone", role: .destructive) { model.forgetThisMac() }
-            Button("Keep connection", role: .cancel) {}
+        .confirmationDialog("\(model.forgetCandidate?.name ?? "This computer") could not be reached", isPresented: Binding(get: { model.forgetCandidate != nil }, set: { if !$0 { model.forgetCandidate = nil } }), titleVisibility: .visible) {
+            Button("Forget it on this iPhone", role: .destructive) { if let host = model.forgetCandidate { model.forgetHost(host.id) } }
+            Button("Keep connection", role: .cancel) { model.forgetCandidate = nil }
         } message: {
-            Text("Forget the saved connection only if this computer is gone or you want to pair with another one.")
+            Text("Forget the saved connection only if this computer is gone. Your other computers stay paired.")
         }
         .confirmationDialog(model.pairingConfirmationTitle, isPresented: $model.showPairingConfirmation, titleVisibility: .visible) {
-            Button(model.isPaired ? "Replace computer" : "Connect") { model.confirmPairing() }
+            Button(model.pairingConfirmationAction) { model.confirmPairing() }
             Button("Cancel", role: .cancel) { model.cancelPairing() }
         } message: {
             Text(model.pairingConfirmationMessage)
@@ -37,11 +37,20 @@ struct AgenthailIOSRoot: View {
 
 struct PairingScreen: View {
     @ObservedObject var model: AgenthailIOSModel
-    @State private var scanning = false
-    @State private var pastedURL = ""
 
     var body: some View {
-        NavigationStack {
+        NavigationStack { PairingForm(model: model) }
+    }
+}
+
+struct PairingForm: View {
+    @ObservedObject var model: AgenthailIOSModel
+    var adding = false
+    @State private var scanning = false
+    @State private var pastedURL = ""
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
             ScrollView {
             VStack(spacing: 24) {
                 ZStack {
@@ -50,7 +59,7 @@ struct PairingScreen: View {
                 }
                 .frame(width: 112, height: 112)
                 VStack(spacing: 8) {
-                    Text("Connect to your agents").font(.largeTitle.bold()).multilineTextAlignment(.center)
+                    Text(adding ? "Add a computer" : "Connect to your agents").font(.largeTitle.bold()).multilineTextAlignment(.center)
                     Text("On a computer running Agenthail, run agenthail devices pair, or open Settings in its web dashboard or Mac app, and show a pairing code.")
                         .foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
@@ -94,7 +103,9 @@ struct PairingScreen: View {
                     .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { scanning = false } } }
                 }
             }
-        }
+            .onChange(of: model.completedPairings) {
+                if adding { dismiss() }
+            }
     }
 }
 
@@ -257,7 +268,7 @@ struct ConversationListView: View {
                             Text(project.name)
                                 .font(.subheadline.weight(.semibold))
                                 .lineLimit(1)
-                            if let host = project.host {
+                            if let host = project.host, model.showsHostNames {
                                 IOSHostBadge(name: host)
                             }
                             Spacer(minLength: 0)
@@ -351,7 +362,7 @@ struct ConversationListView: View {
         Button { openSession(session.id) } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
-                    IOSSessionRow(session: session, title: title, family: family)
+                    IOSSessionRow(session: session, title: title, family: family, showsHost: model.showsHostNames)
                     if let reason {
                         Text(reason).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                     }
@@ -408,9 +419,10 @@ struct SessionScreen: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    if let error = model.connectionError {
+                    let connection = model.connectionState(for: session.id)
+                    if let error = connection.error {
                         Label(error, systemImage: "wifi.exclamationmark").font(.callout).foregroundStyle(.secondary)
-                    } else if model.reconnecting {
+                    } else if connection.reconnecting {
                         Label("Reconnecting live updates", systemImage: "arrow.triangle.2.circlepath").font(.callout).foregroundStyle(.secondary)
                     }
                     if model.loadingSession && detail == nil { ProgressView("Loading conversation") }
@@ -550,7 +562,7 @@ struct SessionScreen: View {
                     VStack(spacing: 2) {
                         Text(displayTitle).font(.body.weight(.semibold)).lineLimit(1)
                         if let cwd = detail?.session.cwd, !cwd.isEmpty {
-                            Text(URL(fileURLWithPath: cwd).lastPathComponent + " · " + ((session.remoteHostID == nil ? model.snapshot?.daemon.host?.name : session.host?.name) ?? "computer")).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            Text(URL(fileURLWithPath: cwd).lastPathComponent + " · " + (session.host?.name ?? "computer")).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
                 }
@@ -561,9 +573,9 @@ struct SessionScreen: View {
                             Text("Chat").tag(false)
                             Text("All events").tag(true)
                         }
-                        if session.canCallByVoice {
+                        if model.canCallByVoice(session) {
                             Button("Call this session", systemImage: "phone.fill") {
-                                voiceCalls.open(targetID: session.id)
+                                voiceCalls.open(targetID: model.voiceTargetID(for: session))
                                 showingVoice = true
                             }
                         }
@@ -613,7 +625,7 @@ struct IOSComposer: View {
     @State private var showingTurnSettings = false
     @State private var loadedModels: [ModelOption]?
 
-    private var steering: Bool { detail.session.status == "busy" && detail.session.waitingOn == nil && detail.capabilities.steer && model.snapshot?.busyDelivery == "steer" }
+    private var steering: Bool { detail.session.status == "busy" && detail.session.waitingOn == nil && detail.capabilities.steer && model.busyDelivery(for: detail.session.id) == "steer" }
     private var sending: Bool { model.sendingSessionIDs.contains(session.id) }
 
     private var canSend: Bool {
@@ -653,6 +665,8 @@ struct IOSComposer: View {
                 layout {
                     if detail.capabilities.attach && detail.capabilities.send {
                         ComposerAttachmentMenu(model: model)
+                            .disabled(sending)
+                        ComposerPasteButton(model: model)
                             .disabled(sending)
                     }
                     if detail.capabilities.model {
@@ -1212,7 +1226,7 @@ struct SessionInspector: View {
                     .disabled(claudeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             } message: { Text("Changes the Claude session name, not its Agenthail alias.") }
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-            .sheet(isPresented: $adopting) { IOSAdoptSessionSheet(model: model, session: liveSession) }
+            .sheet(isPresented: $adopting) { IOSAdoptSessionSheet(model: model, session: model.routedSession(liveSession) ?? liveSession, sessionID: liveSession.id) }
             .task(id: SubagentFetchKey(liveSession, revision: model.fetchedSubagents.revision(session.id))) { await model.loadSubagents(of: liveSession) }
             .sheet(isPresented: $showingModels) {
                 SearchableModelSelectionSheet(initialOptions: detail.models ?? [], currentSelectedID: detail.model, allowsDefault: false, onSelect: { value in
@@ -1252,6 +1266,7 @@ struct IOSSessionRow: View {
     let session: SessionState
     var title: String? = nil
     var family: SessionFamily? = nil
+    var showsHost = true
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var displayTitle: String {
         title ?? SessionStyle.title(session)
@@ -1264,7 +1279,7 @@ struct IOSSessionRow: View {
             layout {
                 Text(SessionStyle.agentName(session.surface)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     .lineLimit(1).fixedSize()
-                if let host = session.shortRemoteHostName {
+                if let host = session.shortRemoteHostName, showsHost || session.isUnavailable {
                     IOSHostBadge(name: host, unavailable: session.isUnavailable)
                         .accessibilityLabel(session.isUnavailable ? "Unavailable on \(host)" : "On \(host)")
                 }
@@ -1347,14 +1362,14 @@ struct SettingsView: View {
     @ObservedObject var model: AgenthailIOSModel
     var body: some View {
         List {
-            Section("Connection") {
-                Label(connectionLabel, systemImage: connectionIcon)
-                if let error = model.connectionError { Text(error).font(.footnote).foregroundStyle(.secondary) }
-                Button("Reconnect") { model.connect() }
+            Section {
+                NavigationLink("Add a computer") { PairingForm(model: model, adding: true) }
             }
-            if !attentionSurfaces.isEmpty {
-                Section("Connections") {
-                    ForEach(attentionSurfaces) { surface in
+            ForEach(model.hosts) { host in
+                Section {
+                    Label(connectionLabel(host), systemImage: connectionIcon(host))
+                    if let error = host.error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+                    ForEach(host.surfaces) { surface in
                         VStack(alignment: .leading, spacing: 4) {
                             LabeledContent(surface.name.capitalized, value: surface.connected ? "Needs attention" : "Unavailable")
                             DisclosureGroup("Details") {
@@ -1368,38 +1383,48 @@ struct SettingsView: View {
                             .font(.footnote)
                         }
                     }
-                }
-            }
-            if let consumers = model.snapshot?.signin, !consumers.isEmpty {
-                Section {
-                    ForEach(consumers) { consumer in
+                    ForEach(host.signin) { consumer in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(consumer.label).font(.headline)
+                            Text("Browser sign-in: \(consumer.label)").font(.headline)
                             Text(consumer.resolvedLabel).font(.footnote)
                             if let problem = consumer.problem {
                                 Text(problem).font(.footnote).foregroundStyle(.orange).textSelection(.enabled)
                             }
                         }
                     }
-                } header: {
-                    Text("Browser sign-in")
-                } footer: {
-                    Text("Change it in Settings > Browser Sign-in on that computer, or run agenthail signin use there.")
-                }
-            }
-            if let hosts = model.snapshot?.daemon.hosts, !hosts.isEmpty {
-                Section("Hosts") {
-                    ForEach(hosts) { host in
+                    ForEach(host.peers) { peer in
                         VStack(alignment: .leading, spacing: 4) {
-                            LabeledContent(host.name, value: host.stateLabel)
-                            if let detail = host.detail, !detail.isEmpty {
+                            LabeledContent(peer.name, value: peer.stateLabel)
+                            if let detail = peer.detail, !detail.isEmpty {
                                 Text(detail).font(.footnote).foregroundStyle(.secondary)
                             }
-                            if let notice = host.notice, !notice.isEmpty {
-                                Text(notice).font(.footnote).foregroundStyle(.orange)
+                            if let notice = peer.notice, !notice.isEmpty {
+                                Text(notice).font(.footnote).foregroundStyle(.orange).lineLimit(3)
                             }
                         }
                     }
+                    if model.hosts.count > 1 { LabeledContent("Notifications", value: host.notifications) }
+                    Button("Reconnect") { model.reconnect(host: host.id) }
+                    Button("Remove \(host.name)", role: .destructive) { model.removeHost(host.id) }
+                } header: {
+                    Text(host.name)
+                } footer: {
+                    if !host.signin.isEmpty {
+                        Text("Change browser sign-in in Settings > Browser Sign-in on \(host.name), or run agenthail signin use there.")
+                    } else {
+                        Text(host.address)
+                    }
+                }
+            }
+            if model.hosts.count > 1 {
+                Section {
+                    Picker("Orchestrator", selection: Binding(get: { model.voiceHost?.id ?? "" }, set: { model.voiceHostID = $0 })) {
+                        ForEach(model.hosts) { Text($0.name).tag($0.id) }
+                    }
+                } header: {
+                    Text("Voice")
+                } footer: {
+                    Text("Talk to orchestrator calls this computer.")
                 }
             }
             Section("Notifications") {
@@ -1413,29 +1438,22 @@ struct SettingsView: View {
                 } else {
                     Button("Enable notifications") { model.requestNotifications() }
                 }
-                Text("Your computer sends an alert when an agent finishes or fails.").font(.footnote).foregroundStyle(.secondary)
-            }
-            Section {
-                Button("Disconnect this iPhone", role: .destructive) { model.unpair() }
+                Text("Your computers send an alert when an agent finishes or fails.").font(.footnote).foregroundStyle(.secondary)
             }
         }
         .navigationTitle("Settings")
     }
 
-    private var attentionSurfaces: [SurfaceState] {
-        (model.snapshot?.surfaces ?? []).filter(\.needsAttention)
+    private func connectionLabel(_ host: PairedHostStatus) -> String {
+        if host.error != nil { return "Connection interrupted" }
+        if host.reconnecting { return "Reconnecting live updates" }
+        return host.reachable ? "Connected over Tailscale" : "Not connected"
     }
 
-    private var connectionLabel: String {
-        if model.connectionError != nil { return "Connection interrupted" }
-        if model.reconnecting { return "Reconnecting live updates" }
-        return model.computerName.map { "Connected to \($0)" } ?? "Connected"
-    }
-
-    private var connectionIcon: String {
-        if model.connectionError != nil { return "wifi.exclamationmark" }
-        if model.reconnecting { return "arrow.triangle.2.circlepath" }
-        return "lock.shield.fill"
+    private func connectionIcon(_ host: PairedHostStatus) -> String {
+        if host.error != nil { return "wifi.exclamationmark" }
+        if host.reconnecting { return "arrow.triangle.2.circlepath" }
+        return host.reachable ? "lock.shield.fill" : "wifi.slash"
     }
 }
 
@@ -1444,8 +1462,11 @@ struct IOSAdoptSessionSheet: View {
     @StateObject private var controller: SessionAdoptController
     @Environment(\.dismiss) private var dismiss
 
-    init(model: AgenthailIOSModel, session: SessionState) {
+    private let sessionID: String
+
+    init(model: AgenthailIOSModel, session: SessionState, sessionID: String) {
         self.model = model
+        self.sessionID = sessionID
         _controller = StateObject(wrappedValue: SessionAdoptController(session: session))
     }
 
@@ -1491,7 +1512,7 @@ struct IOSAdoptSessionSheet: View {
     }
 
     private func run(stopTerminal: Bool) {
-        guard let api = model.api else { return }
+        guard let api = model.routedAPI(for: sessionID) else { return }
         Task {
             await controller.adopt(api: api, stopTerminal: stopTerminal)
             if case .done = controller.phase { _ = await model.refresh(fresh: true) }

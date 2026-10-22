@@ -523,7 +523,9 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 			if err != nil {
 				t.Fatalf("Ensure after the update = %v", err)
 			}
-			if err := client.Close(ctx, retired); err != nil {
+			// The host retires the idle session as it drains, and its Claude
+			// exits once the linger ends; a stop that comes later finds it closed.
+			if err := client.Close(ctx, retired); err != nil && !claudehost.IsCode(err, "not_open") {
 				t.Fatalf("stopping a session the protocol 2 host retired = %v", err)
 			}
 			if claudehosttest.Alive(exiting.PID) {

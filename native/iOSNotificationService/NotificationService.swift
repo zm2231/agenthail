@@ -13,7 +13,8 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
         }
         guard let requestID = content.userInfo["requestId"] as? String, !requestID.isEmpty,
               let sessionID = content.userInfo["sessionId"] as? String, !sessionID.isEmpty,
-              let credential = PairedCredential.read() else { return finish(with: nil) }
+              let host = content.userInfo["host"] as? String, !host.isEmpty,
+              let credential = PairedCredential.read(host: host) else { return finish(with: nil) }
         Task {
             let notice = await RequestNotifications.fetchNotice(endpoint: credential.endpoint, token: credential.token, sessionID: sessionID, requestID: requestID)
             if let notice, !notice.actions.isEmpty {

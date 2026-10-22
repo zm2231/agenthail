@@ -92,7 +92,7 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 			result.UnavailableReason = payload.Reason
 			continue
 		}
-		if payload.Op == "remove" {
+		if !journalRowIsItem(payload) {
 			continue
 		}
 		result.UnavailableReason = ""
@@ -130,12 +130,18 @@ func journalPageStart(collected []journalPageItem, positions, starts []int, limi
 	return min(first, max(0, len(collected)-1)), true
 }
 
+// journalRowIsItem reports whether a page shows a journal row as a timeline
+// item: every row but a source's errors and removals.
+func journalRowIsItem(payload sessionJournalPayload) bool {
+	return payload.Kind != "source-error" && payload.Op != "remove"
+}
+
 // journalVisibleItems returns the timeline items among entries and each item's entry position.
 func journalVisibleItems(entries []journalPageItem, toItem func(sessionJournalPayload) surface.TimelineItem) ([]surface.TimelineItem, []int) {
 	items := make([]surface.TimelineItem, 0, len(entries))
 	positions := make([]int, 0, len(entries))
 	for index, entry := range entries {
-		if entry.payload.Kind == "source-error" || entry.payload.Op == "remove" {
+		if !journalRowIsItem(entry.payload) {
 			continue
 		}
 		items = append(items, toItem(entry.payload))

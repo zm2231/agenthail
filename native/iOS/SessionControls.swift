@@ -100,12 +100,12 @@ struct QueueListView: View {
                 let pending = current.filter { $0.status != "dead" }
                 if !review.isEmpty {
                     Section {
-                        ForEach(review) { item in queueRow(item) }
+                        ForEach(review, id: \.listID) { item in queueRow(item) }
                     } header: { Text("Review delivery") }
                     footer: { Text("Unconfirmed instructions may already have reached the agent. Check the session before sending again.") }
                 }
                 if !pending.isEmpty {
-                    Section("Waiting to deliver") { ForEach(pending) { item in queueRow(item) } }
+                    Section("Waiting to deliver") { ForEach(pending, id: \.listID) { item in queueRow(item) } }
                 }
                 if !loading && error == nil && model.connectionError == nil && current.isEmpty {
                     ContentUnavailableView("No pending deliveries", systemImage: "tray", description: Text("Instructions waiting to send or needing a delivery decision appear here. Older outcomes are in History."))
@@ -116,7 +116,7 @@ struct QueueListView: View {
                     ContentUnavailableView("No delivery history", systemImage: "clock", description: Text("Completed, canceled and older failed instructions appear here."))
                         .listRowSeparator(.hidden)
                 }
-                ForEach(history.reversed()) { item in queueRow(item) }
+                ForEach(history.reversed(), id: \.listID) { item in queueRow(item) }
             }
         }
         .listStyle(.insetGrouped)
@@ -181,7 +181,7 @@ struct QueueListView: View {
                 }
             }
             .controlSize(.large)
-            .disabled(model.pendingControls.contains("queue:\(item.id)"))
+            .disabled(model.pendingControls.contains("queue:\(item.listID)"))
         }.padding(.vertical, 6)
     }
 
@@ -203,7 +203,7 @@ struct QueueListView: View {
                 }
             }
             .buttonStyle(.bordered)
-            .disabled(model.pendingControls.contains("delivery:\(problem.deliveryId)"))
+            .disabled(model.pendingControls.contains("delivery:\(problem.id)"))
         }
         .padding(.vertical, 6)
     }

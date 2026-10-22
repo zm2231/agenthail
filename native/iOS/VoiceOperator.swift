@@ -2,11 +2,12 @@ import SwiftUI
 
 extension VoiceOperatorModel {
     static func paired(targetID: String = "") -> VoiceOperatorModel {
-        guard let endpoint = KeychainStore.get("endpoint").flatMap(URL.init(string:)),
-              let token = KeychainStore.get("token") else {
+        let paired = PairedCredential.all()
+        let chosen = UserDefaults.standard.string(forKey: AgenthailIOSModel.voiceHostKey)
+        guard let credential = paired.first(where: { $0.hostID == chosen }) ?? paired.first else {
             return VoiceOperatorModel(targetID: targetID, unavailable: "Pair this phone with Agenthail on your computer first.")
         }
-        return VoiceOperatorModel(endpoint: endpoint, token: token, targetID: targetID, diagnostics: VoiceCallDiagnostics())
+        return VoiceOperatorModel(endpoint: credential.endpoint, token: credential.token, targetID: targetID, diagnostics: VoiceCallDiagnostics())
     }
 }
 
@@ -360,7 +361,7 @@ struct VoiceOperatorEntry: View {
             .accessibilityIdentifier("voice-entry")
             .sheet(isPresented: $presented) {
                 if let call = voiceCalls.model {
-                    AgenthailVoiceOperatorSheet(model: call) { id in operatorID = id }
+                    AgenthailVoiceOperatorSheet(model: call) { id in operatorID = model.voiceSessionID(id) }
                         .sheet(isPresented: Binding(get: { operatorID != nil }, set: { if !$0 { operatorID = nil } })) {
                             if let id = operatorID {
                                 NavigationStack {
