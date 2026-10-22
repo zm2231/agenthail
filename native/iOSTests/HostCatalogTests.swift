@@ -76,6 +76,30 @@ final class HostCatalogTests: XCTestCase {
         XCTAssertEqual(Set(catalog.deliveryProblems.map(\.id)).count, 2, "the same delivery id on two computers is two problems")
     }
 
+    func testAComputerIsReachedDirectlyOrThroughAPairedComputerThatMirrorsIt() {
+        var laptop = Self.snapshot([])
+        laptop.daemonHosts([HostHealth(id: "hserver", name: "server", state: "connected"), HostHealth(id: "hbuild", name: "build", state: "unreachable")])
+        let catalog = HostCatalog(hosts: [
+            PairedHostView(id: "hlaptop", name: "laptop", reachable: true, snapshot: laptop),
+            PairedHostView(id: "hserver", name: "server", reachable: false, snapshot: Self.snapshot([])),
+        ])
+        XCTAssertEqual(catalog.target(forHost: "hlaptop"), HostTarget(hostID: "hlaptop", remote: nil))
+        XCTAssertEqual(catalog.target(forHost: "hserver"), HostTarget(hostID: "hlaptop", remote: "hserver"))
+        XCTAssertNil(catalog.target(forHost: "hbuild"))
+        XCTAssertEqual(catalog.hosts.map(\.id), ["hlaptop", "hserver", "hbuild"])
+        XCTAssertEqual(catalog.hosts.first { $0.id == "hbuild" }?.state, "unreachable")
+    }
+
+    func testASessionNoComputerListsIsRoutedToItsOwnerByItsID() {
+        var laptop = Self.snapshot([])
+        laptop.daemonHosts([HostHealth(id: "hserver", name: "server", state: "connected")])
+        let direct = HostCatalog(hosts: [PairedHostView(id: "hlaptop", name: "laptop", reachable: true, snapshot: laptop)])
+        XCTAssertEqual(direct.route(for: "hlaptop::new"), SessionRoute(hostID: "hlaptop", sessionID: "new"))
+        XCTAssertEqual(direct.route(for: "hserver::new"), SessionRoute(hostID: "hlaptop", sessionID: "hserver::new"))
+        XCTAssertNil(direct.route(for: "hbuild::new"))
+        XCTAssertNil(direct.route(for: "new"))
+    }
+
     private func host(_ id: String, _ name: String, reachable: Bool, sessions: [SessionState]) -> PairedHostView {
         PairedHostView(id: id, name: name, reachable: reachable, snapshot: Self.snapshot(sessions))
     }
@@ -99,5 +123,11 @@ final class HostCatalogTests: XCTestCase {
 
     static func snapshot(_ sessions: [SessionState], problems: [DeliveryProblem]? = nil) -> DashboardSnapshot {
         DashboardSnapshot(updatedAt: "2026-10-22T12:00:00Z", eventCursor: 1, hostEpoch: "e", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: problems, codexRecentHours: 8, busyDelivery: "queue")
+    }
+}
+
+private extension DashboardSnapshot {
+    mutating func daemonHosts(_ hosts: [HostHealth]) {
+        self = DashboardSnapshot(updatedAt: updatedAt, eventCursor: eventCursor, hostEpoch: hostEpoch, catalogSeq: catalogSeq, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil, hosts: hosts), surfaces: surfaces, sessions: sessions, totalSessions: totalSessions, queue: queue, channels: channels, relays: relays, history: history, attention: attention, deliveryProblems: deliveryProblems, codexRecentHours: codexRecentHours, busyDelivery: busyDelivery)
     }
 }

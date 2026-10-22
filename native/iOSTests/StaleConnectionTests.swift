@@ -5,13 +5,12 @@ final class StaleConnectionTests: XCTestCase {
     @MainActor
     func testStaleCatalogStillConnectsToEventsAndRefreshes() async throws {
         KeychainStore.removeAll()
-        try KeychainStore.set("https://stale.tailnet.ts.net", account: "endpoint")
-        try KeychainStore.set("fixture", account: "token")
+        try AgenthailIOSTests.pair("hstale", "https://stale.tailnet.ts.net", token: "fixture")
         StaleConnectionProtocol.state.reset()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StaleConnectionProtocol.self]
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
-        defer { model.forgetThisMac(); KeychainStore.removeAll() }
+        defer { model.forgetHost("hstale"); KeychainStore.removeAll() }
         model.connect()
         for _ in 0..<150 where model.snapshot?.daemon.stale != false {
             try await Task.sleep(for: .milliseconds(20))
