@@ -422,6 +422,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var transport: String? = nil
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
+    var holders: [SessionHolder]? = nil
     var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
     /// A session its daemon can open in Agenthail's host.

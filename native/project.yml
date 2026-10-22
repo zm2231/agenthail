@@ -29,6 +29,7 @@ targets:
       - path: AgenthailModels.swift
       - path: TurnSettings.swift
       - path: AgenthailAPI.swift
+      - path: HolderPins.swift
       - path: ComposerAttachment.swift
       - path: SessionSelection.swift
       - path: SessionTree.swift
