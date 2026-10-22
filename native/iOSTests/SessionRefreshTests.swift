@@ -133,6 +133,24 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testReconnectJoinsAPendingResume() async throws {
+        let model = try await openUnsupportedSession()
+        SessionRefreshProtocol.state.set(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(snapshotCanStream: true)
+        SessionRefreshProtocol.state.holdDetail()
+        await model.refresh()
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.detailHeld }
+        let reconnect = Task { await model.eventStreamConnected() }
+        try await Task.sleep(for: .milliseconds(300))
+        SessionRefreshProtocol.state.releaseDetail()
+        await reconnect.value
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, 2)
+        XCTAssertEqual(SessionRefreshProtocol.state.streamRequests, 2)
+        model.selectedSessionID = nil
+    }
+
+    @MainActor
     func testEventsRefreshAnUnsupportedSessionOnce() async throws {
         let model = try await openUnsupportedSession()
         for id in 1...3 {

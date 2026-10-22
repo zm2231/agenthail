@@ -274,8 +274,7 @@ final class AgenthailIOSModel: ObservableObject {
     private var selectedSessionStateSeq: UInt64 = 0
     private var sessionStreamUnsupported = false
     private var unsupportedRefreshTask: Task<Void, Never>?
-    private var sessionResumeTask: Task<Void, Never>?
-    private var restartingStreams = false
+    private var sessionReload: (id: String, task: Task<Void, Never>)?
     private var connectionTask: Task<Void, Never>?
     private var snapshotCoversEventStream = false
     private var lastEventID: UInt64 = 0
@@ -313,7 +312,7 @@ final class AgenthailIOSModel: ObservableObject {
         eventRefreshTask?.cancel()
         catalogStreamTask?.cancel()
         sessionStreamTask?.cancel()
-        sessionResumeTask?.cancel()
+        sessionReload?.task.cancel()
         unsupportedRefreshTask?.cancel()
     }
 
@@ -478,7 +477,7 @@ final class AgenthailIOSModel: ObservableObject {
         }
         if selectedSessionID != id {
             sessionStreamTask?.cancel()
-            sessionResumeTask?.cancel()
+            cancelSessionReload()
             unsupportedRefreshTask?.cancel()
             sessionMetadataTask?.cancel()
             sessionStreamCursor = 0
@@ -851,7 +850,7 @@ final class AgenthailIOSModel: ObservableObject {
         eventRefreshTask?.cancel()
         catalogStreamTask?.cancel()
         sessionStreamTask?.cancel()
-        sessionResumeTask?.cancel()
+        cancelSessionReload()
         unsupportedRefreshTask?.cancel()
         sessionMetadataTask?.cancel()
         api = nil
@@ -1081,7 +1080,6 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     private func startSessionStream(_ id: String) {
-        sessionResumeTask?.cancel()
         sessionStreamTask?.cancel()
         guard let api, selectedSessionID == id else { return }
         sessionStreamTask = Task {
@@ -1114,13 +1112,28 @@ final class AgenthailIOSModel: ObservableObject {
         guard sessionStreamUnsupported, let id = selectedSessionID,
               snapshot.sessions.first(where: { $0.id == id })?.capabilities.stream == true else { return }
         sessionStreamUnsupported = false
-        if restartingStreams { return }
-        sessionResumeTask?.cancel()
-        sessionResumeTask = Task { [weak self] in
+        Task { await reloadSelectedSession() }
+    }
+
+    private func reloadSelectedSession() async {
+        guard let id = selectedSessionID else { return }
+        if let pending = sessionReload, pending.id == id {
+            await pending.task.value
+            return
+        }
+        let task = Task { [weak self] in
             await self?.refreshSession(id)
             guard !Task.isCancelled, let self, self.selectedSessionID == id else { return }
             self.startSessionStream(id)
         }
+        sessionReload = (id, task)
+        await task.value
+        if sessionReload?.task == task { sessionReload = nil }
+    }
+
+    private func cancelSessionReload() {
+        sessionReload?.task.cancel()
+        sessionReload = nil
     }
 
     private func refreshUnsupportedSession(_ id: String) {
@@ -1227,14 +1240,12 @@ final class AgenthailIOSModel: ObservableObject {
         reconnecting = false
         if snapshotCoversEventStream {
             snapshotCoversEventStream = false
+            if let id = selectedSessionID, sessionReload?.id != id { startSessionStream(id) }
         } else {
-            restartingStreams = true
             _ = await refresh(fresh: true)
-            restartingStreams = false
-            if let id = selectedSessionID { await refreshSession(id) }
+            await reloadSelectedSession()
         }
         startCatalogStream()
-        if let id = selectedSessionID { startSessionStream(id) }
     }
 
     func recordStreamInterruption(probeError: Error?) {
