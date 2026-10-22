@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"errors"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -79,5 +81,33 @@ func TestDebugHeapNeedsARunningDaemon(t *testing.T) {
 	app := &App{catalogDaemonRunning: func() bool { return false }}
 	if err := app.Run([]string{"debug", "heap", t.TempDir()}); err == nil || !strings.Contains(err.Error(), "not running") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+type failingClose struct{ *os.File }
+
+func (f failingClose) Close() error {
+	f.File.Close()
+	return errors.New("flush failed")
+}
+
+func TestDebugHeapRemovesAProfileThatFailsToClose(t *testing.T) {
+	serveFakeDebugSocket(t, func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("profile")) })
+	create := createProfileFile
+	createProfileFile = func(path string) (io.WriteCloser, error) {
+		file, err := create(path)
+		if err != nil {
+			return nil, err
+		}
+		return failingClose{file.(*os.File)}, nil
+	}
+	t.Cleanup(func() { createProfileFile = create })
+	dir := t.TempDir()
+	app := &App{catalogDaemonRunning: func() bool { return true }}
+	if err := app.Run([]string{"debug", "heap", dir}); err == nil || !strings.Contains(err.Error(), "flush failed") {
+		t.Fatalf("err=%v", err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("a profile that failed to close was left: %v", entries)
 	}
 }

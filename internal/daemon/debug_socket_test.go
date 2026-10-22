@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/pprof/profile"
 )
@@ -93,5 +94,75 @@ func TestTheDebugSocketLeavesAFileAtItsPathAlone(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(DebugSocketPath()); string(data) != "keep" {
 		t.Fatalf("the file was replaced: %q", data)
+	}
+}
+
+func TestADebugClientThatStopsReadingCannotHoldTheServer(t *testing.T) {
+	writeTimeout, grace := debugWriteTimeout, debugShutdownGrace
+	debugWriteTimeout, debugShutdownGrace = 200*time.Millisecond, 200*time.Millisecond
+	t.Cleanup(func() { debugWriteTimeout, debugShutdownGrace = writeTimeout, grace })
+	home := debugSocketHome(t)
+	path := filepath.Join(home, "d.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeEnded := make(chan error, 1)
+	release := make(chan struct{})
+	handlerDone := make(chan struct{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /flood", func(w http.ResponseWriter, _ *http.Request) {
+		chunk := make([]byte, 64<<10)
+		for {
+			if _, err := w.Write(chunk); err != nil {
+				writeEnded <- err
+				return
+			}
+		}
+	})
+	mux.HandleFunc("GET /stuck", func(w http.ResponseWriter, _ *http.Request) {
+		defer close(handlerDone)
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		<-release
+	})
+	stop := serveDebug(listener, mux, t.Logf)
+	t.Cleanup(func() { close(release) })
+
+	flood, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer flood.Close()
+	if _, err := flood.Write([]byte("GET /flood HTTP/1.1\r\nHost: daemon\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-writeEnded:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a response nobody reads kept writing past the write deadline")
+	}
+
+	stuck, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stuck.Close()
+	if _, err := stuck.Write([]byte("GET /stuck HTTP/1.1\r\nHost: daemon\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stuck.Read(make([]byte, 1)); err != nil {
+		t.Fatal(err)
+	}
+	stopped := make(chan struct{})
+	go func() { stop(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown waited on a stuck response past its grace")
+	}
+	stuck.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.ReadAll(stuck); err != nil {
+		t.Fatalf("the stuck connection was left open after shutdown: %v", err)
 	}
 }

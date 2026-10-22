@@ -46,18 +46,35 @@ func (d *Daemon) startDebugSocket() (func(), error) {
 		listener.Close()
 		return nil, err
 	}
-	server := &http.Server{Handler: debugProfileHandler(), ReadHeaderTimeout: 5 * time.Second}
+	stop := serveDebug(listener, debugProfileHandler(), d.log.Printf)
+	return func() {
+		stop()
+		_ = os.Remove(path)
+	}, nil
+}
+
+var (
+	debugWriteTimeout  = time.Minute
+	debugShutdownGrace = 5 * time.Second
+)
+
+// serveDebug bounds every response by a write deadline, so a client that stops
+// reading cannot hold a goroutine, and closes whatever is still open once the
+// shutdown grace runs out.
+func serveDebug(listener net.Listener, handler http.Handler, logf func(string, ...any)) func() {
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, WriteTimeout: debugWriteTimeout, IdleTimeout: debugWriteTimeout}
 	go func() {
 		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			d.log.Printf("debug socket: %s", err)
+			logf("debug socket: %s", err)
 		}
 	}()
 	return func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), debugShutdownGrace)
 		defer cancel()
-		_ = server.Shutdown(ctx)
-		_ = os.Remove(path)
-	}, nil
+		if err := server.Shutdown(ctx); errors.Is(err, context.DeadlineExceeded) {
+			_ = server.Close()
+		}
+	}
 }
 
 func debugProfileHandler() http.Handler {

@@ -41,6 +41,10 @@ func (a *App) cmdDebug(args []string) error {
 	return nil
 }
 
+var createProfileFile = func(path string) (io.WriteCloser, error) {
+	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+}
+
 func fetchDebugProfile(client *http.Client, name, path string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -57,14 +61,16 @@ func fetchDebugProfile(client *http.Client, name, path string) error {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		return fmt.Errorf("daemon answered %s: %s", response.Status, body)
 	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	file, err := createProfileFile(path)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(file, response.Body); err != nil {
-		file.Close()
-		os.Remove(path)
-		return err
+	_, err = io.Copy(file, response.Body)
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
 	}
-	return file.Close()
+	if err != nil {
+		os.Remove(path)
+	}
+	return err
 }
