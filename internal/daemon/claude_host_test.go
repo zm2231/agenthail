@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -556,5 +557,146 @@ func TestAMessageClaudeHoldsIsADeliveryProblemAndItsSenderIsTold(t *testing.T) {
 	}
 	if turns := fixture.Turns(t, target); len(turns) != 0 {
 		t.Fatalf("turns = %+v, want none", turns)
+	}
+}
+
+func TestASessionStreamOpenedOnANewHostSessionDeliversItsFirstReply(t *testing.T) {
+	fixture := claudehosttest.New(t, "")
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	claude := surfaces.NewClaude(nil, fixture.Home)
+	session := hostedSession(t, claude, id)
+	r := hostRegistry(t)
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	d := newTestDaemon(t, r, []surface.Surface{claude})
+	t.Cleanup(d.sources.shutdown)
+	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/session-stream?id="+id+"&after=0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("a session stream opened before the first turn is refused: status %d %s", response.StatusCode, body)
+	}
+	path := filepath.Join(fixture.Home, ".claude", "projects", "a-folder-claude-named", id+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	transcript := `{"type":"user","uuid":"u1","message":{"content":"say hello"}}` + "\n" +
+		`{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"the first reply"}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(transcript), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(response.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("the first reply never reached the open stream: %v", err)
+		}
+		if strings.HasPrefix(line, "data: ") && strings.Contains(line, "the first reply") {
+			return
+		}
+	}
+}
+
+func newHostedSourceFixture(t *testing.T) (*surfaces.Claude, surface.Session, *registry.Registry, string) {
+	t.Helper()
+	fixture := claudehosttest.New(t, "")
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	claude := surfaces.NewClaude(nil, fixture.Home)
+	session := hostedSession(t, claude, id)
+	r := hostRegistry(t)
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	return claude, session, r, filepath.Join(fixture.Home, ".claude", "projects", "a-folder-claude-named", id+".jsonl")
+}
+
+func writeFirstTurn(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	transcript := `{"type":"user","uuid":"u1","message":{"content":"say hello"}}` + "\n" +
+		`{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"the first reply"}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(transcript), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func detachedSource(manager *sessionSourceManager, session surface.Session, adapter surface.Surface) *sessionSource {
+	return &sessionSource{manager: manager, session: session, adapter: adapter, epoch: "seed", ctx: context.Background(), appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+}
+
+func TestAViewerThatReconnectsBeforeTheFirstTurnStillGetsTheFirstReply(t *testing.T) {
+	claude, session, r, path := newHostedSourceFixture(t)
+	manager := newSessionSourceManager(r)
+	if err := detachedSource(manager, session, claude).loadSeed(); err != nil {
+		t.Fatal(err)
+	}
+	again := detachedSource(manager, session, claude)
+	if err := again.loadSeed(); err != nil || !again.session.TranscriptFromStart {
+		t.Fatalf("a source started again before the first turn: err=%v fromStart=%v", err, again.session.TranscriptFromStart)
+	}
+	writeFirstTurn(t, path)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	replied := make(chan struct{}, 1)
+	streamed := again.session
+	go claude.Stream(ctx, &streamed, "", func(event surface.StreamEvent) {
+		if event.Text == "the first reply" {
+			select {
+			case replied <- struct{}{}:
+			default:
+			}
+		}
+	}, 8*time.Second)
+	select {
+	case <-replied:
+	case <-ctx.Done():
+		t.Fatal("the first reply never reached the source started again")
+	}
+}
+
+func TestAHostedTranscriptThatGoesMissingIsNotReadAsNewByTheNextSource(t *testing.T) {
+	claude, session, r, path := newHostedSourceFixture(t)
+	manager := newSessionSourceManager(r)
+	t.Cleanup(manager.shutdown)
+	subscription, err := manager.subscribe(&session, claude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFirstTurn(t, path)
+	deadline := time.After(10 * time.Second)
+	for streamed := false; !streamed; {
+		select {
+		case entry := <-subscription.Entries:
+			streamed = strings.Contains(string(entry.Payload), "the first reply")
+		case <-deadline:
+			t.Fatal("the source never streamed the new transcript")
+		}
+	}
+	subscription.Cancel()
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	next := detachedSource(manager, session, claude)
+	if err := next.loadSeed(); err == nil || !strings.Contains(err.Error(), "transcript is unavailable") || next.session.TranscriptFromStart {
+		t.Fatalf("a transcript that went missing is reported, not read as new: err=%v fromStart=%v", err, next.session.TranscriptFromStart)
 	}
 }
