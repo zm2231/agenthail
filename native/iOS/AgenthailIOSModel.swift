@@ -428,8 +428,11 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func resumeConnection() {
-        refreshNotificationRegistration()
-        guard isPaired else { return }
+        guard isPaired else {
+            refreshNotificationRegistration()
+            return
+        }
+        showNotificationAuthorization()
         connect()
     }
 
@@ -900,6 +903,19 @@ final class AgenthailIOSModel: ObservableObject {
                     await self.disableNotifications(status: "Not allowed")
                 default:
                     await self.disableNotifications(status: "Not enabled")
+                }
+            }
+        }
+    }
+
+    private func showNotificationAuthorization() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let authorization = settings.authorizationStatus.rawValue
+            Task { @MainActor in
+                switch UNAuthorizationStatus(rawValue: authorization) {
+                case .denied: self.notificationStatus = "Not allowed"
+                case .notDetermined: self.notificationStatus = "Not enabled"
+                default: break
                 }
             }
         }
