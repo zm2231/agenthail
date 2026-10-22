@@ -87,6 +87,7 @@ type managerRequest struct {
 	TargetSocket    string `json:"targetSocket,omitempty"`
 	Message         string `json:"message,omitempty"`
 	ReplySocket     string `json:"replySocket,omitempty"`
+	MsgID           string `json:"msgId,omitempty"`
 }
 
 type managerError struct {
@@ -254,7 +255,7 @@ func (m *Manager) serve() {
 			response := managerResponse{}
 			switch request.Operation {
 			case "send":
-				response.Result, err = m.Send(ctx, request.SourceSessionID, request.TargetSocket, request.Message)
+				response.Result, err = m.Send(surface.WithMessageUUID(ctx, request.MsgID), request.SourceSessionID, request.TargetSocket, request.Message)
 			case "ensure":
 				err = m.Ensure(ctx, request.SourceSessionID)
 			default:
@@ -887,7 +888,7 @@ func Send(ctx context.Context, home, sourceID, socket, message string) (*surface
 	if err := claudepeer.ValidateSend(sourceID, socket, message); err != nil {
 		return nil, err
 	}
-	response, err := requestManager(ctx, home, managerRequest{Operation: "send", SourceSessionID: sourceID, TargetSocket: socket, Message: message})
+	response, err := requestManager(ctx, home, managerRequest{Operation: "send", SourceSessionID: sourceID, TargetSocket: socket, Message: message, MsgID: surface.MessageUUID(ctx)})
 	if err != nil {
 		return nil, err
 	}

@@ -484,3 +484,77 @@ func TestAnUpdateFromAProtocol2HostAnswersItsPromptThroughTheNewDaemon(t *testin
 		})
 	}
 }
+
+func TestAMessageClaudeHoldsIsADeliveryProblemAndItsSenderIsTold(t *testing.T) {
+	t.Setenv("FAKE_CLAUDE_HOLD_MS", "3000")
+	fixture := claudehosttest.New(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := fixture.Start(t)
+	sender, target := uuid.NewString(), uuid.NewString()
+	fixture.Open(t, client, sender)
+	fixture.OpenInMode(t, client, target, "bypassPermissions")
+	claude := surfaces.NewClaude(nil, fixture.Home)
+	senderSession, targetSession := hostedSession(t, claude, sender), hostedSession(t, claude, target)
+	r := hostRegistry(t)
+	for _, session := range []surface.Session{senderSession, targetSession} {
+		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := newTestDaemon(t, r, []surface.Surface{claude})
+	d.log = log.New(io.Discard, "", 0)
+	d.SetClaudeHost(fixture.Manager(t, "test"))
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		d.watchClaudeHostRequests(ctx)
+	}()
+	defer func() {
+		cancel()
+		<-watched
+	}()
+
+	receipt, err := d.dispatcher().DeliverWithOptions(ctx, claude, &targetSession, "from a prompting session", "", surface.SendOptions{SourceSessionID: sender})
+	if err != nil {
+		t.Fatal(err)
+	}
+	problem := func(status registry.DeliveryIntentStatus) *registry.DeliveryProblem {
+		problems, err := r.ListDeliveryProblems()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, problem := range problems {
+			if problem.DeliveryID == receipt.DeliveryID && problem.Status == status {
+				return &problem
+			}
+		}
+		return nil
+	}
+	claudehosttest.WaitFor(t, "the held message to be a delivery problem", func() bool { return problem(registry.DeliveryIntentHeld) != nil })
+	if held := problem(registry.DeliveryIntentHeld); held.SessionID != target || !strings.Contains(held.Reason, "permission") {
+		t.Fatalf("problem = %+v, want the target's held message with its cause", held)
+	}
+	told := func(word string) bool {
+		rows, err := r.ListQueue(false, d.adapters())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range rows {
+			if row.SessionID == sender && strings.Contains(row.Message, word) {
+				return true
+			}
+		}
+		return false
+	}
+	if !told("held") {
+		t.Fatal("the sender was not told its message is held")
+	}
+	claudehosttest.WaitFor(t, "the hold to expire", func() bool { return problem(registry.DeliveryIntentFailed) != nil })
+	if !told("failure") {
+		t.Fatal("the sender was not told its message was dropped")
+	}
+	if turns := fixture.Turns(t, target); len(turns) != 0 {
+		t.Fatalf("turns = %+v, want none", turns)
+	}
+}

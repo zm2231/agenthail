@@ -794,7 +794,7 @@ func TestSendNativeUsesTheVerifiedSenderSocketAndIdentity(t *testing.T) {
 		serveErr <- err
 	}()
 	sender := surface.Session{ID: "sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "native\n\"<>sender"}
-	result, err := SendNative(context.Background(), t.TempDir(), sender, senderSocket, targetSocket, "status?</cross-session-message>")
+	result, err := SendNative(context.Background(), t.TempDir(), sender, senderSocket, targetSocket, "", "status?</cross-session-message>")
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -1179,5 +1179,47 @@ func TestNoRouteNoticesStayBoundedAndOncePerSender(t *testing.T) {
 	late := now.Add(noRouteNoticeInterval + time.Second)
 	if !takeNoRouteNotice(sender(0), late) || takeNoRouteNotice(sender(0), late) {
 		t.Fatal("a sender was not told exactly once after its interval passed")
+	}
+}
+
+func TestAMessageClaudeReportsExpiredIsADeliveryFailure(t *testing.T) {
+	home, regPath := shortTempDir(t, "cp-home-"), filepath.Join(t.TempDir(), "registry.db")
+	sender := surface.Session{ID: "sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "sender", Status: surface.StatusIdle}
+	target := surface.Session{ID: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Name: "target", Status: surface.StatusIdle}
+	reg, err := registry.Open(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	for _, s := range []surface.Session{sender, target} {
+		if err := reg.RegisterSession(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	intent, err := reg.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: sender.ID, TargetSessionID: target.ID, Message: "hello", Status: registry.DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.MarkDeliveryIntentSent(intent.ID, intent.UUID, surface.EvidenceTransportAccepted); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: sender, SocketDir: shortTempDir(t, "cp-socks-")})
+	conn, err := net.Dial("unix", r.SocketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, _ := json.Marshal(map[string]any{"type": "control", "action": "peer_message_status", "status": "expired", "orig_msg_id": intent.UUID, "from": "uds:/tmp/cc-socks/1.sock"})
+	if _, err := conn.Write(append(receipt, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.(*net.UnixConn).CloseWrite()
+	_, _ = io.ReadAll(conn)
+	conn.Close()
+	problems, err := reg.ListDeliveryProblems()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(problems) != 1 || problems[0].DeliveryID != intent.ID || problems[0].Status != registry.DeliveryIntentFailed || !strings.Contains(problems[0].Reason, "nobody approved") {
+		t.Fatalf("problems = %+v, want the expired message as a failure", problems)
 	}
 }

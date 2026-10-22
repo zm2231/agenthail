@@ -111,8 +111,10 @@ type sessionRecord struct {
 }
 
 type frame struct {
-	MsgV     int             `json:"msgV"`
-	MsgID    string          `json:"msg_id"`
+	MsgV  int    `json:"msgV"`
+	MsgID string `json:"msg_id"`
+	// UUID is the id Claude gives the message and names in its hold reports.
+	UUID     string          `json:"uuid,omitempty"`
 	Type     string          `json:"type"`
 	Message  json.RawMessage `json:"message"`
 	Priority string          `json:"priority,omitempty"`
@@ -129,6 +131,7 @@ type controlRequest struct {
 	SenderID     string `json:"senderId"`
 	Message      string `json:"message"`
 	ReplySocket  string `json:"replySocket,omitempty"`
+	MsgID        string `json:"msgId,omitempty"`
 }
 
 type controlResponse struct {
@@ -331,7 +334,7 @@ func SendWithReplySocket(ctx context.Context, controlPath, senderID, targetSocke
 	if err := conn.SetDeadline(time.Now().Add(readDeadline)); err != nil {
 		return nil, err
 	}
-	req, _ := json.Marshal(controlRequest{TargetSocket: targetSocket, SenderID: senderID, Message: message, ReplySocket: replySocket})
+	req, _ := json.Marshal(controlRequest{TargetSocket: targetSocket, SenderID: senderID, Message: message, ReplySocket: replySocket, MsgID: surface.MessageUUID(ctx)})
 	if _, err := conn.Write(append(req, '\n')); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(err)
 	}
@@ -355,16 +358,20 @@ func SendWithReplySocket(ctx context.Context, controlPath, senderID, targetSocke
 	}
 }
 
-func SendNative(ctx context.Context, home string, sender surface.Session, senderSocket, targetSocket, message string) (*surface.SendResult, error) {
+// SendNative sends as a Claude session through its own socket. fromMode is the
+// sender's permission class as its runtime reports it, or "" when unknown:
+// Claude holds a message to a session that bypasses permission prompts unless
+// its sender states that it does too.
+func SendNative(ctx context.Context, home string, sender surface.Session, senderSocket, targetSocket, fromMode, message string) (*surface.SendResult, error) {
 	if err := ValidateSend(sender.ID, targetSocket, message); err != nil {
 		return nil, err
 	}
 	if err := validateTargetSocket(defaultSocketDir, targetSocket); err != nil {
 		return nil, err
 	}
-	id := uuid.New().String()
-	content := peerContent("", sender, senderSocket, message)
-	payload, _ := json.Marshal(frame{MsgV: peerProtocol, MsgID: id, Type: "user", Message: mustJSON(messageBody{Role: "user", Content: content}), Priority: "next", From: "uds:" + senderSocket})
+	id := messageID(surface.MessageUUID(ctx))
+	content := peerContent("", sender, senderSocket, fromMode, message)
+	payload, _ := json.Marshal(frame{MsgV: peerProtocol, MsgID: id, UUID: id, Type: "user", Message: mustJSON(messageBody{Role: "user", Content: content}), Priority: "next", From: "uds:" + senderSocket})
 	if len(payload) >= maxLineBytes {
 		return nil, surface.DeliveryTerminal(errors.New("Claude peer message exceeds the 64 KiB frame limit"), surface.DeliveryInvalidRequest)
 	}
@@ -1026,6 +1033,7 @@ func handlePeer(conn net.Conn, reg *registry.Registry, c Config, ownSocket strin
 			}
 			if json.Unmarshal(s.Bytes(), &receipt) == nil && receipt.Action == "peer_message_status" {
 				_ = reg.RecordHistory(registry.HistoryEntry{Kind: "peer_receipt", SessionID: c.Session.ID, SourceSessionID: f.From, Result: receipt.Status + ":" + receipt.Original})
+				recordReceipt(reg, registry.PeerMessage{MsgID: receipt.Original, SenderSessionID: c.Session.ID}, receipt.Status)
 			}
 			continue
 		}
@@ -1152,7 +1160,7 @@ func rejectFrame(c Config, f frame, ownSocket string, err error) {
 		return
 	}
 	notice := fmt.Sprintf("Agenthail could not deliver your message %s. %s Messages to this address are refused the same way.", f.MsgID, err)
-	payload, _ := json.Marshal(frame{MsgV: peerProtocol, MsgID: uuid.New().String(), Type: "user", Message: mustJSON(messageBody{Role: "user", Content: peerContent(c.HostName, c.Session, ownSocket, notice)}), Priority: "next", From: "uds:" + ownSocket})
+	payload, _ := json.Marshal(frame{MsgV: peerProtocol, MsgID: uuid.New().String(), Type: "user", Message: mustJSON(messageBody{Role: "user", Content: peerContent(c.HostName, c.Session, ownSocket, "", notice)}), Priority: "next", From: "uds:" + ownSocket})
 	_ = sendAuthenticatedFrame(c.Home, target, payload)
 }
 
@@ -1213,6 +1221,18 @@ func acceptControls(wg *sync.WaitGroup, ln net.Listener, reg *registry.Registry,
 	}
 }
 
+// recordReceipt keeps the delivery equal to what the target's Claude reported
+// to its sender. A hold is left to the target's host, which knows its cause;
+// the receipt's final outcome stands on its own.
+func recordReceipt(reg *registry.Registry, message registry.PeerMessage, status string) {
+	switch status {
+	case "delivered":
+		_, _ = reg.ReleasePeerMessage(message)
+	case "expired", "refused", "denied", "dropped":
+		_, _ = reg.DropPeerMessage(message, registry.PeerDroppedReason(status))
+	}
+}
+
 func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket string) {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(readDeadline))
@@ -1235,7 +1255,7 @@ func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket st
 		if alias, err := reg.ReverseAlias(session.ID); err == nil && alias != "" {
 			session.Name = alias
 		}
-		id := uuid.New().String()
+		id := messageID(req.MsgID)
 		senderSocket := ownSocket
 		if req.ReplySocket != "" {
 			if err := validateRelaySocket(c.SocketDir, req.ReplySocket); err != nil {
@@ -1245,8 +1265,8 @@ func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket st
 			}
 			senderSocket = req.ReplySocket
 		}
-		content := peerContent(c.HostName, *session, senderSocket, req.Message)
-		f, _ := json.Marshal(frame{MsgV: 1, MsgID: id, Type: "user", Message: mustJSON(messageBody{Role: "user", Content: content}), Priority: "next", From: "uds:" + senderSocket})
+		content := peerContent(c.HostName, *session, senderSocket, "", req.Message)
+		f, _ := json.Marshal(frame{MsgV: 1, MsgID: id, UUID: id, Type: "user", Message: mustJSON(messageBody{Role: "user", Content: content}), Priority: "next", From: "uds:" + senderSocket})
 		var sendErr error
 		if len(f) >= maxLineBytes {
 			sendErr = surface.DeliveryTerminal(errors.New("Claude peer message exceeds the 64 KiB frame limit"), surface.DeliveryInvalidRequest)
@@ -1433,7 +1453,16 @@ func mustJSON(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 
 var closingPeerTag = regexp.MustCompile(`(?i)<(\s*/\s*cross-session-message\b)`)
 
-func peerContent(hostName string, session surface.Session, socket, message string) string {
+// messageID is the delivery's own uuid when it has one, so a report on the
+// message names the delivery it belongs to.
+func messageID(id string) string {
+	if _, err := uuid.Parse(id); err == nil {
+		return id
+	}
+	return uuid.New().String()
+}
+
+func peerContent(hostName string, session surface.Session, socket, fromMode, message string) string {
 	name := strings.Map(func(r rune) rune {
 		if r == '"' || r == '<' || r == '>' || unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Cs, unicode.Zl, unicode.Zp) {
 			return -1
@@ -1445,5 +1474,9 @@ func peerContent(hostName string, session surface.Session, socket, message strin
 		name = string(runes[:64]) + "…"
 	}
 	message = closingPeerTag.ReplaceAllString(message, `<\$1`)
-	return fmt.Sprintf("<cross-session-message from=\"uds:%s\" from-session=\"%s\" from-name=\"%s\">\n%s\n</cross-session-message>", socket, canonicalID(session.Surface, session.ID), name, message)
+	mode := ""
+	if fromMode == "bypass" || fromMode == "prompting" {
+		mode = ` from-mode="` + fromMode + `"`
+	}
+	return fmt.Sprintf("<cross-session-message from=\"uds:%s\" from-session=\"%s\" from-name=\"%s\"%s>\n%s\n</cross-session-message>", socket, canonicalID(session.Surface, session.ID), name, mode, message)
 }

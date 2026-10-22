@@ -707,6 +707,10 @@ async function run(s, exit) {
     for await (const message of s.query) {
       for (const uuid of message.user_message_uuids ?? []) s.owed.delete(uuid);
       if (message.type === 'result') s.measureAfter(message);
+      if (message.type === 'system' && (message.subtype === 'init' || message.subtype === 'status') && PERMISSION_MODES.has(message.permissionMode) && message.permissionMode !== s.permissionMode) {
+        s.permissionMode = message.permissionMode;
+        emit(s.id, 'permission_mode', { permissionMode: s.permissionMode });
+      }
       if (message.type === 'system' && message.subtype === 'session_state_changed') {
         s.stateEvents = true;
         if (message.state === 'running') s.turnStarted();

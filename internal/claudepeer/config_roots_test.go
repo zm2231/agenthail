@@ -51,7 +51,7 @@ func TestNativeSendAuthenticatesWithTheKeyInTheRootHoldingTheTargetRecord(t *tes
 		}
 	}
 	sender := surface.Session{ID: "sender", Surface: surface.KindClaude}
-	if _, err := SendNative(context.Background(), fixture.Home, sender, "/tmp/cc-socks/1.sock", socket, "hello"); err != nil {
+	if _, err := SendNative(context.Background(), fixture.Home, sender, "/tmp/cc-socks/1.sock", socket, "", "hello"); err != nil {
 		t.Fatal(err)
 	}
 	var auth struct {

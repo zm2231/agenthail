@@ -135,7 +135,10 @@ no Remote Control: it takes interrupt, steer, model and permission-mode changes
 through the host, and has no compact or `control` commands.
 A receipt with `evidence: "transport_accepted"` only proves socket acceptance;
 receiver policy can still hold or deny the message. Do not claim model delivery
-from it. Report the immediate send status and target as returned: Sent, Queued,
+from it. A message Claude holds becomes a delivery problem with status `held`,
+and an agent sender gets one `[agenthail delivery held ...]` notice naming the
+cause. Resending does not help: Claude passes it on only from a sender that runs
+in the same permission mode as the target. Report the immediate send status and target as returned: Sent, Queued,
 or Submitted. Submitted is a neutral durable intent, not model completion.
 Continue the task without adding receipt/read-state hedges or investigation
 chores. Agenthail reports proven delivery problems separately; never resend
