@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -82,9 +83,20 @@ func TestAPIV1PairsAuthenticatesAndRevokesDevice(t *testing.T) {
 		Device struct {
 			ID string `json:"id"`
 		} `json:"device"`
+		Host struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"host"`
 	}
 	if err := json.Unmarshal(completeResponse.Body.Bytes(), &completed); err != nil {
 		t.Fatal(err)
+	}
+	link, err := url.Parse(pairing.PairingURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Host.ID == "" || link.Query().Get("host") != completed.Host.ID || link.Query().Get("name") != completed.Host.Name {
+		t.Fatalf("pairing link %q does not name the host that answered the pairing (%+v)", pairing.PairingURL, completed.Host)
 	}
 	versionRequest := httptest.NewRequest(http.MethodGet, "/api/v1/version", nil)
 	versionRequest.Header.Set("Authorization", "Bearer "+completed.Token)

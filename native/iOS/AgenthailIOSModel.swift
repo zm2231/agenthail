@@ -123,6 +123,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     private var sessionMetadata = MetadataOverlay()
     private var stateRequests: UInt64 = 0
     private var selectedSessionStateSeq: UInt64 = 0
+    private var sessionStreamUnsupported = false
+    private var unsupportedRefreshTask: Task<Void, Never>?
+    private var sessionReload: (id: String, task: Task<Void, Never>)?
     private var pendingPairing: PairingLink?
     private var pushDeviceToken: String?
     private var pushStatus: [String: String] = [:]
@@ -489,13 +492,12 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     private var pendingPairingMatch: HostConnection? {
-        guard let endpoint = pendingPairing?.endpoint else { return nil }
-        return hostOrder.compactMap { connections[$0] }.first { $0.credential.endpoint == endpoint }
+        pendingPairing.flatMap { connections[$0.hostID] }
     }
 
     var pairingConfirmationTitle: String {
         if let existing = pendingPairingMatch { return "Reconnect \(existing.name)?" }
-        return "Add \(pendingPairing?.endpoint.host?.split(separator: ".").first.map(String.init) ?? "this computer")?"
+        return "Add \(pendingPairing?.hostName ?? pendingPairing?.endpoint.host?.split(separator: ".").first.map(String.init) ?? "this computer")?"
     }
 
     var pairingConfirmationAction: String { pendingPairingMatch == nil ? "Add computer" : "Reconnect" }
@@ -518,6 +520,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 let pairedAPI = AgenthailAPI(baseURL: pendingPairing.endpoint, token: response.token, session: networkSession)
                 newAPI = pairedAPI
                 let hostID = response.host.id
+                guard hostID == pendingPairing.hostID else {
+                    throw AgenthailAPIError.unavailable("This pairing code is for a different computer than it names. Show a new code on the computer and try again.")
+                }
                 let previous = connections[hostID]
                 if let previous {
                     if let relayURL = previous.pushRelayURL, let stored = storedPush(hostID) {

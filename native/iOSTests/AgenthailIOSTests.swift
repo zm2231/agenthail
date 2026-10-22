@@ -389,8 +389,11 @@ final class AgenthailIOSTests: XCTestCase {
     func testPairingLinksRequireSecureTailscaleEndpoint() throws {
         XCTAssertThrowsError(try PairingLink(url: URL(string: "agenthail://pair?endpoint=http%3A%2F%2Fmac.tailnet.ts.net%3A7412&secret=12345678901234567890")!))
         XCTAssertThrowsError(try PairingLink(url: URL(string: "agenthail://pair?endpoint=https%3A%2F%2Fattacker.example&secret=12345678901234567890")!))
-        let valid = try PairingLink(url: URL(string: "agenthail://pair?endpoint=https%3A%2F%2Fmac.tailnet.ts.net%3A7412&secret=12345678901234567890")!)
+        XCTAssertThrowsError(try PairingLink(url: URL(string: "agenthail://pair?endpoint=https%3A%2F%2Fmac.tailnet.ts.net%3A7412&secret=12345678901234567890")!))
+        let valid = try PairingLink(url: Self.pairingLink("mac", host: "hmac", name: "studio"))
         XCTAssertEqual(valid.endpoint.host, "mac.tailnet.ts.net")
+        XCTAssertEqual(valid.hostID, "hmac")
+        XCTAssertEqual(valid.hostName, "studio")
     }
 
     @MainActor
@@ -398,15 +401,20 @@ final class AgenthailIOSTests: XCTestCase {
         KeychainStore.removeAll()
         try Self.pair("hold", "https://old.tailnet.ts.net:7412", name: "old")
         let model = AgenthailIOSModel(autoConnect: false)
-        model.handlePairingURL(URL(string: "agenthail://pair?endpoint=https%3A%2F%2Fnew.tailnet.ts.net%3A7412&secret=12345678901234567890")!)
+        model.handlePairingURL(Self.pairingLink("new", host: "hnew"))
         XCTAssertTrue(model.isPaired)
         XCTAssertTrue(model.showPairingConfirmation)
         XCTAssertEqual(model.pairingConfirmationTitle, "Add new?")
+        XCTAssertEqual(model.pairingConfirmationAction, "Add computer")
         XCTAssertTrue(model.pairingConfirmationMessage.contains("new.tailnet.ts.net"))
         model.cancelPairing()
-        model.handlePairingURL(URL(string: "agenthail://pair?endpoint=https%3A%2F%2Fold.tailnet.ts.net%3A7412&secret=12345678901234567890")!)
-        XCTAssertEqual(model.pairingConfirmationTitle, "Reconnect old?")
+        model.handlePairingURL(Self.pairingLink("moved", host: "hold", name: "old"))
+        XCTAssertEqual(model.pairingConfirmationTitle, "Reconnect old?", "a known computer at a new address is the same computer")
         XCTAssertEqual(model.pairingConfirmationAction, "Reconnect")
+        model.cancelPairing()
+        model.handlePairingURL(Self.pairingLink("old", host: "hfresh", name: "fresh"))
+        XCTAssertEqual(model.pairingConfirmationTitle, "Add fresh?", "a new computer at a known address is a new computer")
+        XCTAssertEqual(model.pairingConfirmationAction, "Add computer")
         KeychainStore.removeAll()
     }
 
@@ -418,13 +426,33 @@ final class AgenthailIOSTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ReplacementURLProtocol.self]
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
-        model.handlePairingURL(URL(string: "agenthail://pair?endpoint=https%3A%2F%2Fnew.tailnet.ts.net%3A7412&secret=12345678901234567890")!)
+        model.handlePairingURL(Self.pairingLink("new", host: "hnew"))
         model.confirmPairing()
         for _ in 0..<100 where model.hosts.count < 2 { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertEqual(model.hosts.map(\.id), ["hold", "hnew"])
         XCTAssertEqual(PairedCredential.all().map(\.hostID), ["hold", "hnew"])
         XCTAssertEqual(PairedCredential.all().last?.token, "new-token")
         XCTAssertFalse(ReplacementURLProtocol.recorder.snapshot().contains { $0.hasPrefix("DELETE old.tailnet.ts.net") })
+        KeychainStore.removeAll()
+    }
+
+    @MainActor
+    func testACodeThatAnswersForAnotherComputerIsRefusedAndRevoked() async throws {
+        KeychainStore.removeAll()
+        try Self.pair("hother", "https://other.tailnet.ts.net", name: "other", token: "other-token")
+        ReplacementURLProtocol.recorder.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ReplacementURLProtocol.self]
+        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        model.handlePairingURL(Self.pairingLink("new", host: "hother", name: "other"))
+        XCTAssertEqual(model.pairingConfirmationTitle, "Reconnect other?")
+        model.confirmPairing()
+        for _ in 0..<100 where model.operationError == nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertNotNil(model.operationError)
+        XCTAssertEqual(PairedCredential.all().map(\.hostID), ["hother"])
+        XCTAssertEqual(PairedCredential.all().first?.token, "other-token")
+        XCTAssertTrue(ReplacementURLProtocol.recorder.snapshot().contains("DELETE new.tailnet.ts.net/api/v1/device"))
+        XCTAssertFalse(ReplacementURLProtocol.recorder.snapshot().contains { $0.contains("other.tailnet.ts.net") })
         KeychainStore.removeAll()
     }
 
@@ -440,7 +468,7 @@ final class AgenthailIOSTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ReplacementURLProtocol.self]
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
-        model.handlePairingURL(URL(string: "agenthail://pair?endpoint=https%3A%2F%2Fnew.tailnet.ts.net%3A7412&secret=12345678901234567890")!)
+        model.handlePairingURL(Self.pairingLink("new", host: "hnew"))
         XCTAssertEqual(model.pairingConfirmationTitle, "Reconnect new?")
         model.confirmPairing()
         for _ in 0..<100 where KeychainStore.get("push:hnew") != nil { try await Task.sleep(for: .milliseconds(20)) }
@@ -518,6 +546,13 @@ final class AgenthailIOSTests: XCTestCase {
     @MainActor
     static func computerModel() -> AgenthailIOSModel {
         AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture"))
+    }
+
+    static func pairingLink(_ label: String, host: String, name: String? = nil) -> URL {
+        var components = URLComponents(string: "agenthail://pair")!
+        components.queryItems = [URLQueryItem(name: "endpoint", value: "https://\(label).tailnet.ts.net:7412"), URLQueryItem(name: "secret", value: "12345678901234567890"), URLQueryItem(name: "host", value: host)]
+        if let name { components.queryItems?.append(URLQueryItem(name: "name", value: name)) }
+        return components.url!
     }
 
     static func pair(_ hostID: String, _ endpoint: String, name: String? = nil, token: String = "token") throws {

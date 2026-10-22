@@ -3,13 +3,17 @@ import Foundation
 struct PairingLink {
     let endpoint: URL
     let secret: String
+    let hostID: String
+    let hostName: String?
 
     init(url: URL) throws {
         guard url.scheme?.lowercased() == "agenthail", url.host?.lowercased() == "pair", url.fragment == nil,
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let endpointValue = components.queryItems?.first(where: { $0.name == "endpoint" })?.value,
               let endpoint = URL(string: endpointValue),
-              let secret = components.queryItems?.first(where: { $0.name == "secret" })?.value else {
+              let secret = components.queryItems?.first(where: { $0.name == "secret" })?.value,
+              let hostID = components.queryItems?.first(where: { $0.name == "host" })?.value,
+              !hostID.isEmpty, hostID.count <= 64 else {
             throw PairingLinkError.invalid
         }
         let host = endpoint.host?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")) ?? ""
@@ -22,6 +26,8 @@ struct PairingLink {
         }
         self.endpoint = endpoint
         self.secret = secret
+        self.hostID = hostID
+        hostName = components.queryItems?.first(where: { $0.name == "name" })?.value.flatMap { $0.isEmpty ? nil : $0 }
     }
 }
 
