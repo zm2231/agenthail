@@ -45,28 +45,37 @@ var (
 // included, well inside the hook's timeout: a prompt never waits on it.
 const claudeSessionContextLimit = 5 * time.Second
 
-// A daemon restarting, as it does on update, drops the held prompt's
-// connection; the hook reconnects for this long so the prompt stays
-// answerable from Agenthail.
-var (
-	claudePromptHookReconnect = 2 * time.Minute
-	claudePromptHookRetry     = 2 * time.Second
-)
+// claudePromptHookRetry is how often the hook posts its prompt again while
+// no daemon answers, as while one restarts for an update.
+var claudePromptHookRetry = 2 * time.Second
 
 func (a *App) cmdHook(args []string) error {
+	a.OpenRegistry = a.OpenCurrentRegistry
 	if len(args) > 0 && args[0] == "session-context" {
-		claude := os.Getppid()
-		if len(args) == 3 && args[1] == "--claude-pid" {
-			pid, err := strconv.Atoi(args[2])
-			if err != nil || pid <= 0 {
-				return errors.New("usage: agenthail hook session-context [--claude-pid <pid>]")
+		usage := errors.New("usage: agenthail hook session-context [--surface claude|codex] [--claude-pid <pid>]")
+		kind, parent := surface.KindClaude, os.Getppid()
+		for rest := args[1:]; len(rest) > 0; rest = rest[2:] {
+			if len(rest) < 2 {
+				return usage
 			}
-			claude = pid
-		} else if len(args) != 1 {
-			return errors.New("usage: agenthail hook session-context [--claude-pid <pid>]")
+			switch rest[0] {
+			case "--surface":
+				kind = surface.SurfaceKind(rest[1])
+				if kind != surface.KindClaude && kind != surface.KindCodex {
+					return usage
+				}
+			case "--claude-pid":
+				pid, err := strconv.Atoi(rest[1])
+				if err != nil || pid <= 0 {
+					return usage
+				}
+				parent = pid
+			default:
+				return usage
+			}
 		}
 		done := make(chan map[string]any, 1)
-		go func() { done <- a.sessionContext(os.Stdin, claude, time.Now()) }()
+		go func() { done <- a.sessionContext(os.Stdin, kind, parent, time.Now()) }()
 		select {
 		case output := <-done:
 			if output != nil {
@@ -98,15 +107,17 @@ func (a *App) cmdHook(args []string) error {
 }
 
 // holdClaudePrompt passes the prompt to the daemon and waits for a person's
-// decision. Every failure returns none, which leaves the prompt to Claude's
-// own dialog.
+// decision. A dropped or refused connection is posted again until Claude
+// ends the hook or exits, so a prompt outlives a daemon restart; any answer
+// from the daemon without a decision returns none, which leaves the prompt
+// to Claude's own dialog.
 func holdClaudePrompt(ctx context.Context, client *daemonAPIClient, input io.Reader, parent int) *surfaces.ClaudePromptDecision {
 	var request daemon.ClaudePermissionRequest
 	if err := json.NewDecoder(io.LimitReader(input, claudeHookInputLimit)).Decode(&request.Prompt); err != nil {
 		return nil
 	}
 	request.PID = parent
-	reconnectUntil := time.Now().Add(claudePromptHookReconnect)
+	request.AskedAtMS = time.Now().UnixMilli()
 	var body []byte
 	for {
 		var status int
@@ -115,7 +126,7 @@ func holdClaudePrompt(ctx context.Context, client *daemonAPIClient, input io.Rea
 		if err == nil && status == http.StatusOK {
 			break
 		}
-		if status != 0 || ctx.Err() != nil || time.Now().After(reconnectUntil) {
+		if status != 0 || ctx.Err() != nil {
 			return nil
 		}
 		select {
@@ -151,8 +162,11 @@ func cancelWhenOrphaned(ctx context.Context, parent int, cancel func()) {
 }
 
 func (a *App) cmdHooks(args []string) error {
-	if len(args) != 1 || (args[0] != "install" && args[0] != "uninstall" && args[0] != "status") {
-		return errors.New("usage: agenthail hooks install|uninstall|status")
+	if len(args) < 1 || len(args) > 2 || (args[0] != "install" && args[0] != "uninstall" && args[0] != "status") || (len(args) == 2 && args[1] != "codex") {
+		return errors.New("usage: agenthail hooks install|uninstall|status [codex]")
+	}
+	if len(args) == 2 {
+		return cmdCodexHooks(args[0])
 	}
 	home, _ := os.UserHomeDir()
 	roots, err := surface.ClaudeConfigRoots(home)
@@ -381,4 +395,44 @@ func (h claudeHook) state(data []byte) string {
 		}
 	}
 	return state
+}
+
+// cmdCodexHooks has the person's own Codex sessions told who they are. It
+// needs a Codex that can run `codex app-server`, which writes its own config.
+func cmdCodexHooks(action string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	executable := surfaces.AgenthailExecutable()
+	if executable == "" {
+		return errors.New("run this from the installed agenthail binary; Codex hooks name the binary that wrote them")
+	}
+	switch action {
+	case "install":
+		changed, err := surfaces.InstallCodexContext(ctx, executable)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("codex: %s\n", map[bool]string{true: "installed", false: "already installed"}[changed])
+	case "uninstall":
+		changed, err := surfaces.UninstallCodexContext(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("codex: %s\n", map[bool]string{true: "removed", false: "not installed"}[changed])
+	case "status":
+		state, err := surfaces.CodexContextState(ctx, executable)
+		if err != nil {
+			return err
+		}
+		switch state {
+		case "":
+			state = "Codex is not set up for this user"
+		case surfaces.CodexHooksOutdated:
+			state += "; run: agenthail hooks install codex"
+		case surfaces.CodexHooksUntrusted:
+			state = "Codex hook not trusted yet: run agenthail hooks install codex or trust it in Codex"
+		}
+		fmt.Printf("codex: %s\n", state)
+	}
+	return nil
 }

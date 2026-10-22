@@ -29,6 +29,7 @@ SOURCES=(
   MetadataOverlay.swift
   StatusRefreshPolicy.swift
   TurnSettings.swift
+  UIConfig.swift
   VoiceAPI.swift
   VoiceAudioBridge.swift
   VoiceCallDiagnostics.swift
@@ -37,20 +38,26 @@ SOURCES=(
   macOS/AgenthailLink.swift
   macOS/AgenthailProcess.swift
   macOS/AuditFacts.swift
+  macOS/DesktopPalette.swift
+  macOS/InterfaceStore.swift
+  macOS/Backdrop.swift
   macOS/BoundedDock.swift
   macOS/CatalogPosition.swift
-  macOS/FirstMessageField.swift
+  macOS/ComposerPaste.swift
   macOS/ContextBreakdown.swift
   macOS/LocalSend.swift
   macOS/Overview.swift
   macOS/PeerEnvelope.swift
   macOS/QueueFacts.swift
+  macOS/ScrimField.swift
   macOS/SessionFacts.swift
   macOS/SessionHandle.swift
   macOS/SessionLaunch.swift
   macOS/SessionOperationControllers.swift
   macOS/SessionOperations.swift
+  macOS/NewSessionDraft.swift
   macOS/SessionPane.swift
+  macOS/SessionTabs.swift
   macOS/ShortcutStore.swift
   macOS/SlashCommand.swift
   macOS/SpotlightIndex.swift

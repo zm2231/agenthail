@@ -295,12 +295,7 @@ function startLiveStream() {
     if (item.kind === "goal") { app.history.goal = item.goal || null; renderChat(); return; }
     if (!item.itemId || item.op === "reset") return;
     app.history.transcriptWarning = "";
-    const items = app.history.timeline?.items || [];
-    const index = items.findIndex((value) => value.id === item.itemId);
-    const projected = { id: item.itemId, kind: item.kind, role: item.role, origin: item.origin, sender: item.sender, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, resetsAt: item.resetsAt, truncated: item.truncated, bodyRef: item.bodyRef, attachment: item.attachment, files: item.files, callId: item.callId, turnId: item.turnId };
-    if (item.op === "remove") { if (index >= 0) items.splice(index, 1); }
-    else if (index >= 0) items[index] = projected;
-    else items.push(projected);
+    const items = applyStreamedRow(app.history.timeline?.items || [], envelope);
     app.history.timeline = { ...(app.history.timeline || {}), items };
     app.history.exchanges = exchangesFromItems(items);
     renderChat();
@@ -310,6 +305,16 @@ function startLiveStream() {
     stopLiveStream();
     selectSession(session.id);
   });
+}
+// applyStreamedRow applies a session-stream row as a session page reads it. The
+// daemon sends the page's own item; a host that predates it sends only the raw
+// row. An updated row moves to the end, as its journal entry does.
+function applyStreamedRow(items, envelope) {
+  const row = envelope.data;
+  const rest = items.filter((value) => value.id !== row.itemId);
+  if (row.op === "remove") return rest;
+  const item = envelope.item || { id: row.itemId, kind: row.kind, role: row.role, origin: row.origin, sender: row.sender, title: row.title || row.kind, text: row.body || "", timestamp: row.ts, status: row.status, resetsAt: row.resetsAt, truncated: row.truncated, bodyRef: row.bodyRef, attachment: row.attachment, files: row.files, callId: row.callId, turnId: row.turnId };
+  return [...rest, item];
 }
 function promptOrigin(value) {
   if (value.role === "peer") return "peer";
@@ -452,8 +457,33 @@ function statusLabel(status) {
 function backgroundWaiting(session) {
   return session.status !== "busy" && Boolean(session.backgroundTasks?.running);
 }
+// Where a session's wait is answered: here, in its terminal, or wherever else
+// it runs. A hosted or background session's prompt that Agenthail does not
+// hold has nowhere to answer it; stopping and resuming the session clears it.
+function waitingPlace(session) {
+  const waiting = session?.waitingOn;
+  if (!waiting) return "";
+  if (waiting.answerable) return "agenthail";
+  if (waiting.kind === "dialog") return "dialog";
+  const lifecycle = session.capabilities?.lifecycle || {};
+  if (lifecycle.stop && lifecycle.resume) return "restart";
+  if (session.runtimeKind === "claude-cli") return "terminal";
+  return "elsewhere";
+}
+const waitingLabels = {
+  agenthail: "Waiting on you",
+  dialog: "Dialog open in its terminal",
+  terminal: "Waiting in its terminal",
+  restart: "Prompt out of reach",
+  elsewhere: "Waiting on you",
+};
+function usageLimitLabel(session) {
+  const resets = Date.parse(session.usageLimit?.resetsAt || "");
+  return resets ? `Usage limit, resets ${new Date(resets).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Usage limit reached";
+}
 function presenceLabel(session) {
-  if (session.waitingOn) return "Waiting on you";
+  if (session.waitingOn) return waitingLabels[waitingPlace(session)];
+  if (session.usageLimit) return usageLimitLabel(session);
   if (backgroundWaiting(session)) return "Waiting on background work";
   return (
     {
@@ -472,7 +502,7 @@ function presenceTone(session) {
   return session.status;
 }
 function conversationMeta(session, model = "", pendingModel = session.pendingModel || "") {
-  const parts = [session.waitingOn ? "Waiting on you" : backgroundWaiting(session) ? "Waiting on background work" : statusLabel(session.status), `${session.queueCount || 0} queued`];
+  const parts = [session.waitingOn ? waitingLabels[waitingPlace(session)] : session.usageLimit ? usageLimitLabel(session) : backgroundWaiting(session) ? "Waiting on background work" : statusLabel(session.status), `${session.queueCount || 0} queued`];
   if (session.status !== "busy") parts.push(`last active ${timeAgo(session.lastActive)}`);
   const label = modelLabel(model, pendingModel);
   if (label) parts.push(label);
@@ -1617,7 +1647,7 @@ async function syncRequests() {
   const session = app.selected;
   const panel = $("#request-panel");
   const capabilities = app.history?.capabilities || {};
-  if (!session || !capabilities.respond || app.history?.readOnly) {
+  if (!session || !capabilities.respond || app.history?.readOnly || (session.waitingOn && !session.waitingOn.answerable)) {
     app.requests = null;
     app.requestsKey = "";
     panel.innerHTML = session?.waitingOn ? renderElsewhereWait(session) : "";
@@ -1646,9 +1676,10 @@ function renderRequests() {
     ? `<form class="request-mode" data-permission-mode><label for="permission-mode">Permission mode</label><select id="permission-mode" name="permissionMode">${permissionModes.map(([value, label]) => `<option value="${value}"${value === (state.permissionMode || "") ? " selected" : ""}${value === "" ? " disabled" : ""}>${escape(label)}</option>`).join("")}</select><button class="soft-button" type="submit">Change</button></form>`
     : "";
   const failure = state.error ? `<p role="status">Could not read this session's requests: ${escape(state.error)}</p>` : "";
-  // Claude reports a dialog only when nothing else waits, so any request
-  // still listed is stale and the panel says where to settle the dialog.
-  const cards = app.selected?.waitingOn?.kind === "dialog"
+  // A wait Agenthail does not hold, such as a dialog, says where to settle it;
+  // any request still listed from before it is stale.
+  const waiting = app.selected?.waitingOn;
+  const cards = waiting && !waiting.answerable
     ? renderElsewhereWait(app.selected)
     : (state.requests || []).map(renderRequestCard).join("");
   panel.innerHTML = cards + failure + mode;
@@ -1678,11 +1709,20 @@ function renderBackgroundTasks(session) {
   panel.innerHTML = `<div class="background-card"><h3>${escape(title)}</h3>${tasks.length ? `<ul>${tasks.join("")}</ul>` : ""}${source ? `<p>${escape(source)}</p>` : ""}</div>`;
   panel.hidden = false;
 }
-// A session waiting on a prompt Agenthail cannot answer shows where to answer it.
+// A session waiting on a prompt Agenthail cannot answer shows where to answer
+// it, or, when nothing shows it, how to clear it.
 function renderElsewhereWait(session) {
+  const place = waitingPlace(session);
   const asking = { question: "asks you a question", input: "needs your input", dialog: "has a dialog open in its terminal" }[session.waitingOn.kind] || "needs your approval";
-  const open = session.runtime?.focusable ? '<div class="request-actions"><button class="primary-button" data-action="session-focus" type="button">Open session</button></div>' : "";
-  return `<div class="request-card"><h3>${escape(displayName(session))} ${asking}</h3><p>Agenthail can't answer this one. Answer it where the session runs, such as its terminal. Messages you send wait until then.</p>${open}</div>`;
+  const heading = place === "restart" ? "is waiting on a prompt Agenthail can't reach" : asking;
+  const detail = {
+    restart: "Nothing shows this prompt, so no one can answer it. Stop and resume the session to clear it; messages you send wait until then.",
+    terminal: "Agenthail can't answer this one. Answer it in the session's terminal. Messages you send wait until then.",
+  }[place] || "Agenthail can't answer this one. Answer it where the session runs, such as its terminal. Messages you send wait until then.";
+  const actions = [];
+  if (place === "restart") actions.push('<button class="primary-button" data-action="session-restart" type="button">Stop and resume</button>');
+  if (session.runtime?.focusable) actions.push(`<button class="${actions.length ? "soft-button" : "primary-button"}" data-action="session-focus" type="button">Open session</button>`);
+  return `<div class="request-card"><h3>${escape(displayName(session))} ${heading}</h3><p>${detail}</p>${actions.length ? `<div class="request-actions">${actions.join("")}</div>` : ""}</div>`;
 }
 function renderRequestCard(request) {
   const created = request.createdAt ? ` · <time datetime="${escape(request.createdAt)}">${escape(new Date(request.createdAt).toLocaleTimeString())}</time>` : "";
@@ -2299,6 +2339,20 @@ document.addEventListener("click", async (event) => {
   const control = event.target.closest("[data-action]");
   if (!control) return;
   control.disabled = true;
+  if (control.dataset.action === "session-restart") {
+    try {
+      await action("session-lifecycle-stop");
+      await action("session-lifecycle-resume");
+      toast("Stopped and resumed.");
+      await load();
+      await selectSession(app.selected.id);
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      control.disabled = false;
+    }
+    return;
+  }
   try {
     const result = await action(control.dataset.action, {
       message: control.dataset.goalBudgetClear === "true" ? "" : $("#message").value.trim(),

@@ -27,7 +27,7 @@ final class PushRelayClient: Sendable {
         Bundle.main.object(forInfoDictionaryKey: "AgenthailAPNSEnvironment") as? String ?? "sandbox"
     }
 
-    func register(deviceToken: String) async throws -> PushRegistration {
+    func register(deviceToken: String, tag: String) async throws -> PushRegistration {
         let challenge: AppAttestChallengeResponse = try await request("/v1/attest/challenge", method: "POST", body: EmptyRequest())
         guard let challengeData = Data(base64URLEncoded: challenge.challenge) else {
             throw PushRelayError.invalidChallenge
@@ -42,7 +42,8 @@ final class PushRelayClient: Sendable {
             environment: Self.environment,
             challengeId: challenge.challengeId,
             keyId: keyID,
-            attestation: attestation.base64EncodedString()
+            attestation: attestation.base64EncodedString(),
+            tag: tag
         )
         return try await request("/v1/register", method: "POST", body: body)
     }
@@ -84,6 +85,7 @@ private struct PushRegistrationRequest: Encodable {
     let challengeId: String
     let keyId: String
     let attestation: String
+    let tag: String
 }
 
 private enum PushRelayError: LocalizedError {

@@ -194,20 +194,32 @@ struct CreationHostPicker {
     var projects: [LaunchProject] { options?.projects ?? [] }
     var claudeConfigRoots: [ClaudeConfigRootOption] { options?.claudeConfigRoots ?? [] }
 
+    init(hosts: [CreationHost], selectedSession: SessionState?) {
+        update(hosts: hosts)
+        if let id = selectedSession?.host?.id, self.hosts.contains(where: { $0.id == id && $0.isAvailable }) {
+            selected = id
+        }
+    }
+
     mutating func update(daemon: DaemonState?) {
         let paired = daemon?.hosts ?? []
         if let local = daemon?.host, !paired.isEmpty {
-            hosts = [CreationHost(id: "", name: local.name, state: "connected")] + paired.map { CreationHost(id: $0.id, name: $0.name, state: $0.state) }
+            update(hosts: [CreationHost(id: "", name: local.name, state: "connected")] + paired.map { CreationHost(id: $0.id, name: $0.name, state: $0.state) })
         } else {
-            hosts = []
+            update(hosts: [])
         }
-        if !selected.isEmpty && selectedHost == nil {
-            selected = ""
-            options = nil
-            models = [:]
-            loadError = nil
-            generation += 1
-        }
+    }
+
+    mutating func update(hosts next: [CreationHost]) {
+        hosts = next
+        guard selectedHost == nil else { return }
+        let fallback = hosts.first { $0.isLocal || $0.isAvailable }?.id ?? ""
+        guard !(selected.isEmpty && fallback.isEmpty) else { return }
+        selected = fallback
+        options = nil
+        models = [:]
+        loadError = nil
+        generation += 1
     }
 
     @discardableResult
@@ -395,7 +407,7 @@ struct SurfaceRuntime: Decodable, Equatable {
 }
 
 struct SessionState: Codable, Identifiable, Hashable {
-    let id: String
+    var id: String
     let surface: String
     let name: String
     let alias: String?
@@ -422,6 +434,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var transport: String? = nil
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
+    var usageLimit: UsageLimitState? = nil
     var holders: [SessionHolder]? = nil
     var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
@@ -435,6 +448,9 @@ struct SessionState: Codable, Identifiable, Hashable {
 
     var isWorking: Bool { status == "busy" }
     var isWaitingOnYou: Bool { waitingOn != nil }
+    var waitingPlace: WaitingPlace? {
+        waitingOn.map { WaitingPlace($0, runtimeKind: runtimeKind, lifecycle: isReadOnly ? SessionLifecycle() : capabilities.lifecycle) }
+    }
     /// Between turns with background tasks still running: not finished yet.
     var isWaitingOnBackground: Bool { !isWorking && backgroundTasks?.running == true }
     var isReadOnly: Bool { readOnly == true }
@@ -526,10 +542,54 @@ struct BackgroundTask: Codable, Hashable, Identifiable {
 }
 
 /// A question, plan or approval the session is waiting on its user to answer.
+/// An answerable one is held by Agenthail and answered here.
 struct WaitingState: Codable, Hashable {
     let kind: String
     let id: String
     var since: String? = nil
+    var answerable: Bool? = nil
+}
+
+/// Where a session's wait is answered: here, in its terminal, or wherever
+/// else it runs. A hosted or background session's prompt that Agenthail does
+/// not hold has nowhere to answer it; stopping and resuming the session
+/// clears it.
+enum WaitingPlace: Equatable {
+    case agenthail, dialog, terminal, restart, elsewhere
+
+    init(_ waiting: WaitingState, runtimeKind: String?, lifecycle: SessionLifecycle) {
+        if waiting.answerable == true {
+            self = .agenthail
+        } else if waiting.kind == "dialog" {
+            self = .dialog
+        } else if lifecycle.stop && lifecycle.resume {
+            self = .restart
+        } else if runtimeKind == "claude-cli" {
+            self = .terminal
+        } else {
+            self = .elsewhere
+        }
+    }
+
+    /// The session's status while it waits here.
+    var label: String {
+        switch self {
+        case .agenthail, .elsewhere: return "Waiting on you"
+        case .dialog: return "Dialog open in its terminal"
+        case .terminal: return "Waiting in its terminal"
+        case .restart: return "Prompt out of reach"
+        }
+    }
+}
+
+/// A session whose last turn a usage limit refused, and when it lifts.
+struct UsageLimitState: Codable, Hashable {
+    var resetsAt: String? = nil
+
+    var label: String {
+        guard let resetsAt, let date = ISO8601DateFormatter().date(from: resetsAt) else { return "Usage limit reached" }
+        return "Usage limit, resets \(date.formatted(date: .omitted, time: .shortened))"
+    }
 }
 
 struct SubagentIdentity: Codable, Hashable {
@@ -607,6 +667,14 @@ struct SubagentPageCache {
     mutating func fail(_ message: String, for parentID: String) {
         errors[parentID] = message
         touch(parentID)
+    }
+
+    func holds(_ parentID: String) -> Bool { rows[parentID] != nil || errors[parentID] != nil }
+
+    mutating func refetch(_ parentID: String) {
+        rows[parentID] = nil
+        errors[parentID] = nil
+        revisions[parentID, default: 0] += 1
     }
 
     mutating func drop(_ parentID: String) {
@@ -813,13 +881,13 @@ struct CheckoutIdentity: Codable, Hashable {
 
 struct QueueState: Decodable, Identifiable, Equatable {
 	let operation: String?
-    let sourceSessionId: String?
+    var sourceSessionId: String?
     let effort: String?
     let mode: String?
     let serviceTier: String?
     let outputSchema: RecordedJSON?
     let id: Int64
-    let sessionId: String
+    var sessionId: String
     let target: String
     let message: String
     let model: String?
@@ -830,6 +898,9 @@ struct QueueState: Decodable, Identifiable, Equatable {
     var heldBy: String? = nil
     let historical: Bool?
     let evidence: String
+    var hostID: String? = nil
+
+    var listID: String { "\(hostID ?? "")/\(id)" }
 
     var isHistorical: Bool {
         historical == true || status == "delivered" || status == "canceled"
@@ -917,8 +988,11 @@ struct DeliveryProblem: Decodable, Identifiable, Equatable {
     let reason: String
     let status: String?
     let at: String
+    /// The paired computer the problem came from, on a phone that merges
+    /// several; delivery ids are only unique on one computer.
+    var hostID: String? = nil
 
-    var id: Int64 { deliveryId }
+    var id: String { "\(hostID ?? "")/\(deliveryId)" }
 
     var reasonText: String {
         let words = reason.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1138,10 +1212,14 @@ struct SessionDetail: Decodable {
     let transcriptTruncated: Bool?
     let transcriptOriginalBytes: Int?
     let transcriptReturnedBytes: Int?
+
+    var waitingPlace: WaitingPlace? {
+        session.waitingOn.map { WaitingPlace($0, runtimeKind: session.runtimeKind, lifecycle: readOnly ? SessionLifecycle() : capabilities.lifecycle) }
+    }
 }
 
 struct RawSession: Decodable {
-    let id: String
+    var id: String
     let surface: String
     let name: String
     var status: String
@@ -1153,6 +1231,8 @@ struct RawSession: Decodable {
     let runtime: SessionRuntime?
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
+    var usageLimit: UsageLimitState? = nil
+    var runtimeKind: String? = nil
 }
 
 struct GoalState: Decodable {
@@ -1370,9 +1450,14 @@ struct PairingResponse: Decodable {
 }
 
 struct PairedDeviceResponse: Decodable {
+    struct Host: Decodable {
+        let id: String
+        let name: String
+    }
     let device: DeviceState
     let token: String
     let `protocol`: Int
+    let host: Host
 }
 
 struct AgenthailEvent: Decodable {
@@ -1387,7 +1472,7 @@ struct SessionTimeline: Decodable {
     var items: [TimelineItem]
     let source: String?
     let truncated: Bool
-    let unavailableReason: String?
+    var unavailableReason: String?
 }
 
 struct SessionAttachment: Decodable, Equatable, Hashable {
@@ -1455,6 +1540,8 @@ struct SessionStreamEvent: Decodable {
     let seq: UInt64
     let type: String
     let data: SessionStreamItem
+    /// The row as a session page reads it; absent for rows a page leaves out.
+    var item: TimelineItem? = nil
 }
 
 struct CatalogStreamEvent: Decodable {
@@ -1522,7 +1609,7 @@ struct SessionSearchResponse: Decodable {
 }
 struct SessionSearchItem: Decodable, Identifiable {
     var id: String { session.id }
-    let session: SessionState
+    var session: SessionState
     let snippet: String?
 }
 

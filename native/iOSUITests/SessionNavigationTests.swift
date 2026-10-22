@@ -7,14 +7,14 @@ final class SessionNavigationTests: XCTestCase {
         app.launchArguments = ["--preview-session", "--preview-app", "--preview-voice-entry"]
         app.launch()
         XCTAssertTrue(app.buttons["voice-entry"].waitForExistence(timeout: 10))
-        let workspace = app.buttons["project-project-fieldnotes"]
+        let workspace = app.buttons["project-computer::project-fieldnotes"]
         XCTAssertTrue(workspace.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["session-codex-demo"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["session-computer::codex-demo"].waitForExistence(timeout: 5))
         workspace.tapWhenReady()
-        XCTAssertFalse(app.buttons["session-codex-demo"].exists)
-        XCTAssertTrue(app.buttons["session-demo"].exists, "a collapsed project keeps its working session")
+        XCTAssertFalse(app.buttons["session-computer::codex-demo"].exists)
+        XCTAssertTrue(app.buttons["session-computer::demo"].exists, "a collapsed project keeps its working session")
         workspace.tapWhenReady()
-        XCTAssertTrue(app.buttons["session-codex-demo"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["session-computer::codex-demo"].waitForExistence(timeout: 5))
         app.buttons["voice-entry"].tapWhenReady()
         XCTAssertTrue(app.navigationBars["Talk to orchestrator"].waitForExistence(timeout: 5))
         app.buttons["Done"].tapWhenReady()
@@ -32,7 +32,7 @@ final class SessionNavigationTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-app", "--preview-delivery"]
         app.launch()
-        let session = app.buttons["session-demo"]
+        let session = app.buttons["session-computer::demo"]
         XCTAssertTrue(session.waitForExistence(timeout: 10))
         session.tapWhenReady()
         XCTAssertFalse(app.buttons["voice-entry"].exists)

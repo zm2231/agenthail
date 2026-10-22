@@ -153,6 +153,58 @@ func TestSessionJournalUpsertMaintainsByteRetention(t *testing.T) {
 	}
 }
 
+func TestSessionJournalByteRetentionFollowsUpsertsAndReplacement(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	retention := SessionJournalRetention{Count: 10, Bytes: 10}
+	keys := func() []string {
+		t.Helper()
+		window, err := r.SessionJournalAfter("session", 0, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var keys []string
+		for _, entry := range window.Entries {
+			keys = append(keys, entry.ProviderKey)
+		}
+		var retained, rows int
+		if err := r.db.QueryRow(`SELECT retained_bytes,(SELECT COALESCE(SUM(bytes),0) FROM session_journal WHERE session_id='session') FROM session_journal_state WHERE session_id='session'`).Scan(&retained, &rows); err != nil || retained != rows {
+			t.Fatalf("retained=%d rows=%d err=%v", retained, rows, err)
+		}
+		return keys
+	}
+	for _, input := range []SessionJournalEntry{
+		{SessionID: "session", Kind: "item", ProviderKey: "a", Payload: []byte("aaaaaaaa")},
+		{SessionID: "session", Kind: "item", ProviderKey: "a", Payload: []byte("a")},
+		{SessionID: "session", Kind: "item", ProviderKey: "b", Payload: []byte("bbbbbbbb")},
+	} {
+		if _, _, err := r.AppendSessionJournalEntry(input, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := keys(); fmt.Sprint(got) != "[a b]" {
+		t.Fatalf("after shrinking upsert keys=%v, want [a b]", got)
+	}
+	if _, err := r.ReplaceSessionJournal("session", []SessionJournalEntry{
+		{Kind: "item", ProviderKey: "c", Payload: []byte("cc")},
+		{Kind: "item", ProviderKey: "d", Payload: []byte("dddd")},
+	}, retention, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "e", Payload: []byte("eeee")}, retention); err != nil {
+		t.Fatal(err)
+	}
+	if got := keys(); fmt.Sprint(got) != "[c d e]" {
+		t.Fatalf("after replacement keys=%v, want [c d e]", got)
+	}
+	if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "f", Payload: []byte("fffff")}, retention); err != nil {
+		t.Fatal(err)
+	}
+	if got := keys(); fmt.Sprint(got) != "[e f]" {
+		t.Fatalf("after byte trim keys=%v, want [e f]", got)
+	}
+}
+
 func TestSessionJournalRejectsSingleBodyBeyondRetention(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "session")

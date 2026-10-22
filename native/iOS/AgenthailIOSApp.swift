@@ -5,7 +5,6 @@ import UserNotifications
 final class IOSAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
-        KeychainStore.shareCredential()
         return true
     }
 
@@ -18,9 +17,11 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNU
     }
 
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
-        guard let key = userInfo["withdraw"] as? String, !key.isEmpty else { return .noData }
+        guard let key = userInfo["withdraw"] as? String, !key.isEmpty,
+              let host = userInfo["host"] as? String, !host.isEmpty else { return .noData }
         let center = UNUserNotificationCenter.current()
         let withdrawn = await center.deliveredNotifications()
+            .filter { $0.request.content.userInfo["host"] as? String == host }
             .filter { $0.request.identifier == key || $0.request.content.userInfo["collapseId"] as? String == key }
             .map(\.request.identifier)
         guard !withdrawn.isEmpty else { return .noData }
@@ -34,23 +35,25 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNU
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let userInfo = response.notification.request.content.userInfo
-        guard let sessionID = userInfo["sessionId"] as? String, !sessionID.isEmpty else { return }
+        guard let sessionID = userInfo["sessionId"] as? String, !sessionID.isEmpty,
+              let host = userInfo["host"] as? String, !host.isEmpty else { return }
         if let choice = RequestNotifications.choice(forAction: response.actionIdentifier), let requestID = userInfo["requestId"] as? String {
-            await RequestAnswer.send(choice: choice, text: (response as? UNTextInputNotificationResponse)?.userText, sessionID: sessionID, requestID: requestID, api: Self.pairedAPI)
+            await RequestAnswer.send(choice: choice, text: (response as? UNTextInputNotificationResponse)?.userText, sessionID: sessionID, requestID: requestID, api: { @Sendable in try Self.pairedAPI(host: host) })
             return
         }
+        let opened = HostCatalog.qualify(host, sessionID)
         await MainActor.run {
-            NotificationCenter.default.post(name: .agenthailNotificationOpened, object: sessionID)
+            NotificationCenter.default.post(name: .agenthailNotificationOpened, object: opened)
         }
     }
 }
 
 extension IOSAppDelegate {
-    nonisolated static func pairedAPI() throws -> AgenthailAPI {
-        guard let endpoint = KeychainStore.get("endpoint").flatMap(URL.init(string:)), let token = KeychainStore.get("token") else {
-            throw AgenthailAPIError.unavailable("Pair this phone with Agenthail on your computer first.")
+    nonisolated static func pairedAPI(host: String) throws -> AgenthailAPI {
+        guard let credential = KeychainStore.get(PairedCredential.account(for: host)).flatMap(PairedCredential.decode) else {
+            throw AgenthailAPIError.unavailable("This iPhone is no longer paired with the computer that sent this notification.")
         }
-        return AgenthailAPI(baseURL: endpoint, token: token)
+        return AgenthailAPI(baseURL: credential.endpoint, token: credential.token)
     }
 }
 
@@ -105,6 +108,7 @@ struct AgenthailIOSApp: App {
             .onChange(of: model.isPaired) { _, paired in
                 if !paired { voiceCalls.disconnect() }
             }
+            .onChange(of: model.voiceHost?.id) { _, _ in voiceCalls.disconnect() }
     }
 
 }

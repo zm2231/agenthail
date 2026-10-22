@@ -20,11 +20,13 @@ func (c *Claude) hostWaiting(ctx context.Context, sess *surface.Session) *surfac
 		return nil
 	}
 	oldest := listed.Requests[0]
-	return &surface.Waiting{Kind: claudeRequestKind(oldest.Kind), ID: oldest.RequestID, Since: oldest.CreatedAt.UTC()}
+	return &surface.Waiting{Kind: claudeRequestKind(oldest.Kind), ID: oldest.RequestID, Since: oldest.CreatedAt.UTC(), Answerable: true}
 }
 
 // Requests lists the open requests of a session the host runs, oldest first,
-// read from the host now rather than from its cached listing.
+// read from the host now rather than from its cached listing. While a host
+// does not answer, a session it may run has requests no one can read, which
+// is an error rather than none.
 func (c *Claude) Requests(ctx context.Context, sess *surface.Session) (surface.RequestState, error) {
 	state := surface.RequestState{Requests: []surface.Request{}}
 	if !claudeHosted(sess) {
@@ -33,6 +35,9 @@ func (c *Claude) Requests(ctx context.Context, sess *surface.Session) (surface.R
 	}
 	c.host.forget()
 	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
+	if !ok && c.host.unanswered() {
+		return state, fmt.Errorf("the Claude host running session %s did not answer", sess.ID)
+	}
 	if !ok {
 		return state, nil
 	}

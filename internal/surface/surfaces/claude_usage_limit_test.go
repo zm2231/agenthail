@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -142,5 +143,46 @@ func TestStreamingAUsageLimitedTurnEndsItFailedWithTheLimit(t *testing.T) {
 	}
 	if ended.Turn == nil || ended.Turn.State != surface.TurnFailed || ended.Turn.Model == claudeSyntheticModel {
 		t.Fatalf("the refused turn's metadata=%+v", ended.Turn)
+	}
+}
+
+// A session whose last turn a usage limit refused is limited until the limit
+// resets or a later turn starts, and that limit outranks the permission
+// prompt its process record still reports.
+func TestAUsageLimitedSessionIsLimitedUntilItsResetOrItsNextTurn(t *testing.T) {
+	future := time.Now().Add(time.Hour).Truncate(time.Second).UTC()
+	past := time.Now().Add(-time.Minute).Truncate(time.Second).UTC()
+	user := `{"type":"user","uuid":"u1","timestamp":"2026-10-09T10:11:10Z","message":{"role":"user","content":"keep going"}}`
+	limited := func(resetsAt time.Time) string {
+		return strings.ReplaceAll(claudeUsageLimitLine, "1791543600", strconv.FormatInt(resetsAt.Unix(), 10))
+	}
+	unknown := strings.NewReplacer(`,"resetsAt":1791543600`, "").Replace(claudeUsageLimitLine)
+	for _, test := range []struct {
+		name  string
+		lines []string
+		want  *surface.UsageLimit
+	}{
+		{"until its reset", []string{user, limited(future)}, &surface.UsageLimit{ResetsAt: future}},
+		{"with no reset time given", []string{user, unknown}, &surface.UsageLimit{}},
+		{"after its reset", []string{user, limited(past)}, nil},
+		{"once the next turn starts", []string{user, limited(future), strings.ReplaceAll(user, `"u1"`, `"u3"`)}, nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			writeClaudeRecord(t, home, map[string]any{"kind": "interactive", "entrypoint": "cli", "status": "waiting", "waitingFor": "permission prompt", "statusUpdatedAt": time.Now().UnixMilli()})
+			claude := NewClaude(nil, home)
+			session := terminalSession(t)
+			session.Transcript = writeTranscript(t, strings.Join(test.lines, "\n"))
+			observation, err := claude.Observe(context.Background(), session)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !surface.SameUsageLimit(observation.UsageLimit, test.want) {
+				t.Fatalf("usage limit = %+v, want %+v", observation.UsageLimit, test.want)
+			}
+			if test.want != nil && observation.WaitingOn != nil {
+				t.Fatalf("a limited session also waits on %+v", observation.WaitingOn)
+			}
+		})
 	}
 }

@@ -8,6 +8,19 @@ final class SessionPane: ObservableObject, Identifiable {
     unowned let model: AgenthailModel
 
     @Published private(set) var selectedSessionID: String?
+    @Published private(set) var tabs = SessionTabs() {
+        didSet {
+            if restoresSelection, tabs != oldValue, let data = try? JSONEncoder().encode(tabs) {
+                UserDefaults.standard.set(data, forKey: Self.tabsKey)
+            }
+            if tabsEnabled { syncNewSessionDraft() }
+        }
+    }
+    @Published private(set) var newSession: NewSessionDraft?
+    @Published var archivedTab: SessionState? {
+        didSet { if archivedTab?.id != oldValue?.id { archivedTabError = nil } }
+    }
+    @Published private(set) var archivedTabError: String?
     @Published private(set) var detail: SessionDetail?
     @Published private(set) var detailStale = false
     @Published private(set) var detailRefreshFailed = false
@@ -39,6 +52,16 @@ final class SessionPane: ObservableObject, Identifiable {
     private var frozenOlderCursor: Int64?
     private var sessionStreamTask: Task<Void, Never>?
     private var sessionCursor: UInt64 = 0
+    /// Rows streamed while a page read is in flight, latest mutation last, so
+    /// a page read before some of them arrived can be brought up to date.
+    private(set) var streamedRows: [SessionStreamEvent] = []
+    private(set) var pageReadsInFlight = 0
+    private var requestGeneration = 0
+    /// Streamed rows apply here as they arrive and reach `detail` at most once
+    /// per `streamPublishInterval`, so a burst of rows renders once.
+    private(set) var unpublishedDetail: SessionDetail?
+    private var publishTask: Task<Void, Never>?
+    static let streamPublishInterval: Duration = .milliseconds(100)
     private var streamAwaitsCursor = false
     private var streamUnsupported = false
     private var detailReloadTask: Task<Void, Never>?
@@ -58,8 +81,24 @@ final class SessionPane: ObservableObject, Identifiable {
     init(model: AgenthailModel, restoresSelection: Bool) {
         self.model = model
         self.restoresSelection = restoresSelection
+        if restoresSelection, let data = UserDefaults.standard.data(forKey: Self.tabsKey), let saved = try? JSONDecoder().decode(SessionTabs.self, from: data) {
+            tabs = saved
+        }
         observeDraft()
     }
+
+    /// Keeps a draft exactly while a New Session tab is open.
+    private func syncNewSessionDraft() {
+        if !tabs.tabs.contains(where: { $0.id == SessionTabs.newSession }) {
+            newSession = nil
+        } else if newSession == nil {
+            newSession = NewSessionDraft(model: model, selected: selectedSession)
+        }
+    }
+
+    private static let tabsKey = "sessionTabs"
+
+    var tabsEnabled: Bool { restoresSelection && model.interface.config.tabs }
 
     private func observeDraft() {
         draftObservation = composerDraft.$text.combineLatest(composerDraft.$attachments)
@@ -75,8 +114,128 @@ final class SessionPane: ObservableObject, Identifiable {
     var displayedSession: SessionState? { selectedSession ?? removedSession }
     var timelineItems: [TimelineItem] { olderItems + (detail?.timeline?.items ?? []) }
 
-    func select(_ id: String) {
+    /// Shows a session. With tabs, it opens in the preview tab unless kept,
+    /// or switches to the tab it is already in.
+    func select(_ id: String, keep: Bool = false) {
         let id = model.resolveSessionID(id)
+        if tabsEnabled, !closed {
+            tabs.open(id, keep: keep, preview: model.interface.config.tabPreview)
+        } else {
+            newSession = nil
+        }
+        show(id)
+    }
+
+    /// Shows New Session: with tabs, in its own tab, opened once.
+    func openNewSession(message: String? = nil) {
+        guard !closed else { return }
+        if newSession == nil { newSession = NewSessionDraft(model: model, selected: selectedSession) }
+        if tabsEnabled { tabs.open(SessionTabs.newSession, keep: true) }
+        if let message { newSession?.take(message) }
+        clearSelection()
+    }
+
+    /// Shows a session started from New Session, in the tab New Session
+    /// was in.
+    func showStarted(_ id: String) {
+        let id = model.resolveSessionID(id)
+        let shared = newSession?.takeHeld() ?? []
+        if tabsEnabled, !closed {
+            tabs.replace(SessionTabs.newSession, with: id)
+        } else {
+            newSession = nil
+        }
+        show(id)
+        guard !shared.isEmpty, !closed else { return }
+        guard tabsEnabled else {
+            shared.forEach { openNewSession(message: $0) }
+            return
+        }
+        let draft = NewSessionDraft(model: model, selected: selectedSession)
+        shared.forEach(draft.take)
+        newSession = draft
+        tabs.add(SessionTabs.newSession)
+    }
+
+    func activateTab(_ id: String) {
+        tabs.activate(id)
+        showActiveTab()
+    }
+
+    func keepTab(_ id: String) {
+        tabs.keep(id)
+    }
+
+    func closeTab(_ id: String) {
+        let wasActive = tabs.active == id
+        tabs.close(id)
+        if wasActive { showActiveTab() }
+    }
+
+    /// Unarchives a session whose tab closed when it was archived, and opens
+    /// its tab again. On failure the notice stays, with the reason.
+    func unarchiveTab(_ session: SessionState) async {
+        if archivedTab?.id == session.id { archivedTabError = nil }
+        var unarchived = false
+        if model.api != nil { unarchived = await model.performNow(action: "session-unarchive", sessionID: session.id) }
+        if unarchived {
+            if archivedTab?.id == session.id { archivedTab = nil }
+            select(session.id, keep: true)
+        } else if archivedTab == nil || archivedTab?.id == session.id {
+            archivedTab = session
+            archivedTabError = model.api == nil ? "Agenthail isn't connected, so the session stays archived." : model.operationError ?? "The session couldn't be unarchived."
+        }
+    }
+
+    func closeOtherTabs(_ id: String) {
+        tabs.closeOthers(id)
+        showActiveTab()
+    }
+
+    func stepTab(_ offset: Int) {
+        guard let next = tabs.neighbour(offset) else { return }
+        tabs.activate(next)
+        showActiveTab()
+    }
+
+    private func showActiveTab() {
+        guard let active = tabs.active, active != SessionTabs.newSession else {
+            openNewSession()
+            return
+        }
+        show(active)
+    }
+
+    private func clearSelection() {
+        guard selectedSessionID != nil || removedSession != nil else { return }
+        sessionStreamTask?.cancel()
+        detailReloadTask?.cancel()
+        detailReloadTask = nil
+        detailReloadPending = false
+        removedSession = nil
+        selectedSnapshot = nil
+        detail = nil
+        detailStale = false
+        composerDraft = ComposerDraft()
+        selectedSessionID = nil
+    }
+
+    private func reconcileTabs(_ sessions: [SessionState]) {
+        if tabs.tabs.isEmpty, let selected = selectedSessionID {
+            tabs.open(selected, keep: true)
+        }
+        let byID = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let dropped = tabs.reconcile(resolve: model.resolveSessionID) { id in
+            id == SessionTabs.newSession || byID[id].map { $0.archived != true } == true
+        }
+        if let archived = dropped.lazy.compactMap({ byID[self.model.resolveSessionID($0)] }).first(where: { $0.archived == true }) {
+            archivedTab = archived
+        }
+        let shown = tabs.active == SessionTabs.newSession ? nil : tabs.active
+        if shown != selectedSessionID || shown == nil && newSession == nil { showActiveTab() }
+    }
+
+    private func show(_ id: String) {
         guard !closed, id != selectedSessionID || detail == nil else { return }
         removedSession = nil
         selectedSnapshot = model.knownSessions.first { $0.id == id }
@@ -88,9 +247,11 @@ final class SessionPane: ObservableObject, Identifiable {
         olderCursor = nil
         olderError = nil
         requestError = nil
+        streamedRows = []
         selectionGeneration &+= 1
         detailAppliedGeneration = detailRequestGeneration
         if restoresSelection { UserDefaults.standard.set(id, forKey: "lastSelectedSessionID") }
+        dropUnpublishedDetail()
         detail = model.cachedDetail(id)
         detailStale = detail != nil
         detailRefreshFailed = false
@@ -112,6 +273,7 @@ final class SessionPane: ObservableObject, Identifiable {
         detailLoadTask?.cancel()
         olderTask?.cancel()
         metadataTask?.cancel()
+        dropUnpublishedDetail()
         sessionStreamTask = nil
         detailReloadTask = nil
         detailLoadTask = nil
@@ -125,11 +287,17 @@ final class SessionPane: ObservableObject, Identifiable {
         guard !closed, let api = model.api else { return false }
         detailRequestGeneration &+= 1
         let generation = detailRequestGeneration
+        pageReadsInFlight += 1
+        defer {
+            pageReadsInFlight -= 1
+            if pageReadsInFlight == 0 { streamedRows = [] }
+        }
         do {
             let loaded = try await api.sessionDetail(id: id, includeTimeline: true)
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), generation > detailAppliedGeneration, removedSession?.id != id else { return true }
             detailAppliedGeneration = generation
-            let previous = detail?.session.id == id ? detail?.timeline : nil
+            let shown = unpublishedDetail ?? detail
+            let previous = shown?.session.id == id ? shown?.timeline : nil
             let fresh = Set(loaded.timeline?.items.map(\.id) ?? [])
             if let previous, previous.items.contains(where: { fresh.contains($0.id) }) {
                 if olderItems.isEmpty { olderCursor = previous.nextBefore }
@@ -140,7 +308,12 @@ final class SessionPane: ObservableObject, Identifiable {
                 olderCursor = loaded.timeline?.nextBefore
             }
             metadata.absorb(context: loaded.context, goal: loaded.goal, model: loaded.model, models: loaded.models)
-            let merged = metadata.apply(to: loaded)
+            var merged = metadata.apply(to: loaded)
+            let pageSeq = loaded.journalSeq ?? 0
+            var older = olderItems
+            for row in streamedRows where row.seq > pageSeq { merged = Self.applying(row, to: merged, older: &older) ?? merged }
+            if older != olderItems { olderItems = older }
+            dropUnpublishedDetail()
             detail = merged
             detailStale = false
             detailRefreshFailed = false
@@ -152,7 +325,7 @@ final class SessionPane: ObservableObject, Identifiable {
             }
             return true
         } catch {
-            guard !closed, sessionLoadIsCurrent(id, selectedID: selectedSessionID), !error.isCancellation else { return true }
+            guard !closed, sessionLoadIsCurrent(id, selectedID: selectedSessionID), removedSession?.id != id, !error.isCancellation else { return true }
             detailLoadError = AgenthailAPIError.userMessage(error)
             if detail?.session.id == id {
                 detailStale = true
@@ -203,8 +376,11 @@ final class SessionPane: ObservableObject, Identifiable {
     func reconcile() {
         guard !closed, model.snapshot != nil else { return }
         let sessions = model.knownSessions
+        if tabsEnabled {
+            reconcileTabs(sessions)
+        }
         if let selected = selectedSessionID, model.resolveSessionID(selected) != selected {
-            select(selected)
+            show(model.resolveSessionID(selected))
             return
         }
         if let selected = selectedSessionID {
@@ -221,6 +397,7 @@ final class SessionPane: ObservableObject, Identifiable {
                     awaitStreamCursor()
                     startDetailLoad(selected)
                     startMetadataLoad(selected)
+                    Task { await syncRequests(for: live) }
                 }
             } else if removedSession?.id != selected, selectedSnapshot?.id == selected {
                 removedSession = selectedSnapshot
@@ -228,18 +405,22 @@ final class SessionPane: ObservableObject, Identifiable {
             }
             if removedSession != nil || sessions.contains(where: { $0.id == selected }) { return }
         }
-        guard restoresSelection else { return }
+        guard restoresSelection, !tabsEnabled, newSession == nil else { return }
         let next = reconciledSelection(selected: (selectedSessionID ?? UserDefaults.standard.string(forKey: "lastSelectedSessionID")).map(model.resolveSessionID), sessions: sessions)
-        guard next != selectedSessionID else { return }
+        guard next != selectedSessionID else {
+            if next == nil { openNewSession() }
+            return
+        }
         sessionStreamTask?.cancel()
         detailReloadTask?.cancel()
         detailReloadTask = nil
         detailReloadPending = false
+        dropUnpublishedDetail()
         detail = nil
         detailStale = false
         composerDraft = ComposerDraft()
         selectedSessionID = nil
-        if let next { select(next) }
+        if let next { show(next) } else { openNewSession() }
     }
 
     func closeRemovedSession() {
@@ -249,6 +430,7 @@ final class SessionPane: ObservableObject, Identifiable {
         frozenOlderCursor = nil
         composerDraft = ComposerDraft()
         sessionStreamTask?.cancel()
+        dropUnpublishedDetail()
         detail = nil
         detailStale = false
         selectedSessionID = nil
@@ -279,7 +461,7 @@ final class SessionPane: ObservableObject, Identifiable {
         Task {
             let succeeded = await model.performNow(action: action, sessionID: sessionID, model: modelID)
             controlPending = false
-            if succeeded, !closed, selectedSessionID == sessionID { startMetadataLoad(sessionID) }
+            if succeeded, !closed, selectedSessionID == sessionID, removedSession == nil { startMetadataLoad(sessionID) }
         }
     }
 
@@ -301,6 +483,7 @@ final class SessionPane: ObservableObject, Identifiable {
         let attachments = composerDraft.attachments
         composer = ""
         composerDraft.attachments = []
+        tabs.keep(sessionID)
         send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery)
     }
 
@@ -384,7 +567,12 @@ final class SessionPane: ObservableObject, Identifiable {
     private func freezeRemovedSession() {
         streamAwaitsCursor = false
         sessionStreamTask?.cancel()
+        dropUnpublishedDetail()
         metadataTask?.cancel()
+        detailLoadTask?.cancel()
+        detailLoadTask = nil
+        requestsKey = nil
+        requestGeneration &+= 1
         detailReloadTask?.cancel()
         detailReloadTask = nil
         detailReloadPending = false
@@ -412,8 +600,9 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     private func applyMetadata(to id: String) {
-        guard let current = detail, current.session.id == id else { return }
+        guard let current = unpublishedDetail ?? detail, current.session.id == id else { return }
         let merged = metadata.apply(to: current)
+        dropUnpublishedDetail()
         detail = merged
         model.refreshCachedDetail(merged, for: id)
     }
@@ -440,13 +629,15 @@ final class SessionPane: ObservableObject, Identifiable {
 
     private func fetchRequests(_ id: String, key: String?) async {
         guard let api = model.api else { return }
+        requestGeneration &+= 1
+        let generation = requestGeneration
         do {
             let loaded = try await api.requests(sessionID: id)
-            guard selectedSessionID == id, requestsKey == key else { return }
+            guard requestGeneration == generation, selectedSessionID == id, requestsKey == key, removedSession == nil else { return }
             requests = loaded
             requestError = nil
         } catch {
-            guard selectedSessionID == id else { return }
+            guard requestGeneration == generation, selectedSessionID == id, removedSession == nil else { return }
             requestsKey = nil
             requestError = error.localizedDescription
         }
@@ -559,8 +750,70 @@ final class SessionPane: ObservableObject, Identifiable {
             guard removedSession == nil else { return }
             if event.data.kind == "context" { metadata.stream(context: event.data.context) } else { metadata.stream(goal: event.data.goal) }
             applyMetadata(to: event.sessionId)
+            applyStreamedRow(event)
             return
         }
-        scheduleDetailReload(event.sessionId)
+        guard applyStreamedRow(event) else {
+            scheduleDetailReload(event.sessionId)
+            return
+        }
+        // A finished turn reloads once, so exchanges and paging come from the daemon.
+        if event.data.kind == "done" { scheduleDetailReload(event.sessionId) }
+    }
+
+    @discardableResult
+    private func applyStreamedRow(_ event: SessionStreamEvent) -> Bool {
+        // A row that leaves the earlier pages alone must not publish them, or
+        // every row re-renders the window.
+        var older = olderItems
+        guard removedSession == nil, let current = unpublishedDetail ?? detail, current.session.id == event.sessionId,
+              let updated = Self.applying(event, to: current, older: &older) else { return false }
+        if older != olderItems { olderItems = older }
+        if pageReadsInFlight > 0 {
+            streamedRows.removeAll { $0.data.itemId == event.data.itemId && !event.data.itemId.isEmpty }
+            streamedRows.append(event)
+        }
+        unpublishedDetail = updated
+        guard publishTask == nil else { return true }
+        publishTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.streamPublishInterval)
+            guard let self, !Task.isCancelled else { return }
+            publishTask = nil
+            guard let pending = unpublishedDetail else { return }
+            unpublishedDetail = nil
+            detail = pending
+            model.detailLoaded(pending, for: pending.session.id)
+        }
+        return true
+    }
+
+    private func dropUnpublishedDetail() {
+        publishTask?.cancel()
+        publishTask = nil
+        unpublishedDetail = nil
+    }
+
+    /// Applies a streamed journal row as a session page reads it: an updated
+    /// row moves to the end, as its journal entry does, so a later reload shows
+    /// the same rows in the same order. Returns nil for a row it cannot apply.
+    static func applying(_ event: SessionStreamEvent, to detail: SessionDetail, older: inout [TimelineItem]) -> SessionDetail? {
+        guard var timeline = detail.timeline else { return nil }
+        let id = event.data.itemId
+        if event.data.kind == "source-error" {
+            timeline.unavailableReason = event.data.reason
+        } else if event.data.op == "remove" {
+            timeline.items.removeAll { $0.id == id }
+            older.removeAll { $0.id == id }
+        } else if let item = event.item {
+            timeline.items.removeAll { $0.id == item.id }
+            older.removeAll { $0.id == item.id }
+            timeline.items.append(item)
+            timeline.unavailableReason = nil
+        } else {
+            return nil
+        }
+        var updated = detail
+        updated.timeline = timeline
+        return updated
     }
 }

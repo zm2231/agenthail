@@ -1,7 +1,7 @@
 import AppKit
 
 enum AccentContrast {
-    struct RGB: Equatable {
+    struct RGB: Equatable, Sendable {
         var r: Double
         var g: Double
         var b: Double

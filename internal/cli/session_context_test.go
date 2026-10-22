@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"database/sql"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -31,7 +34,7 @@ func rootHooks(t *testing.T, store *registry.Registry, fake *cliSurface, roots i
 		var wg sync.WaitGroup
 		for _, app := range apps {
 			wg.Go(func() {
-				output := app.sessionContext(strings.NewReader(input), 4242, time.Now())
+				output := app.sessionContext(strings.NewReader(input), surface.KindClaude, 4242, time.Now())
 				if output == nil {
 					return
 				}
@@ -115,6 +118,100 @@ func TestAClaudeSessionFirstSeenAtAPromptGetsItsCardAndAnUnknownOneNothing(t *te
 	for _, event := range []string{"SessionStart", "UserPromptSubmit"} {
 		if printed := hooks(`{"session_id":"elsewhere","hook_event_name":"` + event + `","source":"startup"}`); len(printed) != 0 {
 			t.Fatalf("%s for an unknown session printed %q", event, printed)
+		}
+	}
+}
+
+func TestTheCodexContextHookTellsARegisteredThreadWhoItIsAndLeavesAnyOtherAlone(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"unknown-thread": {ID: "unknown-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: t.TempDir()}}}
+	app, store := cliFixture(t, fake)
+	if err := store.RegisterSession(surface.Session{ID: "known-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	hook := func(thread string) string {
+		t.Helper()
+		stdin, err := os.CreateTemp(t.TempDir(), "hook-input")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := stdin.WriteString(`{"session_id":"` + thread + `","hook_event_name":"SessionStart","source":"startup"}`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := stdin.Seek(0, 0); err != nil {
+			t.Fatal(err)
+		}
+		previous := os.Stdin
+		os.Stdin = stdin
+		defer func() { os.Stdin = previous }()
+		output, err := captureStdout(t, func() error {
+			return app.Run([]string{"hook", "session-context", "--surface", "codex", "--claude-pid", "4242"})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return output
+	}
+	if output := hook("known-thread"); !strings.HasPrefix(gjson.Get(output, "hookSpecificOutput.additionalContext").String(), "[Agenthail] You are session known-thread (") {
+		t.Fatalf("a registered thread was told %q", output)
+	}
+	if output := hook("unknown-thread"); output != "" {
+		t.Fatalf("a thread Agenthail doesn't know was told %q", output)
+	}
+	if _, err := store.Session("unknown-thread"); err == nil {
+		t.Fatal("the hook registered a thread Agenthail didn't know")
+	}
+}
+
+func TestTheSessionContextHookNeverMigratesTheRegistry(t *testing.T) {
+	for _, offset := range []int{-1, 0, 1} {
+		path := filepath.Join(t.TempDir(), "registry.db")
+		store, err := registry.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.RegisterSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir()}); err != nil {
+			t.Fatal(err)
+		}
+		store.Close()
+		version := registry.SchemaVersion() + offset
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
+			t.Fatal(err)
+		}
+		app := &App{
+			OpenRegistry:         func() (*registry.Registry, error) { return registry.Open(path) },
+			OpenCurrentRegistry:  func() (*registry.Registry, error) { return registry.OpenCurrent(path) },
+			Surfaces:             []SurfaceEntry{{Name: string(surface.KindClaude), Surface: &cliSurface{kind: surface.KindClaude}}},
+			DefaultTimeout:       time.Second,
+			catalogDaemonRunning: func() bool { return false },
+		}
+		stdin, err := os.CreateTemp(t.TempDir(), "hook-input")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := stdin.WriteString(`{"session_id":"s1","hook_event_name":"SessionStart","source":"startup"}`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := stdin.Seek(0, 0); err != nil {
+			t.Fatal(err)
+		}
+		previous := os.Stdin
+		os.Stdin = stdin
+		output, err := captureStdout(t, func() error { return app.Run([]string{"hook", "session-context", "--claude-pid", "4242"}) })
+		os.Stdin = previous
+		if app.Registry != nil {
+			app.Registry.Close()
+		}
+		var after int
+		if scanErr := db.QueryRow(`PRAGMA user_version`).Scan(&after); scanErr != nil || after != version {
+			t.Fatalf("a hook against schema %d left user_version %d err=%v", version, after, scanErr)
+		}
+		db.Close()
+		if printed := strings.TrimSpace(output); err != nil || (offset == 0) != (printed != "") {
+			t.Fatalf("a hook against schema %d printed %q err=%v", version, printed, err)
 		}
 	}
 }

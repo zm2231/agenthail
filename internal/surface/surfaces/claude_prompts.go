@@ -26,6 +26,10 @@ type ClaudePermissionPrompt struct {
 	// PID is the Claude process that ran the hook, which must be the
 	// session's own.
 	PID int `json:"-"`
+	// AskedAt is when the hook read the prompt. A hook posts the same
+	// prompt again after a daemon restart, so the daemon receiving it may
+	// be much later.
+	AskedAt time.Time `json:"-"`
 }
 
 // ClaudePromptDecision is the decision a PermissionRequest hook returns
@@ -156,6 +160,9 @@ func (c *Claude) HoldPrompt(ctx context.Context, prompt ClaudePermissionPrompt) 
 	}
 	session := surface.Session{ID: prompt.SessionID, PID: pid}
 	created := time.Now().UTC()
+	if !prompt.AskedAt.IsZero() && prompt.AskedAt.Before(created) {
+		created = prompt.AskedAt.UTC()
+	}
 	canonical, _ := json.Marshal(input)
 	held := &claudePrompt{input: input, suggestions: prompt.Suggestions, createdMS: created.UnixMilli(), key: prompt.ToolName + "\x00" + string(canonical), holders: 1, pid: pid, done: make(chan struct{})}
 	held.identity, _ = processIdentity(pid)
@@ -169,6 +176,11 @@ func (c *Claude) HoldPrompt(ctx context.Context, prompt ClaudePermissionPrompt) 
 		// Claude shows a prompt in the record as it opens the dialog; one
 		// the record does not show was settled before the hook got here.
 		return nil, nil
+	}
+	if waiting.Since.After(created.Add(claudePromptRecordWait)) {
+		// The session waits on a prompt it showed after this one, so this
+		// one was settled while no daemon held it.
+		return nil, ErrPromptNotHeld
 	}
 	held.recordMS = waiting.Since.UnixMilli()
 	if !c.prompts.shown(prompt.SessionID, held.recordMS) {
@@ -434,7 +446,7 @@ func (p *claudePrompts) waiting(sessionID string) *surface.Waiting {
 		return nil
 	}
 	oldest := open[0].request
-	return &surface.Waiting{Kind: oldest.Kind, ID: oldest.ID, Since: oldest.CreatedAt}
+	return &surface.Waiting{Kind: oldest.Kind, ID: oldest.ID, Since: oldest.CreatedAt, Answerable: true}
 }
 
 func (p *claudePrompts) requests(sessionID string) []surface.Request {

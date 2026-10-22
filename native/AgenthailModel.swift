@@ -21,10 +21,6 @@ final class AgenthailModel: ObservableObject {
     @Published private(set) var finishedUnseen: Set<String> = []
     @Published private(set) var holderPicks: [String: HolderPin] = [:]
     @Published private(set) var snapshotLoadedAt: Date?
-    @Published var newSessionVisible = false {
-        didSet { if newSessionVisible { paletteVisible = false } }
-    }
-    @Published var newSessionMessage: String?
     @Published var paletteVisible = false
     @Published var searchQuery = ""
     @Published private(set) var searchResults: [SessionSearchItem] = []
@@ -58,6 +54,7 @@ final class AgenthailModel: ObservableObject {
     @Published private(set) var fetchedSubagents = SubagentPageCache()
 
     private(set) var api: AgenthailAPI?
+    let interface = InterfaceStore()
     let actionKeys = ActionRetryKeys()
     private(set) var mainPane: SessionPane!
     private var panes: [SessionPane] = []
@@ -250,12 +247,16 @@ final class AgenthailModel: ObservableObject {
         detailCache[id] = detail
     }
 
+    func openNewSession(message: String? = nil) {
+        paletteVisible = false
+        mainPane.openNewSession(message: message)
+    }
+
     func receiveSharedText(_ text: String) {
-        if !newSessionVisible, let session = mainPane.selectedSession, mainPane.removedSession == nil, !session.isReadOnly, session.capabilities.send {
+        if let session = mainPane.selectedSession, mainPane.removedSession == nil, !session.isReadOnly, session.capabilities.send {
             draft(for: session.id).restore(text)
         } else {
-            newSessionMessage = text
-            newSessionVisible = true
+            openNewSession(message: text)
         }
     }
 
@@ -339,7 +340,7 @@ final class AgenthailModel: ObservableObject {
             switch decision {
             case .open(let id):
                 operationError = nil
-                await openCreatedSession(id)
+                await openCreatedSession(id, started: true)
                 return .opened
             case .submitted(let note):
                 operationError = nil
@@ -347,7 +348,7 @@ final class AgenthailModel: ObservableObject {
             case .starting:
                 return .starting("Agenthail is still starting this session. It appears in the sidebar once it starts.")
             case .unconfirmed(let id):
-                if let id { await openCreatedSession(id) }
+                if let id { await openCreatedSession(id, started: true) }
                 return .unconfirmed("This session may still be starting. It will appear in the sidebar when ready.")
             case .halted(let message):
                 return .halted(message)
@@ -365,14 +366,19 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func openCreatedSession(_ id: String, in pane: SessionPane? = nil) async {
+    func openCreatedSession(_ id: String, in pane: SessionPane? = nil, started: Bool = false) async {
         await refresh(fresh: true)
         if !knownSessions.contains(where: { AgenthailLink.matches($0, reference: id) }), let api, let detail = try? await api.sessionDetail(id: id) {
             var created = SessionState(id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias.flatMap { $0.isEmpty ? nil : $0 }, status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly, readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd)
             created.host = snapshot?.daemon.pairedHost(owning: detail.session.id)
             pin(created)
         }
-        if let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: id) }) { (pane ?? mainPane).select(session.id) }
+        guard let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: id) }) else { return }
+        if started {
+            mainPane.showStarted(session.id)
+        } else {
+            (pane ?? mainPane).select(session.id, keep: true)
+        }
     }
 
     func attachmentData(sessionID: String, attachment: SessionAttachment) async throws -> Data {
@@ -386,6 +392,14 @@ final class AgenthailModel: ObservableObject {
 
     func focusInTerminal(_ session: SessionState) {
         perform(action: "session-focus", sessionID: session.id)
+    }
+
+    /// Stops a session and resumes it, which clears a prompt nothing shows.
+    func stopAndResume(_ sessionID: String) {
+        Task {
+            guard await performNow(action: "session-lifecycle-stop", sessionID: sessionID) else { return }
+            await performNow(action: "session-lifecycle-resume", sessionID: sessionID)
+        }
     }
 
     func search(_ query: String) {
@@ -997,6 +1011,11 @@ final class AgenthailModel: ObservableObject {
     }
 
     private func receive(_ event: AgenthailEvent) {
+        if event.type == "ui.changed" {
+            lastEventID = max(lastEventID, event.id)
+            if let api { interface.load(from: api) }
+            return
+        }
         if event.type == "stream.reset" {
             lastEventID = 0
         } else {
@@ -1019,6 +1038,7 @@ final class AgenthailModel: ObservableObject {
     }
 
     private func eventStreamConnected() {
+        if let api { interface.load(from: api) }
         reconnecting = false
         clearConnectionError()
     }

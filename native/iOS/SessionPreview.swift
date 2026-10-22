@@ -18,22 +18,23 @@ struct SessionPreview: View {
             detail.claudeRuns = metadata.claudeRuns
             detail.claudeSubagents = metadata.claudeSubagents
         }
-        self.detail = detail
-        session = snapshot.sessions.first(where: { $0.id == detail.session.id }) ?? SessionState(
-            id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
-            status: detail.session.status, lastActive: nil, queueCount: 0, open: false, current: false,
-            currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly,
-            readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd)
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [SessionPreviewProtocol.self]
         let model = AgenthailIOSModel(
             api: AgenthailAPI(baseURL: URL(string: "https://preview.invalid")!, token: "public-demo", session: URLSession(configuration: config)),
             paired: ProcessInfo.processInfo.arguments.contains("--preview-voice-entry")
         )
+        model.setHostSnapshot(snapshot)
+        detail.session.id = HostCatalog.qualify("computer", detail.session.id)
+        self.detail = detail
+        session = model.snapshot?.sessions.first(where: { $0.id == detail.session.id }) ?? SessionState(
+            id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
+            status: detail.session.status, lastActive: nil, queueCount: 0, open: false, current: false,
+            currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly,
+            readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd)
         model.selectedSessionID = session.id
         model.selectedDetail = detail
         if capture == nil { model.composer = "Keep the regression check with the fix." }
-        model.snapshot = snapshot
         if ProcessInfo.processInfo.arguments.contains("--preview-delivery") {
             model.deliveryStatus[session.id] = "Queued for the agent"
         }
@@ -55,18 +56,35 @@ struct SessionPreview: View {
     /// The question a waiting preview session asks in its terminal.
     nonisolated static let previewWaiting: [String: String] = ["kind": "question", "id": "preview-question"]
 
+    /// With --preview-unreachable the session runs in the host and waits on an
+    /// approval Agenthail does not hold, and another session is stopped by a
+    /// usage limit.
+    nonisolated static var previewUnreachable: [String: Any] { ["kind": "approval", "id": "preview-approval", "answerable": false] }
+    nonisolated static let previewHostedLifecycle: [String: Bool] = ["status": true, "logs": true, "stop": true, "resume": true]
+    nonisolated static let previewUsageLimit: [String: String] = ["resetsAt": "2026-09-12T18:20:00Z"]
+
     /// With --preview-waiting the detail reports the question too; with
     /// --preview-waiting-catalog-only only the catalog does. With
     /// --preview-claude-goal the session reports a blocked goal it sets and
     /// clears but cannot pause or budget.
     nonisolated static var previewDetailJSON: String {
         let arguments = ProcessInfo.processInfo.arguments
-        guard arguments.contains("--preview-waiting") || arguments.contains("--preview-claude-goal") else { return basePreviewDetailJSON }
+        guard arguments.contains("--preview-waiting") || arguments.contains("--preview-claude-goal") || arguments.contains("--preview-unreachable") else { return basePreviewDetailJSON }
         var detail = try! JSONSerialization.jsonObject(with: Data(basePreviewDetailJSON.utf8)) as! [String: Any]
         if arguments.contains("--preview-waiting") {
             var session = detail["session"] as! [String: Any]
             session["waitingOn"] = previewWaiting
             detail["session"] = session
+        }
+        if arguments.contains("--preview-unreachable") {
+            var session = detail["session"] as! [String: Any]
+            session["waitingOn"] = previewUnreachable
+            session["runtimeKind"] = "claude-host"
+            detail["session"] = session
+            var capabilities = detail["capabilities"] as! [String: Any]
+            capabilities["respond"] = true
+            capabilities["lifecycle"] = previewHostedLifecycle
+            detail["capabilities"] = capabilities
         }
         if arguments.contains("--preview-claude-goal") {
             var capabilities = detail["capabilities"] as! [String: Any]
@@ -102,7 +120,7 @@ struct SessionPreview: View {
     }
 
     nonisolated static var snapshotJSON: String {
-        let capabilities: [String: Bool] = ["send": true, "stream": true, "reply": true, "goal": true, "goalSet": true, "goalStatus": true, "compact": true, "model": true, "interrupt": true, "steer": true]
+        let capabilities: [String: Bool] = ["send": true, "stream": true, "reply": true, "goal": true, "goalSet": true, "goalStatus": true, "compact": true, "model": true, "interrupt": true, "steer": true, "attach": true]
         let sessions: [[String: Any]] = [
             ["id": "demo", "project": ["id": "project-fieldnotes", "displayName": "fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "kind": "git"], "name": "Make the build reliable", "surface": "claude", "cwd": "/Users/demo/projects/fieldnotes", "status": "busy", "lastActive": "2026-09-12T04:03:00Z", "queueCount": 1, "open": true, "current": true, "capabilities": capabilities],
             ["id": "codex-demo", "project": ["id": "project-fieldnotes", "displayName": "fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "kind": "git"], "name": "Review the release pipeline", "surface": "codex", "cwd": "/Users/demo/projects/fieldnotes", "status": "idle", "lastActive": "2026-09-12T03:45:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities],
@@ -117,6 +135,18 @@ struct SessionPreview: View {
             waitingSessions[0]["waitingOn"] = previewWaiting
             waitingSessions[0]["runtime"] = ["launcher": "cmux", "focusable": true]
             snapshot["sessions"] = waitingSessions
+        }
+        if ProcessInfo.processInfo.arguments.contains("--preview-unreachable") {
+            var limited = snapshot["sessions"] as! [[String: Any]]
+            limited[0]["waitingOn"] = previewUnreachable
+            limited[0]["runtimeKind"] = "claude-host"
+            var hostedCapabilities: [String: Any] = capabilities
+            hostedCapabilities["respond"] = true
+            hostedCapabilities["lifecycle"] = previewHostedLifecycle
+            limited[0]["capabilities"] = hostedCapabilities
+            limited[4]["usageLimit"] = previewUsageLimit
+            limited[4]["status"] = "idle"
+            snapshot["sessions"] = limited
         }
         if ProcessInfo.processInfo.arguments.contains("--preview-attention") {
             snapshot["attention"] = [["id": 1, "sessionId": "codex-demo", "target": "Review the release pipeline", "queueId": 2, "reason": "Delivery outcome could not be confirmed", "requestedAction": "review", "createdAt": "2026-09-11T18:20:00Z"]]
@@ -141,7 +171,7 @@ struct SessionPreview: View {
     {
       "session":{"id":"demo","surface":"claude","name":"Make the build reliable","status":"busy","lastActive":"2026-09-07T12:05:00Z","cwd":"/Users/demo/projects/fieldnotes","source":"cli","transport":"local"},
       "journalSeq":2048,
-      "exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"goalSet":true,"goalStatus":true,"compact":true,"model":true,"interrupt":true,"steer":true},
+      "exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"goalSet":true,"goalStatus":true,"compact":true,"model":true,"interrupt":true,"steer":true,"attach":true},
       "readOnly":false,"readOnlyReason":"","model":"Claude Sonnet",
       "models":[{"id":"sonnet","displayName":"Claude Sonnet"},{"id":"opus","displayName":"Claude Opus"}],
       "context":{"usedTokens":86400,"contextWindow":200000,"cumulativeTokens":312000,"compacting":false,"compactionCount":1,"reclaimedTokens":42000,"inputTokens":83000,"cachedInputTokens":60000,"outputTokens":3400},

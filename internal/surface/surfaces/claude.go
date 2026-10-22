@@ -678,11 +678,13 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 	sess.Status = claudePeerStatus(record)
 	sess.WaitingOn = nil
 	sess.BackgroundTasks = nil
+	sess.UsageLimit = nil
 	if sess.HasLocal {
 		if observation, observeErr := c.Observe(ctx, sess); observeErr == nil && observation.Status != surface.StatusUnknown {
 			sess.Status = observation.Status
 			sess.WaitingOn = observation.WaitingOn
 			sess.BackgroundTasks = observation.BackgroundTasks
+			sess.UsageLimit = observation.UsageLimit
 		}
 	}
 	advanceBusyActivityFromTranscript(sess)
@@ -900,6 +902,9 @@ func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.T
 	if claudeHosted(sess) {
 		waiting = c.hostWaiting(ctx, sess)
 	}
+	if observation.UsageLimit != nil && waiting != nil && !waiting.Answerable {
+		waiting = nil
+	}
 	if waiting != nil && observation.Status != surface.StatusOffline {
 		observation.Status = surface.StatusBusy
 		observation.WaitingOn = waiting
@@ -989,6 +994,9 @@ func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surfa
 		observation.CompletedTurnID = state.completed.MessageID
 		observation.InputTurnID = state.completed.UserID
 		observation.Reply = &surface.ReplyResult{Text: state.completed.Assistant, UserText: state.completed.User, Done: true, Error: claudeTurnError(state.completed)}
+	}
+	if last.Done && last.UsageLimited && (last.UsageResetsAt.IsZero() || time.Now().Before(last.UsageResetsAt)) {
+		observation.UsageLimit = &surface.UsageLimit{ResetsAt: last.UsageResetsAt}
 	}
 	return observation, nil
 }

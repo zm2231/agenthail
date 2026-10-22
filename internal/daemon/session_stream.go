@@ -19,6 +19,9 @@ type sessionStreamEnvelope struct {
 	Seq       uint64          `json:"seq"`
 	Type      string          `json:"type"`
 	Data      json.RawMessage `json:"data"`
+	// Item is the row as a session page reads it, so a client applying the
+	// stream shows what a reload would. Rows a page leaves out carry none.
+	Item *surface.TimelineItem `json:"item,omitempty"`
 }
 
 func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +77,7 @@ func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flus
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("Connection", "keep-alive")
 	writeSSEOpen(w)
+	toItem := d.journalItemReader(sessionID)
 	watermark := window.LatestSeq
 	if watermark < after {
 		watermark = after
@@ -82,7 +86,7 @@ func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flus
 		if !d.apiEventStreamAuthorized(r) {
 			return
 		}
-		if err := writeSessionStreamEntry(w, sessionID, entry); err != nil {
+		if err := writeSessionStreamEntry(w, sessionID, entry, toItem); err != nil {
 			return
 		}
 		if entry.Seq > watermark {
@@ -106,7 +110,7 @@ func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flus
 			if !d.apiEventStreamAuthorized(r) {
 				return
 			}
-			if err := writeSessionStreamEntry(w, sessionID, entry); err != nil {
+			if err := writeSessionStreamEntry(w, sessionID, entry, toItem); err != nil {
 				return
 			}
 			watermark = entry.Seq
@@ -163,15 +167,21 @@ func (d *Daemon) sessionStreamBodyHandler(w http.ResponseWriter, r *http.Request
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"sessionId": id, "bodyRef": ref, "start": start, "end": start + len(body), "total": total, "body": string(body), "truncated": start+len(body) < total})
 }
 
-func writeSessionStreamEntry(w http.ResponseWriter, sessionID string, entry registry.SessionJournalEntry) error {
+func writeSessionStreamEntry(w http.ResponseWriter, sessionID string, entry registry.SessionJournalEntry, toItem func(sessionJournalPayload) surface.TimelineItem) error {
 	payload := entry.Payload
-	if !json.Valid(payload) {
+	var row sessionJournalPayload
+	if err := json.Unmarshal(payload, &row); err != nil {
 		return fmt.Errorf("invalid session journal payload")
 	}
-	envelope, err := json.Marshal(sessionStreamEnvelope{Stream: "session", SessionID: sessionID, Seq: entry.Seq, Type: "item", Data: payload})
+	envelope := sessionStreamEnvelope{Stream: "session", SessionID: sessionID, Seq: entry.Seq, Type: "item", Data: payload}
+	if journalRowIsItem(row) {
+		item := toItem(row)
+		envelope.Item = &item
+	}
+	encoded, err := json.Marshal(envelope)
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(w, "id: %d\nevent: item\ndata: %s\n\n", entry.Seq, envelope)
+	_, err = fmt.Fprintf(w, "id: %d\nevent: item\ndata: %s\n\n", entry.Seq, encoded)
 	return err
 }
