@@ -381,10 +381,16 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 	}
 	for _, adapter := range d.Surfaces {
 		priorStamps := map[string]catalogLiveSession{}
+		d.catalogLiveMu.Lock()
 		for id, live := range d.catalogLive {
 			if live.adapter.Name() == adapter.Name() {
-				priorStamps[id] = catalogLiveSession{files: live.files, stamps: catalogFileStamps(live.files)}
+				priorStamps[id] = catalogLiveSession{files: live.files}
 			}
+		}
+		d.catalogLiveMu.Unlock()
+		for id, prior := range priorStamps {
+			prior.stamps = catalogFileStamps(prior.files)
+			priorStamps[id] = prior
 		}
 		operationCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 		complete := true
@@ -438,12 +444,10 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			identityCancel()
 			open := openSessions[session.ID]
 			alias := aliasByID[session.ID]
-			if !d.publishCatalogSession(ctx, adapter, session, identity, alias, counts[session.ID], open, config, view, observedAt) {
+			if !d.publishCatalogSession(ctx, adapter, session, identity, alias, counts[session.ID], open, config, view, observedAt) || source == nil {
+				d.catalogLiveMu.Lock()
 				delete(d.catalogLive, session.ID)
-				continue
-			}
-			if source == nil {
-				delete(d.catalogLive, session.ID)
+				d.catalogLiveMu.Unlock()
 				continue
 			}
 			live := &catalogLiveSession{adapter: adapter, session: session, identity: identity, alias: alias, open: open, files: source.LocalStatusFiles(session)}
@@ -452,7 +456,9 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			if prior, found := priorStamps[session.ID]; found && equalStrings(prior.files, live.files) {
 				live.stamps = prior.stamps
 			}
+			d.catalogLiveMu.Lock()
 			d.catalogLive[session.ID] = live
+			d.catalogLiveMu.Unlock()
 		}
 		d.forgetCatalogLive(adapter.Name(), seen)
 		if err := d.catalog.recordDiscovery(adapter.Name(), seen, observedAt, complete); err != nil {
@@ -467,8 +473,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 // publishUnarchivedProjects republishes the other rows of a project that a
 // session's activity unarchived during a catalog pass.
 func (d *Daemon) publishUnarchivedProjects() {
-	if d.catalogProjectUnarchived {
-		d.catalogProjectUnarchived = false
+	if d.catalogProjectUnarchived.CompareAndSwap(true, false) {
 		d.publishCatalogPresence()
 	}
 }
@@ -476,6 +481,8 @@ func (d *Daemon) publishUnarchivedProjects() {
 // forgetCatalogLive drops a surface's live sessions that are not in keep, so
 // the status pass follows only sessions the last successful pass listed.
 func (d *Daemon) forgetCatalogLive(kind surface.SurfaceKind, keep map[string]struct{}) {
+	d.catalogLiveMu.Lock()
+	defer d.catalogLiveMu.Unlock()
 	for id, live := range d.catalogLive {
 		if live.adapter.Name() != kind {
 			continue
@@ -501,18 +508,45 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 	var config *DashboardConfig
 	var counts map[string]int
 	var view catalogViewState
+	type followed struct {
+		id      string
+		live    *catalogLiveSession
+		session surface.Session
+		stamps  []string
+	}
+	d.catalogLiveMu.Lock()
+	sessions := make([]followed, 0, len(d.catalogLive))
 	for id, live := range d.catalogLive {
+		sessions = append(sessions, followed{id: id, live: live, session: live.session, stamps: live.stamps})
+	}
+	d.catalogLiveMu.Unlock()
+	// current applies change to a followed session unless discovery replaced
+	// or dropped it meanwhile; discovery's entry then carries the stamps its
+	// listing was read against, so the next pass rereads anything newer.
+	current := func(entry followed, change func(*catalogLiveSession)) bool {
+		d.catalogLiveMu.Lock()
+		defer d.catalogLiveMu.Unlock()
+		if d.catalogLive[entry.id] != entry.live {
+			return false
+		}
+		change(entry.live)
+		return true
+	}
+	for _, entry := range sessions {
+		live := entry.live
 		stamps := catalogFileStamps(live.files)
-		if live.stamps != nil && equalStrings(live.stamps, stamps) {
+		if entry.stamps != nil && equalStrings(entry.stamps, stamps) {
 			continue
 		}
-		live.stamps = stamps
+		if !current(entry, func(live *catalogLiveSession) { live.stamps = stamps }) {
+			continue
+		}
 		source, ok := live.adapter.(surface.LocalStatusSource)
 		if !ok {
 			continue
 		}
 		statusCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		refreshed, err := source.LocalStatus(statusCtx, live.session)
+		refreshed, err := source.LocalStatus(statusCtx, entry.session)
 		cancel()
 		if err != nil {
 			// The files changed but no longer describe this session, as when
@@ -521,7 +555,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 			d.requestCatalogDiscovery()
 			continue
 		}
-		if refreshed.Status == live.session.Status && surface.SameWaiting(refreshed.WaitingOn, live.session.WaitingOn) && surface.SameBackground(refreshed.BackgroundTasks, live.session.BackgroundTasks) && refreshed.PendingModel == live.session.PendingModel {
+		if refreshed.Status == entry.session.Status && surface.SameWaiting(refreshed.WaitingOn, entry.session.WaitingOn) && surface.SameBackground(refreshed.BackgroundTasks, entry.session.BackgroundTasks) && refreshed.PendingModel == entry.session.PendingModel {
 			continue
 		}
 		if config == nil {
@@ -540,11 +574,14 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 				return
 			}
 		}
-		if d.publishCatalogSession(ctx, live.adapter, refreshed, live.identity, live.alias, counts[id], live.open, *config, view, time.Now().UTC()) {
-			live.session = refreshed
+		if !current(entry, func(*catalogLiveSession) {}) {
+			continue
+		}
+		if d.publishCatalogSession(ctx, live.adapter, refreshed, live.identity, live.alias, counts[entry.id], live.open, *config, view, time.Now().UTC()) {
+			current(entry, func(live *catalogLiveSession) { live.session = refreshed })
 			published = true
 		} else {
-			live.stamps = nil
+			current(entry, func(live *catalogLiveSession) { live.stamps = nil })
 		}
 	}
 }
@@ -571,7 +608,7 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 		row.HiddenSubagents, row.Listed = stored.HiddenSubagents, stored.Listed
 		row.Subagents = addSubagentRollups(row.ObservedSubagents, stored.HiddenSubagents)
 		if d.settleArchiveActivity([]dashboardSession{row}, view) {
-			d.catalogProjectUnarchived = true
+			d.catalogProjectUnarchived.Store(true)
 		}
 		applyCatalogView(&row, view)
 		payload, err := json.Marshal(map[string]any{"session": row})

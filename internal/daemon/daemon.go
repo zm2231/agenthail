@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -65,14 +66,18 @@ type Daemon struct {
 	notifyDesktop func(title, message, sessionID, identifier, requestID string, actions []surface.RequestAction) error
 	// withdrawDesktop removes a desktop notification; it is
 	// WithdrawNotification outside tests.
-	withdrawDesktop   func(identifier string) error
-	background        *backgroundWork
-	events            *eventHub
-	catalog           *catalogHub
+	withdrawDesktop func(identifier string) error
+	background      *backgroundWork
+	events          *eventHub
+	catalog         *catalogHub
+	// catalogLiveMu guards catalogLive, which discovery replaces and the
+	// status pass reads from its own goroutine.
+	catalogLiveMu     sync.Mutex
 	catalogLive       map[string]*catalogLiveSession
 	catalogIdentities *catalogIdentityCache
-	// catalogProjectUnarchived is set and cleared by the catalog goroutine.
-	catalogProjectUnarchived bool
+	// catalogProjectUnarchived is set by either catalog goroutine when a
+	// session's activity unarchived its project.
+	catalogProjectUnarchived atomic.Bool
 	sources                  *sessionSourceManager
 	sourceHoldMu             sync.Mutex
 	surfaceHealthMu          sync.Mutex
@@ -281,13 +286,18 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 }
 
-// runCatalog owns catalog discovery and the status pass. It runs apart from
-// relay observation so a slow relay scan never delays a status change.
+// runCatalog owns catalog discovery and the status pass. Each runs on its
+// own goroutine, apart from relay observation, so neither a slow relay scan
+// nor a slow discovery pass delays a status change.
 func (d *Daemon) runCatalog(ctx context.Context) {
+	statusDone := make(chan struct{})
+	go func() {
+		defer close(statusDone)
+		d.runCatalogStatus(ctx)
+	}()
+	defer func() { <-statusDone }()
 	discoveryTicker := time.NewTicker(catalogDiscoveryInterval)
 	defer discoveryTicker.Stop()
-	statusTicker := time.NewTicker(catalogStatusInterval)
-	defer statusTicker.Stop()
 	d.discoverCatalog(ctx)
 	for {
 		select {
@@ -297,6 +307,17 @@ func (d *Daemon) runCatalog(ctx context.Context) {
 			d.discoverCatalog(ctx)
 		case <-d.catalogNudge:
 			d.discoverCatalog(ctx)
+		}
+	}
+}
+
+func (d *Daemon) runCatalogStatus(ctx context.Context) {
+	statusTicker := time.NewTicker(catalogStatusInterval)
+	defer statusTicker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
 		case <-statusTicker.C:
 			d.refreshCatalogStatus(ctx)
 		}

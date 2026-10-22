@@ -261,6 +261,61 @@ func TestRunCatalogPublishesStatusWithinTwoSeconds(t *testing.T) {
 	}
 }
 
+func TestStatusPassPublishesWhileDiscoveryIsBlocked(t *testing.T) {
+	d, store, source := localStatusFixture(t)
+	var blocking atomic.Bool
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	source.duringList = func() {
+		if !blocking.Load() {
+			return
+		}
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.runCatalog(ctx)
+	}()
+	defer func() {
+		close(release)
+		cancel()
+		<-done
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(catalogStatusEvents(t, store, 0, "from")) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("initial discovery did not publish")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(catalogStatusInterval + 100*time.Millisecond)
+	blocking.Store(true)
+	d.requestCatalogDiscovery()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("discovery did not start")
+	}
+	after := latestCatalogSeq(t, store)
+	source.writeStatus(t, "from", surface.StatusBusy)
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		if statuses := catalogStatusEvents(t, store, after, "from"); len(statuses) > 0 && statuses[len(statuses)-1] == string(surface.StatusBusy) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("busy status did not publish within 2s while discovery was blocked")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 var (
 	commitHookOnce sync.Once
 	commitCounters sync.Map
