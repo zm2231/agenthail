@@ -263,7 +263,7 @@ func TestLocalRegistrationRefusesHostOwnedSession(t *testing.T) {
 func TestLocalRegistrationTakesASessionItsHostStoppedServing(t *testing.T) {
 	r := openTestRegistry(t)
 	hostID := "h0123456789ab"
-	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "server", Endpoint: "https://server.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	entity := hostID + "::remote-thread"

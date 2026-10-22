@@ -76,7 +76,7 @@ func TestALiveClaudeConversationKeepsItsHistoryAndTasksAcrossAMove(t *testing.T)
 	t.Logf("source: %s", awaitAssistantText(t, source.host.Home, session.ID, "STORED-7Q"))
 	t.Logf("source tasks/%s: %v", session.ID, filesUnder(t, filepath.Join(source.host.Home, ".claude", "tasks", session.ID)))
 
-	result, err := source.daemon.moveSession(ctx, sessionMoveRequest{SessionID: session.ID, Host: "forge", WaitSeconds: 180})
+	result, err := source.daemon.moveSession(ctx, sessionMoveRequest{SessionID: session.ID, Host: "server", WaitSeconds: 180})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,8 +85,8 @@ func TestALiveClaudeConversationKeepsItsHistoryAndTasksAcrossAMove(t *testing.T)
 	}
 	moved := hostedSession(t, target.claude, session.ID)
 	clis = append(clis, moved.PID)
-	if moved.Cwd != checkout {
-		t.Fatalf("the target's Claude host runs the session in %s, want %s", moved.Cwd, checkout)
+	if resolved, err := filepath.EvalSymlinks(checkout); err != nil || moved.Cwd != resolved {
+		t.Fatalf("the target's Claude host runs the session in %s, want %s (%v)", moved.Cwd, resolved, err)
 	}
 	if _, err := target.reg.Session(session.ID); err != nil {
 		t.Fatalf("the target does not list the session: %v", err)

@@ -95,7 +95,7 @@ func pairMoveNodes(t *testing.T, source, target *moveNode) (*moveNode, *moveNode
 	}
 	target.serve(t, nil)
 	source.start(t, testRoots(target.server))
-	record := source.pair(t, target.federationNode, "forge")
+	record := source.pair(t, target.federationNode, "server")
 	awaitFederation(t, "the target connected", func() bool { return source.daemon.hostConnected(record.ID) })
 	if head := runGit(t, checkout, "rev-parse", "HEAD"); head != commit {
 		t.Fatalf("target checkout at %s, want %s", head, commit)
@@ -142,7 +142,7 @@ func TestAnIdleClaudeSessionMovesToAPairedHostAndRunsThere(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "forge"})
+	result, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "server"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,13 +167,14 @@ func TestAnIdleClaudeSessionMovesToAPairedHostAndRunsThere(t *testing.T) {
 	if owner, _ := target.reg.SessionHost(session.ID); owner != "" || moved.RuntimeKind != surface.RuntimeClaudeHost || moved.PID <= 0 {
 		t.Fatalf("target row=%+v owner=%q", moved, owner)
 	}
-	if moved.Cwd != checkout {
-		t.Fatalf("the session runs in %s on the target, want its checkout %s", moved.Cwd, checkout)
+	resolved, err := filepath.EvalSymlinks(checkout)
+	if err != nil || moved.Cwd != resolved {
+		t.Fatalf("the session runs in %s on the target, want its checkout %s (%v)", moved.Cwd, resolved, err)
 	}
 	if alias, _ := target.reg.LookupAlias("builder"); alias != session.ID {
 		t.Fatalf("target alias=%q", alias)
 	}
-	placed := filepath.Join(target.host.Home, ".claude", "projects", strings.NewReplacer("/", "-", ".", "-").Replace(checkout), session.ID+".jsonl")
+	placed := filepath.Join(target.host.Home, ".claude", "projects", strings.NewReplacer("/", "-", ".", "-").Replace(resolved), session.ID+".jsonl")
 	data, err := os.ReadFile(placed)
 	if err != nil || !strings.HasPrefix(string(data), string(before)) {
 		t.Fatalf("the target's transcript does not continue the source's: err=%v", err)
@@ -223,7 +224,7 @@ func TestAMoveTheTargetRefusesLeavesTheSessionWhereItWas(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "forge"})
+	_, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "server"})
 	var refused MoveRefusedError
 	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "no checkout") {
 		t.Fatalf("err=%v", err)
@@ -257,7 +258,7 @@ func TestAMoveWhoseTransferIsNotAnsweredStaysUnresolvedUntilTheTargetAnswers(t *
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "forge"})
+		_, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "server"})
 		done <- err
 	}()
 	awaitFederation(t, "the transfer to reach the target", func() bool { return hold.waiting.Load() > 0 })
@@ -396,7 +397,7 @@ func TestAMoveWhoseResumeTheTargetRefusesLeavesNoCopyThere(t *testing.T) {
 	runGit(t, checkout, "commit", "--quiet", "-am", "elsewhere")
 	target.host.Refuse(t, session.ID, "not logged in")
 
-	result, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "forge"})
+	result, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "server"})
 	var refused MoveRefusedError
 	if !errors.As(err, &refused) {
 		t.Fatalf("err=%v", err)

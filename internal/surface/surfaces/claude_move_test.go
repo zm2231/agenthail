@@ -295,8 +295,12 @@ func TestPreparingAMoveClosesTheHostSessionAndDeclaresItsTranscript(t *testing.T
 		t.Fatal(err)
 	}
 	defer out.Release()
-	if out.Stopped != "host" || out.PermissionMode != "acceptEdits" || out.Cwd != host.Cwd {
-		t.Fatalf("out=%+v", out)
+	cwd, err := filepath.EvalSymlinks(host.Cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Stopped != "host" || out.PermissionMode != "acceptEdits" || out.Cwd != cwd {
+		t.Fatalf("out=%+v, want cwd %s", out, cwd)
 	}
 	roots, _ := surface.ClaudeConfigRoots(host.Home)
 	paths := c.transcripts.pass(roots)(session.ID)

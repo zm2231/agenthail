@@ -109,11 +109,11 @@ func TestALargeTranscriptMovesBetweenTwoDaemonProcesses(t *testing.T) {
 		roots := x509.NewCertPool()
 		roots.AddCert(certificate)
 		node.start(t, roots)
-		response := node.request(t, "POST", "/api/v1/hosts", map[string]string{"pairingUrl": target["invite"], "address": target["address"], "name": "forge"})
+		response := node.request(t, "POST", "/api/v1/hosts", map[string]string{"pairingUrl": target["invite"], "address": target["address"], "name": "server"})
 		if response.Code != 201 {
 			t.Fatalf("pair status=%d body=%s", response.Code, response.Body.String())
 		}
-		record, err := node.reg.Host("forge")
+		record, err := node.reg.Host("server")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,7 +123,7 @@ func TestALargeTranscriptMovesBetweenTwoDaemonProcesses(t *testing.T) {
 		padTranscript(t, transcript, session.ID, size)
 		reportPeakRSS(t, "source before the move")
 		started := time.Now()
-		result, err := node.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "forge", WaitSeconds: 60})
+		result, err := node.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "server", WaitSeconds: 60})
 		if err != nil {
 			t.Fatal(err)
 		}

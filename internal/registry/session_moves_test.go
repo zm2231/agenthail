@@ -15,12 +15,12 @@ const (
 	moveTarget       = "h0123456789ab"
 )
 
-var testPlaceholder = MovePlaceholder{EntityID: moveTarget + "::" + moveConversation, Projection: json.RawMessage(`{"id":"` + moveTarget + "::" + moveConversation + `","surface":"claude"}`), UnavailableReason: "moved to forge"}
+var testPlaceholder = MovePlaceholder{EntityID: moveTarget + "::" + moveConversation, Projection: json.RawMessage(`{"id":"` + moveTarget + "::" + moveConversation + `","surface":"claude"}`), UnavailableReason: "moved to server"}
 
 func moveRegistry(t *testing.T) *Registry {
 	t.Helper()
 	r := openTestRegistry(t)
-	if _, err := r.AddHost(PairedHost{ID: moveTarget, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+	if _, err := r.AddHost(PairedHost{ID: moveTarget, Name: "server", Endpoint: "https://server.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Name: "moving", PID: 41, Transcript: "/tmp/t.jsonl", HasLocal: true}
@@ -89,7 +89,7 @@ func TestAMoveOutHoldsItsConversationsQueueAndHandsItToTheTarget(t *testing.T) {
 		t.Fatalf("a local registration took back a moved session the target serves: %v", err)
 	}
 	rows, err := r.HostCatalogRows(moveTarget)
-	if err != nil || len(rows) != 1 || rows[0].Session.ID != moveConversation || rows[0].UnavailableReason != "moved to forge" {
+	if err != nil || len(rows) != 1 || rows[0].Session.ID != moveConversation || rows[0].UnavailableReason != "moved to server" {
 		t.Fatalf("the moved row is not mirrored as the target's: %+v err=%v", rows, err)
 	}
 	if _, _, err := r.ApplyHostCatalogRow(moveTarget, HostCatalogRow{Session: surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Name: "moving"}, EntityID: testPlaceholder.EntityID, Projection: json.RawMessage(`{"id":"` + testPlaceholder.EntityID + `","surface":"claude","name":"moving"}`)}); err != nil {
@@ -120,7 +120,7 @@ func TestAFailedMoveOutReleasesItsConversation(t *testing.T) {
 func TestAMoveInIsPreparedOnceAbortedForGoodAndTakesTheSourcesRow(t *testing.T) {
 	r := openTestRegistry(t)
 	source := "h00000000000a"
-	if _, err := r.AddHost(PairedHost{ID: source, Name: "mac", Endpoint: "https://mac.example.ts.net:7412", Address: "100.64.0.3", Token: "ahd_secret"}); err != nil {
+	if _, err := r.AddHost(PairedHost{ID: source, Name: "laptop", Endpoint: "https://laptop.example.ts.net:7412", Address: "100.64.0.3", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	entity := source + "::" + moveConversation
@@ -148,7 +148,7 @@ func TestAMoveInIsPreparedOnceAbortedForGoodAndTakesTheSourcesRow(t *testing.T) 
 	if _, err := r.PrepareMoveIn("move-unseen", moveConversation, source, []byte(`{"a":1}`)); err == nil {
 		t.Fatal("a move aborted before it arrived was prepared")
 	}
-	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: 77, Transcript: "/persist/claude/projects/x/t.jsonl", HasLocal: true}
+	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: 77, Transcript: "/home/user/.claude/projects/x/t.jsonl", HasLocal: true}
 	if _, err := r.TakeMovedSession("move-2", session, "builder"); !errors.As(err, &MoveConflictError{}) {
 		t.Fatalf("a move that never received its files took the session: %v", err)
 	}

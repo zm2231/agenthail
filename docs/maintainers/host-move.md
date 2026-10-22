@@ -130,23 +130,27 @@ A target refuses to abort a move whose conversation already runs there
 (`move_running`), so a move whose resume outcome was unknown is finished, not
 undone.
 
-## Forge and other Linux hosts
+## What the target machine needs
 
-- The target places the conversation in its primary Claude config root, the
-  one the daemon's `CLAUDE_CONFIG_DIR` names (`/persist/claude` on forge), and
-  launches Claude without naming that root.
-- A proxied install (`ANTHROPIC_BASE_URL` and a token in the root's
-  `settings.json`, no login) needs nothing from the move. Every process on
-  that root goes through the proxy.
-- A host that cannot push to GitHub can still take a move as long as it can
-  fetch the commit. The source requires the commit to be on a remote branch.
-- A conversation moved to a host without Remote Control loses its claude.ai
-  listing, as every session in the Claude host does.
-- The conversation's tasks (`tasks/<id>/`) arrive with it, and a turn on the
-  target lists them with TaskList. The Claude host turns on Claude's task
-  tools for every session it runs.
+- **A checkout of the repository**, added with `agenthail projects add` or
+  holding one of its sessions, that can fetch the commit from its git remote.
+  It does not need to push.
+- **Its Claude host.** The target resumes the conversation in the Claude host
+  its daemon runs.
+- **Its primary Claude config root**, the one its daemon's
+  `CLAUDE_CONFIG_DIR` names, `~/.claude` when unset. The conversation is
+  placed there and Claude is launched without naming a root.
+- **Its own Claude sign-in.** The move carries no account. The moved session
+  uses whatever login or API configuration the target's root has, like any
+  session started there.
+
+The conversation's tasks (`tasks/<id>/`) arrive with it, and a turn on the
+target lists them with TaskList, because the Claude host turns on Claude's
+task tools for every session it runs. A target without Claude Remote Control
+runs the moved session without a claude.ai listing, as it runs all its
+sessions.
 
 ## Not in this slice
 
-A working tree with uncommitted changes is refused. Moving one, Mac and
-iPhone controls, and Codex sessions come later.
+A working tree with uncommitted changes is refused. Moving one, move
+controls in the Mac and iPhone apps, and Codex sessions come later.
