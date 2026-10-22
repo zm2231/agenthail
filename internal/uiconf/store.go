@@ -108,6 +108,9 @@ func (s *Store) read() (State, error) {
 // Write replaces ui.conf with text and commits it. An unchanged file makes
 // no commit.
 func (s *Store) Write(text, author, message string) (State, bool, error) {
+	if problems := Parse(text).Problems; len(problems) > 0 {
+		return State{}, false, &ProblemsError{Problems: problems}
+	}
 	unlock, err := s.lock()
 	if err != nil {
 		return State{}, false, err

@@ -41,6 +41,18 @@ func TestUIAPIReadsChangesAndUndoes(t *testing.T) {
 		t.Fatalf("bad set: status=%d %+v", code, refused)
 	}
 
+	var problems struct {
+		Error    struct{ Code string } `json:"error"`
+		Problems []uiconf.Problem      `json:"problems"`
+	}
+	if code := api.do(http.MethodPost, "/api/v1/ui", `{"action":"write","text":"version = 1\ntheme = sepia\n"}`, &problems); code != http.StatusUnprocessableEntity || problems.Error.Code != "ui_problems" || len(problems.Problems) != 1 || problems.Problems[0].Line != 2 {
+		t.Fatalf("bad write: status=%d %+v", code, problems)
+	}
+	var unchanged uiView
+	if api.do(http.MethodGet, "/api/v1/ui?class=mac", "", &unchanged); unchanged.Rev != first || strings.Contains(unchanged.Text, "sepia") {
+		t.Fatalf("refused write changed ui.conf: rev %s -> %s", first, unchanged.Rev)
+	}
+
 	if code := api.do(http.MethodPost, "/api/v1/ui?class=phone", `{"action":"set","set":["theme = dark","texture@phone = grain"],"message":"Dark phone with grain"}`, &view); code != http.StatusOK {
 		t.Fatalf("set status=%d", code)
 	}

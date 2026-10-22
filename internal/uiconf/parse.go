@@ -13,6 +13,21 @@ type Problem struct {
 	Message string `json:"message"`
 }
 
+// ProblemsError refuses a whole file that has problems, so a write never
+// commits a file the apps would have to skip lines of.
+type ProblemsError struct {
+	Problems []Problem
+}
+
+func (e *ProblemsError) Error() string {
+	lines := make([]string, 0, len(e.Problems)+1)
+	lines = append(lines, "ui.conf not written; fix these lines:")
+	for _, p := range e.Problems {
+		lines = append(lines, p.String())
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (p Problem) String() string {
 	return fmt.Sprintf("ui.conf:%d: %s", p.Line, p.Message)
 }

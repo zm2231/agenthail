@@ -67,6 +67,35 @@ struct BackdropTest {
         return sum / count
     }
 
+    /// One white device pixel in every other point, on black, at scale 2:
+    /// neighbouring points need very different opacities, so any pixel
+    /// interpolated from too low a neighbour shows up.
+    static func spikes() -> Int {
+        let size = CGSize(width: 120, height: 80), scale: CGFloat = 2
+        let w = Int(size.width * scale), h = Int(size.height * scale)
+        let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let pixels = ctx.data!.bindMemory(to: UInt8.self, capacity: w * h * 4)
+        for y in 0..<h {
+            for x in 0..<w {
+                let white: UInt8 = (x % 4 == 1 && y % 4 == 1) ? 255 : 0
+                let i = (y * w + x) * 4
+                pixels[i] = white; pixels[i + 1] = white; pixels[i + 2] = white; pixels[i + 3] = 255
+            }
+        }
+        let roles = [0xECECEE, 0x8E8E93].map(rgb)
+        let ground = rgb(0x17181A)
+        let pane = CGRect(x: 4, y: 4, width: 50, height: 72), text = CGRect(x: 70, y: 30, width: 40, height: 16)
+        let spec = BackdropSpec(wallpaper: .image(WallpaperImage(id: "spikes", image: ctx.makeImage()!)), fit: "center", texture: "none", blur: 0, paneTint: ground, ground: ground, roles: roles, size: size, scale: scale,
+                                panes: [.init(id: "pane", rect: pane, radius: 0, minimum: 0, strength: 1)], texts: [text])
+        guard let out = BackdropRenderer.render(spec) else { print("FAIL: spikes render returned nil"); return 1 }
+        let result = worst(out.image, scale: scale, in: [pane, text], roles: roles)
+        if result < 4.5 {
+            print("FAIL: one-pixel spikes at scale 2 read at \(result):1")
+            return 1
+        }
+        return 0
+    }
+
     static func main() {
         let size = CGSize(width: 420, height: 260)
         let scale: CGFloat = 2
@@ -117,6 +146,7 @@ struct BackdropTest {
                 }
             }
         }
+        failures += spikes()
         if failures > 0 { exit(1) }
         print("backdrop: every text role reads at 4.5:1 or better on the rendered pixels")
     }

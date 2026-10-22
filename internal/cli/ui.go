@@ -123,10 +123,6 @@ func (a *App) cmdUI(args []string) error {
 		if err != nil {
 			return err
 		}
-		if problems := uiconf.Parse(text).Problems; len(problems) > 0 {
-			_ = a.printUIProblems(problems, "")
-			return errors.New("ui.conf not written: fix the lines above, or check them with agenthail ui check")
-		}
 		message := parsed.message
 		if message == "" {
 			message = "Replace ui.conf"

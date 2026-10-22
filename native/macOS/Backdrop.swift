@@ -44,6 +44,7 @@ struct BackdropSpec: Equatable, Sendable {
         var radius: CGFloat
         var minimum: Float
         var strength: Float
+        var sharp = false
     }
 
     var wallpaper: Wallpaper
@@ -99,10 +100,11 @@ enum BackdropRenderer {
         let paneMask = CIImage(cgImage: mask(spec.panes, scale: spec.scale, width: w, height: h))
         var paneBase = sharp
         if !transparent {
-            for strength in Set(spec.panes.map(\.strength)).sorted() {
+            let glass = spec.panes.filter { !$0.sharp }
+            for strength in Set(glass.map(\.strength)).sorted() {
                 let plain = CIImage(cgImage: base(spec, wallpaper: wallpaper, strength: strength, texture: false, width: w, height: h))
                 let blurred = spec.blur > 0 ? plain.clampedToExtent().applyingGaussianBlur(sigma: Double(spec.blur * spec.scale / 3)).cropped(to: full) : plain
-                let these = CIImage(cgImage: mask(spec.panes.filter { $0.strength == strength }, scale: spec.scale, width: w, height: h))
+                let these = CIImage(cgImage: mask(glass.filter { $0.strength == strength }, scale: spec.scale, width: w, height: h))
                 paneBase = blurred.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: paneBase, kCIInputMaskImageKey: these])
             }
         }
@@ -131,7 +133,7 @@ enum BackdropRenderer {
         let texts = spec.texts.map { rect(outward: $0) }
         let openNeed = ScrimField.needs(image: analysis, tint: scrimTint, texts: texts, polarity: spec.polarity, boundary: boundary)
         let openAlpha = texts.isEmpty ? [Float](repeating: 0, count: pw * ph)
-            : ScrimField.openOpacity(need: openNeed, width: pw, height: ph, texts: texts, feather: spec.feather, minimum: 0)
+            : ScrimField.openOpacity(need: openNeed, width: pw, height: ph, feather: spec.feather, minimum: 0)
 
         var paneAlpha = [Float](repeating: 0, count: pw * ph)
         var maxima: [String: Float] = [:]
@@ -156,6 +158,10 @@ enum BackdropRenderer {
             maxima[pane.id] = alpha.max() ?? pane.minimum
         }
 
+        // A pixel's colour is interpolated from the points around it, so each
+        // point must already cover its neighbours' floors.
+        paneAlpha = ScrimField.maxFilter(paneAlpha, width: pw, height: ph, radius: 1)
+        let openShown = ScrimField.maxFilter(openAlpha, width: pw, height: ph, radius: 1)
         let up = CGAffineTransform(scaleX: CGFloat(w) / CGFloat(pw), y: CGFloat(h) / CGFloat(ph))
         let paneTintImage = CIImage(color: CIColor(red: CGFloat(paneTint.0), green: CGFloat(paneTint.1), blue: CGFloat(paneTint.2), colorSpace: srgb)!).cropped(to: full)
         let panes = paneTintImage.applyingFilter("CIBlendWithMask", parameters: [
@@ -164,7 +170,7 @@ enum BackdropRenderer {
         ])
         let open = color(scrimTint).samplingLinear().transformed(by: up).cropped(to: full).applyingFilter("CIBlendWithMask", parameters: [
             kCIInputBackgroundImageKey: sharp,
-            kCIInputMaskImageKey: scalar(openAlpha, width: pw, height: ph).samplingLinear().transformed(by: up).cropped(to: full),
+            kCIInputMaskImageKey: scalar(openShown, width: pw, height: ph).samplingLinear().transformed(by: up).cropped(to: full),
         ])
         let shown = panes.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: open, kCIInputMaskImageKey: paneMask])
         guard let image = context.createCGImage(shown, from: full, format: .RGBA8, colorSpace: srgb) else { return nil }

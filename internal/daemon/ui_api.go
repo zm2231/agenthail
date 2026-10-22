@@ -112,6 +112,11 @@ func (d *Daemon) apiUIHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		state, entry, err := applyUIChange(store, uiconf.Person, request)
+		var problems *uiconf.ProblemsError
+		if errors.As(err, &problems) {
+			writeDashboardJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": map[string]string{"code": "ui_problems", "message": err.Error()}, "problems": problems.Problems})
+			return
+		}
 		if err != nil {
 			writeAPIError(w, http.StatusUnprocessableEntity, "ui_change_refused", err.Error())
 			return

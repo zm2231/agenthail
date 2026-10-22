@@ -61,7 +61,7 @@ struct ScrimFieldTest {
                 precondition(paneWorst >= 4.5, "pane \(polarity) \(mode): \(paneWorst)")
 
                 let openNeed = ScrimField.needs(image: image, tint: tint, texts: open, polarity: polarity, boundary: boundary)
-                let openAlpha = ScrimField.openOpacity(need: openNeed, width: width, height: height, texts: open, feather: 240, minimum: 0)
+                let openAlpha = ScrimField.openOpacity(need: openNeed, width: width, height: height, feather: 240, minimum: 0)
                 let openShown = ScrimField.composite(image, tint: tint, alpha: openAlpha)
                 let openWorst = worst(openShown, texts: open, roles: roleSet)
                 precondition(openWorst >= 4.5, "open \(polarity) \(mode): \(openWorst)")

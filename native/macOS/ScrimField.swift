@@ -178,9 +178,10 @@ enum ScrimField {
         return gaussian(grown, width: width, height: height, sigma: Float(r) / 3, radius: r).map { max($0, minimum) }
     }
 
-    /// Opacity for open areas: the floor holds over the padded text, and
-    /// outside it the scrim fades with distance as exp(-(d/feather)^2).
-    static func openOpacity(need: [Float], width: Int, height: Int, texts: [Rect], feather: Float, minimum: Float) -> [Float] {
+    /// Opacity for open areas: the floor, padded around the text, spread
+    /// outwards as max over points of floor × exp(-(d/feather)^2). The
+    /// spread is continuous, has no box edge, and never lowers any point.
+    static func openOpacity(need: [Float], width: Int, height: Int, feather: Float, minimum: Float) -> [Float] {
         let cell = 4
         let gw = max((width + cell - 1) / cell, 1), gh = max((height + cell - 1) / cell, 1)
         var small = [Float](repeating: 0, count: gw * gh)
@@ -190,39 +191,34 @@ enum ScrimField {
                 small[i] = max(small[i], need[y * width + x])
             }
         }
-        var inside = [Bool](repeating: false, count: gw * gh)
-        for text in texts {
-            let x0 = max((text.x - pad) / cell, 0), y0 = max((text.y - pad) / cell, 0)
-            let x1 = min((text.x + text.width + pad + cell - 1) / cell, gw), y1 = min((text.y + text.height + pad + cell - 1) / cell, gh)
-            guard x0 < x1, y0 < y1 else { continue }
-            for y in y0..<y1 { for x in x0..<x1 { inside[y * gw + x] = true } }
-        }
-        let core = maxFilter(small, width: gw, height: gh, radius: 2)
-        var edges: [(Int, Int, Float)] = []
-        for y in 0..<gh {
-            for x in 0..<gw where inside[y * gw + x] {
-                let border = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)].contains { nx, ny in
-                    nx < 0 || ny < 0 || nx >= gw || ny >= gh || !inside[ny * gw + nx]
-                }
-                if border { edges.append((x, y, core[y * gw + x])) }
-            }
-        }
-        let f = max(feather / Float(cell), 1)
-        var field = [Float](repeating: 0, count: gw * gh)
-        for y in 0..<gh {
-            for x in 0..<gw {
-                let i = y * gw + x
-                if inside[i] { field[i] = core[i]; continue }
-                var best: Float = .infinity, value: Float = 0
-                for (ex, ey, v) in edges {
-                    let d = Float((ex - x) * (ex - x) + (ey - y) * (ey - y))
-                    if d < best { best = d; value = v }
-                }
-                if best.isFinite { field[i] = value * expf(-best / (f * f)) }
-            }
-        }
+        let core = maxFilter(small, width: gw, height: gh, radius: (pad + cell - 1) / cell)
+        let field = maxGaussian(core, width: gw, height: gh, scale: max(feather / Float(cell), 1))
         let full: [Float] = upsample(field, width: gw, height: gh, channels: 1, to: width, height, as: [Float].self)
         return full.map { max($0, minimum) }
+    }
+
+    /// max over neighbours of value × exp(-(d/scale)^2), in two passes; the
+    /// kernel is a product of one per axis, so the separation is exact.
+    static func maxGaussian(_ values: [Float], width: Int, height: Int, scale: Float) -> [Float] {
+        let radius = Int((3 * scale).rounded(.up))
+        let kernel = (0...radius).map { expf(-Float($0 * $0) / (scale * scale)) }
+        func pass(_ input: [Float], horizontal: Bool) -> [Float] {
+            var output = [Float](repeating: 0, count: input.count)
+            let (lines, length) = horizontal ? (height, width) : (width, height)
+            for line in 0..<lines {
+                func at(_ p: Int) -> Int { horizontal ? line * width + p : p * width + line }
+                for p in 0..<length {
+                    var best: Float = 0
+                    for q in max(p - radius, 0)...min(p + radius, length - 1) {
+                        let v = input[at(q)]
+                        if v > best { best = max(best, v * kernel[abs(q - p)]) }
+                    }
+                    output[at(p)] = best
+                }
+            }
+            return output
+        }
+        return pass(pass(values, horizontal: true), horizontal: false)
     }
 
     static func composite(_ base: Raster, tint: Raster, alpha: [Float]) -> Raster {
