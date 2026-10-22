@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudepeer"
+	"github.com/zm2231/agenthail/internal/claudetestenv"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -29,7 +30,7 @@ var binary string
 // inside a test's deadline; under a cold cache and a parallel race suite it
 // takes longer than those deadlines allow.
 func TestMain(m *testing.M) {
-	os.Unsetenv("CLAUDE_CONFIG_DIR")
+	claudetestenv.Clear()
 	buildDir, err := os.MkdirTemp("", "ah-bin-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
