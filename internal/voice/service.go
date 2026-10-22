@@ -243,7 +243,6 @@ func newService(path string, provider Provider, register func(context.Context, s
 	s := &Service{path: path, provider: provider, register: register, commandPath: commandPath, target: target, dispatcher: dispatcher, setOperatorSourceActive: setOperatorSourceActive, stream: stream, clock: clock, speechTimeout: delegatedSpeechTimeout, saving: make(chan struct{}, 1)}
 	s.background, s.stop = context.WithCancel(context.Background())
 	s.effectsWake, s.effectsDone = sync.NewCond(&s.mu), make(chan struct{})
-	go s.runEffects()
 	s.state.State = State{Protocol: 1, Phase: "idle", Events: []Event{}}
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -264,6 +263,7 @@ func newService(path string, provider Provider, register func(context.Context, s
 	}
 	s.syncOperatorSourceActive()
 	s.published.Store(s.capture())
+	go s.runEffects()
 	return s
 }
 

@@ -3,10 +3,12 @@ package voice
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -339,5 +341,31 @@ func TestAProjectTransferKeepsItsPlaceAheadOfALaterTransfer(t *testing.T) {
 	}
 	if got := f.View().Target; got != nil {
 		t.Fatalf("the earlier project transfer overwrote the later one: %+v", got)
+	}
+}
+
+func TestARestartWithAnActiveCallHoldsTheOperatorSourceOnce(t *testing.T) {
+	f := newFixture(t, fixtureOptions{})
+	connectFixture(t, f)
+	held := make(chan string, 4)
+	reopened := NewWithTargetsAndOperatorSource(f.path, f.provider, nil, "/fixture/agenthail", nil, delivery.Dispatcher{}, func(session *surface.Session, active bool) {
+		held <- session.ID + ":" + strconv.FormatBool(active)
+	})
+	if v := reopened.View("phone"); v.Phase != "unknown" {
+		t.Fatalf("reopened phase=%q", v.Phase)
+	}
+	select {
+	case got := <-held:
+		if got != "operator:true" {
+			t.Fatalf("operator source=%s", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("restart did not hold the operator source")
+	}
+	reopened.Close()
+	select {
+	case got := <-held:
+		t.Fatalf("operator source changed again: %s", got)
+	default:
 	}
 }
