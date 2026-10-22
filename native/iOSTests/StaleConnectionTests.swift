@@ -64,6 +64,50 @@ final class StaleConnectionTests: XCTestCase {
         XCTAssertEqual(HeldSnapshotProtocol.state.catalogRequests, 0)
         XCTAssertNil(model.snapshot)
     }
+    @MainActor
+    func testASessionShowsOnlyTheStateOfTheComputerServingIt() async throws {
+        KeychainStore.removeAll()
+        try AgenthailIOSTests.pair("hup", "https://up.tailnet.ts.net")
+        try AgenthailIOSTests.pair("hdown", "https://down.tailnet.ts.net")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SplitHostsProtocol.self]
+        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        defer { KeychainStore.removeAll() }
+        model.connect()
+        for _ in 0..<150 where model.connectionError == nil || model.snapshot == nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        for _ in 0..<150 where model.connectionState(for: "hup::demo").reconnecting {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNotNil(model.connectionError)
+        XCTAssertNil(model.connectionState(for: "hup::demo").error)
+        XCTAssertFalse(model.connectionState(for: "hup::demo").reconnecting)
+        XCTAssertNotNil(model.connectionState(for: "hdown::other").error)
+    }
+}
+
+private final class SplitHostsProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        guard request.url?.host == "up.tailnet.ts.net" else {
+            respond(503, #"{"error":"offline"}"#, finish: true)
+            return
+        }
+        switch request.url!.path {
+        case "/api/v1/version": respond(200, #"{"protocol":1,"minimumProtocol":1,"maximumProtocol":1}"#, finish: true)
+        case "/api/v1/snapshot": respond(200, SessionPreview.snapshotJSON, finish: true)
+        case "/api/v1/events", "/api/v1/catalog-events": respond(200, ": connected\n\n", finish: false)
+        default: respond(200, "{}", finish: true)
+        }
+    }
+    override func stopLoading() {}
+    private func respond(_ status: Int, _ body: String, finish: Bool) {
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        if finish { client?.urlProtocolDidFinishLoading(self) }
+    }
 }
 
 private final class HeldSnapshotProtocol: URLProtocol, @unchecked Sendable {

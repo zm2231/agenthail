@@ -259,6 +259,12 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         return route.hostID == voice.id
     }
 
+    func connectionState(for sessionID: String) -> (error: String?, reconnecting: Bool) {
+        let hostID = catalog.route(for: sessionID)?.hostID ?? HostCatalog.owner(of: sessionID)
+        guard let connection = hostID.flatMap({ connections[$0] }) else { return (connectionError, reconnecting) }
+        return (connection.connectionError, connection.reconnecting)
+    }
+
     func voiceTargetID(for session: SessionState) -> String {
         catalog.route(for: session.id)?.sessionID ?? ""
     }

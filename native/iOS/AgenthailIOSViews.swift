@@ -419,9 +419,10 @@ struct SessionScreen: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    if let error = model.connectionError {
+                    let connection = model.connectionState(for: session.id)
+                    if let error = connection.error {
                         Label(error, systemImage: "wifi.exclamationmark").font(.callout).foregroundStyle(.secondary)
-                    } else if model.reconnecting {
+                    } else if connection.reconnecting {
                         Label("Reconnecting live updates", systemImage: "arrow.triangle.2.circlepath").font(.callout).foregroundStyle(.secondary)
                     }
                     if model.loadingSession && detail == nil { ProgressView("Loading conversation") }
