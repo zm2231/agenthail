@@ -25,6 +25,7 @@ final class HostConnection {
     private(set) var catalogStreamCursor: UInt64 = 0
     private(set) var snapshotSeq: UInt64 = 0
     private var snapshotCoversEventStream = false
+    private var stopped = false
     private var catalogHostEpoch: String?
     private var lastEventID: UInt64 = 0
     private var connectionTask: Task<Void, Never>?
@@ -63,6 +64,7 @@ final class HostConnection {
     static func relayAccount(_ hostID: String) -> String { "pushRelayURL:\(hostID)" }
 
     func connect() {
+        guard !stopped else { return }
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
@@ -74,7 +76,7 @@ final class HostConnection {
             while !Task.isCancelled {
                 do {
                     let version = try await api.version()
-                    guard !Task.isCancelled else { return }
+                    guard !Task.isCancelled, !stopped else { return }
                     if let value = version.pushRelayUrl, let url = URL(string: value) {
                         pushRelayURL = url
                         try? KeychainStore.set(value, account: Self.relayAccount(id))
@@ -104,6 +106,7 @@ final class HostConnection {
     }
 
     func stop() {
+        stopped = true
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
@@ -130,6 +133,7 @@ final class HostConnection {
         let seq = delegate?.nextStateRequest() ?? 0
         do {
             let loaded = try await api.snapshot(fresh: fresh)
+            guard !stopped else { return false }
             if let retired = loaded.rekeyed, !retired.isEmpty { delegate?.host(self, rekeyed: retired) }
             snapshot = loaded
             snapshotSeq = seq
@@ -146,6 +150,7 @@ final class HostConnection {
             await delegate?.hostRefreshed(self)
             return true
         } catch {
+            guard !stopped else { return false }
             connectionError = error.localizedDescription
             delegate?.hostDidChange(self)
             return false
@@ -183,6 +188,7 @@ final class HostConnection {
     }
 
     func eventStreamConnected() async {
+        guard !stopped else { return }
         reconnecting = false
         let refreshed = !snapshotCoversEventStream
         if refreshed { _ = await refresh(fresh: true) } else { snapshotCoversEventStream = false }
@@ -198,6 +204,7 @@ final class HostConnection {
     }
 
     private func receive(_ event: AgenthailEvent) async {
+        guard !stopped else { return }
         lastEventID = event.type == "stream.reset" ? 0 : max(lastEventID, event.id)
         guard AgenthailIOSModel.shouldRefreshSnapshot(for: event.type) else { return }
         eventRefreshTask?.cancel()
@@ -232,6 +239,7 @@ final class HostConnection {
     }
 
     func receiveCatalog(_ event: CatalogStreamEvent) async {
+        guard !stopped else { return }
         guard event.stream == "catalog" else { return }
         guard event.seq > catalogStreamCursor else { return }
         catalogStreamCursor = max(catalogStreamCursor, event.seq)

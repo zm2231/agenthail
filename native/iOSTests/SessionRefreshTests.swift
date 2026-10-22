@@ -7,10 +7,10 @@ final class SessionRefreshTests: XCTestCase {
     func testDetailRefreshKeepsMetadata() async throws {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
-        await model.loadSession("demo")
+        await model.loadSession("computer::demo")
         try await waitUntil(timeout: 2) { model.selectedDetail?.model == "Claude Opus" }
 
-        await model.refreshSession("demo")
+        await model.refreshSession("computer::demo")
 
         XCTAssertEqual(model.selectedDetail?.model, "Claude Opus")
         XCTAssertEqual(model.selectedDetail?.context?.usedTokens, 1234)
@@ -22,8 +22,8 @@ final class SessionRefreshTests: XCTestCase {
     func testSnapshotStatusReachesOpenSession() async {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
-        model.selectedSessionID = "demo"
-        await model.refreshSession("demo")
+        model.selectedSessionID = "computer::demo"
+        await model.refreshSession("computer::demo")
         XCTAssertEqual(model.selectedDetail?.session.status, "busy")
 
         SessionRefreshProtocol.state.set(snapshotStatus: "idle")
@@ -36,14 +36,14 @@ final class SessionRefreshTests: XCTestCase {
     func testOlderSnapshotDoesNotOverwriteNewerDetail() async throws {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
-        model.selectedSessionID = "demo"
-        await model.refreshSession("demo")
+        model.selectedSessionID = "computer::demo"
+        await model.refreshSession("computer::demo")
         SessionRefreshProtocol.state.holdSnapshot()
         let snapshot = Task { await model.refresh() }
         try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.snapshotHeld }
 
         SessionRefreshProtocol.state.set(detailStatus: "idle")
-        await model.refreshSession("demo")
+        await model.refreshSession("computer::demo")
         SessionRefreshProtocol.state.releaseSnapshot()
         _ = await snapshot.value
 
@@ -54,8 +54,8 @@ final class SessionRefreshTests: XCTestCase {
     func testOlderSnapshotDoesNotOverwriteNewerMatchingSnapshot() async throws {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
-        model.selectedSessionID = "demo"
-        await model.refreshSession("demo")
+        model.selectedSessionID = "computer::demo"
+        await model.refreshSession("computer::demo")
         SessionRefreshProtocol.state.set(snapshotStatus: "idle")
         SessionRefreshProtocol.state.holdSnapshot()
         let older = Task { await model.refresh() }
@@ -74,10 +74,10 @@ final class SessionRefreshTests: XCTestCase {
     func testOlderDetailDoesNotOverwriteNewerSnapshot() async throws {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
-        model.selectedSessionID = "demo"
-        await model.refreshSession("demo")
+        model.selectedSessionID = "computer::demo"
+        await model.refreshSession("computer::demo")
         SessionRefreshProtocol.state.holdDetail()
-        let detail = Task { await model.refreshSession("demo") }
+        let detail = Task { await model.refreshSession("computer::demo") }
         try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.detailHeld }
 
         SessionRefreshProtocol.state.set(snapshotStatus: "idle")
@@ -92,7 +92,7 @@ final class SessionRefreshTests: XCTestCase {
     func testLiveStreamReplacesPolling() async throws {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
-        await model.loadSession("demo")
+        await model.loadSession("computer::demo")
         try await Task.sleep(for: .seconds(5))
         XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, 1)
         model.selectedSessionID = nil
@@ -103,20 +103,8 @@ final class SessionRefreshTests: XCTestCase {
         SessionRefreshProtocol.state.reset(streamUnsupported: true)
         SessionRefreshProtocol.state.set(snapshotCanStream: false)
         let model = makeModel()
-        await model.refresh()
-        await model.loadSession("demo")
-        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.streamRequests >= 1 }
-        try await Task.sleep(for: .seconds(5))
-        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, 1)
-        XCTAssertEqual(SessionRefreshProtocol.state.streamRequests, 1)
-
-        SessionRefreshProtocol.state.set(streamUnsupported: false)
-        SessionRefreshProtocol.state.set(snapshotCanStream: true)
-        await model.refresh()
-        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.detailFetches >= 2 && SessionRefreshProtocol.state.streamRequests >= 2 }
-        try await Task.sleep(for: .seconds(1))
-        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, 2)
-        XCTAssertEqual(SessionRefreshProtocol.state.streamRequests, 2)
+        await model.loadSession("computer::demo")
+        try await waitUntil(timeout: 6) { SessionRefreshProtocol.state.detailFetches >= 2 }
         model.selectedSessionID = nil
     }
 

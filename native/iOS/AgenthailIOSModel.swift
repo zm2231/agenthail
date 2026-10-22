@@ -419,7 +419,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             }
             creationWarning = receipt.warning
             if let created = receipt.id, !created.isEmpty {
-                let id = HostCatalog.qualify(target.hostID, created)
+                let id = HostCatalog.qualify(target.remote ?? target.hostID, created)
                 let launched = receipt.launcher ?? launcher?.id ?? surface
                 deliveryStatus[id] = receipt.status == "submitted" || receipt.unknown == true ? "Submitted to \(launched)." : (surface == "claude" ? "Session started. Waiting for activity." : "Conversation started")
                 requestedSessionID = id
@@ -1315,25 +1315,29 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func hostRefreshed(_ host: HostConnection) async {
+        guard connections[host.id] === host else { return }
         await refreshDeliveries()
     }
 
     func hostConnected(_ host: HostConnection) {
+        guard connections[host.id] === host else { return }
         if let pushDeviceToken { registerPush(host, deviceToken: pushDeviceToken) }
         else { refreshNotificationRegistration() }
     }
 
     func hostEventStreamConnected(_ host: HostConnection, refreshed: Bool) async {
-        guard let id = selectedSessionID, catalog.route(for: id)?.hostID == host.id else { return }
+        guard connections[host.id] === host, let id = selectedSessionID, catalog.route(for: id)?.hostID == host.id else { return }
         if refreshed { await refreshSession(id) }
         startSessionStream(id)
     }
 
     func host(_ host: HostConnection, rekeyed retired: [String: String]) {
+        guard connections[host.id] === host else { return }
         followRekeys(Dictionary(retired.map { (HostCatalog.qualify(host.id, $0.key), HostCatalog.qualify(host.id, $0.value)) }, uniquingKeysWith: { _, new in new }))
     }
 
     func host(_ host: HostConnection, removedSession id: String, unlisted: Bool) {
+        guard connections[host.id] === host else { return }
         fetchedSubagents.sessionRemoved(HostCatalog.qualify(host.id, id), unlisted: unlisted)
     }
 

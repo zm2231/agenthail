@@ -6,9 +6,9 @@ final class NeedsYouUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-app", "--preview-waiting", "--preview-attention"]
         app.launch()
-        let asking = app.buttons["needs-you-demo"]
-        let incoming = app.buttons["needs-you-codex-demo"]
-        let undelivered = app.buttons["needs-you-saved-demo"]
+        let asking = app.buttons["needs-you-computer::demo"]
+        let incoming = app.buttons["needs-you-computer::codex-demo"]
+        let undelivered = app.buttons["needs-you-computer::saved-demo"]
         XCTAssertTrue(asking.waitForExistence(timeout: 10))
         XCTAssertTrue(incoming.exists)
         XCTAssertTrue(undelivered.exists)
