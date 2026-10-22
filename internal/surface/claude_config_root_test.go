@@ -223,3 +223,27 @@ func TestASessionsConfigRootIsTheRootHoldingItsTranscript(t *testing.T) {
 		t.Fatal("a transcript outside every root got a config root")
 	}
 }
+
+func TestAnAccountSwitchWrittenInTheTickOfTheLastReadIsRead(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".claude.json")
+	write := func(email string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(`{"oauthAccount":{"accountUuid":"u","emailAddress":"`+email+`"}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("one@example.com")
+	cache := &claudeGlobalConfigCache{entries: map[string]claudeGlobalConfigEntry{}}
+	first := cache.read(path)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write("two@example.com")
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if second := cache.read(path); second == first {
+		t.Fatalf("a same-size rewrite in the tick of the last read was not read: %+v", second)
+	}
+}

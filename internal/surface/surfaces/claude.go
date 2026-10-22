@@ -262,7 +262,8 @@ func onlyTranscript(paths []string) string {
 // writes every conversation to <root>/projects/<project>/<id>.jsonl, so the
 // index is built from directory listings and never predicts project names.
 // Each pass re-lists only project directories whose modification time
-// changed, which is when Claude Code adds or removes a transcript.
+// changed, which is when Claude Code adds or removes a transcript, by
+// surface.UnchangedSince.
 type claudeTranscriptIndex struct {
 	mu   sync.Mutex
 	dirs map[string]claudeProjectListing
@@ -271,6 +272,7 @@ type claudeTranscriptIndex struct {
 
 type claudeProjectListing struct {
 	modified time.Time
+	listed   time.Time
 	ids      []string
 }
 
@@ -319,7 +321,7 @@ func (x *claudeTranscriptIndex) refresh(roots []string) {
 			if err != nil {
 				continue
 			}
-			if listing, ok := x.dirs[dir]; ok && listing.modified.Equal(info.ModTime()) {
+			if listing, ok := x.dirs[dir]; ok && surface.UnchangedSince(listing.listed, listing.modified, info.ModTime()) {
 				continue
 			}
 			x.forget(dir)
@@ -334,11 +336,12 @@ func (x *claudeTranscriptIndex) refresh(roots []string) {
 }
 
 func (x *claudeTranscriptIndex) list(dir string, modified time.Time) {
+	listed := time.Now()
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
-	listing := claudeProjectListing{modified: modified}
+	listing := claudeProjectListing{modified: modified, listed: listed}
 	for _, file := range files {
 		id, ok := strings.CutSuffix(file.Name(), ".jsonl")
 		if !ok || file.IsDir() {

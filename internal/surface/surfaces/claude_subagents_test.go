@@ -170,3 +170,24 @@ func TestObserveAllClaudeSubagentsKeysParentsByTranscript(t *testing.T) {
 		t.Fatalf("links = %+v, %v", links, err)
 	}
 }
+
+func TestASubagentStartedInTheTickOfTheLastListingIsFound(t *testing.T) {
+	fixture := newClaudeSubagentFixture(t, "transcript-1")
+	fixture.write(t, "a1", "", subagentRecord("transcript-1", "a1", "user", ""))
+	observer := newClaudeSubagentObserver()
+	session := &surface.Session{ID: "transcript-1", Transcript: fixture.transcript}
+	if links, err := observer.observeSession(context.Background(), session); err != nil || len(links) != 1 {
+		t.Fatalf("initial = %+v, %v", links, err)
+	}
+	info, err := os.Stat(fixture.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.write(t, "a2", "", subagentRecord("transcript-1", "a2", "user", ""))
+	if err := os.Chtimes(fixture.dir, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if links, err := observer.observeSession(context.Background(), session); err != nil || len(links) != 2 {
+		t.Fatalf("a subagent started in the tick of the last listing: %+v, %v", links, err)
+	}
+}

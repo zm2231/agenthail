@@ -30,10 +30,11 @@ type claudeSubagentObserver struct {
 }
 
 type claudeSubagentDir struct {
-	mu      sync.Mutex
-	modTime time.Time
-	listed  bool
-	agents  map[string]*claudeSubagentFile
+	mu       sync.Mutex
+	modTime  time.Time
+	listedAt time.Time
+	listed   bool
+	agents   map[string]*claudeSubagentFile
 }
 
 type claudeSubagentFile struct {
@@ -129,11 +130,12 @@ func (o *claudeSubagentObserver) observe(ctx context.Context, parentSessionID, t
 	o.mu.Unlock()
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if !state.listed || !info.ModTime().Equal(state.modTime) {
+	if !state.listed || !surface.UnchangedSince(state.listedAt, state.modTime, info.ModTime()) {
+		listedAt := time.Now()
 		if err := state.list(dir); err != nil {
 			return nil, err
 		}
-		state.modTime = info.ModTime()
+		state.modTime, state.listedAt = info.ModTime(), listedAt
 		state.listed = true
 	}
 	now := o.now()
