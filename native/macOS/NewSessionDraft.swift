@@ -115,7 +115,7 @@ final class NewSessionDraft: ObservableObject {
         modelError = nil
         let agent = form.agent
         let generation = hosts.generation
-        guard form.listsModels, hosts.options != nil, hosts.models[agent] == nil else { return }
+        guard model.isConnected, form.listsModels, hosts.options != nil, hosts.models[agent] == nil else { return }
         do {
             let options = try await model.creationModels(for: agent, host: hosts.hostQuery)
             try Task.checkCancellation()

@@ -323,6 +323,11 @@ struct SessionPaneTest {
         let offlineDraft = offlineModel.mainPane.newSession
         offlineDraft?.form.folder = "/work/sample"
         check(offlineDraft?.form.message == "while offline" && offlineDraft?.canStart == false, "New Session opens while disconnected, and Start waits for the connection")
+        if let offlineDraft {
+            offlineDraft.hosts.receive(options: try! JSONDecoder().decode(SessionCreationOptions.self, from: Data(#"{"surfaces":[{"id":"claude","workspace":true}],"projects":[]}"#.utf8)), for: offlineDraft.hosts.generation)
+            await offlineDraft.loadModels()
+            check(offlineDraft.modelError == nil && offlineDraft.hosts.models["claude"] == nil, "models wait for the connection instead of failing, so reconnecting loads them")
+        }
         UserDefaults.standard.removeObject(forKey: "sessionTabs")
 
         let launch = try! StubServer { request, _ in
