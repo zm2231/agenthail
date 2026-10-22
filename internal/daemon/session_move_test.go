@@ -326,6 +326,7 @@ func TestAMoveSentByADaemonThatStoppedIsSettledFromTheTargetsRecord(t *testing.T
 			if !claimed {
 				t.Fatal("the move is already claimed")
 			}
+			t.Cleanup(release)
 			if err := source.reg.BeginMoveOut(manifest.ID, session.ID, record.ID, encoded); err != nil {
 				t.Fatal(err)
 			}
