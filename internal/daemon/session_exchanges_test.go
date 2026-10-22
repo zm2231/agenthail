@@ -448,3 +448,28 @@ func TestJournalPageKeepsTheInstructionsOfItsOldestTurn(t *testing.T) {
 		t.Fatalf("pages returned %d of 20 items", len(seen))
 	}
 }
+
+func TestJournalPagesNeverSplitATurnWhoseIDIsReused(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	appendJournalPayloads(t, r, from.ID,
+		sessionJournalPayload{ItemID: "first", Kind: "message", Role: "user", Body: "first", TurnID: "t1"},
+		sessionJournalPayload{ItemID: "one", Kind: "message", Role: "assistant", Body: "one", TurnID: "t1"},
+		sessionJournalPayload{ItemID: "done", Kind: "done", TurnID: "t1"},
+		sessionJournalPayload{ItemID: "after", Kind: "message", Role: "peer", Origin: "peer", Sender: "reviewer", Body: "after the close", TurnID: "t1"},
+		sessionJournalPayload{ItemID: "two", Kind: "message", Role: "assistant", Body: "two", TurnID: "t1"},
+	)
+	newest, err := d.readJournalPage(from.ID, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	older, err := d.readJournalPage(from.ID, uint64(newest.NextBefore), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(newest.Exchanges) != 1 || newest.Exchanges[0].Assistant != "two" || len(newest.Items) != 2 {
+		t.Fatalf("newest page exchanges=%+v items=%+v", newest.Exchanges, newest.Items)
+	}
+	if len(older.Exchanges) != 1 || older.Exchanges[0].Assistant != "one" || len(older.Items) != 3 {
+		t.Fatalf("older page exchanges=%+v items=%+v", older.Exchanges, older.Items)
+	}
+}

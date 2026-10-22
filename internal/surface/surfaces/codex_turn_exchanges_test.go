@@ -153,3 +153,44 @@ func exchangeUsers(exchanges []surface.Exchange) string {
 	}
 	return strings.Join(users, "|")
 }
+
+func TestPagesNeverSplitATurnWhoseIDIsReused(t *testing.T) {
+	claude := `{"type":"user","uuid":"u1","timestamp":"2026-10-19T10:00:00Z","message":{"content":"first"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-10-19T10:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"one"}]}}
+{"type":"attachment","uuid":"q1","timestamp":"2026-10-19T10:00:02Z","attachment":{"type":"queued_command","prompt":"<cross-session-message from=\"uds:/tmp/s.sock\" from-name=\"reviewer\">after the close</cross-session-message>","origin":{"kind":"peer","name":"reviewer","msg_id":"msg-1","body":"after the close"}}}
+{"type":"assistant","uuid":"a2","timestamp":"2026-10-19T10:00:03Z","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"two"}]}}
+`
+	codex := `{"timestamp":"2026-10-21T03:32:36Z","type":"session_meta","payload":{"id":"thread"}}` + "\n" + codexContextTurn("t1", "first", "one") + codexContextTurn("t1", "second", "two")
+	for _, test := range []struct {
+		name string
+		read func(request surface.SessionReadRequest) *surface.SessionReadResult
+	}{
+		{"claude", func(request surface.SessionReadRequest) *surface.SessionReadResult {
+			read, err := timelineClaude().ReadSession(context.Background(), &surface.Session{Transcript: timelineFixture(t, claude), Status: surface.StatusIdle}, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return read
+		}},
+		{"codex", func(request surface.SessionReadRequest) *surface.SessionReadResult {
+			return readCodexFixture(t, codex, request)
+		}},
+	} {
+		newest := test.read(surface.SessionReadRequest{Limit: 1})
+		older := test.read(surface.SessionReadRequest{Limit: 1, Before: newest.NextBefore})
+		if len(newest.Exchanges) != 1 || newest.Exchanges[0].Assistant != "two" || len(older.Exchanges) != 1 || older.Exchanges[0].Assistant != "one" {
+			t.Fatalf("%s pages: newest=%+v older=%+v", test.name, newest.Exchanges, older.Exchanges)
+		}
+		seen := map[string]bool{}
+		for _, item := range append(older.Items, newest.Items...) {
+			if seen[item.ID] {
+				t.Fatalf("%s: item %s on both pages", test.name, item.ID)
+			}
+			seen[item.ID] = true
+		}
+		whole := test.read(surface.SessionReadRequest{Limit: 10})
+		if len(seen) != len(whole.Items) {
+			t.Fatalf("%s: pages hold %d items, the session %d", test.name, len(seen), len(whole.Items))
+		}
+	}
+}
