@@ -41,14 +41,14 @@ func TestUIAPIReadsChangesAndUndoes(t *testing.T) {
 		t.Fatalf("bad set: status=%d %+v", code, refused)
 	}
 
-	if code := api.do(http.MethodPost, "/api/v1/ui?class=phone", `{"action":"set","set":["theme = dark","density@phone = compact"],"message":"Dark, compact phone"}`, &view); code != http.StatusOK {
+	if code := api.do(http.MethodPost, "/api/v1/ui?class=phone", `{"action":"set","set":["theme = dark","texture@phone = grain"],"message":"Dark phone with grain"}`, &view); code != http.StatusOK {
 		t.Fatalf("set status=%d", code)
 	}
-	if view.Values["theme"] != "dark" || view.Values["density"] != "compact" || view.Change == nil || view.Change.Author != uiconf.Person || view.Change.Message != "Dark, compact phone" {
+	if view.Values["theme"] != "dark" || view.Values["texture"] != "grain" || view.Change == nil || view.Change.Author != uiconf.Person || view.Change.Message != "Dark phone with grain" {
 		t.Fatalf("after set = %+v change=%+v", view.Values, view.Change)
 	}
-	if code := api.do(http.MethodGet, "/api/v1/ui?class=mac", "", &view); code != http.StatusOK || view.Values["density"] != "regular" {
-		t.Fatalf("mac density = %v (status %d)", view.Values["density"], code)
+	if code := api.do(http.MethodGet, "/api/v1/ui?class=mac", "", &view); code != http.StatusOK || view.Values["texture"] != "scanlines" {
+		t.Fatalf("mac texture = %v (status %d)", view.Values["texture"], code)
 	}
 	if events := uiEvents(d); len(events) != 1 || !strings.Contains(events[0], view.Rev) {
 		t.Fatalf("ui.changed events = %v, want one for %s", events, view.Rev)
@@ -64,7 +64,7 @@ func TestUIAPIReadsChangesAndUndoes(t *testing.T) {
 	if code := api.do(http.MethodPost, "/api/v1/ui?class=mac", `{"action":"undo"}`, &view); code != http.StatusOK {
 		t.Fatalf("undo status=%d", code)
 	}
-	if view.Values["theme"] != "system" || view.Change == nil || view.Change.Message != "Undo Dark, compact phone" || view.Rev == first {
+	if view.Values["theme"] != "system" || view.Change == nil || view.Change.Message != "Undo Dark phone with grain" || view.Rev == first {
 		t.Fatalf("after undo = %+v change=%+v", view.Values, view.Change)
 	}
 }

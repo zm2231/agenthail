@@ -81,9 +81,6 @@ struct UIConfig: Decodable, Equatable {
 
     var theme: String { text("theme", "system") }
     var accent: RGBColor? { RGBColor(hex: text("theme.accent", "system")) }
-    var fontSize: Double { number("font.size", 13) }
-    var proseSize: Double { number("font.prose", 15) }
-    var density: String { text("density", "regular") }
 
     var background: Background { Self.parseBackground(text("background", "none")) ?? .none }
     var backgroundFit: String { text("background.fit", "cover") }

@@ -13,7 +13,7 @@ func TestParseReportsBadLinesAndKeepsTheRest(t *testing.T) {
 		"# comment",
 		"theme = dark",
 		"glass.blur = 90",
-		"font.size = big",
+		"texture.spacing = big",
 		"nonsense = 1",
 		"no equals sign",
 		"theme.accent = #4DA3F5  # house blue",
@@ -26,7 +26,7 @@ func TestParseReportsBadLinesAndKeepsTheRest(t *testing.T) {
 	}
 	want := map[int]string{
 		3: "glass.blur must be from 0 to 64; using 64",
-		4: "font.size must be a number from 12 to 18",
+		4: "texture.spacing must be a number from 2 to 8",
 		5: "unknown key nonsense",
 		6: "expected key = value",
 		8: "device must be mac, phone, tablet, web or device:<name>",
@@ -35,25 +35,25 @@ func TestParseReportsBadLinesAndKeepsTheRest(t *testing.T) {
 		t.Fatalf("problems = %v, want %v", got, want)
 	}
 	values := parsed.Resolve(Device{Class: "mac"})
-	if values["theme"] != "dark" || values["glass.blur"] != 64.0 || values["font.size"] != 13.0 || values["theme.accent"] != "#4da3f5" {
-		t.Fatalf("resolved = theme %v blur %v size %v accent %v", values["theme"], values["glass.blur"], values["font.size"], values["theme.accent"])
+	if values["theme"] != "dark" || values["glass.blur"] != 64.0 || values["texture.spacing"] != 3.0 || values["theme.accent"] != "#4da3f5" {
+		t.Fatalf("resolved = theme %v blur %v spacing %v accent %v", values["theme"], values["glass.blur"], values["texture.spacing"], values["theme.accent"])
 	}
 }
 
 func TestResolvePrefersTheMostSpecificDevice(t *testing.T) {
-	parsed := Parse("density = regular\ndensity@device:studio = comfortable\ndensity@phone = compact\n")
+	parsed := Parse("texture = scanlines\ntexture@device:studio = grain\ntexture@phone = none\n")
 	cases := []struct {
 		device Device
 		want   string
 	}{
-		{Device{Class: "mac"}, "regular"},
-		{Device{Class: "phone"}, "compact"},
-		{Device{Class: "mac", Name: "studio"}, "comfortable"},
-		{Device{Class: "phone", Name: "studio"}, "comfortable"},
+		{Device{Class: "mac"}, "scanlines"},
+		{Device{Class: "phone"}, "none"},
+		{Device{Class: "mac", Name: "studio"}, "grain"},
+		{Device{Class: "phone", Name: "studio"}, "grain"},
 	}
 	for _, c := range cases {
-		if got := parsed.Resolve(c.device)["density"]; got != c.want {
-			t.Errorf("%+v: density = %v, want %s", c.device, got, c.want)
+		if got := parsed.Resolve(c.device)["texture"]; got != c.want {
+			t.Errorf("%+v: texture = %v, want %s", c.device, got, c.want)
 		}
 	}
 }
@@ -101,21 +101,21 @@ func TestBackgroundValues(t *testing.T) {
 }
 
 func TestSetKeepsCommentsAndOrderAndUnsetRemoves(t *testing.T) {
-	text := "# mine\ntheme = dark  # night owl\nfont.size = 14\n"
+	text := "# mine\ntheme = dark  # night owl\ntexture.spacing = 4\n"
 	theme, err := ParseAssignment("theme = light")
 	if err != nil {
 		t.Fatal(err)
 	}
-	phone, err := ParseAssignment("density@phone = compact")
+	phone, err := ParseAssignment("texture@phone = none")
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := Set(text, theme, phone)
-	want := "# mine\ntheme = light  # night owl\nfont.size = 14\ndensity@phone = compact\n"
+	want := "# mine\ntheme = light  # night owl\ntexture.spacing = 4\ntexture@phone = none\n"
 	if got != want {
 		t.Fatalf("Set = %q, want %q", got, want)
 	}
-	if got := Unset(want, "density", "phone"); got != "# mine\ntheme = light  # night owl\nfont.size = 14\n" {
+	if got := Unset(want, "texture", "phone"); got != "# mine\ntheme = light  # night owl\ntexture.spacing = 4\n" {
 		t.Fatalf("Unset = %q", got)
 	}
 	if _, err := ParseAssignment("glass.blur = wide"); err == nil {
@@ -159,7 +159,7 @@ func TestStoreVersionsEveryChange(t *testing.T) {
 	if _, changed, err := s.Update("@fixer", "Light theme again", func(text string) string { return Set(text, theme) }); err != nil || changed {
 		t.Fatalf("no-op update: changed=%v err=%v", changed, err)
 	}
-	if err := os.WriteFile(s.Path(), []byte(Set(mustRead(t, s.Path()), mustAssign(t, "font.size = 15"))), 0o600); err != nil {
+	if err := os.WriteFile(s.Path(), []byte(Set(mustRead(t, s.Path()), mustAssign(t, "texture.spacing = 5"))), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Current(); err != nil {
@@ -192,12 +192,12 @@ func TestUndoRevertsAndRefusesConflicts(t *testing.T) {
 		}
 	}
 	update("@fixer", "Dark", "theme = dark")
-	update(Person, "Bigger text", "font.size = 16")
+	update(Person, "Bigger text", "texture.spacing = 6")
 	state, entry, err := s.Undo("", Person)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(state.Text, "font.size") || !strings.Contains(state.Text, "theme = dark") || entry.Message != "Undo Bigger text" {
+	if strings.Contains(state.Text, "texture.spacing") || !strings.Contains(state.Text, "theme = dark") || entry.Message != "Undo Bigger text" {
 		t.Fatalf("after undo: %q %+v", state.Text, entry)
 	}
 	update("@fixer", "Light", "theme = light")

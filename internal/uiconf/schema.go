@@ -50,10 +50,6 @@ var Keys = []Key{
 
 	choice("theme", "system", "Light or dark appearance.", "system", "dark", "light"),
 	color("theme.accent", "system", "Accent for links, focus and working state: the system accent or a colour.", "system"),
-	choice("theme.ground", "neutral", "Neutral ground preset; tints panes and matches a gradient preset.", "neutral", "slate", "forest", "ember", "violet"),
-	number("font.size", "13", "Interface text size in points.", 12, 18),
-	number("font.prose", "15", "Transcript text size in points.", 13, 20),
-	choice("density", "regular", "Spacing of lists and rows.", "compact", "regular", "comfortable"),
 
 	{Name: "background", Default: "gradient: aurora", Doc: "What fills the window: none, desktop, image: <path>, gradient: <preset>, gradient: <angle>deg, <colour> <pos>%, ..., or mesh: <cols>x<rows>, <colour>, ...", kind: kindBackground},
 	choice("background.fit", "cover", "How an image fills the window.", "cover", "contain", "center", "tile"),

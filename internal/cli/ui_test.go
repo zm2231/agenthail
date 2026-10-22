@@ -29,7 +29,7 @@ func runUI(t *testing.T, app *App, args ...string) (string, error) {
 
 func TestUISetUnsetUndoAndLog(t *testing.T) {
 	app, store := uiFixture(t)
-	if out, err := runUI(t, app, "set", "theme = dark", "density@phone = compact", "--message", "Night mode"); err != nil || !strings.Contains(out, "committed") {
+	if out, err := runUI(t, app, "set", "theme = dark", "texture@phone = grain", "--message", "Night mode"); err != nil || !strings.Contains(out, "committed") {
 		t.Fatalf("set: %q %v", out, err)
 	}
 	if _, err := runUI(t, app, "set", "glass.blur = 99"); err == nil || !strings.Contains(err.Error(), "glass.blur must be from 0 to 64") {
@@ -45,24 +45,24 @@ func TestUISetUnsetUndoAndLog(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &resolved); err != nil {
 		t.Fatal(err)
 	}
-	if resolved.Values["theme"] != "dark" || resolved.Values["density"] != "compact" {
+	if resolved.Values["theme"] != "dark" || resolved.Values["texture"] != "grain" {
 		t.Fatalf("phone values = %v", resolved.Values)
 	}
-	if _, err := runUI(t, app, "unset", "density@phone"); err != nil {
+	if _, err := runUI(t, app, "unset", "texture@phone"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := runUI(t, app, "undo"); err != nil {
 		t.Fatal(err)
 	}
 	state, err := store.Current()
-	if err != nil || !strings.Contains(state.Text, "density@phone = compact") {
+	if err != nil || !strings.Contains(state.Text, "texture@phone = grain") {
 		t.Fatalf("after undo: %q %v", state.Text, err)
 	}
 	out, err = runUI(t, app, "log")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Undo Reset density@phone", "Reset density@phone", "Night mode", "Create ui.conf"} {
+	for _, want := range []string{"Undo Reset texture@phone", "Reset texture@phone", "Night mode", "Create ui.conf"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("log missing %q:\n%s", want, out)
 		}
