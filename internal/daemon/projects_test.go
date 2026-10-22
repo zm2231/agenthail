@@ -369,15 +369,15 @@ func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing
 	t.Setenv("HOME", t.TempDir())
 	upstream := catalogTestRepo(t)
 	remote := newFederationNode(t, "remote-a", "remote-b")
-	moveSessions(t, remote, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "forge-gadget")), "src"))
+	moveSessions(t, remote, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "vps-gadget")), "src"))
 	remote.serve(t, nil)
 	local := newFederationNode(t, "local-a")
-	localRoot := cloneAt(t, upstream, filepath.Join(t.TempDir(), "mac-gadget"))
+	localRoot := cloneAt(t, upstream, filepath.Join(t.TempDir(), "laptop-gadget"))
 	worktree := filepath.Join(localRoot, ".worktrees", "task-e5")
 	gitRun(t, localRoot, "worktree", "add", "-b", "feature/e5", worktree)
 	moveSessions(t, local, filepath.Join(worktree, "src"))
 	local.start(t, testRoots(remote.server))
-	record := local.pair(t, remote, "forge")
+	record := local.pair(t, remote, "vps")
 	for _, node := range []*federationNode{local, remote} {
 		folder := map[*federationNode]string{local: filepath.Join(localRoot, "src"), remote: remote.fake.sessions["remote-a"].Cwd}[node]
 		if response := node.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-add", "path": folder}); response.Code != http.StatusOK {
@@ -410,9 +410,9 @@ func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing
 	}
 
 	if response := remote.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-archive", "projectId": projectID}); response.Code != http.StatusOK {
-		t.Fatalf("archive on forge: %d %s", response.Code, response.Body)
+		t.Fatalf("archive on vps: %d %s", response.Code, response.Body)
 	}
-	awaitFederation(t, "forge checkout archived", func() bool {
+	awaitFederation(t, "vps checkout archived", func() bool {
 		projects := merged()
 		return len(projects) == 1 && projects[0].Checkouts[1].Archived && !projects[0].Checkouts[0].Archived && !projects[0].Archived
 	})
@@ -421,10 +421,10 @@ func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing
 		t.Fatalf("unarchive everywhere: %d %s", response.Code, response.Body)
 	}
 	if state, err := remote.reg.ArchiveState(); err != nil || len(state.Projects) != 0 {
-		t.Fatalf("forge kept the archive: %+v err=%v", state, err)
+		t.Fatalf("vps kept the archive: %+v err=%v", state, err)
 	}
 	archived := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-archive", "projectId": projectID})
-	if archived.Code != http.StatusOK || !strings.Contains(archived.Body.String(), `"host":"forge","ok":true`) {
+	if archived.Code != http.StatusOK || !strings.Contains(archived.Body.String(), `"host":"vps","ok":true`) {
 		t.Fatalf("archive everywhere: %d %s", archived.Code, archived.Body)
 	}
 	awaitFederation(t, "project archived on both hosts", func() bool {
@@ -432,7 +432,7 @@ func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing
 		return len(projects) == 1 && projects[0].Archived && projects[0].Checkouts[0].Archived && projects[0].Checkouts[1].Archived
 	})
 	if state, err := remote.reg.ArchiveState(); err != nil || len(state.Projects) != 1 || state.Projects[remoteLocalID].IsZero() {
-		t.Fatalf("forge did not record the archive: %+v err=%v", state, err)
+		t.Fatalf("vps did not record the archive: %+v err=%v", state, err)
 	}
 }
 
@@ -566,10 +566,10 @@ func TestEveryProjectSurfaceNamesItsCoordinatorsOnEveryHost(t *testing.T) {
 		t.Fatalf("unarchived project=%+v", found)
 	}
 
-	if err := r.PutHostCoordinator("forge", registry.CoordinatorEntry{ProjectID: widget.ID, ProjectRoot: "/srv/widget", Name: "forge-lead", Surface: "codex", SessionID: hosts.Qualify("forge", "s-forge"), ChangedAt: time.Now()}); err != nil {
+	if err := r.PutHostCoordinator("vps", registry.CoordinatorEntry{ProjectID: widget.ID, ProjectRoot: "/srv/widget", Name: "vps-lead", Surface: "codex", SessionID: hosts.Qualify("vps", "s-vps"), ChangedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	if leads := projects()[widget.ID].Coordinators; len(leads) != 2 || leads[0].Name != "widget-lead" || leads[1].Name != "forge-lead" || leads[1].Host.ID != "forge" || leads[1].SessionID != hosts.Qualify("forge", "s-forge") {
+	if leads := projects()[widget.ID].Coordinators; len(leads) != 2 || leads[0].Name != "widget-lead" || leads[1].Name != "vps-lead" || leads[1].Host.ID != "vps" || leads[1].SessionID != hosts.Qualify("vps", "s-vps") {
 		t.Fatalf("conflicting coordinators=%+v", leads)
 	}
 

@@ -22,6 +22,8 @@ Each runner is a separate service under the same macOS user, in `~/actions-runne
 
 `scripts/ci-self-hosted.sh prepare` gives `verify` and `native` a scratch `HOME` and `CFFIXED_USER_HOME` inside the job temp directory, and keeps the Go and npm caches per runner. `TMPDIR` and `GOTMPDIR` point to a new directory directly under the user's own temp directory in `/var/folders`, the same place hosted runners and users' Macs use, so tests see that `/var` resolves to `/private/var`. Its name is four characters, because tests create Unix sockets in it and macOS limits a socket path to 104 bytes. A marker file per runner records the directory. If a runner was killed before cleanup, the next `prepare` stops the processes still running from the old directory and deletes it. The iOS jobs keep the real `HOME` because the simulator service uses it. Each runner uses its own simulator, named `Agenthail CI <runner name>`, and its own DerivedData next to its workspace.
 
+`verify` runs `scripts/ci-self-hosted.sh trim-go-cache` after Go is set up. When the runner's Go build cache is over 8 GB, it clears the cache with `go clean -cache`, because a busy runner fills the cache faster than Go's own five-day trim empties it. The script refuses a `RUNNER_TOOL_CACHE` that is relative or contains `.` or `..`, and the trim only acts when the cache path resolves to exactly the runner's tool cache plus `agenthail-cache/go-build`. `scripts/test-ci-self-hosted.sh` checks that guard.
+
 `scripts/ci-self-hosted.sh cleanup` runs after every self-hosted job, including failed and cancelled ones. It stops processes started from the job's workspace or temp directories, erases the job's simulator, resets the workspace, and deletes the scratch `HOME`, the job's temp directory and its marker.
 
 ## Disposable VM runners
@@ -49,13 +51,13 @@ The script refuses to start with less than 60 GB free. It flushes the guest disk
 
 Runner output and the runner's diagnostic log for each slot are kept in `~/Library/Logs/agenthail-ci-vm/`.
 
-The App private key is read from setec over the tailnet when a token is needed and is never written to disk or passed to the guest.
+The supervisor needs `AGENTHAIL_CI_APP_ID`, the GitHub App's id, and `AGENTHAIL_CI_APP_KEY_COMMAND`, a command that prints the App's private key, for example one that reads it from the login keychain or a secret manager. It runs that command each time it mints a token; the key is never written to disk or passed to the guest.
 
 ### Host setup
 
 1. Install Tart and Softnet with Homebrew, and let Softnet run as root without a password: add `<user> ALL=(root) NOPASSWD: <homebrew prefix>/bin/softnet` to a file in `/etc/sudoers.d/` and check it with `sudo visudo -cf <file>`.
 2. Clone this repository on the host and run `ci/vm/build-image.sh` from it.
-3. Create a LaunchAgent that runs `/bin/bash <clone>/ci/vm/supervisor.sh` with `RunAtLoad`, `KeepAlive` set to restart only after an unsuccessful exit (`SuccessfulExit` false), an `ExitTimeOut` of 60 seconds and a log file, then load it with `launchctl bootstrap gui/$(id -u) <plist>`.
+3. Create a LaunchAgent that runs `/bin/bash <clone>/ci/vm/supervisor.sh` with `RunAtLoad`, `KeepAlive` set to restart only after an unsuccessful exit (`SuccessfulExit` false), an `ExitTimeOut` of 60 seconds, a log file, and `EnvironmentVariables` holding `AGENTHAIL_CI_APP_ID` and `AGENTHAIL_CI_APP_KEY_COMMAND`, then load it with `launchctl bootstrap gui/$(id -u) <plist>`.
 4. Turn off system sleep on the host: `sudo pmset -a sleep 0 disksleep 0 powernap 0`.
 
 ## Stacked pull requests

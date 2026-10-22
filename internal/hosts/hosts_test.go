@@ -25,8 +25,8 @@ func TestQualifyAndSplit(t *testing.T) {
 	if got := Qualify("", "x"); got != "x" {
 		t.Fatalf("local qualify=%q", got)
 	}
-	host, target, ok := Split("forge::@builder/reviewer")
-	if !ok || host != "forge" || target != "@builder/reviewer" {
+	host, target, ok := Split("vps::@builder/reviewer")
+	if !ok || host != "vps" || target != "@builder/reviewer" {
 		t.Fatalf("split=%q %q %v", host, target, ok)
 	}
 	if _, target, ok := Split("codex:019a"); ok || target != "codex:019a" {
@@ -52,11 +52,11 @@ func TestQualifyJSONRewritesOnlySessionReferences(t *testing.T) {
 }
 
 func TestParsePairingLink(t *testing.T) {
-	link, err := ParsePairingLink("agenthail://pair?endpoint=https%3A%2F%2Fforge.example.ts.net%3A7412%2F&secret=abc&scope=read")
-	if err != nil || link.Endpoint != "https://forge.example.ts.net:7412" || link.Secret != "abc" {
+	link, err := ParsePairingLink("agenthail://pair?endpoint=https%3A%2F%2Fvps.example.ts.net%3A7412%2F&secret=abc&scope=read")
+	if err != nil || link.Endpoint != "https://vps.example.ts.net:7412" || link.Secret != "abc" {
 		t.Fatalf("link=%+v err=%v", link, err)
 	}
-	for _, bad := range []string{"https://forge/pair?secret=x", "agenthail://pair?endpoint=https://x", "agenthail://other?endpoint=https://x&secret=y"} {
+	for _, bad := range []string{"https://vps/pair?secret=x", "agenthail://pair?endpoint=https://x", "agenthail://other?endpoint=https://x&secret=y"} {
 		if _, err := ParsePairingLink(bad); err == nil {
 			t.Fatalf("accepted %q", bad)
 		}
@@ -71,17 +71,17 @@ func allowLoopback(t *testing.T) {
 }
 
 func TestCheckTailnetAddressAcceptsOnlyTailscaleRanges(t *testing.T) {
-	for _, address := range []string{"100.64.0.1", "100.85.38.9", "100.127.255.254", "fd7a:115c:a1e0::1", "fd7a:115c:a1e0:ab12::42"} {
+	for _, address := range []string{"100.64.0.1", "100.100.100.100", "100.127.255.254", "fd7a:115c:a1e0::1", "fd7a:115c:a1e0:ab12::42"} {
 		if err := CheckTailnetAddress(address); err != nil {
 			t.Errorf("%s rejected: %v", address, err)
 		}
 	}
-	for _, address := range []string{"127.0.0.1", "::1", "169.254.169.254", "fe80::1", "10.0.0.5", "192.168.1.10", "172.16.0.1", "100.63.255.255", "100.128.0.1", "8.8.8.8", "224.0.0.1", "ff02::1", "fd7a:115c:a1e1::1", "fe80::1%en0", "forge.example.ts.net", ""} {
+	for _, address := range []string{"127.0.0.1", "::1", "169.254.169.254", "fe80::1", "10.0.0.5", "192.168.1.10", "172.16.0.1", "100.63.255.255", "100.128.0.1", "8.8.8.8", "224.0.0.1", "ff02::1", "fd7a:115c:a1e1::1", "fe80::1%en0", "vps.example.ts.net", ""} {
 		if err := CheckTailnetAddress(address); err == nil {
 			t.Errorf("%s accepted", address)
 		}
 	}
-	if _, err := NewClient("https://forge.example.ts.net:7412", "192.168.1.10", "", ClientOptions{}); err == nil {
+	if _, err := NewClient("https://vps.example.ts.net:7412", "192.168.1.10", "", ClientOptions{}); err == nil {
 		t.Fatal("client accepted a LAN address")
 	}
 }
@@ -94,7 +94,7 @@ func TestClientClassifiesUnreachableAsNotSentAndHidesToken(t *testing.T) {
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
-	client, err := NewClient("https://forge.example.ts.net:"+strconv.Itoa(port), "127.0.0.1", "ahd_secret-token", ClientOptions{})
+	client, err := NewClient("https://vps.example.ts.net:"+strconv.Itoa(port), "127.0.0.1", "ahd_secret-token", ClientOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,10 +106,10 @@ func TestClientClassifiesUnreachableAsNotSentAndHidesToken(t *testing.T) {
 	if strings.Contains(err.Error(), "ahd_secret-token") {
 		t.Fatalf("error leaked token: %v", err)
 	}
-	if _, err := NewClient("http://forge:7412", "127.0.0.1", "", ClientOptions{}); err == nil {
+	if _, err := NewClient("http://vps:7412", "127.0.0.1", "", ClientOptions{}); err == nil {
 		t.Fatal("plain http endpoint accepted")
 	}
-	if _, err := NewClient("https://forge:7412", "forge.example.ts.net", "", ClientOptions{}); err == nil {
+	if _, err := NewClient("https://vps:7412", "vps.example.ts.net", "", ClientOptions{}); err == nil {
 		t.Fatal("DNS name accepted as address")
 	}
 }
@@ -215,7 +215,7 @@ func TestPairRevokesTheDeviceWhenProtocolsDoNotOverlap(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/pair":
 			_, _ = w.Write([]byte(`{"token":"ahd_minted"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/version":
-			_, _ = w.Write([]byte(`{"hostId":"h0123456789ab","hostName":"forge","minimumProtocol":2,"maximumProtocol":3}`))
+			_, _ = w.Write([]byte(`{"hostId":"h0123456789ab","hostName":"vps","minimumProtocol":2,"maximumProtocol":3}`))
 		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/device":
 			revokedWith.Store(r.Header.Get("Authorization"))
 			_, _ = w.Write([]byte(`{"ok":true}`))
@@ -228,7 +228,7 @@ func TestPairRevokesTheDeviceWhenProtocolsDoNotOverlap(t *testing.T) {
 	roots.AddCert(server.Certificate())
 	port := server.Listener.Addr().(*net.TCPAddr).Port
 	link := PairingLink{Endpoint: "https://example.com:" + strconv.Itoa(port), Secret: "pair-secret"}
-	token, _, err := Pair(context.Background(), link, "127.0.0.1", "mac", "h00000000000a", ClientOptions{RootCAs: roots})
+	token, _, err := Pair(context.Background(), link, "127.0.0.1", "laptop", "h00000000000a", ClientOptions{RootCAs: roots})
 	var mismatch ErrProtocolMismatch
 	if !errors.As(err, &mismatch) || token != "" {
 		t.Fatalf("token=%q err=%v, want protocol mismatch and no token", token, err)

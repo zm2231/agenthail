@@ -148,14 +148,14 @@ func TestDeviceAuthenticationRecordsLastSeenAtMostOncePerMinute(t *testing.T) {
 
 func TestAHostTokenBelongsToTheHostThatPaired(t *testing.T) {
 	r := openTestRegistry(t)
-	hostPairing, err := r.CreateDevicePairing("forge", []string{"read", "control", HostScope}, time.Minute)
+	hostPairing, err := r.CreateDevicePairing("vps", []string{"read", "control", HostScope}, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := r.CompleteDevicePairing(hostPairing.Secret, "", "not-a-host"); err == nil {
 		t.Fatal("a malformed host id was accepted")
 	}
-	hostPairing, err = r.CreateDevicePairing("forge", []string{"read", "control", HostScope}, time.Minute)
+	hostPairing, err = r.CreateDevicePairing("vps", []string{"read", "control", HostScope}, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

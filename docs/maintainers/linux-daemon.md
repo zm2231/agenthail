@@ -1,6 +1,6 @@
 # Linux daemon
 
-Agenthail runs on Linux as a headless daemon for Claude Code and Codex on remote machines. The daemon is the same pure Go binary as on macOS; what differs per operating system is who supervises it.
+Agenthail runs on Linux as a headless daemon for Claude Code and Codex. The daemon is the same pure Go binary as on macOS; what differs per operating system is who supervises it.
 
 ## One service owner per operating system
 

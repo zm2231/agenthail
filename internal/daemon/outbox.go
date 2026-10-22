@@ -144,6 +144,9 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	}
 	d.log.Printf("delivered queue item %d to %s", item.ID, d.resolveDisplay(session.ID))
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: historyKind, SessionID: session.ID, QueueID: item.ID, Message: item.Message, Result: result.UUID})
+	if result.Notice != "" {
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "model", SessionID: session.ID, QueueID: item.ID, Message: result.Notice, Result: result.UUID})
+	}
 }
 
 func (d *Daemon) runQueuedCompact(ctx context.Context, adapter surface.Surface, session *surface.Session, item *registry.QueuedMessage) {

@@ -7,7 +7,7 @@ const start = source.indexOf("function sessionIsCurrent(");
 const end = source.indexOf("function renderSessions()", start);
 assert(start >= 0 && end > start);
 const widget = { id: "project-widget", displayName: "widget", rootPath: "/work/widget", kind: "git" };
-const forge = { id: "h1::project-widget", displayName: "widget", rootPath: "/private/example/secret", kind: "git", host: { id: "h1", name: "forge-agents.tail0000.ts.net", state: "connected" } };
+const vps = { id: "h1::project-widget", displayName: "widget", rootPath: "/private/example/secret", kind: "git", host: { id: "h1", name: "vps.example.ts.net", state: "connected" } };
 const notes = { id: "project-notes", displayName: "notes", rootPath: "/work/notes", kind: "folder", archived: true };
 const at = (hours) => new Date(Date.UTC(2026, 9, 4, 12) - hours * 3600e3).toISOString();
 const sessions = [
@@ -16,13 +16,13 @@ const sessions = [
   { id: "queued", name: "queued", surface: "codex", status: "idle", lastActive: at(31), project: widget, queueCount: 1 },
   { id: "flagged", name: "flagged", surface: "codex", status: "idle", lastActive: at(32), project: widget },
   { id: "lead", name: "lead", surface: "claude", status: "idle", lastActive: at(33), project: widget, subagents: { count: 2, working: 1 } },
-  { id: "far", name: "far", surface: "codex", status: "idle", lastActive: at(1), project: forge, host: { id: "h1", name: "forge-agents.tail0000.ts.net", state: "connected" }, current: true },
+  { id: "far", name: "far", surface: "codex", status: "idle", lastActive: at(1), project: vps, host: { id: "h1", name: "vps.example.ts.net", state: "connected" }, current: true },
   { id: "hidden", name: "hidden", surface: "codex", status: "idle", lastActive: at(1), project: widget, current: true, archived: true },
   { id: "kept", name: "kept", surface: "claude", status: "idle", lastActive: at(40), project: notes, archived: true },
   { id: "loose", name: "loose", surface: "claude", status: "idle", lastActive: at(2), current: true },
 ];
 const context = {
-  app: { state: { sessions, projects: [widget, forge, notes], attention: [{ sessionId: "flagged" }] }, inboxMode: "current", showArchived: false, expandedProjects: new Set(), openArchivedProjects: false, selected: null },
+  app: { state: { sessions, projects: [widget, vps, notes], attention: [{ sessionId: "flagged" }] }, inboxMode: "current", showArchived: false, expandedProjects: new Set(), openArchivedProjects: false, selected: null },
   labels: { codex: "Codex", claude: "Claude Code" },
   escape: (value) => String(value ?? "").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"),
   displayName: (session) => session.name, rawDisplayName: (session) => session.name,
@@ -42,15 +42,15 @@ for (const id of ["w0", "w4", "busy", "queued", "flagged", "lead"]) assert.match
 assert.doesNotMatch(widgetSection, /data-session="w5"/, "older idle sessions collapse");
 assert.match(widgetSection, /Show 2 more/);
 assert.doesNotMatch(html, /\/private\/example\/secret|\/work\/widget/, "project headers never show a root path");
-assert.match(html, /<span class="host-badge" title="On forge-agents\.tail0000\.ts\.net">forge-agents<\/span>/, "a remote project names its host briefly");
-assert.match(html, /data-session="far".*<span class="host-badge" title="On forge-agents\.tail0000\.ts\.net">forge-agents<\/span>/s, "a remote session shows a short host badge");
+assert.match(html, /<span class="host-badge" title="On vps\.example\.ts\.net">vps<\/span>/, "a remote project names its host briefly");
+assert.match(html, /data-session="far".*<span class="host-badge" title="On vps\.example\.ts\.net">vps<\/span>/s, "a remote session shows a short host badge");
 assert.doesNotMatch(html.slice(0, html.indexOf("</section>")), /host-badge/, "local projects and sessions carry no host badge");
 assert.doesNotMatch(html, /data-session="hidden"|data-session="loose"/, "archived sessions and sessions without a project stay out");
 assert.match(html, /Archived \(1\)<\/summary>.*data-project-action="project-unarchive" data-project-id="project-notes".*data-session="kept"/s);
 assert.match(widgetSection, /data-project-message="project-widget" data-project-name="widget"[^>]*>Message<\/button>/, "an active project offers a message to its conversations");
 assert.doesNotMatch(html.slice(html.indexOf("Archived (1)")), /data-project-message/, "an archived project offers no message");
-const local = { id: "h0", name: "mac", state: "local" };
-const remote = { id: "h1", name: "forge-agents.tail0000.ts.net", state: "connected" };
+const local = { id: "h0", name: "laptop", state: "local" };
+const remote = { id: "h1", name: "vps.example.ts.net", state: "connected" };
 const leads = (coordinators) => {
   context.app.state.projects = [{ ...widget, coordinators }];
   const rendered = vm.runInContext('renderProjects("")', context).html;
@@ -58,9 +58,9 @@ const leads = (coordinators) => {
 };
 assert.match(leads([{ host: local, name: "widget-lead", surface: "claude", sessionId: "lead" }]), /<button class="lead-chip" type="button" data-session="lead" title="Open @widget-lead, the project coordinator">@widget-lead<\/button>/, "a started coordinator opens its conversation");
 assert.match(leads([{ host: local, name: "widget-lead", surface: "claude" }]), /<span class="lead-chip idle" title="@widget-lead starts on its first message">@widget-lead<\/span>/, "an unstarted coordinator is not clickable");
-assert.match(leads([{ host: remote, name: "forge-lead", surface: "codex", sessionId: "h1::s9" }]), /data-session="h1::s9"[^>]*>forge-agents::@forge-lead</, "a paired host's coordinator is named with its host and opens its mirrored session");
-const conflict = leads([{ host: local, name: "a<b", surface: "claude", sessionId: "lead" }, { host: remote, name: "forge-lead", surface: "codex" }]);
-assert.match(conflict, /<span class="lead-chip conflict" title="Several hosts each have a coordinator: @a&lt;b, forge-agents::@forge-lead\.[^"]*">2 leads<\/span>/, "a conflict names every coordinator and opens none");
+assert.match(leads([{ host: remote, name: "vps-lead", surface: "codex", sessionId: "h1::s9" }]), /data-session="h1::s9"[^>]*>vps::@vps-lead</, "a paired host's coordinator is named with its host and opens its mirrored session");
+const conflict = leads([{ host: local, name: "a<b", surface: "claude", sessionId: "lead" }, { host: remote, name: "vps-lead", surface: "codex" }]);
+assert.match(conflict, /<span class="lead-chip conflict" title="Several hosts each have a coordinator: @a&lt;b, vps::@vps-lead\.[^"]*">2 leads<\/span>/, "a conflict names every coordinator and opens none");
 assert.doesNotMatch(conflict, /lead-chip"[^>]*data-session/, "a conflict chip is not a button");
 assert.doesNotMatch(leads([]), /lead-chip/, "a project without a coordinator shows no chip");
 const pickerStart = source.indexOf("function renderStartProjects(");

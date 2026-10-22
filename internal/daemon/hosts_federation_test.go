@@ -376,7 +376,7 @@ func pairedFederation(t *testing.T) (*federationNode, *federationNode, registry.
 	remote.serve(t, nil)
 	local := newFederationNode(t, "local-a")
 	local.start(t, testRoots(remote.server))
-	record := local.pair(t, remote, "forge")
+	record := local.pair(t, remote, "vps")
 	awaitFederation(t, "remote sessions mirrored", func() bool {
 		return len(sessionsOf(local.snapshot(t), record.ID)) == 2
 	})
@@ -401,7 +401,7 @@ func TestFederationMirrorsReadsAndDrivesRemoteSessions(t *testing.T) {
 			t.Fatalf("local row host=%+v", session.Host)
 		}
 	}
-	if mirrored == nil || mirrored.Host.Name != "forge" || mirrored.Host.State != hostStateConnected || mirrored.UnavailableReason != "" {
+	if mirrored == nil || mirrored.Host.Name != "vps" || mirrored.Host.State != hostStateConnected || mirrored.UnavailableReason != "" {
 		t.Fatalf("mirrored=%+v", mirrored)
 	}
 	if owner, err := local.reg.SessionHost("remote-a"); err != nil || owner != record.ID {
@@ -417,7 +417,7 @@ func TestFederationMirrorsReadsAndDrivesRemoteSessions(t *testing.T) {
 	if send.Code != http.StatusOK || !strings.Contains(send.Body.String(), `"sessionId":"`+qualified+`"`) {
 		t.Fatalf("send status=%d body=%s", send.Code, send.Body.String())
 	}
-	steer := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "steer", "sessionId": "forge::remote-b", "message": "turn left"})
+	steer := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "steer", "sessionId": "vps::remote-b", "message": "turn left"})
 	if steer.Code != http.StatusOK {
 		t.Fatalf("steer status=%d body=%s", steer.Code, steer.Body.String())
 	}
@@ -439,10 +439,10 @@ func TestFederationMirrorsReadsAndDrivesRemoteSessions(t *testing.T) {
 
 	resolved := local.request(t, http.MethodGet, "/api/v1/resolve?scope=remote&target=remote-a", nil)
 	var answer resolveResponse
-	if err := json.Unmarshal(resolved.Body.Bytes(), &answer); err != nil || len(answer.Matches) != 1 || answer.Matches[0].ID != qualified || answer.Matches[0].Host.Name != "forge" {
+	if err := json.Unmarshal(resolved.Body.Bytes(), &answer); err != nil || len(answer.Matches) != 1 || answer.Matches[0].ID != qualified || answer.Matches[0].Host.Name != "vps" {
 		t.Fatalf("resolve status=%d body=%s", resolved.Code, resolved.Body.String())
 	}
-	onHost := local.request(t, http.MethodGet, "/api/v1/resolve?scope=remote&host=forge&target=remote-b", nil)
+	onHost := local.request(t, http.MethodGet, "/api/v1/resolve?scope=remote&host=vps&target=remote-b", nil)
 	if err := json.Unmarshal(onHost.Body.Bytes(), &answer); err != nil || len(answer.Matches) != 1 || answer.Matches[0].ID != hosts.Qualify(record.ID, "remote-b") {
 		t.Fatalf("host-scoped resolve status=%d body=%s", onHost.Code, onHost.Body.String())
 	}
@@ -462,7 +462,7 @@ func TestFederationHostRowCollidingWithLocalSessionLeavesTheLocalRow(t *testing.
 	remote.serve(t, nil)
 	local := newFederationNode(t, "moved")
 	local.start(t, testRoots(remote.server))
-	record := local.pair(t, remote, "forge")
+	record := local.pair(t, remote, "vps")
 	awaitFederation(t, "remote sessions mirrored", func() bool {
 		return len(sessionsOf(local.snapshot(t), record.ID)) == 1
 	})
@@ -495,7 +495,7 @@ func TestFederationHostRowCollidingWithLocalSessionLeavesTheLocalRow(t *testing.
 	if session, err := local.reg.Session("moved"); err != nil || session.Name != "work moved" {
 		t.Fatalf("local row after remote upsert=%+v err=%v", session, err)
 	}
-	want := "1 session on forge not shown: conversation moved is also a local session"
+	want := "1 session on vps not shown: conversation moved is also a local session"
 	if notice := hostNotice(t, local, record.ID); notice != want {
 		t.Fatalf("hosts notice=%q, want %q", notice, want)
 	}
@@ -554,20 +554,20 @@ func hostNotices(t *testing.T, node *federationNode, hostID string) (string, str
 
 func TestFederationPairedBothWaysShowsEachSessionOnce(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	mac := newFederationNode(t, "mac-a")
-	forge := newFederationNode(t, "forge-a", "forge-b")
-	mac.serve(t, nil)
-	forge.serve(t, nil)
-	roots := testRoots(mac.server)
-	mac.start(t, roots)
-	forge.start(t, roots)
-	forgeRecord := mac.pair(t, forge, "forge")
-	macRecord := forge.pair(t, mac, "mac")
+	laptop := newFederationNode(t, "laptop-a")
+	vps := newFederationNode(t, "vps-a", "vps-b")
+	laptop.serve(t, nil)
+	vps.serve(t, nil)
+	roots := testRoots(laptop.server)
+	laptop.start(t, roots)
+	vps.start(t, roots)
+	vpsRecord := laptop.pair(t, vps, "vps")
+	laptopRecord := vps.pair(t, laptop, "laptop")
 	awaitFederation(t, "both mirrors", func() bool {
-		return len(sessionsOf(mac.snapshot(t), forgeRecord.ID)) == 2 && len(sessionsOf(forge.snapshot(t), macRecord.ID)) == 1
+		return len(sessionsOf(laptop.snapshot(t), vpsRecord.ID)) == 2 && len(sessionsOf(vps.snapshot(t), laptopRecord.ID)) == 1
 	})
 	time.Sleep(300 * time.Millisecond)
-	for name, node := range map[string]*federationNode{"mac": mac, "forge": forge} {
+	for name, node := range map[string]*federationNode{"laptop": laptop, "vps": vps} {
 		seen := map[string]int{}
 		for _, session := range node.snapshot(t).Sessions {
 			seen[session.ID]++
@@ -592,7 +592,7 @@ func TestFederationUnreachableHostKeepsRowsAndDeliversHeldSendOnce(t *testing.T)
 	remote.stop()
 	awaitFederation(t, "rows marked unavailable", func() bool {
 		rows := sessionsOf(local.snapshot(t), record.ID)
-		return len(rows) == 2 && rows[0].Host.State == hostStateUnreachable && strings.Contains(rows[0].UnavailableReason, "host forge is unreachable") && rows[0].Freshness != nil && rows[0].Freshness.Stale
+		return len(rows) == 2 && rows[0].Host.State == hostStateUnreachable && strings.Contains(rows[0].UnavailableReason, "host vps is unreachable") && rows[0].Freshness != nil && rows[0].Freshness.Stale
 	})
 	qualified := hosts.Qualify(record.ID, "remote-a")
 	resolved := local.request(t, http.MethodGet, "/api/v1/resolve?scope=remote&target=remote-a", nil)
@@ -600,14 +600,14 @@ func TestFederationUnreachableHostKeepsRowsAndDeliversHeldSendOnce(t *testing.T)
 		t.Fatalf("unreachable resolve body=%s", resolved.Body.String())
 	}
 	read := local.request(t, http.MethodGet, "/api/v1/session-metadata?id="+url.QueryEscape(qualified), nil)
-	if read.Code != http.StatusServiceUnavailable || !strings.Contains(read.Body.String(), "Host forge is unreachable") {
+	if read.Code != http.StatusServiceUnavailable || !strings.Contains(read.Body.String(), "Host vps is unreachable") {
 		t.Fatalf("read while down status=%d body=%s", read.Code, read.Body.String())
 	}
 	steer := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "steer", "sessionId": qualified, "message": "now"})
 	if steer.Code != http.StatusServiceUnavailable {
 		t.Fatalf("steer while down status=%d body=%s", steer.Code, steer.Body.String())
 	}
-	send := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": qualified, "message": "held for forge"})
+	send := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": qualified, "message": "held for vps"})
 	if send.Code != http.StatusOK || !strings.Contains(send.Body.String(), `"evidence":"queued"`) {
 		t.Fatalf("send while down status=%d body=%s", send.Code, send.Body.String())
 	}
@@ -626,7 +626,7 @@ func TestFederationUnreachableHostKeepsRowsAndDeliversHeldSendOnce(t *testing.T)
 	})
 	host, _ := local.daemon.pairedHost(record.ID)
 	local.daemon.drainHostDeliveries(context.Background(), host)
-	if got := remote.fake.delivered(); len(got) != 1 || got[0] != "held for forge" {
+	if got := remote.fake.delivered(); len(got) != 1 || got[0] != "held for vps" {
 		t.Fatalf("remote delivered=%v", got)
 	}
 	queue, err := local.reg.ListQueue(true, nil)
@@ -648,7 +648,7 @@ func mirroredQueueCount(t *testing.T, node *federationNode, id string) int {
 func TestFederationQueueCountsCombineHostAndHeldWork(t *testing.T) {
 	local, remote, record := pairedFederation(t)
 	qualified := hosts.Qualify(record.ID, "remote-a")
-	if err := remote.reg.QueueMessage("remote-a", "queued on forge"); err != nil {
+	if err := remote.reg.QueueMessage("remote-a", "queued on vps"); err != nil {
 		t.Fatal(err)
 	}
 	remote.daemon.publishCatalogPresence()
@@ -661,7 +661,7 @@ func TestFederationQueueCountsCombineHostAndHeldWork(t *testing.T) {
 	if got := mirroredQueueCount(t, local, qualified); got != 1 {
 		t.Fatalf("queue count after marking down=%d", got)
 	}
-	send := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": qualified, "message": "held for forge"})
+	send := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": qualified, "message": "held for vps"})
 	if send.Code != http.StatusOK || !strings.Contains(send.Body.String(), `"evidence":"queued"`) {
 		t.Fatalf("send while down status=%d body=%s", send.Code, send.Body.String())
 	}
@@ -783,7 +783,7 @@ func TestFederationUnconfirmedSendRetriesByReplayingItsKey(t *testing.T) {
 		t.Fatalf("queue=%+v err=%v", queue, err)
 	}
 	id := queue[0].ID
-	if err := local.reg.DeadLetterUnknown(id, errors.New("host forge has not confirmed the message")); err != nil {
+	if err := local.reg.DeadLetterUnknown(id, errors.New("host vps has not confirmed the message")); err != nil {
 		t.Fatal(err)
 	}
 	retry := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "queue-retry", "queueId": id})
@@ -835,7 +835,7 @@ func TestFederationRemoveWaitsForInFlightReconcile(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	removed := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
-		removed <- local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "forge"})
+		removed <- local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "vps"})
 	}()
 	time.Sleep(100 * time.Millisecond)
 	local.daemon.catalog.mu.Unlock()
@@ -878,7 +878,7 @@ func TestFederationAppliesRemoteCatalogEventsIncrementally(t *testing.T) {
 
 func TestFederationCreatesSessionOnRemoteHost(t *testing.T) {
 	local, remote, record := pairedFederation(t)
-	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "session-create", "host": "forge", "surface": "codex", "message": "start remotely", "cwd": t.TempDir()})
+	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "session-create", "host": "vps", "surface": "codex", "message": "start remotely", "cwd": t.TempDir()})
 	if response.Code != http.StatusOK && response.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -892,7 +892,7 @@ func TestFederationCreatesSessionOnRemoteHost(t *testing.T) {
 
 func TestFederationRelaysRemoteSessionStream(t *testing.T) {
 	local, remote, record := pairedFederation(t)
-	if _, _, err := remote.reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: "remote-a", Kind: "text", ProviderKey: "m1", Payload: []byte(`{"itemId":"m1","version":1,"op":"upsert","kind":"text","role":"assistant","body":"from forge"}`), ObservedAt: time.Now()}, registry.SessionJournalRetention{Count: 8, Bytes: 4096}); err != nil {
+	if _, _, err := remote.reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: "remote-a", Kind: "text", ProviderKey: "m1", Payload: []byte(`{"itemId":"m1","version":1,"op":"upsert","kind":"text","role":"assistant","body":"from vps"}`), ObservedAt: time.Now()}, registry.SessionJournalRetention{Count: 8, Bytes: 4096}); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(local.handler)
@@ -920,7 +920,7 @@ func TestFederationRelaysRemoteSessionStream(t *testing.T) {
 			t.Fatalf("stream ended before the remote entry: %v", err)
 		}
 		if strings.HasPrefix(line, "data: ") {
-			if !strings.Contains(line, `"sessionId":"`+hosts.Qualify(record.ID, "remote-a")+`"`) || !strings.Contains(line, "from forge") {
+			if !strings.Contains(line, `"sessionId":"`+hosts.Qualify(record.ID, "remote-a")+`"`) || !strings.Contains(line, "from vps") {
 				t.Fatalf("stream entry=%s", line)
 			}
 			return
@@ -992,14 +992,14 @@ func TestFederationRenameRacesReadsAndLocalRouting(t *testing.T) {
 		}
 	}()
 	for index := 0; index < 20; index++ {
-		response := local.request(t, http.MethodPut, "/api/v1/host", map[string]string{"name": fmt.Sprintf("mac-%d", index)})
+		response := local.request(t, http.MethodPut, "/api/v1/host", map[string]string{"name": fmt.Sprintf("laptop-%d", index)})
 		if response.Code != http.StatusOK {
 			t.Fatalf("rename status=%d body=%s", response.Code, response.Body.String())
 		}
 	}
 	close(stop)
 	wg.Wait()
-	if name := local.daemon.hostIdentity().Name; name != "mac-19" {
+	if name := local.daemon.hostIdentity().Name; name != "laptop-19" {
 		t.Fatalf("name=%q", name)
 	}
 }
@@ -1027,7 +1027,7 @@ func TestFederationOverlappingAttachesLeaveOneLoopPairAndRemoveStopsIt(t *testin
 	if got := hostLoopsRunning(); got != 2 {
 		t.Fatalf("host loops after overlapping attaches=%d", got)
 	}
-	response := local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "forge"})
+	response := local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "vps"})
 	if response.Code != http.StatusOK {
 		t.Fatalf("remove status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -1044,7 +1044,7 @@ func TestFederationOverlappingAttachesLeaveOneLoopPairAndRemoveStopsIt(t *testin
 
 func TestFederationAttachAfterRemovalIsRefused(t *testing.T) {
 	local, _, record := pairedFederation(t)
-	response := local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "forge"})
+	response := local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "vps"})
 	if response.Code != http.StatusOK {
 		t.Fatalf("remove status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -1064,7 +1064,7 @@ func TestFederationRemovalCommitsAndRevokesDespiteCatalogGap(t *testing.T) {
 	local.daemon.catalog.mu.Lock()
 	local.daemon.catalog.publishedSeq = 1 << 40
 	local.daemon.catalog.mu.Unlock()
-	response := local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "forge"})
+	response := local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "vps"})
 	if response.Code != http.StatusOK {
 		t.Fatalf("remove status=%d body=%s", response.Code, response.Body.String())
 	}

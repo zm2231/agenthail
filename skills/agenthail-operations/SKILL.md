@@ -89,6 +89,21 @@ hit its limit; wait for the reset it names rather than resending.
 into the Agenthail host. A busy session is refused (or waited on with
 `--wait`); a terminal is stopped only with `--stop-terminal`.
 
+`agenthail claude settings compact [--json]` shows each root's compaction
+settings as its `settings.json` holds them: `autoCompactWindow`, each
+`modelSettings.<model>.autoCompactWindow`, `autoCompactEnabled` and
+`idleCompaction`, plus `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `DISABLE_AUTO_COMPACT`
+or `DISABLE_COMPACT` when set in this environment, since they take precedence.
+`agenthail claude settings compact [--root <root>] [--model <model>]
+<tokens|auto|unset> [--enabled on|off] [--idle on|off]` edits only those keys
+in that root's file (the primary root by default). Tokens run from 100000 to
+1000000; `auto` is Claude's window for the model; `unset` removes the key. A
+running Claude does not reread the file: a change applies to sessions started
+after it. A hosted session's `contextUsage.autoCompact` is what the running
+Claude reports (`source: "runtime"`), the value actually in effect.
+The roots are those of the machine the command runs on; each host's settings
+are changed on that host or through its daemon.
+
 One unhealthy surface does not block the others. Preserve the `errors` object
 from JSON discovery output when reporting partial availability.
 
@@ -315,6 +330,15 @@ and `clear`, which run Claude's `/goal` once the session is idle and are
 confirmed by Claude's answer; it has no `pause`, `resume` or `budget`, and a
 session reached only through its peer socket cannot set a goal.
 
+Codex model: a conversation Codex already has open keeps its model until its
+next turn, so `model @builder <name>` records the choice and the next turn
+Agenthail sends carries it. `--json` then reports `model` (what it runs now)
+and `pendingModel`; `model @builder` and the session row show `pendingModel`
+until that turn starts. A turn started from Codex Desktop's composer, or from
+its own queue with `thread queue <target> start`, runs on the model Desktop
+shows. If the conversation moved to a third model meanwhile, the choice is
+dropped and the send result's `notice` says so.
+
 Claude controls over Remote Control report request-linked evidence. `model` and
 `interrupt` wait for Claude's `control_response` to their own request id;
 `interrupt` also waits for the active turn to end. A steer is only
@@ -345,7 +369,7 @@ Each exchange in `last --json` and `last --report`, and the reply in
 about that turn:
 
 ```json
-{"v":1,"state":"completed","model":"gpt-5.6-terra","durationMs":4200,"usage":{"inputTokens":250,"cachedInputTokens":140,"cacheWriteTokens":5,"outputTokens":50,"reasoningTokens":10},"contextTokens":180,"compactions":[{"trigger":"threshold","preTokens":1103,"postTokens":200}]}
+{"v":1,"state":"completed","model":"claude-opus-5-5","durationMs":4200,"usage":{"inputTokens":250,"cachedInputTokens":140,"cacheWriteTokens":5,"outputTokens":50,"reasoningTokens":10},"contextTokens":180,"compactions":[{"trigger":"threshold","preTokens":1103,"postTokens":200}]}
 ```
 
 `state` is `completed`, `interrupted`, `failed`, `running` or `unknown`.
@@ -595,14 +619,14 @@ here. Pairing needs remote access on the other host and both daemons running.
 agenthail hosts                     # this host, paired hosts, state, session counts
 agenthail hosts invite              # on the other host: prints a pairing link
 agenthail hosts add '<link>' --address <tailnet-ip>
-agenthail hosts remove forge
-agenthail hosts name mac
+agenthail hosts remove server
+agenthail hosts name laptop
 ```
 
-Address a paired host's session as `forge::@builder` or `forge::<id>`.
+Address a paired host's session as `server::@builder` or `server::<id>`.
 An unqualified target that matches on two hosts is an error listing each
 `host::target`; show the candidates and ask which one. `send`, `steer`,
-`interrupt`, `reply`, `last`, `stream` and `thread create --host forge` reach
+`interrupt`, `reply`, `last`, `stream` and `thread create --host server` reach
 paired hosts, and `--cwd` with `--host` is a path on that host. A session on an
 unreachable host stays listed as `down` with the host named. A send to it is
 held by the local daemon (`queued`, held by `hostUnreachable`) and delivered

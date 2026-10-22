@@ -103,6 +103,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/history", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("sessionId", d.dashboardHistoryHandler))))
 	mux.HandleFunc("/api/v1/actions", d.apiV1Guard(dashboard, "control", d.idempotentActionHandler(apiV1JSONHandler(d.hostRoutedAction(d.dashboardActionHandler)))))
 	mux.HandleFunc("/api/v1/settings", d.apiV1Guard(dashboard, "settings", apiV1JSONHandler(d.dashboardSettingsHandler)))
+	mux.HandleFunc("/api/v1/claude/compact-settings", d.apiV1Guard(dashboard, "settings", apiV1JSONHandler(d.claudeCompactSettingsHandler)))
 	mux.HandleFunc("/api/v1/pairings", d.apiV1Guard(dashboard, "settings", d.apiPairingsHandler))
 	mux.HandleFunc("/api/v1/devices", d.apiV1Guard(dashboard, "settings", d.apiDevicesHandler))
 	mux.HandleFunc("/api/v1/device", d.apiDeviceSelfHandler)
@@ -531,7 +532,7 @@ func pairingEndpoint(r *http.Request) (string, error) {
 	}
 	status := RemoteAccessStatusForConfig(config)
 	if !status.Enabled || status.URL == "" {
-		message := "Enable private Tailscale access in Operations before pairing an iPhone."
+		message := "Turn on remote access before pairing: run agenthail dashboard remote, or turn on Phone access in the Mac app's Settings > Devices."
 		if status.Error != "" {
 			message += " " + status.Error
 		}

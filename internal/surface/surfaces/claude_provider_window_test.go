@@ -115,3 +115,31 @@ func TestAHostThatDoesNotAnswerDelaysOnlyTheSessionsItRuns(t *testing.T) {
 		t.Fatal("the hosted read did not give up on a host that does not answer")
 	}
 }
+
+func TestAHostedClaudeSessionReportsWhenClaudeCompactsIt(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	host := claudehosttest.New(t, "")
+	host.Start(t)
+	if _, err := surface.WriteClaudeCompactSettings(surface.ClaudeConfigDir(host.Home), surface.ClaudeCompactChange{Window: "300000"}); err != nil {
+		t.Fatal(err)
+	}
+	c := NewClaude(nil, host.Home)
+	ctx := context.Background()
+	session, _, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usage *surface.ContextUsage
+	claudehosttest.WaitFor(t, "the reported autocompact", func() bool {
+		usage, err = c.ContextUsage(ctx, session)
+		return err == nil && usage != nil && usage.AutoCompact != nil
+	})
+	if want := (surface.AutoCompact{Enabled: true, Window: 300000, Threshold: 267000, DecidedBy: "settings", Source: surface.AutoCompactSourceRuntime}); *usage.AutoCompact != want {
+		t.Fatalf("autoCompact=%+v", *usage.AutoCompact)
+	}
+	terminal := *session
+	terminal.RuntimeKind = surface.RuntimeClaudeCLI
+	if usage, err := NewClaude(nil, host.Home).ContextUsage(ctx, &terminal); err != nil || usage == nil || usage.AutoCompact != nil {
+		t.Fatalf("a session the host does not run reported autocompact: usage=%+v err=%v", usage, err)
+	}
+}

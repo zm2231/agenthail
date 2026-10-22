@@ -471,13 +471,18 @@ function presenceTone(session) {
   if (session.status === "idle" || ["queued", "blocked"].includes(session.currentReason)) return "idle";
   return session.status;
 }
-function conversationMeta(session, model = "") {
+function conversationMeta(session, model = "", pendingModel = session.pendingModel || "") {
   const parts = [session.waitingOn ? "Waiting on you" : backgroundWaiting(session) ? "Waiting on background work" : statusLabel(session.status), `${session.queueCount || 0} queued`];
   if (session.status !== "busy") parts.push(`last active ${timeAgo(session.lastActive)}`);
-  if (model) parts.push(model);
+  const label = modelLabel(model, pendingModel);
+  if (label) parts.push(label);
   const configRoot = session.claudeConfigRoot;
   if (configRoot?.name && (configRoot.name !== "default" || configRoot.signedInAs)) parts.push(configRoot.signedInAs ? `config folder ${configRoot.name} · currently signed in as ${configRoot.signedInAs}` : `config folder ${configRoot.name}`);
   return parts.join(" · ");
+}
+function modelLabel(model = "", pendingModel = "") {
+  if (!pendingModel || pendingModel === model) return model;
+  return model ? `${model} · ${pendingModel} from next turn` : `${pendingModel} from next turn`;
 }
 function surfaceIcon(name) {
   return name === "claude" ? "✦" : name === "codex" ? "◈" : "N";
@@ -977,8 +982,40 @@ function renderSigninProfileChoices() {
   $("#signin-profile").innerHTML = choices.map((profile) => `<option value="${escape(profile.profile)}">${escape(profile.name)}${profile.name === profile.profile ? "" : ` (${escape(profile.profile)})`}</option>`).join("");
   $("#signin-add-form button[type=submit]").disabled = choices.length === 0;
 }
+async function loadClaudeCompact() {
+  try {
+    const response = await fetch("/api/claude/compact-settings");
+    if (!response.ok) throw Error(await response.text());
+    app.claudeCompact = (await response.json()).roots || [];
+    renderClaudeCompact();
+  } catch (error) {
+    $("#claude-compact-roots").innerHTML = `<div class="empty-card">${escape(error.message)}</div>`;
+  }
+}
+function claudeCompactWindowLabel(window) {
+  if (!window) return "Claude's default";
+  if (window.auto) return "auto";
+  if (window.ignored) return `${window.ignored} (Claude ignores it)`;
+  return `${Number(window.tokens).toLocaleString()} tokens`;
+}
+function claudeSettingLabel(value) {
+  return value === undefined || value === null ? "not set" : value ? "on" : "off";
+}
+function renderClaudeCompact() {
+  const roots = app.claudeCompact || [];
+  $("#claude-compact-roots").innerHTML = roots.map((root) => {
+    const models = Object.entries(root.modelWindows || {}).map(([model, window]) => `<p>${escape(model)}: ${escape(claudeCompactWindowLabel(window))}</p>`).join("");
+    const overrides = Object.entries(root.overrides || {}).map(([name, value]) => `<p>${escape(name)}=${escape(value)} is set where Agenthail runs and takes precedence over this file.</p>`).join("");
+    return `<article class="setting-row"><div><strong>${escape(root.settingsPath)}</strong><p>Window: ${escape(claudeCompactWindowLabel(root.autoCompactWindow))}</p>${models}<p>Autocompact: ${escape(claudeSettingLabel(root.autoCompactEnabled))} · Idle compaction: ${escape(claudeSettingLabel(root.idleCompaction))}</p>${overrides}</div></article>`;
+  }).join("") || '<div class="empty-card">No Claude config folders.</div>';
+  const select = $("#claude-compact-root");
+  const chosen = select.value;
+  select.innerHTML = roots.map((root) => `<option value="${escape(root.root)}">${escape(root.root)}</option>`).join("");
+  if (roots.some((root) => root.root === chosen)) select.value = chosen;
+}
 async function loadSettings() {
   loadSignin();
+  loadClaudeCompact();
   try {
     const response = await fetch("/api/settings");
     if (!response.ok) throw Error(await response.text());
@@ -1375,7 +1412,7 @@ function renderChat() {
   renderSlashMenu();
   syncRequests();
   renderBackgroundTasks(session);
-  $("#chat-subtitle").textContent = conversationMeta(session, model);
+  $("#chat-subtitle").textContent = conversationMeta(session, model, app.history?.pendingModel ?? session.pendingModel ?? "");
   $("#thread-count").textContent =
     `${exchanges.length} recent exchange${exchanges.length === 1 ? "" : "s"}`;
   renderContextUsage(context);
@@ -1949,8 +1986,12 @@ async function send(requestedAction = "send") {
         ? result.result.detail
         : composerAction === "steer"
         ? "Current turn redirected."
+        : command?.toLowerCase() === "/model" && result?.result?.output
+        ? result.result.output
         : commandAction
         ? `${command} requested.`
+        : result?.result?.notice
+        ? `${status} to ${target}. ${result.result.notice}`
         : `${status} to ${target}.`,
     );
     await load();
@@ -1969,7 +2010,7 @@ function renderSlashMenu() {
   const choosingModel = value.toLowerCase().startsWith("/model ");
   const visible = value.startsWith("/") && !value.includes(" ");
   const commands = choosingModel
-    ? (app.history?.models || []).map((model) => [model.id, model.displayName || model.id, model.description || "", model.default])
+    ? (app.history?.models || []).map((model) => [model.id, model.displayName || model.id, model.id === (app.history?.pendingModel || app.selected?.pendingModel) ? "From next turn" : model.description || "", model.default])
     : visible
     ? app.slashCommands.filter(([command]) => command.startsWith(query))
     : [];
@@ -2672,6 +2713,21 @@ $("#dashboard-settings-form").addEventListener("submit", async (event) => {
     await updateSettings({ action: "dashboard-config", codexRecentHours: Number($("#settings-codex-hours").value), busyDelivery: $("#settings-busy-delivery").value });
     await load(true);
     toast("Settings saved.");
+  } catch (error) {
+    toast(error.message);
+  }
+});
+$("#claude-compact-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const body = { root: $("#claude-compact-root").value, model: $("#claude-compact-model").value.trim(), window: $("#claude-compact-window").value.trim() };
+  for (const [key, id] of [["enabled", "#claude-compact-enabled"], ["idleCompaction", "#claude-compact-idle"]]) {
+    if ($(id).value) body[key] = $(id).value === "on";
+  }
+  try {
+    const response = await fetch("/api/claude/compact-settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    if (!response.ok) throw Error(await response.text());
+    await loadClaudeCompact();
+    toast("Saved. Claude sessions started from now on use it.");
   } catch (error) {
     toast(error.message);
   }

@@ -28,7 +28,21 @@ const modelUsage = () => ({ 'claude-haiku-5-5': { contextWindow: 64000 }, [model
 const dir = process.env.FAKE_CLAUDE_DIR;
 const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME, '.claude');
 const transcript = path.join(dir, `${sessionId}.jsonl`);
-fs.appendFileSync(path.join(dir, 'spawns.jsonl'), JSON.stringify({ pid: process.pid, sessionId, argv, cwd: process.cwd(), env: Object.keys(process.env), configDir: process.env.CLAUDE_CONFIG_DIR ?? null }) + '\n');
+// Like Claude, the fake reads its autocompact settings once, when it starts.
+const settings = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(configDir, 'settings.json'), 'utf8'));
+  } catch {
+    return {};
+  }
+})();
+const contextReport = () => {
+  const modelWindow = windows[model] ?? 1000000;
+  if (settings.autoCompactEnabled === false) return { model, maxTokens: modelWindow, rawMaxTokens: modelWindow, isAutoCompactEnabled: false, autocompactSource: 'auto' };
+  const window = Number.isInteger(settings.autoCompactWindow) ? Math.min(settings.autoCompactWindow, modelWindow) : modelWindow;
+  return { model, maxTokens: window, rawMaxTokens: window, autoCompactThreshold: window - 33000, isAutoCompactEnabled: true, autocompactSource: Number.isInteger(settings.autoCompactWindow) ? 'settings' : 'auto' };
+};
+fs.appendFileSync(path.join(dir, 'spawns.jsonl'), JSON.stringify({ pid: process.pid, sessionId, argv, cwd: process.cwd(), env: Object.keys(process.env), configDir: process.env.CLAUDE_CONFIG_DIR ?? null, todoTools: process.env.CLAUDE_CODE_ENABLE_TODO_TOOLS ?? null }) + '\n');
 // A refuse-<session id> file makes the CLI exit before it starts, printing the
 // file's text the way Claude reports a session it cannot open.
 const refusal = path.join(dir, `refuse-${sessionId}`);
@@ -283,7 +297,7 @@ lines.on('line', (line) => {
     }
     const responses = {
       initialize: { commands: [], models: [], account: {}, output_style: 'default', available_output_styles: [] },
-      get_context_usage: { model, maxTokens: 425000, rawMaxTokens: 425000, totalTokens: 1000, categories: [] },
+      get_context_usage: { ...contextReport(), totalTokens: 1000, categories: [] },
     };
     const response = responses[subtype] ?? {};
     const answer = () => write({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response } });

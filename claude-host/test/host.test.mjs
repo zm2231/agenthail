@@ -223,6 +223,25 @@ test('a session opened in a Claude config root runs its Claude there', async () 
   c.close();
 });
 
+test('every session the host opens has the task tools unless the host turns them off', async () => {
+  const on = fixture();
+  await startHost(on, { env: { CLAUDE_CODE_ENABLE_TODO_TOOLS: undefined } });
+  const c = new Client(on.socket);
+  await c.call('open', { sessionId: randomUUID(), cwd: on.cwd });
+  await c.call('open', { resume: randomUUID(), cwd: on.cwd });
+  const spawned = fs.readFileSync(path.join(on.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(spawned.map((s) => s.todoTools), ['1', '1']);
+  c.close();
+
+  const off = fixture();
+  await startHost(off, { env: { CLAUDE_CODE_ENABLE_TODO_TOOLS: '0' } });
+  const d = new Client(off.socket);
+  await d.call('open', { sessionId: randomUUID(), cwd: off.cwd });
+  const [kept] = fs.readFileSync(path.join(off.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(kept.todoTools, '0');
+  d.close();
+});
+
 test('logs returns what an open session wrote to stderr', async () => {
   const f = fixture();
   await startHost(f);
@@ -501,7 +520,7 @@ test('model and permission mode change live and a resume keeps them', async () =
 
 test('a turn result gives the session the window Claude runs its main model with', async () => {
   const f = fixture();
-  await startHost(f);
+  await startHost(f, { env: { CLAUDE_CONFIG_DIR: f.claudeDir } });
   const c = new Client(f.socket);
   await c.call('subscribe', { after: 0 });
   const id = randomUUID();
@@ -512,6 +531,7 @@ test('a turn result gives the session the window Claude runs its main model with
   const first = await c.event((e) => e.sessionId === id && e.kind === 'context');
   assert.deepEqual([first.contextWindow, first.contextModel], [1000000, 'claude-opus-5-5']);
   assert.deepEqual([(await listed()).contextWindow, (await listed()).contextModel], [1000000, 'claude-opus-5-5']);
+  assert.deepEqual(first.autoCompact, { enabled: true, window: 1000000, threshold: 967000, decidedBy: 'auto' });
 
   const switchTo = async (model, after) => {
     await c.call('setModel', { sessionId: id, model });
@@ -685,6 +705,27 @@ test('a slow context report does not hold up the turns after it', async () => {
   assert.ok(Date.now() - sent < 1500, `the next turn waited ${Date.now() - sent}ms`);
   const context = await c.event((e) => e.sessionId === id && e.kind === 'context', 10000);
   assert.equal(context.contextWindow, 1000000);
+  c.close();
+});
+
+test('a session reports when Claude compacts it, as the settings it started with say', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const reported = async (settings) => {
+    const root = fs.mkdtempSync(path.join(f.root, 'root-'));
+    fs.writeFileSync(path.join(root, 'settings.json'), JSON.stringify(settings));
+    const id = randomUUID();
+    await c.call('open', { sessionId: id, cwd: f.cwd, configDir: root });
+    fs.writeFileSync(path.join(root, 'settings.json'), JSON.stringify({ autoCompactWindow: 150000 }));
+    await c.call('send', { sessionId: id, uuid: randomUUID(), text: 'hello', origin: { kind: 'human' } });
+    const context = await c.event((e) => e.sessionId === id && e.kind === 'context');
+    assert.deepEqual((await c.call('list')).sessions.find((s) => s.sessionId === id).autoCompact, context.autoCompact);
+    return context.autoCompact;
+  };
+  assert.deepEqual(await reported({ autoCompactWindow: 300000 }), { enabled: true, window: 300000, threshold: 267000, decidedBy: 'settings' });
+  assert.deepEqual(await reported({ autoCompactWindow: 300000, autoCompactEnabled: false }), { enabled: false });
   c.close();
 });
 

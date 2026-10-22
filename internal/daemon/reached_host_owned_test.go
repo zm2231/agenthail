@@ -32,10 +32,10 @@ func (c *conversationMovingClaude) Send(ctx context.Context, sess *surface.Sessi
 	return result, err
 }
 
-func pairForgeOwning(t *testing.T, r *registry.Registry, sessionID string) string {
+func pairVpsOwning(t *testing.T, r *registry.Registry, sessionID string) string {
 	t.Helper()
 	hostID := "h0123456789ab"
-	if _, err := r.AddHost(registry.PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+	if _, err := r.AddHost(registry.PairedHost{ID: hostID, Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	entity := hostID + "::" + sessionID
@@ -50,7 +50,7 @@ func pairForgeOwning(t *testing.T, r *registry.Registry, sessionID string) strin
 func newReachedHostOwnedFixture(t *testing.T) (*orphanFixture, string) {
 	t.Helper()
 	f := newOrphanFixture(t)
-	hostID := pairForgeOwning(t, f.r, reachedRemoteID)
+	hostID := pairVpsOwning(t, f.r, reachedRemoteID)
 	f.daemon = newTestDaemon(t, f.r, []surface.Surface{&conversationMovingClaude{Claude: surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, f.claude.Home, f.posts.request), to: reachedRemoteID}})
 	f.handler = dashboardRouter(f.daemon)
 	return f, hostID
@@ -63,7 +63,7 @@ func TestDiscoveringLiveProcessOfHostOwnedConversationLeavesTheHostRow(t *testin
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = r.Close() })
-	hostID := pairForgeOwning(t, r, reachedRemoteID)
+	hostID := pairVpsOwning(t, r, reachedRemoteID)
 	fixture.Transcript(reachedRemoteID, fixture.Home)
 	fixture.Record(reachedRemoteID, fixture.Home, "session_copied_bridge")
 	d := newTestDaemon(t, r, []surface.Surface{surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, (&orphanPosts{}).request)})
@@ -104,7 +104,7 @@ func TestSendResumingIntoHostOwnedSessionIsUnknownAndRecordsNothingThere(t *test
 	manager := claudetest.ListenPeerManager(t, f.claude.Home)
 	code, body := f.send(t, "owned-1", "hello")
 	encoded, _ := json.Marshal(body)
-	if code == http.StatusOK || !strings.Contains(string(encoded), "forge") || !strings.Contains(string(encoded), "unknown") {
+	if code == http.StatusOK || !strings.Contains(string(encoded), "vps") || !strings.Contains(string(encoded), "unknown") {
 		t.Fatalf("status=%d body=%s", code, encoded)
 	}
 	if manager.Count("hello") != 1 || f.resumes(t) != 1 {
@@ -124,7 +124,7 @@ func TestQueuedSendResumingIntoHostOwnedSessionIsUnknownAndNotRetried(t *testing
 		f.daemon.scanAndRelay(context.Background())
 	}
 	item, err := f.r.QueueItem(id, nil)
-	if err != nil || item.Status != "dead" || !strings.Contains(item.LastError, "forge") {
+	if err != nil || item.Status != "dead" || !strings.Contains(item.LastError, "vps") {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
 	if manager.Count("queued hello") != 1 || f.resumes(t) != 1 {

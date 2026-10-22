@@ -33,12 +33,12 @@ struct SessionFactsTest {
         expect(!ambientOnly.isWaitingOnBackground && SessionFacts.presenceLabel(ambientOnly) == "Open", "ambient tasks alone do not hold the session")
         expect(SessionFacts.rowDetail(session(surface: "codex", status: "busy", queued: 2, reason: "working")) == "Codex · Working · 2 queued", "row detail adds the queued count")
         var remote = session(reason: "open")
-        remote.host = SessionHost(id: "h0123456789ab", name: "forge", state: "connected")
-        expect(SessionFacts.rowDetail(remote) == "Claude · Open on forge", "row detail names a paired host")
-        remote.unavailableReason = "host forge is unreachable"
-        expect(SessionFacts.rowDetail(remote) == "Claude · Unavailable on forge", "row detail marks an unreachable host's session")
+        remote.host = SessionHost(id: "h0123456789ab", name: "vps", state: "connected")
+        expect(SessionFacts.rowDetail(remote) == "Claude · Open on vps", "row detail names a paired host")
+        remote.unavailableReason = "host vps is unreachable"
+        expect(SessionFacts.rowDetail(remote) == "Claude · Unavailable on vps", "row detail marks an unreachable host's session")
         var local = session(reason: "open")
-        local.host = SessionHost(id: "h00000000000a", name: "mac", state: "local")
+        local.host = SessionHost(id: "h00000000000a", name: "laptop", state: "local")
         expect(SessionFacts.rowDetail(local) == "Claude · Open", "a local session names no host")
 
         expect(SessionFacts.headerFacts(session(queued: 3), age: "5m") == ["3 queued", "last active 5m ago"], "idle header shows queue and last active")

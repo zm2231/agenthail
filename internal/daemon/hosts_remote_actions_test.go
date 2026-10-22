@@ -128,7 +128,7 @@ func TestFederationLaunchCatalogComesFromTheNamedHost(t *testing.T) {
 		} `json:"surfaces"`
 		Projects []launchProject `json:"projects"`
 	}
-	response := local.request(t, http.MethodGet, "/api/v1/session-options?host=forge", nil)
+	response := local.request(t, http.MethodGet, "/api/v1/session-options?host=vps", nil)
 	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &options) != nil {
 		t.Fatalf("options status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -172,7 +172,7 @@ func TestFederationReportsAnOlderHostAsNeedingAnUpdate(t *testing.T) {
 	local := newFederationNode(t)
 	local.start(t, testRoots(remote.server))
 	remote.gate.older.Store(true)
-	refused := local.request(t, http.MethodPost, "/api/v1/hosts", map[string]string{"pairingUrl": remote.invite(t), "address": remote.address, "name": "forge"})
+	refused := local.request(t, http.MethodPost, "/api/v1/hosts", map[string]string{"pairingUrl": remote.invite(t), "address": remote.address, "name": "vps"})
 	if refused.Code == http.StatusCreated || !strings.Contains(refused.Body.String(), "update Agenthail on that host") {
 		t.Fatalf("pairing an older host status=%d body=%s", refused.Code, refused.Body.String())
 	}
@@ -181,7 +181,7 @@ func TestFederationReportsAnOlderHostAsNeedingAnUpdate(t *testing.T) {
 	}
 
 	remote.gate.older.Store(false)
-	record := local.pair(t, remote, "forge")
+	record := local.pair(t, remote, "vps")
 	awaitFederation(t, "remote session mirrored", func() bool { return len(sessionsOf(local.snapshot(t), record.ID)) == 1 })
 	remote.gate.older.Store(true)
 	host, _ := local.daemon.pairedHost(record.ID)
@@ -193,7 +193,7 @@ func TestFederationReportsAnOlderHostAsNeedingAnUpdate(t *testing.T) {
 		rows := sessionsOf(local.snapshot(t), record.ID)
 		return len(rows) == 1 && rows[0].Host.State == hostStateIncompatible && strings.Contains(rows[0].UnavailableReason, "update Agenthail on that host")
 	})
-	options := local.request(t, http.MethodGet, "/api/v1/session-options?host=forge", nil)
+	options := local.request(t, http.MethodGet, "/api/v1/session-options?host=vps", nil)
 	if options.Code != http.StatusConflict || !strings.Contains(options.Body.String(), "host_incompatible") {
 		t.Fatalf("an incompatible host's launch catalog status=%d body=%s", options.Code, options.Body.String())
 	}
@@ -229,7 +229,7 @@ func TestFederationSendsNothingBeyondVersionUntilTheHostIsConfirmed(t *testing.T
 	stream.Header.Set("Authorization", "Bearer "+dashboardTestToken)
 	local.handler.ServeHTTP(httptest.NewRecorder(), stream)
 	cancelStream()
-	local.request(t, http.MethodGet, "/api/v1/session-options?host=forge", nil)
+	local.request(t, http.MethodGet, "/api/v1/session-options?host=vps", nil)
 	send := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": qualified, "message": "before confirmed"})
 	if got := remote.gate.beyondVersion.Load(); got != 0 {
 		t.Fatalf("%d requests reached a host before its version was confirmed", got)

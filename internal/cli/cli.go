@@ -150,6 +150,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdWhoami(rest)
 	case "roots":
 		return a.cmdRoots(rest)
+	case "claude":
+		return a.cmdClaude(rest)
 	case "search":
 		return a.cmdSearch(rest)
 	case "send":
@@ -610,7 +612,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--request": true, "--reason": true, "--answers": true, "--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--max-bytes": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--project": true, "--instructions": true, "--permission-mode": true, "--wait": true}
+	valueFlags := map[string]bool{"--request": true, "--reason": true, "--answers": true, "--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--max-bytes": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--project": true, "--instructions": true, "--permission-mode": true, "--wait": true, "--root": true, "--enabled": true, "--idle": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -640,7 +642,7 @@ func validateCommandFlags(command string, args []string) error {
 		bools  map[string]bool
 	}
 	specs := map[string]flagSpec{
-		"list": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--wide": true, "--json": true}}, "runs": {bools: map[string]bool{"--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "roots": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
+		"list": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--wide": true, "--json": true}}, "runs": {bools: map[string]bool{"--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "roots": {bools: map[string]bool{"--json": true}}, "claude": {values: map[string]bool{"--root": true, "--model": true, "--enabled": true, "--idle": true}, bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {values: map[string]bool{"--before": true, "--timeout": true, "--max-bytes": true}, bools: map[string]bool{"--json": true, "--report": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true, "--max-bytes": true}, bools: map[string]bool{"--full": true, "--json": true, "--report": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true, "--max-bytes": true}, bools: map[string]bool{"--full": true, "--json": true, "--report": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
@@ -1948,6 +1950,9 @@ func (a *App) cmdSend(args []string) error {
 	} else {
 		fmt.Printf("sent (turn %s)\n", receipt.TurnID)
 	}
+	if receipt.Notice != "" && !jsonOut {
+		fmt.Println(receipt.Notice)
+	}
 	return nil
 }
 
@@ -2427,15 +2432,34 @@ func (a *App) cmdModel(args []string) error {
 		}
 		return a.printControlResult(sess, result, controlErr, args)
 	}
+	if setter, ok := surf.(surface.ModelSetter); ok && name != "" {
+		change, err := setter.SetModel(ctx, sess, name)
+		if err != nil {
+			return err
+		}
+		a.recordHistory(registry.HistoryEntry{Kind: "model", SessionID: sess.ID, Message: name, Result: change.Text()})
+		return printModelChange(sess.ID, change, args)
+	}
 	current, err := surf.Model(ctx, sess, name)
 	if err != nil {
 		return err
 	}
-	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]string{"sessionId": sess.ID, "model": current})
+	change := surface.ModelChange{Model: current}
+	if reader, ok := surf.(surface.PendingModelReader); ok && name == "" {
+		change.PendingModel = reader.PendingModel(sess.ID)
 	}
-	if current != "" {
-		fmt.Println(current)
+	return printModelChange(sess.ID, change, args)
+}
+
+func printModelChange(sessionID string, change surface.ModelChange, args []string) error {
+	if hasFlag(args, "--json") {
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			SessionID string `json:"sessionId"`
+			surface.ModelChange
+		}{sessionID, change})
+	}
+	if change.Model != "" {
+		fmt.Println(change.Text())
 	}
 	return nil
 }

@@ -126,10 +126,15 @@ class Session {
   async measure(result) {
     const usage = await Promise.race([this.query.getContextUsage({ detail: 'summary' }), timeout(5_000, 'context report')]);
     const window = result.modelUsage?.[usage?.model]?.contextWindow;
-    if (!Number.isInteger(window) || window <= 0) return;
-    if (this.context?.window === window && this.context?.model === usage.model) return;
-    this.context = { window, model: usage.model };
-    emit(this.id, 'context', { contextWindow: window, contextModel: usage.model });
+    const context = {
+      window: Number.isInteger(window) && window > 0 ? window : 0,
+      model: usage?.model ?? '',
+      autoCompact: autoCompactOf(usage),
+    };
+    if (!context.window && !context.autoCompact) return;
+    if (JSON.stringify(this.context) === JSON.stringify(context)) return;
+    this.context = context;
+    emit(this.id, 'context', { contextWindow: context.window, contextModel: context.model, autoCompact: context.autoCompact });
   }
 
   async *input() {
@@ -256,6 +261,7 @@ class Session {
       model: this.model,
       contextWindow: this.context?.window ?? 0,
       contextModel: this.context?.model ?? '',
+      autoCompact: this.context?.autoCompact ?? null,
       requests: [...this.pending.values()].map((p) => p.request),
       tasks: this.describeTasks(),
     };
@@ -402,8 +408,11 @@ async function open(params) {
       options: {
         cwd,
         // Claude reports its own idle, busy and requires_action states only
-        // when asked; the SDK otherwise reads them and drops them.
-        env: { ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.configDir ? { CLAUDE_CONFIG_DIR: params.configDir } : {}) },
+        // when asked; the SDK otherwise reads them and drops them. It offers
+        // its task tools (TaskCreate, TaskList and the rest) to an SDK
+        // session only when asked too, though a terminal session has them;
+        // the host's own environment can still turn them off.
+        env: { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.configDir ? { CLAUDE_CONFIG_DIR: params.configDir } : {}) },
         pathToClaudeCodeExecutable: args.claude,
         ...(params.resume ? { resume: id } : { sessionId: id }),
         ...(permissionMode ? { permissionMode } : {}),
@@ -907,6 +916,18 @@ function alive(pid) {
   } catch (error) {
     return error.code === 'EPERM';
   }
+}
+
+// When autocompact is off, Claude reports the model's window as maxTokens,
+// which is not a compaction point.
+function autoCompactOf(usage) {
+  if (typeof usage?.isAutoCompactEnabled !== 'boolean') return null;
+  if (!usage.isAutoCompactEnabled) return { enabled: false };
+  const report = { enabled: true };
+  if (Number.isInteger(usage.maxTokens) && usage.maxTokens > 0) report.window = usage.maxTokens;
+  if (Number.isInteger(usage.autoCompactThreshold) && usage.autoCompactThreshold > 0) report.threshold = usage.autoCompactThreshold;
+  if (typeof usage.autocompactSource === 'string' && usage.autocompactSource) report.decidedBy = usage.autocompactSource;
+  return report;
 }
 
 function timeout(ms, what) {

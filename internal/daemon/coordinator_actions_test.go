@@ -60,168 +60,168 @@ func TestCoordinatorSetRefusesATakeoverAndNamesWhoChangedIt(t *testing.T) {
 func TestCoordinatorSetRunsOnTheConversationsHostInBothDirections(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	upstream := catalogTestRepo(t)
-	mac := newFederationNode(t, "mac-a")
-	forge := newFederationNode(t, "forge-a", "forge-b")
-	moveSessions(t, mac, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "mac-gadget")), "src"))
-	moveSessions(t, forge, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "forge-gadget")), "src"))
-	mac.serve(t, nil)
-	forge.serve(t, nil)
-	roots := testRoots(mac.server)
-	mac.start(t, roots)
-	forge.start(t, roots)
-	forgeRecord := mac.pair(t, forge, "forge")
-	macRecord := forge.pair(t, mac, "mac")
+	laptop := newFederationNode(t, "laptop-a")
+	vps := newFederationNode(t, "vps-a", "vps-b")
+	moveSessions(t, laptop, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "laptop-gadget")), "src"))
+	moveSessions(t, vps, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "vps-gadget")), "src"))
+	laptop.serve(t, nil)
+	vps.serve(t, nil)
+	roots := testRoots(laptop.server)
+	laptop.start(t, roots)
+	vps.start(t, roots)
+	vpsRecord := laptop.pair(t, vps, "vps")
+	laptopRecord := vps.pair(t, laptop, "laptop")
 	awaitFederation(t, "both mirrors", func() bool {
-		return len(sessionsOf(mac.snapshot(t), forgeRecord.ID)) == 2 && len(sessionsOf(forge.snapshot(t), macRecord.ID)) == 1
+		return len(sessionsOf(laptop.snapshot(t), vpsRecord.ID)) == 2 && len(sessionsOf(vps.snapshot(t), laptopRecord.ID)) == 1
 	})
 	const project = "repo:github.com/example/gadget"
 
-	set := mac.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": hosts.Qualify(forgeRecord.ID, "forge-a"), "name": "gadget-lead", "sourceSessionId": "mac-a"})
+	set := laptop.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": hosts.Qualify(vpsRecord.ID, "vps-a"), "name": "gadget-lead", "sourceSessionId": "laptop-a"})
 	if set.Code != http.StatusOK {
-		t.Fatalf("set from mac: %d %s", set.Code, set.Body)
+		t.Fatalf("set from laptop: %d %s", set.Code, set.Body)
 	}
-	owned, err := forge.reg.Coordinator(project)
-	if err != nil || owned.SessionID != "forge-a" || owned.ChangedBy != hosts.Qualify(macRecord.ID, "mac-a") {
-		t.Fatalf("forge coordinator=%+v err=%v", owned, err)
+	owned, err := vps.reg.Coordinator(project)
+	if err != nil || owned.SessionID != "vps-a" || owned.ChangedBy != hosts.Qualify(laptopRecord.ID, "laptop-a") {
+		t.Fatalf("vps coordinator=%+v err=%v", owned, err)
 	}
-	if _, err := mac.reg.Coordinator(project); err == nil {
-		t.Fatal("mac wrote a coordinator for a forge conversation")
+	if _, err := laptop.reg.Coordinator(project); err == nil {
+		t.Fatal("laptop wrote a coordinator for a vps conversation")
 	}
-	awaitFederation(t, "mac mirrors forge's coordinator", func() bool {
-		mirrored, _ := mac.reg.ProjectCoordinators(project)
-		return len(mirrored) == 1 && mirrored[0].HostID == forgeRecord.ID && mirrored[0].SessionID == hosts.Qualify(forgeRecord.ID, "forge-a")
+	awaitFederation(t, "laptop mirrors vps's coordinator", func() bool {
+		mirrored, _ := laptop.reg.ProjectCoordinators(project)
+		return len(mirrored) == 1 && mirrored[0].HostID == vpsRecord.ID && mirrored[0].SessionID == hosts.Qualify(vpsRecord.ID, "vps-a")
 	})
 
-	takeover := forge.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": hosts.Qualify(macRecord.ID, "mac-a"), "name": "mac-lead"})
+	takeover := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": hosts.Qualify(laptopRecord.ID, "laptop-a"), "name": "laptop-lead"})
 	if takeover.Code != http.StatusConflict || !strings.Contains(takeover.Body.String(), "already has coordinator @gadget-lead;") {
-		t.Fatalf("takeover from forge: %d %s", takeover.Code, takeover.Body)
+		t.Fatalf("takeover from vps: %d %s", takeover.Code, takeover.Body)
 	}
-	replaced := forge.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": hosts.Qualify(macRecord.ID, "mac-a"), "name": "mac-lead", "replace": true, "sourceSessionId": "forge-b"})
+	replaced := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": hosts.Qualify(laptopRecord.ID, "laptop-a"), "name": "laptop-lead", "replace": true, "sourceSessionId": "vps-b"})
 	if replaced.Code != http.StatusOK {
-		t.Fatalf("replace from forge: %d %s", replaced.Code, replaced.Body)
+		t.Fatalf("replace from vps: %d %s", replaced.Code, replaced.Body)
 	}
-	if _, err := forge.reg.Coordinator(project); err == nil {
-		t.Fatal("forge kept the coordinator mac replaced")
+	if _, err := vps.reg.Coordinator(project); err == nil {
+		t.Fatal("vps kept the coordinator laptop replaced")
 	}
-	history, err := forge.reg.CoordinatorHistory(project)
-	if err != nil || len(history) != 2 || history[1].Action != "cleared" || history[1].ChangedBy != hosts.Qualify(forgeRecord.ID, "forge-b") {
-		t.Fatalf("forge history=%+v err=%v", history, err)
+	history, err := vps.reg.CoordinatorHistory(project)
+	if err != nil || len(history) != 2 || history[1].Action != "cleared" || history[1].ChangedBy != hosts.Qualify(vpsRecord.ID, "vps-b") {
+		t.Fatalf("vps history=%+v err=%v", history, err)
 	}
-	lead, err := mac.reg.Coordinator(project)
-	if err != nil || lead.SessionID != "mac-a" || lead.Name != "mac-lead" || lead.ChangedBy != hosts.Qualify(forgeRecord.ID, "forge-b") {
-		t.Fatalf("mac coordinator=%+v err=%v", lead, err)
+	lead, err := laptop.reg.Coordinator(project)
+	if err != nil || lead.SessionID != "laptop-a" || lead.Name != "laptop-lead" || lead.ChangedBy != hosts.Qualify(vpsRecord.ID, "vps-b") {
+		t.Fatalf("laptop coordinator=%+v err=%v", lead, err)
 	}
-	awaitFederation(t, "forge mirrors mac's coordinator alone", func() bool {
-		mirrored, _ := forge.reg.ProjectCoordinators(project)
-		return len(mirrored) == 1 && mirrored[0].HostID == macRecord.ID && mirrored[0].Name == "mac-lead"
+	awaitFederation(t, "vps mirrors laptop's coordinator alone", func() bool {
+		mirrored, _ := vps.reg.ProjectCoordinators(project)
+		return len(mirrored) == 1 && mirrored[0].HostID == laptopRecord.ID && mirrored[0].Name == "laptop-lead"
 	})
 
-	forge.stop()
-	unreachable := mac.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": hosts.Qualify(forgeRecord.ID, "forge-b"), "name": "forge-lead", "replace": true})
-	if unreachable.Code == http.StatusOK || !strings.Contains(unreachable.Body.String(), "forge") {
+	vps.stop()
+	unreachable := laptop.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": hosts.Qualify(vpsRecord.ID, "vps-b"), "name": "vps-lead", "replace": true})
+	if unreachable.Code == http.StatusOK || !strings.Contains(unreachable.Body.String(), "vps") {
 		t.Fatalf("set on an unreachable owner: %d %s", unreachable.Code, unreachable.Body)
 	}
-	if current, err := mac.reg.ProjectCoordinators(project); err != nil || len(current) != 1 || current[0].HostID != "" || current[0].Name != "mac-lead" {
-		t.Fatalf("mac coordinators=%+v err=%v", current, err)
+	if current, err := laptop.reg.ProjectCoordinators(project); err != nil || len(current) != 1 || current[0].HostID != "" || current[0].Name != "laptop-lead" {
+		t.Fatalf("laptop coordinators=%+v err=%v", current, err)
 	}
 }
 
 func TestReplacingAPeerCoordinatorIsRefusedWhileItsHostIsUnreachable(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	upstream := catalogTestRepo(t)
-	mac := newFederationNode(t, "mac-a")
-	forge := newFederationNode(t, "forge-a")
-	moveSessions(t, mac, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "mac-gadget")), "src"))
-	moveSessions(t, forge, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "forge-gadget")), "src"))
-	forge.serve(t, nil)
-	mac.start(t, testRoots(forge.server))
-	record := mac.pair(t, forge, "forge")
+	laptop := newFederationNode(t, "laptop-a")
+	vps := newFederationNode(t, "vps-a")
+	moveSessions(t, laptop, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "laptop-gadget")), "src"))
+	moveSessions(t, vps, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "vps-gadget")), "src"))
+	vps.serve(t, nil)
+	laptop.start(t, testRoots(vps.server))
+	record := laptop.pair(t, vps, "vps")
 	const project = "repo:github.com/example/gadget"
-	if response := forge.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "forge-a", "name": "gadget-lead"}); response.Code != http.StatusOK {
-		t.Fatalf("set on forge: %d %s", response.Code, response.Body)
+	if response := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "vps-a", "name": "gadget-lead"}); response.Code != http.StatusOK {
+		t.Fatalf("set on vps: %d %s", response.Code, response.Body)
 	}
-	awaitFederation(t, "mac mirrors forge's coordinator", func() bool {
-		mirrored, _ := mac.reg.ProjectCoordinators(project)
+	awaitFederation(t, "laptop mirrors vps's coordinator", func() bool {
+		mirrored, _ := laptop.reg.ProjectCoordinators(project)
 		return len(mirrored) == 1 && mirrored[0].HostID == record.ID
 	})
-	if err := mac.reg.RegisterSession(surface.Session{ID: "mac-other", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: mac.fake.sessions["mac-a"].Cwd, Status: surface.StatusIdle}); err != nil {
+	if err := laptop.reg.RegisterSession(surface.Session{ID: "laptop-other", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: laptop.fake.sessions["laptop-a"].Cwd, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
-	if err := mac.reg.SetAlias("taken-lead", "mac-other"); err != nil {
+	if err := laptop.reg.SetAlias("taken-lead", "laptop-other"); err != nil {
 		t.Fatal(err)
 	}
-	clash := mac.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "mac-a", "name": "taken-lead", "replace": true})
-	if clash.Code != http.StatusConflict || !strings.Contains(clash.Body.String(), "@taken-lead already names session mac-other") {
+	clash := laptop.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "laptop-a", "name": "taken-lead", "replace": true})
+	if clash.Code != http.StatusConflict || !strings.Contains(clash.Body.String(), "@taken-lead already names session laptop-other") {
 		t.Fatalf("replace with a taken name: %d %s", clash.Code, clash.Body)
 	}
-	if owned, err := forge.reg.Coordinator(project); err != nil || owned.Name != "gadget-lead" {
-		t.Fatalf("a refused replace cleared forge's coordinator: %+v err=%v", owned, err)
+	if owned, err := vps.reg.Coordinator(project); err != nil || owned.Name != "gadget-lead" {
+		t.Fatalf("a refused replace cleared vps's coordinator: %+v err=%v", owned, err)
 	}
-	if _, err := mac.reg.Coordinator(project); err == nil {
+	if _, err := laptop.reg.Coordinator(project); err == nil {
 		t.Fatal("a refused replace wrote a local coordinator")
 	}
-	forge.stop()
-	refused := mac.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "mac-a", "name": "mac-lead", "replace": true})
-	if refused.Code != http.StatusConflict || !strings.Contains(refused.Body.String(), "cannot replace forge::@gadget-lead") || !strings.Contains(refused.Body.String(), "nothing changed") {
+	vps.stop()
+	refused := laptop.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "laptop-a", "name": "laptop-lead", "replace": true})
+	if refused.Code != http.StatusConflict || !strings.Contains(refused.Body.String(), "cannot replace vps::@gadget-lead") || !strings.Contains(refused.Body.String(), "nothing changed") {
 		t.Fatalf("replace: %d %s", refused.Code, refused.Body)
 	}
-	if _, err := mac.reg.Coordinator(project); err == nil {
-		t.Fatal("mac took over while forge could not confirm")
+	if _, err := laptop.reg.Coordinator(project); err == nil {
+		t.Fatal("laptop took over while vps could not confirm")
 	}
-	if alias, err := mac.reg.LookupAlias("mac-lead"); err == nil {
-		t.Fatalf("a withdrawn replace left @mac-lead on %s", alias)
+	if alias, err := laptop.reg.LookupAlias("laptop-lead"); err == nil {
+		t.Fatalf("a withdrawn replace left @laptop-lead on %s", alias)
 	}
-	if owned, err := forge.reg.Coordinator(project); err != nil || owned.Name != "gadget-lead" {
-		t.Fatalf("forge coordinator=%+v err=%v", owned, err)
+	if owned, err := vps.reg.Coordinator(project); err != nil || owned.Name != "gadget-lead" {
+		t.Fatalf("vps coordinator=%+v err=%v", owned, err)
 	}
 }
 
 func TestANameClaimedWhileAPeerClearsItsCoordinatorCannotStrandTheProject(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	upstream := catalogTestRepo(t)
-	mac := newFederationNode(t, "mac-a", "mac-other")
-	forge := newFederationNode(t, "forge-a")
-	moveSessions(t, mac, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "mac-gadget")), "src"))
-	moveSessions(t, forge, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "forge-gadget")), "src"))
-	forge.serve(t, nil)
-	mac.start(t, testRoots(forge.server))
-	record := mac.pair(t, forge, "forge")
+	laptop := newFederationNode(t, "laptop-a", "laptop-other")
+	vps := newFederationNode(t, "vps-a")
+	moveSessions(t, laptop, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "laptop-gadget")), "src"))
+	moveSessions(t, vps, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "vps-gadget")), "src"))
+	vps.serve(t, nil)
+	laptop.start(t, testRoots(vps.server))
+	record := laptop.pair(t, vps, "vps")
 	const project = "repo:github.com/example/gadget"
-	if response := forge.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "forge-a", "name": "gadget-lead"}); response.Code != http.StatusOK {
-		t.Fatalf("set on forge: %d %s", response.Code, response.Body)
+	if response := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "vps-a", "name": "gadget-lead"}); response.Code != http.StatusOK {
+		t.Fatalf("set on vps: %d %s", response.Code, response.Body)
 	}
-	awaitFederation(t, "mac mirrors forge's coordinator", func() bool {
-		mirrored, _ := mac.reg.ProjectCoordinators(project)
+	awaitFederation(t, "laptop mirrors vps's coordinator", func() bool {
+		mirrored, _ := laptop.reg.ProjectCoordinators(project)
 		return len(mirrored) == 1 && mirrored[0].HostID == record.ID
 	})
 
 	hold := &snapshotHold{release: make(chan struct{})}
-	forge.gate.actions.Store(hold)
+	vps.gate.actions.Store(hold)
 	var once sync.Once
 	release := func() {
 		once.Do(func() {
-			forge.gate.actions.Store(nil)
+			vps.gate.actions.Store(nil)
 			close(hold.release)
 		})
 	}
 	t.Cleanup(release)
 	answered := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
-		answered <- mac.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "mac-a", "name": "race-lead", "replace": true})
+		answered <- laptop.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "laptop-a", "name": "race-lead", "replace": true})
 	}()
-	awaitFederation(t, "the clear reaching forge", func() bool { return hold.waiting.Load() == 1 })
-	if err := mac.reg.SetAlias("race-lead", "mac-other"); err == nil {
-		t.Fatal("another session took the name while forge was clearing its coordinator")
+	awaitFederation(t, "the clear reaching vps", func() bool { return hold.waiting.Load() == 1 })
+	if err := laptop.reg.SetAlias("race-lead", "laptop-other"); err == nil {
+		t.Fatal("another session took the name while vps was clearing its coordinator")
 	}
 	release()
 	if response := <-answered; response.Code != http.StatusOK {
 		t.Fatalf("replace: %d %s", response.Code, response.Body)
 	}
-	if lead, err := mac.reg.Coordinator(project); err != nil || lead.Name != "race-lead" || lead.SessionID != "mac-a" {
-		t.Fatalf("mac coordinator=%+v err=%v", lead, err)
+	if lead, err := laptop.reg.Coordinator(project); err != nil || lead.Name != "race-lead" || lead.SessionID != "laptop-a" {
+		t.Fatalf("laptop coordinator=%+v err=%v", lead, err)
 	}
-	if _, err := forge.reg.Coordinator(project); err == nil {
-		t.Fatal("forge kept its coordinator after confirming the clear")
+	if _, err := vps.reg.Coordinator(project); err == nil {
+		t.Fatal("vps kept its coordinator after confirming the clear")
 	}
 }
 
@@ -230,54 +230,54 @@ func TestARefusedReplaceRestoresTheLocalCoordinatorOrKeepsTheNewOne(t *testing.T
 		t.Run(map[bool]string{false: "restores, and the new coordinator's session keeps its name meanwhile", true: "keeps the new one when the old name moved"}[renamed], func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			upstream := catalogTestRepo(t)
-			mac := newFederationNode(t, "mac-a", "mac-other", "mac-third")
-			forge := newFederationNode(t, "forge-a")
-			cwd := filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "mac-gadget")), "src")
-			moveSessions(t, mac, cwd)
-			moveSessions(t, forge, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "forge-gadget")), "src"))
-			forge.serve(t, nil)
-			mac.start(t, testRoots(forge.server))
-			record := mac.pair(t, forge, "forge")
+			laptop := newFederationNode(t, "laptop-a", "laptop-other", "laptop-third")
+			vps := newFederationNode(t, "vps-a")
+			cwd := filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "laptop-gadget")), "src")
+			moveSessions(t, laptop, cwd)
+			moveSessions(t, vps, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "vps-gadget")), "src"))
+			vps.serve(t, nil)
+			laptop.start(t, testRoots(vps.server))
+			record := laptop.pair(t, vps, "vps")
 			const project = "repo:github.com/example/gadget"
-			if response := forge.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "forge-a", "name": "peer-lead"}); response.Code != http.StatusOK {
-				t.Fatalf("set on forge: %d %s", response.Code, response.Body)
+			if response := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "vps-a", "name": "peer-lead"}); response.Code != http.StatusOK {
+				t.Fatalf("set on vps: %d %s", response.Code, response.Body)
 			}
-			awaitFederation(t, "mac mirrors forge's coordinator", func() bool {
-				mirrored, _ := mac.reg.ProjectCoordinators(project)
+			awaitFederation(t, "laptop mirrors vps's coordinator", func() bool {
+				mirrored, _ := laptop.reg.ProjectCoordinators(project)
 				return len(mirrored) == 1 && mirrored[0].HostID == record.ID
 			})
-			old, err := mac.reg.SetCoordinator(registry.CoordinatorSpec{ProjectID: project, ProjectRoot: cwd, Name: "old-lead", Surface: "codex", Cwd: cwd, Instructions: "brief"}, registry.CoordinatorChange{SessionID: "mac-a", Replace: true, OverPeers: true, ChangedBy: "fixture"})
+			old, err := laptop.reg.SetCoordinator(registry.CoordinatorSpec{ProjectID: project, ProjectRoot: cwd, Name: "old-lead", Surface: "codex", Cwd: cwd, Instructions: "brief"}, registry.CoordinatorChange{SessionID: "laptop-a", Replace: true, OverPeers: true, ChangedBy: "fixture"})
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			hold := &snapshotHold{release: make(chan struct{})}
-			forge.gate.actions.Store(hold)
+			vps.gate.actions.Store(hold)
 			var once sync.Once
 			release := func() {
 				once.Do(func() {
-					forge.gate.actions.Store(nil)
+					vps.gate.actions.Store(nil)
 					close(hold.release)
 				})
 			}
 			t.Cleanup(release)
 			answered := make(chan *httptest.ResponseRecorder, 1)
 			go func() {
-				answered <- mac.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "mac-other", "name": "new-lead", "replace": true})
+				answered <- laptop.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "laptop-other", "name": "new-lead", "replace": true})
 			}()
-			awaitFederation(t, "the clear reaching forge", func() bool { return hold.waiting.Load() == 1 })
-			if response := forge.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "forge-a", "name": "peer-lead", "replace": true}); response.Code != http.StatusOK {
-				t.Fatalf("forge changes its coordinator: %d %s", response.Code, response.Body)
+			awaitFederation(t, "the clear reaching vps", func() bool { return hold.waiting.Load() == 1 })
+			if response := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "vps-a", "name": "peer-lead", "replace": true}); response.Code != http.StatusOK {
+				t.Fatalf("vps changes its coordinator: %d %s", response.Code, response.Body)
 			}
 			var aliasErr registry.CoordinatorAliasError
-			if err := mac.reg.SetAlias("renamed-other", "mac-other"); !errors.As(err, &aliasErr) {
+			if err := laptop.reg.SetAlias("renamed-other", "laptop-other"); !errors.As(err, &aliasErr) {
 				t.Fatalf("the new coordinator's session was renamed during the replace: %v", err)
 			}
 			if renamed {
-				if err := mac.reg.SetAlias("renamed", "mac-a"); err != nil {
+				if err := laptop.reg.SetAlias("renamed", "laptop-a"); err != nil {
 					t.Fatal(err)
 				}
-				if err := mac.reg.SetAlias("old-lead", "mac-third"); err != nil {
+				if err := laptop.reg.SetAlias("old-lead", "laptop-third"); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -286,21 +286,21 @@ func TestARefusedReplaceRestoresTheLocalCoordinatorOrKeepsTheNewOne(t *testing.T
 			if response.Code != http.StatusConflict {
 				t.Fatalf("replace: %d %s", response.Code, response.Body)
 			}
-			current, err := mac.reg.Coordinator(project)
+			current, err := laptop.reg.Coordinator(project)
 			if err != nil {
 				t.Fatalf("the project lost its local coordinator: %v (%s)", err, response.Body)
 			}
 			if renamed {
-				if current.Name != "new-lead" || current.SessionID != "mac-other" || !strings.Contains(response.Body.String(), "stays here") {
+				if current.Name != "new-lead" || current.SessionID != "laptop-other" || !strings.Contains(response.Body.String(), "stays here") {
 					t.Fatalf("coordinator=%+v body=%s", current, response.Body)
 				}
 				return
 			}
-			if current.Name != "old-lead" || current.SessionID != "mac-a" || current.Instructions != "brief" || !current.ChangedAt.Equal(old.ChangedAt) || !strings.Contains(response.Body.String(), "nothing changed") {
+			if current.Name != "old-lead" || current.SessionID != "laptop-a" || current.Instructions != "brief" || !current.ChangedAt.Equal(old.ChangedAt) || !strings.Contains(response.Body.String(), "nothing changed") {
 				t.Fatalf("coordinator=%+v body=%s", current, response.Body)
 			}
-			if alias, err := mac.reg.ReverseAlias("mac-other"); err == nil && alias != "" {
-				t.Fatalf("mac-other kept @%s", alias)
+			if alias, err := laptop.reg.ReverseAlias("laptop-other"); err == nil && alias != "" {
+				t.Fatalf("laptop-other kept @%s", alias)
 			}
 		})
 	}

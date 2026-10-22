@@ -24,7 +24,7 @@ struct NewSessionSheet: View {
     }
 
     private var options: SessionCreationOptions? { hosts.options }
-    private var hostName: String { hosts.selectedHost?.name ?? "your Mac" }
+    private var hostName: String { hosts.selectedHost?.name ?? "your computer" }
 
     var body: some View {
         NavigationStack {
