@@ -78,7 +78,7 @@ func TestASessionAnAgentStartsReportsToThatAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"You are @builder", "@planner started you", `agenthail send @planner "<result>"`, "@lead (@card-lead)", "request_user_input"} {
+	for _, want := range []string{"You are @builder", "@planner started you", `agenthail send @planner "<result>"`, "@lead (@card-lead)", "Questions go to @planner with agenthail send"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("help agent does not say %q:\n%s", want, text)
 		}
@@ -100,6 +100,10 @@ func TestASessionThePersonStartsReportsToTheCoordinator(t *testing.T) {
 	lead := callerCardJSON(t, app, "CLAUDE_CODE_SESSION_ID", "lead-conversation")
 	if lead.Lead == nil || !lead.Lead.Self || lead.ReportTo != "" || lead.Ask == nil || !lead.Ask.Answerable {
 		t.Fatalf("the coordinator's own card=%+v", lead)
+	}
+	text, err := captureStdout(t, func() error { return app.Run([]string{"help", "agent"}) })
+	if err != nil || !strings.Contains(text, "To ask the person, use AskUserQuestion") || !strings.Contains(text, "If your own instructions forbid it, they win") || strings.Contains(text, "Questions go to") {
+		t.Fatalf("the coordinator's brief does not send its questions to the person:\n%s err=%v", text, err)
 	}
 }
 

@@ -135,8 +135,8 @@ func claudePromptsHeld(session surface.Session) bool {
 		}
 	}
 	for _, root := range roots {
-		state, err := claudePromptHookState(filepath.Join(root, "settings.json"))
-		if err != nil || state != claudePromptHookInstalled {
+		state, err := claudeHookState(filepath.Join(root, "settings.json"), claudePromptHook)
+		if err != nil || state != claudeHookInstalled {
 			return false
 		}
 	}
