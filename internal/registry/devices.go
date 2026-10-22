@@ -143,14 +143,14 @@ func (r *Registry) CompleteDevicePairing(secret, name, hostID string) (Device, s
 	}
 	token := deviceTokenPrefix + tokenSecret
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	result, err := tx.Exec(`UPDATE device_pairings SET consumed_at=? WHERE id=? AND consumed_at=''`, now, pairingID)
+	device := Device{ID: uuid.NewString(), Name: name, Scopes: scopes, HostID: hostID, CreatedAt: now}
+	result, err := tx.Exec(`UPDATE device_pairings SET consumed_at=?, device_id=? WHERE id=? AND consumed_at=''`, now, device.ID, pairingID)
 	if err != nil {
 		return Device{}, "", err
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return Device{}, "", ErrPairingInvalid
 	}
-	device := Device{ID: uuid.NewString(), Name: name, Scopes: scopes, HostID: hostID, CreatedAt: now}
 	if _, err := tx.Exec(`INSERT INTO paired_devices (id,name,token_hash,scopes,host_id,created_at) VALUES (?,?,?,?,?,?)`, device.ID, device.Name, hashDeviceSecret(token), strings.Join(scopes, ","), device.HostID, now); err != nil {
 		return Device{}, "", err
 	}
@@ -160,14 +160,11 @@ func (r *Registry) CompleteDevicePairing(secret, name, hostID string) (Device, s
 	return device, token, nil
 }
 
-// CompleteDevicePairing stamps a code's consumed_at and its device's
-// created_at with the same instant in one transaction, which is how a paired
-// code finds its device.
 func (r *Registry) PairingStatus(id string) (DevicePairingStatus, error) {
 	var consumedAt, expiresAt string
 	var deviceID, name, scopes, hostID, createdAt, lastSeenAt, revokedAt sql.NullString
 	err := r.read.QueryRow(`SELECT p.consumed_at,p.expires_at,d.id,d.name,d.scopes,d.host_id,d.created_at,d.last_seen_at,d.revoked_at
-		FROM device_pairings p LEFT JOIN paired_devices d ON p.consumed_at<>'' AND d.created_at=p.consumed_at
+		FROM device_pairings p LEFT JOIN paired_devices d ON p.device_id<>'' AND d.id=p.device_id
 		WHERE p.id=?`, strings.TrimSpace(id)).Scan(&consumedAt, &expiresAt, &deviceID, &name, &scopes, &hostID, &createdAt, &lastSeenAt, &revokedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DevicePairingStatus{}, ErrPairingInvalid
