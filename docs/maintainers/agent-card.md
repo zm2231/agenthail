@@ -42,6 +42,16 @@ Codex sends the hook Claude's input shape (`session_id` is the thread id). The h
 
 The config is passed only when the running binary is `agenthail` (`AgenthailExecutable`), never from a test binary.
 
+## Telling the person's own Codex sessions their card
+
+A Codex session the person starts outside Agenthail gets the card only after `agenthail hooks install codex` (`surfaces.InstallCodexContext`). It runs its own `codex app-server` over stdio with the person's environment (`codexStdioClient`), never the shared daemon, and:
+
+- Adds the two session-context hooks to the hooks file the person already uses: `CODEX_HOME/hooks.json` when it exists, edited by path with gjson/sjson and written with its mode kept; otherwise `config.toml` through `config/read` (user layer) and `config/batchWrite` with `expectedVersion`, which keeps the file's comments and other keys. Writing to only one of the two avoids Codex's warning about hooks in both. Agenthail's handlers are recognised by command (`ownsCodexContextHook`, any absolute `agenthail` path), so install replaces an older binary's hooks and keeps every other hook in place.
+- Trusts them: `hooks/list` over `CODEX_HOME` gives each hook's key and `currentHash`, and any of Agenthail's that is not trusted gets `hooks.state."<key>".trusted_hash` set to that hash. Trust is taken from Codex, not computed.
+- Writes `agentcard.Guide` between `<!-- agenthail:begin -->` and `<!-- agenthail:end -->` at the end of `CODEX_HOME/AGENTS.md`, which Codex loads as instructions for every session. A project's `AGENTS.md` is never touched. A begin marker without an end marker is an error, not a guess.
+
+Uninstall removes the block (deleting `AGENTS.md` if nothing else is left), Agenthail's handlers and the groups they leave empty, and their `hooks.state` entries. `hooks status codex` and `doctor` (`codexHooks`) report `installed` when both hooks run this binary with timeout 10s, are trusted, and the block is current; `missing` when none of it is there; `outdated` otherwise. With no Codex home they report nothing.
+
 ## Who started a session
 
 `session_origins(session_id, via, creator_session_id)` holds one row per session Agenthail created; discovered sessions have none. `via` is `agent` (with the creator), `person` or `coordinator`.
