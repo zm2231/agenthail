@@ -877,6 +877,54 @@ final class AgenthailModel: ObservableObject {
         deliveryProblems.filter { $0.sessionId == sessionID || $0.sourceSessionId == sessionID }
     }
 
+    func sessionTitle(for sessionID: String) -> String {
+        knownSessions.first { $0.id == sessionID }?.title ?? "Another session"
+    }
+
+    func loadPrompts(for sessionID: String) async {
+        guard let api, let page = try? await api.prompts(sessionID: sessionID, limit: 100) else { return }
+        draft(for: sessionID).recordSent(page.prompts)
+    }
+
+    /// Searches what was typed into one session or, without one, into every
+    /// session on this computer and each connected paired host. A host that
+    /// cannot answer is reported by name and leaves the others' results.
+    func searchPrompts(_ query: String, sessionID: String?) async -> (prompts: [PromptItem], problems: [String]) {
+        guard let api else { return ([], ["Agenthail isn't connected."]) }
+        if let sessionID {
+            do {
+                return (try await api.prompts(sessionID: sessionID, query: query, limit: 100).prompts, [])
+            } catch {
+                return ([], [AgenthailAPIError.userMessage(error)])
+            }
+        }
+        let hosts = (snapshot?.daemon.hosts ?? []).filter { $0.state == "connected" }
+        let results = await withTaskGroup(of: (prompts: [PromptItem], problem: String?).self) { group in
+            group.addTask {
+                do { return (try await api.prompts(query: query, limit: 100).prompts, nil) } catch { return ([], AgenthailAPIError.userMessage(error)) }
+            }
+            for host in hosts {
+                group.addTask {
+                    do {
+                        let prompts = try await api.prompts(query: query, limit: 100, host: host.id).prompts.map { prompt in
+                            var prompt = prompt
+                            prompt.sessionId = host.id + "::" + prompt.sessionId
+                            return prompt
+                        }
+                        return (prompts, nil)
+                    } catch {
+                        return ([], "\(host.name): \(AgenthailAPIError.userMessage(error))")
+                    }
+                }
+            }
+            var collected: [(prompts: [PromptItem], problem: String?)] = []
+            for await result in group { collected.append(result) }
+            return collected
+        }
+        let prompts = results.flatMap(\.prompts).sorted { ($0.sentAt ?? .distantPast) > ($1.sentAt ?? .distantPast) }
+        return (prompts, results.compactMap(\.problem))
+    }
+
     func dismissDeliveryProblem(_ problem: DeliveryProblem) {
         guard let api else { return }
         removeDeliveryProblem(problem.deliveryId)
@@ -1104,8 +1152,67 @@ enum FollowUpAction: String {
 final class ComposerDraft: ObservableObject {
     @Published var text = ""
     @Published var attachments: [ComposerAttachment] = []
+    @Published private(set) var stash: ComposerStash?
+    @Published private(set) var sent: [PromptItem] = []
+    private(set) var cleared: [String] = []
+    var history = PromptHistory()
 
     var isEmpty: Bool { ComposerAttachments.isEmpty(text: text, attachments: attachments) }
+
+    /// Stashes the draft, or brings the stash back into an empty composer.
+    /// Stashing while a stash is held swaps the two, so neither is lost.
+    @discardableResult
+    func toggleStash() -> Bool {
+        if !isEmpty {
+            let current = ComposerStash(text: text, attachments: attachments)
+            text = stash?.text ?? ""
+            attachments = stash?.attachments ?? []
+            stash = current
+            return true
+        }
+        guard let held = stash else { return false }
+        text = held.text
+        attachments = held.attachments
+        stash = nil
+        return true
+    }
+
+    func restoreStashAfterSend() {
+        guard isEmpty, let held = stash else { return }
+        text = held.text
+        attachments = held.attachments
+        stash = nil
+    }
+
+    @discardableResult
+    func clearIntoHistory() -> Bool {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        cleared.insert(text, at: 0)
+        text = ""
+        history.stopBrowsing()
+        rebuildHistory()
+        return true
+    }
+
+    /// Takes the host's record of what was sent, keeping prompts sent from
+    /// here that the host has not recorded yet.
+    func recordSent(_ prompts: [PromptItem]) {
+        let recorded = Set(prompts.map(\.text))
+        sent = sent.filter { $0.sessionId.isEmpty && !recorded.contains($0.text) } + prompts
+        rebuildHistory()
+    }
+
+    func recordSending(_ text: String) {
+        history.stopBrowsing()
+        cleared.removeAll { $0 == text }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        sent.insert(PromptItem(sessionId: "", itemId: UUID().uuidString, turnId: nil, ts: "", text: text), at: 0)
+        rebuildHistory()
+    }
+
+    private func rebuildHistory() {
+        history.replace(cleared + sent.map(\.text))
+    }
 
     func restore(_ restored: String, attachments restoredAttachments: [ComposerAttachment] = []) {
         if !restored.isEmpty {

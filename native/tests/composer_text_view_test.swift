@@ -163,6 +163,20 @@ struct ComposerTextViewTest {
         check(ups == 2 && textView.selectedRange().location == 0, "with nothing queued, ↑ on the first line moves to the start as usual")
         textView.onUpFromFirstLine = nil
 
+        var downs = 0
+        var stepsForward = true
+        textView.onDownFromLastLine = { downs += 1; return stepsForward }
+        textView.setSelectedRange(NSRange(location: 1, length: 0))
+        textView.doCommand(by: #selector(NSResponder.moveDown(_:)))
+        check(downs == 0 && textView.selectedRange().location > 3, "↓ on an earlier line moves the caret down as usual")
+        textView.setSelectedRange(NSRange(location: 5, length: 0))
+        textView.doCommand(by: #selector(NSResponder.moveDown(_:)))
+        check(downs == 1 && textView.selectedRange().location == 5, "↓ on the last line steps forward through sent prompts instead of moving")
+        stepsForward = false
+        textView.doCommand(by: #selector(NSResponder.moveDown(_:)))
+        check(downs == 2 && textView.selectedRange().location == 7, "outside sent prompts, ↓ on the last line moves to the end as usual")
+        textView.onDownFromLastLine = nil
+
         check(ComposerReturn.continuation(in: "a\\", caret: 2) == NSRange(location: 1, length: 1), "a backslash before the caret is found")
         check(ComposerReturn.continuation(in: "a\\b", caret: 3) == nil, "a backslash elsewhere is ignored")
         check(ComposerReturn.continuation(in: "🙂\\", caret: 3) == NSRange(location: 2, length: 1), "the caret counts UTF-16 units")

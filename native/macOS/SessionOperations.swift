@@ -11,10 +11,15 @@ struct NativeQueueCommand: Encodable, Equatable {
     var cursor: String? = nil
 }
 
+struct ForkPoint: Encodable, Hashable {
+    let beforeTurnId: String
+}
+
 struct SessionOperationRequest: Encodable {
     let action: String
     let sessionId: String
     var nativeQueue: NativeQueueCommand? = nil
+    var fork: ForkPoint? = nil
 
     var mutates: Bool {
         switch action {
@@ -192,8 +197,8 @@ enum SessionOperationAvailability {
 
 extension AgenthailAPI {
     @MainActor
-    func forkSession(id: String, keys: ActionRetryKeys) async throws -> ForkedSession {
-        let result: SessionForkResult = try await keys.post(SessionOperationRequest(action: "session-fork", sessionId: id), api: self)
+    func forkSession(id: String, before turnID: String? = nil, keys: ActionRetryKeys) async throws -> ForkedSession {
+        let result: SessionForkResult = try await keys.post(SessionOperationRequest(action: "session-fork", sessionId: id, fork: turnID.map(ForkPoint.init)), api: self)
         return result.session
     }
 

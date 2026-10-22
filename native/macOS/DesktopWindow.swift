@@ -1535,6 +1535,9 @@ struct ComposerView: View {
     @State private var dropTargeted = false
     @State private var dismissedSlash: String?
     @State private var modeChanged = false
+    @State private var lastEscape: Date?
+    @State private var showingSent = false
+    @State private var searchingSent = false
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
     private var followUp: FollowUpAction { model.busyDelivery }
@@ -1599,8 +1602,25 @@ struct ComposerView: View {
                     .padding(.horizontal, 10)
                 }
                 VStack(spacing: 0) {
-                    ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: takeBackQueued) { submit(alternate: false) }
+                    ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt) { submit(alternate: false) }
                         .id(session.id)
+                        .popover(isPresented: $showingSent, arrowEdge: .top) {
+                            SentPromptsList(prompts: draft.sent, canFork: SessionOperationAvailability.fork(session)) { prompt in
+                                draft.restore(prompt.text)
+                                showingSent = false
+                                focused = true
+                            } fork: { prompt in
+                                showingSent = false
+                                pane.fork(session, before: prompt)
+                            }
+                        }
+                        .popover(isPresented: $searchingSent, arrowEdge: .top) {
+                            PromptSearchPanel(model: model, sessionID: session.id) { text in
+                                draft.restore(text)
+                                searchingSent = false
+                                focused = true
+                            }
+                        }
                         .padding(.horizontal, 15)
                         .padding(.top, 13)
                         .padding(.bottom, DesktopSpace.xs)
@@ -1636,6 +1656,23 @@ struct ComposerView: View {
                         }
                         if !session.sharedHolders.isEmpty {
                             HolderPicker(model: model, session: session)
+                        }
+                        if draft.stash != nil {
+                            Button {
+                                if draft.isEmpty { draft.toggleStash() }
+                                focused = true
+                            } label: {
+                                Label("Stashed", systemImage: "tray.and.arrow.down")
+                                    .font(.system(size: DesktopType.meta, weight: .medium))
+                                    .foregroundStyle(DesktopPalette.text2)
+                                    .padding(.horizontal, 8)
+                                    .frame(height: 22)
+                                    .overlay(Capsule().strokeBorder(DesktopPalette.line))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!draft.isEmpty)
+                            .help(draft.isEmpty ? shortcuts.help("Bring back the stashed draft", .composerStash) : "The stashed draft comes back after you send")
+                            .accessibilityLabel(draft.isEmpty ? "Bring back the stashed draft" : "A draft is stashed; it comes back after you send")
                         }
                         Spacer()
                         if session.isWorking && hasText && !draftIsCommand {
@@ -1707,6 +1744,7 @@ struct ComposerView: View {
         .frame(maxWidth: .infinity)
         .backdropFade(DesktopPalette.window, paneID: "content", solidFrom: 0.38)
         .onAppear { focused = true }
+        .task(id: session.id) { await model.loadPrompts(for: session.id) }
     }
 
     private var primaryIsStop: Bool { SessionPane.stopAvailable(session, removed: false, draftEmpty: draft.isEmpty) }
@@ -1750,16 +1788,41 @@ struct ComposerView: View {
         case .interrupt:
             if !slashSuggestions.isEmpty {
                 dismissedSlash = draft.text
+                lastEscape = nil
                 return true
             }
             if session.isWorking && session.capabilities.interrupt && !session.isReadOnly {
                 pane.interrupt()
+                lastEscape = nil
                 return true
             }
-            return false
+            if let lastEscape, Date().timeIntervalSince(lastEscape) < 0.6 {
+                self.lastEscape = nil
+                if !draft.clearIntoHistory() { showingSent = true }
+                return true
+            }
+            lastEscape = Date()
+            return true
+        case .stash:
+            return draft.toggleStash()
+        case .searchHistory:
+            searchingSent = true
+            return true
         case .newline, .deleteToLineStart, .deleteWordBackward, .paste:
             return false
         }
+    }
+
+    private func olderPrompt() -> Bool {
+        guard let text = draft.history.older(from: draft.text) else { return draft.history.isBrowsing }
+        draft.text = text
+        return true
+    }
+
+    private func newerPrompt() -> Bool {
+        guard draft.history.isBrowsing, let text = draft.history.newer() else { return false }
+        draft.text = text
+        return true
     }
 
     private func cycleMode() {

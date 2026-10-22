@@ -46,6 +46,8 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case composerSendNow
     case composerCycleMode
     case composerInterrupt
+    case composerStash
+    case composerSearchHistory
 
     var id: String { rawValue }
 
@@ -79,7 +81,9 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .composerPaste: "Paste (also ⌘V)"
         case .composerSendNow: "Send now, steering a running turn"
         case .composerCycleMode: "Change mode"
-        case .composerInterrupt: "Stop the running turn"
+        case .composerInterrupt: "Stop the running turn (twice clears the draft)"
+        case .composerStash: "Stash the draft, or bring it back"
+        case .composerSearchHistory: "Search what you sent"
         }
     }
 
@@ -111,6 +115,8 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .composerSendNow: StoredShortcut(kVK_Return, controlKey)
         case .composerCycleMode: StoredShortcut(kVK_Tab, shiftKey)
         case .composerInterrupt: StoredShortcut(kVK_Escape, 0)
+        case .composerStash: StoredShortcut(kVK_ANSI_S, controlKey)
+        case .composerSearchHistory: StoredShortcut(kVK_ANSI_R, controlKey)
         case .rename, .openInNewWindow, .keepTab: nil
         }
     }

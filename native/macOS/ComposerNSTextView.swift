@@ -7,6 +7,7 @@ final class ComposerNSTextView: NSTextView {
     var command: ((StoredShortcut) -> ComposerCommand?)?
     var onCommand: ((ComposerCommand) -> Bool)?
     var onUpFromFirstLine: (() -> Bool)?
+    var onDownFromLastLine: (() -> Bool)?
     var onSubmit: (() -> Void)?
     var focusChanged: ((Bool) -> Void)?
     var pasteAttachments: ((PastedAttachments) -> Void)? {
@@ -126,6 +127,8 @@ final class ComposerNSTextView: NSTextView {
             }
         case #selector(moveUp(_:)):
             if !(selectedRange().length == 0 && onFirstLine && onUpFromFirstLine?() == true) { super.doCommand(by: selector) }
+        case #selector(moveDown(_:)):
+            if !(selectedRange().length == 0 && onLastLine && onDownFromLastLine?() == true) { super.doCommand(by: selector) }
         case #selector(insertLineBreak(_:)):
             insertNewlineIgnoringFieldEditor(nil)
         case #selector(insertTab(_:)):
@@ -146,6 +149,16 @@ final class ComposerNSTextView: NSTextView {
         let start = firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: &actual)
         let here = firstRect(forCharacterRange: NSRange(location: caret, length: 0), actualRange: &actual)
         return abs(here.midY - start.midY) < 1
+    }
+
+    var onLastLine: Bool {
+        let caret = selectedRange().location
+        let length = (string as NSString).length
+        guard caret < length else { return true }
+        var actual = NSRange()
+        let end = firstRect(forCharacterRange: NSRange(location: length, length: 0), actualRange: &actual)
+        let here = firstRect(forCharacterRange: NSRange(location: caret, length: 0), actualRange: &actual)
+        return abs(here.midY - end.midY) < 1
     }
 
     override func becomeFirstResponder() -> Bool {

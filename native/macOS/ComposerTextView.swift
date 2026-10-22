@@ -10,6 +10,7 @@ struct ComposerTextView: NSViewRepresentable {
     var onPaste: ((PastedAttachments) -> Void)? = nil
     var onCommand: ((ComposerCommand) -> Bool)? = nil
     var onUpFromFirstLine: (() -> Bool)? = nil
+    var onDownFromLastLine: (() -> Bool)? = nil
     let onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -24,6 +25,7 @@ struct ComposerTextView: NSViewRepresentable {
         textView.command = { ComposerCommand.matching($0, in: .shared) }
         textView.onCommand = { [weak coordinator = context.coordinator] in coordinator?.parent.onCommand?($0) ?? false }
         textView.onUpFromFirstLine = { [weak coordinator = context.coordinator] in coordinator?.parent.onUpFromFirstLine?() ?? false }
+        textView.onDownFromLastLine = { [weak coordinator = context.coordinator] in coordinator?.parent.onDownFromLastLine?() ?? false }
         textView.onSubmit = { [weak coordinator = context.coordinator] in coordinator?.parent.onSubmit() }
         textView.focusChanged = { [weak coordinator = context.coordinator] isFocused in
             coordinator?.focusChanged(isFocused)

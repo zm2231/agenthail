@@ -9,6 +9,8 @@ enum ComposerCommand: CaseIterable {
     case sendNow
     case cycleMode
     case interrupt
+    case stash
+    case searchHistory
 
     var appCommand: AppCommand {
         switch self {
@@ -19,6 +21,8 @@ enum ComposerCommand: CaseIterable {
         case .sendNow: .composerSendNow
         case .cycleMode: .composerCycleMode
         case .interrupt: .composerInterrupt
+        case .stash: .composerStash
+        case .searchHistory: .composerSearchHistory
         }
     }
 
@@ -29,7 +33,7 @@ enum ComposerCommand: CaseIterable {
         case .deleteToLineStart: #selector(NSResponder.deleteToBeginningOfParagraph(_:))
         case .deleteWordBackward: #selector(NSResponder.deleteWordBackward(_:))
         case .paste: #selector(NSText.paste(_:))
-        case .sendNow, .cycleMode, .interrupt: nil
+        case .sendNow, .cycleMode, .interrupt, .stash, .searchHistory: nil
         }
     }
 
