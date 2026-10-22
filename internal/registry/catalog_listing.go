@@ -53,6 +53,10 @@ func catalogListingTx(q catalogQuerier) (CatalogListing, error) {
 		retired := status == string(surface.StatusOffline) && !current
 		byID[id] = catalogListingRow{entity: hosts.Qualify(hostID, id), parent: parent, subagent: delegatedColumns(parent, source), active: busy || current, busy: busy, retired: retired}
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return CatalogListing{}, err
+	}
 	if err := rows.Close(); err != nil {
 		return CatalogListing{}, err
 	}
