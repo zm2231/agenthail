@@ -532,6 +532,19 @@ test('model and permission mode change live and a resume keeps them', async () =
   d.close();
 });
 
+test('the listing gives the permission mode Claude reports, also one it changed by itself', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd, permissionMode: 'plan' });
+  await c.call('send', { sessionId: id, uuid: randomUUID(), text: 'MODE acceptEdits', origin: { kind: 'human' } });
+  await c.event((e) => e.sessionId === id && e.kind === 'permission_mode');
+  assert.equal((await c.call('list')).sessions.find((s) => s.sessionId === id).permissionMode, 'acceptEdits');
+  c.close();
+});
+
 test('a turn result gives the session the window Claude runs its main model with', async () => {
   const f = fixture();
   await startHost(f, { env: { CLAUDE_CONFIG_DIR: f.claudeDir } });

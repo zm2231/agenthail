@@ -471,3 +471,46 @@ test("withdraw sends a silent background push naming the notification to remove"
   assert.equal("apns-collapse-id" in delivered[1].headers, false)
   assert.deepEqual(delivered[1].payload, { aps: { "content-available": 1 }, withdraw: "waiting-abc" })
 })
+
+test("a registration's tag reaches every notification and withdrawal sent through it, and a sender cannot set it", async () => {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])
+  const pkcs8 = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64")
+  const env = environment({ APNS_KEY_P8: `-----BEGIN PRIVATE KEY-----\n${pkcs8}\n-----END PRIVATE KEY-----`, APNS_KEY_ID: "KEY1234567", APNS_TOPIC: "com.agenthail.ios" })
+  const tagged = await (await register(request("POST", await registrationBody(env, { tag: "h0123456789ab" })), env, acceptAttestation)).json()
+  const untagged = await (await register(request("POST", await registrationBody(env)), env, acceptAttestation)).json()
+  for (const tag of ["", "a", "x".repeat(64)]) {
+    const accepted = await register(request("POST", await registrationBody(env, { tag })), env, acceptAttestation)
+    assert.equal(accepted.status, 201)
+    const { installationId } = await accepted.json()
+    const stored = await env.PUSH_DEVICES.get(`device:${installationId}`, "json")
+    assert.equal(stored.tag, tag === "" ? undefined : tag)
+  }
+  for (const tag of ["has space", "x".repeat(65), 7, "h/1", null]) {
+    const refused = await register(request("POST", await registrationBody(env, { tag })), env, acceptAttestation)
+    assert.equal(refused.status, 400)
+    assert.deepEqual(await refused.json(), { error: "invalid_tag" })
+  }
+  const delivered = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    delivered.push(JSON.parse(init.body))
+    return new Response(null, { status: 200 })
+  }
+  try {
+    const notification = { title: "Agenthail", message: "Done", host: "h999999999999", tag: "h999999999999" }
+    for (const registration of [tagged, untagged]) {
+      const credentials = { installationId: registration.installationId, credential: registration.credential }
+      assert.equal((await send(request("POST", { ...credentials, ...notification }), env)).status, 200)
+      assert.equal((await withdraw(request("POST", { ...credentials, collapseId: "c1", host: "h999999999999" }), env)).status, 200)
+    }
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  assert.equal(delivered[0].host, "h0123456789ab")
+  assert.equal(delivered[1].host, "h0123456789ab")
+  assert.equal(delivered[1].withdraw, "c1")
+  assert.equal("host" in delivered[2], false)
+  assert.equal("host" in delivered[3], false)
+  const health = await (await worker.fetch(new Request("https://push.test/health"), {})).json()
+  assert.ok(health.capabilities.includes("host-tag"))
+})

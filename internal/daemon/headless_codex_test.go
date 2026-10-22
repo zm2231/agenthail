@@ -222,3 +222,23 @@ func TestHeadlessCodexDesktopCreatedThreadStaysOnDesktop(t *testing.T) {
 		t.Fatalf("the daemon loaded a Desktop thread: %v", daemon.Methods())
 	}
 }
+
+func TestDashboardRecordsWhichSessionStartedAThread(t *testing.T) {
+	fixture := newHeadlessCodexFixture(t, unreachableDesktop)
+	if err := fixture.registry.RegisterSession(surface.Session{ID: "planner-conversation", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := fixture.action(t, map[string]any{"action": "session-create", "surface": "codex", "message": "Build", "cwd": t.TempDir(), "sourceSessionId": "not-a-session"}); code != http.StatusBadRequest {
+		t.Fatalf("an unknown creator status=%d", code)
+	}
+	for _, source := range []string{"planner-conversation", ""} {
+		_, created := fixture.action(t, map[string]any{"action": "session-create", "surface": "codex", "message": "Build", "cwd": t.TempDir(), "sourceSessionId": source})
+		session, _ := created["session"].(map[string]any)
+		id, _ := session["id"].(string)
+		origin, found, err := fixture.registry.SessionOrigin(id)
+		want := registry.OriginOf(id, source)
+		if err != nil || !found || origin != want {
+			t.Fatalf("source %q: origin=%+v found=%v err=%v, want %+v", source, origin, found, err, want)
+		}
+	}
+}

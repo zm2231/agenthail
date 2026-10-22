@@ -215,13 +215,19 @@ func (f *Fixture) Start(t testing.TB) claudehost.Client {
 // started that host did, so it opens sessions in hosts of any protocol.
 func (f *Fixture) Open(t testing.TB, client claudehost.Client, sessionID string) claudehost.Session {
 	t.Helper()
+	return f.OpenInMode(t, client, sessionID, "")
+}
+
+// OpenInMode opens a session as Open does, running in permissionMode.
+func (f *Fixture) OpenInMode(t testing.TB, client claudehost.Client, sessionID, permissionMode string) claudehost.Session {
+	t.Helper()
 	conn, err := net.DialTimeout("unix", client.Socket, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
-	request, err := json.Marshal(map[string]any{"id": 1, "method": "open", "params": claudehost.OpenRequest{SessionID: sessionID, Cwd: f.Cwd}})
+	request, err := json.Marshal(map[string]any{"id": 1, "method": "open", "params": claudehost.OpenRequest{SessionID: sessionID, Cwd: f.Cwd, PermissionMode: permissionMode}})
 	if err != nil {
 		t.Fatal(err)
 	}

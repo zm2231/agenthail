@@ -110,6 +110,59 @@ struct SessionPaneTest {
         journaledModel.closePane(journaledPane)
         journaled.stop()
 
+        var lateStreamRequests: [String] = []
+        let lateStream = try! StubServer { line, _ in
+            if line.contains("/api/v1/session-stream?") {
+                lateStreamRequests.append(line)
+                if lateStreamRequests.count == 1 {
+                    return StubServer.reply("409 Conflict", #"{"error":{"code":"stream_unsupported","message":"This session does not expose a live stream."}}"#)
+                }
+                return "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
+            }
+            if line.contains("/api/v1/session?") { return StubServer.reply("200 OK", journaledJSON) }
+            return StubServer.reply("404 Not Found", "{}")
+        }
+        let lateStreamPort = await lateStream.ready()
+        let lateStreamModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(lateStreamPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
+        func newSession(stream: Bool) -> SessionState {
+            var capabilities = Capabilities()
+            capabilities.stream = stream
+            return SessionState(id: "R", surface: "claude", name: "new", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: capabilities, readOnly: nil, readOnlyReason: nil)
+        }
+        lateStreamModel.snapshot = DashboardSnapshot(updatedAt: "2026-10-22T08:28:26Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [newSession(stream: false)], totalSessions: 1, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        let lateStreamPane = lateStreamModel.mainPane!
+        lateStreamPane.select("R")
+        for _ in 0..<60 where lateStreamRequests.isEmpty { try? await Task.sleep(for: .milliseconds(50)) }
+        try? await Task.sleep(for: .milliseconds(300))
+        check(lateStreamRequests.count == 1, "a session without a stream yet is asked once: \(lateStreamRequests)")
+        let gainedStream = String(decoding: try! JSONEncoder().encode(newSession(stream: true)), as: UTF8.self)
+        let upserted = "{\"stream\":\"catalog\",\"seq\":2,\"type\":\"session.upserted\",\"data\":{\"session\":\(gainedStream)}}"
+        lateStreamModel.applyCatalogEvent(try! JSONDecoder().decode(CatalogStreamEvent.self, from: Data(upserted.utf8)))
+        for _ in 0..<60 where lateStreamRequests.count < 2 { try? await Task.sleep(for: .milliseconds(50)) }
+        check(lateStreamRequests.count >= 2 && lateStreamRequests[1].contains("after=100"), "the live stream starts once a new session gains it, from the reloaded journal position: \(lateStreamRequests)")
+        lateStreamPane.close()
+        lateStream.stop()
+        func page(_ range: ClosedRange<Int>, before: Int) -> String {
+            let items = range.map { #"{"id":"i\#($0)","kind":"message","role":"assistant","title":"assistant","text":"row \#($0)","truncated":false}"# }.joined(separator: ",")
+            return detailJSON.replacingOccurrences(of: #""timeline":{"items":[],"nextBefore":null,"truncated":false}"#, with: #""timeline":{"items":["# + items + #"],"nextBefore":\#(before),"truncated":false}"#)
+        }
+        var pages = [page(1...20, before: 50), page(2...21, before: 51), page(40...59, before: 70)]
+        let paging = try! StubServer { line, _ in
+            guard line.contains("/api/v1/session?") else { return StubServer.reply("404 Not Found", "{}") }
+            return StubServer.reply("200 OK", pages.count > 1 ? pages.removeFirst() : pages[0])
+        }
+        let pagingPort = await paging.ready()
+        let pagingModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(pagingPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
+        let pagingPane = pagingModel.openPane()
+        pagingPane.select("R")
+        for _ in 0..<60 where pagingPane.detail == nil { try? await Task.sleep(for: .milliseconds(50)) }
+        await pagingPane.loadSession("R")
+        check(pagingPane.timelineItems.map(\.id) == (1...21).map { "i\($0)" } && pagingPane.olderCursor == 50, "a refreshed page keeps the rows that fell off its start, in order, with the earlier cursor: \(pagingPane.timelineItems.map(\.id)) \(String(describing: pagingPane.olderCursor))")
+        await pagingPane.loadSession("R")
+        check(pagingPane.timelineItems.map(\.id) == (40...59).map { "i\($0)" } && pagingPane.olderCursor == 70, "a page that does not overlap the shown rows replaces them rather than joining across a gap: \(pagingPane.timelineItems.map(\.id))")
+        pagingModel.closePane(pagingPane)
+        paging.stop()
+
         let offline = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:9")!, token: "t", session: URLSession(configuration: .ephemeral)))
         let offlinePane = offline.openPane()
         offline.operationError = "An action failed."

@@ -54,7 +54,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 27
+	schemaVersion   = 28
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -624,6 +624,12 @@ CREATE TABLE IF NOT EXISTS session_runtime (
 	waiting_id TEXT NOT NULL DEFAULT '',
 	waiting_since_ms INTEGER NOT NULL DEFAULT 0,
 	waiting_announced INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS session_origins (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	via TEXT NOT NULL,
+	creator_session_id TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS launcher_pending (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -97,7 +97,7 @@ agenthail send claude:<session-id> "Here are the findings" --from @builder --jso
 agenthail history @builder 25
 ```
 
-A socket acknowledgement means transport acceptance, not model completion. Claude's inbound policy can still hold or deny the message. Agenthail does not invent a permission-mode attestation. Native sends do not support `--reply`, `--stream`, or slash commands; read the transcript with `last` or receive a native `SendMessage` reply. Compact, model, interrupt, and steer are typed controls. They require the target session to have a live Remote Control attachment, except that a session the Claude host runs takes interrupt, steer and model through the host, and they are never placed in the ordinary message queue. Over Remote Control, a model change and an interrupt are confirmed only by Claude's response to that exact request, and an interrupt also by the turn ending. A steer is reported as accepted, not delivered, because Claude does not confirm it reached the running turn. `agenthail control <target> context|usage|status|effort|rename` runs one of those Claude commands and shows its output.
+A socket acknowledgement means transport acceptance, not model completion. Claude's inbound policy can still hold or deny the message: a session that runs without permission prompts holds a message unless its sender states that it does too. A session the Claude host runs states its own mode when it messages another; other senders state none. A held message is listed among delivery problems with its cause, and its agent sender is told. Native sends do not support `--reply`, `--stream`, or slash commands; read the transcript with `last` or receive a native `SendMessage` reply. Compact, model, interrupt, and steer are typed controls. They require the target session to have a live Remote Control attachment, except that a session the Claude host runs takes interrupt, steer and model through the host, and they are never placed in the ordinary message queue. Over Remote Control, a model change and an interrupt are confirmed only by Claude's response to that exact request, and an interrupt also by the turn ending. A steer is reported as accepted, not delivered, because Claude does not confirm it reached the running turn. `agenthail control <target> context|usage|status|effort|rename` runs one of those Claude commands and shows its output.
 
 A message you type in the web dashboard or the Mac or iPhone app, or speak to a session by voice, is your own turn, so Claude records it as yours rather than a peer message. The apps mark it with `"author": "person"` on the `send` action. A session the Claude host runs takes it through the host, and so does an exited session, which resumes in the host. A running session with Remote Control takes it through that attachment. A running session with only a native socket receives it over the socket. A send that does not declare an author, including any script calling the API, and all agent, relay, channel and CLI sends, use the native socket whenever the session has one. Sessions that expose only Remote Control receive every send through it, as before. A steer you send from the composer is also your own turn. A composer message to a busy session follows your busy-delivery setting, and a queued one is still delivered as your turn.
 
@@ -265,6 +265,15 @@ agenthail thread create claude "Investigate the build failure" --alias investiga
 ```
 
 The session starts in your current folder unless you choose another project with `--cwd`. Claude sessions run in the Claude host and support status, logs, stop and resume; logs is what the session's Claude process wrote to stderr while it is open, and `agenthail last` reads the conversation. Codex supports forks, its native input queue, reasoning effort, plan mode, service tier and structured output. These controls are available in the CLI and web dashboard; the Mac app offers one-click forks, the native queue, effort and plan mode; see [session operations](docs/maintainers/session-operations.md) for commands and retry behavior.
+
+Agenthail records who started each session: the agent whose command created it, or you when it came from the dashboard, an app or a terminal with no calling session. `--from @alias` names the creator explicitly. Any agent can ask what it is inside Agenthail:
+
+```bash
+agenthail whoami --json   # alias, project, coordinator, who started it, who it reports to, how it reaches you
+agenthail help agent      # the same as a short brief with the commands that act on it
+```
+
+A session an agent started reports to that agent; one you started reports to the project's coordinator, which also sees every report in history. The brief says whether a question the agent asks reaches you in Agenthail and on your phone, or only tells you so you can answer where the session runs.
 
 Notion threads can start the same way:
 

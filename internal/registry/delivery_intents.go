@@ -54,6 +54,9 @@ const (
 	DeliveryIntentDelivered DeliveryIntentStatus = "delivered"
 	DeliveryIntentUnknown   DeliveryIntentStatus = "unknown"
 	DeliveryIntentFailed    DeliveryIntentStatus = "failed"
+	// DeliveryIntentHeld is a message its target's runtime took and parked
+	// under its own policy instead of passing it to the model.
+	DeliveryIntentHeld DeliveryIntentStatus = "held"
 )
 
 type DeliveryIntentInput struct {
@@ -109,9 +112,9 @@ func (r *Registry) ListDeliveryProblems() ([]DeliveryProblem, error) {
 	rows, err := r.read.Query(`
 		SELECT di.id,di.target_session_id,di.sender_session_id,di.message,di.failure,di.status,di.updated_at,COALESCE(mq.status,'')='delivered'
 		FROM delivery_intents di LEFT JOIN message_queue mq ON mq.id=di.notification_queue_id
-		WHERE di.status=? AND COALESCE(di.dismissed_at,'')=''
+		WHERE di.status IN (?,?) AND COALESCE(di.dismissed_at,'')=''
 		ORDER BY di.updated_at DESC, di.id DESC
-		LIMIT 50`, DeliveryIntentFailed)
+		LIMIT 50`, DeliveryIntentFailed, DeliveryIntentHeld)
 	if err != nil {
 		return nil, err
 	}
@@ -164,13 +167,13 @@ func (r *Registry) DismissDeliveryProblem(id int64) (bool, error) {
 		}
 		return false, err
 	}
-	if status != string(DeliveryIntentFailed) {
+	if status != string(DeliveryIntentFailed) && status != string(DeliveryIntentHeld) {
 		return false, fmt.Errorf("delivery %d is not a failure", id)
 	}
 	if dismissedAt.Valid && dismissedAt.String != "" {
 		return false, tx.Commit()
 	}
-	if _, err := tx.Exec(`UPDATE delivery_intents SET dismissed_at=datetime('now') WHERE id=? AND status=? AND COALESCE(dismissed_at,'')=''`, id, DeliveryIntentFailed); err != nil {
+	if _, err := tx.Exec(`UPDATE delivery_intents SET dismissed_at=datetime('now') WHERE id=? AND status=? AND COALESCE(dismissed_at,'')=''`, id, status); err != nil {
 		return false, err
 	}
 	payload, err := json.Marshal(map[string]any{"deliveryId": id})
@@ -282,7 +285,7 @@ func (r *Registry) ReconcileDeliveryIntent(targetSessionID, providerKey string) 
 	if strings.TrimSpace(targetSessionID) == "" || strings.TrimSpace(providerKey) == "" {
 		return false, fmt.Errorf("delivery reconciliation requires target and provider key")
 	}
-	res, err := r.db.Exec(`UPDATE delivery_intents SET status=?,evidence=?,failure='',updated_at=datetime('now') WHERE target_session_id=? AND provider_key=? AND status IN (?,?,?,?)`, DeliveryIntentDelivered, surface.EvidenceDelivered, targetSessionID, providerKey, DeliveryIntentSubmitted, DeliveryIntentSent, DeliveryIntentQueued, DeliveryIntentUnknown)
+	res, err := r.db.Exec(`UPDATE delivery_intents SET status=?,evidence=?,failure='',updated_at=datetime('now') WHERE target_session_id=? AND provider_key=? AND status IN (?,?,?,?,?)`, DeliveryIntentDelivered, surface.EvidenceDelivered, targetSessionID, providerKey, DeliveryIntentSubmitted, DeliveryIntentSent, DeliveryIntentQueued, DeliveryIntentUnknown, DeliveryIntentHeld)
 	if err != nil {
 		return false, err
 	}
@@ -296,12 +299,13 @@ func (r *Registry) FailDeliveryIntent(id int64, failure string) (bool, error) {
 
 // MarkDeliveryIntentSent completes the same logical intent created before a
 // provider side effect. Keeping this transition on the original row preserves
-// the delivery ID across accepted, submitted, and reconciled outcomes.
+// the delivery ID across accepted, submitted, and reconciled outcomes. A hold
+// the target reported before the send was recorded stands.
 func (r *Registry) MarkDeliveryIntentSent(id int64, providerKey string, evidence surface.DeliveryEvidence) (bool, error) {
 	if id == 0 || strings.TrimSpace(string(evidence)) == "" {
 		return false, fmt.Errorf("delivery intent completion requires an id and evidence")
 	}
-	res, err := r.db.Exec(`UPDATE delivery_intents SET status=?,evidence=?,provider_key=CASE WHEN ?!='' THEN ? ELSE provider_key END,failure='',updated_at=datetime('now') WHERE id=? AND status=?`, DeliveryIntentSent, evidence, providerKey, providerKey, id, DeliveryIntentSubmitted)
+	res, err := r.db.Exec(`UPDATE delivery_intents SET status=CASE WHEN status=? THEN status ELSE ? END,evidence=?,provider_key=CASE WHEN ?!='' THEN ? ELSE provider_key END,failure=CASE WHEN status=? THEN failure ELSE '' END,updated_at=datetime('now') WHERE id=? AND status IN (?,?)`, DeliveryIntentHeld, DeliveryIntentSent, evidence, providerKey, providerKey, DeliveryIntentHeld, id, DeliveryIntentSubmitted, DeliveryIntentHeld)
 	if err != nil {
 		return false, err
 	}
@@ -410,7 +414,7 @@ func failDeliveryIntent(q deliveryIntentExecutor, id int64, failure string) (boo
 	if strings.TrimSpace(failure) == "" {
 		return false, fmt.Errorf("delivery failure reason is required")
 	}
-	res, err := q.Exec(`UPDATE delivery_intents SET status=?,evidence=?,failure=?,updated_at=datetime('now') WHERE id=? AND status IN (?,?,?,?)`, DeliveryIntentFailed, surface.EvidenceFailed, failure, id, DeliveryIntentSubmitted, DeliveryIntentSent, DeliveryIntentQueued, DeliveryIntentUnknown)
+	res, err := q.Exec(`UPDATE delivery_intents SET status=?,evidence=?,failure=?,updated_at=datetime('now') WHERE id=? AND status IN (?,?,?,?,?)`, DeliveryIntentFailed, surface.EvidenceFailed, failure, id, DeliveryIntentSubmitted, DeliveryIntentSent, DeliveryIntentQueued, DeliveryIntentUnknown, DeliveryIntentHeld)
 	if err != nil {
 		return false, err
 	}
@@ -589,11 +593,11 @@ func queueDeliveryRefusalNotice(tx *sql.Tx, queueID, refusal int64, reason strin
 
 func appendDeliveryProblemEvent(tx *sql.Tx, intent *DeliveryIntent) (bool, error) {
 	at := time.Now().UTC()
-	payload, err := json.Marshal(map[string]any{"deliveryId": intent.ID, "sessionId": intent.TargetSessionID, "sourceSessionId": intent.SenderSessionID, "attentionSessionId": deliveryAttentionSession(intent.SenderSessionID, false), "message": boundedIntentMessage(intent.Message), "reason": intent.Failure, "at": at.Format(time.RFC3339Nano)})
+	payload, err := json.Marshal(map[string]any{"deliveryId": intent.ID, "sessionId": intent.TargetSessionID, "sourceSessionId": intent.SenderSessionID, "attentionSessionId": deliveryAttentionSession(intent.SenderSessionID, false), "message": boundedIntentMessage(intent.Message), "reason": intent.Failure, "status": intent.Status, "at": at.Format(time.RFC3339Nano)})
 	if err != nil {
 		return false, err
 	}
-	_, appended, err := appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("delivery.problem:%d:%d", intent.ID, intent.Retries), Type: "delivery.problem", EntityID: intent.TargetSessionID, Payload: payload, CreatedAt: at})
+	_, appended, err := appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("delivery.%s:%d:%d", intent.Status, intent.ID, intent.Retries), Type: "delivery.problem", EntityID: intent.TargetSessionID, Payload: payload, CreatedAt: at})
 	return appended, err
 }
 

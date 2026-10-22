@@ -149,13 +149,13 @@ func TestAMoveInIsPreparedOnceAbortedForGoodAndTakesTheSourcesRow(t *testing.T) 
 		t.Fatal("a move aborted before it arrived was prepared")
 	}
 	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: 77, Transcript: "/home/user/.claude/projects/x/t.jsonl", HasLocal: true}
-	if _, err := r.TakeMovedSession("move-2", session, "builder"); !errors.As(err, &MoveConflictError{}) {
+	if _, err := r.TakeMovedSession("move-2", session, "builder", nil); !errors.As(err, &MoveConflictError{}) {
 		t.Fatalf("a move that never received its files took the session: %v", err)
 	}
 	if err := r.SetMoveState("move-2", MoveReceived, "", MovePrepared); err != nil {
 		t.Fatal(err)
 	}
-	events, err := r.TakeMovedSession("move-2", session, "builder")
+	events, err := r.TakeMovedSession("move-2", session, "builder", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

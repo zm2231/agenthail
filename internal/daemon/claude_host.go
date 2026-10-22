@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudehost"
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 const (
@@ -76,6 +78,7 @@ func (d *Daemon) watchClaudeHostRequests(ctx context.Context) {
 	var after uint64
 	for ctx.Err() == nil {
 		start, _ := client.Subscribe(ctx, after, func(event claudehost.Event) {
+			d.recordPeerHold(event)
 			if event.Kind == "request_opened" || event.Kind == "request_resolved" || event.Kind == "tasks" {
 				d.requestCatalogDiscovery()
 			}
@@ -98,6 +101,7 @@ func (d *Daemon) watchClaudeHostRequests(ctx context.Context) {
 func (d *Daemon) watchRetiringClaudeHost(ctx context.Context, host claudehost.Client) {
 	d.log.Printf("Claude host: following the retiring host on %s until its sessions close", host.Socket)
 	_, _ = host.Subscribe(ctx, 0, func(event claudehost.Event) {
+		d.recordPeerHold(event)
 		if event.Kind == "request_opened" || event.Kind == "request_resolved" || event.Kind == "tasks" || event.Kind == "exited" {
 			d.requestCatalogDiscovery()
 		}
@@ -139,4 +143,48 @@ func (d *Daemon) checkClaudeHost(ctx context.Context, last claudeHostCheck) clau
 		d.log.Printf("Claude host: %s", check.status)
 	}
 	return check
+}
+
+// peerHold is what Claude reports when its inbound policy parks a message
+// instead of passing it to the model, and when it later releases or drops it.
+type peerHold struct {
+	Type        string `json:"type"`
+	Subtype     string `json:"subtype"`
+	State       string `json:"state"`
+	Cause       string `json:"cause"`
+	Outcome     string `json:"outcome"`
+	MessageUUID string `json:"message_uuid"`
+}
+
+// recordPeerHold keeps a delivery's state equal to what the target's Claude
+// did with it, so a held message is a problem rather than a silent loss.
+func (d *Daemon) recordPeerHold(event claudehost.Event) {
+	if event.Kind != "sdk" || d.Registry == nil {
+		return
+	}
+	var hold peerHold
+	if json.Unmarshal(event.Message, &hold) != nil || hold.Type != "system" || hold.Subtype != "peer_message_hold" || hold.MessageUUID == "" {
+		return
+	}
+	message := registry.PeerMessage{MsgID: hold.MessageUUID, TargetSessionID: event.SessionID}
+	var changed bool
+	var err error
+	switch hold.State {
+	case "held":
+		changed, err = d.Registry.HoldPeerMessage(message, registry.PeerHeldReason(hold.Cause))
+	case "released":
+		changed, err = d.Registry.ReleasePeerMessage(message)
+	case "dropped":
+		changed, err = d.Registry.DropPeerMessage(message, registry.PeerDroppedReason(hold.Outcome))
+	}
+	if err != nil {
+		d.log.Printf("record a message Claude %s for %s: %s", hold.State, event.SessionID, err)
+	}
+	if !changed {
+		return
+	}
+	if err := d.catalog.flushCommitted(); err != nil {
+		d.log.Printf("publish delivery problem: %s", err)
+	}
+	d.publishEvent("state.changed", event.SessionID, map[string]string{"source": "delivery-problem"})
 }

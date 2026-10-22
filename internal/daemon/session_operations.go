@@ -13,7 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Request, adapter surface.Surface, session *surface.Session, action string, forkOptions surface.ForkOptions, forkName string, queue surface.NativeQueueRequest) {
+func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Request, adapter surface.Surface, session *surface.Session, action string, forkOptions surface.ForkOptions, forkName, creator string, queue surface.NativeQueueRequest) {
 	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 	defer cancel()
 	var result any
@@ -24,6 +24,12 @@ func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Reques
 		if !ok {
 			err = surface.ErrUnsupported
 			break
+		}
+		if creator != "" {
+			if _, lookupErr := d.Registry.Session(creator); lookupErr != nil {
+				http.Error(w, fmt.Sprintf("sourceSessionId %s is not a session here", creator), http.StatusBadRequest)
+				return
+			}
 		}
 		name, reserved := d.reserveStartName(w, forkName)
 		if !reserved {
@@ -42,6 +48,11 @@ func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Reques
 		if err == nil {
 			if bindErr := d.Registry.BindReservedAlias(name, fork.ID); bindErr != nil {
 				err = fmt.Errorf("fork %s was created, but its name could not be persisted: %w", fork.ID, bindErr)
+			}
+		}
+		if err == nil {
+			if originErr := d.Registry.RecordSessionOrigin(registry.OriginOf(fork.ID, creator)); originErr != nil {
+				err = fmt.Errorf("fork %s was created, but who started it could not be recorded: %w", fork.ID, originErr)
 			}
 		}
 	case "native-queue":

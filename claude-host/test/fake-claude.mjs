@@ -21,6 +21,7 @@ const flag = (name) => {
 };
 const sessionId = flag('session-id') || flag('resume');
 let model = flag('model') || 'claude-opus-5-5';
+let permissionMode = flag('permission-mode') || 'default';
 // Claude reports each model's window in a turn result's modelUsage; a side
 // query's model appears beside the main one.
 const windows = { 'claude-opus-4-8': 200000 };
@@ -151,6 +152,11 @@ async function turn(message) {
     interrupt = null;
     state('running');
     reply = `elicit:${result.action ?? result.behavior}:${JSON.stringify(result.content ?? null)}`;
+  } else if (text.startsWith('MODE')) {
+    // A mode Claude changes by itself, as leaving plan mode does.
+    permissionMode = text.split(' ')[1];
+    write({ type: 'system', subtype: 'status', status: null, permissionMode, uuid: crypto.randomUUID(), session_id: sessionId });
+    reply = `mode:${permissionMode}`;
   } else if (text.startsWith('SLOW')) {
     const ms = Number(text.split(' ')[1] ?? 30000);
     const interrupted = await new Promise((resolve) => {
@@ -277,12 +283,32 @@ if (process.env.FAKE_CLAUDE_RECORD) {
       readline.createInterface({ input: conn }).on('line', (line) => {
         const frame = JSON.parse(line);
         if (frame.type !== 'user') return;
+        const cause = holdCause(frame.message.content);
+        if (cause) return hold(frame, cause);
         turns = turns.then(() => turn({ uuid: crypto.randomUUID(), origin: { kind: 'peer', from: frame.from }, message: frame.message }));
       });
     })
     .listen(socket, () => {
       fs.writeFileSync(record, JSON.stringify({ pid: process.pid, sessionId, cwd: process.cwd(), startedAt: Date.now(), kind: 'interactive', entrypoint: 'sdk-cli', status: 'idle', messagingSocketPath: socket, peerProtocol: 1, ...naming }));
     });
+}
+
+// Like Claude 2.1.305, a session that runs without permission prompts holds a
+// peer message whose sender states no permission class or another one. A host
+// has no prompt to approve it, so it is dropped once FAKE_CLAUDE_HOLD_MS (five
+// minutes in Claude) pass.
+function holdCause(content) {
+  const own = permissionMode === 'bypassPermissions' ? 'bypass' : 'prompting';
+  const stated = /^<cross-session-message [^>]*from-mode="(bypass|prompting)"/.exec(typeof content === 'string' ? content : '')?.[1];
+  if (stated !== undefined) return stated === own ? '' : 'mode-mismatch';
+  return own === 'bypass' ? 'no-mode-asserted' : '';
+}
+
+function hold(frame, cause) {
+  const base = { type: 'system', subtype: 'peer_message_hold', lane: 'socket', from: frame.from ?? '', session_id: sessionId };
+  const uuid = { message_uuid: typeof frame.uuid === 'string' ? frame.uuid : crypto.randomUUID() };
+  write({ ...base, ...uuid, state: 'held', cause, uuid: crypto.randomUUID() });
+  setTimeout(() => write({ ...base, ...uuid, state: 'dropped', outcome: 'expired', uuid: crypto.randomUUID() }), Number(process.env.FAKE_CLAUDE_HOLD_MS ?? 300000));
 }
 
 const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -294,6 +320,10 @@ lines.on('line', (line) => {
     if (subtype === 'set_model') model = message.request.model || 'claude-opus-5-5';
     if (subtype === 'initialize') {
       fs.appendFileSync(path.join(dir, 'initialize.jsonl'), JSON.stringify({ sessionId, systemPrompt: message.request.systemPrompt ?? null, appendSystemPrompt: message.request.appendSystemPrompt ?? null }) + '\n');
+    }
+    if (subtype === 'set_permission_mode') {
+      permissionMode = message.request.mode;
+      write({ type: 'system', subtype: 'status', status: null, permissionMode, uuid: crypto.randomUUID(), session_id: sessionId });
     }
     if (subtype === 'set_model' || subtype === 'set_permission_mode') {
       fs.appendFileSync(path.join(dir, 'controls.jsonl'), JSON.stringify({ sessionId, pid: process.pid, ...message.request }) + '\n');

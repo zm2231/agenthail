@@ -40,6 +40,7 @@ final class SessionPane: ObservableObject, Identifiable {
     private var sessionStreamTask: Task<Void, Never>?
     private var sessionCursor: UInt64 = 0
     private var streamAwaitsCursor = false
+    private var streamUnsupported = false
     private var detailReloadTask: Task<Void, Never>?
     private var detailLoadTask: Task<Void, Never>?
     @Published private(set) var detailLoadError: String?
@@ -127,11 +128,15 @@ final class SessionPane: ObservableObject, Identifiable {
             let loaded = try await api.sessionDetail(id: id, includeTimeline: true)
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), generation > detailAppliedGeneration, removedSession?.id != id else { return true }
             detailAppliedGeneration = generation
-            if olderItems.isEmpty {
+            let previous = detail?.session.id == id ? detail?.timeline : nil
+            let fresh = Set(loaded.timeline?.items.map(\.id) ?? [])
+            if let previous, previous.items.contains(where: { fresh.contains($0.id) }) {
+                if olderItems.isEmpty { olderCursor = previous.nextBefore }
+                let retained = fresh.union(olderItems.map(\.id))
+                olderItems += previous.items.filter { !retained.contains($0.id) }
+            } else if olderItems.isEmpty || previous?.items.isEmpty == false {
+                olderItems = []
                 olderCursor = loaded.timeline?.nextBefore
-            } else {
-                let retained = Set(olderItems.map(\.id) + (loaded.timeline?.items.map(\.id) ?? []))
-                olderItems += (detail?.timeline?.items ?? []).filter { !retained.contains($0.id) }
             }
             metadata.absorb(context: loaded.context, goal: loaded.goal, model: loaded.model, models: loaded.models)
             let merged = metadata.apply(to: loaded)
@@ -204,6 +209,10 @@ final class SessionPane: ObservableObject, Identifiable {
         if let selected = selectedSessionID {
             if let live = sessions.first(where: { $0.id == selected }) {
                 selectedSnapshot = live
+                if streamUnsupported, live.capabilities.stream, removedSession == nil {
+                    awaitStreamCursor()
+                    startDetailLoad(selected)
+                }
                 if removedSession != nil {
                     removedSession = nil
                     olderCursor = frozenOlderCursor
@@ -500,6 +509,7 @@ final class SessionPane: ObservableObject, Identifiable {
         sessionStreamTask?.cancel()
         sessionStreamTask = nil
         streamAwaitsCursor = true
+        streamUnsupported = false
     }
 
     private func startSessionStream(_ id: String, after cursor: UInt64) {
@@ -517,7 +527,11 @@ final class SessionPane: ObservableObject, Identifiable {
                     })
                 } catch {
                     if Task.isCancelled || selectedSessionID != id { return }
-                    if case AgenthailAPIError.streamUnsupported = error { return }
+                    if case AgenthailAPIError.streamUnsupported = error, selectedSnapshot?.capabilities.stream != true {
+                        // A session gains its stream once its transcript exists; reconcile restarts it then.
+                        streamUnsupported = true
+                        return
+                    }
                     if case AgenthailAPIError.streamGap = error {
                         streamAwaitsCursor = true
                         startDetailLoad(id)

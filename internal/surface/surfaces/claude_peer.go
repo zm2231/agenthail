@@ -80,7 +80,7 @@ func (c *Claude) sendPeer(ctx context.Context, session *surface.Session, message
 	if sender, senderSocket, found, err := c.nativeCaller(ctx, surface.SourceSessionID(ctx)); err != nil {
 		return nil, err
 	} else if found {
-		return claudepeer.SendNative(ctx, c.home, *sender, senderSocket, socket, message)
+		return claudepeer.SendNative(ctx, c.home, *sender, senderSocket, socket, c.permissionClass(ctx, sender), message)
 	}
 	return peerbridge.Send(ctx, c.home, surface.SourceSessionID(ctx), socket, message)
 }
@@ -120,6 +120,27 @@ func (c *Claude) nativeCaller(ctx context.Context, id string) (*surface.Session,
 		return nil, "", false, surface.DeliveryUnavailable(fmt.Errorf("Claude sender messaging socket is unavailable"))
 	}
 	return sender, socket, true, nil
+}
+
+// permissionClass is how the sender runs, in the terms Claude's peer policy
+// uses, read live from the host that runs it. Only the host knows a session's
+// current mode; Claude records none beside its socket, and a transcript's mode
+// is the one its last prompt ran in. A plan session counts as bypassing only
+// when Claude allows bypassing, which the host cannot see, so its class and
+// that of every session no host runs is unknown.
+func (c *Claude) permissionClass(ctx context.Context, sender *surface.Session) string {
+	c.host.forget()
+	listed, ok := c.host.session(ctx, sender.ID, sender.PID)
+	if !ok {
+		return ""
+	}
+	switch listed.PermissionMode {
+	case "bypassPermissions":
+		return "bypass"
+	case "default", "acceptEdits", "auto", "dontAsk", "manual":
+		return "prompting"
+	}
+	return ""
 }
 
 func (c *Claude) peerRecord(pid int) (map[string]any, bool) {

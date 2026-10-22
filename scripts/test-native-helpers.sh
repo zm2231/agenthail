@@ -54,6 +54,7 @@ SOURCES=(
   macOS/SpotlightIndex.swift
   macOS/ToolRunSummary.swift
   macOS/TranscriptBlock.swift
+  macOS/TranscriptFollow.swift
   macOS/VoiceController.swift
 )
 

@@ -135,7 +135,10 @@ no Remote Control: it takes interrupt, steer, model and permission-mode changes
 through the host, and has no compact or `control` commands.
 A receipt with `evidence: "transport_accepted"` only proves socket acceptance;
 receiver policy can still hold or deny the message. Do not claim model delivery
-from it. Report the immediate send status and target as returned: Sent, Queued,
+from it. A message Claude holds becomes a delivery problem with status `held`,
+and an agent sender gets one `[agenthail delivery held ...]` notice naming the
+cause. Resending does not help: Claude passes it on only from a sender that runs
+in the same permission mode as the target. Report the immediate send status and target as returned: Sent, Queued,
 or Submitted. Submitted is a neutral durable intent, not model completion.
 Continue the task without adding receipt/read-state hedges or investigation
 chores. Agenthail reports proven delivery problems separately; never resend
@@ -234,6 +237,16 @@ creates and registers the thread, starts its first turn, and returns the session
 and delivery result. Keep the returned thread ID or alias. Valid approval modes
 are `untrusted`, `on-request`, and `never`. Use `--timeout` to bound the complete
 operation.
+
+Agenthail records the calling session as the new session's creator (or the
+person, when there is no calling session); `--from` names it explicitly, and a
+caller variable naming a session of another Agenthail is refused as for `send`.
+`agenthail whoami --json` returns the calling session's card: alias, project,
+coordinator (`lead`, with `self` for the coordinator itself), `startedBy`,
+`reportTo` and `ask` (the question tool, whether Agenthail can answer it, and
+whether a paired phone is notified). `agenthail help agent` renders it as a
+brief. Read it instead of guessing who you report to; send results to
+`reportTo`.
 
 Create a Notion thread non-interactively:
 

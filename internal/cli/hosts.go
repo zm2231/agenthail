@@ -381,7 +381,7 @@ func (a *App) isLocalHost(ref string) (bool, error) {
 	return strings.EqualFold(ref, identity.ID) || strings.EqualFold(ref, identity.Name), nil
 }
 
-func (a *App) createRemoteThread(hostText string, request threadCreateRequest, args []string) error {
+func (a *App) createRemoteThread(hostText string, request threadCreateRequest, creator string, args []string) error {
 	timeout, err := commandTimeout(args, a.DefaultTimeout)
 	if err != nil {
 		return err
@@ -396,7 +396,7 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, a
 	if err != nil {
 		return err
 	}
-	fields := map[string]string{"action": "session-create", "host": hostText, "surface": string(request.surface), "message": request.message, "cwd": request.cwd, "alias": request.alias, "model": request.model, "approvalPolicy": request.approval, "name": request.options.Name, "worktree": request.options.Worktree, "agent": request.options.Agent, "permissionMode": request.options.PermissionMode, "configRoot": request.options.ConfigRoot}
+	fields := map[string]string{"action": "session-create", "host": hostText, "surface": string(request.surface), "message": request.message, "cwd": request.cwd, "alias": request.alias, "model": request.model, "approvalPolicy": request.approval, "name": request.options.Name, "worktree": request.options.Worktree, "agent": request.options.Agent, "permissionMode": request.options.PermissionMode, "configRoot": request.options.ConfigRoot, "sourceSessionId": creator}
 	for key, value := range fields {
 		if value != "" {
 			payload[key] = value

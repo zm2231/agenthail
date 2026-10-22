@@ -814,8 +814,7 @@ struct TranscriptView: View {
     @ObservedObject var pane: SessionPane
     let session: SessionState
     @State private var position = ScrollPosition(edge: .bottom)
-    @State private var pinned = true
-    @State private var prepending = false
+    @State private var following = true
     @State private var underfilled = false
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
@@ -876,14 +875,7 @@ struct TranscriptView: View {
             .padding(.bottom, 12 + MessageActions.height)
             .frame(maxWidth: .infinity)
         }
-        .scrollPosition($position)
-        .defaultScrollAnchor(.bottom, for: .initialOffset)
-        .defaultScrollAnchor(pinned || prepending ? .bottom : nil, for: .sizeChanges)
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 70
-        } action: { _, atBottom in
-            pinned = atBottom
-        }
+        .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, hasRow: { id in pane.timelineItems.contains { $0.id == id } }, position: $position, following: $following)
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentSize.height < geometry.containerSize.height * 1.5
         } action: { _, value in
@@ -892,12 +884,8 @@ struct TranscriptView: View {
         }
         .onChange(of: pane.olderItems.count) { if underfilled { fillViewport() } }
         .onChange(of: pane.detail?.session.id) { if underfilled { fillViewport() } }
-        .onChange(of: session.id) {
-            pinned = true
-            position.scrollTo(edge: .bottom)
-        }
         .overlay(alignment: .bottomTrailing) {
-            if !pinned {
+            if !following {
                 Button {
                     jumpToLatest()
                 } label: {
@@ -961,12 +949,7 @@ struct TranscriptView: View {
                 ProgressView().controlSize(.mini)
             } else if (pane.olderCursor ?? 0) > 0 {
                 Button("Load earlier") {
-                    prepending = true
-                    Task {
-                        await pane.loadOlder()
-                        try? await Task.sleep(for: .milliseconds(300))
-                        prepending = false
-                    }
+                    Task { await pane.loadOlder() }
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(DesktopPalette.accentText)
@@ -981,12 +964,7 @@ struct TranscriptView: View {
 
     private func fillViewport() {
         guard pane.detail != nil, let cursor = pane.olderCursor, cursor > 0, !pane.loadingOlder, pane.olderError == nil else { return }
-        prepending = true
-        Task {
-            await pane.loadOlder()
-            try? await Task.sleep(for: .milliseconds(300))
-            prepending = false
-        }
+        Task { await pane.loadOlder() }
     }
 
     private func resend(_ text: String, attachments: [ComposerAttachment] = []) {
@@ -995,8 +973,7 @@ struct TranscriptView: View {
     }
 
     private func jumpToLatest() {
-        pinned = true
-        withAnimation(.easeOut(duration: 0.25)) { position.scrollTo(edge: .bottom) }
+        scrollToLatest($position, following: $following)
     }
 }
 

@@ -18,4 +18,5 @@ These notes cover Agenthail's implementation, packaging, release automation, and
 - [Moving a session to another host: protocol and failure model](host-move.md)
 - [Registry migrations: adding a table, column, index or data step](registry-migrations.md)
 - [Coordinator: one per project, its saved spec, @lead, and how a send always lands](coordinator.md)
+- [Agent card: what a session knows about itself, and who started it](agent-card.md)
 - [Dashboard design reference](../../design.md)
