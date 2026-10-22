@@ -24,7 +24,7 @@ func writeClaudeGlobalConfigFixture(t *testing.T, path string, config map[string
 }
 
 func oauthAccount(uuid, email string) map[string]any {
-	return map[string]any{"accountUuid": uuid, "emailAddress": email, "organizationName": "Org " + uuid, "organizationType": "claude_max", "accessToken": "must-not-surface"}
+	return map[string]any{"accountUuid": uuid, "emailAddress": email, "organizationUuid": "org-" + uuid, "organizationName": "Org " + uuid, "organizationType": "claude_max", "accessToken": "must-not-surface"}
 }
 
 func claudeRootsHome(t *testing.T, roots ...string) string {
@@ -53,16 +53,9 @@ func signedInAs(root ClaudeConfigRoot) string {
 
 func TestDescribedRootsReadEachRootsCurrentLogin(t *testing.T) {
 	home := claudeRootsHome(t, ".work/.claude", "spare")
-	resets := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
 	writeClaudeGlobalConfigFixture(t, filepath.Join(home, ".claude.json"), map[string]any{"oauthAccount": oauthAccount("a-1", "me@example.com")})
 	writeClaudeGlobalConfigFixture(t, filepath.Join(home, ".claude", ".claude.json"), map[string]any{"oauthAccount": oauthAccount("wrong", "wrong@example.com")})
-	writeClaudeGlobalConfigFixture(t, filepath.Join(home, ".work", ".claude", ".claude.json"), map[string]any{
-		"oauthAccount": oauthAccount("b-2", "work@example.com"),
-		"cachedUsageUtilization": map[string]any{"fetchedAtMs": 1792364047870, "accountUuid": "b-2", "utilization": map[string]any{"limits": []any{
-			map[string]any{"kind": "session", "group": "session", "percent": 100, "severity": "critical", "resets_at": resets.Format(time.RFC3339Nano)},
-			map[string]any{"kind": "weekly_scoped", "percent": 35, "scope": map[string]any{"model": map[string]any{"display_name": "Fable"}}},
-		}}},
-	})
+	writeClaudeGlobalConfigFixture(t, filepath.Join(home, ".work", ".claude", ".claude.json"), map[string]any{"oauthAccount": oauthAccount("b-2", "work@example.com")})
 
 	roots, err := DescribeClaudeConfigRoots(home)
 	if err != nil {
@@ -75,14 +68,8 @@ func TestDescribedRootsReadEachRootsCurrentLogin(t *testing.T) {
 	if !primary.Primary || primary.Name != "default" || signedInAs(primary) != "me@example.com" || primary.SignedInAs.Plan != "max" || primary.Root != filepath.Join(home, ".claude") {
 		t.Fatalf("primary=%+v", primary)
 	}
-	if work.Name != "work" || signedInAs(work) != "work@example.com" || work.Usage == nil || len(work.Usage.Limits) != 2 || work.Usage.Limits[1].Scope != "Fable" {
-		t.Fatalf("work=%+v", work)
-	}
-	if until, out := work.Usage.Exhausted(time.Now()); !out || !until.Equal(resets) {
-		t.Fatalf("exhausted=%v until=%v", out, until)
-	}
-	if _, out := work.Usage.Exhausted(resets.Add(time.Minute)); out {
-		t.Fatal("a limit that has reset still reads as exhausted")
+	if work.Name != "work" || signedInAs(work) != "work@example.com" || work.SignedInAs.AccountID != "b-2" || work.SignedInAs.OrganizationID != "org-b-2" {
+		t.Fatalf("work=%+v login=%+v", work, work.SignedInAs)
 	}
 	if spare.SignedInAs != nil || spare.Name != "spare" {
 		t.Fatalf("spare=%+v", spare)
@@ -93,15 +80,27 @@ func TestDescribedRootsReadEachRootsCurrentLogin(t *testing.T) {
 	}
 }
 
-func TestDescribedRootsDropUsageCachedForAnEarlierLogin(t *testing.T) {
+func TestDescribedRootsIgnoreClaudesCachedUsage(t *testing.T) {
 	home := claudeRootsHome(t)
 	writeClaudeGlobalConfigFixture(t, filepath.Join(home, ".claude.json"), map[string]any{
 		"oauthAccount":           oauthAccount("now", "now@example.com"),
-		"cachedUsageUtilization": map[string]any{"fetchedAtMs": 1792364047870, "accountUuid": "before", "utilization": map[string]any{"limits": []any{map[string]any{"kind": "session", "percent": 100}}}},
+		"cachedUsageUtilization": map[string]any{"fetchedAtMs": 1792364047870, "accountUuid": "now", "utilization": map[string]any{"limits": []any{map[string]any{"kind": "session", "percent": 100}}}},
 	})
 	roots, err := DescribeClaudeConfigRoots(home)
 	if err != nil || roots[0].Usage != nil || signedInAs(roots[0]) != "now@example.com" {
-		t.Fatalf("roots=%+v err=%v", roots, err)
+		t.Fatalf("Claude's own usage cache is refreshed only by its usage view, so it must not be reported: roots=%+v err=%v", roots, err)
+	}
+}
+
+func TestClaudeUsageExhaustedUntilTheLatestLimitResets(t *testing.T) {
+	now := time.Now()
+	resets := now.Add(2 * time.Hour)
+	usage := &ClaudeUsage{Limits: []ClaudeUsageLimit{{Kind: "session", Percent: 100, ResetsAt: now.Add(time.Hour)}, {Kind: "weekly_all", Percent: 100, ResetsAt: resets}, {Kind: "weekly_scoped", Percent: 35}}}
+	if until, out := usage.Exhausted(now); !out || !until.Equal(resets) {
+		t.Fatalf("exhausted=%v until=%v", out, until)
+	}
+	if _, out := usage.Exhausted(resets.Add(time.Minute)); out {
+		t.Fatal("a limit that has reset still reads as exhausted")
 	}
 }
 
@@ -118,15 +117,15 @@ func TestDescribedRootsUseTheEnvironmentRootsOwnConfig(t *testing.T) {
 }
 
 func TestResolveClaudeConfigRoot(t *testing.T) {
-	home := claudeRootsHome(t, ".gentle-claude/.claude")
-	gentle := filepath.Join(home, ".gentle-claude", ".claude")
-	writeClaudeGlobalConfigFixture(t, filepath.Join(gentle, ".claude.json"), map[string]any{"oauthAccount": oauthAccount("g", "other@example.com")})
+	home := claudeRootsHome(t, ".team/.claude")
+	team := filepath.Join(home, ".team", ".claude")
+	writeClaudeGlobalConfigFixture(t, filepath.Join(team, ".claude.json"), map[string]any{"oauthAccount": oauthAccount("g", "other@example.com")})
 	for choice, want := range map[string]string{
-		"":                         filepath.Join(home, ".claude"),
-		"default":                  filepath.Join(home, ".claude"),
-		"gentle-claude":            gentle,
-		gentle:                     gentle,
-		"~/.gentle-claude/.claude": gentle,
+		"":                filepath.Join(home, ".claude"),
+		"default":         filepath.Join(home, ".claude"),
+		"team":            team,
+		team:              team,
+		"~/.team/.claude": team,
 	} {
 		if got, err := ResolveClaudeConfigRoot(home, choice); err != nil || got != want {
 			t.Fatalf("choice %q: got %q err=%v", choice, got, err)

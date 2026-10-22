@@ -27,9 +27,9 @@ type claudeRemoteEvent struct {
 }
 
 func (c *Claude) remoteRequest(ctx context.Context, sess *surface.Session, method, path, body string) (string, error) {
-	cookies, err := c.cookieSource(sess.ID)
+	cookies, err := c.cookieSource(ctx, sess)
 	if err != nil {
-		return "", surface.DeliveryTerminal(err, signinTerminalKind(err))
+		return "", cookieSourceError(err)
 	}
 	request := c.request
 	if request == nil {

@@ -240,9 +240,24 @@ struct NewSessionSheet: View {
             if form.folder.isEmpty {
                 form.folder = hosts.defaultFolder(selected: model.mainPane.selectedSession)
             }
+            await loadRootUsage(options, for: generation)
         } catch is CancellationError {
         } catch {
             if !error.isCancellation { hosts.fail("Couldn't load what \(hosts.selectedHost?.name ?? "this Mac") can start: \(AgenthailAPIError.userMessage(error))", for: generation) }
+        }
+    }
+
+    /// Fills in each signed-in root's usage as it arrives; the roots are
+    /// already shown.
+    private func loadRootUsage(_ options: SessionCreationOptions, for generation: Int) async {
+        let host = hosts.hostQuery
+        await withTaskGroup(of: ClaudeRootUsage?.self) { group in
+            for root in options.claudeConfigRoots ?? [] where root.signedIn {
+                group.addTask { try? await model.creationRootUsage(root: root.root, host: host) }
+            }
+            for await usage in group {
+                if let usage { hosts.receive(usage: usage, for: generation) }
+            }
         }
     }
 

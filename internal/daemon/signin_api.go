@@ -39,6 +39,7 @@ func (d *Daemon) registerSigninAPI(mux *http.ServeMux, dashboard *dashboardServe
 	mux.HandleFunc("/api/v1/signin", d.apiV1Guard(dashboard, "settings", d.apiSigninHandler))
 	mux.HandleFunc("/api/v1/signin/profiles", d.apiV1Guard(dashboard, "settings", d.apiSigninProfilesHandler))
 	mux.HandleFunc("/api/v1/signin/bindings", d.apiV1Guard(dashboard, "settings", d.apiSigninBindingsHandler))
+	mux.HandleFunc("/api/v1/claude/roots", d.apiV1Guard(dashboard, "settings", d.apiClaudeConfigRootsHandler))
 }
 
 func (d *Daemon) signinView(r *http.Request) (signinView, error) {

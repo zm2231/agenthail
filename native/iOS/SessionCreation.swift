@@ -214,6 +214,16 @@ struct NewSessionSheet: View {
                 selectedSurface = loaded.surfaces.first?.id ?? ""
                 if cwd.isEmpty { cwd = loaded.projects.first?.rootPath ?? "" }
             }
+            loading = false
+            let host = hosts.hostQuery
+            await withTaskGroup(of: ClaudeRootUsage?.self) { group in
+                for root in loaded.claudeConfigRoots ?? [] where root.signedIn {
+                    group.addTask { try? await model.creationRootUsage(root: root.root, host: host) }
+                }
+                for await usage in group {
+                    if let usage { hosts.receive(usage: usage, for: generation) }
+                }
+            }
         } catch is CancellationError {
         } catch { hosts.fail(error.localizedDescription, for: generation) }
     }

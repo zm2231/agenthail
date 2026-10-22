@@ -294,6 +294,11 @@ final class AgenthailModel: ObservableObject {
         return try await api.sessionOptions(host: host)
     }
 
+    func creationRootUsage(root: String, host: String?) async throws -> ClaudeRootUsage {
+        guard let api else { throw AgenthailAPIError.unavailable("Agenthail isn't connected.") }
+        return try await api.claudeRootUsage(root: root, host: host)
+    }
+
     func creationModels(for agent: String, host: String?) async throws -> [ModelOption] {
         guard let api else { throw AgenthailAPIError.unavailable("Agenthail isn't connected.") }
         return try await api.creationModels(surface: agent, host: host)

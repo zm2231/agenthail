@@ -89,7 +89,7 @@ func TestSigninAPIAddListUseRemove(t *testing.T) {
 	if len(view.Profiles) != 0 || len(view.Consumers) != 2 {
 		t.Fatalf("view=%+v", view)
 	}
-	if source, err := r.ResolveSignin(signin.Target{Consumer: signin.Notion}); err != nil || source != (signin.Source{Browser: signin.Chrome, Dir: filepath.Join(chromeRoot, "Default")}) {
+	if source, err := r.ResolveSignin(signin.Target{Consumer: signin.Notion}); err != nil || source != (signin.Source{Label: "Personal", Browser: signin.Chrome, Dir: filepath.Join(chromeRoot, "Default")}) {
 		t.Fatalf("source=%+v err=%v", source, err)
 	}
 	var chrome *signinBrowserView
@@ -129,10 +129,10 @@ func TestSigninAPIAddListUseRemove(t *testing.T) {
 		t.Fatalf("status=%d", code)
 	}
 	source, err := r.ResolveSignin(signin.Target{Consumer: signin.Notion})
-	if err != nil || source != (signin.Source{ProfileID: added.Profile.ID, Browser: signin.Chrome, Dir: filepath.Join(chromeRoot, "Profile 2")}) {
+	if err != nil || source != (signin.Source{ProfileID: added.Profile.ID, Label: added.Profile.Label, Browser: signin.Chrome, Dir: filepath.Join(chromeRoot, "Profile 2")}) {
 		t.Fatalf("source=%+v err=%v", source, err)
 	}
-	source, err = r.ResolveSignin(signin.Target{Consumer: signin.Claude, SessionID: "conversation"})
+	source, err = r.ResolveSignin(signin.Target{Consumer: signin.Claude})
 	if err != nil || source.ProfileID != firefox.Profile.ID || source.Browser != signin.Firefox {
 		t.Fatalf("source=%+v err=%v", source, err)
 	}
@@ -151,7 +151,7 @@ func TestSigninAPIAddListUseRemove(t *testing.T) {
 	if code := api.do(http.MethodDelete, "/api/v1/signin/profiles?id="+added.Profile.ID, "", nil); code != http.StatusOK {
 		t.Fatalf("status=%d", code)
 	}
-	if source, err := r.ResolveSignin(signin.Target{Consumer: signin.Notion}); err != nil || source != (signin.Source{Browser: signin.Chrome, Dir: filepath.Join(chromeRoot, "Default")}) {
+	if source, err := r.ResolveSignin(signin.Target{Consumer: signin.Notion}); err != nil || source != (signin.Source{Label: "Personal", Browser: signin.Chrome, Dir: filepath.Join(chromeRoot, "Default")}) {
 		t.Fatalf("removing a profile did not return its consumer to the default browser: %+v %v", source, err)
 	}
 	if source, err := r.ResolveSignin(signin.Target{Consumer: signin.Claude}); err != nil || source.ProfileID != firefox.Profile.ID {

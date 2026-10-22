@@ -172,6 +172,10 @@ final class AgenthailIOSModel: ObservableObject {
         guard let api else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
         return try await api.sessionOptions(host: host)
     }
+    func creationRootUsage(root: String, host: String?) async throws -> ClaudeRootUsage {
+        guard let api else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
+        return try await api.claudeRootUsage(root: root, host: host)
+    }
     func creationModels(surface: String, host: String?) async throws -> [ModelOption] {
         guard let api else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
         return try await api.creationModels(surface: surface, host: host)
