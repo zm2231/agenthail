@@ -186,8 +186,8 @@ func (p claudeProcess) pinned(pid int) (claudeProcess, bool) {
 func (c *Claude) sharedLocalStatus(ctx context.Context, session surface.Session) (surface.Session, error) {
 	records := make([]map[string]any, 0, len(session.Holders))
 	for _, holder := range session.Holders {
-		_, record, found := c.pidRecord(holder.PID)
-		if !found || str(record, "sessionId") != session.ID || !claudeRecordLive(record) {
+		record, held := c.heldRecord(session.ID, holder)
+		if !held {
 			return session, fmt.Errorf("claude pid %d no longer holds session %s", holder.PID, session.ID)
 		}
 		records = append(records, record)
@@ -227,8 +227,8 @@ func (c *Claude) sharedLiveRecord(sess surface.Session) (map[string]any, bool) {
 		return 0
 	}
 	for _, holder := range sess.Holders {
-		_, record, found := c.pidRecord(holder.PID)
-		if !found || str(record, "sessionId") != sess.ID || !claudeRecordLive(record) {
+		record, held := c.heldRecord(sess.ID, holder)
+		if !held {
 			continue
 		}
 		if chosen == nil || rank(record) > rank(chosen) {
@@ -236,4 +236,20 @@ func (c *Claude) sharedLiveRecord(sess surface.Session) (map[string]any, bool) {
 		}
 	}
 	return chosen, chosen != nil
+}
+
+// heldRecord reads the live record of holder while it is still the process
+// discovery listed: the same pid, conversation and start. A process that
+// reused the pid since is a change of holders, which only discovery publishes.
+func (c *Claude) heldRecord(conversation string, holder surface.Holder) (map[string]any, bool) {
+	_, record, found := c.pidRecord(holder.PID)
+	if !found || str(record, "sessionId") != conversation || !claudeRecordLive(record) {
+		return nil, false
+	}
+	if !holder.StartedAt.IsZero() {
+		if startedAt, ok := record["startedAt"].(float64); !ok || int64(startedAt) != holder.StartedAt.UnixMilli() {
+			return nil, false
+		}
+	}
+	return record, true
 }

@@ -292,3 +292,19 @@ func TestClaudeAdoptingAConversationOpenInTwoProcessesAsksToCloseTheOthers(t *te
 		}
 	}
 }
+
+func TestClaudeSharedStatusFromAProcessThatReusedAHoldersPIDIsAChangeOfHolders(t *testing.T) {
+	s := newSharedConversation(t)
+	listed := s.listShared(t)
+	if _, err := s.adapter.LocalStatus(context.Background(), listed); err != nil {
+		t.Fatalf("status of the listed holders: %v", err)
+	}
+	// Discovery listed this holder under an earlier process with its pid.
+	listed.Holders[1].StartedAt = listed.Holders[1].StartedAt.Add(-time.Hour)
+	if _, err := s.adapter.LocalStatus(context.Background(), listed); err == nil {
+		t.Fatal("status read a process that reused a holder's pid as that holder")
+	}
+	if open := s.adapter.OpenSessions(context.Background(), []surface.Session{{ID: sharedConversation, Holders: listed.Holders[1:]}}); open[sharedConversation] {
+		t.Fatal("a process that reused a holder's pid kept the conversation open as that holder")
+	}
+}
