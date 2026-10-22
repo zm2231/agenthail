@@ -1530,7 +1530,7 @@ struct ComposerView: View {
     @ObservedObject var model: AgenthailModel
     let pane: SessionPane
     let session: SessionState
-    @FocusState private var focused: Bool
+    @State private var focused = false
     @State private var dropTargeted = false
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
@@ -1592,15 +1592,11 @@ struct ComposerView: View {
                     .padding(.horizontal, 10)
                 }
                 VStack(spacing: 0) {
-                    TextField("Message \(session.title)", text: $draft.text, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: DesktopType.prose))
-                        .lineLimit(2...10)
-                        .focused($focused)
+                    ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)") { submit(alternate: false) }
+                        .id(session.id)
                         .padding(.horizontal, 15)
                         .padding(.top, 13)
                         .padding(.bottom, DesktopSpace.xs)
-                        .onSubmit { submit(alternate: false) }
                     HStack(spacing: DesktopSpace.xs) {
                         if session.capabilities.attach {
                             Button(action: chooseAttachments) {

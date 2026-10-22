@@ -39,6 +39,9 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case nextTab
     case previousTab
     case keepTab
+    case composerNewline
+    case composerDeleteToLineStart
+    case composerDeleteWordBackward
 
     var id: String { rawValue }
 
@@ -66,6 +69,9 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .nextTab: "Next tab"
         case .previousTab: "Previous tab"
         case .keepTab: "Keep tab open"
+        case .composerNewline: "New line"
+        case .composerDeleteToLineStart: "Delete to start of line"
+        case .composerDeleteWordBackward: "Delete previous word"
         }
     }
 
@@ -90,6 +96,9 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .closeTab: StoredShortcut(kVK_ANSI_W, cmdKey)
         case .nextTab: StoredShortcut(kVK_ANSI_RightBracket, cmdKey | shiftKey)
         case .previousTab: StoredShortcut(kVK_ANSI_LeftBracket, cmdKey | shiftKey)
+        case .composerNewline: StoredShortcut(kVK_ANSI_J, controlKey)
+        case .composerDeleteToLineStart: StoredShortcut(kVK_ANSI_U, controlKey)
+        case .composerDeleteWordBackward: StoredShortcut(kVK_ANSI_W, controlKey)
         case .rename, .openInNewWindow, .keepTab: nil
         }
     }
