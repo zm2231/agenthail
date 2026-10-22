@@ -66,7 +66,7 @@ struct TitleBarStrip: View {
                     if tabs.count > fits {
                         Menu {
                             ForEach(tabs) { tab in
-                                Button(SessionTabView.title(model.knownSessions.first { $0.id == tab.id }, id: tab.id, label: interface.config.tabLabel)) { pane.select(tab.id) }
+                                Button(SessionTabView.title(model.knownSessions.first { $0.id == tab.id }, id: tab.id, label: interface.config.tabLabel)) { pane.activateTab(tab.id) }
                             }
                         } label: {
                             Text("\(tabs.count - fits) more")
@@ -74,7 +74,7 @@ struct TitleBarStrip: View {
                         .menuStyle(.borderlessButton)
                         .fixedSize()
                     }
-                    Button { model.newSessionVisible = true } label: { Image(systemName: "plus") }
+                    Button { model.openNewSession() } label: { Image(systemName: "plus") }
                         .buttonStyle(.plain)
                         .foregroundStyle(DesktopPalette.text2)
                         .padding(.horizontal, DesktopSpace.s)
@@ -126,11 +126,18 @@ struct ArchivedTabNotice: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text("\(SessionTabView.title(session, id: session.id, label: label)) was archived")
-                .foregroundStyle(DesktopPalette.text)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Button("Unarchive") { Task { await pane.unarchiveTab() } }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(SessionTabView.title(session, id: session.id, label: label)) was archived")
+                    .foregroundStyle(DesktopPalette.text)
+                if let error = pane.archivedTabError {
+                    Text(error)
+                        .font(.system(size: DesktopType.caption))
+                        .foregroundStyle(DesktopPalette.failed)
+                }
+            }
+            .lineLimit(1)
+            .truncationMode(.middle)
+            Button(pane.archivedTabError == nil ? "Unarchive" : "Try Again") { [session] in Task { await pane.unarchiveTab(session) } }
             Button { pane.archivedTab = nil } label: {
                 Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
             }
@@ -139,12 +146,13 @@ struct ArchivedTabNotice: View {
             .accessibilityLabel("Dismiss")
         }
         .padding(.horizontal, 14)
-        .frame(height: 36)
+        .frame(minHeight: 36)
         .frame(maxWidth: 480)
         .floatingGlass(DesktopPalette.raised, in: Capsule())
-        .task(id: session.id) {
+        .task(id: "\(session.id)/\(pane.archivedTabError ?? "")") {
+            guard pane.archivedTabError == nil else { return }
             try? await Task.sleep(for: .seconds(10))
-            if !Task.isCancelled, pane.archivedTab?.id == session.id { pane.archivedTab = nil }
+            if !Task.isCancelled, pane.archivedTab?.id == session.id, pane.archivedTabError == nil { pane.archivedTab = nil }
         }
     }
 }
@@ -158,6 +166,7 @@ struct SessionTabView: View {
     @State private var hovering = false
 
     static func title(_ session: SessionState?, id: String, label: String) -> String {
+        if id == SessionTabs.newSession { return "New Session" }
         guard let session else { return id }
         let alias = session.alias.flatMap { $0.isEmpty ? nil : "@\($0)" }
         let trimmed = session.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -176,11 +185,19 @@ struct SessionTabView: View {
         let session = model.knownSessions.first { $0.id == tab.id }
         let active = pane.tabs.active == tab.id
         let needsYou = model.sessionTree.attention[tab.id] != nil
+        let composing = tab.id == SessionTabs.newSession
         HStack(spacing: 6) {
-            Circle()
-                .fill(session.map { DesktopPalette.statusColor($0, needsYou: needsYou, finishedUnseen: model.finishedUnseen.contains($0.id)) } ?? DesktopPalette.muted)
-                .frame(width: 7, height: 7)
-                .accessibilityHidden(true)
+            if composing {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 10))
+                    .foregroundStyle(DesktopPalette.text2)
+                    .accessibilityHidden(true)
+            } else {
+                Circle()
+                    .fill(session.map { DesktopPalette.statusColor($0, needsYou: needsYou, finishedUnseen: model.finishedUnseen.contains($0.id)) } ?? DesktopPalette.muted)
+                    .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
+            }
             Text(Self.title(session, id: tab.id, label: label))
                 .italic(!tab.kept)
                 .foregroundStyle(active ? DesktopPalette.text : DesktopPalette.text2)
@@ -212,15 +229,17 @@ struct SessionTabView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { pane.keepTab(tab.id) }
-        .onTapGesture { pane.select(tab.id) }
+        .onTapGesture { pane.activateTab(tab.id) }
         .onHover { hovering = $0 }
         .contextMenu {
-            if !tab.kept { Button("Keep Open") { pane.keepTab(tab.id) } }
-            Button("Open in New Window") {
-                pane.closeTab(tab.id)
-                openWindow(id: "session", value: tab.id)
+            if !composing {
+                if !tab.kept { Button("Keep Open") { pane.keepTab(tab.id) } }
+                Button("Open in New Window") {
+                    pane.closeTab(tab.id)
+                    openWindow(id: "session", value: tab.id)
+                }
+                Divider()
             }
-            Divider()
             Button("Close Tab") { pane.closeTab(tab.id) }
             Button("Close Other Tabs") { pane.closeOtherTabs(tab.id) }
                 .disabled(pane.tabs.tabs.count < 2)

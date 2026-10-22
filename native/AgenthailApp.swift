@@ -466,7 +466,7 @@ private struct MenuBarLabel: View {
         if let sessionID = request.sessionID { model.openSession(reference: sessionID) }
         NSApplication.shared.activate()
         openWindow(id: "main")
-        if request.newSession { model.newSessionVisible = true }
+        if request.newSession { model.openNewSession() }
         if request.palette { model.paletteVisible = true }
         if let text = request.sharedText { model.receiveSharedText(text) }
     }
@@ -527,9 +527,9 @@ private struct AgenthailMenuContent: View {
             }
         }
         Divider()
-        Button("New Session…") {
+        Button("New Session") {
             open()
-            model.newSessionVisible = true
+            model.openNewSession()
         }
         Button("Open Agenthail") { open() }
             .keyboardShortcut("o")

@@ -43,7 +43,6 @@ SOURCES=(
   macOS/Backdrop.swift
   macOS/BoundedDock.swift
   macOS/CatalogPosition.swift
-  macOS/FirstMessageField.swift
   macOS/ContextBreakdown.swift
   macOS/LocalSend.swift
   macOS/Overview.swift
@@ -55,6 +54,7 @@ SOURCES=(
   macOS/SessionLaunch.swift
   macOS/SessionOperationControllers.swift
   macOS/SessionOperations.swift
+  macOS/NewSessionDraft.swift
   macOS/SessionPane.swift
   macOS/SessionTabs.swift
   macOS/ShortcutStore.swift

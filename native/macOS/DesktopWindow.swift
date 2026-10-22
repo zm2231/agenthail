@@ -20,11 +20,6 @@ struct DesktopWindow: View {
         .environmentObject(model)
         .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
         .sheet(item: $pane.adoptingSession) { AdoptSessionSheet(model: model, session: $0) }
-        .sheet(isPresented: $model.newSessionVisible, onDismiss: {
-            if model.newSessionMessage != nil { model.newSessionVisible = true }
-        }) {
-            NewSessionSheet(model: model)
-        }
         .overlay(alignment: .top) {
             if model.paletteVisible {
                 ZStack(alignment: .top) {
@@ -59,7 +54,7 @@ struct DesktopWindow: View {
                 .belowWindowChrome()
                 .ignoresSafeArea(.container, edges: .top)
                 .navigationSplitViewColumnWidth(min: 340, ideal: 892)
-                .inspector(isPresented: $pane.inspectorVisible) {
+                .inspector(isPresented: Binding(get: { pane.inspectorVisible && pane.displayedSession != nil }, set: { if pane.displayedSession != nil { pane.inspectorVisible = $0 } })) {
                     SessionInspector(model: model, pane: pane)
                         .belowWindowChrome()
                         .ignoresSafeArea(.container, edges: .top)
@@ -134,7 +129,7 @@ struct SessionSidebar: View {
                 Spacer()
                 SessionRefinementMenu(model: model)
                 Button {
-                    model.newSessionVisible = true
+                    model.openNewSession()
                 } label: {
                     Image(systemName: "square.and.pencil")
                 }
@@ -728,6 +723,9 @@ struct ConversationPane: View {
                 }
             .glassPane("content", .content, fallback: DesktopPalette.window)
             .environmentObject(pane)
+        } else if model.isConnected, let draft = pane.newSession {
+            NewSessionView(model: model, draft: draft)
+                .glassPane("content", .content, fallback: DesktopPalette.window)
         } else {
             ContentUnavailableView {
                 if model.isConnected {

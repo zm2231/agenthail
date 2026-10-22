@@ -8,6 +8,9 @@ struct SessionTabs: Codable, Equatable {
         var kept: Bool
     }
 
+    /// The tab holding the New Session view; at most one is open.
+    static let newSession = "agenthail.new-session"
+
     private(set) var tabs: [Tab] = []
     private(set) var active: String?
 
@@ -30,6 +33,19 @@ struct SessionTabs: Codable, Equatable {
             tabs.append(tab)
         }
         active = id
+    }
+
+    /// Turns one tab into another in place, kept and active: the New Session
+    /// tab becomes the session it started.
+    mutating func replace(_ old: String, with new: String) {
+        guard tabs.contains(where: { $0.id == old }) else {
+            open(new, keep: true)
+            return
+        }
+        if old != new { tabs.removeAll { $0.id == new } }
+        guard let index = tabs.firstIndex(where: { $0.id == old }) else { return }
+        tabs[index] = Tab(id: new, kept: true)
+        active = new
     }
 
     mutating func keep(_ id: String) {

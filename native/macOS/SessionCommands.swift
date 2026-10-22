@@ -13,15 +13,15 @@ struct SessionCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Session…") {
+            Button("New Session") {
                 showMainWindow()
-                model.newSessionVisible = true
+                model.openNewSession()
             }
             .keyboardShortcut(shortcuts.keyboardShortcut(.newSession))
             if tabs {
                 Button("New Tab") {
                     showMainWindow()
-                    model.newSessionVisible = true
+                    model.openNewSession()
                 }
                 .keyboardShortcut(shortcuts.keyboardShortcut(.newTab))
             }

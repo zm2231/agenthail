@@ -56,6 +56,15 @@ struct SessionTabsTest {
         expect(ids(moved) == ["a2", "c", "d"] && dropped == ["b"], "reconcile follows rekeys and drops gone sessions: \(ids(moved)) \(dropped)")
         expect(moved.active == "c", "a dropped active tab hands over to its right neighbour: \(String(describing: moved.active))")
 
+        var started = SessionTabs()
+        started.open("a", keep: true)
+        started.open(SessionTabs.newSession, keep: true)
+        started.open("b", keep: true)
+        started.replace(SessionTabs.newSession, with: "c")
+        expect(ids(started) == ["a", "c", "b"] && started.active == "c" && started.tabs[1].kept, "a started session replaces the New Session tab in place: \(ids(started))")
+        started.replace(SessionTabs.newSession, with: "a")
+        expect(ids(started) == ["a", "c", "b"] && started.active == "a", "replacing a missing tab opens the session once")
+
         var merged = SessionTabs()
         ["a", "b"].forEach { merged.open($0, keep: true) }
         merged.reconcile(resolve: { $0 == "b" ? "a" : $0 }, keepsTab: { _ in true })
