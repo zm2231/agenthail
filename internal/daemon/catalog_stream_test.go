@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -88,10 +90,12 @@ func TestActiveCatalogSubscriberReceivesTerminalDeliveryProblemOnce(t *testing.T
 	if _, _, err := store.QueueDeliveryWithIntent(target.ID, "deliver later", "terminal", surface.SendOptions{SourceSessionID: sender.ID}); err != nil {
 		t.Fatal(err)
 	}
-	_, events, cancel, err := d.catalog.subscribe(0)
+	_, eventsFollower, err := d.catalog.subscribe(0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	events := followCatalog(t, eventsFollower)
+	cancel := eventsFollower.Cancel
 	defer cancel()
 	item, err := store.ClaimNextMessage(target.ID, time.Now())
 	if err != nil || item == nil {
@@ -140,10 +144,12 @@ func TestCatalogScanFlushesCommittedDeliveryProblemBeforeObserving(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, events, cancel, err := d.catalog.subscribe(0)
+	_, eventsFollower, err := d.catalog.subscribe(0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	events := followCatalog(t, eventsFollower)
+	cancel := eventsFollower.Cancel
 	defer cancel()
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -189,10 +195,12 @@ func TestActiveCatalogSubscriberReceivesTerminalRelayProblemAndReconnectsWithout
 	if _, err := store.AddRoute(sender.ID, target.ID, ".*"); err != nil {
 		t.Fatal(err)
 	}
-	_, events, cancel, err := d.catalog.subscribe(0)
+	_, eventsFollower, err := d.catalog.subscribe(0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	events := followCatalog(t, eventsFollower)
+	cancel := eventsFollower.Cancel
 	d.fireRelays(&sender, "relay-turn", 0, "forwarded reply")
 	fake.sendErr = surface.DeliveryTerminal(fmt.Errorf("target rejected input"), surface.DeliveryInvalidRequest)
 	d.drainMessageQueue(context.Background(), fake, &target)
@@ -201,10 +209,12 @@ func TestActiveCatalogSubscriberReceivesTerminalRelayProblemAndReconnectsWithout
 		t.Fatalf("first=%+v", first)
 	}
 	cancel()
-	window, resumed, stop, err := d.catalog.subscribe(first.Seq)
+	window, resumedFollower, err := d.catalog.subscribe(first.Seq)
 	if err != nil {
 		t.Fatal(err)
 	}
+	resumed := followCatalog(t, resumedFollower)
+	stop := resumedFollower.Cancel
 	defer stop()
 	for _, replayed := range window.Events {
 		if replayed.Type != "session.queue" {
@@ -226,10 +236,12 @@ func TestActiveCatalogSubscriberReceivesReplyForwardFailureOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, events, cancel, err := d.catalog.subscribe(0)
+	_, eventsFollower, err := d.catalog.subscribe(0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	events := followCatalog(t, eventsFollower)
+	cancel := eventsFollower.Cancel
 	defer cancel()
 	_ = routeID
 	if _, err := store.RecordReplyForwardFailure(sender.ID, target.ID, "reply-turn", "reply body", "target surface unavailable"); err != nil {
@@ -259,30 +271,40 @@ func TestCatalogHubClosesStaleSubscribersAndRecoversAfterJournalGap(t *testing.T
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	d := newTestDaemon(t, store, nil)
-	_, stale, cancel, err := d.catalog.subscribe(0)
+	_, staleFollower, err := d.catalog.subscribe(0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	stale := followCatalog(t, staleFollower)
+	cancel := staleFollower.Cancel
 	defer cancel()
 	appendCatalogGapFixture(t, path, catalogStreamReplayLimit+1)
-	if err := d.catalog.flushCommitted(); err == nil {
-		t.Fatal("catalog journal gap did not report an error")
+	if err := d.catalog.flushCommitted(); err != nil {
+		t.Fatal(err)
 	}
-	if _, open := <-stale; open {
-		t.Fatal("stale subscriber remained open after catalog journal gap")
+	select {
+	case _, open := <-stale:
+		if open {
+			t.Fatal("a follower behind the retained journal read an event instead of ending")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a follower behind the retained journal stayed open")
 	}
-	staleWindow, _, stopStale, err := d.catalog.subscribe(0)
+	staleWindow, stopStaleFollower, err := d.catalog.subscribe(0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	stopStale := stopStaleFollower.Cancel
 	defer stopStale()
 	if !staleWindow.Gap {
 		t.Fatalf("stale replay window=%+v", staleWindow)
 	}
-	window, events, stop, err := d.catalog.subscribe(staleWindow.LatestSeq)
+	window, eventsFollower, err := d.catalog.subscribe(staleWindow.LatestSeq)
 	if err != nil {
 		t.Fatal(err)
 	}
+	events := followCatalog(t, eventsFollower)
+	stop := eventsFollower.Cancel
 	defer stop()
 	if window.Gap || len(window.Events) != 0 {
 		t.Fatalf("reconnected window=%+v", window)
@@ -994,4 +1016,122 @@ func TestSnapshotKeepsTheSubagentCountStoredBeforeHiddenCounts(t *testing.T) {
 		}
 	}
 	t.Fatal("snapshot dropped the lead")
+}
+
+// followCatalog reads a catalog follower the way the stream handler does,
+// each time the hub wakes it. The channel closes when the follower falls
+// behind the retained journal or is cancelled.
+func followCatalog(t *testing.T, follower *catalogFollower) <-chan registry.CatalogEvent {
+	t.Helper()
+	events := make(chan registry.CatalogEvent)
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	go func() {
+		defer close(events)
+		for {
+			select {
+			case <-done:
+				return
+			case _, open := <-follower.Wake:
+				if !open {
+					return
+				}
+			}
+			for {
+				batch, err := follower.read(catalogStreamBatch)
+				if err != nil {
+					return
+				}
+				for _, event := range batch {
+					select {
+					case events <- event:
+					case <-done:
+						return
+					}
+				}
+				if len(batch) < catalogStreamBatch {
+					break
+				}
+			}
+		}
+	}()
+	return events
+}
+
+// gatedCatalogWriter holds every write until release closes, the way a
+// paired host that stops reading holds the catalog stream writer.
+type gatedCatalogWriter struct {
+	release chan struct{}
+	mu      sync.Mutex
+	header  http.Header
+	body    bytes.Buffer
+}
+
+func (w *gatedCatalogWriter) Header() http.Header { return w.header }
+
+func (w *gatedCatalogWriter) WriteHeader(int) {}
+
+func (w *gatedCatalogWriter) Write(p []byte) (int, error) {
+	<-w.release
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.body.Write(p)
+}
+
+func (w *gatedCatalogWriter) Flush() {}
+
+func (w *gatedCatalogWriter) count(text string) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return strings.Count(w.body.String(), text)
+}
+
+func TestAPairedHostCatalogStreamThatStopsReadingDuringABurstStillReceivesEveryEvent(t *testing.T) {
+	d, store, _, _, _ := daemonFixture(t)
+	_, latest, err := store.CatalogState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), apiHostPrincipalContextKey{}, apiHostPrincipal{host: true, hostID: "h00000000000a"}))
+	defer cancel()
+	writer := &gatedCatalogWriter{release: make(chan struct{}), header: http.Header{}}
+	request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/catalog-stream?after=%d", latest), nil).WithContext(ctx)
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		d.apiCatalogStreamHandler(writer, request)
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for subscribed := false; !subscribed; {
+		d.catalog.mu.Lock()
+		subscribed = len(d.catalog.followers) > 0
+		d.catalog.mu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("the stream did not subscribe")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	const burst = 300
+	for i := range burst {
+		id := fmt.Sprintf("burst-%d", i)
+		if _, _, err := d.catalog.publish(registry.CatalogEvent{DedupeKey: "burst:" + id, Type: "session.upserted", EntityID: id, Payload: []byte(`{"id":"` + id + `"}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(writer.release)
+	for writer.count(`{"id":"burst-`) < burst {
+		select {
+		case <-finished:
+			t.Fatalf("the stream ended after %d of %d events", writer.count(`{"id":"burst-`), burst)
+		case <-time.After(time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the stream wrote %d of %d events", writer.count(`{"id":"burst-`), burst)
+		}
+	}
+	for i := range burst {
+		if got := writer.count(fmt.Sprintf(`{"id":"burst-%d"}`, i)); got != 1 {
+			t.Fatalf("event %d was written %d times", i, got)
+		}
+	}
 }

@@ -22,14 +22,39 @@ const catalogStreamReplayLimit = 4096
 type catalogHub struct {
 	registry     *registry.Registry
 	mu           sync.Mutex
-	subscribers  map[uint64]*catalogSubscriber
+	followers    map[uint64]chan struct{}
 	nextID       uint64
 	publishedSeq uint64
 }
 
-type catalogSubscriber struct {
-	stream chan registry.CatalogEvent
-	seq    uint64
+// catalogFollower follows the catalog journal from its own cursor. Wake
+// receives a signal after the hub sees newly committed events; the follower
+// then reads them from the journal, so a burst it is slow to read waits in the
+// journal instead of ending the follower.
+type catalogFollower struct {
+	Wake   <-chan struct{}
+	Cancel func()
+	hub    *catalogHub
+	cursor uint64
+}
+
+var errCatalogFollowerGap = errors.New("the catalog journal no longer holds the events after this cursor")
+
+// read returns up to limit events after the follower's cursor and advances
+// it past them. It returns errCatalogFollowerGap once the journal no longer
+// retains the events after the cursor.
+func (f *catalogFollower) read(limit int) ([]registry.CatalogEvent, error) {
+	window, err := f.hub.registry.CatalogEventsAfter(f.cursor, limit)
+	if err != nil {
+		return nil, err
+	}
+	if window.Gap {
+		return nil, errCatalogFollowerGap
+	}
+	if len(window.Events) > 0 {
+		f.cursor = window.Events[len(window.Events)-1].Seq
+	}
+	return window.Events, nil
 }
 
 func newCatalogHub(store *registry.Registry) *catalogHub {
@@ -37,7 +62,7 @@ func newCatalogHub(store *registry.Registry) *catalogHub {
 	if err != nil {
 		latest = 0
 	}
-	return &catalogHub{registry: store, subscribers: map[uint64]*catalogSubscriber{}, publishedSeq: latest}
+	return &catalogHub{registry: store, followers: map[uint64]chan struct{}{}, publishedSeq: latest}
 }
 
 func (h *catalogHub) publish(event registry.CatalogEvent) (registry.CatalogEvent, bool, error) {
@@ -107,9 +132,8 @@ func (h *catalogHub) markDiscoveryFailure(kind surface.SurfaceKind, reason strin
 	return h.flushCommittedLocked()
 }
 
-// flushCommitted publishes journal rows only after their owning transaction
-// committed. It preserves sequence order across catalog writers that do not
-// route through the hub themselves.
+// flushCommitted wakes the followers once events are committed. Catalog
+// writers that do not route through the hub call it after their transaction.
 func (h *catalogHub) flushCommitted() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -117,75 +141,50 @@ func (h *catalogHub) flushCommitted() error {
 }
 
 func (h *catalogHub) flushCommittedLocked() error {
-	window, err := h.registry.CatalogEventsAfter(h.publishedSeq, catalogStreamReplayLimit)
+	_, latest, err := h.registry.CatalogState()
 	if err != nil {
 		return err
 	}
-	if window.Gap {
-		after := h.publishedSeq
-		h.closeSubscribersLocked()
-		h.publishedSeq = window.LatestSeq
-		return catalogJournalGapError{After: after, Earliest: window.EarliestSeq, Latest: window.LatestSeq}
+	if latest == h.publishedSeq {
+		return nil
 	}
-	for _, event := range window.Events {
-		h.broadcastLocked(event)
-		h.publishedSeq = event.Seq
+	h.publishedSeq = latest
+	for _, follower := range h.followers {
+		select {
+		case follower <- struct{}{}:
+		default:
+		}
 	}
 	return nil
 }
 
-type catalogJournalGapError struct {
-	After    uint64
-	Earliest uint64
-	Latest   uint64
-}
-
-func (e catalogJournalGapError) Error() string {
-	return fmt.Sprintf("catalog journal gap after sequence %d (retained %d through %d)", e.After, e.Earliest, e.Latest)
-}
-
-func (h *catalogHub) broadcastLocked(event registry.CatalogEvent) {
-	for id, subscriber := range h.subscribers {
-		if event.Seq <= subscriber.seq {
-			continue
-		}
-		select {
-		case subscriber.stream <- event:
-			subscriber.seq = event.Seq
-		default:
-			delete(h.subscribers, id)
-			close(subscriber.stream)
-		}
-	}
-}
-
-func (h *catalogHub) closeSubscribersLocked() {
-	for id, subscriber := range h.subscribers {
-		delete(h.subscribers, id)
-		close(subscriber.stream)
-	}
-}
-
-func (h *catalogHub) subscribe(after uint64) (registry.CatalogEventWindow, <-chan registry.CatalogEvent, func(), error) {
+// subscribe returns the events after after, up to catalogStreamReplayLimit,
+// and a follower whose cursor starts after the last of them.
+func (h *catalogHub) subscribe(after uint64) (registry.CatalogEventWindow, *catalogFollower, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	window, err := h.registry.CatalogEventsAfter(after, catalogStreamReplayLimit)
 	if err != nil {
-		return registry.CatalogEventWindow{}, nil, nil, err
+		return registry.CatalogEventWindow{}, nil, err
 	}
 	h.nextID++
 	id := h.nextID
-	stream := make(chan registry.CatalogEvent, 64)
-	h.subscribers[id] = &catalogSubscriber{stream: stream, seq: window.LatestSeq}
-	cancel := func() {
+	wake := make(chan struct{}, 1)
+	h.followers[id] = wake
+	cursor := after
+	if len(window.Events) > 0 {
+		cursor = window.Events[len(window.Events)-1].Seq
+	}
+	follower := &catalogFollower{Wake: wake, hub: h, cursor: cursor}
+	follower.Cancel = func() {
 		h.mu.Lock()
-		if existing, found := h.subscribers[id]; found {
-			delete(h.subscribers, id)
-			close(existing.stream)
+		if existing, found := h.followers[id]; found {
+			delete(h.followers, id)
+			close(existing)
 		}
 		h.mu.Unlock()
 	}
-	return window, stream, cancel, nil
+	return window, follower, nil
 }
 
 type catalogStreamEnvelope struct {
@@ -210,12 +209,12 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusBadRequest, "invalid_cursor", "The catalog stream cursor is invalid.")
 		return
 	}
-	window, events, cancel, err := d.catalog.subscribe(after)
+	window, follower, err := d.catalog.subscribe(after)
 	if err != nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "stream_unavailable", "The catalog journal could not be read.")
 		return
 	}
-	defer cancel()
+	defer follower.Cancel()
 	if window.Gap {
 		writeDashboardJSON(w, http.StatusConflict, map[string]any{"error": map[string]any{"code": "stream_gap", "message": "The catalog stream cursor is no longer retained."}, "hostEpoch": window.HostEpoch, "earliestSeq": window.EarliestSeq, "latestSeq": window.LatestSeq})
 		return
@@ -231,49 +230,47 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 		}
 		return d.listedCatalogEvents(batch)
 	}
-	backlog, err := view(window.Events)
-	if err != nil {
-		return
+	write := func(batch []registry.CatalogEvent) bool {
+		listed, err := view(batch)
+		if err != nil {
+			return false
+		}
+		for _, event := range listed {
+			if !d.apiEventStreamAuthorized(r) || writeCatalogStreamEntry(w, event) != nil {
+				return false
+			}
+		}
+		return true
 	}
-	for _, event := range backlog {
-		if !d.apiEventStreamAuthorized(r) || writeCatalogStreamEntry(w, event) != nil {
-			return
+	follow := func() bool {
+		for {
+			batch, err := follower.read(catalogStreamBatch)
+			if err != nil {
+				d.log.Printf("catalog stream ended: %s", err)
+				return false
+			}
+			if len(batch) > 0 && !write(batch) {
+				return false
+			}
+			if len(batch) < catalogStreamBatch {
+				flusher.Flush()
+				return true
+			}
 		}
 	}
-	flusher.Flush()
+	if !write(window.Events) || !follow() {
+		return
+	}
 	keepalive := time.NewTicker(eventKeepalivePeriod)
 	defer keepalive.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case event, open := <-events:
-			if !open {
+		case <-follower.Wake:
+			if !follow() {
 				return
 			}
-			batch := []registry.CatalogEvent{event}
-		drain:
-			for len(batch) < catalogStreamBatch {
-				select {
-				case next, more := <-events:
-					if !more {
-						break drain
-					}
-					batch = append(batch, next)
-				default:
-					break drain
-				}
-			}
-			listed, err := view(batch)
-			if err != nil {
-				return
-			}
-			for _, event := range listed {
-				if !d.apiEventStreamAuthorized(r) || writeCatalogStreamEntry(w, event) != nil {
-					return
-				}
-			}
-			flusher.Flush()
 		case <-keepalive.C:
 			if !d.apiEventStreamAuthorized(r) {
 				return
