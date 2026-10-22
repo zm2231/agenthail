@@ -86,6 +86,7 @@ final class SessionPane: ObservableObject, Identifiable {
         olderItems = []
         olderCursor = nil
         olderError = nil
+        requestError = nil
         selectionGeneration &+= 1
         detailAppliedGeneration = detailRequestGeneration
         if restoresSelection { UserDefaults.standard.set(id, forKey: "lastSelectedSessionID") }
@@ -412,6 +413,7 @@ final class SessionPane: ObservableObject, Identifiable {
         guard session.capabilities.respond, !session.isReadOnly else {
             requests = nil
             requestsKey = nil
+            requestError = nil
             return
         }
         let key = "\(session.id)|\(session.waitingOn?.id ?? "")"
@@ -427,6 +429,7 @@ final class SessionPane: ObservableObject, Identifiable {
             let loaded = try await api.requests(sessionID: id)
             guard selectedSessionID == id, requestsKey == key else { return }
             requests = loaded
+            requestError = nil
         } catch {
             guard selectedSessionID == id else { return }
             requestsKey = nil

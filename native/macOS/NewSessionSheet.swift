@@ -111,8 +111,7 @@ struct NewSessionSheet: View {
                     }
                 }
                 Section {
-                    TextField("First message", text: $form.message, axis: .vertical)
-                        .lineLimit(3...8)
+                    FirstMessageField(message: $form.message)
                 }
             }
             .formStyle(.grouped)

@@ -45,6 +45,12 @@ struct DesktopWindow: View {
                         .onTapGesture { model.paletteVisible = false }
                     CommandPalette(model: model, pane: pane)
                         .padding(.top, 72)
+                    // Escape closes the palette wherever focus is, not only from its field.
+                    Button("Close palette") { model.paletteVisible = false }
+                        .keyboardShortcut(.cancelAction)
+                        .opacity(0)
+                        .frame(width: 0, height: 0)
+                        .accessibilityHidden(true)
                 }
             }
         }
@@ -673,6 +679,8 @@ struct ConversationPane: View {
                             }
                             if let error = pane.requestError {
                                 Text(error).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 4)
+                                    .frame(maxWidth: .infinity)
+                                    .background(DesktopPalette.window)
                             }
                             ComposerView(model: model, pane: pane, session: session)
                         }
@@ -1075,9 +1083,9 @@ struct AttachmentImageView: View {
                     .resizable()
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: 520, maxHeight: 360, alignment: .leading)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(DesktopPalette.line))
+                    .frame(maxWidth: 520, maxHeight: 360, alignment: .leading)
                     .onTapGesture(count: 2) { open(image) }
                     .contextMenu {
                         Button("Open in Preview") { open(image) }
@@ -2048,8 +2056,21 @@ struct DetailsTab: View {
                 }
                 detailRow("Surface", session.surface.capitalized)
                 if let configRoot = session.claudeConfigRoot {
-                    detailRow("Config folder", configRoot.summary)
-                        .help(configRoot.root)
+                    GridRow {
+                        Text("Config folder").foregroundStyle(DesktopPalette.text2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(configRoot.name)
+                            if let account = configRoot.signedInAs, !account.isEmpty {
+                                Text(account)
+                                    .foregroundStyle(DesktopPalette.text2)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                        }
+                        .font(.system(size: 12.5))
+                        .textSelection(.enabled)
+                    }
+                    .help(configRoot.summary + "\n" + configRoot.root)
                 }
                 if let detail = pane.detail {
                     detailRow("Exchanges", SessionFacts.exchangeLabel(detail.exchanges.count))

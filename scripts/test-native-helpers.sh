@@ -38,6 +38,7 @@ SOURCES=(
   macOS/AuditFacts.swift
   macOS/BoundedDock.swift
   macOS/CatalogPosition.swift
+  macOS/FirstMessageField.swift
   macOS/ContextBreakdown.swift
   macOS/LocalSend.swift
   macOS/Overview.swift
