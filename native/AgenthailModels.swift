@@ -194,20 +194,32 @@ struct CreationHostPicker {
     var projects: [LaunchProject] { options?.projects ?? [] }
     var claudeConfigRoots: [ClaudeConfigRootOption] { options?.claudeConfigRoots ?? [] }
 
+    init(hosts: [CreationHost], selectedSession: SessionState?) {
+        update(hosts: hosts)
+        if let id = selectedSession?.host?.id, self.hosts.contains(where: { $0.id == id && $0.isAvailable }) {
+            selected = id
+        }
+    }
+
     mutating func update(daemon: DaemonState?) {
         let paired = daemon?.hosts ?? []
         if let local = daemon?.host, !paired.isEmpty {
-            hosts = [CreationHost(id: "", name: local.name, state: "connected")] + paired.map { CreationHost(id: $0.id, name: $0.name, state: $0.state) }
+            update(hosts: [CreationHost(id: "", name: local.name, state: "connected")] + paired.map { CreationHost(id: $0.id, name: $0.name, state: $0.state) })
         } else {
-            hosts = []
+            update(hosts: [])
         }
-        if !selected.isEmpty && selectedHost == nil {
-            selected = ""
-            options = nil
-            models = [:]
-            loadError = nil
-            generation += 1
-        }
+    }
+
+    mutating func update(hosts next: [CreationHost]) {
+        hosts = next
+        guard selectedHost == nil else { return }
+        let fallback = hosts.first { $0.isLocal || $0.isAvailable }?.id ?? ""
+        guard !(selected.isEmpty && fallback.isEmpty) else { return }
+        selected = fallback
+        options = nil
+        models = [:]
+        loadError = nil
+        generation += 1
     }
 
     @discardableResult
@@ -395,7 +407,7 @@ struct SurfaceRuntime: Decodable, Equatable {
 }
 
 struct SessionState: Codable, Identifiable, Hashable {
-    let id: String
+    var id: String
     let surface: String
     let name: String
     let alias: String?
@@ -609,6 +621,14 @@ struct SubagentPageCache {
         touch(parentID)
     }
 
+    func holds(_ parentID: String) -> Bool { rows[parentID] != nil || errors[parentID] != nil }
+
+    mutating func refetch(_ parentID: String) {
+        rows[parentID] = nil
+        errors[parentID] = nil
+        revisions[parentID, default: 0] += 1
+    }
+
     mutating func drop(_ parentID: String) {
         rows[parentID] = nil
         errors[parentID] = nil
@@ -813,13 +833,13 @@ struct CheckoutIdentity: Codable, Hashable {
 
 struct QueueState: Decodable, Identifiable, Equatable {
 	let operation: String?
-    let sourceSessionId: String?
+    var sourceSessionId: String?
     let effort: String?
     let mode: String?
     let serviceTier: String?
     let outputSchema: RecordedJSON?
     let id: Int64
-    let sessionId: String
+    var sessionId: String
     let target: String
     let message: String
     let model: String?
@@ -830,6 +850,9 @@ struct QueueState: Decodable, Identifiable, Equatable {
     var heldBy: String? = nil
     let historical: Bool?
     let evidence: String
+    var hostID: String? = nil
+
+    var listID: String { "\(hostID ?? "")/\(id)" }
 
     var isHistorical: Bool {
         historical == true || status == "delivered" || status == "canceled"
@@ -917,8 +940,11 @@ struct DeliveryProblem: Decodable, Identifiable, Equatable {
     let reason: String
     let status: String?
     let at: String
+    /// The paired computer the problem came from, on a phone that merges
+    /// several; delivery ids are only unique on one computer.
+    var hostID: String? = nil
 
-    var id: Int64 { deliveryId }
+    var id: String { "\(hostID ?? "")/\(deliveryId)" }
 
     var reasonText: String {
         let words = reason.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1141,7 +1167,7 @@ struct SessionDetail: Decodable {
 }
 
 struct RawSession: Decodable {
-    let id: String
+    var id: String
     let surface: String
     let name: String
     var status: String
@@ -1370,9 +1396,14 @@ struct PairingResponse: Decodable {
 }
 
 struct PairedDeviceResponse: Decodable {
+    struct Host: Decodable {
+        let id: String
+        let name: String
+    }
     let device: DeviceState
     let token: String
     let `protocol`: Int
+    let host: Host
 }
 
 struct AgenthailEvent: Decodable {
@@ -1522,7 +1553,7 @@ struct SessionSearchResponse: Decodable {
 }
 struct SessionSearchItem: Decodable, Identifiable {
     var id: String { session.id }
-    let session: SessionState
+    var session: SessionState
     let snippet: String?
 }
 
