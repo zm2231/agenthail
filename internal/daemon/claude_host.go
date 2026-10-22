@@ -100,12 +100,31 @@ func (d *Daemon) watchClaudeHostRequests(ctx context.Context) {
 // Its exit ends the requests it held, so the catalog is read again then.
 func (d *Daemon) watchRetiringClaudeHost(ctx context.Context, host claudehost.Client) {
 	d.log.Printf("Claude host: following the retiring host on %s until its sessions close", host.Socket)
-	_, _ = host.Subscribe(ctx, 0, func(event claudehost.Event) {
-		d.recordPeerHold(event)
-		if event.Kind == "request_opened" || event.Kind == "request_resolved" || event.Kind == "tasks" || event.Kind == "exited" {
+	var after uint64
+	for ctx.Err() == nil {
+		start, _ := host.Subscribe(ctx, after, func(event claudehost.Event) {
+			after = event.Seq
+			d.recordPeerHold(event)
+			if event.Kind == "request_opened" || event.Kind == "request_resolved" || event.Kind == "tasks" || event.Kind == "exited" {
+				d.requestCatalogDiscovery()
+			}
+		})
+		if start.Gap {
+			after = start.Seq
 			d.requestCatalogDiscovery()
+			continue
 		}
-	})
+		helloCtx, cancel := context.WithTimeout(ctx, time.Second)
+		_, err := host.Hello(helloCtx)
+		cancel()
+		if err != nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(claudeHostWatchRetryWait):
+		}
+	}
 	if ctx.Err() == nil {
 		d.log.Printf("Claude host: the retiring host on %s has exited", host.Socket)
 		d.requestCatalogDiscovery()

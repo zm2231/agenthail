@@ -28,6 +28,7 @@ type claudeHost struct {
 	listed   time.Time
 	sessions map[string]int
 	open     map[string]claudehost.Session
+	partial  bool
 }
 
 // claudeHosted reports whether the host runs the session's conversation. Its
@@ -58,7 +59,9 @@ func (h *claudeHost) forget() {
 
 // listing is the host's sessions and orphans by conversation, with their
 // process ids. A host that does not answer is read from its state file, which
-// names the processes it started.
+// names the processes it started. While any host does not answer, a process
+// last listed that still runs keeps its listing, since the silent host may be
+// the one running it.
 func (h *claudeHost) listing(ctx context.Context) map[string]int {
 	if h == nil {
 		return nil
@@ -69,8 +72,10 @@ func (h *claudeHost) listing(ctx context.Context) map[string]int {
 		listCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 		listing, err := h.client.List(listCtx)
 		cancel()
+		previous, previousOpen := h.sessions, h.open
 		h.sessions = map[string]int{}
 		h.open = map[string]claudehost.Session{}
+		h.partial = err != nil || len(listing.Unanswered) > 0
 		if err == nil {
 			for _, session := range listing.Sessions {
 				h.sessions[session.SessionID] = session.PID
@@ -82,9 +87,31 @@ func (h *claudeHost) listing(ctx context.Context) map[string]int {
 		} else {
 			h.readState()
 		}
+		if h.partial {
+			h.keepUnseen(previous, previousOpen)
+		}
 		h.listed = time.Now()
 	}
 	return h.sessions
+}
+
+func (h *claudeHost) keepUnseen(previous map[string]int, previousOpen map[string]claudehost.Session) {
+	for id, pid := range previous {
+		if _, seen := h.sessions[id]; seen || !claudeProcessAlive(pid) {
+			continue
+		}
+		h.sessions[id] = pid
+		if session, ok := previousOpen[id]; ok && session.PID == pid {
+			h.open[id] = session
+		}
+	}
+}
+
+// unanswered reports whether a host did not answer the last listing.
+func (h *claudeHost) unanswered() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.partial
 }
 
 // session is the host's listing of the conversation it runs as process pid.
