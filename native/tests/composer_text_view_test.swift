@@ -91,6 +91,24 @@ struct ComposerTextViewTest {
         check(textView.string == "/model " && textView.selectedRange() == NSRange(location: 7, length: 0), "a replaced draft puts the caret at its end")
         undo.undo()
         check(textView.string == "typed", "a replaced draft is one undo step: \(textView.string.debugDescription)")
+        undo.groupsByEvent = true
+
+        let board = NSPasteboard(name: NSPasteboard.Name("agenthail.composer-text-view-test.\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        textView.pasteboard = board
+        var pastedImages: [PastedAttachments] = []
+        textView.pasteAttachments = { pastedImages.append($0) }
+        let png = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!.representation(using: .png, properties: [:])!
+        board.clearContents()
+        board.setData(png, forType: .png)
+        type("look")
+        press(kVK_ANSI_V, "\u{16}", .control)
+        check(pastedImages.count == 1 && pastedImages[0].attachments.first?.isImage == true && textView.string == "look", "⌃V pastes a copied image as an attachment, not into the text")
+        textView.paste(nil)
+        check(pastedImages.count == 2, "⌘V's paste: pastes a copied image as an attachment too")
+        textView.pasteAttachments = nil
+        textView.paste(nil)
+        check(pastedImages.count == 2, "a session that can't take attachments never gets one from a paste")
 
         check(textView.acceptableDragTypes == [.string], "files and images dropped on the composer go to the attachment drop, not into the text")
 

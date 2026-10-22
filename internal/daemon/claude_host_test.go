@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -698,5 +699,365 @@ func TestAHostedTranscriptThatGoesMissingIsNotReadAsNewByTheNextSource(t *testin
 	next := detachedSource(manager, session, claude)
 	if err := next.loadSeed(); err == nil || !strings.Contains(err.Error(), "transcript is unavailable") || next.session.TranscriptFromStart {
 		t.Fatalf("a transcript that went missing is reported, not read as new: err=%v fromStart=%v", err, next.session.TranscriptFromStart)
+	}
+}
+
+// A request open on a session survives host updates: through one update, and
+// through a second one with a restarted daemon while the first retiring host
+// still holds it, the session waits on that request, the daemon lists it,
+// and the person's answer reaches Claude.
+func TestAnOpenRequestStaysAnswerableThroughHostUpdates(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		updates []string
+	}{
+		{name: "one update", updates: []string{"1.1.0"}},
+		{name: "two updates and a daemon restart", updates: []string{"1.1.0", "1.2.0"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := claudehosttest.New(t, "")
+			ctx := context.Background()
+			agents := filepath.Join(fixture.Home, "claude-agents")
+			if err := os.WriteFile(agents, []byte("#!/bin/sh\necho '[]'\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("AGENTHAIL_CLAUDE_BIN", agents)
+			client, err := fixture.Manager(t, "1.0.0").Ensure(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id := uuid.NewString()
+			opened := fixture.Open(t, client, id)
+			claude := surfaces.NewClaude(nil, fixture.Home)
+			session := hostedSession(t, claude, id)
+			r := hostRegistry(t)
+			if err := r.RegisterSession(session); err != nil {
+				t.Fatal(err)
+			}
+			fixture.Peer(t, opened.PID, "TOOL")
+			var request surface.Request
+			claudehosttest.WaitFor(t, "the request to be listed", func() bool {
+				state, err := claude.Requests(ctx, &session)
+				if err != nil || len(state.Requests) != 1 {
+					return false
+				}
+				request = state.Requests[0]
+				return true
+			})
+
+			var d *Daemon
+			for _, version := range test.updates {
+				claude = surfaces.NewClaude(nil, fixture.Home)
+				d = newTestDaemon(t, r, []surface.Surface{claude})
+				d.log = log.New(io.Discard, "", 0)
+				d.SetClaudeHost(fixture.Manager(t, version))
+				if check := d.checkClaudeHost(ctx, claudeHostCheck{}); check.status != "running" {
+					t.Fatalf("host after the update to %s = %+v", version, check)
+				}
+			}
+
+			observation, err := d.observeTurn(ctx, claude, &session)
+			if err != nil || observation.WaitingOn == nil || observation.WaitingOn.ID != request.ID || observation.WaitingOn.Kind != surface.WaitingApproval {
+				t.Fatalf("waiting after the updates = %+v, %v; want the open request %s", observation, err, request.ID)
+			}
+			state, err := claude.Requests(ctx, &session)
+			if err != nil || len(state.Requests) != 1 || state.Requests[0].ID != request.ID {
+				t.Fatalf("requests after the updates = %+v, %v; want %s", state, err, request.ID)
+			}
+			answer := httptest.NewRecorder()
+			d.respond(ctx, answer, claude, &session, request.ID, surface.Decision{Behavior: "allow"}, "the test")
+			if answer.Code != http.StatusOK {
+				t.Fatalf("answer after the updates = %d %s", answer.Code, answer.Body)
+			}
+			claudehosttest.WaitFor(t, "the answer to reach Claude", func() bool {
+				turns := fixture.Turns(t, id)
+				return len(turns) == 1 && turns[0].Reply == "tool:allow:"
+			})
+		})
+	}
+}
+
+// A retiring host that has dropped its oldest events is still followed: the
+// daemon picks up from the host's current event, keeps following it while it
+// serves a session, and asks for a catalog pass when its request is answered.
+func TestTheDaemonFollowsARetiringHostWhoseOldestEventsAreGone(t *testing.T) {
+	t.Setenv("AGENTHAIL_CLAUDE_HOST_MAX_EVENTS", "4")
+	fixture := claudehosttest.New(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client, err := fixture.Manager(t, "1.0.0").Ensure(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := uuid.NewString()
+	opened := fixture.Open(t, client, id)
+	for i := range 3 {
+		if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: id, UUID: uuid.NewString(), Text: fmt.Sprintf("turn %d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claudehosttest.WaitFor(t, "the turns", func() bool { return len(fixture.Turns(t, id)) == 3 })
+	fixture.Peer(t, opened.PID, "TOOL")
+	var request claudehost.Request
+	claudehosttest.WaitFor(t, "the request", func() bool {
+		listing, err := client.List(ctx)
+		if err != nil {
+			return false
+		}
+		for _, session := range listing.Sessions {
+			if session.SessionID == id && len(session.Requests) == 1 {
+				request = session.Requests[0]
+				return true
+			}
+		}
+		return false
+	})
+	if client, err = fixture.Manager(t, "1.1.0").Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	retiring := client.Retiring()
+	if len(retiring) != 1 {
+		t.Fatalf("retiring hosts = %v, want the old one", retiring)
+	}
+
+	d := newTestDaemon(t, hostRegistry(t), nil)
+	var logged strings.Builder
+	d.log = log.New(&logged, "", 0)
+	followed := make(chan struct{})
+	go func() {
+		defer close(followed)
+		d.watchRetiringClaudeHost(ctx, retiring[0])
+	}()
+	select {
+	case <-followed:
+		t.Fatal("the daemon stopped following the retiring host while it still serves a session")
+	case <-time.After(time.Second):
+	}
+	for drained := false; !drained; {
+		select {
+		case <-d.catalogNudge:
+		default:
+			drained = true
+		}
+	}
+	if _, err := client.Respond(ctx, id, request.RequestID, claudehost.Decision{Behavior: "allow"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-d.catalogNudge:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the answered request on the retiring host asked for no catalog pass")
+	}
+
+	cancelled, stop := context.WithCancel(ctx)
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		d.watchRetiringClaudeHost(cancelled, retiring[0])
+	}()
+	stop()
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("a cancelled daemon kept following the retiring host")
+	}
+
+	select {
+	case <-followed:
+	case <-time.After(15 * time.Second):
+		t.Fatal("the daemon kept following the retiring host after its last session went idle and it exited")
+	}
+	if !strings.Contains(logged.String(), "has exited") {
+		t.Fatalf("log = %q, want the retiring host's exit", logged.String())
+	}
+}
+
+// retiringRequest opens a hosted session, has its Claude ask for a tool, and
+// updates the host, so the request is held by a retiring host.
+func retiringRequest(t *testing.T) (*claudehosttest.Fixture, surface.Session, surface.Request) {
+	t.Helper()
+	fixture := claudehosttest.New(t, "")
+	ctx := context.Background()
+	agents := filepath.Join(fixture.Home, "claude-agents")
+	if err := os.WriteFile(agents, []byte("#!/bin/sh\necho '[]'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CLAUDE_BIN", agents)
+	client, err := fixture.Manager(t, "1.0.0").Ensure(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := uuid.NewString()
+	opened := fixture.Open(t, client, id)
+	claude := surfaces.NewClaude(nil, fixture.Home)
+	session := hostedSession(t, claude, id)
+	fixture.Peer(t, opened.PID, "TOOL")
+	var request surface.Request
+	claudehosttest.WaitFor(t, "the request to be listed", func() bool {
+		state, err := claude.Requests(ctx, &session)
+		if err != nil || len(state.Requests) != 1 {
+			return false
+		}
+		request = state.Requests[0]
+		return true
+	})
+	if _, err := fixture.Manager(t, "1.1.0").Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return fixture, session, request
+}
+
+// A host that accepts connections and never answers costs the other hosts
+// nothing: the session a retiring host runs is still listed with its open
+// request, and the request is answered there.
+func TestARetiringHostThatDoesNotAnswerHidesNoOtherHostsRequest(t *testing.T) {
+	fixture, session, request := retiringRequest(t)
+	ctx := context.Background()
+	silentHost(t, fixture)
+
+	claude := surfaces.NewClaude(nil, fixture.Home)
+	if listed := hostedSession(t, claude, session.ID); listed.PID != session.PID {
+		t.Fatalf("listed pid = %d, want %d", listed.PID, session.PID)
+	}
+	state, err := claude.Requests(ctx, &session)
+	if err != nil || len(state.Requests) != 1 || state.Requests[0].ID != request.ID {
+		t.Fatalf("requests beside a silent host = %+v, %v; want %s", state, err, request.ID)
+	}
+	r := hostRegistry(t)
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	d := newTestDaemon(t, r, []surface.Surface{claude})
+	d.log = log.New(io.Discard, "", 0)
+	answerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	answer := httptest.NewRecorder()
+	d.respond(answerCtx, answer, claude, &session, request.ID, surface.Decision{Behavior: "allow"}, "the test")
+	if answer.Code != http.StatusOK {
+		t.Fatalf("answer beside a silent host = %d %s", answer.Code, answer.Body)
+	}
+	claudehosttest.WaitFor(t, "the answer to reach Claude", func() bool {
+		turns := fixture.Turns(t, session.ID)
+		return len(turns) == 1 && turns[0].Reply == "tool:allow:"
+	})
+}
+
+// While the retiring host that runs a session does not answer, the session
+// stays the host's and its requests are unknown rather than none; once the
+// host answers again, its request is listed and answerable.
+func TestASessionWhoseRetiringHostDoesNotAnswerKeepsItsRequest(t *testing.T) {
+	fixture, session, request := retiringRequest(t)
+	ctx := context.Background()
+	retiring := claudehost.NewClient(fixture.Home).Retiring()
+	if len(retiring) != 1 {
+		t.Fatalf("retiring hosts = %d, want 1", len(retiring))
+	}
+	hello, err := retiring[0].Hello(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claude := surfaces.NewClaude(nil, fixture.Home)
+	hostedSession(t, claude, session.ID)
+	if err := syscall.Kill(hello.PID, syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	stopped := true
+	defer func() {
+		if stopped {
+			_ = syscall.Kill(hello.PID, syscall.SIGCONT)
+		}
+	}()
+	time.Sleep(1100 * time.Millisecond)
+
+	sessions, err := claude.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed *surface.Session
+	for i := range sessions {
+		if sessions[i].ID == session.ID {
+			listed = &sessions[i]
+		}
+	}
+	if listed == nil || listed.RuntimeKind != surface.RuntimeClaudeHost {
+		t.Fatalf("session while its host is silent = %+v, want the host's", listed)
+	}
+	if state, err := claude.Requests(ctx, &session); err == nil {
+		t.Fatalf("requests while the host is silent = %+v, want an error", state)
+	}
+
+	if err := syscall.Kill(hello.PID, syscall.SIGCONT); err != nil {
+		t.Fatal(err)
+	}
+	stopped = false
+	var state surface.RequestState
+	claudehosttest.WaitFor(t, "the request once the host answers", func() bool {
+		state, err = claude.Requests(ctx, &session)
+		return err == nil && len(state.Requests) == 1 && state.Requests[0].ID == request.ID
+	})
+}
+
+// silentHost listens on a retiring host's socket that sorts before the
+// others, accepts connections and never answers.
+func silentHost(t *testing.T, fixture *claudehosttest.Fixture) {
+	t.Helper()
+	silent, err := net.Listen("unix", filepath.Join(fixture.Home, ".agenthail", "claude-host.0.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { silent.Close() })
+	go func() {
+		var held []net.Conn
+		defer func() {
+			for _, conn := range held {
+				conn.Close()
+			}
+		}()
+		for {
+			conn, err := silent.Accept()
+			if err != nil {
+				return
+			}
+			held = append(held, conn)
+		}
+	}()
+}
+
+// A stop reaches the retiring host that runs the session past a host that
+// does not answer.
+func TestAStopReachesASessionPastARetiringHostThatDoesNotAnswer(t *testing.T) {
+	for _, closeIdle := range []bool{false, true} {
+		t.Run(fmt.Sprintf("ifIdle=%v", closeIdle), func(t *testing.T) {
+			fixture, session, _ := retiringRequest(t)
+			silentHost(t, fixture)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			client := claudehost.NewClient(fixture.Home)
+			close := client.Close
+			if closeIdle {
+				close = client.CloseIdle
+			}
+			err := close(ctx, session.ID)
+			if closeIdle && claudehost.IsCode(err, "busy") {
+				return
+			}
+			if err != nil {
+				t.Fatalf("stop past a silent host = %v", err)
+			}
+			claudehosttest.WaitFor(t, "the session to close", func() bool {
+				listCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				listing, err := client.List(listCtx)
+				if err != nil {
+					return false
+				}
+				for _, listed := range listing.Sessions {
+					if listed.SessionID == session.ID {
+						return false
+					}
+				}
+				return true
+			})
+		})
 	}
 }

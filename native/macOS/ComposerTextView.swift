@@ -7,6 +7,7 @@ struct ComposerTextView: NSViewRepresentable {
     let placeholder: String
     var accessibilityLabel: String? = nil
     var lines: ClosedRange<Int> = 2...10
+    var onPaste: ((PastedAttachments) -> Void)? = nil
     let onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -37,6 +38,7 @@ struct ComposerTextView: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = scroll.documentView as? ComposerNSTextView else { return }
         textView.isEditable = context.environment.isEnabled
+        textView.pasteAttachments = onPaste
         if textView.placeholder != placeholder {
             textView.placeholder = placeholder
             textView.setAccessibilityPlaceholderValue(placeholder)

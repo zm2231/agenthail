@@ -66,11 +66,12 @@ final class AgenthailIOSTests: XCTestCase {
 
     @MainActor
     func testCatalogDeltaUpdatesKnownSessionWithoutSnapshotRead() async throws {
-        let model = AgenthailIOSModel(autoConnect: false)
-        model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))
+        let model = Self.computerModel()
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8)))
+        let computer = try XCTUnwrap(model.connection("computer"))
         let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":42,"type":"session.upserted","data":{"session":{"id":"demo","surface":"codex","name":"Updated","cwd":"/updated","status":"busy","lastActive":"2026-10-03T12:00:00Z","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}}}}"#.utf8))
-        await model.receiveCatalog(event)
-        let updated = model.snapshot?.sessions.first { $0.id == "demo" }
+        await computer.receiveCatalog(event)
+        let updated = model.snapshot?.sessions.first { $0.id == "computer::demo" }
         XCTAssertEqual(updated?.name, "Updated")
         XCTAssertEqual(updated?.status, "busy")
         XCTAssertEqual(updated?.cwd, "/updated")
@@ -78,15 +79,16 @@ final class AgenthailIOSTests: XCTestCase {
 
     @MainActor
     func testCatalogHealthAndDuplicateEventsApplyLocally() async throws {
-        let model = AgenthailIOSModel(autoConnect: false)
-        model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))
-        model.snapshot?.surfaces = [
+        let model = Self.computerModel()
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8)))
+        let computer = try XCTUnwrap(model.connection("computer"))
+        computer.updateSnapshot { $0.surfaces = [
             SurfaceState(name: "codex", connected: true, error: nil, health: "healthy", healthDetail: nil, capabilities: Capabilities())
-        ]
+        ] }
         let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":7,"type":"surface.health","data":{"surface":"codex","health":"unavailable","detail":"discovery failed"}}"#.utf8))
-        await model.receiveCatalog(event)
-        await model.receiveCatalog(event)
-        let surface = model.snapshot?.surfaces.first { $0.name == "codex" }
+        await computer.receiveCatalog(event)
+        await computer.receiveCatalog(event)
+        let surface = computer.snapshot?.surfaces.first { $0.name == "codex" }
         XCTAssertEqual(surface?.health, "unavailable")
         XCTAssertFalse(surface?.connected ?? true)
         XCTAssertEqual(surface?.healthDetail, "discovery failed")
@@ -94,14 +96,15 @@ final class AgenthailIOSTests: XCTestCase {
 
     @MainActor
     func testCatalogHealthEventCarriesRuntimeFixes() async throws {
-        let model = AgenthailIOSModel(autoConnect: false)
-        model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))
-        model.snapshot?.surfaces = [
+        let model = Self.computerModel()
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8)))
+        let computer = try XCTUnwrap(model.connection("computer"))
+        computer.updateSnapshot { $0.surfaces = [
             SurfaceState(name: "codex", connected: true, error: nil, health: "healthy", healthDetail: nil, capabilities: Capabilities())
-        ]
+        ] }
         let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":8,"type":"surface.health","data":{"surface":"codex","health":"healthy","detail":"managed terminals unavailable","runtime":{"name":"Codex Desktop bridge","reachable":true,"durable":true,"notes":[{"problem":"standalone-missing","message":"managed terminals unavailable","remediation":"install the standalone Codex runtime: curl -fsSL https://chatgpt.com/codex/install.sh | sh"}]}}}"#.utf8))
-        await model.receiveCatalog(event)
-        let surface = try XCTUnwrap(model.snapshot?.surfaces.first { $0.name == "codex" })
+        await computer.receiveCatalog(event)
+        let surface = try XCTUnwrap(computer.snapshot?.surfaces.first { $0.name == "codex" })
         XCTAssertTrue(surface.needsAttention)
         XCTAssertEqual(surface.runtime?.advice.count, 1)
         XCTAssertTrue(surface.runtime?.advice.first?.contains("chatgpt.com/codex/install.sh") ?? false)
@@ -109,33 +112,35 @@ final class AgenthailIOSTests: XCTestCase {
 
     @MainActor
     func testCatalogQueueUpdatesCountAndPresenceComesFromTheDaemon() async throws {
-        let model = AgenthailIOSModel(autoConnect: false)
-        model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))
+        let model = Self.computerModel()
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8)))
+        let computer = try XCTUnwrap(model.connection("computer"))
         func upserted(_ seq: Int, queueCount: Int, current: Bool, reason: String?) throws -> CatalogStreamEvent {
             let currentReason = reason.map { #","currentReason":"\#($0)""# } ?? ""
             return try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":\#(seq),"type":"session.upserted","data":{"session":{"id":"queued-claude","surface":"claude","name":"Queued","status":"idle","queueCount":\#(queueCount),"open":false,"current":\#(current)\#(currentReason),"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}}}}"#.utf8))
         }
-        await model.receiveCatalog(try upserted(50, queueCount: 0, current: false, reason: nil))
+        await computer.receiveCatalog(try upserted(50, queueCount: 0, current: false, reason: nil))
         let queued = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":51,"type":"session.queue","data":{"sessionId":"queued-claude","queueCount":3}}"#.utf8))
-        await model.receiveCatalog(queued)
-        var session = model.snapshot?.sessions.first { $0.id == "queued-claude" }
+        await computer.receiveCatalog(queued)
+        var session = model.snapshot?.sessions.first { $0.id == "computer::queued-claude" }
         XCTAssertEqual(session?.queueCount, 3)
         XCTAssertEqual(session?.current, false)
         XCTAssertNil(session?.currentReason)
-        await model.receiveCatalog(try upserted(52, queueCount: 3, current: true, reason: "queued"))
-        session = model.snapshot?.sessions.first { $0.id == "queued-claude" }
+        await computer.receiveCatalog(try upserted(52, queueCount: 3, current: true, reason: "queued"))
+        session = model.snapshot?.sessions.first { $0.id == "computer::queued-claude" }
         XCTAssertEqual(session?.current, true)
         XCTAssertEqual(session?.currentReason, "queued")
     }
 
     @MainActor
     func testCatalogRemovalDeletesOnlyItsSession() async throws {
-        let model = AgenthailIOSModel(autoConnect: false)
-        model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))
+        let model = Self.computerModel()
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8)))
+        let computer = try XCTUnwrap(model.connection("computer"))
         let before = model.snapshot!.sessions.count
         let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":8,"type":"session.removed","data":{"sessionId":"demo"}}"#.utf8))
-        await model.receiveCatalog(event)
-        XCTAssertNil(model.snapshot?.sessions.first { $0.id == "demo" })
+        await computer.receiveCatalog(event)
+        XCTAssertNil(model.snapshot?.sessions.first { $0.id == "computer::demo" })
         XCTAssertEqual(model.snapshot?.totalSessions, before - 1)
     }
 
@@ -159,8 +164,9 @@ final class AgenthailIOSTests: XCTestCase {
 
     @MainActor
     func testSessionStreamRejectsEmptyItemIdentity() async throws {
-        let model = AgenthailIOSModel(autoConnect: false)
-        let detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        let model = Self.computerModel()
+        var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        detail.session.id = "computer::demo"
         model.selectedSessionID = detail.session.id
         model.selectedDetail = detail
         let before = detail.timeline?.items
@@ -182,8 +188,9 @@ final class AgenthailIOSTests: XCTestCase {
 
     @MainActor
     func testSessionStreamKeepsPeerMessageSender() throws {
-        let model = AgenthailIOSModel(autoConnect: false)
+        let model = Self.computerModel()
         var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        detail.session.id = "computer::demo"
         detail.timeline = SessionTimeline(nextBefore: nil, items: [], source: "fixture", truncated: false, unavailableReason: nil)
         model.selectedSessionID = detail.session.id
         model.selectedDetail = detail
@@ -196,8 +203,9 @@ final class AgenthailIOSTests: XCTestCase {
 
     @MainActor
     func testSessionStreamPreservesJournalItemMetadataAndBodyReference() throws {
-        let model = AgenthailIOSModel(autoConnect: false)
+        let model = Self.computerModel()
         var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        detail.session.id = "computer::demo"
         detail.timeline = SessionTimeline(nextBefore: nil, items: [], source: "fixture", truncated: false, unavailableReason: nil)
         model.selectedSessionID = detail.session.id
         model.selectedDetail = detail
@@ -219,7 +227,7 @@ final class AgenthailIOSTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [RetainedBodyURLProtocol.self]
         let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
-        model.selectedSessionID = "demo"
+        model.selectedSessionID = "computer::demo"
         let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref", attachment: nil)
 
         let result = await model.retainedSessionBody(for: item)
@@ -255,7 +263,7 @@ final class AgenthailIOSTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [RetainedBodyURLProtocol.self]
         let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
-        model.selectedSessionID = "demo"
+        model.selectedSessionID = "computer::demo"
         let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref", attachment: nil)
 
         let result = await model.retainedSessionBody(for: item)
@@ -270,7 +278,7 @@ final class AgenthailIOSTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [RetainedBodyURLProtocol.self]
         let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
-        model.selectedSessionID = "demo"
+        model.selectedSessionID = "computer::demo"
         let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref", attachment: nil)
 
         let result = await model.retainedSessionBody(for: item)
@@ -280,8 +288,9 @@ final class AgenthailIOSTests: XCTestCase {
 
     @MainActor
     func testSessionStreamUpdatesAndClearsContextAndGoalImmediately() throws {
-        let model = AgenthailIOSModel(autoConnect: false)
+        let model = Self.computerModel()
         var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        detail.session.id = "computer::demo"
         detail.timeline = SessionTimeline(nextBefore: nil, items: [], source: "fixture", truncated: false, unavailableReason: nil)
         model.selectedSessionID = detail.session.id
         model.selectedDetail = detail
@@ -301,8 +310,9 @@ final class AgenthailIOSTests: XCTestCase {
 
     @MainActor
     func testSessionStreamSourceResetShowsTheBoundedReasonWithoutAddingTimelineActivity() async throws {
-        let model = AgenthailIOSModel(autoConnect: false)
-        let detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        let model = Self.computerModel()
+        var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        detail.session.id = "computer::demo"
         model.selectedSessionID = detail.session.id
         model.selectedDetail = detail
         let before = detail.timeline?.items
@@ -325,13 +335,13 @@ final class AgenthailIOSTests: XCTestCase {
     }
 
     @MainActor
-    func testEventStreamOnlyReportsConfirmedOutage() {
-        let model = AgenthailIOSModel(autoConnect: false)
-        model.connectionError = "old"
-        model.recordStreamInterruption(probeError: nil)
+    func testEventStreamOnlyReportsConfirmedOutage() throws {
+        let model = Self.computerModel()
+        let computer = try XCTUnwrap(model.connection("computer"))
+        computer.recordStreamInterruption(probeError: nil)
         XCTAssertTrue(model.reconnecting)
         XCTAssertNil(model.connectionError)
-        model.recordStreamInterruption(probeError: NSError(domain: "network", code: -1, userInfo: [NSLocalizedDescriptionKey: "offline"]))
+        computer.recordStreamInterruption(probeError: NSError(domain: "network", code: -1, userInfo: [NSLocalizedDescriptionKey: "offline"]))
         XCTAssertFalse(model.reconnecting)
         XCTAssertEqual(model.connectionError, "offline")
     }
@@ -339,8 +349,7 @@ final class AgenthailIOSTests: XCTestCase {
     @MainActor
     func testForegroundConnectionRetriesAfterTransientOutage() async throws {
         KeychainStore.removeAll()
-        try KeychainStore.set("https://mac.tailnet.ts.net", account: "endpoint")
-        try KeychainStore.set("token", account: "token")
+        try Self.pair("hmac", "https://mac.tailnet.ts.net")
         FlakyConnectionURLProtocol.state.reset()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [FlakyConnectionURLProtocol.self]
@@ -349,18 +358,22 @@ final class AgenthailIOSTests: XCTestCase {
         for _ in 0..<150 where !FlakyConnectionURLProtocol.state.connected {
             try await Task.sleep(for: .milliseconds(20))
         }
+        for _ in 0..<150 where model.reconnecting {
+            try await Task.sleep(for: .milliseconds(20))
+        }
         XCTAssertGreaterThanOrEqual(FlakyConnectionURLProtocol.state.versionRequests, 2)
         XCTAssertTrue(FlakyConnectionURLProtocol.state.connected)
         XCTAssertNotNil(model.snapshot)
-        model.forgetThisMac()
+        XCTAssertFalse(model.reconnecting)
+        XCTAssertEqual(model.hosts.first?.reconnecting, false)
+        model.forgetHost("hmac")
         KeychainStore.removeAll()
     }
 
     @MainActor
     func testIncompatibleProtocolDoesNotRetry() async throws {
         KeychainStore.removeAll()
-        try KeychainStore.set("https://mac.tailnet.ts.net", account: "endpoint")
-        try KeychainStore.set("token", account: "token")
+        try Self.pair("hmac", "https://mac.tailnet.ts.net")
         IncompatibleConnectionURLProtocol.requests.reset()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [IncompatibleConnectionURLProtocol.self]
@@ -369,33 +382,111 @@ final class AgenthailIOSTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(1200))
         XCTAssertEqual(IncompatibleConnectionURLProtocol.requests.snapshot().count, 1)
         XCTAssertFalse(model.reconnecting)
-        model.forgetThisMac()
+        model.forgetHost("hmac")
         KeychainStore.removeAll()
     }
 
     func testPairingLinksRequireSecureTailscaleEndpoint() throws {
         XCTAssertThrowsError(try PairingLink(url: URL(string: "agenthail://pair?endpoint=http%3A%2F%2Fmac.tailnet.ts.net%3A7412&secret=12345678901234567890")!))
         XCTAssertThrowsError(try PairingLink(url: URL(string: "agenthail://pair?endpoint=https%3A%2F%2Fattacker.example&secret=12345678901234567890")!))
-        let valid = try PairingLink(url: URL(string: "agenthail://pair?endpoint=https%3A%2F%2Fmac.tailnet.ts.net%3A7412&secret=12345678901234567890")!)
+        XCTAssertThrowsError(try PairingLink(url: URL(string: "agenthail://pair?endpoint=https%3A%2F%2Fmac.tailnet.ts.net%3A7412&secret=12345678901234567890")!))
+        let valid = try PairingLink(url: Self.pairingLink("mac", host: "hmac", name: "studio"))
         XCTAssertEqual(valid.endpoint.host, "mac.tailnet.ts.net")
+        XCTAssertEqual(valid.hostID, "hmac")
+        XCTAssertEqual(valid.hostName, "studio")
     }
 
     @MainActor
-    func testExistingPairingRequiresReplacementConfirmation() throws {
+    func testAPairingLinkAddsANewComputerAndReconnectsAKnownOne() throws {
         KeychainStore.removeAll()
-        try KeychainStore.set("https://old.tailnet.ts.net:7412", account: "endpoint")
-        try KeychainStore.set("token", account: "token")
+        try Self.pair("hold", "https://old.tailnet.ts.net:7412", name: "old")
         let model = AgenthailIOSModel(autoConnect: false)
-        model.handlePairingURL(URL(string: "agenthail://pair?endpoint=https%3A%2F%2Fnew.tailnet.ts.net%3A7412&secret=12345678901234567890")!)
+        model.handlePairingURL(Self.pairingLink("new", host: "hnew"))
         XCTAssertTrue(model.isPaired)
         XCTAssertTrue(model.showPairingConfirmation)
-        XCTAssertEqual(model.pairingConfirmationTitle, "Replace connected computer?")
+        XCTAssertEqual(model.pairingConfirmationTitle, "Add new?")
+        XCTAssertEqual(model.pairingConfirmationAction, "Add computer")
         XCTAssertTrue(model.pairingConfirmationMessage.contains("new.tailnet.ts.net"))
+        model.cancelPairing()
+        model.handlePairingURL(Self.pairingLink("moved", host: "hold", name: "old"))
+        XCTAssertEqual(model.pairingConfirmationTitle, "Reconnect old?", "a known computer at a new address is the same computer")
+        XCTAssertEqual(model.pairingConfirmationAction, "Reconnect")
+        model.cancelPairing()
+        model.handlePairingURL(Self.pairingLink("old", host: "hfresh", name: "fresh"))
+        XCTAssertEqual(model.pairingConfirmationTitle, "Add fresh?", "a new computer at a known address is a new computer")
+        XCTAssertEqual(model.pairingConfirmationAction, "Add computer")
         KeychainStore.removeAll()
     }
 
     @MainActor
-    func testReplacingMacRevokesOldDeviceAndRelayRegistration() async throws {
+    func testPairingAnotherComputerKeepsTheFirst() async throws {
+        KeychainStore.removeAll()
+        try Self.pair("hold", "https://old.tailnet.ts.net:7412", name: "old")
+        ReplacementURLProtocol.recorder.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ReplacementURLProtocol.self]
+        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        model.handlePairingURL(Self.pairingLink("new", host: "hnew"))
+        model.confirmPairing()
+        for _ in 0..<100 where model.hosts.count < 2 { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(model.hosts.map(\.id), ["hold", "hnew"])
+        XCTAssertEqual(PairedCredential.all().map(\.hostID), ["hold", "hnew"])
+        XCTAssertEqual(PairedCredential.all().last?.token, "new-token")
+        XCTAssertFalse(ReplacementURLProtocol.recorder.snapshot().contains { $0.hasPrefix("DELETE old.tailnet.ts.net") })
+        KeychainStore.removeAll()
+    }
+
+    @MainActor
+    func testACodeThatAnswersForAnotherComputerIsRefusedAndRevoked() async throws {
+        KeychainStore.removeAll()
+        try Self.pair("hother", "https://other.tailnet.ts.net", name: "other", token: "other-token")
+        ReplacementURLProtocol.recorder.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ReplacementURLProtocol.self]
+        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        model.handlePairingURL(Self.pairingLink("new", host: "hother", name: "other"))
+        XCTAssertEqual(model.pairingConfirmationTitle, "Reconnect other?")
+        model.confirmPairing()
+        for _ in 0..<100 where model.operationError == nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertNotNil(model.operationError)
+        XCTAssertEqual(PairedCredential.all().map(\.hostID), ["hother"])
+        XCTAssertEqual(PairedCredential.all().first?.token, "other-token")
+        XCTAssertTrue(ReplacementURLProtocol.recorder.snapshot().contains("DELETE new.tailnet.ts.net/api/v1/device"))
+        XCTAssertFalse(ReplacementURLProtocol.recorder.snapshot().contains { $0.contains("other.tailnet.ts.net") })
+        KeychainStore.removeAll()
+    }
+
+    @MainActor
+    func testReconnectingAComputerReplacesOnlyItsEntryAndRevokesItsOldTokenAndPush() async throws {
+        KeychainStore.removeAll()
+        try Self.pair("hnew", "https://new.tailnet.ts.net:7412", name: "new", token: "old-token")
+        try Self.pair("hother", "https://other.tailnet.ts.net", name: "other", token: "other-token")
+        try KeychainStore.set("https://relay.example", account: HostConnection.relayAccount("hnew"))
+        let stored = #"{"registration":{"installationId":"old-installation","credential":"old-credential","expiresAt":9223372036854775807},"deviceToken":"device","environment":"sandbox","endpoint":"https://new.tailnet.ts.net:7412"}"#
+        try KeychainStore.set(stored, account: "push:hnew")
+        ReplacementURLProtocol.recorder.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ReplacementURLProtocol.self]
+        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        model.handlePairingURL(Self.pairingLink("new", host: "hnew"))
+        XCTAssertEqual(model.pairingConfirmationTitle, "Reconnect new?")
+        model.confirmPairing()
+        for _ in 0..<100 where KeychainStore.get("push:hnew") != nil { try await Task.sleep(for: .milliseconds(20)) }
+        for _ in 0..<100 where PairedCredential.all().first(where: { $0.hostID == "hnew" })?.token != "new-token" { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(PairedCredential.all().map(\.hostID), ["hnew", "hother"], "the reconnected computer keeps its place")
+        XCTAssertEqual(PairedCredential.all().first { $0.hostID == "hother" }?.token, "other-token")
+        XCTAssertNil(KeychainStore.get("push:hnew"))
+        let requests = ReplacementURLProtocol.recorder.snapshot()
+        XCTAssertTrue(requests.contains("DELETE relay.example/v1/register"))
+        XCTAssertTrue(requests.contains("DELETE new.tailnet.ts.net/api/v1/device/push"))
+        XCTAssertTrue(requests.contains("DELETE new.tailnet.ts.net/api/v1/device"))
+        XCTAssertFalse(requests.contains { $0.contains("other.tailnet.ts.net") })
+        XCTAssertEqual(model.hosts.map(\.id), ["hnew", "hother"])
+        KeychainStore.removeAll()
+    }
+
+    @MainActor
+    func testTheOldSingleComputerPairingIsRevokedThenDeleted() async throws {
         KeychainStore.removeAll()
         try KeychainStore.set("https://old.tailnet.ts.net:7412", account: "endpoint")
         try KeychainStore.set("old-token", account: "token")
@@ -406,16 +497,12 @@ final class AgenthailIOSTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ReplacementURLProtocol.self]
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
-        model.handlePairingURL(URL(string: "agenthail://pair?endpoint=https%3A%2F%2Fnew.tailnet.ts.net%3A7412&secret=12345678901234567890")!)
-        model.confirmPairing()
-        for _ in 0..<100 where KeychainStore.get("token") != "new-token" {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        XCTAssertEqual(KeychainStore.get("token"), "new-token")
+        for _ in 0..<100 where KeychainStore.get("token") != nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertFalse(model.isPaired)
+        XCTAssertNil(KeychainStore.get("endpoint"))
         XCTAssertNil(KeychainStore.get("pushRegistration"))
         let requests = ReplacementURLProtocol.recorder.snapshot()
         XCTAssertTrue(requests.contains("DELETE relay.example/v1/register"))
-        XCTAssertTrue(requests.contains("DELETE old.tailnet.ts.net/api/v1/device/push"))
         XCTAssertTrue(requests.contains("DELETE old.tailnet.ts.net/api/v1/device"))
         KeychainStore.removeAll()
     }
@@ -437,17 +524,39 @@ final class AgenthailIOSTests: XCTestCase {
     }
 
     @MainActor
-    func testForgetThisMacClearsLocalPairingWhileOffline() throws {
+    func testForgettingAComputerWhileOfflineKeepsTheOthers() throws {
         KeychainStore.removeAll()
-        try KeychainStore.set("https://unreachable.invalid", account: "endpoint")
-        try KeychainStore.set("token", account: "token")
-        try KeychainStore.set("registration", account: "pushRegistration")
-        let model = AgenthailIOSModel()
-        model.forgetThisMac()
-        XCTAssertNil(KeychainStore.get("endpoint"))
-        XCTAssertNil(KeychainStore.get("token"))
-        XCTAssertNil(KeychainStore.get("pushRegistration"))
+        try Self.pair("hgone", "https://gone.tailnet.ts.net")
+        try Self.pair("hkept", "https://kept.tailnet.ts.net")
+        try KeychainStore.set("registration", account: "push:hgone")
+        try KeychainStore.set("registration", account: "push:hkept")
+        let model = AgenthailIOSModel(autoConnect: false)
+        model.forgetHost("hgone")
+        XCTAssertNil(KeychainStore.get(PairedCredential.account(for: "hgone")))
+        XCTAssertNil(KeychainStore.get("push:hgone"))
+        XCTAssertNotNil(KeychainStore.get(PairedCredential.account(for: "hkept")))
+        XCTAssertNotNil(KeychainStore.get("push:hkept"))
+        XCTAssertEqual(model.hosts.map(\.id), ["hkept"])
+        XCTAssertTrue(model.isPaired)
+        model.forgetHost("hkept")
         XCTAssertFalse(model.isPaired)
+        KeychainStore.removeAll()
+    }
+
+    @MainActor
+    static func computerModel() -> AgenthailIOSModel {
+        AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture"))
+    }
+
+    static func pairingLink(_ label: String, host: String, name: String? = nil) -> URL {
+        var components = URLComponents(string: "agenthail://pair")!
+        components.queryItems = [URLQueryItem(name: "endpoint", value: "https://\(label).tailnet.ts.net:7412"), URLQueryItem(name: "secret", value: "12345678901234567890"), URLQueryItem(name: "host", value: host)]
+        if let name { components.queryItems?.append(URLQueryItem(name: "name", value: name)) }
+        return components.url!
+    }
+
+    static func pair(_ hostID: String, _ endpoint: String, name: String? = nil, token: String = "token") throws {
+        try PairedCredential.save(PairedHostCredential(hostID: hostID, hostName: name ?? hostID, endpoint: URL(string: endpoint)!, token: token, pairedAt: Date()))
     }
 }
 
@@ -731,8 +840,9 @@ private final class ReplacementURLProtocol: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         Self.recorder.record(request)
         let paired = request.url?.path == "/api/v1/pair"
+        let host = request.url?.host?.split(separator: ".").first.map(String.init) ?? ""
         let body = paired
-            ? #"{"device":{"id":"new-device","name":"Phone","scopes":["read","control"],"createdAt":"now","pushEnabled":false},"token":"new-token","protocol":1}"#
+            ? #"{"device":{"id":"new-device","name":"Phone","scopes":["read","control"],"createdAt":"now","pushEnabled":false},"token":"new-token","protocol":1,"host":{"id":"h\#(host)","name":"\#(host)"}}"#
             : #"{"ok":true}"#
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

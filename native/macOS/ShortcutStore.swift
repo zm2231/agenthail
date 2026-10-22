@@ -42,6 +42,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case composerNewline
     case composerDeleteToLineStart
     case composerDeleteWordBackward
+    case composerPaste
 
     var id: String { rawValue }
 
@@ -72,6 +73,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .composerNewline: "New line"
         case .composerDeleteToLineStart: "Delete to start of line"
         case .composerDeleteWordBackward: "Delete previous word"
+        case .composerPaste: "Paste (also ⌘V)"
         }
     }
 
@@ -99,6 +101,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .composerNewline: StoredShortcut(kVK_ANSI_J, controlKey)
         case .composerDeleteToLineStart: StoredShortcut(kVK_ANSI_U, controlKey)
         case .composerDeleteWordBackward: StoredShortcut(kVK_ANSI_W, controlKey)
+        case .composerPaste: StoredShortcut(kVK_ANSI_V, controlKey)
         case .rename, .openInNewWindow, .keepTab: nil
         }
     }

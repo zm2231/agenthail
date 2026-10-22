@@ -7,6 +7,8 @@ final class ComposerNSTextView: NSTextView {
     var command: ((StoredShortcut) -> Selector?)?
     var onSubmit: (() -> Void)?
     var focusChanged: ((Bool) -> Void)?
+    var pasteAttachments: ((PastedAttachments) -> Void)?
+    var pasteboard = NSPasteboard.general
     private var shiftHeld = false
 
     static func make() -> ComposerNSTextView {
@@ -46,6 +48,14 @@ final class ComposerNSTextView: NSTextView {
             used = ceil(layout.usageBoundsForTextContainer.height + textContainerInset.height * 2)
         }
         return ceil(min(max(used, Self.lineHeight * CGFloat(lines.lowerBound)), Self.lineHeight * CGFloat(lines.upperBound)))
+    }
+
+    override func paste(_ sender: Any?) {
+        if let pasteAttachments, let pasted = ComposerAttachments.pasted(from: pasteboard) {
+            pasteAttachments(pasted)
+        } else {
+            super.paste(sender)
+        }
     }
 
     override var acceptableDragTypes: [NSPasteboard.PasteboardType] { [.string] }

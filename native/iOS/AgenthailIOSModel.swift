@@ -2,13 +2,28 @@ import Foundation
 import UIKit
 import UserNotifications
 
+struct PairedHostStatus: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let address: String
+    let reachable: Bool
+    let reconnecting: Bool
+    let error: String?
+    let surfaces: [SurfaceState]
+    let signin: [SigninConsumerState]
+    let peers: [HostHealth]
+    let notifications: String
+}
+
 @MainActor
-final class AgenthailIOSModel: ObservableObject {
+final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     static func shouldRefreshSnapshot(for eventType: String) -> Bool {
         eventType == "stream.reset" || eventType == "state.changed" || eventType == "settings.updated" || eventType.hasPrefix("device.")
     }
 
-    @Published var snapshot: DashboardSnapshot? {
+    static let voiceHostKey = "voiceHost"
+
+    @Published private(set) var snapshot: DashboardSnapshot? {
         didSet {
             if let snapshot {
                 HolderPins.shared.prune(to: snapshot.sessions)
@@ -17,16 +32,21 @@ final class AgenthailIOSModel: ObservableObject {
             }
         }
     }
+    @Published private(set) var hosts: [PairedHostStatus] = []
+    @Published private(set) var creationHosts: [CreationHost] = []
     @Published private(set) var holderPicks: [String: HolderPin] = [:]
     @Published var selectedDetail: SessionDetail?
     @Published var sessionRequests: SessionRequests?
     @Published var answeringRequest: String?
     private var sessionRequestsKey: String?
-    @Published var selectedSessionID: String?
-    @Published var connectionError: String?
-    @Published var reconnecting = false
+    @Published var selectedSessionID: String? {
+        didSet { if selectedSessionID != oldValue { sessionServer = selectedSessionID.flatMap(server(for:)) } }
+    }
+    @Published private(set) var connectionError: String?
+    @Published private(set) var reconnecting = false
     @Published var operationError: String?
     @Published var pairing = false
+    @Published private(set) var completedPairings = 0
     let draft = ComposerDraft()
     var composer: String {
         get { draft.text }
@@ -73,34 +93,256 @@ final class AgenthailIOSModel: ObservableObject {
         let launcher: String?
         let host: String?
     }
+    private struct StoredPush: Codable {
+        let registration: PushRegistration
+        let deviceToken: String
+        let environment: String
+        let endpoint: String
+    }
     private var pendingSendRequests: [String: PendingSendRequest] = [:]
     private var creationRequestIdentity: CreationRequestIdentity?
     private var creationRequestKey: String?
     @Published var notificationStatus = "Not enabled"
     @Published var requestedSessionID: String?
-    @Published var showForgetMacConfirmation = false
+    @Published var forgetCandidate: PairedHostStatus?
     @Published var showPairingConfirmation = false
+    @Published var voiceHostID: String? {
+        didSet { UserDefaults.standard.set(voiceHostID, forKey: Self.voiceHostKey) }
+    }
 
-    private(set) var api: AgenthailAPI?
     @Published var creatingSession = false
     @Published var creationError: String?
     @Published var creationWarning: String?
     @Published var pendingControls: Set<String> = []
     @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
     @Published private(set) var fetchedSubagents = SubagentPageCache()
+    private var subagentServers: [String: HostConnection?] = [:]
 
+    private var connections: [String: HostConnection] = [:]
+    private var hostOrder: [String] = []
+    private var catalog = HostCatalog()
+    private var sessionStreamTask: Task<Void, Never>?
+    private var sessionMetadataTask: Task<Void, Never>?
+    private var sessionServer: HostConnection?
+    private(set) var sessionStreamCursor: UInt64 = 0
+    private var sessionMetadata = MetadataOverlay()
+    private var stateRequests: UInt64 = 0
+    private var selectedSessionStateSeq: UInt64 = 0
+    private var sessionStreamUnsupported = false
+    private var unsupportedRefreshTask: Task<Void, Never>?
+    private var sessionReload: (id: String, task: Task<Void, Never>)?
+    private var pendingPairing: PairingLink?
+    private var pushDeviceToken: String?
+    private var pushStatus: [String: String] = [:]
+    private var registeringPush: Set<String> = []
+    private let networkSession: URLSession
+    private let automaticallyConnect: Bool
+    private let previewPaired: Bool
+
+    var isPaired: Bool { !hostOrder.isEmpty && (previewPaired || connections.values.contains { !$0.isPreview }) }
+    var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
+    var showsHostNames: Bool { Set((snapshot?.sessions ?? []).compactMap(\.host?.id)).count > 1 || hostOrder.count > 1 }
+
+    init(autoConnect: Bool = true, session: URLSession = .shared) {
+        networkSession = session
+        automaticallyConnect = autoConnect
+        previewPaired = false
+        voiceHostID = UserDefaults.standard.string(forKey: Self.voiceHostKey)
+        for credential in PairedCredential.all() { add(HostConnection(credential: credential, session: session)) }
+        rebuild()
+        Task { await retireLegacyPairing() }
+        if autoConnect { connect() }
+    }
+
+    init(api: AgenthailAPI, paired: Bool = false, hostID: String = "computer", hostName: String = "computer") {
+        networkSession = .shared
+        automaticallyConnect = false
+        previewPaired = paired
+        add(HostConnection(id: hostID, name: hostName, api: api))
+        rebuild()
+    }
+
+    deinit {
+        sessionStreamTask?.cancel()
+        sessionReload?.task.cancel()
+        unsupportedRefreshTask?.cancel()
+        sessionMetadataTask?.cancel()
+    }
+
+    private func add(_ connection: HostConnection) {
+        connection.delegate = self
+        connections[connection.id] = connection
+        if !hostOrder.contains(connection.id) { hostOrder.append(connection.id) }
+    }
+
+    func setHostSnapshot(_ value: DashboardSnapshot?, host hostID: String? = nil) {
+        guard let connection = hostID.flatMap({ connections[$0] }) ?? hostOrder.first.flatMap({ connections[$0] }) else { return }
+        connection.setSnapshot(value)
+    }
+
+    func connection(_ hostID: String) -> HostConnection? { connections[hostID] }
+
+    private func rebuild() {
+        let ordered = hostOrder.compactMap { connections[$0] }
+        let views = ordered.map(\.view)
+        catalog = HostCatalog(hosts: views)
+        let loaded = views.compactMap(\.snapshot)
+        if loaded.isEmpty {
+            snapshot = nil
+        } else {
+            let merged = DashboardSnapshot(
+                updatedAt: views.map { $0.snapshot?.updatedAt ?? "" }.joined(separator: "|"),
+                eventCursor: nil, hostEpoch: nil, catalogSeq: nil,
+                daemon: DaemonState(running: true, pid: nil, stale: loaded.contains { $0.daemon.stale == true }, refreshError: nil, host: nil, hosts: catalog.hosts),
+                surfaces: [], sessions: catalog.sessions, totalSessions: catalog.sessions.count,
+                queue: ordered.flatMap { connection in
+                    (connection.snapshot?.queue ?? []).map { item in var item = item; item.hostID = connection.id; return item }
+                },
+                channels: [], relays: [], history: loaded.flatMap(\.history), attention: catalog.attention,
+                deliveryProblems: catalog.deliveryProblems,
+                codexRecentHours: loaded.first?.codexRecentHours ?? 24, busyDelivery: nil)
+            if snapshot?.hasSamePresentation(as: merged) != true { snapshot = merged }
+        }
+        hosts = ordered.map { connection in
+            PairedHostStatus(id: connection.id, name: connection.name, address: connection.credential.endpoint.host ?? "",
+                             reachable: connection.reachable, reconnecting: connection.reconnecting, error: connection.connectionError,
+                             surfaces: (connection.snapshot?.surfaces ?? []).filter(\.needsAttention), signin: connection.snapshot?.signin ?? [],
+                             peers: connection.snapshot?.daemon.hosts ?? [], notifications: pushStatus[connection.id] ?? "Not enabled")
+        }
+        creationHosts = catalog.hosts.map { host in
+            CreationHost(id: host.id, name: host.name, state: catalog.target(forHost: host.id) == nil ? (host.state == "connected" ? "unreachable" : host.state) : "connected")
+        }
+        let failing = ordered.filter { $0.connectionError != nil }
+        if failing.isEmpty { connectionError = nil }
+        else if ordered.count == 1 { connectionError = failing[0].connectionError }
+        else { connectionError = failing.map { "\($0.name): \($0.connectionError ?? "")" }.joined(separator: "\n") }
+        reconnecting = ordered.contains(where: \.reconnecting)
+        if let voice = voiceHostID, connections[voice] == nil { voiceHostID = nil }
+        rebindSelectedSession()
+        refetchMovedSubagents()
+    }
+
+    private func refetchMovedSubagents() {
+        for (parent, recorded) in subagentServers where server(for: parent) !== recorded {
+            subagentServers[parent] = nil
+            if fetchedSubagents.holds(parent) { fetchedSubagents.refetch(parent) }
+        }
+    }
+
+    private func server(for sessionID: String) -> HostConnection? {
+        catalog.route(for: sessionID).flatMap { connections[$0.hostID] }
+    }
+
+    private func rebindSelectedSession() {
+        guard let id = selectedSessionID else { return }
+        let current = server(for: id)
+        guard current !== sessionServer else { return }
+        sessionServer = current
+        sessionStreamTask?.cancel()
+        cancelSessionReload()
+        unsupportedRefreshTask?.cancel()
+        sessionMetadataTask?.cancel()
+        sessionStreamCursor = 0
+        sessionStreamUnsupported = false
+        sessionRequests = nil
+        sessionRequestsKey = nil
+        olderActivity = []
+        activityCursor = nil
+        olderActivityError = nil
+        attachmentCache.removeAll()
+        attachmentCacheBytes = 0
+        guard current != nil else { return }
+        Task { [weak self] in
+            await self?.reloadSelectedSession()
+            guard let self, self.selectedSessionID == id else { return }
+            self.startSessionMetadata(id)
+            if let session = self.snapshot?.sessions.first(where: { $0.id == id }) { await self.syncRequests(for: session) }
+        }
+    }
+
+    private func resolve(_ sessionID: String) throws -> (api: AgenthailAPI, route: SessionRoute) {
+        let (connection, route) = try resolveServer(sessionID)
+        return (connection.api, route)
+    }
+
+    private func resolveServer(_ sessionID: String) throws -> (connection: HostConnection, route: SessionRoute) {
+        guard let route = catalog.route(for: sessionID), let connection = connections[route.hostID] else {
+            throw AgenthailAPIError.unavailable(unreachableMessage(for: sessionID))
+        }
+        return (connection, route)
+    }
+
+    private func reach(_ hostID: String?) throws -> (api: AgenthailAPI, target: HostTarget) {
+        guard let hostID = hostID ?? hostOrder.first(where: { catalog.target(forHost: $0) != nil }) else {
+            throw AgenthailAPIError.unavailable("Connect to your computer first.")
+        }
+        guard let target = catalog.target(forHost: hostID), let connection = connections[target.hostID] else {
+            let name = catalog.hosts.first { $0.id == hostID }?.name ?? "That computer"
+            throw AgenthailAPIError.unavailable("\(name) can't be reached.")
+        }
+        return (connection.api, target)
+    }
+
+    private func unreachableMessage(for sessionID: String) -> String {
+        guard let owner = HostCatalog.owner(of: sessionID) else { return "Connect to your computer first." }
+        let name = catalog.hosts.first { $0.id == owner }?.name ?? "The computer running this session"
+        return "\(name) can't be reached."
+    }
+
+    private func merged(_ row: SessionState, from hostID: String) -> SessionState {
+        let names = Dictionary(catalog.hosts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        return HostCatalog.merge(row, servedBy: hostID, ownerName: { names[$0] }, reachable: connections[hostID]?.reachable ?? false).row
+    }
+
+    func routedSession(_ session: SessionState) -> SessionState? {
+        guard let route = catalog.route(for: session.id) else { return nil }
+        var routed = session
+        routed.id = route.sessionID
+        return routed
+    }
+
+    func routedAPI(for sessionID: String) -> AgenthailAPI? { (try? resolve(sessionID))?.api }
+
+    func busyDelivery(for sessionID: String) -> String? {
+        catalog.route(for: sessionID).flatMap { connections[$0.hostID]?.snapshot?.busyDelivery }
+    }
+
+    var voiceHost: PairedHostStatus? {
+        hosts.first { $0.id == voiceHostID } ?? hosts.first
+    }
+
+    func canCallByVoice(_ session: SessionState) -> Bool {
+        guard let voice = voiceHost, voice.reachable, session.host?.id == voice.id,
+              let route = catalog.route(for: session.id) else { return false }
+        return route.hostID == voice.id
+    }
+
+    func connectionState(for sessionID: String) -> (error: String?, reconnecting: Bool) {
+        let hostID = catalog.route(for: sessionID)?.hostID ?? catalog.server(of: sessionID) ?? HostCatalog.owner(of: sessionID)
+        guard let connection = hostID.flatMap({ connections[$0] }) else { return (nil, false) }
+        return (connection.connectionError, connection.reconnecting)
+    }
+
+    func voiceTargetID(for session: SessionState) -> String {
+        catalog.route(for: session.id)?.sessionID ?? ""
+    }
+
+    func voiceSessionID(_ id: String) -> String {
+        guard let voice = voiceHost else { return id }
+        return HostCatalog.qualify(voice.id, id)
+    }
 
     func dismissDeliveryProblem(_ problem: DeliveryProblem) async throws {
-        guard let api else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
-        let key = "delivery:\(problem.deliveryId)"
+        guard let hostID = problem.hostID, let connection = connections[hostID], connection.reachable else {
+            throw AgenthailAPIError.unavailable("Connect to your computer first.")
+        }
+        let key = "delivery:\(problem.id)"
         guard !pendingControls.contains(key) else { return }
         pendingControls.insert(key)
         defer { pendingControls.remove(key) }
-        try await api.action("delivery-dismiss", deliveryID: problem.deliveryId)
-        guard var current = snapshot else { return }
-        current.deliveryProblems = current.deliveryProblems?.filter { $0.deliveryId != problem.deliveryId }
-        snapshot = current
+        try await connection.api.action("delivery-dismiss", deliveryID: problem.deliveryId)
+        connection.updateSnapshot { $0.deliveryProblems = $0.deliveryProblems?.filter { $0.deliveryId != problem.deliveryId } }
     }
 
     private func deliveryLabel(_ evidence: String?, detail: String?) -> String {
@@ -130,19 +372,23 @@ final class AgenthailIOSModel: ObservableObject {
         turnSettingsDrafts.removeValue(forKey: sessionID)
     }
 
-    /// Fetches the direct subagents a session list only counts, so they can
-    /// be shown and opened.
     func loadSubagents(of session: SessionState) async {
-        guard let api else { return }
         guard (session.hiddenSubagents?.count ?? 0) > 0 else {
             fetchedSubagents.drop(session.id)
+            subagentServers[session.id] = nil
             return
         }
+        let requestServer = server(for: session.id)
         do {
-            let loaded = try await api.subagents(of: session.id)
-            if !Task.isCancelled { fetchedSubagents.store(loaded, for: session.id) }
+            let (connection, route) = try resolveServer(session.id)
+            let loaded = try await connection.api.subagents(of: route.sessionID)
+            guard !Task.isCancelled, server(for: session.id) === connection else { return }
+            fetchedSubagents.store(loaded.map { merged($0, from: route.hostID) }, for: session.id)
+            subagentServers.updateValue(connection, forKey: session.id)
         } catch {
-            if !Task.isCancelled { fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id) }
+            guard !Task.isCancelled, server(for: session.id) === requestServer else { return }
+            fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id)
+            subagentServers.updateValue(requestServer, forKey: session.id)
         }
     }
 
@@ -150,13 +396,30 @@ final class AgenthailIOSModel: ObservableObject {
         SessionFamilies.children(of: sessionID, listed: snapshot?.sessions ?? [], fetched: fetchedSubagents.children(of: sessionID))
     }
 
+    private func hostQueue(_ connection: HostConnection) async throws -> [QueueState] {
+        try await connection.api.queuedInstructions().map { item in
+            var item = item
+            item.hostID = connection.id
+            item.sessionId = HostCatalog.qualify(connection.id, item.sessionId)
+            item.sourceSessionId = item.sourceSessionId.map { HostCatalog.qualify(connection.id, $0) }
+            return item
+        }
+    }
+
     func queuedInstructions() async throws -> [QueueState] {
-        guard let api else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
-        return try await api.queuedInstructions()
+        let reachable = hostOrder.compactMap { connections[$0] }.filter(\.reachable)
+        guard !reachable.isEmpty else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
+        var items: [QueueState] = []
+        var failure: Error?
+        for connection in reachable {
+            do { items += try await hostQueue(connection) } catch { failure = error }
+        }
+        if items.isEmpty, let failure { throw failure }
+        return items
     }
 
     func editSession(id: String, action: String, text: String = "") async throws {
-        guard let api else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
+        let (api, route) = try resolve(id)
         guard !pendingControls.contains(id) else { throw AgenthailAPIError.unavailable("An update is already in progress.") }
         if action != "alias" {
             let settable = ["goal-set", "goal-edit", "goal-clear"].contains(action)
@@ -165,33 +428,35 @@ final class AgenthailIOSModel: ObservableObject {
         }
         pendingControls.insert(id)
         defer { pendingControls.remove(id) }
-        if action == "alias" { try await api.nameSession(id: id, alias: text) }
-        else { try await api.action(action, sessionID: id, message: text) }
-        await refresh(fresh: true)
+        if action == "alias" { try await api.nameSession(id: route.sessionID, alias: text) }
+        else { try await api.action(action, sessionID: route.sessionID, message: text) }
+        await refresh(host: route.hostID)
         await refreshSession(id)
     }
 
     func updateQueue(_ item: QueueState, retry: Bool) async throws {
-        guard let api else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
-        let key = "queue:\(item.id)"
+        guard let hostID = item.hostID, let connection = connections[hostID], connection.reachable else {
+            throw AgenthailAPIError.unavailable("Connect to your computer first.")
+        }
+        let key = "queue:\(item.listID)"
         guard !pendingControls.contains(key) else { return }
         pendingControls.insert(key)
         defer { pendingControls.remove(key) }
-        try await api.action(retry ? "queue-retry" : "queue-cancel", queueID: item.id)
-        await refresh(fresh: true)
+        try await connection.api.action(retry ? "queue-retry" : "queue-cancel", queueID: item.id)
+        await connection.refresh(fresh: true)
     }
 
     func sessionOptions(host: String?) async throws -> SessionCreationOptions {
-        guard let api else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
-        return try await api.sessionOptions(host: host)
+        let (api, target) = try reach(host)
+        return try await api.sessionOptions(host: target.remote)
     }
     func creationRootUsage(root: String, host: String?) async throws -> ClaudeRootUsage {
-        guard let api else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
-        return try await api.claudeRootUsage(root: root, host: host)
+        let (api, target) = try reach(host)
+        return try await api.claudeRootUsage(root: root, host: target.remote)
     }
     func creationModels(surface: String, host: String?) async throws -> [ModelOption] {
-        guard let api else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
-        return try await api.creationModels(surface: surface, host: host)
+        let (api, target) = try reach(host)
+        return try await api.creationModels(surface: surface, host: target.remote)
     }
     func prepareNewSessionForm() {
         creationError = nil
@@ -200,7 +465,13 @@ final class AgenthailIOSModel: ObservableObject {
         creationRequestKey = nil
     }
     func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, host: String? = nil) async -> Bool {
-        guard !creatingSession, let api, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        guard !creatingSession, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        let api: AgenthailAPI
+        let target: HostTarget
+        do { (api, target) = try self.reach(host) } catch {
+            creationError = AgenthailAPIError.userMessage(error)
+            return false
+        }
         creatingSession = true; creationError = nil; creationWarning = nil
         defer { creatingSession = false }
         let identity = CreationRequestIdentity(surface: surface, message: message, cwd: cwd, model: model,
@@ -211,16 +482,17 @@ final class AgenthailIOSModel: ObservableObject {
             creationRequestKey = UUID().uuidString
         }
         do {
-            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher, host: host, idempotencyKey: creationRequestKey)
+            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher, host: target.remote, idempotencyKey: creationRequestKey)
             guard receipt.ok || receipt.unknown == true || receipt.accepted == true else { throw AgenthailAPIError.invalidResponse }
             if receipt.status == "submitted" && receipt.id == nil {
                 creationWarning = "Submitted to \(receipt.launcher ?? launcher?.id ?? surface)."
                 return false
             }
             creationWarning = receipt.warning
-            if let id = receipt.id, !id.isEmpty {
-                let target = receipt.launcher ?? launcher?.id ?? surface
-                deliveryStatus[id] = receipt.status == "submitted" || receipt.unknown == true ? "Submitted to \(target)." : (surface == "claude" ? "Session started. Waiting for activity." : "Conversation started")
+            if let created = receipt.id, !created.isEmpty {
+                let id = HostCatalog.qualify(target.remote ?? target.hostID, created)
+                let launched = receipt.launcher ?? launcher?.id ?? surface
+                deliveryStatus[id] = receipt.status == "submitted" || receipt.unknown == true ? "Submitted to \(launched)." : (surface == "claude" ? "Session started. Waiting for activity." : "Conversation started")
                 requestedSessionID = id
             }
             if receipt.id != nil { creationRequestIdentity = nil; creationRequestKey = nil }
@@ -236,20 +508,20 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func focusSession(_ session: SessionState) {
-        guard let api, session.runtime?.focusable == true else { return }
+        guard session.runtime?.focusable == true, case let (api, route)? = try? resolve(session.id) else { return }
         Task {
-            do { try await api.action("session-focus", sessionID: session.id) }
+            do { try await api.action("session-focus", sessionID: route.sessionID) }
             catch { operationError = error.localizedDescription }
         }
     }
 
     func sessionAttachment(for item: TimelineItem, sessionID: String) async -> Data? {
-        guard let api, let attachment = item.attachment, selectedSessionID == sessionID else { return nil }
+        guard let attachment = item.attachment, selectedSessionID == sessionID, case let (connection, route)? = try? resolveServer(sessionID) else { return nil }
         let cacheKey = "\(sessionID):\(attachment.id)"
         if let cached = attachmentCache[cacheKey] { return cached }
         do {
-            let data = try await api.sessionAttachment(sessionID: sessionID, id: attachment.id)
-            guard !Task.isCancelled, selectedSessionID == sessionID else { return nil }
+            let data = try await connection.api.sessionAttachment(sessionID: route.sessionID, id: attachment.id)
+            guard !Task.isCancelled, selectedSessionID == sessionID, server(for: sessionID) === connection else { return nil }
             if data.count <= attachmentCacheLimit {
                 if attachmentCacheBytes + data.count > attachmentCacheLimit {
                     attachmentCache.removeAll()
@@ -264,64 +536,6 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
-    private var endpoint: URL?
-    private var token: String?
-    private var eventTask: Task<Void, Never>?
-    private var eventRefreshTask: Task<Void, Never>?
-    private var catalogStreamTask: Task<Void, Never>?
-    private(set) var catalogStreamCursor: UInt64 = 0
-    private var catalogHostEpoch: String?
-    private var sessionStreamTask: Task<Void, Never>?
-    private var sessionMetadataTask: Task<Void, Never>?
-    private(set) var sessionStreamCursor: UInt64 = 0
-    private var sessionMetadata = MetadataOverlay()
-    private var stateRequests: UInt64 = 0
-    private var selectedSessionStateSeq: UInt64 = 0
-    private var sessionStreamUnsupported = false
-    private var unsupportedRefreshTask: Task<Void, Never>?
-    private var sessionReload: (id: String, task: Task<Void, Never>)?
-    private var connectionTask: Task<Void, Never>?
-    private var snapshotCoversEventStream = false
-    private var lastEventID: UInt64 = 0
-    private var pushRelayURL: URL?
-    private var pendingPairing: PairingLink?
-    private let networkSession: URLSession
-    private let automaticallyConnect: Bool
-
-    var isPaired: Bool { endpoint != nil && token != nil }
-    var computerName: String? { endpoint?.host }
-    var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
-
-    init(autoConnect: Bool = true, session: URLSession = .shared) {
-        networkSession = session
-        automaticallyConnect = autoConnect
-        if let endpointValue = KeychainStore.get("endpoint"), let endpoint = URL(string: endpointValue), let token = KeychainStore.get("token") {
-            self.endpoint = endpoint
-            self.token = token
-            if autoConnect { connect() }
-        }
-    }
-
-    init(api: AgenthailAPI, paired: Bool = false) {
-        networkSession = .shared
-        automaticallyConnect = false
-        self.api = api
-        if paired {
-            endpoint = URL(string: "https://preview.invalid")
-            token = "public-demo"
-        }
-    }
-
-    deinit {
-        connectionTask?.cancel()
-        eventTask?.cancel()
-        eventRefreshTask?.cancel()
-        catalogStreamTask?.cancel()
-        sessionStreamTask?.cancel()
-        sessionReload?.task.cancel()
-        unsupportedRefreshTask?.cancel()
-    }
-
     func handlePairingURL(_ url: URL) {
         do {
             pendingPairing = try PairingLink(url: url)
@@ -333,13 +547,21 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
-    var pairingConfirmationTitle: String {
-        isPaired ? "Replace connected computer?" : "Connect to this computer?"
+    private var pendingPairingMatch: HostConnection? {
+        pendingPairing.flatMap { connections[$0.hostID] }
     }
+
+    var pairingConfirmationTitle: String {
+        if let existing = pendingPairingMatch { return "Reconnect \(existing.name)?" }
+        return "Add \(pendingPairing?.hostName ?? pendingPairing?.endpoint.host?.split(separator: ".").first.map(String.init) ?? "this computer")?"
+    }
+
+    var pairingConfirmationAction: String { pendingPairingMatch == nil ? "Add computer" : "Reconnect" }
 
     var pairingConfirmationMessage: String {
         guard let host = pendingPairing?.endpoint.host else { return "" }
-        return isPaired ? "This will replace the saved computer with \(host)." : "Agenthail will connect securely to \(host) over Tailscale."
+        if let existing = pendingPairingMatch { return "This replaces the saved connection to \(existing.name). Your other computers stay paired." }
+        return "Agenthail will connect securely to \(host) over Tailscale."
     }
 
     func confirmPairing() {
@@ -350,39 +572,41 @@ final class AgenthailIOSModel: ObservableObject {
         Task {
             var newAPI: AgenthailAPI?
             do {
-                let previousEndpoint = endpoint
-                let previousToken = token
-                let previousRelayURL = pushRelayURL ?? KeychainStore.get("pushRelayURL").flatMap(URL.init(string:))
-                let previousRegistration = storedPushRegistration()
-                let name = UIDevice.current.name
-                let response = try await AgenthailAPI.completePairing(endpoint: pendingPairing.endpoint, secret: pendingPairing.secret, name: name, session: networkSession)
+                let response = try await AgenthailAPI.completePairing(endpoint: pendingPairing.endpoint, secret: pendingPairing.secret, name: UIDevice.current.name, session: networkSession)
                 let pairedAPI = AgenthailAPI(baseURL: pendingPairing.endpoint, token: response.token, session: networkSession)
                 newAPI = pairedAPI
-                if let previousRegistration, let previousRelayURL {
-                    do {
-                        try await PushRelayClient(baseURL: previousRelayURL, session: networkSession).revoke(previousRegistration)
-                    } catch {
-                        try? await pairedAPI.revokeCurrentDevice()
-                        throw AgenthailAPIError.unavailable("The previous notification connection could not be revoked. Try pairing again.")
+                let hostID = response.host.id
+                guard hostID == pendingPairing.hostID else {
+                    throw AgenthailAPIError.unavailable("This pairing code is for a different computer than it names. Show a new code on the computer and try again.")
+                }
+                let previous = connections[hostID]
+                if let previous {
+                    if let relayURL = previous.pushRelayURL, let stored = storedPush(hostID) {
+                        do {
+                            try await PushRelayClient(baseURL: relayURL, session: networkSession).revoke(stored.registration)
+                        } catch {
+                            try? await pairedAPI.revokeCurrentDevice()
+                            throw AgenthailAPIError.unavailable("The previous notification connection could not be revoked. Try pairing again.")
+                        }
                     }
+                    if !previous.isPreview {
+                        try? await previous.api.removePush()
+                        try? await previous.api.revokeCurrentDevice()
+                    }
+                    previous.stop()
+                    clearStoredPush(hostID)
                 }
-                if let previousEndpoint, let previousToken {
-                    let previousAPI = AgenthailAPI(baseURL: previousEndpoint, token: previousToken, session: networkSession)
-                    try? await previousAPI.removePush()
-                    try? await previousAPI.revokeCurrentDevice()
-                }
-                clearStoredPushRegistration()
-                try KeychainStore.set(pendingPairing.endpoint.absoluteString, account: "endpoint")
-                try KeychainStore.set(response.token, account: "token")
-                self.endpoint = pendingPairing.endpoint
-                token = response.token
-                api = pairedAPI
+                let credential = PairedHostCredential(hostID: hostID, hostName: response.host.name, endpoint: pendingPairing.endpoint, token: response.token, pairedAt: previous == nil ? Date() : PairedCredential.all().first { $0.hostID == hostID }?.pairedAt ?? Date())
+                try PairedCredential.save(credential)
+                add(HostConnection(credential: credential, session: networkSession))
                 attachmentCache.removeAll()
                 attachmentCacheBytes = 0
                 pairing = false
                 operationError = nil
+                completedPairings += 1
+                rebuild()
                 if automaticallyConnect {
-                    connect()
+                    connections[hostID]?.connect()
                     requestNotifications()
                 }
             } catch {
@@ -399,45 +623,11 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func connect() {
-        guard let endpoint, let token else { return }
-        let api = AgenthailAPI(baseURL: endpoint, token: token, session: networkSession)
-        self.api = api
-        connectionTask?.cancel()
-        eventTask?.cancel()
-        eventRefreshTask?.cancel()
-        lastEventID = 0
-        reconnecting = true
-        connectionTask = Task {
-            let backoff = EventRetryBackoff()
-            while !Task.isCancelled {
-                do {
-                    let version = try await api.version()
-                    guard !Task.isCancelled else { return }
-                    if let value = version.pushRelayUrl, let url = URL(string: value) {
-                        pushRelayURL = url
-                        try? KeychainStore.set(value, account: "pushRelayURL")
-                    } else if let value = KeychainStore.get("pushRelayURL") {
-                        pushRelayURL = URL(string: value)
-                    }
-                    if await refresh(fresh: true) {
-                        guard !Task.isCancelled else { return }
-                        snapshotCoversEventStream = snapshot?.daemon.stale != true
-                        startEvents()
-                        refreshNotificationRegistration()
-                        return
-                    }
-                } catch {
-                    connectionError = error.localizedDescription
-                    if let apiError = error as? AgenthailAPIError, case .incompatible = apiError {
-                        reconnecting = false
-                        return
-                    }
-                }
-                reconnecting = true
-                let delay = backoff.nextDelay()
-                try? await Task.sleep(for: .seconds(delay))
-            }
-        }
+        for id in hostOrder { connections[id]?.connect() }
+    }
+
+    func reconnect(host hostID: String) {
+        connections[hostID]?.connect()
     }
 
     func resumeConnection() {
@@ -451,28 +641,15 @@ final class AgenthailIOSModel: ObservableObject {
 
     @discardableResult
     func refresh(fresh: Bool = false) async -> Bool {
-        guard let api else { return false }
-        let seq = nextStateRequest()
-        do {
-            let loaded = try await api.snapshot(fresh: fresh)
-            followRekeys(loaded.rekeyed ?? [:])
-            if snapshot?.hasSamePresentation(as: loaded) != true { snapshot = loaded }
-            syncSelectedSession(from: loaded, seq: seq)
-            resumeSessionStream(from: loaded)
-            lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
-            if catalogHostEpoch != loaded.hostEpoch {
-                catalogHostEpoch = loaded.hostEpoch
-                catalogStreamCursor = loaded.catalogSeq ?? 0
-            } else {
-                catalogStreamCursor = max(catalogStreamCursor, loaded.catalogSeq ?? catalogStreamCursor)
-            }
-            connectionError = loaded.daemon.stale == true ? (loaded.daemon.refreshError ?? "Showing saved state. The computer could not refresh its agents.") : nil
-            await refreshDeliveries()
-            return true
-        } catch {
-            connectionError = error.localizedDescription
-            return false
+        var any = false
+        for id in hostOrder {
+            if let connection = connections[id], await connection.refresh(fresh: fresh) { any = true }
         }
+        return any
+    }
+
+    private func refresh(host hostID: String) async {
+        _ = await connections[hostID]?.refresh(fresh: true)
     }
 
     func loadSession(_ id: String) async {
@@ -508,13 +685,16 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func refreshSession(_ id: String) async {
-        guard let api, sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
+        guard sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
         let requestID = UUID()
         sessionRequestID = requestID
         let seq = nextStateRequest()
+        let requestServer = server(for: id)
         do {
-            let detail = try await api.sessionDetail(id: id, includeTimeline: true)
-            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID else { return }
+            let (connection, route) = try resolveServer(id)
+            var detail = try await connection.api.sessionDetail(id: route.sessionID, includeTimeline: true)
+            detail.session.id = id
+            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID, server(for: id) === connection else { return }
             if !olderActivity.isEmpty {
                 let retained = Set(olderActivity.map(\.id) + (detail.timeline?.items.map(\.id) ?? []))
                 olderActivity += (selectedDetail?.timeline?.items ?? []).filter { !retained.contains($0.id) }
@@ -534,7 +714,7 @@ final class AgenthailIOSModel: ObservableObject {
             if olderActivity.isEmpty { activityCursor = detail.timeline?.nextBefore }
             sessionError = nil
         } catch {
-            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID else { return }
+            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID, server(for: id) === requestServer else { return }
             sessionError = error.localizedDescription
         }
         await refreshDeliveries()
@@ -553,24 +733,26 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     private func fetchRequests(_ id: String, key: String?) async {
-        guard let api else { return }
+        let requestServer = server(for: id)
         do {
-            let requests = try await api.requests(sessionID: id)
-            guard selectedSessionID == id, sessionRequestsKey == key else { return }
+            let (connection, route) = try resolveServer(id)
+            let requests = try await connection.api.requests(sessionID: route.sessionID)
+            guard selectedSessionID == id, sessionRequestsKey == key, server(for: id) === connection else { return }
             sessionRequests = requests
         } catch {
-            guard selectedSessionID == id else { return }
+            guard selectedSessionID == id, server(for: id) === requestServer else { return }
             sessionRequestsKey = nil
             operationError = error.localizedDescription
         }
     }
 
     func respond(to request: SessionRequest, sessionID: String, decision: RequestDecision) async {
-        guard let api, answeringRequest == nil else { return }
+        guard answeringRequest == nil else { return }
         answeringRequest = request.id
         defer { answeringRequest = nil }
         do {
-            _ = try await api.respond(sessionID: sessionID, requestID: request.id, decision: decision)
+            let (api, route) = try resolve(sessionID)
+            _ = try await api.respond(sessionID: route.sessionID, requestID: request.id, decision: decision)
             operationError = nil
         } catch AgenthailAPIError.requestStale {
             sessionRequests = sessionRequests?.removing(request.id)
@@ -583,9 +765,9 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func setPermissionMode(_ mode: String, sessionID: String) async {
-        guard let api else { return }
         do {
-            try await api.setPermissionMode(sessionID: sessionID, mode: mode)
+            let (api, route) = try resolve(sessionID)
+            try await api.setPermissionMode(sessionID: route.sessionID, mode: mode)
             operationError = nil
         } catch {
             operationError = error.localizedDescription
@@ -594,45 +776,45 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     private func refreshDeliveries() async {
-        guard let api, !deliveryQueueIDs.isEmpty, !refreshingDeliveries else { return }
+        guard !deliveryQueueIDs.isEmpty, !refreshingDeliveries else { return }
         refreshingDeliveries = true
         defer { refreshingDeliveries = false }
         let expected = deliveryQueueIDs
-        do {
-            let items = try await api.queuedInstructions()
-            for (sessionID, queueID) in expected where deliveryQueueIDs[sessionID] == queueID {
-                guard let item = items.first(where: { $0.id == queueID && $0.sessionId == sessionID }) else {
-                    continue
-                }
-                switch item.isHistorical && item.evidence == "unknown" ? "unknown-history" : item.isHistorical && item.evidence == "failed" ? "failed-history" : item.evidence {
-                case "submitted": deliveryStatus[sessionID] = "Submitted to \(item.target)."
-                case "queued": deliveryStatus[sessionID] = item.queuedReceipt
-                case "unknown": deliveryStatus[sessionID] = "Submitted to \(item.target)."
-                case "failed": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox before retrying."
-                case "unknown-history": deliveryStatus[sessionID] = "Delivery was never confirmed. Review it in Inbox history."
-                case "failed-history": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox history."
-                case "transport_accepted": deliveryStatus[sessionID] = "Accepted for \(item.target); not yet confirmed."
-                case "delivered": deliveryStatus[sessionID] = "Sent to \(item.target)."
-                case "held": deliveryStatus[sessionID] = "Delivery held. Review it in Inbox before retrying."
-                case "canceled": deliveryStatus[sessionID] = "Instruction canceled."
-                default: continue
-                }
-                if item.isHistorical { deliveryQueueIDs.removeValue(forKey: sessionID) }
+        var queues: [String: [QueueState]] = [:]
+        for (sessionID, queueID) in expected where deliveryQueueIDs[sessionID] == queueID {
+            guard let route = catalog.route(for: sessionID), let connection = connections[route.hostID] else { continue }
+            if queues[route.hostID] == nil { queues[route.hostID] = (try? await hostQueue(connection)) ?? [] }
+            guard let item = queues[route.hostID]?.first(where: { $0.id == queueID && $0.sessionId == HostCatalog.qualify(route.hostID, route.sessionID) }) else {
+                continue
             }
-        } catch {}
+            switch item.isHistorical && item.evidence == "unknown" ? "unknown-history" : item.isHistorical && item.evidence == "failed" ? "failed-history" : item.evidence {
+            case "submitted": deliveryStatus[sessionID] = "Submitted to \(item.target)."
+            case "queued": deliveryStatus[sessionID] = item.queuedReceipt
+            case "unknown": deliveryStatus[sessionID] = "Submitted to \(item.target)."
+            case "failed": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox before retrying."
+            case "unknown-history": deliveryStatus[sessionID] = "Delivery was never confirmed. Review it in Inbox history."
+            case "failed-history": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox history."
+            case "transport_accepted": deliveryStatus[sessionID] = "Accepted for \(item.target); not yet confirmed."
+            case "delivered": deliveryStatus[sessionID] = "Sent to \(item.target)."
+            case "held": deliveryStatus[sessionID] = "Delivery held. Review it in Inbox before retrying."
+            case "canceled": deliveryStatus[sessionID] = "Instruction canceled."
+            default: continue
+            }
+            if item.isHistorical { deliveryQueueIDs.removeValue(forKey: sessionID) }
+        }
     }
 
     private func startSessionMetadata(_ id: String) {
         sessionMetadataTask?.cancel()
-        guard let api, sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
+        guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), case let (connection, route)? = try? resolveServer(id) else { return }
         sessionMetadata.metadataRequested()
-        sessionMetadataTask = Task { [weak self, api] in
+        sessionMetadataTask = Task { [weak self, connection] in
             do {
-                let metadata = try await api.sessionMetadata(id: id)
-                guard !Task.isCancelled else { return }
+                let metadata = try await connection.api.sessionMetadata(id: route.sessionID)
+                guard !Task.isCancelled, self?.server(for: id) === connection else { return }
                 self?.updateSessionMetadata(for: id) { $0.absorb(metadata) }
             } catch {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, self?.server(for: id) === connection else { return }
                 self?.updateSessionMetadata(for: id) { $0.metadataFailed() }
             }
         }
@@ -645,12 +827,14 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func loadOlderActivity() async {
-        guard let api, let id = selectedSessionID, let cursor = activityCursor, cursor > 0, !loadingOlderActivity else { return }
+        guard let id = selectedSessionID, let cursor = activityCursor, cursor > 0, !loadingOlderActivity else { return }
         loadingOlderActivity = true
         defer { loadingOlderActivity = false }
+        let requestServer = server(for: id)
         do {
-            let page = try await api.sessionDetail(id: id, includeTimeline: true, timelineBefore: cursor)
-            guard selectedSessionID == id else { return }
+            let (connection, route) = try resolveServer(id)
+            let page = try await connection.api.sessionDetail(id: route.sessionID, includeTimeline: true, timelineBefore: cursor)
+            guard selectedSessionID == id, server(for: id) === connection, activityCursor == cursor else { return }
             guard let timeline = page.timeline, timeline.unavailableReason == nil else {
                 throw AgenthailAPIError.unavailable(page.timeline?.unavailableReason ?? "Older activity is unavailable.")
             }
@@ -659,7 +843,7 @@ final class AgenthailIOSModel: ObservableObject {
             activityCursor = timeline.nextBefore
             olderActivityError = nil
         } catch {
-            if selectedSessionID == id {
+            if selectedSessionID == id, activityCursor == cursor, server(for: id) === requestServer {
                 if case AgenthailAPIError.historyGap = error { activityCursor = nil }
                 olderActivityError = error.localizedDescription
             }
@@ -671,14 +855,34 @@ final class AgenthailIOSModel: ObservableObject {
         searchResults = []
         searchError = nil
         searching = false
-        guard query.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3, let api else { return }
+        let reachable = hostOrder.compactMap { connections[$0] }.filter(\.reachable)
+        guard query.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3, !reachable.isEmpty else { return }
         searching = true
         do {
             try await Task.sleep(for: .milliseconds(350))
-            let response = try await api.searchSessions(query: query)
+            var results: [SessionSearchItem] = []
+            var errors: [String] = []
+            for connection in reachable {
+                do {
+                    let response = try await connection.api.searchSessions(query: query)
+                    for item in response.results {
+                        var item = item
+                        let (row, local) = HostCatalog.merge(item.session, servedBy: connection.id, ownerName: { id in self.catalog.hosts.first { $0.id == id }?.name }, reachable: true)
+                        item.session = row
+                        if let index = results.firstIndex(where: { $0.id == row.id }) {
+                            if local { results[index] = item }
+                        } else {
+                            results.append(item)
+                        }
+                    }
+                    if let remote = response.remoteError, !remote.isEmpty { errors.append(remote) }
+                } catch {
+                    errors.append("\(connection.name): \(error.localizedDescription)")
+                }
+            }
             guard !Task.isCancelled, searchQuery == query else { return }
-            searchResults = response.results
-            searchError = response.remoteError?.isEmpty == false ? response.remoteError : nil
+            searchResults = results
+            searchError = errors.isEmpty ? nil : errors.joined(separator: "\n")
         } catch {
             guard !Task.isCancelled, searchQuery == query else { return }
             searchError = error.localizedDescription
@@ -711,6 +915,14 @@ final class AgenthailIOSModel: ObservableObject {
         attachmentProblem = (problem ?? added.problem)?.message
     }
 
+    func paste(_ providers: [NSItemProvider]) async {
+        guard let pasted = await ComposerAttachments.pasted(from: providers) else {
+            addAttachments([], problem: .unreadable("The pasted image"))
+            return
+        }
+        addAttachments(pasted.attachments, problem: pasted.problem)
+    }
+
     func removeAttachment(_ id: UUID) {
         composerAttachments.removeAll { $0.id == id }
         attachmentProblem = nil
@@ -730,9 +942,15 @@ final class AgenthailIOSModel: ObservableObject {
     func send(to session: SessionState) {
         let message = composer.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachments = composerAttachments
-        guard !ComposerAttachments.isEmpty(text: message, attachments: attachments), let api,
+        guard !ComposerAttachments.isEmpty(text: message, attachments: attachments),
               let detail = selectedDetail, detail.session.id == session.id,
               !detail.readOnly, !sendingSessionIDs.contains(session.id) else { return }
+        let api: AgenthailAPI
+        let route: SessionRoute
+        do { (api, route) = try self.resolve(session.id) } catch {
+            operationError = AgenthailAPIError.userMessage(error)
+            return
+        }
         let action = "send"
         guard detail.capabilities.send else { return }
         let turnSettings = action == "send" && session.surface == "codex" ? turnSettingsDrafts[session.id] ?? TurnSettings() : TurnSettings()
@@ -754,8 +972,8 @@ final class AgenthailIOSModel: ObservableObject {
         Task {
             defer { sendingSessionIDs.remove(session.id) }
             do {
-                let uploaded = try await api.upload(attachments, sessionID: session.id).map(\.id)
-                let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings, author: "person", attachments: uploaded, idempotencyKey: idempotencyKey)
+                let uploaded = try await api.upload(attachments, sessionID: route.sessionID).map(\.id)
+                let response = try await api.sendInstruction(action: action, sessionID: route.sessionID, message: message, turnSettings: turnSettings, author: "person", attachments: uploaded, idempotencyKey: idempotencyKey)
                 if let deliveryID = response.result?.deliveryId { deliveryIDs[session.id] = deliveryID }
                 deliveryStatus[session.id] = deliveryLabel(response.result?.evidence, detail: response.result?.detail)
                 if response.result?.evidence == "queued", let queueID = response.result?.queueId {
@@ -783,15 +1001,21 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func action(_ action: String, session: SessionState, model: String? = nil, message: String? = nil) {
-        guard let api, !pendingControls.contains(session.id) else { return }
+        guard !pendingControls.contains(session.id) else { return }
+        let api: AgenthailAPI
+        let route: SessionRoute
+        do { (api, route) = try self.resolve(session.id) } catch {
+            operationError = AgenthailAPIError.userMessage(error)
+            return
+        }
         pendingControls.insert(session.id)
         Task {
             defer { pendingControls.remove(session.id) }
             do {
-                if let receipt = try await api.control(action, sessionID: session.id, message: message, model: model), receipt.requestId != nil || receipt.output != nil {
+                if let receipt = try await api.control(action, sessionID: route.sessionID, message: message, model: model), receipt.requestId != nil || receipt.output != nil {
                     controlOutput[session.id] = [receipt.output, receipt.detail, receipt.requestId.map { "Request \($0)" }].compactMap { $0 }.joined(separator: "\n")
                 }
-                await refresh(fresh: true)
+                await refresh(host: route.hostID)
                 await refreshSession(session.id)
             } catch {
                 operationError = error.localizedDescription
@@ -800,89 +1024,109 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func setArchived(sessionID: String, _ archived: Bool) async {
-        guard let api else { return }
         do {
-            try await api.action(archived ? "session-archive" : "session-unarchive", sessionID: sessionID)
+            let (api, route) = try resolve(sessionID)
+            try await api.action(archived ? "session-archive" : "session-unarchive", sessionID: route.sessionID)
             operationError = nil
+            await refresh(host: route.hostID)
         } catch {
             operationError = error.localizedDescription
         }
-        await refresh(fresh: true)
     }
 
     func setProjectArchived(_ projectID: String, _ archived: Bool) async {
-        guard let api else { return }
         do {
-            _ = try await api.projectAction(archived ? "project-archive" : "project-unarchive", projectID: projectID)
+            guard let owner = HostCatalog.owner(of: projectID) else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
+            let (api, target) = try reach(owner)
+            let id = target.remote == nil ? String(projectID.dropFirst(owner.count + HostCatalog.separator.count)) : projectID
+            _ = try await api.projectAction(archived ? "project-archive" : "project-unarchive", projectID: id)
             operationError = nil
+            await refresh(host: target.hostID)
         } catch {
             operationError = error.localizedDescription
         }
-        await refresh(fresh: true)
     }
 
-    func unpair() {
-        guard let existingAPI = api else { return }
-        let relay = pushRelayURL.map { PushRelayClient(baseURL: $0, session: networkSession) }
-        let registration = storedPushRegistration()
+    func removeHost(_ hostID: String) {
+        guard let connection = connections[hostID] else { return }
+        let relay = connection.pushRelayURL.map { PushRelayClient(baseURL: $0, session: networkSession) }
+        let stored = storedPush(hostID)
         Task {
             do {
-                try? await existingAPI.removePush()
-                try await existingAPI.revokeCurrentDevice()
-                if let relay, let registration { try? await relay.revoke(registration) }
-                clearPairing()
+                try? await connection.api.removePush()
+                try await connection.api.revokeCurrentDevice()
+                if let relay, let stored { try? await relay.revoke(stored.registration) }
+                clearHost(hostID)
             } catch {
                 operationError = nil
-                showForgetMacConfirmation = true
+                forgetCandidate = hosts.first { $0.id == hostID }
             }
         }
     }
 
-    func forgetThisMac() {
-        let relay = pushRelayURL.map { PushRelayClient(baseURL: $0, session: networkSession) }
-        let registration = storedPushRegistration()
-        clearPairing()
+    func forgetHost(_ hostID: String) {
+        let relay = connections[hostID]?.pushRelayURL.map { PushRelayClient(baseURL: $0, session: networkSession) }
+        let stored = storedPush(hostID)
+        clearHost(hostID)
+        forgetCandidate = nil
         Task {
-            if let relay, let registration { try? await relay.revoke(registration) }
+            if let relay, let stored { try? await relay.revoke(stored.registration) }
         }
     }
 
-    private func clearPairing() {
-        KeychainStore.removeAll()
-        connectionTask?.cancel()
-        eventTask?.cancel()
-        eventRefreshTask?.cancel()
-        catalogStreamTask?.cancel()
-        sessionStreamTask?.cancel()
-        cancelSessionReload()
-        unsupportedRefreshTask?.cancel()
-        sessionMetadataTask?.cancel()
-        api = nil
+    private func clearHost(_ hostID: String) {
+        connections[hostID]?.stop()
+        connections.removeValue(forKey: hostID)
+        hostOrder.removeAll { $0 == hostID }
+        KeychainStore.remove(PairedCredential.account(for: hostID))
+        KeychainStore.remove(HostConnection.relayAccount(hostID))
+        clearStoredPush(hostID)
+        pushStatus.removeValue(forKey: hostID)
+        let prefix = hostID + HostCatalog.separator
+        func owned(_ id: String) -> Bool { id.hasPrefix(prefix) }
+        if let selected = selectedSessionID, owned(selected) {
+            sessionStreamTask?.cancel()
+            cancelSessionReload()
+            unsupportedRefreshTask?.cancel()
+            sessionMetadataTask?.cancel()
+            selectedDetail = nil
+            selectedSessionID = nil
+            composer = ""
+            composerAttachments = []
+        }
+        drafts = drafts.filter { !owned($0.key) }
+        attachmentDrafts = attachmentDrafts.filter { !owned($0.key) }
+        pendingSendRequests = pendingSendRequests.filter { !owned($0.key) }
+        deliveryStatus = deliveryStatus.filter { !owned($0.key) }
+        deliveryQueueIDs = deliveryQueueIDs.filter { !owned($0.key) }
+        searchResults = searchResults.filter { !owned($0.id) }
         attachmentCache.removeAll()
         attachmentCacheBytes = 0
-        endpoint = nil
-        token = nil
-        pushRelayURL = nil
-        snapshot = nil
-        selectedDetail = nil
-        selectedSessionID = nil
-        composer = ""
-        drafts = [:]
-        composerAttachments = []
-        attachmentDrafts = [:]
-        pendingSendRequests = [:]
         creationRequestIdentity = nil
         creationRequestKey = nil
-        olderActivity = []
-        activityCursor = nil
-        searchResults = []
-        deliveryStatus = [:]
-        deliveryQueueIDs = [:]
-        lastEventID = 0
-        catalogStreamCursor = 0
-        catalogHostEpoch = nil
-        connectionError = nil
-        reconnecting = false
+        rebuild()
+        updateNotificationStatus()
+    }
+
+    private func retireLegacyPairing() async {
+        let legacy = ["endpoint", "token", "pushRelayURL", "pushRegistration", "pushDeviceToken", "pushEnvironment", "pushEndpoint"]
+        guard legacy.contains(where: { KeychainStore.get($0) != nil }) else { return }
+        var revoked = true
+        if let endpoint = KeychainStore.get("endpoint").flatMap(URL.init(string:)), let token = KeychainStore.get("token") {
+            let api = AgenthailAPI(baseURL: endpoint, token: token, session: networkSession)
+            try? await api.removePush()
+            do { try await api.revokeCurrentDevice() }
+            catch AgenthailAPIError.request(let status, _) where status == 401 {}
+            catch { revoked = false }
+        }
+        if let relayURL = KeychainStore.get("pushRelayURL").flatMap(URL.init(string:)),
+           let value = KeychainStore.get("pushRegistration"), let data = Data(base64Encoded: value),
+           let registration = try? JSONDecoder().decode(PushRegistration.self, from: data) {
+            do { try await PushRelayClient(baseURL: relayURL, session: networkSession).revoke(registration) }
+            catch AgenthailAPIError.request(let status, _) where status == 401 || status == 404 {}
+            catch { revoked = false }
+        }
+        if revoked { legacy.forEach(KeychainStore.remove) }
     }
 
     func requestNotifications() {
@@ -934,168 +1178,85 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func registerPushToken(_ deviceToken: String) {
-        guard let api, let pushRelayURL else {
-            notificationStatus = "Reconnect to finish setup"
+        pushDeviceToken = deviceToken
+        for id in hostOrder {
+            if let connection = connections[id], connection.reachable { registerPush(connection, deviceToken: deviceToken) }
+        }
+        updateNotificationStatus()
+    }
+
+    private func registerPush(_ connection: HostConnection, deviceToken: String) {
+        let hostID = connection.id
+        guard !connection.isPreview, !registeringPush.contains(hostID) else { return }
+        guard let relayURL = connection.pushRelayURL else {
+            pushStatus[hostID] = "Reconnect to finish setup"
+            updateNotificationStatus()
             return
         }
-        notificationStatus = "Enabling"
+        registeringPush.insert(hostID)
+        pushStatus[hostID] = "Enabling"
+        updateNotificationStatus()
         Task {
+            defer {
+                registeringPush.remove(hostID)
+                updateNotificationStatus()
+            }
             do {
-                let relay = PushRelayClient(baseURL: pushRelayURL, session: networkSession)
-                if let registration = storedPushRegistration(),
-                   !registration.needsRenewal,
-                   KeychainStore.get("pushDeviceToken") == deviceToken,
-                   KeychainStore.get("pushEnvironment") == PushRelayClient.environment,
-                   KeychainStore.get("pushEndpoint") == endpoint?.absoluteString {
+                let relay = PushRelayClient(baseURL: relayURL, session: networkSession)
+                let endpoint = connection.credential.endpoint.absoluteString
+                if let stored = storedPush(hostID), !stored.registration.needsRenewal, stored.deviceToken == deviceToken,
+                   stored.environment == PushRelayClient.environment, stored.endpoint == endpoint {
                     do {
-                        try await relay.validate(registration)
-                        try await api.configurePush(installationID: registration.installationId, credential: registration.credential)
-                        notificationStatus = "Enabled"
+                        try await relay.validate(stored.registration)
+                        try await connection.api.configurePush(installationID: stored.registration.installationId, credential: stored.registration.credential)
+                        pushStatus[hostID] = "Enabled"
                         return
                     } catch AgenthailAPIError.request(let status, _) where status == 401 {
-                        clearStoredPushRegistration()
+                        clearStoredPush(hostID)
                     }
                 }
-                if let previous = storedPushRegistration() { try? await relay.revoke(previous) }
-                let registration = try await relay.register(deviceToken: deviceToken)
-                let data = try JSONEncoder().encode(registration)
-                try KeychainStore.set(data.base64EncodedString(), account: "pushRegistration")
-                try KeychainStore.set(deviceToken, account: "pushDeviceToken")
-                try KeychainStore.set(PushRelayClient.environment, account: "pushEnvironment")
-                try KeychainStore.set(endpoint?.absoluteString ?? "", account: "pushEndpoint")
-                try await api.configurePush(installationID: registration.installationId, credential: registration.credential)
-                notificationStatus = "Enabled"
+                if let previous = storedPush(hostID) { try? await relay.revoke(previous.registration) }
+                let registration = try await relay.register(deviceToken: deviceToken, tag: hostID)
+                let stored = StoredPush(registration: registration, deviceToken: deviceToken, environment: PushRelayClient.environment, endpoint: endpoint)
+                try KeychainStore.set(String(decoding: try JSONEncoder().encode(stored), as: UTF8.self), account: Self.pushAccount(hostID))
+                guard connections[hostID] === connection else {
+                    try? await relay.revoke(registration)
+                    clearStoredPush(hostID)
+                    return
+                }
+                try await connection.api.configurePush(installationID: registration.installationId, credential: registration.credential)
+                pushStatus[hostID] = "Enabled"
             } catch {
-                notificationStatus = "Setup failed"
-                operationError = error.localizedDescription
+                pushStatus[hostID] = "Setup failed"
+                operationError = "\(connection.name): \(error.localizedDescription)"
             }
         }
     }
 
-    private func startEvents() {
-        eventTask?.cancel()
-        guard let api else { return }
-        eventTask = Task {
-            let backoff = EventRetryBackoff()
-            while !Task.isCancelled {
-                do {
-                    try await api.streamEvents(
-                        after: lastEventID,
-                        onConnected: { [weak self] in await self?.eventStreamConnected() },
-                        onEvent: { [weak self] event in
-                            backoff.reset()
-                            await self?.receive(event)
-                        }
-                    )
-                } catch {
-                    if Task.isCancelled { return }
-                    reconnecting = true
-                    do {
-                        _ = try await api.version()
-                        recordStreamInterruption(probeError: nil)
-                    } catch {
-                        recordStreamInterruption(probeError: error)
-                    }
-                    let delay = backoff.nextDelay()
-                    try? await Task.sleep(for: .seconds(delay))
-                }
-            }
-        }
-    }
-
-    private func startCatalogStream() {
-        catalogStreamTask?.cancel()
-        guard let api else { return }
-        catalogStreamTask = Task {
-            let backoff = EventRetryBackoff()
-            while !Task.isCancelled {
-                do {
-                    try await api.streamCatalog(after: catalogStreamCursor, onConnected: {}, onEvent: { [weak self] event in
-                        backoff.reset()
-                        await self?.receiveCatalog(event)
-                    })
-                } catch {
-                    if Task.isCancelled { return }
-                    if case AgenthailAPIError.streamGap = error {
-                        catalogStreamCursor = 0
-                        _ = await refresh(fresh: true)
-                    }
-                    let delay = backoff.nextDelay()
-                    try? await Task.sleep(for: .seconds(delay))
-                }
-            }
-        }
-    }
-
-    func receiveCatalog(_ event: CatalogStreamEvent) async {
-        guard event.stream == "catalog" else { return }
-        guard event.seq > catalogStreamCursor else { return }
-        catalogStreamCursor = max(catalogStreamCursor, event.seq)
-        guard var current = snapshot else { return }
-        switch event.type {
-        case "session.upserted":
-            guard let changed = event.data.session else { _ = await refresh(); return }
-            if let index = current.sessions.firstIndex(where: { $0.id == changed.id }) { current.sessions[index] = changed }
-            else { current.sessions.append(changed) }
-            current.totalSessions = current.sessions.count
-            snapshot = current
-            syncSelectedSession(from: current, seq: nextStateRequest())
-            resumeSessionStream(from: current)
-        case "session.queue":
-            guard let id = event.data.sessionId, let count = event.data.queueCount,
-                  let index = current.sessions.firstIndex(where: { $0.id == id }) else { return }
-            current.sessions[index].queueCount = count
-            snapshot = current
-        case "session.removed":
-            guard let id = event.data.sessionId else { _ = await refresh(); return }
-            current.sessions.removeAll { $0.id == id }
-            current.totalSessions = current.sessions.count
-            snapshot = current
-            fetchedSubagents.sessionRemoved(id, unlisted: event.data.reason == "unlisted")
-            if let next = event.data.rekeyedTo { followRekeys([id: next]) }
-        case "surface.health":
-            guard let name = event.data.surface, let health = event.data.health,
-                  let index = current.surfaces.firstIndex(where: { $0.name == name }) else {
-                _ = await refresh(fresh: true)
-                return
-            }
-            let previous = current.surfaces[index]
-            current.surfaces[index] = SurfaceState(name: name, connected: health == "healthy", error: health == "healthy" ? nil : event.data.detail, health: health, healthDetail: event.data.detail, capabilities: previous.capabilities, runtime: event.data.runtime)
-            snapshot = current
-        case "delivery.problem":
-            guard let deliveryId = event.data.deliveryId,
-                  let sessionId = event.data.sessionId,
-                  let message = event.data.message,
-                  let reason = event.data.reason,
-                  let at = event.data.at else { return }
-            var problems = current.deliveryProblems ?? []
-            let problem = DeliveryProblem(deliveryId: deliveryId, sessionId: sessionId, sourceSessionId: event.data.sourceSessionId, attentionSessionId: event.data.attentionSessionId, message: message, reason: reason, status: event.data.status, at: at)
-            problems.removeAll { $0.deliveryId == deliveryId }
-            problems.insert(problem, at: 0)
-            current.deliveryProblems = Array(problems.prefix(50))
-            snapshot = current
-        case "delivery.dismissed":
-            guard let deliveryId = event.data.deliveryId else { return }
-            current.deliveryProblems = current.deliveryProblems?.filter { $0.deliveryId != deliveryId }
-            snapshot = current
-        default:
-            return
-        }
+    private func updateNotificationStatus() {
+        let statuses = hostOrder.filter { !(connections[$0]?.isPreview ?? true) }.map { pushStatus[$0] ?? "Not enabled" }
+        if statuses.isEmpty { return }
+        if statuses.contains("Setup failed") { notificationStatus = "Setup failed" }
+        else if statuses.contains("Enabling") { notificationStatus = "Enabling" }
+        else if statuses.allSatisfy({ $0 == "Enabled" }) { notificationStatus = "Enabled" }
+        else if statuses.contains("Enabled") || statuses.contains("Reconnect to finish setup") { notificationStatus = "Reconnect to finish setup" }
+        else { notificationStatus = statuses.first ?? "Not enabled" }
+        rebuild()
     }
 
     private func startSessionStream(_ id: String) {
         sessionStreamTask?.cancel()
-        guard let api, selectedSessionID == id else { return }
+        guard selectedSessionID == id, case let (connection, route)? = try? resolveServer(id) else { return }
         sessionStreamTask = Task {
             let backoff = EventRetryBackoff()
-            while !Task.isCancelled, selectedSessionID == id {
+            while !Task.isCancelled, selectedSessionID == id, server(for: id) === connection {
                 do {
-                    try await api.streamSession(id: id, after: sessionStreamCursor, onConnected: {}, onEvent: { [weak self] event in
+                    try await connection.api.streamSession(id: route.sessionID, after: sessionStreamCursor, onConnected: {}, onEvent: { [weak self] event in
                         backoff.reset()
-                        await self?.applySessionStreamEvent(event)
+                        await self?.applySessionStreamEvent(event, route: route, server: connection)
                     })
                 } catch {
-                    if Task.isCancelled || selectedSessionID != id { return }
+                    if Task.isCancelled || selectedSessionID != id || server(for: id) !== connection { return }
                     if case AgenthailAPIError.streamUnsupported = error,
                        snapshot?.sessions.first(where: { $0.id == id })?.capabilities.stream != true {
                         sessionStreamUnsupported = true
@@ -1150,7 +1311,7 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
-    private func nextStateRequest() -> UInt64 {
+    func nextStateRequest() -> UInt64 {
         stateRequests += 1
         return stateRequests
     }
@@ -1167,7 +1328,14 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func applySessionStreamEvent(_ event: SessionStreamEvent) {
-        guard event.stream == "session", event.sessionId == selectedSessionID, var detail = selectedDetail, detail.session.id == event.sessionId else { return }
+        guard let id = selectedSessionID, let route = catalog.route(for: id), let connection = connections[route.hostID] else { return }
+        applySessionStreamEvent(event, route: route, server: connection)
+    }
+
+    private func applySessionStreamEvent(_ event: SessionStreamEvent, route: SessionRoute, server connection: HostConnection) {
+        guard event.stream == "session", event.sessionId == route.sessionID, let selected = selectedSessionID,
+              catalog.route(for: selected) == route, server(for: selected) === connection,
+              var detail = selectedDetail, detail.session.id == selected else { return }
         sessionStreamCursor = max(sessionStreamCursor, event.seq)
         if event.data.kind == "context" {
             sessionMetadata.stream(context: event.data.context)
@@ -1197,7 +1365,7 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func retainedSessionBody(for item: TimelineItem, start: Int = 0) async -> RetainedBodyResult? {
-        guard let api, let id = selectedSessionID, let ref = item.bodyRef else { return nil }
+        guard let id = selectedSessionID, let ref = item.bodyRef, case let (connection, route)? = try? resolveServer(id) else { return nil }
         let chunkSize = 16 << 10
         let maximum = 8 << 20
         var cursor = max(0, start)
@@ -1207,7 +1375,8 @@ final class AgenthailIOSModel: ObservableObject {
         do {
             while cursor < (total ?? maximum) {
                 let requestedEnd = min(cursor + chunkSize, maximum)
-                let chunk = try await api.sessionStreamBody(id: id, ref: ref, start: cursor, end: requestedEnd)
+                let chunk = try await connection.api.sessionStreamBody(id: route.sessionID, ref: ref, start: cursor, end: requestedEnd)
+                guard server(for: id) === connection else { return nil }
                 if total == nil { total = chunk.total }
                 guard chunk.total == total, chunk.start == cursor, chunk.end > cursor, chunk.end <= maximum else {
                     return RetainedBodyResult(text: chunks.joined(), error: "The retained body returned an invalid range.")
@@ -1224,65 +1393,81 @@ final class AgenthailIOSModel: ObservableObject {
             }
             return RetainedBodyResult(text: chunks.joined(), error: "The retained body could not be completed.")
         } catch {
+            guard server(for: id) === connection else { return nil }
             return RetainedBodyResult(text: chunks.joined(), error: error.localizedDescription)
         }
     }
 
-    func receive(_ event: AgenthailEvent) async {
-        lastEventID = event.type == "stream.reset" ? 0 : max(lastEventID, event.id)
-        if let entity = event.entityId { refreshUnsupportedSession(entity) }
-        guard Self.shouldRefreshSnapshot(for: event.type) else { return }
-        eventRefreshTask?.cancel()
-        eventRefreshTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(200))
-            guard !Task.isCancelled, let self else { return }
-            await self.refresh(fresh: event.type == "stream.reset")
+    func hostDidChange(_ host: HostConnection) {
+        guard connections[host.id] === host else { return }
+        rebuild()
+        if let snapshot {
+            syncSelectedSession(from: snapshot, seq: host.snapshotSeq)
+            resumeSessionStream(from: snapshot)
         }
     }
 
-    func eventStreamConnected() async {
-        reconnecting = false
-        if snapshotCoversEventStream {
-            snapshotCoversEventStream = false
-        } else {
-            _ = await refresh(fresh: true)
-        }
+    func hostRefreshed(_ host: HostConnection) async {
+        guard connections[host.id] === host else { return }
+        await refreshDeliveries()
+    }
+
+    func hostConnected(_ host: HostConnection) {
+        guard connections[host.id] === host else { return }
+        if let pushDeviceToken { registerPush(host, deviceToken: pushDeviceToken) }
+        else { refreshNotificationRegistration() }
+    }
+
+    func hostEventStreamConnected(_ host: HostConnection) async {
+        guard connections[host.id] === host, let id = selectedSessionID, catalog.route(for: id)?.hostID == host.id else { return }
         await reloadSelectedSession()
-        startCatalogStream()
     }
 
-    func recordStreamInterruption(probeError: Error?) {
-        reconnecting = probeError == nil
-        connectionError = probeError?.localizedDescription
+    func host(_ host: HostConnection, receivedEventFor entity: String) {
+        guard connections[host.id] === host else { return }
+        refreshUnsupportedSession(HostCatalog.qualify(host.id, entity))
     }
 
-    private func storedPushRegistration() -> PushRegistration? {
-        guard let value = KeychainStore.get("pushRegistration"), let data = Data(base64Encoded: value) else { return nil }
-        return try? JSONDecoder().decode(PushRegistration.self, from: data)
+    func host(_ host: HostConnection, rekeyed retired: [String: String]) {
+        guard connections[host.id] === host else { return }
+        followRekeys(Dictionary(retired.map { (HostCatalog.qualify(host.id, $0.key), HostCatalog.qualify(host.id, $0.value)) }, uniquingKeysWith: { _, new in new }))
+    }
+
+    func host(_ host: HostConnection, removedSession id: String, unlisted: Bool) {
+        guard connections[host.id] === host else { return }
+        fetchedSubagents.sessionRemoved(HostCatalog.qualify(host.id, id), unlisted: unlisted)
+    }
+
+    private static func pushAccount(_ hostID: String) -> String { "push:\(hostID)" }
+
+    private func storedPush(_ hostID: String) -> StoredPush? {
+        guard let value = KeychainStore.get(Self.pushAccount(hostID)) else { return nil }
+        return try? JSONDecoder().decode(StoredPush.self, from: Data(value.utf8))
     }
 
     private func disableNotifications(status: String) async {
-        guard let api else {
-            notificationStatus = status
-            return
-        }
-        do {
-            try await api.removePush()
-            if let pushRelayURL, let registration = storedPushRegistration() {
-                try? await PushRelayClient(baseURL: pushRelayURL, session: networkSession).revoke(registration)
+        var failure: String?
+        for id in hostOrder {
+            guard let connection = connections[id], !connection.isPreview else { continue }
+            do {
+                try await connection.api.removePush()
+                if let relayURL = connection.pushRelayURL, let stored = storedPush(id) {
+                    try? await PushRelayClient(baseURL: relayURL, session: networkSession).revoke(stored.registration)
+                }
+                clearStoredPush(id)
+                pushStatus[id] = status
+            } catch {
+                pushStatus[id] = status
+                failure = "Could not disable notification delivery on \(connection.name). Reconnect and try again. \(error.localizedDescription)"
             }
-            clearStoredPushRegistration()
-            notificationStatus = status
-        } catch {
-            notificationStatus = status
-            operationError = "Could not disable notification delivery. Reconnect and try again. \(error.localizedDescription)"
         }
+        notificationStatus = status
+        if let failure { operationError = failure }
+        rebuild()
     }
 
-    private func clearStoredPushRegistration() {
-        for account in ["pushRegistration", "pushDeviceToken", "pushEnvironment", "pushEndpoint"] {
-            KeychainStore.remove(account)
-        }
+    private func clearStoredPush(_ hostID: String) {
+        KeychainStore.remove(Self.pushAccount(hostID))
     }
 }
 

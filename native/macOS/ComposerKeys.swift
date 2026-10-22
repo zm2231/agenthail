@@ -5,12 +5,14 @@ enum ComposerCommand: CaseIterable {
     case newline
     case deleteToLineStart
     case deleteWordBackward
+    case paste
 
     var appCommand: AppCommand {
         switch self {
         case .newline: .composerNewline
         case .deleteToLineStart: .composerDeleteToLineStart
         case .deleteWordBackward: .composerDeleteWordBackward
+        case .paste: .composerPaste
         }
     }
 
@@ -20,6 +22,7 @@ enum ComposerCommand: CaseIterable {
         case .newline: #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:))
         case .deleteToLineStart: #selector(NSResponder.deleteToBeginningOfParagraph(_:))
         case .deleteWordBackward: #selector(NSResponder.deleteWordBackward(_:))
+        case .paste: #selector(NSText.paste(_:))
         }
     }
 
