@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -15,8 +14,8 @@ import (
 
 // codexStdioClient runs its own `codex app-server` over stdio for one task,
 // with the environment it is given, so it never reaches a thread or a daemon
-// another process runs. The process lives no longer than the context it was
-// started with.
+// another process runs. It and everything it starts live no longer than the
+// context it was started with or the Close that ends it.
 type codexStdioClient struct {
 	ctx     context.Context
 	cmd     *exec.Cmd
@@ -28,7 +27,9 @@ type codexStdioClient struct {
 }
 
 func startCodexStdio(ctx context.Context, binary string, env []string) (*codexStdioClient, error) {
-	cmd := exec.CommandContext(ctx, binary, "app-server")
+	// Plugins are off because at startup Codex syncs its plugin catalog with a
+	// git clone into CODEX_HOME, which this short run would leave half done.
+	cmd := processGroupCommand(ctx, binary, "app-server", "--disable", "plugins")
 	cmd.Env = env
 	cmd.Stderr = nil
 	stdin, err := cmd.StdinPipe()
@@ -124,9 +125,10 @@ func (c *codexStdioClient) Close() error {
 	select {
 	case <-c.done:
 	case <-c.ctx.Done():
-		_ = c.cmd.Process.Signal(os.Kill)
 	case <-time.After(5 * time.Second):
-		_ = c.cmd.Process.Signal(os.Kill)
 	}
+	// Killing the group also ends anything the app-server started, which
+	// could otherwise keep writing to CODEX_HOME after it exits.
+	_ = c.cmd.Cancel()
 	return c.cmd.Wait()
 }

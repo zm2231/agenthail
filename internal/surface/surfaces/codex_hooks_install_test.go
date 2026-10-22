@@ -82,6 +82,10 @@ func TestHooksInstallCodexKeepsThePersonsConfigAndIsUndoneByUninstall(t *testing
 	if instructions, _ := os.ReadFile(memory); string(instructions) != notes {
 		t.Fatalf("AGENTS.md after uninstall:\n%q, want %q", instructions, notes)
 	}
+	if _, err := os.Stat(filepath.Join(home, ".tmp")); !os.IsNotExist(err) {
+		entries, _ := os.ReadDir(filepath.Join(home, ".tmp"))
+		t.Fatalf("install left Codex's own work in CODEX_HOME/.tmp: %v", entries)
+	}
 }
 
 func TestHooksInstallCodexWritesIntoAHooksFileThePersonAlreadyUses(t *testing.T) {
