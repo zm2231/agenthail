@@ -408,7 +408,7 @@ final class AgenthailIOSModel: ObservableObject {
                     }
                     if await refresh(fresh: true) {
                         guard !Task.isCancelled else { return }
-                        snapshotCoversEventStream = true
+                        snapshotCoversEventStream = snapshot?.daemon.stale != true
                         startEvents()
                         refreshNotificationRegistration()
                         return
