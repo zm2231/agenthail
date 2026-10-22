@@ -502,6 +502,15 @@ struct SessionRowView: View {
                     .font(.system(size: 10.5))
                     .foregroundStyle(DesktopPalette.amber)
             }
+            if !session.sharedHolders.isEmpty {
+                HStack(spacing: 3) {
+                    Image(systemName: "terminal")
+                    Text("\(session.sharedHolders.count)")
+                }
+                .font(.system(size: 10.5))
+                .foregroundStyle(DesktopPalette.text2)
+                .help(SessionFacts.holdersHelp(session.sharedHolders))
+            }
             Text(relativeAge(session.lastActive))
                 .font(.system(size: 11))
                 .foregroundStyle(DesktopPalette.text2)
@@ -1536,6 +1545,9 @@ struct ComposerView: View {
                         }
                         if session.surface == "codex" {
                             TurnSettingsMenu(model: model, sessionID: session.id, detail: pane.detail)
+                        }
+                        if !session.sharedHolders.isEmpty {
+                            HolderPicker(model: model, session: session)
                         }
                         Spacer()
                         if session.isWorking && hasText && !draftIsCommand {

@@ -8,7 +8,15 @@ final class AgenthailIOSModel: ObservableObject {
         eventType == "stream.reset" || eventType == "state.changed" || eventType == "settings.updated" || eventType.hasPrefix("device.")
     }
 
-    @Published var snapshot: DashboardSnapshot?
+    @Published var snapshot: DashboardSnapshot? {
+        didSet {
+            if let snapshot {
+                HolderPins.shared.prune(to: snapshot.sessions)
+                holderPicks = HolderPins.shared.all
+            }
+        }
+    }
+    @Published private(set) var holderPicks: [String: HolderPin] = [:]
     @Published var selectedDetail: SessionDetail?
     @Published var sessionRequests: SessionRequests?
     @Published var answeringRequest: String?
@@ -695,6 +703,11 @@ final class AgenthailIOSModel: ObservableObject {
         composer = composer.isEmpty ? edited : edited + "\n\n" + composer
     }
 
+    func pickHolder(_ holder: SessionHolder?, for sessionID: String) {
+        HolderPins.shared.pick(holder.map(HolderPin.init), for: sessionID)
+        holderPicks = HolderPins.shared.all
+    }
+
     func send(to session: SessionState) {
         let message = composer.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachments = composerAttachments
@@ -737,7 +750,7 @@ final class AgenthailIOSModel: ObservableObject {
             } catch {
                 deliveryIDs.removeValue(forKey: session.id)
                 deliveryStatus[session.id] = "Couldn’t complete request. Draft kept."
-                operationError = attachments.isEmpty ? "Couldn’t complete request." : AgenthailAPIError.userMessage(error)
+                operationError = session.holderRefusal(error, picked: holderPicks[session.id] != nil) ?? (attachments.isEmpty ? "Couldn’t complete request." : AgenthailAPIError.userMessage(error))
                 if selectedSessionID == session.id {
                     composer = composer.isEmpty ? message : message + "\n\n" + composer
                     composerAttachments = ComposerAttachments.adding(composerAttachments, to: attachments).attachments

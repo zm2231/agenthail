@@ -42,6 +42,7 @@ final class AgenthailAPI: @unchecked Sendable {
     private let session: URLSession
     private let baseURL: URL
     private let token: String
+    var holderPins = HolderPins.shared
 
     init(baseURL: URL, token: String, session: URLSession = .shared) {
         self.session = session
@@ -533,7 +534,11 @@ final class AgenthailAPI: @unchecked Sendable {
 
     private func setIdempotencyHeader(on request: inout URLRequest, path: String, method: String, key: String?) {
         guard method == "POST", path == "/api/v1/actions" else { return }
-        request.setValue(key ?? UUID().uuidString, forHTTPHeaderField: "Idempotency-Key")
+        var key = key ?? UUID().uuidString
+        if let body = request.httpBody {
+            (request.httpBody, key) = holderPins.pinned(body: body, key: key)
+        }
+        request.setValue(key, forHTTPHeaderField: "Idempotency-Key")
     }
 
     // Lines are split here because AsyncBytes.lines drops the blank lines that end server-sent events.
