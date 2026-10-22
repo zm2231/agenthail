@@ -1116,7 +1116,7 @@ struct ClaudeSubagentLink: Decodable, Identifiable, Equatable {
 }
 
 struct SessionDetail: Decodable {
-    let session: RawSession
+    var session: RawSession
     let journalSeq: UInt64?
     let alias: String?
     let exchanges: [ExchangeState]
@@ -1144,7 +1144,7 @@ struct RawSession: Decodable {
     let id: String
     let surface: String
     let name: String
-    let status: String
+    var status: String
     let lastActive: String
     let source: String?
     let transport: String?

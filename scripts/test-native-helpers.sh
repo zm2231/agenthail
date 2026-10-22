@@ -26,6 +26,7 @@ SOURCES=(
   RequestNotifications.swift
   SessionSelection.swift
   SessionTree.swift
+  MetadataOverlay.swift
   StatusRefreshPolicy.swift
   TurnSettings.swift
   VoiceAPI.swift
@@ -39,7 +40,6 @@ SOURCES=(
   macOS/CatalogPosition.swift
   macOS/ContextBreakdown.swift
   macOS/LocalSend.swift
-  macOS/MetadataOverlay.swift
   macOS/Overview.swift
   macOS/PeerEnvelope.swift
   macOS/QueueFacts.swift

@@ -32,6 +32,7 @@ let package = Package(
                 "ComposerAttachment.swift",
                 "SessionSelection.swift",
                 "SessionTree.swift",
+                "MetadataOverlay.swift",
                 "EventRetryBackoff.swift",
                 "ToolPresentation.swift",
                 "OperationsRefreshPolicy.swift",

@@ -33,6 +33,7 @@ targets:
       - path: ComposerAttachment.swift
       - path: SessionSelection.swift
       - path: SessionTree.swift
+      - path: MetadataOverlay.swift
       - path: EventRetryBackoff.swift
       - path: ToolPresentation.swift
       - path: VoiceAPI.swift
