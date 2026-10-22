@@ -235,7 +235,7 @@ func TestSessionSourceJournalsToolResultAttachmentMetadataWithoutBytes(t *testin
 
 func TestSessionSourceTurnPhasePreservesAssistantBody(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	source.append(surface.StreamEvent{ID: "answer", ProviderKey: "answer", Operation: "upsert", Kind: "text", Role: "assistant", Text: "The complete answer", Version: 19})
 	source.append(surface.StreamEvent{ID: "answer", ProviderKey: "answer", Operation: "phase", Kind: "done", Version: 19})
 	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
@@ -257,7 +257,7 @@ func TestSessionSourceTurnPhasePreservesAssistantBody(t *testing.T) {
 func TestSessionJournalInlineBodyKeepsUTF8Boundary(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	manager := newSessionSourceManager(reg)
-	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	body := strings.Repeat("a", sessionStreamBodyBytes-1) + "é rest"
 	source.append(surface.StreamEvent{ID: "unicode", Kind: "text", Text: body})
 	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
@@ -281,7 +281,7 @@ func TestSessionJournalPreservesProviderTruncationForSeedAndLive(t *testing.T) {
 	for _, mode := range []string{"seed", "live", "seed-metadata"} {
 		t.Run(mode, func(t *testing.T) {
 			_, reg, fake, from, _ := daemonFixture(t)
-			source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+			source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 			item := surface.TimelineItem{ID: "partial", Kind: "event", Text: "bounded preview", Truncated: true, TruncationReason: "timeline text limit"}
 			if mode == "live" {
 				source.append(surface.StreamEvent{ID: item.ID, ProviderKey: "timeline:" + item.ID, Operation: "upsert", Kind: item.Kind, Text: item.Text, Truncated: item.Truncated, TruncationReason: item.TruncationReason})
@@ -312,7 +312,7 @@ func TestSessionJournalPreservesProviderTruncationForSeedAndLive(t *testing.T) {
 
 func TestTruncatedSeedDoesNotMarkRetainedAuthoritativeBodyIncomplete(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	source.append(surface.StreamEvent{ID: "answer", ProviderKey: "timeline:answer", Operation: "upsert", Kind: "text", Text: "complete answer"})
 	source.appendSeedItems([]surface.TimelineItem{{ID: "answer", Kind: "text", Text: "complete", Truncated: true, TruncationReason: "timeline text limit"}})
 	entry, found, err := reg.SessionJournalEntryByProviderKey(from.ID, "timeline:answer")
@@ -331,7 +331,7 @@ func TestTruncatedSeedDoesNotMarkRetainedAuthoritativeBodyIncomplete(t *testing.
 func TestSessionJournalBodyBudgetKeepsPreviewWithoutDeadReference(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	manager := newSessionSourceManager(reg)
-	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	body := strings.Repeat("x", sessionJournalRetentionBytes)
 	source.append(surface.StreamEvent{ID: "oversized", Kind: "text", Text: body})
 	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
@@ -395,10 +395,11 @@ func TestSessionSourcePersistsStreamFailureAsReset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	entries := followJournal(t, manager, from.ID, subscription)
 	defer subscription.Cancel()
 	var entry registry.SessionJournalEntry
 	select {
-	case entry = <-subscription.Entries:
+	case entry = <-entries:
 	case <-time.After(time.Second):
 		t.Fatal("subscriber did not receive source failure")
 	}
@@ -492,6 +493,7 @@ func TestSessionSourceUnifiesCodexSeedAndLiveProviderIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	entries := followJournal(t, manager, from.ID, subscription)
 	defer subscription.Cancel()
 	select {
 	case <-adapter.started:
@@ -513,7 +515,7 @@ func TestSessionSourceUnifiesCodexSeedAndLiveProviderIdentity(t *testing.T) {
 	deadline := time.After(time.Second)
 	for {
 		select {
-		case entry := <-subscription.Entries:
+		case entry := <-entries:
 			var payload sessionJournalPayload
 			if json.Unmarshal(entry.Payload, &payload) == nil && payload.Body == "live" {
 				goto liveObserved
@@ -588,6 +590,7 @@ func TestSessionSourceKeepsUnsupportedTailOpenWithoutRetryNoise(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	entries := followJournal(t, manager, from.ID, subscription)
 	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
 	if err != nil || len(window.Entries) != 1 {
 		t.Fatalf("window=%+v err=%v", window, err)
@@ -603,7 +606,7 @@ func TestSessionSourceKeepsUnsupportedTailOpenWithoutRetryNoise(t *testing.T) {
 	deadline := time.After(time.Second)
 	for {
 		select {
-		case _, open := <-subscription.Entries:
+		case _, open := <-entries:
 			if !open {
 				return
 			}
@@ -636,6 +639,7 @@ func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	entries := followJournal(t, manager, from.ID, subscription)
 	defer subscription.Cancel()
 	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
 	if err != nil || len(window.Entries) < 2 {
@@ -696,7 +700,7 @@ func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
 		answerID := ""
 		for !seen[turn.message] {
 			select {
-			case entry := <-subscription.Entries:
+			case entry := <-entries:
 				if entry.Seq <= seedThrough {
 					continue
 				}
@@ -917,7 +921,7 @@ func TestSessionSourceSharesOneUpstreamAndJournalsNormalizedEvents(t *testing.T)
 	adapter.events <- surface.StreamEvent{ID: "m1", ProviderKey: "m1", Version: 4, Operation: "append", TurnID: "t1", Kind: "text", Text: "test"}
 	for _, subscription := range []sessionSourceSubscription{first, second, third} {
 		select {
-		case entry := <-subscription.Entries:
+		case entry := <-followJournal(t, manager, from.ID, subscription):
 			var payload sessionJournalPayload
 			if err := json.Unmarshal(entry.Payload, &payload); err != nil {
 				t.Fatal(err)
@@ -966,6 +970,52 @@ func TestPrepareStreamDropsSeedBufferAndKeepsFastPostCursorEvent(t *testing.T) {
 	}
 }
 
+func TestPrepareStreamFollowsABurstItsConsumerIsSlowToRead(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 200)}
+	for i := range 160 {
+		adapter.items = append(adapter.items, surface.TimelineItem{ID: fmt.Sprintf("seed-%d", i), Kind: "text", Role: "assistant", Text: "seed"})
+	}
+	adapter.caps.Stream = true
+	manager := newSessionSourceManager(reg)
+	defer manager.shutdown()
+	subscription, err := manager.prepareStream(context.Background(), &from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	if subscription.Cursor != 160 {
+		t.Fatalf("seed cursor=%d", subscription.Cursor)
+	}
+	for i := range 160 {
+		adapter.events <- surface.StreamEvent{ID: fmt.Sprintf("reply-%d", i), ProviderKey: fmt.Sprintf("reply-%d", i), Operation: "upsert", Kind: "text", Role: "assistant", Text: fmt.Sprintf("reply-%d", i)}
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		window, err := reg.SessionJournalAfter(from.ID, subscription.Cursor, 200)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(window.Entries) == 160 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the source did not journal the burst")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	for i := range 160 {
+		select {
+		case event, ok := <-subscription.Events:
+			if !ok || event.Body != fmt.Sprintf("reply-%d", i) {
+				t.Fatalf("event %d: %+v open=%v", i, event, ok)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("missing event %d", i)
+		}
+	}
+}
+
 func TestSessionSourceAccumulatesStableProviderAppendIntoOneJournalEntry(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 2)}
@@ -975,6 +1025,7 @@ func TestSessionSourceAccumulatesStableProviderAppendIntoOneJournalEntry(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	entries := followJournal(t, manager, from.ID, subscription)
 	defer subscription.Cancel()
 	select {
 	case <-adapter.started:
@@ -983,11 +1034,13 @@ func TestSessionSourceAccumulatesStableProviderAppendIntoOneJournalEntry(t *test
 	}
 	adapter.events <- surface.StreamEvent{ID: "managed:turn-1:text", ProviderKey: "managed:turn-1:text", Version: 3, Operation: "append", TurnID: "turn-1", Kind: "text", Text: "hel"}
 	adapter.events <- surface.StreamEvent{ID: "managed:turn-1:text", ProviderKey: "managed:turn-1:text", Version: 5, Operation: "append", TurnID: "turn-1", Kind: "text", Text: "lo"}
-	for range 2 {
+	deadline := time.After(time.Second)
+	for accumulated := false; !accumulated; {
 		select {
-		case <-subscription.Entries:
-		case <-time.After(time.Second):
-			t.Fatal("subscriber did not receive event")
+		case entry := <-entries:
+			accumulated = strings.Contains(string(entry.Payload), `"body":"hello"`)
+		case <-deadline:
+			t.Fatal("subscriber did not receive the accumulated row")
 		}
 	}
 	window, err := registry.SessionJournalAfter(from.ID, 0, 10)
@@ -1013,7 +1066,7 @@ func TestSessionSourceAssignsIdentityToProviderEventsWithoutOne(t *testing.T) {
 
 func TestSessionSourceKeepsMetadataStateInOneJournalRow(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	source.append(surface.StreamEvent{ID: "visible", ProviderKey: "visible", Operation: "upsert", Kind: "message", Role: "assistant", Text: "keep me"})
 	for index := 1; index <= 50; index++ {
 		source.append(surface.StreamEvent{Kind: "context", Context: &surface.ContextUsage{UsedTokens: int64(index)}})
@@ -1078,6 +1131,7 @@ func TestSessionSourceSeedOverlapDoesNotRepublishOrAdvanceJournal(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	entries := followJournal(t, manager, from.ID, subscription)
 	defer subscription.Cancel()
 	select {
 	case <-adapter.started:
@@ -1089,7 +1143,7 @@ func TestSessionSourceSeedOverlapDoesNotRepublishOrAdvanceJournal(t *testing.T) 
 		t.Fatalf("seeded=%+v err=%v", seeded, err)
 	}
 	select {
-	case entry := <-subscription.Entries:
+	case entry := <-entries:
 		if entry.Seq != seeded.LatestSeq {
 			t.Fatalf("seed event=%+v, want seq %d", entry, seeded.LatestSeq)
 		}
@@ -1098,7 +1152,7 @@ func TestSessionSourceSeedOverlapDoesNotRepublishOrAdvanceJournal(t *testing.T) 
 	}
 	adapter.events <- surface.StreamEvent{ID: "timeline-1", ProviderKey: "timeline:timeline-1", Version: uint64(len(body)), Operation: "upsert", Kind: "message", Role: "assistant", Text: body, Timestamp: timeMustParse(t, when)}
 	select {
-	case entry := <-subscription.Entries:
+	case entry := <-entries:
 		t.Fatalf("identical overlap was published: %+v", entry)
 	case <-time.After(150 * time.Millisecond):
 	}
@@ -1108,7 +1162,7 @@ func TestSessionSourceSeedOverlapDoesNotRepublishOrAdvanceJournal(t *testing.T) 
 	}
 	adapter.events <- surface.StreamEvent{ID: "timeline-1", ProviderKey: "timeline:timeline-1", Version: uint64(len(body) + 1), Operation: "upsert", Kind: "message", Role: "assistant", Text: body + "!", Timestamp: timeMustParse(t, when)}
 	select {
-	case entry := <-subscription.Entries:
+	case entry := <-entries:
 		if entry.Seq != seeded.LatestSeq+1 {
 			t.Fatalf("changed entry=%+v, want seq %d", entry, seeded.LatestSeq+1)
 		}
@@ -1133,7 +1187,7 @@ func TestSessionSourceSeedHandoffPreservesPrefixAndSuppressesDesktopReplay(t *te
 			Timestamp: "2026-10-04T00:00:00Z",
 		}},
 	}
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: adapter, epoch: "epoch", ctx: context.Background(), appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: adapter, epoch: "epoch", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	source.seedJournal()
 
 	for _, event := range []surface.StreamEvent{
@@ -1396,4 +1450,37 @@ func TestAUsageLimitNoticeKeepsItsResetTimeThroughTheJournal(t *testing.T) {
 	if item.Kind != "notice" || item.Status != surface.TimelineUsageLimit || item.ResetsAt != notice.ResetsAt || item.Text != notice.Text {
 		t.Fatalf("item=%+v", item)
 	}
+}
+
+// followJournal reads a subscription the way the daemon's followers do: the
+// journal rows after a cursor that starts at the beginning, read each time the
+// source wakes it. The channel closes when the source ends.
+func followJournal(t *testing.T, manager *sessionSourceManager, sessionID string, subscription sessionSourceSubscription) <-chan registry.SessionJournalEntry {
+	t.Helper()
+	entries := make(chan registry.SessionJournalEntry)
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	go func() {
+		defer close(entries)
+		var cursor uint64
+		for open := true; ; {
+			more, err := readSessionJournalAfter(manager.registry, sessionID, &cursor, func(entry registry.SessionJournalEntry) bool {
+				select {
+				case entries <- entry:
+					return true
+				case <-done:
+					return false
+				}
+			})
+			if err != nil || !more || !open {
+				return
+			}
+			select {
+			case _, open = <-subscription.Wake:
+			case <-done:
+				return
+			}
+		}
+	}()
+	return entries
 }

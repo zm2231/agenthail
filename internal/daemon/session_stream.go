@@ -69,10 +69,10 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 		writeDashboardJSON(w, http.StatusConflict, map[string]any{"error": map[string]any{"code": "stream_gap", "message": "The session stream cursor is no longer retained."}, "earliestSeq": window.EarliestSeq, "latestSeq": window.LatestSeq})
 		return
 	}
-	d.writeSessionStream(w, r, flusher, sessionID, after, window, subscription.Entries)
+	d.writeSessionStream(w, r, flusher, sessionID, after, window, subscription.Wake)
 }
 
-func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flusher http.Flusher, sessionID string, after uint64, window registry.SessionJournalWindow, entries <-chan registry.SessionJournalEntry) {
+func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flusher http.Flusher, sessionID string, after uint64, window registry.SessionJournalWindow, wake <-chan struct{}) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("Connection", "keep-alive")
@@ -93,28 +93,26 @@ func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flus
 			watermark = entry.Seq
 		}
 	}
-	flusher.Flush()
+	follow := func() bool {
+		more, _ := readSessionJournalAfter(d.Registry, sessionID, &watermark, func(entry registry.SessionJournalEntry) bool {
+			return d.apiEventStreamAuthorized(r) && writeSessionStreamEntry(w, sessionID, entry, toItem) == nil
+		})
+		flusher.Flush()
+		return more
+	}
+	if !follow() {
+		return
+	}
 	keepalive := time.NewTicker(eventKeepalivePeriod)
 	defer keepalive.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case entry, open := <-entries:
-			if !open {
+		case _, open := <-wake:
+			if !follow() || !open {
 				return
 			}
-			if entry.Seq <= watermark {
-				continue
-			}
-			if !d.apiEventStreamAuthorized(r) {
-				return
-			}
-			if err := writeSessionStreamEntry(w, sessionID, entry, toItem); err != nil {
-				return
-			}
-			watermark = entry.Seq
-			flusher.Flush()
 		case <-keepalive.C:
 			if !d.apiEventStreamAuthorized(r) {
 				return

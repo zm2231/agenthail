@@ -82,7 +82,7 @@ type sessionSource struct {
 	cancel          context.CancelFunc
 	mu              sync.Mutex
 	providerMu      sync.Mutex
-	subscribers     map[uint64]chan registry.SessionJournalEntry
+	followers       map[uint64]chan struct{}
 	nextID          uint64
 	holders         map[string]int
 	appendBodies    map[string]string
@@ -94,9 +94,13 @@ type sessionSource struct {
 	sourceVersion   uint64
 }
 
+// sessionSourceSubscription follows a session's journal. Wake receives a
+// signal after the source journals rows and closes when the source ends; the
+// follower reads the rows after its own cursor, so a burst it is slow to read
+// waits in the journal instead of ending the subscription.
 type sessionSourceSubscription struct {
-	Entries <-chan registry.SessionJournalEntry
-	Cancel  func()
+	Wake   <-chan struct{}
+	Cancel func()
 }
 
 func newSessionSourceManager(store *registry.Registry) *sessionSourceManager {
@@ -125,7 +129,7 @@ func (m *sessionSourceManager) subscribeContext(waitContext context.Context, ses
 			return sessionSourceSubscription{}, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}, appendCursors: map[string]uint64{}}
+		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), followers: map[uint64]chan struct{}{}, holders: map[string]int{}, appendBodies: map[string]string{}, appendCursors: map[string]uint64{}}
 		m.sources[session.ID] = source
 		m.running.Add(1)
 		start = true
@@ -166,7 +170,7 @@ func (m *sessionSourceManager) holdSource(session *surface.Session, adapter surf
 			return nil, nil, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}, appendCursors: map[string]uint64{}}
+		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), followers: map[uint64]chan struct{}{}, holders: map[string]int{}, appendBodies: map[string]string{}, appendCursors: map[string]uint64{}}
 		m.sources[session.ID] = source
 		m.running.Add(1)
 		start = true
@@ -185,21 +189,21 @@ func (s *sessionSource) subscribe(holder string) sessionSourceSubscription {
 	s.mu.Lock()
 	s.nextID++
 	id := s.nextID
-	events := make(chan registry.SessionJournalEntry, 64)
-	s.subscribers[id] = events
+	wake := make(chan struct{}, 1)
+	s.followers[id] = wake
 	s.holders[holder]++
 	s.mu.Unlock()
-	return sessionSourceSubscription{Entries: events, Cancel: func() {
+	return sessionSourceSubscription{Wake: wake, Cancel: func() {
 		s.mu.Lock()
-		if existing, found := s.subscribers[id]; found {
-			delete(s.subscribers, id)
+		if existing, found := s.followers[id]; found {
+			delete(s.followers, id)
 			close(existing)
 		}
 		s.holders[holder]--
 		if s.holders[holder] <= 0 {
 			delete(s.holders, holder)
 		}
-		stop := len(s.subscribers) == 0 && len(s.holders) == 0
+		stop := len(s.followers) == 0 && len(s.holders) == 0
 		s.mu.Unlock()
 		if stop {
 			s.stop()
@@ -213,7 +217,7 @@ func (s *sessionSource) releaseHolder(holder string) {
 	if s.holders[holder] <= 0 {
 		delete(s.holders, holder)
 	}
-	stop := len(s.subscribers) == 0 && len(s.holders) == 0
+	stop := len(s.followers) == 0 && len(s.holders) == 0
 	s.mu.Unlock()
 	if stop {
 		s.stop()
@@ -225,7 +229,7 @@ func (s *sessionSource) stop() {
 	defer s.manager.mu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.subscribers) != 0 || len(s.holders) != 0 {
+	if len(s.followers) != 0 || len(s.holders) != 0 {
 		return
 	}
 	s.cancel()
@@ -263,7 +267,7 @@ func (s *sessionSource) run() {
 		}
 	}
 	defer func() {
-		s.closeSubscribers()
+		s.closeFollowers()
 		s.remove()
 		s.manager.running.Done()
 	}()
@@ -334,12 +338,12 @@ func (s *sessionSource) run() {
 	}
 }
 
-func (s *sessionSource) closeSubscribers() {
+func (s *sessionSource) closeFollowers() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for id, subscriber := range s.subscribers {
-		delete(s.subscribers, id)
-		close(subscriber)
+	for id, follower := range s.followers {
+		delete(s.followers, id)
+		close(follower)
 	}
 }
 
@@ -407,12 +411,12 @@ func (s *sessionSource) appendSourceError(streamErr error) {
 	if err != nil {
 		return
 	}
-	entry, changed, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+	_, changed, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
 	if err != nil {
 		return
 	}
 	if changed {
-		s.publish(entry)
+		s.wakeFollowers()
 	}
 }
 
@@ -697,8 +701,8 @@ func (s *sessionSource) rederiveJournal(ctx context.Context) error {
 		s.appendBodies[key] = body
 	}
 	s.mu.Unlock()
-	for _, entry := range replaced {
-		s.publish(entry)
+	if len(replaced) > 0 {
+		s.wakeFollowers()
 	}
 	return nil
 }
@@ -904,9 +908,9 @@ func (s *sessionSource) mergeSeedIntoAuthoritativeRow(providerKey, operation str
 	if err != nil {
 		return true
 	}
-	updated, changed, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: merged.Kind, ProviderKey: journalKey, Payload: encoded, BodyRef: payload.BodyRef, FullBody: entry.FullBody, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+	_, changed, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: merged.Kind, ProviderKey: journalKey, Payload: encoded, BodyRef: payload.BodyRef, FullBody: entry.FullBody, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
 	if err == nil && changed {
-		s.publish(updated)
+		s.wakeFollowers()
 	}
 	return true
 }
@@ -941,7 +945,7 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 	payload, bodyKey := s.normalizeLocked(event)
 	s.mu.Unlock()
 	accumulated := payload.Body
-	entry, changed, err := s.persist(payload)
+	_, changed, err := s.persist(payload)
 	if err != nil {
 		s.appendSourceError(fmt.Errorf("session journal append failed: %w", err))
 		return
@@ -958,7 +962,7 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 	}
 	s.mu.Unlock()
 	if changed {
-		s.publish(entry)
+		s.wakeFollowers()
 	}
 }
 
@@ -1001,14 +1005,40 @@ func sessionJournalEntry(sessionID string, payload sessionJournalPayload) (regis
 	return registry.SessionJournalEntry{SessionID: sessionID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, BodyRef: payload.BodyRef, FullBody: fullBody, ObservedAt: time.Now().UTC()}, err
 }
 
-func (s *sessionSource) publish(entry registry.SessionJournalEntry) {
+var errSessionJournalGap = errors.New("the session journal no longer holds the rows after this cursor; reselect the session")
+
+const sessionJournalFollowPage = 64
+
+// readSessionJournalAfter hands yield the journal rows after *cursor in seq
+// order, a page at a time, advancing *cursor past each row yield accepts. It
+// reports false when yield stops it or the read fails.
+func readSessionJournalAfter(store *registry.Registry, sessionID string, cursor *uint64, yield func(registry.SessionJournalEntry) bool) (bool, error) {
+	for {
+		window, err := store.SessionJournalAfter(sessionID, *cursor, sessionJournalFollowPage)
+		if err != nil {
+			return false, err
+		}
+		if window.Gap {
+			return false, errSessionJournalGap
+		}
+		for _, entry := range window.Entries {
+			if !yield(entry) {
+				return false, nil
+			}
+			*cursor = entry.Seq
+		}
+		if len(window.Entries) < sessionJournalFollowPage {
+			return true, nil
+		}
+	}
+}
+
+func (s *sessionSource) wakeFollowers() {
 	s.mu.Lock()
-	for id, subscriber := range s.subscribers {
+	for _, follower := range s.followers {
 		select {
-		case subscriber <- entry:
+		case follower <- struct{}{}:
 		default:
-			delete(s.subscribers, id)
-			close(subscriber)
 		}
 	}
 	s.mu.Unlock()
@@ -1109,28 +1139,35 @@ func (m *sessionSourceManager) prepareStream(ctx context.Context, session *surfa
 	}
 	go func() {
 		defer close(events)
+		cursor := window.LatestSeq
+		send := func(event sessionstream.Event) bool {
+			select {
+			case events <- event:
+				return true
+			case <-done:
+				return false
+			}
+		}
+		follow := func() bool {
+			more, err := readSessionJournalAfter(m.registry, session.ID, &cursor, func(entry registry.SessionJournalEntry) bool {
+				event, decodeErr := sessionstream.DecodePayload(entry.Seq, entry.Payload)
+				if decodeErr != nil {
+					send(sessionstream.Event{Seq: entry.Seq, Kind: "source-error", Reason: decodeErr.Error()})
+					return false
+				}
+				return send(event)
+			})
+			if err != nil {
+				send(sessionstream.Event{Seq: cursor, Kind: "source-error", Reason: err.Error()})
+			}
+			return more
+		}
 		for {
 			select {
 			case <-done:
 				return
-			case entry, ok := <-subscription.Entries:
-				if !ok {
-					return
-				}
-				if entry.Seq <= window.LatestSeq {
-					continue
-				}
-				event, decodeErr := sessionstream.DecodePayload(entry.Seq, entry.Payload)
-				if decodeErr != nil {
-					select {
-					case events <- sessionstream.Event{Seq: entry.Seq, Kind: "source-error", Reason: decodeErr.Error()}:
-					case <-done:
-					}
-					return
-				}
-				select {
-				case events <- event:
-				case <-done:
+			case _, open := <-subscription.Wake:
+				if !follow() || !open {
 					return
 				}
 			}
