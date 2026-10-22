@@ -128,11 +128,15 @@ final class SessionPane: ObservableObject, Identifiable {
             let loaded = try await api.sessionDetail(id: id, includeTimeline: true)
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), generation > detailAppliedGeneration, removedSession?.id != id else { return true }
             detailAppliedGeneration = generation
-            if olderItems.isEmpty {
+            let previous = detail?.session.id == id ? detail?.timeline : nil
+            let fresh = Set(loaded.timeline?.items.map(\.id) ?? [])
+            if let previous, previous.items.contains(where: { fresh.contains($0.id) }) {
+                if olderItems.isEmpty { olderCursor = previous.nextBefore }
+                let retained = fresh.union(olderItems.map(\.id))
+                olderItems += previous.items.filter { !retained.contains($0.id) }
+            } else if olderItems.isEmpty || previous?.items.isEmpty == false {
+                olderItems = []
                 olderCursor = loaded.timeline?.nextBefore
-            } else {
-                let retained = Set(olderItems.map(\.id) + (loaded.timeline?.items.map(\.id) ?? []))
-                olderItems += (detail?.timeline?.items ?? []).filter { !retained.contains($0.id) }
             }
             metadata.absorb(context: loaded.context, goal: loaded.goal, model: loaded.model, models: loaded.models)
             let merged = metadata.apply(to: loaded)
