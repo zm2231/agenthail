@@ -34,7 +34,7 @@ struct Transcript: View {
             }
             .padding(24)
         }
-        .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, position: $position, following: $following)
+        .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, hasRow: { id in feed.rows.contains { $0.id == id } }, position: $position, following: $following)
         .safeAreaInset(edge: .bottom, spacing: 0) { Color.gray.frame(height: feed.inset) }
         .onChange(of: following) { feed.following = following }
         .onReceive(NotificationCenter.default.publisher(for: .jumpToLatest)) { _ in
@@ -89,6 +89,11 @@ struct TranscriptFollowTest {
         expectEventually(abs(gap(scroll) - fromBottom) < 2, "loading earlier rows keeps the reader's place, distance from bottom \(fromBottom) became \(gap(scroll))")
         spin(0.6)
         expect(abs(gap(scroll) - fromBottom) < 2, "the reader's place holds after earlier rows settle, distance from bottom \(fromBottom) became \(gap(scroll))")
+
+        move(scroll, to: 500)
+        feed.rows = rows("Cr", 70)
+        spin(0.6)
+        expect(offset(scroll) == 500 && !feed.following, "a page that replaces the rows leaves an up-scrolled reader where they were, got offset \(offset(scroll))")
 
         move(scroll, to: 300)
         feed.rows = rows("Cq", 10) + feed.rows

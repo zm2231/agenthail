@@ -875,7 +875,7 @@ struct TranscriptView: View {
             .padding(.bottom, 12 + MessageActions.height)
             .frame(maxWidth: .infinity)
         }
-        .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, position: $position, following: $following)
+        .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, hasRow: { id in pane.timelineItems.contains { $0.id == id } }, position: $position, following: $following)
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentSize.height < geometry.containerSize.height * 1.5
         } action: { _, value in

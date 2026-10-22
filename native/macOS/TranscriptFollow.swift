@@ -3,6 +3,7 @@ import SwiftUI
 struct TranscriptFollow<ID: Equatable>: ViewModifier {
     let transcript: ID
     let leadingRow: String?
+    let hasRow: (String) -> Bool
     @Binding var position: ScrollPosition
     @Binding var following: Bool
     @State private var phase: ScrollPhase = .idle
@@ -22,7 +23,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .defaultScrollAnchor(following ? .bottom : nil, for: .sizeChanges)
             .onScrollPhaseChange { _, new in phase = new }
             .onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { old, new in
-                let inserted = leadingRow != placedLeadingRow
+                let inserted = leadingRow != placedLeadingRow && placedLeadingRow.map(hasRow) == true
                 placedLeadingRow = leadingRow
                 if old.contentSize == new.contentSize && old.containerSize == new.containerSize {
                     // A jump's animation passes through offsets short of the bottom; they are not the reader leaving it.
@@ -53,8 +54,8 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
 }
 
 extension View {
-    func transcriptFollow<ID: Equatable>(_ transcript: ID, leadingRow: String?, position: Binding<ScrollPosition>, following: Binding<Bool>) -> some View {
-        modifier(TranscriptFollow(transcript: transcript, leadingRow: leadingRow, position: position, following: following))
+    func transcriptFollow<ID: Equatable>(_ transcript: ID, leadingRow: String?, hasRow: @escaping (String) -> Bool, position: Binding<ScrollPosition>, following: Binding<Bool>) -> some View {
+        modifier(TranscriptFollow(transcript: transcript, leadingRow: leadingRow, hasRow: hasRow, position: position, following: following))
     }
 }
 
