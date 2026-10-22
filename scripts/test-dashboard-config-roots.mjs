@@ -7,10 +7,7 @@ const start = source.indexOf("function renderStartConfigRoots(");
 const end = source.indexOf("function renderStartLaunchers(", start);
 assert(start >= 0 && end > start);
 
-const select = {
-  innerHTML: "", value: "",
-  closest: () => ({ dataset: {} }),
-};
+const select = { closest: () => ({ dataset: {} }) };
 const pending = [];
 const context = {
   app: { startHost: "", startOptions: null },
@@ -20,10 +17,16 @@ const context = {
   startHostQuery: (prefix) => (context.app.startHost ? `${prefix}host=${context.app.startHost}` : ""),
   fetch: (url) => new Promise((resolve) => pending.push({ url, resolve })),
 };
-// Option values: the browser keeps value only when an option with it exists.
+// Like a browser select: replacing the options selects the first one, and a
+// value is kept only when an option has it.
+const firstOption = (html) => html.match(/value="([^"]*)"/)?.[1] ?? "";
+Object.defineProperty(select, "innerHTML", {
+  get() { return this._html ?? ""; },
+  set(next) { this._html = next; this._value = firstOption(next); },
+});
 Object.defineProperty(select, "value", {
   get() { return this._value ?? ""; },
-  set(next) { this._value = this.innerHTML.includes(`value="${next}"`) ? next : (this.innerHTML.match(/value="([^"]*)"/)?.[1] ?? ""); },
+  set(next) { this._value = this.innerHTML.includes(`value="${next}"`) ? next : firstOption(this.innerHTML); },
 });
 vm.runInNewContext(source.slice(start, end), context);
 
