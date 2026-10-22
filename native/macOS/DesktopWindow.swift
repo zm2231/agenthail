@@ -148,7 +148,7 @@ struct SessionSidebar: View {
                         VStack(alignment: .leading, spacing: 2) {
                             SidebarCaption("Needs you")
                             ForEach(tree.needsYou) { session in
-                                sessionButton(session, title: SessionFamilies.title(session, in: model.knownSessions), needsYou: true)
+                                sessionButton(session, title: SessionFamilies.title(session, in: model.knownSessions), attention: tree.attention[session.id], showsReason: true)
                             }
                         }
                     }
@@ -168,7 +168,7 @@ struct SessionSidebar: View {
                                     CheckoutRowView(checkout: checkout)
                                 }
                                 ForEach(checkout.families) { family in
-                                    familyRows(family)
+                                    familyRows(family, attention: tree.attention)
                                 }
                             }
                             if project.sessionCount > shown.sessionCount || expanded && project.sessionCount > SessionTree.collapsedSessionLimit {
@@ -215,10 +215,11 @@ extension SessionSidebar {
     private var searchResults: some View {
         let query = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let (local, remote) = searchMatches
+        let attention = model.sessionAttention
         VStack(alignment: .leading, spacing: 2) {
             SidebarCaption("Sessions")
             ForEach(local) { session in
-                sessionButton(session, title: SessionFamilies.title(session, in: model.knownSessions), needsYou: model.attentionSessionIDs.contains(session.id))
+                sessionButton(session, title: SessionFamilies.title(session, in: model.knownSessions), attention: attention[session.id])
             }
             if local.isEmpty {
                 Text("No matching sessions.")
@@ -307,10 +308,10 @@ extension SessionSidebar {
     }
 
     @ViewBuilder
-    private func familyRows(_ family: SessionFamily) -> some View {
+    private func familyRows(_ family: SessionFamily, attention: [String: SessionAttention]) -> some View {
         let expanded = familyExpanded(family)
         HStack(spacing: 0) {
-            sessionButton(family.root, title: family.root.title, family: family, needsYou: model.attentionSessionIDs.contains(family.root.id))
+            sessionButton(family.root, title: family.root.title, family: family, attention: attention[family.root.id])
             if !family.members.isEmpty {
                 Button {
                     if expandedFamilies.contains(family.id) { expandedFamilies.remove(family.id) } else { expandedFamilies.insert(family.id) }
@@ -327,7 +328,7 @@ extension SessionSidebar {
         }
         if expanded {
             ForEach(family.members) { member in
-                sessionButton(member.session, title: SessionFamilies.label(member.session), needsYou: model.attentionSessionIDs.contains(member.id))
+                sessionButton(member.session, title: SessionFamilies.label(member.session), attention: attention[member.id])
                     .padding(.leading, CGFloat(member.depth) * 16)
             }
         }
@@ -344,12 +345,13 @@ extension SessionSidebar {
         }
     }
 
-    private func sessionButton(_ session: SessionState, title: String, family: SessionFamily? = nil, needsYou: Bool) -> some View {
+    private func sessionButton(_ session: SessionState, title: String, family: SessionFamily? = nil, attention: SessionAttention?, showsReason: Bool = false) -> some View {
         let selected = pane.selectedSessionID == session.id
+        let needsYou = attention != nil
         return Button {
             pane.select(session.id)
         } label: {
-            SessionRowView(session: session, title: title, family: family, needsYou: needsYou, finishedUnseen: model.finishedUnseen.contains(session.id))
+            SessionRowView(session: session, title: title, family: family, needsYou: needsYou, reason: showsReason ? attention?.reason : nil, finishedUnseen: model.finishedUnseen.contains(session.id))
                 .padding(.vertical, 6)
                 .padding(.horizontal, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -397,9 +399,9 @@ struct ProjectHeaderView: View {
         HStack(spacing: 7) {
             Text(String(name.prefix(1)).uppercased())
                 .font(.system(size: 10.5, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(DesktopPalette.text2)
                 .frame(width: 18, height: 18)
-                .background(archived ? DesktopPalette.text2 : DesktopPalette.accent, in: RoundedRectangle(cornerRadius: 5))
+                .background(DesktopPalette.selection, in: RoundedRectangle(cornerRadius: 5))
                 .accessibilityHidden(true)
             Text(name)
                 .font(.system(size: 12.5, weight: .semibold))
@@ -416,7 +418,7 @@ struct ProjectHeaderView: View {
                     .truncationMode(.middle)
             }
             if dirty {
-                Circle().fill(DesktopPalette.amber).frame(width: 5, height: 5)
+                Circle().fill(DesktopPalette.muted).frame(width: 5, height: 5)
                     .accessibilityLabel("Uncommitted changes")
             }
         }
@@ -439,7 +441,7 @@ struct HostBadge: View {
                 .truncationMode(.tail)
         }
         .font(.system(size: 10.5))
-        .foregroundStyle(unavailable ? DesktopPalette.amber : DesktopPalette.text2)
+        .foregroundStyle(DesktopPalette.text2)
         .frame(maxWidth: 96, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -457,7 +459,7 @@ struct CheckoutRowView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             if checkout.dirty {
-                Circle().fill(DesktopPalette.amber).frame(width: 5, height: 5)
+                Circle().fill(DesktopPalette.muted).frame(width: 5, height: 5)
                     .accessibilityLabel("Uncommitted changes")
             }
         }
@@ -474,14 +476,25 @@ struct SessionRowView: View {
     var title: String? = nil
     var family: SessionFamily? = nil
     let needsYou: Bool
+    /// Why the session needs the person, shown under its title.
+    var reason: String? = nil
     var finishedUnseen = false
 
     var body: some View {
-        HStack(spacing: 9) {
+        HStack(alignment: reason == nil ? .center : .firstTextBaseline, spacing: 9) {
             StatusIndicator(session: session, needsYou: needsYou, finishedUnseen: finishedUnseen)
-            Text(title ?? session.title)
-                .lineLimit(1)
-                .foregroundStyle(!session.isUnavailable && (session.open || session.isWorking) ? DesktopPalette.text : DesktopPalette.text2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title ?? session.title)
+                    .lineLimit(1)
+                    .foregroundStyle(!session.isUnavailable && (session.open || session.isWorking) ? DesktopPalette.text : DesktopPalette.text2)
+                if let reason {
+                    Text(reason)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(DesktopPalette.text2)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
             if let host = session.shortRemoteHostName {
                 HostBadge(name: host, unavailable: session.isUnavailable)
                     .help(session.unavailableReason ?? "On \(session.remoteHostName ?? host)")
@@ -500,7 +513,7 @@ struct SessionRowView: View {
             if session.queueCount > 0 {
                 Text(SessionFacts.queuedLabel(session.queueCount))
                     .font(.system(size: 10.5))
-                    .foregroundStyle(DesktopPalette.amber)
+                    .foregroundStyle(DesktopPalette.text2)
             }
             if !session.sharedHolders.isEmpty {
                 HStack(spacing: 3) {
@@ -520,7 +533,7 @@ struct SessionRowView: View {
         .font(.system(size: 13))
         .padding(.leading, 6)
         .accessibilityElement(children: .combine)
-        .accessibilityValue(needsYou ? "Needs you · \(SessionFacts.rowDetail(session))" : SessionFacts.rowDetail(session))
+        .accessibilityValue(needsYou ? "Needs you\(reason.map { ": \($0)" } ?? "") · \(SessionFacts.rowDetail(session))" : SessionFacts.rowDetail(session))
         .help(SessionFacts.rowDetail(session))
     }
 }
@@ -574,7 +587,7 @@ struct ConnectionFooter: View {
     var body: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(model.isConnected ? DesktopPalette.green : DesktopPalette.amber)
+                .fill(model.isConnected ? DesktopPalette.green : DesktopPalette.red)
                 .frame(width: 6, height: 6)
                 .accessibilityHidden(true)
             Text(model.isConnected ? "Connected · this Mac" : model.reconnecting ? "Reconnecting…" : offlineLabel)

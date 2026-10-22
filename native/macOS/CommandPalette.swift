@@ -15,13 +15,14 @@ struct CommandPalette: View {
         let title: String
         let detail: String
         var session: SessionState? = nil
+        var needsYou = false
         var shortcut: String? = nil
         let run: () -> Void
     }
 
     private var entries: [Entry] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let attention = model.attentionSessionIDs
+        let attention = Set(model.sessionAttention.keys)
         let sessions = model.knownSessions
             .filter { session in
                 trimmed.isEmpty || [session.title, session.name, session.alias, session.project?.displayName, session.checkout?.branch]
@@ -45,7 +46,8 @@ struct CommandPalette: View {
                     icon: "",
                     title: session.title,
                     detail: [session.project?.displayName, session.checkout?.branch, session.surface.capitalized].compactMap { $0 }.joined(separator: " · "),
-                    session: session
+                    session: session,
+                    needsYou: attention.contains(session.id)
                 ) { pane.select(session.id) }
             }
         let actions = actionEntries.filter { trimmed.isEmpty || $0.title.localizedCaseInsensitiveContains(trimmed) }
@@ -131,7 +133,7 @@ struct CommandPalette: View {
         HStack(spacing: 10) {
             Group {
                 if let session = entry.session {
-                    StatusIndicator(session: session, needsYou: model.attentionSessionIDs.contains(session.id), finishedUnseen: model.finishedUnseen.contains(session.id))
+                    StatusIndicator(session: session, needsYou: entry.needsYou, finishedUnseen: model.finishedUnseen.contains(session.id))
                 } else {
                     Image(systemName: entry.icon)
                         .foregroundStyle(DesktopPalette.text2)
