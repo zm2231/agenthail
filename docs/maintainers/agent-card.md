@@ -25,6 +25,8 @@ The brief sends questions where reports go. A session that reports to an agent (
 
 ## Telling a Claude session its card
 
+A session Agenthail's Claude host runs gets this with no hook installed: the host registers the same command as SDK callbacks ([Claude host](claude-host.md)), passing `--claude-pid` so its claim matches an installed hook's. For a terminal Claude:
+
 `agenthail hooks install` adds `exec '<agenthail>' hook session-context` (timeout 10s, no matcher) as a `SessionStart` and a `UserPromptSubmit` hook in every Claude config root, beside the `PermissionRequest` hook. The hook reads Claude's input on stdin, finds the session by its `session_id` (registry, then the local Claude adapter, which registers a live one; never a paired host), and prints `hookSpecificOutput.additionalContext`:
 
 - `SessionStart` (startup, resume, clear, compact): the rendered card.

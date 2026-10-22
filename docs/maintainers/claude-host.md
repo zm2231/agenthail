@@ -306,6 +306,14 @@ Every session runs with Claude Code's own system prompt (`systemPrompt: {type:
 session does (`settingSources: user, project, local`): CLAUDE.md files,
 settings, hooks and skills. The SDK sends an empty system prompt when none is
 given, and Claude then runs with a one-line prompt instead of Claude Code's.
+When the daemon starts the host from an `agenthail` binary it passes it as
+`--agenthail`, and every session gets SDK `SessionStart` and
+`UserPromptSubmit` callbacks that run `agenthail hook session-context
+--claude-pid <pid>` with the hook input on stdin, so it is told its agent card
+with no hook installed ([agent card](agent-card.md#telling-a-claude-session-its-card)).
+The callback returns only the command's `additionalContext`, and nothing on any
+failure or after 8s. The claim is keyed by the Claude pid, the same key the
+installed hook uses as Claude's child, so a session that has both is told once.
 Where Claude records a conversation's system prompt (the SDK's `snapshot`,
 which the SDK notes is still rolling out and does not apply to every
 provider), it resends the prompt it recorded on every later request and resume

@@ -52,6 +52,7 @@ type Daemon struct {
 	announcing           map[string]string
 	announcingRefusal    map[int64]int64
 	catalogNudge         chan struct{}
+	presence             catalogPresence
 	observerNudge        chan struct{}
 	// catalogSelected, when set, runs after a catalog publication has chosen
 	// what a session waits on and before its row commits.

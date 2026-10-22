@@ -93,7 +93,7 @@ func TestAClaudeSessionIsToldItsCardOncePerStartAndOncePerChange(t *testing.T) {
 	previous := os.Stdin
 	os.Stdin = stdin
 	t.Cleanup(func() { os.Stdin = previous })
-	output, err := captureStdout(t, func() error { return app.Run([]string{"hook", "session-context"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"hook", "session-context", "--claude-pid", "4242"}) })
 	if err != nil {
 		t.Fatal(err)
 	}

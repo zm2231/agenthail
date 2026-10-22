@@ -108,11 +108,27 @@ function control(request) {
   });
 }
 
+// hooks holds the callback ids the SDK registered in initialize, by event.
+// Like Claude, the fake calls them and records what each returned in
+// hooks.jsonl.
+let hooks = {};
+async function runHooks(event, input) {
+  for (const matcher of hooks[event] ?? []) {
+    for (const callback of matcher.hookCallbackIds) {
+      const id = `fake-${++requests}`;
+      write({ type: 'control_request', request_id: id, request: { subtype: 'hook_callback', callback_id: callback, input: { session_id: sessionId, transcript_path: transcript, cwd: process.cwd(), hook_event_name: event, ...input } } });
+      const output = await new Promise((resolve) => pending.set(id, resolve));
+      fs.appendFileSync(path.join(dir, 'hooks.jsonl'), JSON.stringify({ sessionId, pid: process.pid, event, output }) + '\n');
+    }
+  }
+}
+
 async function turn(message) {
   const uuid = message.uuid;
   if (uuid && seen.has(uuid)) return;
   seen.add(uuid);
   const text = typeof message.message.content === 'string' ? message.message.content : JSON.stringify(message.message.content);
+  await runHooks('UserPromptSubmit', { prompt: text });
   state('running');
   let reply = `echo:${text}`;
   if (text.startsWith('TOOL')) {
@@ -319,6 +335,8 @@ lines.on('line', (line) => {
     if (subtype === 'interrupt') interrupt?.();
     if (subtype === 'set_model') model = message.request.model || 'claude-opus-5-5';
     if (subtype === 'initialize') {
+      hooks = message.request.hooks ?? {};
+      turns = turns.then(() => runHooks('SessionStart', { source: flag('resume') ? 'resume' : 'startup' }));
       fs.appendFileSync(path.join(dir, 'initialize.jsonl'), JSON.stringify({ sessionId, systemPrompt: message.request.systemPrompt ?? null, appendSystemPrompt: message.request.appendSystemPrompt ?? null }) + '\n');
     }
     if (subtype === 'set_permission_mode') {

@@ -88,7 +88,7 @@ struct CommandPalette: View {
                     .foregroundStyle(DesktopPalette.muted)
                 TextField("Jump to a session or run a command", text: $query)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 15))
+                    .font(.system(size: DesktopType.title))
                     .focused($fieldFocused)
                     .onSubmit { run(items, at: highlighted) }
                     .onKeyPress(.downArrow) { move(1, from: highlighted, in: items); return .handled }
@@ -96,15 +96,15 @@ struct CommandPalette: View {
                     .onKeyPress(.escape) { model.paletteVisible = false; return .handled }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .padding(.vertical, DesktopSpace.m)
             Divider().overlay(DesktopPalette.line)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
                         if items.isEmpty {
                             Text("No matches")
-                                .font(.system(size: 13))
-                                .foregroundStyle(DesktopPalette.muted)
+                                .font(.system(size: DesktopType.body))
+                                .foregroundStyle(DesktopPalette.text2)
                                 .padding(14)
                         }
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, entry in
@@ -123,8 +123,8 @@ struct CommandPalette: View {
             .frame(maxHeight: 360)
         }
         .frame(width: 560)
-        .background(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(DesktopPalette.line2))
+        .background(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.card))
+        .overlay(RoundedRectangle(cornerRadius: DesktopRadius.card).stroke(DesktopPalette.line2))
         .shadow(color: .black.opacity(0.35), radius: 24, y: 10)
         .task { fieldFocused = true }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in fieldFocused = true }
@@ -143,25 +143,25 @@ struct CommandPalette: View {
             }
             .frame(width: 18)
             Text(entry.title)
-                .font(.system(size: 13))
+                .font(.system(size: DesktopType.body))
                 .foregroundStyle(DesktopPalette.text)
                 .lineLimit(1)
             if !entry.detail.isEmpty {
                 Text(entry.detail)
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.muted)
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
             if let shortcut = entry.shortcut {
                 Text(shortcut)
-                    .font(.system(size: 11))
+                    .font(.system(size: DesktopType.caption))
                     .foregroundStyle(DesktopPalette.muted)
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(highlighted ? DesktopPalette.selection : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+        .background(highlighted ? DesktopPalette.selection : Color.clear, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
         .contentShape(Rectangle())
     }
 

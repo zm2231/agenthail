@@ -6,7 +6,7 @@
 // ({id, result} or {id, error: {code, message}}); a subscribed connection also
 // receives {event} lines.
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -43,6 +43,7 @@ const { values: args } = parseArgs({
     state: { type: 'string' },
     claude: { type: 'string' },
     version: { type: 'string' },
+    agenthail: { type: 'string' },
   },
 });
 for (const name of ['socket', 'state', 'claude', 'version']) {
@@ -429,6 +430,7 @@ async function open(params) {
         // Claude allows only when it started with consent to it. Claude still
         // asks canUseTool for questions in bypassPermissions.
         allowDangerouslySkipPermissions: true,
+        ...(args.agenthail ? { hooks: sessionContextHooks(s) } : {}),
         canUseTool: (toolName, input, options) => s.ask(toolName, input, options),
         onElicitation: (elicitation, options) => s.elicit(elicitation, options),
         spawnClaudeCodeProcess: (options) => spawnDetached(s, options, exited),
@@ -667,6 +669,27 @@ function origin(value) {
     default:
       throw new HostError('invalid', `unknown origin kind: ${value?.kind}`);
   }
+}
+
+// sessionContextHooks tells the session who it is inside Agenthail, as the
+// session-context hook does for a terminal Claude. The command is keyed by the
+// Claude process, so a copy of it from the person's settings prints nothing
+// more. Every failure adds nothing.
+function sessionContextHooks(s) {
+  const run = (input, _toolUseID, { signal }) =>
+    new Promise((resolve) => {
+      const child = execFile(args.agenthail, ['hook', 'session-context', ...(s.pid ? ['--claude-pid', String(s.pid)] : [])], { signal, timeout: 8_000, maxBuffer: 1 << 20 }, (error, stdout) => {
+        let context;
+        try {
+          context = JSON.parse(stdout)?.hookSpecificOutput?.additionalContext;
+        } catch {}
+        if (error || typeof context !== 'string') return resolve({});
+        resolve({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: context } });
+      });
+      child.stdin.on('error', () => {});
+      child.stdin.end(JSON.stringify(input));
+    });
+  return { SessionStart: [{ hooks: [run] }], UserPromptSubmit: [{ hooks: [run] }] };
 }
 
 function spawnDetached(s, options, exited) {

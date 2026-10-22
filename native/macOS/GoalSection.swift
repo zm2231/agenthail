@@ -38,28 +38,28 @@ struct GoalSection: View {
                 SidebarCaption("Goal").padding(.horizontal, -8)
                 Spacer()
                 Label(goal.displayStatus, systemImage: goal.needsAttention ? "exclamationmark.triangle.fill" : "target")
-                    .font(.system(size: 11))
-                    .foregroundStyle(goal.needsAttention ? DesktopPalette.amber : DesktopPalette.text2)
+                    .font(.system(size: DesktopType.caption))
+                    .foregroundStyle(goal.needsAttention ? DesktopPalette.attention : DesktopPalette.text2)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
-                    .background(DesktopPalette.selection, in: Capsule())
+                    .background(DesktopPalette.fill, in: Capsule())
             }
             Text(goal.objective)
                 .textSelection(.enabled)
             if let reason = goal.reason {
                 Text(reason)
-                    .font(.system(size: 11))
+                    .font(.system(size: DesktopType.caption))
                     .foregroundStyle(DesktopPalette.text2)
                     .textSelection(.enabled)
             }
             let usage = GoalSection.usage(goal)
             if !usage.isEmpty {
                 Text(usage)
-                    .font(.system(size: 11).monospacedDigit())
+                    .font(.system(size: DesktopType.caption).monospacedDigit())
                     .foregroundStyle(DesktopPalette.text2)
             }
             if editable {
-                HStack(spacing: 8) {
+                HStack(spacing: DesktopSpace.s) {
                     Button("Edit") { begin(.editGoal, text: goal.objective) }
                     if controllable {
                         if goal.status == "active" {
@@ -84,13 +84,13 @@ struct GoalSection: View {
                 TextField("Tokens", text: $text)
                     .textFieldStyle(.roundedBorder)
                 Text("Leave empty to remove the budget.")
-                    .font(.system(size: 11))
+                    .font(.system(size: DesktopType.caption))
                     .foregroundStyle(DesktopPalette.text2)
             } else {
                 TextEditor(text: $text)
                     .font(.body)
                     .frame(minHeight: 100)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(DesktopPalette.line))
+                    .overlay(RoundedRectangle(cornerRadius: DesktopRadius.control).stroke(DesktopPalette.line))
             }
             HStack {
                 Spacer()
@@ -101,7 +101,7 @@ struct GoalSection: View {
                     .disabled(!canSave)
             }
         }
-        .padding(20)
+        .padding(DesktopSpace.xl)
         .frame(width: 400)
     }
 
