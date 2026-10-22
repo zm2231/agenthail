@@ -114,7 +114,49 @@ final class SessionRefreshTests: XCTestCase {
         SessionRefreshProtocol.state.set(snapshotCanStream: true)
         await model.refresh()
         try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.detailFetches >= 2 && SessionRefreshProtocol.state.streamRequests >= 2 }
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, 2)
+        XCTAssertEqual(SessionRefreshProtocol.state.streamRequests, 2)
         model.selectedSessionID = nil
+    }
+
+    @MainActor
+    func testReconnectResubscribesAnUnsupportedSessionOnce() async throws {
+        let model = try await openUnsupportedSession()
+        SessionRefreshProtocol.state.set(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(snapshotCanStream: true)
+        await model.eventStreamConnected()
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, 2)
+        XCTAssertEqual(SessionRefreshProtocol.state.streamRequests, 2)
+        model.selectedSessionID = nil
+    }
+
+    @MainActor
+    func testEventsRefreshAnUnsupportedSessionOnce() async throws {
+        let model = try await openUnsupportedSession()
+        for id in 1...3 {
+            await model.receive(AgenthailEvent(id: UInt64(id), type: "session.updated", timestamp: "", entityId: "demo"))
+        }
+        await model.receive(AgenthailEvent(id: 4, type: "session.updated", timestamp: "", entityId: "other"))
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.detailFetches >= 2 }
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, 2)
+        XCTAssertEqual(SessionRefreshProtocol.state.streamRequests, 1)
+        model.selectedSessionID = nil
+    }
+
+    @MainActor
+    private func openUnsupportedSession() async throws -> AgenthailIOSModel {
+        SessionRefreshProtocol.state.reset(streamUnsupported: true)
+        SessionRefreshProtocol.state.set(snapshotCanStream: false)
+        let model = makeModel()
+        await model.refresh()
+        await model.loadSession("demo")
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.streamRequests >= 1 }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, 1)
+        return model
     }
 
     @MainActor

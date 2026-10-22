@@ -274,6 +274,8 @@ final class AgenthailIOSModel: ObservableObject {
     private var selectedSessionStateSeq: UInt64 = 0
     private var sessionStreamUnsupported = false
     private var unsupportedRefreshTask: Task<Void, Never>?
+    private var sessionResumeTask: Task<Void, Never>?
+    private var restartingStreams = false
     private var connectionTask: Task<Void, Never>?
     private var snapshotCoversEventStream = false
     private var lastEventID: UInt64 = 0
@@ -311,6 +313,8 @@ final class AgenthailIOSModel: ObservableObject {
         eventRefreshTask?.cancel()
         catalogStreamTask?.cancel()
         sessionStreamTask?.cancel()
+        sessionResumeTask?.cancel()
+        unsupportedRefreshTask?.cancel()
     }
 
     func handlePairingURL(_ url: URL) {
@@ -474,6 +478,8 @@ final class AgenthailIOSModel: ObservableObject {
         }
         if selectedSessionID != id {
             sessionStreamTask?.cancel()
+            sessionResumeTask?.cancel()
+            unsupportedRefreshTask?.cancel()
             sessionMetadataTask?.cancel()
             sessionStreamCursor = 0
             sessionMetadata = MetadataOverlay()
@@ -845,6 +851,8 @@ final class AgenthailIOSModel: ObservableObject {
         eventRefreshTask?.cancel()
         catalogStreamTask?.cancel()
         sessionStreamTask?.cancel()
+        sessionResumeTask?.cancel()
+        unsupportedRefreshTask?.cancel()
         sessionMetadataTask?.cancel()
         api = nil
         attachmentCache.removeAll()
@@ -1073,6 +1081,7 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     private func startSessionStream(_ id: String) {
+        sessionResumeTask?.cancel()
         sessionStreamTask?.cancel()
         guard let api, selectedSessionID == id else { return }
         sessionStreamTask = Task {
@@ -1105,9 +1114,12 @@ final class AgenthailIOSModel: ObservableObject {
         guard sessionStreamUnsupported, let id = selectedSessionID,
               snapshot.sessions.first(where: { $0.id == id })?.capabilities.stream == true else { return }
         sessionStreamUnsupported = false
-        Task {
-            await refreshSession(id)
-            if selectedSessionID == id { startSessionStream(id) }
+        if restartingStreams { return }
+        sessionResumeTask?.cancel()
+        sessionResumeTask = Task { [weak self] in
+            await self?.refreshSession(id)
+            guard !Task.isCancelled, let self, self.selectedSessionID == id else { return }
+            self.startSessionStream(id)
         }
     }
 
@@ -1199,7 +1211,7 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
-    private func receive(_ event: AgenthailEvent) async {
+    func receive(_ event: AgenthailEvent) async {
         lastEventID = event.type == "stream.reset" ? 0 : max(lastEventID, event.id)
         if let entity = event.entityId { refreshUnsupportedSession(entity) }
         guard Self.shouldRefreshSnapshot(for: event.type) else { return }
@@ -1216,7 +1228,9 @@ final class AgenthailIOSModel: ObservableObject {
         if snapshotCoversEventStream {
             snapshotCoversEventStream = false
         } else {
+            restartingStreams = true
             _ = await refresh(fresh: true)
+            restartingStreams = false
             if let id = selectedSessionID { await refreshSession(id) }
         }
         startCatalogStream()
