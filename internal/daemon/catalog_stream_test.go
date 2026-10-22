@@ -263,7 +263,7 @@ func TestActiveCatalogSubscriberReceivesReplyForwardFailureOnce(t *testing.T) {
 	ensureNoCatalogEvent(t, events)
 }
 
-func TestCatalogHubClosesStaleSubscribersAndRecoversAfterJournalGap(t *testing.T) {
+func TestACatalogFollowerBehindTheRetainedJournalEndsAndResumesFromTheLatestCursor(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "catalog-gap.db")
 	store, err := registry.Open(path)
 	if err != nil {
