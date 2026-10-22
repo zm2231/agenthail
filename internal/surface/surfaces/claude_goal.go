@@ -61,21 +61,25 @@ type claudeGoalCursor struct {
 // complete and an impossible one blocked until Claude records another goal or
 // a clear.
 func (c *Claude) GoalGet(ctx context.Context, sess *surface.Session) (*surface.GoalState, error) {
+	path, err := c.sessionTranscript(sess)
+	if err != nil || path == "" {
+		return nil, err
+	}
 	c.goalMu.Lock()
 	defer c.goalMu.Unlock()
-	cursor, err := c.readGoalLocked(ctx, sess)
+	cursor, err := c.readGoalLocked(ctx, path)
 	if err != nil || cursor == nil {
 		return nil, err
 	}
 	return cloneGoal(cursor.goal), nil
 }
 
-// streamGoal is the session's goal when it changed after a stream last sent
-// it, with that change's version.
-func (c *Claude) streamGoal(ctx context.Context, sess *surface.Session) (*surface.GoalState, uint64, bool, error) {
+// streamGoal is the goal of the transcript at path when it changed after a
+// stream last sent it, with that change's version.
+func (c *Claude) streamGoal(ctx context.Context, path string) (*surface.GoalState, uint64, bool, error) {
 	c.goalMu.Lock()
 	defer c.goalMu.Unlock()
-	cursor, err := c.readGoalLocked(ctx, sess)
+	cursor, err := c.readGoalLocked(ctx, path)
 	if err != nil || cursor == nil || cursor.version == cursor.streamed {
 		return nil, 0, false, err
 	}
@@ -83,11 +87,7 @@ func (c *Claude) streamGoal(ctx context.Context, sess *surface.Session) (*surfac
 	return cloneGoal(cursor.goal), cursor.version, true, nil
 }
 
-func (c *Claude) readGoalLocked(ctx context.Context, sess *surface.Session) (*claudeGoalCursor, error) {
-	path, err := c.sessionTranscript(sess)
-	if err != nil || path == "" {
-		return nil, err
-	}
+func (c *Claude) readGoalLocked(ctx context.Context, path string) (*claudeGoalCursor, error) {
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
 		return nil, nil
