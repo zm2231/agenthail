@@ -40,6 +40,7 @@ SOURCES=(
   macOS/BoundedDock.swift
   macOS/CatalogPosition.swift
   macOS/FirstMessageField.swift
+  macOS/ComposerPaste.swift
   macOS/ContextBreakdown.swift
   macOS/LocalSend.swift
   macOS/Overview.swift
