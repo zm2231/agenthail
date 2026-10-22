@@ -16,9 +16,19 @@ use crate::model::{Detail, Request, Requests, Session, TimelineItem};
 use crate::palette::{Palette, radius, space, ty};
 use crate::probe;
 
+gpui::actions!(transcript, [PageUp, PageDown, ScrollBench]);
+
+struct Bench {
+    started: Instant,
+    last: Instant,
+    intervals: Vec<f64>,
+    older_loads: usize,
+}
+
 enum StreamMessage {
     Changed,
     Gap,
+    Ended,
 }
 
 pub struct SessionPane {
@@ -38,6 +48,8 @@ pub struct SessionPane {
     opened_at: Instant,
     paint_pending: bool,
     stream_started: bool,
+    bench: Option<Bench>,
+    load_task: Option<Task<()>>,
     reload_task: Option<Task<()>>,
     _tasks: Vec<Task<()>>,
 }
@@ -91,6 +103,8 @@ impl SessionPane {
             opened_at,
             paint_pending: true,
             stream_started: false,
+            bench: None,
+            load_task: None,
             reload_task: None,
             _tasks: Vec::new(),
         };
@@ -102,6 +116,9 @@ impl SessionPane {
     pub fn session_changed(&mut self, session: Session, cx: &mut Context<Self>) {
         let waiting_changed = session.waiting_on != self.session.waiting_on;
         self.session = session;
+        if !self.stream_started {
+            self.load(cx);
+        }
         if waiting_changed {
             self.load_requests(cx);
         }
@@ -125,7 +142,7 @@ impl SessionPane {
                 cx.notify();
             });
         });
-        self.reload_task = Some(task);
+        self.load_task = Some(task);
     }
 
     fn apply_detail(&mut self, detail: Detail, cx: &mut Context<Self>) {
@@ -214,6 +231,7 @@ impl SessionPane {
                 let known: HashSet<String> = this.older.iter().chain(this.latest.iter()).map(|i| i.id.clone()).collect();
                 let fresh: Vec<TimelineItem> = collected.into_iter().filter(|i| !known.contains(&i.id)).collect();
                 let added = fresh.iter().filter(|i| shown(i)).count();
+                probe::record("older-loaded", &format!("{}\t{added} rows\tcursor={:?}", this.session.id, next));
                 this.older = fresh.into_iter().chain(this.older.drain(..)).collect();
                 this.rows = this.older.iter().chain(this.latest.iter()).filter(|i| shown(i)).cloned().collect();
                 this.list.splice(0..0, added);
@@ -232,10 +250,12 @@ impl SessionPane {
             let mut delay = Duration::from_millis(500);
             loop {
                 let path = format!("/api/v1/session-stream?id={}&after={cursor}", query(&id));
+                probe::record("stream-open", &format!("{id}\tafter={cursor}"));
                 let result = api.stream(&path, cursor, |event| {
                     if let Some(seq) = event["seq"].as_u64() {
                         cursor = cursor.max(seq);
                     }
+                    probe::record("stream-event", &format!("{id}\tseq={cursor}"));
                     delay = Duration::from_millis(500);
                     tx.send_blocking(StreamMessage::Changed).is_ok()
                 });
@@ -244,11 +264,17 @@ impl SessionPane {
                 }
                 match result {
                     Err(StreamError::Gap) => {
+                        probe::record("stream-gap", &id);
                         let _ = tx.send_blocking(StreamMessage::Gap);
                         return;
                     }
-                    Err(StreamError::Unsupported) => return,
-                    _ => {}
+                    Err(StreamError::Unsupported) => {
+                        probe::record("stream-unsupported", &id);
+                        let _ = tx.send_blocking(StreamMessage::Ended);
+                        return;
+                    }
+                    Err(StreamError::Other(error)) => probe::record("stream-error", &format!("{id}\t{error}")),
+                    Ok(()) => {}
                 }
                 std::thread::sleep(delay);
                 delay = (delay * 2).min(Duration::from_secs(10));
@@ -262,6 +288,7 @@ impl SessionPane {
                         this.stream_started = false;
                         this.load(cx);
                     }
+                    StreamMessage::Ended => this.stream_started = false,
                 });
                 if alive.is_err() {
                     return;
@@ -299,13 +326,16 @@ impl SessionPane {
     }
 
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let text = self.composer.read(cx).value().trim().to_string();
+        let typed = self.composer.read(cx).value().trim().to_string();
+        let (steering, text) = match typed.strip_prefix("/steer ") {
+            Some(rest) => (true, rest.trim().to_string()),
+            None => (false, typed),
+        };
         if text.is_empty() {
             return;
         }
         self.composer.update(cx, |state, cx| state.set_value("", window, cx));
         let mut body = json!({"action": "send", "sessionId": self.session.id, "message": text, "author": "person"});
-        let steering = self.session.is_working();
         if steering {
             body["busyDelivery"] = json!("steer");
         }
@@ -346,6 +376,77 @@ impl SessionPane {
             });
         });
         self._tasks.push(task);
+    }
+
+    fn scroll_offset(&self) -> gpui::Pixels {
+        let offset = -self.list.scroll_px_offset_for_scrollbar().y;
+        offset.min(self.list.max_offset_for_scrollbar().y)
+    }
+
+    fn scroll_to_offset(&self, offset: gpui::Pixels) {
+        self.list.set_offset_from_scrollbar(gpui::point(px(0.), -offset.max(px(0.))));
+    }
+
+    pub fn page(&mut self, up: bool, cx: &mut Context<Self>) {
+        let height = self.list.viewport_bounds().size.height * 0.9;
+        let from = self.scroll_offset();
+        self.scroll_to_offset(if up { from - height } else { from + height });
+        let top = self.list.logical_scroll_top().item_ix;
+        probe::record("page", &format!("from={from:?}\ttop_item={top}\trows={}", self.rows.len()));
+        if up && top < 4 {
+            self.load_older(cx);
+        }
+        cx.notify();
+    }
+
+    pub fn scroll_bench(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        self.bench = Some(Bench { started: now, last: now, intervals: Vec::new(), older_loads: 0 });
+        probe::record("bench-start", &format!("{}\t{} rows\ttop={}", self.session.id, self.rows.len(), self.list.logical_scroll_top().item_ix));
+        cx.on_next_frame(window, |this, window, cx| this.bench_tick(window, cx));
+    }
+
+    fn bench_tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(bench) = self.bench.as_mut() else { return };
+        let now = Instant::now();
+        bench.intervals.push((now - bench.last).as_secs_f64() * 1000.);
+        bench.last = now;
+        if now - bench.started > Duration::from_secs(8) {
+            let bench = self.bench.take().unwrap();
+            let mut sorted = bench.intervals[1..].to_vec();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let pick = |q: f64| sorted[((sorted.len() - 1) as f64 * q) as usize];
+            let mean = sorted.iter().sum::<f64>() / sorted.len() as f64;
+            let over = |limit: f64| sorted.iter().filter(|v| **v > limit).count();
+            probe::record(
+                "bench-done",
+                &format!(
+                    "{}\tframes={}\tmean={mean:.2}ms\tp50={:.2}\tp95={:.2}\tp99={:.2}\tmax={:.2}\t>12.5ms={}\t>25ms={}\t>50ms={}\trows={}\tolder_loads={}\ttop={}",
+                    self.session.id,
+                    sorted.len(),
+                    pick(0.5),
+                    pick(0.95),
+                    pick(0.99),
+                    sorted[sorted.len() - 1],
+                    over(12.5),
+                    over(25.),
+                    over(50.),
+                    self.rows.len(),
+                    bench.older_loads,
+                    self.list.logical_scroll_top().item_ix,
+                ),
+            );
+            return;
+        }
+        let offset = -self.list.scroll_px_offset_for_scrollbar().y;
+        let offset = offset.min(self.list.max_offset_for_scrollbar().y) - px(30.);
+        self.list.set_offset_from_scrollbar(gpui::point(px(0.), -offset.max(px(0.))));
+        if self.list.logical_scroll_top().item_ix < 4 && !self.loading_older && self.older_cursor.is_some() {
+            bench.older_loads += 1;
+            self.load_older(cx);
+        }
+        cx.notify();
+        cx.on_next_frame(window, |this, window, cx| this.bench_tick(window, cx));
     }
 
     fn render_item(&self, ix: usize, palette: &Palette) -> AnyElement {

@@ -27,6 +27,7 @@ pub struct AppView {
     selected: Option<String>,
     pane: Option<Entity<SessionPane>>,
     error: Option<String>,
+    focus: gpui::FocusHandle,
     _tasks: Vec<gpui::Task<()>>,
 }
 
@@ -38,6 +39,17 @@ impl AppView {
         })
         .detach();
         sync_theme(window, cx);
+        cx.intercept_keystrokes(|event, window, _| {
+            let key = event.keystroke.key.clone();
+            let pressed = Instant::now();
+            window.on_next_frame(move |window, _| {
+                let frame = pressed.elapsed().as_secs_f64() * 1000.;
+                window.on_next_frame(move |_, _| {
+                    probe::record("key", &format!("{key}\tframe_start={frame:.2}ms\tpresented={:.2}ms", pressed.elapsed().as_secs_f64() * 1000.));
+                });
+            });
+        })
+        .detach();
         let mut this = Self {
             api,
             sessions: Vec::new(),
@@ -46,6 +58,7 @@ impl AppView {
             selected: None,
             pane: None,
             error: None,
+            focus: cx.focus_handle(),
             _tasks: Vec::new(),
         };
         this.load_snapshot(cx);
@@ -163,7 +176,19 @@ impl AppView {
         self.selected = Some(id);
         let api = self.api.clone();
         self.pane = Some(cx.new(|cx| SessionPane::new(api, session, clicked, window, cx)));
+        window.focus(&self.focus, cx);
         cx.notify();
+    }
+
+    fn with_pane(
+        &mut self,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut SessionPane, Option<&mut Window>, &mut Context<SessionPane>),
+        window: Option<&mut Window>,
+    ) {
+        if let Some(pane) = &self.pane {
+            pane.update(cx, |pane, cx| f(pane, window, cx));
+        }
     }
 
     fn needs_you(&self, session: &Session) -> bool {
@@ -338,6 +363,12 @@ impl Render for AppView {
         div()
             .size_full()
             .flex()
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &crate::pane::PageUp, _, cx| this.with_pane(cx, |pane, _, cx| pane.page(true, cx), None)))
+            .on_action(cx.listener(|this, _: &crate::pane::PageDown, _, cx| this.with_pane(cx, |pane, _, cx| pane.page(false, cx), None)))
+            .on_action(cx.listener(|this, _: &crate::pane::ScrollBench, window, cx| {
+                this.with_pane(cx, |pane, window, cx| pane.scroll_bench(window.unwrap(), cx), Some(window))
+            }))
             .bg(palette.window)
             .text_color(palette.text)
             .font_family(".SystemUIFont")

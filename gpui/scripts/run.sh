@@ -28,6 +28,6 @@ listen=${AGENTHAIL_LISTEN:-127.0.0.1:7412}
 token_file=${AGENTHAIL_TOKEN_FILE:?set AGENTHAIL_TOKEN_FILE}
 mkdir -p "$work/home"
 AGENTHAIL_API_URL="http://$listen" AGENTHAIL_API_TOKEN=$(cat "$token_file") \
-HOME="$work/home" CFFIXED_USER_HOME="$work/home" AGENTHAIL_GPUI_PROBE="$work/probe.log" \
+HOME="$work/home" CFFIXED_USER_HOME="$work/home" AGENTHAIL_GPUI_PROBE="$work/probe.log" AGENTHAIL_GPUI_FRAME="${AGENTHAIL_GPUI_FRAME:-}" \
   "$app/Contents/MacOS/agenthail-gpui" >"$work/app.log" 2>&1 &
 echo $!
