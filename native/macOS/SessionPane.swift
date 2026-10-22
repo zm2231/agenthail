@@ -409,6 +409,12 @@ final class SessionPane: ObservableObject, Identifiable {
         model.refreshCachedDetail(merged, for: id)
     }
 
+    /// Changes whenever syncRequests could reach a different result, so the
+    /// view resyncs when requests become unavailable as well as when they move.
+    static func requestSyncKey(_ session: SessionState) -> String {
+        "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)"
+    }
+
     func syncRequests(for session: SessionState) async {
         guard session.capabilities.respond, !session.isReadOnly else {
             requests = nil

@@ -647,7 +647,7 @@ struct ConversationPane: View {
     var body: some View {
         if let session = pane.displayedSession {
             TranscriptView(model: model, pane: pane, session: session)
-                .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)") { await pane.syncRequests(for: session) }
+                .task(id: SessionPane.requestSyncKey(session)) { await pane.syncRequests(for: session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.modelLabel, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)
