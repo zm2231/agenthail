@@ -2100,6 +2100,14 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		cancel()
 	} else if timelineBefore > 0 {
 		sessionRead, sessionReadErr = d.readJournalPage(session.ID, uint64(timelineBefore), limit)
+	} else if status, seedSeq, _, err := d.Registry.SessionJournalSeedCheckpoint(session.ID); err == nil && effective.Stream && status == registry.SessionJournalSeeded && seedSeq > 0 {
+		// A streamable journal seeded before serves its page now; what the
+		// source catches up arrives on the session stream after the page's
+		// seq.
+		if err := d.sources.start(session, adapter); err != nil {
+			d.log.Printf("start session source %s: %s", d.resolveDisplay(session.ID), err)
+		}
+		sessionRead, sessionReadErr = d.readJournalPage(session.ID, 0, limit)
 	} else {
 		seedCtx, cancel := context.WithTimeout(r.Context(), min(operationTimeout, 2*time.Second))
 		seedErr := d.sources.seed(seedCtx, session, adapter)

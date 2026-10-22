@@ -319,7 +319,7 @@ func TestALiveSourceLeavesItsCheckpointWhereItsStreamStopped(t *testing.T) {
 		t.Fatalf("checkpoint after the stream stopped = %+v found=%v err=%v, want offset %d", checkpoint, found, err, info.Size())
 	}
 	appendToFile(t, path, claudeTurns(conversation, 4, 4))
-	got := readDashboardExchanges(t, handler, conversation, "")
+	got := readDashboardExchangesWhen(t, handler, conversation, func(got []pageExchange) bool { return len(got) == 4 })
 	if len(got) != 4 || got[3].User != "question 4" || got[3].Assistant != "answer 4" {
 		t.Fatalf("page after the source stopped=%+v", got)
 	}

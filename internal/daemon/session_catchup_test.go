@@ -66,6 +66,20 @@ func readDashboardExchanges(t *testing.T, handler http.Handler, sessionID, query
 	return page.Exchanges
 }
 
+// readDashboardExchangesWhen reads the session page until ready holds: a
+// journal seeded before serves its page at once and catches up after it.
+func readDashboardExchangesWhen(t *testing.T, handler http.Handler, sessionID string, ready func([]pageExchange) bool) []pageExchange {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got := readDashboardExchanges(t, handler, sessionID, "")
+		if ready(got) || time.Now().After(deadline) {
+			return got
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestDashboardSessionPageShowsClaudeTurnsWrittenAfterItsSourceStopped(t *testing.T) {
 	previousGrace := sessionPageHandoffGrace
 	sessionPageHandoffGrace = 10 * time.Millisecond
@@ -112,7 +126,7 @@ func TestDashboardSessionPageShowsClaudeTurnsWrittenAfterItsSourceStopped(t *tes
 		claudeTranscriptLine(t, map[string]any{"type": "assistant", "uuid": "reply-two", "sessionId": conversation, "timestamp": second.Add(time.Second).Format(time.RFC3339Nano), "message": map[string]any{"id": "message-two", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": "second answer"}}}}),
 	)
 
-	got := readDashboardExchanges(t, handler, conversation, "")
+	got := readDashboardExchangesWhen(t, handler, conversation, func(got []pageExchange) bool { return len(got) == 2 })
 	if len(got) != 2 || got[0].User != "first question" || got[0].Assistant != "first answer" || got[1].User != "second question" || got[1].Assistant != "second answer" {
 		t.Fatalf("page after the source stopped=%+v", got)
 	}

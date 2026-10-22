@@ -362,6 +362,17 @@ func (s *sessionSource) remove() {
 	}
 }
 
+// start runs the session's source, holding it for the page handoff grace,
+// without waiting for its seed.
+func (m *sessionSourceManager) start(session *surface.Session, adapter surface.Surface) error {
+	_, release, err := m.holdSource(session, adapter, "page-seed")
+	if err != nil {
+		return err
+	}
+	time.AfterFunc(sessionPageHandoffGrace, release)
+	return nil
+}
+
 func (m *sessionSourceManager) seed(ctx context.Context, session *surface.Session, adapter surface.Surface) error {
 	source, release, err := m.holdSource(session, adapter, "page-seed")
 	if err != nil {
