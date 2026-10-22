@@ -19,20 +19,53 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
-    func testSnapshotStatusReachesOpenSession() throws {
+    func testSnapshotStatusReachesOpenSession() async {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
         model.selectedSessionID = "demo"
-        model.selectedDetail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        await model.refreshSession("demo")
         XCTAssertEqual(model.selectedDetail?.session.status, "busy")
-        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as? [String: Any])
-        var sessions = try XCTUnwrap(object["sessions"] as? [[String: Any]])
-        let index = try XCTUnwrap(sessions.firstIndex { $0["id"] as? String == "demo" })
-        sessions[index]["status"] = "idle"
-        object["sessions"] = sessions
-        model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: JSONSerialization.data(withJSONObject: object))
+
+        SessionRefreshProtocol.state.set(snapshotStatus: "idle")
+        await model.refresh()
 
         XCTAssertEqual(model.selectedDetail?.session.status, "idle")
-        XCTAssertEqual(model.selectedDetail?.model, "Claude Sonnet")
+    }
+
+    @MainActor
+    func testOlderSnapshotDoesNotOverwriteNewerDetail() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        let model = makeModel()
+        model.selectedSessionID = "demo"
+        await model.refreshSession("demo")
+        SessionRefreshProtocol.state.holdSnapshot()
+        let snapshot = Task { await model.refresh() }
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.snapshotHeld }
+
+        SessionRefreshProtocol.state.set(detailStatus: "idle")
+        await model.refreshSession("demo")
+        SessionRefreshProtocol.state.releaseSnapshot()
+        await snapshot.value
+
+        XCTAssertEqual(model.selectedDetail?.session.status, "idle")
+    }
+
+    @MainActor
+    func testOlderDetailDoesNotOverwriteNewerSnapshot() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        let model = makeModel()
+        model.selectedSessionID = "demo"
+        await model.refreshSession("demo")
+        SessionRefreshProtocol.state.holdDetail()
+        let detail = Task { await model.refreshSession("demo") }
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.detailHeld }
+
+        SessionRefreshProtocol.state.set(snapshotStatus: "idle")
+        await model.refresh()
+        SessionRefreshProtocol.state.releaseDetail()
+        await detail.value
+
+        XCTAssertEqual(model.selectedDetail?.session.status, "idle")
     }
 
     @MainActor
@@ -71,22 +104,74 @@ final class SessionRefreshTests: XCTestCase {
 
 private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
     final class State: @unchecked Sendable {
-        private let lock = NSLock()
+        private let condition = NSCondition()
         private var fetches = 0
         private var unsupported = false
+        private var detail = "busy"
+        private var snapshot = "busy"
+        private var holdingSnapshot = false
+        private var holdingDetail = false
+        private var snapshotWaiting = false
+        private var detailWaiting = false
 
-        var detailFetches: Int { lock.withLock { fetches } }
-        var streamUnsupported: Bool { lock.withLock { unsupported } }
-        func reset(streamUnsupported: Bool) { lock.withLock { fetches = 0; unsupported = streamUnsupported } }
-        func fetched() { lock.withLock { fetches += 1 } }
+        var detailFetches: Int { condition.withLock { fetches } }
+        var streamUnsupported: Bool { condition.withLock { unsupported } }
+        var snapshotHeld: Bool { condition.withLock { snapshotWaiting } }
+        var detailHeld: Bool { condition.withLock { detailWaiting } }
+        func reset(streamUnsupported: Bool) {
+            condition.withLock {
+                fetches = 0; unsupported = streamUnsupported; detail = "busy"; snapshot = "busy"
+                holdingSnapshot = false; holdingDetail = false; snapshotWaiting = false; detailWaiting = false
+                condition.broadcast()
+            }
+        }
+        func set(detailStatus: String) { condition.withLock { detail = detailStatus } }
+        func set(snapshotStatus: String) { condition.withLock { snapshot = snapshotStatus } }
+        func holdSnapshot() { condition.withLock { holdingSnapshot = true } }
+        func holdDetail() { condition.withLock { holdingDetail = true } }
+        func releaseSnapshot() { condition.withLock { holdingSnapshot = false; condition.broadcast() } }
+        func releaseDetail() { condition.withLock { holdingDetail = false; condition.broadcast() } }
+
+        func detailResponse() -> String {
+            condition.lock(); defer { condition.unlock() }
+            fetches += 1
+            let status = detail
+            if holdingDetail {
+                detailWaiting = true
+                while holdingDetail { condition.wait() }
+                detailWaiting = false
+            }
+            return SessionRefreshProtocol.detail(status: status)
+        }
+
+        func snapshotResponse() -> String {
+            condition.lock(); defer { condition.unlock() }
+            let status = snapshot
+            if holdingSnapshot {
+                snapshotWaiting = true
+                while holdingSnapshot { condition.wait() }
+                snapshotWaiting = false
+            }
+            return SessionRefreshProtocol.snapshot(status: status)
+        }
     }
 
     static let state = State()
-    static let detail: String = {
+    static func detail(status: String) -> String {
         var object = try! JSONSerialization.jsonObject(with: Data(SessionPreview.detailJSON.utf8)) as! [String: Any]
         for key in ["context", "goal", "model", "models"] { object.removeValue(forKey: key) }
+        var session = object["session"] as! [String: Any]
+        session["status"] = status
+        object["session"] = session
         return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
-    }()
+    }
+    static func snapshot(status: String) -> String {
+        var object = try! JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as! [String: Any]
+        var sessions = object["sessions"] as! [[String: Any]]
+        if let index = sessions.firstIndex(where: { $0["id"] as? String == "demo" }) { sessions[index]["status"] = status }
+        object["sessions"] = sessions
+        return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+    }
     static let metadata = #"{"model":"Claude Opus","models":[{"id":"opus","displayName":"Claude Opus"}],"context":{"usedTokens":1234,"contextWindow":200000,"compacting":false,"compactionCount":0},"goal":{"objective":"Keep the metadata","status":"active"}}"#
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -96,9 +181,12 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         var status = 200
         var body = #"{"items":[]}"#
         switch request.url?.path {
-        case "/api/v1/session":
-            Self.state.fetched()
-            body = Self.detail
+        case "/api/v1/session", "/api/v1/snapshot":
+            let detail = request.url?.path == "/api/v1/session"
+            DispatchQueue.global().async { [self] in
+                finish(status: 200, body: detail ? Self.state.detailResponse() : Self.state.snapshotResponse())
+            }
+            return
         case "/api/v1/session-metadata":
             body = Self.metadata
         case "/api/v1/session-stream":
@@ -113,6 +201,10 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         default:
             break
         }
+        finish(status: status, body: body)
+    }
+
+    private func finish(status: Int, body: String) {
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)

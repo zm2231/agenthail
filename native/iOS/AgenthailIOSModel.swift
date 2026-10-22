@@ -13,7 +13,6 @@ final class AgenthailIOSModel: ObservableObject {
             if let snapshot {
                 HolderPins.shared.prune(to: snapshot.sessions)
                 holderPicks = HolderPins.shared.all
-                syncSelectedSession(from: snapshot)
             }
         }
     }
@@ -271,6 +270,8 @@ final class AgenthailIOSModel: ObservableObject {
     private var sessionMetadataTask: Task<Void, Never>?
     private(set) var sessionStreamCursor: UInt64 = 0
     private var sessionMetadata = MetadataOverlay()
+    private var stateRequests: UInt64 = 0
+    private var selectedSessionStateSeq: UInt64 = 0
     private var connectionTask: Task<Void, Never>?
     private var lastEventID: UInt64 = 0
     private var pushRelayURL: URL?
@@ -435,10 +436,12 @@ final class AgenthailIOSModel: ObservableObject {
     @discardableResult
     func refresh(fresh: Bool = false) async -> Bool {
         guard let api else { return false }
+        let seq = nextStateRequest()
         do {
             let loaded = try await api.snapshot(fresh: fresh)
             followRekeys(loaded.rekeyed ?? [:])
             snapshot = loaded
+            syncSelectedSession(from: loaded, seq: seq)
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             if catalogHostEpoch != loaded.hostEpoch {
                 catalogHostEpoch = loaded.hostEpoch
@@ -491,6 +494,7 @@ final class AgenthailIOSModel: ObservableObject {
         guard let api, sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
         let requestID = UUID()
         sessionRequestID = requestID
+        let seq = nextStateRequest()
         do {
             let detail = try await api.sessionDetail(id: id, includeTimeline: true)
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID else { return }
@@ -498,7 +502,15 @@ final class AgenthailIOSModel: ObservableObject {
                 let retained = Set(olderActivity.map(\.id) + (detail.timeline?.items.map(\.id) ?? []))
                 olderActivity += (selectedDetail?.timeline?.items ?? []).filter { !retained.contains($0.id) }
             }
-            selectedDetail = sessionMetadata.apply(to: detail)
+            var merged = sessionMetadata.apply(to: detail)
+            if seq < selectedSessionStateSeq, let current = selectedDetail?.session, current.id == id {
+                merged.session.status = current.status
+                merged.session.waitingOn = current.waitingOn
+                merged.session.backgroundTasks = current.backgroundTasks
+            } else {
+                selectedSessionStateSeq = seq
+            }
+            selectedDetail = merged
             if let journalSeq = detail.journalSeq {
                 sessionStreamCursor = journalSeq
             }
@@ -994,6 +1006,7 @@ final class AgenthailIOSModel: ObservableObject {
             else { current.sessions.append(changed) }
             current.totalSessions = current.sessions.count
             snapshot = current
+            syncSelectedSession(from: current, seq: nextStateRequest())
         case "session.queue":
             guard let id = event.data.sessionId, let count = event.data.queueCount,
                   let index = current.sessions.firstIndex(where: { $0.id == id }) else { return }
@@ -1071,13 +1084,19 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
-    private func syncSelectedSession(from snapshot: DashboardSnapshot) {
-        guard var detail = selectedDetail, let live = snapshot.sessions.first(where: { $0.id == detail.session.id }),
+    private func nextStateRequest() -> UInt64 {
+        stateRequests += 1
+        return stateRequests
+    }
+
+    private func syncSelectedSession(from snapshot: DashboardSnapshot, seq: UInt64) {
+        guard seq > selectedSessionStateSeq, var detail = selectedDetail, let live = snapshot.sessions.first(where: { $0.id == detail.session.id }),
               detail.session.status != live.status || detail.session.waitingOn != live.waitingOn || detail.session.backgroundTasks != live.backgroundTasks else { return }
         detail.session.status = live.status
         detail.session.waitingOn = live.waitingOn
         detail.session.backgroundTasks = live.backgroundTasks
         selectedDetail = detail
+        selectedSessionStateSeq = seq
     }
 
     func applySessionStreamEvent(_ event: SessionStreamEvent) {
