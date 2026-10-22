@@ -33,6 +33,7 @@ type fixtureProvider struct {
 	speaking     chan struct{}
 	speakingText string
 	respondErr   error
+	releases     []string
 	toolCalls    []struct {
 		requestID string
 		success   bool
@@ -162,7 +163,7 @@ func (p *fixtureProvider) Create(_ context.Context, cwd, instructions string) (*
 	}
 	return &surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Voice operator", Cwd: cwd, Transport: "desktop"}, p.createErr
 }
-func (p *fixtureProvider) Cursor(context.Context) (Cursor, error) {
+func (p *fixtureProvider) Cursor(context.Context, *surface.Session) (Cursor, error) {
 	return Cursor{Source: "fixture", Position: 10}, nil
 }
 func (p *fixtureProvider) Poll(_ context.Context, after Cursor, _ string) (Batch, error) {
@@ -209,6 +210,18 @@ func (p *fixtureProvider) Interrupt(context.Context, *surface.Session) error {
 	defer p.mu.Unlock()
 	p.interrupts++
 	return nil
+}
+
+func (p *fixtureProvider) Release(threadID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.releases = append(p.releases, threadID)
+}
+
+func (p *fixtureProvider) released() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.releases...)
 }
 
 func (p *fixtureProvider) failRequests(err error) {
@@ -1007,6 +1020,51 @@ func TestNativeHeartbeatExpiryPreservesTerminalReason(t *testing.T) {
 	if got := f.View(); got.Phase != "ended" || got.TerminalReason != "phone_disconnected" {
 		t.Fatalf("terminal reason was not preserved: %+v", got)
 	}
+	f.ticks <- time.Time{}
+	waitForRelease(t, p, "operator")
+}
+
+func TestAnUnconfirmedHangupAfterAPhoneDisconnectGivesUpAndReleasesTheCall(t *testing.T) {
+	f, p := fixture(t)
+	connectFixture(t, f)
+	apply(t, f, Action{Action: "heartbeat", AttemptID: "call-a"})
+	f.advance(41 * time.Second)
+	f.tick()
+	f.advance(10 * time.Second)
+	f.tick()
+	if requests, _, _ := p.snapshot(); len(requests) != 2 {
+		t.Fatalf("a disconnect asked for more than one hangup: %v", requests)
+	}
+	if releases := p.released(); len(releases) != 0 {
+		t.Fatalf("the call was released before Codex confirmed the hangup: %v", releases)
+	}
+	f.advance(21 * time.Second)
+	f.tick()
+	if got := f.View(); got.Phase != "unknown" || !strings.Contains(got.Message, "did not confirm") {
+		t.Fatalf("view=%+v", got)
+	}
+	waitForRelease(t, p, "operator")
+}
+
+func TestClosingTheServiceReleasesTheCall(t *testing.T) {
+	f, p := fixture(t)
+	connectFixture(t, f)
+	f.service.Close()
+	if releases := p.released(); len(releases) == 0 || releases[len(releases)-1] != "operator" {
+		t.Fatalf("shutdown kept the call's event source: %v", releases)
+	}
+}
+
+func waitForRelease(t *testing.T, p *fixtureProvider, threadID string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if releases := p.released(); len(releases) > 0 && releases[len(releases)-1] == threadID {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("the call's event source was not released: %v", p.released())
 }
 
 func TestSDPRequiresMatchingStartAndEventLossPreventsReattachment(t *testing.T) {
@@ -1042,6 +1100,31 @@ func TestPersistenceFailureDoesNotPreventAudioTeardown(t *testing.T) {
 	}
 	if requests, _, _ := p.snapshot(); !reflect.DeepEqual(requests, []string{"thread/realtime/start", "thread/realtime/stop"}) {
 		t.Fatalf("audio teardown skipped: %v", requests)
+	}
+}
+
+func TestAStartWhoseStateCannotBeSavedReleasesTheCall(t *testing.T) {
+	f, p := fixture(t)
+	apply(t, f, Action{Action: "prepare"})
+	dir := filepath.Dir(f.path)
+	if err := os.Chmod(dir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+	if _, err := f.Apply(Action{Action: "start", AttemptID: "call-a", SDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"}); err == nil {
+		t.Fatal("a start with unpersistable state was accepted")
+	}
+	if releases := p.released(); !reflect.DeepEqual(releases, []string{"operator"}) {
+		t.Fatalf("releases=%v", releases)
+	}
+	if requests, _, _ := p.snapshot(); len(requests) != 0 {
+		t.Fatalf("realtime was started with unpersistable state: %v", requests)
+	}
+	f.service.mu.Lock()
+	running := f.service.running
+	f.service.mu.Unlock()
+	if running {
+		t.Fatal("an observer started for a call that never started")
 	}
 }
 
@@ -1123,5 +1206,50 @@ func TestALeadSendAnsweredAfterTheCallEndedReportsCodexsRefusalToItsOwnOperator(
 				t.Fatalf("after restart message=%q", got)
 			}
 		})
+	}
+}
+
+func TestACallStartCodexRefusesEndsTheCallWithTheReason(t *testing.T) {
+	f, provider := fixture(t)
+	apply(t, f, Action{Action: "prepare"})
+	provider.failRequests(&RejectedError{Reason: "Codex on this host is not signed in. Run 'codex login' on this host."})
+	if _, err := f.Apply(Action{Action: "start", AttemptID: "call-a", SDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"}); err == nil {
+		t.Fatal("a refused start was accepted")
+	}
+	view := f.View()
+	if view.Phase != "ended" || view.TerminalReason != "start_rejected" || !strings.Contains(view.Message, "codex login") {
+		t.Fatalf("view=%+v", view)
+	}
+	if releases := provider.released(); !reflect.DeepEqual(releases, []string{"operator"}) {
+		t.Fatalf("a refused call kept its event source: %v", releases)
+	}
+	provider.failRequests(nil)
+	if _, err := f.Apply(Action{Action: "start", AttemptID: "call-b", SDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"}); err != nil {
+		t.Fatalf("the next call was refused after a definite rejection: %v", err)
+	}
+}
+
+func TestEachCallStartsWithOnlyItsOwnEvents(t *testing.T) {
+	f, _ := fixture(t)
+	connectFixture(t, f)
+	hangUp(t, f)
+	if len(f.View().Events) == 0 {
+		t.Fatal("the first call recorded no events")
+	}
+	apply(t, f, Action{Action: "start", AttemptID: "call-b", SDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"})
+	if events := f.View().Events; len(events) != 0 {
+		t.Fatalf("a new call kept the previous call's events: %+v", events)
+	}
+	f.observe(
+		Event{Method: "thread/realtime/item/started", Params: map[string]any{"realtimeSessionId": "call-a", "item": "late"}},
+		Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-b"}},
+		Event{Method: "thread/realtime/item/started", Params: map[string]any{"realtimeSessionId": "call-b", "item": "current"}},
+	)
+	var kept []string
+	for _, event := range f.View().Events {
+		kept = append(kept, fmt.Sprint(event.Method, " ", event.Params["realtimeSessionId"]))
+	}
+	if strings.Join(kept, ",") != "thread/realtime/started call-b,thread/realtime/item/started call-b" {
+		t.Fatalf("events=%v", kept)
 	}
 }

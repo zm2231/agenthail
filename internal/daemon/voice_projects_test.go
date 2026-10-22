@@ -32,7 +32,7 @@ func (c *toolVoice) Create(_ context.Context, cwd, _ string) (*surface.Session, 
 	return &surface.Session{ID: "operator", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Voice operator", Cwd: cwd, Transport: "desktop"}, nil
 }
 
-func (c *toolVoice) Cursor(context.Context) (voice.Cursor, error) {
+func (c *toolVoice) Cursor(context.Context, *surface.Session) (voice.Cursor, error) {
 	return voice.Cursor{Source: "fixture", Position: 10}, nil
 }
 
@@ -59,6 +59,7 @@ func (c *toolVoice) Request(context.Context, *surface.Session, string, map[strin
 }
 
 func (c *toolVoice) Interrupt(context.Context, *surface.Session) error { return nil }
+func (c *toolVoice) Release(string)                                    {}
 
 func (c *toolVoice) RespondDynamicToolCall(_ context.Context, requestID, _ string, success bool, text string) error {
 	c.mu.Lock()

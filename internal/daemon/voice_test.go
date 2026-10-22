@@ -99,7 +99,7 @@ type ownerFixtureProvider struct{}
 func (ownerFixtureProvider) Create(context.Context, string, string) (*surface.Session, error) {
 	return &surface.Session{ID: "fixture-operator", Surface: surface.KindCodex, Name: "fixture operator"}, nil
 }
-func (ownerFixtureProvider) Cursor(context.Context) (voice.Cursor, error) {
+func (ownerFixtureProvider) Cursor(context.Context, *surface.Session) (voice.Cursor, error) {
 	return voice.Cursor{Source: "fixture"}, nil
 }
 func (ownerFixtureProvider) Poll(_ context.Context, after voice.Cursor, _ string) (voice.Batch, error) {
@@ -109,6 +109,7 @@ func (ownerFixtureProvider) Request(context.Context, *surface.Session, string, m
 	return nil
 }
 func (ownerFixtureProvider) Interrupt(context.Context, *surface.Session) error { return nil }
+func (ownerFixtureProvider) Release(string)                                    {}
 
 // The web dashboard and the Mac app both hold the dashboard token, but the web
 // route and the v1 route derive different owners from it, so neither can take
