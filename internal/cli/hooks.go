@@ -50,6 +50,7 @@ const claudeSessionContextLimit = 5 * time.Second
 var claudePromptHookRetry = 2 * time.Second
 
 func (a *App) cmdHook(args []string) error {
+	a.OpenRegistry = a.OpenCurrentRegistry
 	if len(args) > 0 && args[0] == "session-context" {
 		claude := os.Getppid()
 		if len(args) == 3 && args[1] == "--claude-pid" {
