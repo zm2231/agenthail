@@ -538,7 +538,7 @@ final class AgenthailIOSModel: ObservableObject {
         do {
             _ = try await api.respond(sessionID: sessionID, requestID: request.id, decision: decision)
             operationError = nil
-        } catch AgenthailAPIError.request(409, _) {
+        } catch AgenthailAPIError.requestStale {
             sessionRequests = sessionRequests?.removing(request.id)
             operationError = "That request was already answered or has expired."
         } catch {
@@ -750,7 +750,7 @@ final class AgenthailIOSModel: ObservableObject {
             } catch {
                 deliveryIDs.removeValue(forKey: session.id)
                 deliveryStatus[session.id] = "Couldn’t complete request. Draft kept."
-                operationError = session.holderRefusal(error, picked: holderPicks[session.id] != nil) ?? (attachments.isEmpty ? "Couldn’t complete request." : AgenthailAPIError.userMessage(error))
+                operationError = AgenthailAPIError.userMessage(error)
                 if selectedSessionID == session.id {
                     composer = composer.isEmpty ? message : message + "\n\n" + composer
                     composerAttachments = ComposerAttachments.adding(composerAttachments, to: attachments).attachments

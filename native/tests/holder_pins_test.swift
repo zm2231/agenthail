@@ -5,6 +5,7 @@ final class PinStubProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var bodies: [[String: Any]] = []
     nonisolated(unsafe) static var keys: [String?] = []
     nonisolated(unsafe) static var status = 200
+    nonisolated(unsafe) static var failure = HolderPinsTest.refusal
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -25,8 +26,8 @@ final class PinStubProtocol: URLProtocol, @unchecked Sendable {
             Self.keys.append(request.value(forHTTPHeaderField: "Idempotency-Key"))
             Self.bodies.append((try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:])
         }
-        let body = Self.status == 200 ? #"{"ok":true,"result":{"status":"delivered"}}"# : #"{"ok":false,"error":"open in 2 terminals; pin one with claude:4101"}"#
-        let response = HTTPURLResponse(url: request.url!, statusCode: Self.status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        let body = Self.status == 200 ? #"{"ok":true,"result":{"status":"delivered"}}"# : Self.failure
+        let response = HTTPURLResponse(url: request.url!, statusCode: Self.status, httpVersion: nil, headerFields: ["Content-Type": Self.failure.hasPrefix("{") || Self.status == 200 ? "application/json" : "text/plain"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
@@ -47,6 +48,8 @@ struct HolderPinsTest {
         await checkRequests()
         print("holder pins tests passed")
     }
+
+    static let refusal = "delivery did not start: Claude conversation S is open in 2 terminals: pid 4101 (ttys002, idle), pid 4102 (pts/1, busy); send to one with claude:4101 or claude:4102, or close the others"
 
     static let holders = #"[{"pid":4101,"tty":"ttys002","status":"idle","startedAt":"2026-01-02T03:04:05.678Z"},{"pid":4102,"tty":"pts/1","status":"busy","startedAt":"2026-01-02T03:04:06Z"}]"#
 
@@ -138,12 +141,11 @@ struct HolderPinsTest {
     }
 
     static func checkRefusal() {
-        let refused = AgenthailAPIError.request(409, "open in 2 terminals")
-        let message = session().holderRefusal(refused, picked: false)
-        check(message == "Open in 2 terminals. Choose a terminal, then send again.", "a refusal points at the picker")
-        check(session().holderRefusal(refused, picked: true) == nil, "a refusal after a pick keeps the daemon's reason")
-        check(session().holderRefusal(AgenthailAPIError.request(502, "x"), picked: false) == nil, "other failures keep their reason")
-        check(session(holders: nil).holderRefusal(refused, picked: false) == nil, "an unshared conversation keeps the daemon's reason")
+        check(AgenthailAPIError.sharedConversationHolders(refusal) == 2, "the daemon's refusal names how many terminals hold the conversation")
+        let adoption = "Claude conversation S is open in 2 terminals: pid 4101 (idle), pid 4102 (idle); the Claude host can take it over only once a single terminal holds it, so close the others first"
+        check(AgenthailAPIError.sharedConversationHolders(adoption) == nil, "a refusal a pick cannot settle is not sent to the picker")
+        check(AgenthailAPIError.sharedConversationHolders("@research is already used by another session") == nil, "other conflicts are not refusals")
+        check(AgenthailAPIError.chooseTerminal(2).localizedDescription == "Open in 2 terminals. Choose a terminal, then try again.", "the refusal points at the picker")
     }
 
     static func checkRequests() async {
@@ -157,8 +159,10 @@ struct HolderPinsTest {
         do {
             _ = try await api.sendInstruction(action: "send", sessionID: "S", message: "hi", idempotencyKey: "k")
             check(false, "an unpinned send to a shared conversation fails")
+        } catch AgenthailAPIError.chooseTerminal(let count) {
+            check(count == 2, "the refusal counts the terminals")
         } catch {
-            check(session().holderRefusal(error, picked: false) != nil, "the refusal surfaces as a 409")
+            check(false, "the refusal surfaces as a choice of terminal, not \(error)")
         }
         check(PinStubProtocol.bodies.last?["pid"] == nil && PinStubProtocol.keys.last == "k", "an unpinned send goes out as is")
 
@@ -177,6 +181,25 @@ struct HolderPinsTest {
         check(PinStubProtocol.bodies.last?["pid"] as? Int == 4102, "lifecycle carries the pick")
         try? await api.action("queue-cancel", sessionID: "S", queueID: 7)
         check(PinStubProtocol.bodies.last?["pid"] == nil, "queue cancel is not pinned")
+
+        PinStubProtocol.status = 409
+        PinStubProtocol.failure = #"{"ok":false,"error":{"code":"stale","message":"request is no longer open"}}"#
+        do {
+            _ = try await api.respond(sessionID: "S", requestID: "r1", decision: RequestDecision(choice: "allow"))
+            check(false, "a stale answer fails")
+        } catch AgenthailAPIError.requestStale {
+        } catch {
+            check(false, "a stale answer is told apart from other conflicts, not \(error)")
+        }
+        PinStubProtocol.failure = "Claude process 4102 does not hold conversation S"
+        do {
+            _ = try await api.respond(sessionID: "S", requestID: "r1", decision: RequestDecision(choice: "allow"))
+            check(false, "an answer to a terminal that left fails")
+        } catch AgenthailAPIError.request(409, let message) {
+            check(message == "Claude process 4102 does not hold conversation S", "a pick that went stale keeps the daemon's reason")
+        } catch {
+            check(false, "an answer to a terminal that left is a plain conflict, not \(error)")
+        }
     }
 
     static func check(_ condition: Bool, _ message: String) {

@@ -5,6 +5,8 @@ enum AgenthailAPIError: LocalizedError {
     case incompatible(Int)
     case invalidResponse
     case request(Int, String)
+    case chooseTerminal(Int)
+    case requestStale(String)
     case outcomeUnknown(String)
     case historyGap(String)
     case streamGap
@@ -17,12 +19,22 @@ enum AgenthailAPIError: LocalizedError {
         case .incompatible: return "Agenthail needs an update before this app can reconnect."
         case .invalidResponse: return "Agenthail returned an invalid response."
         case .request(_, let message): return message
+        case .chooseTerminal(let count): return "Open in \(count) terminals. Choose a terminal, then try again."
+        case .requestStale(let message): return message
         case .outcomeUnknown(let message): return "\(message) The outcome is unknown; check the session before retrying."
         case .historyGap(let message): return message
         case .streamGap: return "The live activity history changed. Reloading the current activity."
         case .streamUnsupported: return "This session has no live stream. It refreshes when it changes."
         case .streamClosed: return "The Agenthail event stream disconnected."
         }
+    }
+
+    /// The daemon names no code for a write to a conversation open in several
+    /// terminals; its message asking for a pin is the contract. A refusal a
+    /// pin cannot settle, such as adoption, leaves out the pin and stays as is.
+    static func sharedConversationHolders(_ message: String) -> Int? {
+        guard let match = message.firstMatch(of: #/is open in (\d+) terminals: .*; send to one with claude:\d+/#) else { return nil }
+        return Int(match.1)
     }
 
     static let disconnectedGuidance = "Agenthail is not connected. Restart it from the menu bar, then refresh."
@@ -605,9 +617,15 @@ final class AgenthailAPI: @unchecked Sendable {
                    (object["result"] as? [String: Any])?["evidence"] as? String == "unknown" {
                     throw AgenthailAPIError.outcomeUnknown(message)
                 }
+                if let error = object["error"] as? [String: Any], error["code"] as? String == "stale" {
+                    throw AgenthailAPIError.requestStale(message)
+                }
                 if let error = object["error"] as? [String: Any], error["code"] as? String == "history_gap" {
                     throw AgenthailAPIError.historyGap("The oldest activity is no longer retained. Current activity is still available here; no new session is needed.")
                 }
+            }
+            if response.statusCode == 409, let count = AgenthailAPIError.sharedConversationHolders(message) {
+                throw AgenthailAPIError.chooseTerminal(count)
             }
             throw AgenthailAPIError.request(response.statusCode, message)
         }

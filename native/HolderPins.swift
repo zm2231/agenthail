@@ -32,13 +32,6 @@ extension SessionState {
         guard surface == "claude", let holders, holders.count > 1 else { return [] }
         return holders
     }
-
-    /// The daemon refuses a write that names no terminal; in the app the way
-    /// out is the picker, not the CLI pin its message suggests.
-    func holderRefusal(_ error: Error, picked: Bool) -> String? {
-        guard !picked, !sharedHolders.isEmpty, case AgenthailAPIError.request(409, _) = error else { return nil }
-        return "Open in \(sharedHolders.count) terminals. Choose a terminal, then send again."
-    }
 }
 
 struct HolderPin: Hashable, Sendable {

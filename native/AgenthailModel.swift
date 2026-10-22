@@ -702,8 +702,7 @@ final class AgenthailModel: ObservableObject {
                 operationError = nil
                 completion?(true)
             } catch {
-                let session = snapshot?.sessions.first { $0.id == sessionID }
-                let failure = session?.holderRefusal(error, picked: holderPicks[sessionID] != nil) ?? AgenthailAPIError.userMessage(error)
+                let failure = AgenthailAPIError.userMessage(error)
                 updateLocalSend(send.id, in: sessionID) { $0.failure = failure }
                 completion?(false)
             }
