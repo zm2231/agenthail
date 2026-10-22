@@ -2430,11 +2430,28 @@ function syncStartForm() {
 }
 function renderStartConfigRoots(roots) {
   const select = $("#new-conversation-config-root");
+  const current = select.value;
   select.innerHTML = roots.map(root =>
     `<option value="${root.primary ? "" : escape(root.root)}"${root.signedInAs ? "" : " disabled"}>${escape(claudeConfigRootOption(root))}</option>`,
   ).join("");
+  if (roots.some(root => (root.primary ? "" : root.root) === current)) select.value = current;
   select.closest("[data-claude-root]").dataset.single = roots.length < 2 ? "true" : "";
   syncStartForm();
+}
+// Each signed-in root's usage is read from claude.ai after the roots are
+// shown, so the form never waits on it.
+function loadStartRootUsage(options, host) {
+  for (const root of options.claudeConfigRoots || []) {
+    if (!root.signedInAs) continue;
+    fetch(`/api/v1/session-options/claude-usage?root=${encodeURIComponent(root.root)}${startHostQuery("&")}`)
+      .then(response => response.ok ? response.json() : null)
+      .then(answer => {
+        if (!answer || host !== app.startHost || app.startOptions !== options) return;
+        root.usage = answer.usage;
+        renderStartConfigRoots(options.claudeConfigRoots);
+      })
+      .catch(() => {});
+  }
 }
 function claudeConfigRootOption(root) {
   const parts = [root.name, root.signedInAs ? `signed in as ${root.signedInAs.email}` : "signed out"];
@@ -2472,6 +2489,7 @@ async function loadStartOptions() {
   app.launchers = options.launchers || [];
   renderStartConfigRoots(options.claudeConfigRoots || []);
   renderStartSurfaceOptions();
+  loadStartRootUsage(options, host);
 }
 async function loadStartModels() {
   const surfaceName = $("#new-conversation-surface").value;

@@ -35,7 +35,7 @@ A root is a config folder, not an account. Claude Code keeps one login per root 
 
 `Claude.ClaudeConfigRoots` adds what only the process that reads browser cookies knows: `signin`, the sign-in profile signed into the root's login on claude.ai, and `usage`, that login's limits from `GET /api/organizations/<org>/usage` as of `fetchedAt` (see [claude-human-turn-profiles.md](claude-human-turn-profiles.md)). A root with no matching profile has `signinProblem`, and a failed usage read `usageProblem`. The daemon serves it at `GET /api/v1/claude/roots`.
 
-The described roots reach `agenthail roots [--json]`, `doctor`, `signin list`, the `claudeConfigRoots` list of `/api/v1/session-options` (answered by the host that owns the session), and each Claude row's `claudeConfigRoot` (`name`, `root`, and `signedInAs`, the root's current login), which is derived from the root that holds the transcript. A row whose transcript does not exist yet has no config root until Claude writes it.
+The described roots reach `agenthail roots [--json]`, `doctor`, `signin list`, the `claudeConfigRoots` list of `/api/v1/session-options` (answered by the host that owns the session, without usage, which the form reads per root from `/api/v1/session-options/claude-usage`), and each Claude row's `claudeConfigRoot` (`name`, `root`, and `signedInAs`, the root's current login), which is derived from the root that holds the transcript. A row whose transcript does not exist yet has no config root until Claude writes it.
 
 ### Adopting a session
 

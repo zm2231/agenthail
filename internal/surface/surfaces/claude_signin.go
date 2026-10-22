@@ -203,25 +203,43 @@ func (c *Claude) ClaudeConfigRoots(ctx context.Context) ([]surface.ClaudeConfigR
 		return nil, err
 	}
 	for i := range roots {
-		root := &roots[i]
-		if root.SignedInAs == nil || root.SignedInAs.AccountID == "" {
-			continue
-		}
-		if c.localOnly {
-			root.UsageProblem = "usage is read from claude.ai with a browser sign-in, and this install has no claude.ai cookie reader"
-			continue
-		}
-		source, err := c.accountCookies(ctx, *root)
-		if err != nil {
-			root.SigninProblem = err.Error()
-			continue
-		}
-		root.Signin = signinLabel(source.Signin)
-		if root.Usage, err = c.claudeUsage(ctx, source, root.SignedInAs.OrganizationID); err != nil {
-			root.UsageProblem = err.Error()
-		}
+		c.describeLogin(ctx, &roots[i])
 	}
 	return roots, nil
+}
+
+// ClaudeConfigRoot describes the one config root at path, as ClaudeConfigRoots
+// does.
+func (c *Claude) ClaudeConfigRoot(ctx context.Context, path string) (surface.ClaudeConfigRoot, error) {
+	roots, err := surface.DescribeClaudeConfigRoots(c.home)
+	if err != nil {
+		return surface.ClaudeConfigRoot{}, err
+	}
+	root, ok := surface.ClaudeConfigRootFor(roots, path)
+	if !ok {
+		return surface.ClaudeConfigRoot{}, fmt.Errorf("%s is not a configured Claude config root", path)
+	}
+	c.describeLogin(ctx, &root)
+	return root, nil
+}
+
+func (c *Claude) describeLogin(ctx context.Context, root *surface.ClaudeConfigRoot) {
+	if root.SignedInAs == nil || root.SignedInAs.AccountID == "" {
+		return
+	}
+	if c.localOnly {
+		root.UsageProblem = "usage is read from claude.ai with a browser sign-in, and this install has no claude.ai cookie reader"
+		return
+	}
+	source, err := c.accountCookies(ctx, *root)
+	if err != nil {
+		root.SigninProblem = err.Error()
+		return
+	}
+	root.Signin = signinLabel(source.Signin)
+	if root.Usage, err = c.claudeUsage(ctx, source, root.SignedInAs.OrganizationID); err != nil {
+		root.UsageProblem = err.Error()
+	}
 }
 
 type claudeUsageResponse struct {

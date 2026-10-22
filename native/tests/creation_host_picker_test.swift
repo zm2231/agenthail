@@ -36,6 +36,16 @@ struct CreationHostPickerTest {
         picker.receive(models: [], agent: "codex", for: picker.generation)
         expect(picker.canStart && picker.projects.map(\.rootPath) == ["/Users/me/app"] && picker.models["codex"] != nil, "this machine's catalog is applied")
 
+        let rooted = try decode(#"{"surfaces":[{"id":"claude","workspace":true}],"projects":[],"claudeConfigRoots":[{"name":"default","root":"/home/me/.claude","primary":true,"signedInAs":{"email":"me@example.com"}},{"name":"work","root":"/home/me/.work/.claude","primary":false,"signedInAs":{"email":"work@example.com"}}]}"#)
+        picker.receive(options: rooted, for: picker.generation)
+        expect(picker.claudeConfigRoots.allSatisfy { $0.usage == nil } && picker.canStart, "the roots are shown before any usage arrives")
+        let resets = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
+        let usage = try JSONDecoder().decode(ClaudeRootUsage.self, from: Data(#"{"root":"/home/me/.work/.claude","usage":{"limits":[{"kind":"session","percent":100,"resetsAt":"\#(resets)"}]}}"#.utf8))
+        picker.receive(usage: usage, for: picker.generation)
+        expect(picker.claudeConfigRoots[0].usage == nil && picker.claudeConfigRoots[1].exhaustedUntil() != nil, "a root's usage fills in that root alone")
+        picker.receive(usage: usage, for: picker.generation - 1)
+        picker.receive(options: local, for: picker.generation)
+
         let stale = picker.generation
         expect(picker.select(vps.id) && picker.hostQuery == vps.id, "choosing a connected host selects it")
         expect(picker.options == nil && picker.models.isEmpty && picker.isLoading, "choosing a host drops the previous host's catalog")

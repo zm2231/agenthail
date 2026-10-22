@@ -142,8 +142,13 @@ choice.
 with the profile signed into it (`signin`, or `signinProblem`) and its current
 limits from `GET /api/organizations/<organizationUuid>/usage` (`usage`, or
 `usageProblem`). `agenthail roots`, `agenthail signin list` and `doctor` read
-it. The new-session forms get the same roots from `/api/v1/session-options`
-(read scope) without `signin` and `signinProblem`.
+it. The new-session forms never wait on claude.ai: `/api/v1/session-options`
+(read scope) lists the roots from their `.claude.json` alone, and the form then
+asks `GET /api/v1/session-options/claude-usage?root=<root>` for each signed-in
+root at once and fills in each root's usage as its answer arrives. That route
+reads one root, gives up after five seconds, and answers `usage` or
+`usageProblem`; a login with no matching profile gets a problem that names no
+profile or account. Both routes are answered by the chosen host.
 
 ## Planned account model
 

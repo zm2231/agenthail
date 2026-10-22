@@ -34,7 +34,12 @@ func (d *Daemon) claudeConfigRoots() []surface.ClaudeConfigRoot {
 
 type claudeConfigRootReader interface {
 	ClaudeConfigRoots(ctx context.Context) ([]surface.ClaudeConfigRoot, error)
+	ClaudeConfigRoot(ctx context.Context, path string) (surface.ClaudeConfigRoot, error)
 }
+
+// claudeRootUsageTimeout bounds one root's live usage read, which a
+// new-session form fills in after it has shown the roots.
+const claudeRootUsageTimeout = 5 * time.Second
 
 // liveClaudeConfigRoots adds each root's sign-in profile and current usage,
 // which only the Claude surface can read from claude.ai.
@@ -59,4 +64,32 @@ func (d *Daemon) apiClaudeConfigRootsHandler(w http.ResponseWriter, r *http.Requ
 		roots = []surface.ClaudeConfigRoot{}
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"claude": roots})
+}
+
+// claudeRootUsageHandler answers one root's current usage. It is read scoped,
+// so it says that a login has no sign-in profile without naming the profiles
+// or their accounts, which /api/v1/claude/roots reports under settings.
+func (d *Daemon) claudeRootUsageHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
+		return
+	}
+	path := r.URL.Query().Get("root")
+	reader, ok := d.adapters().ForSurface(surface.KindClaude).(claudeConfigRootReader)
+	if !ok {
+		writeAPIError(w, http.StatusServiceUnavailable, "claude_unavailable", "Claude is not available on this host.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), claudeRootUsageTimeout)
+	defer cancel()
+	root, err := reader.ClaudeConfigRoot(ctx, path)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, "root_not_found", err.Error())
+		return
+	}
+	problem := root.UsageProblem
+	if root.SigninProblem != "" {
+		problem = "no browser sign-in profile here is signed into this login on claude.ai; agenthail signin list shows which accounts they hold"
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"root": root.Root, "usage": root.Usage, "usageProblem": problem})
 }
