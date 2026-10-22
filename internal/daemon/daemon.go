@@ -71,8 +71,8 @@ type Daemon struct {
 	events          *eventHub
 	catalog         *catalogHub
 	// catalogLiveMu guards catalogLive, which discovery replaces and the
-	// status pass reads from its own goroutine. Each side holds it while it
-	// publishes one session's row, so the row and the entry change together.
+	// status pass reads from its own goroutine. It is held only for map
+	// reads and writes; a session's waiting lock orders its row and entry.
 	catalogLiveMu     sync.Mutex
 	catalogLive       map[string]*catalogLiveSession
 	catalogIdentities *catalogIdentityCache

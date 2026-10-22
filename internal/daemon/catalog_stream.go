@@ -453,15 +453,17 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 					live.stamps = prior.stamps
 				}
 			}
-			// The row and the entry the status pass follows change together,
-			// so a status publish lands wholly before or after them.
-			d.catalogLiveMu.Lock()
-			if d.publishCatalogSession(ctx, adapter, session, identity, alias, counts[session.ID], open, config, view, observedAt) && live != nil {
-				d.catalogLive[session.ID] = live
-			} else {
-				delete(d.catalogLive, session.ID)
-			}
-			d.catalogLiveMu.Unlock()
+			// The entry changes with the row, under the session's waiting
+			// lock, so a status publish lands wholly before or after both.
+			d.publishCatalogSession(ctx, adapter, session, identity, alias, counts[session.ID], open, config, view, observedAt, nil, func(committed bool) {
+				d.catalogLiveMu.Lock()
+				defer d.catalogLiveMu.Unlock()
+				if committed && live != nil {
+					d.catalogLive[session.ID] = live
+				} else {
+					delete(d.catalogLive, session.ID)
+				}
+			})
 		}
 		d.forgetCatalogLive(adapter.Name(), seen)
 		if err := d.catalog.recordDiscovery(adapter.Name(), seen, observedAt, complete); err != nil {
@@ -485,14 +487,23 @@ func (d *Daemon) publishUnarchivedProjects() {
 // the status pass follows only sessions the last successful pass listed.
 func (d *Daemon) forgetCatalogLive(kind surface.SurfaceKind, keep map[string]struct{}) {
 	d.catalogLiveMu.Lock()
-	defer d.catalogLiveMu.Unlock()
+	forget := map[string]*catalogLiveSession{}
 	for id, live := range d.catalogLive {
-		if live.adapter.Name() != kind {
-			continue
+		if _, found := keep[id]; live.adapter.Name() == kind && !found {
+			forget[id] = live
 		}
-		if _, found := keep[id]; !found {
+	}
+	d.catalogLiveMu.Unlock()
+	// Each drop holds the session's waiting lock, which a status publish
+	// holds from its liveness check through its write.
+	for id, live := range forget {
+		unlock := d.lockWaiting(id)
+		d.catalogLiveMu.Lock()
+		if d.catalogLive[id] == live {
 			delete(d.catalogLive, id)
 		}
+		d.catalogLiveMu.Unlock()
+		unlock()
 	}
 }
 
@@ -523,10 +534,9 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 		sessions = append(sessions, followed{id: id, live: live, session: live.session, stamps: live.stamps})
 	}
 	d.catalogLiveMu.Unlock()
-	// current applies change to a followed session, under the lock, unless
-	// discovery replaced or dropped it meanwhile; discovery's entry then
-	// carries the stamps its listing was read against, so the next pass
-	// rereads anything newer.
+	// current applies change to a followed session unless discovery replaced
+	// or dropped it meanwhile; discovery's entry then carries the stamps its
+	// listing was read against, so the next pass rereads anything newer.
 	current := func(entry followed, change func(*catalogLiveSession)) bool {
 		d.catalogLiveMu.Lock()
 		defer d.catalogLiveMu.Unlock()
@@ -578,22 +588,36 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 				return
 			}
 		}
-		// Publishing under the lock keeps discovery from replacing or
-		// dropping the entry between this check and the row it writes.
-		current(entry, func(live *catalogLiveSession) {
-			if d.publishCatalogSession(ctx, live.adapter, refreshed, live.identity, live.alias, counts[entry.id], live.open, *config, view, time.Now().UTC()) {
-				live.session = refreshed
-				published = true
-			} else {
-				live.stamps = nil
-			}
+		// The check and the write share the session's waiting lock with
+		// discovery's change to the entry, so discovery cannot replace or
+		// drop the entry between them.
+		check := func() bool { return current(entry, func(*catalogLiveSession) {}) }
+		d.publishCatalogSession(ctx, live.adapter, refreshed, live.identity, live.alias, counts[entry.id], live.open, *config, view, time.Now().UTC(), check, func(committed bool) {
+			current(entry, func(live *catalogLiveSession) {
+				if committed {
+					live.session = refreshed
+					published = true
+				} else {
+					live.stamps = nil
+				}
+			})
 		})
 	}
 }
 
 // publishCatalogSession records one session row, rebuilding the projection
 // when the queue count changed under it. It reports whether the row committed.
-func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, identity catalogIdentity, alias string, queueCount int, open bool, config DashboardConfig, view catalogViewState, observedAt time.Time) bool {
+// Under the session's waiting lock, check, when set, runs before the row is
+// written and stops the write when it fails, and done, when set, runs last
+// with whether the row committed.
+func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, identity catalogIdentity, alias string, queueCount int, open bool, config DashboardConfig, view catalogViewState, observedAt time.Time, check func() bool, done func(committed bool)) (committed bool) {
+	defer d.lockWaiting(session.ID)()
+	if done != nil {
+		defer func() { done(committed) }()
+	}
+	if check != nil && !check() {
+		return false
+	}
 	project, err := json.Marshal(identity.Project)
 	if err != nil {
 		return false
@@ -602,7 +626,6 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 	if err != nil {
 		return false
 	}
-	defer d.lockWaiting(session.ID)()
 	session.WaitingOn = d.catalogWaiting(ctx, adapter, session)
 	if d.catalogSelected != nil {
 		d.catalogSelected(session.ID)

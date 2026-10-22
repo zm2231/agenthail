@@ -365,6 +365,45 @@ func TestAStatusPublishCannotOutliveTheDiscoveryThatDroppedItsSession(t *testing
 	}
 }
 
+func TestStatusPassPublishesWhileDiscoveryWaitsOnAnotherSession(t *testing.T) {
+	d, store, source := localStatusFixture(t)
+	d.discoverCatalog(context.Background())
+	d.refreshCatalogStatus(context.Background())
+	// The observer holds a session's waiting lock while it reads that
+	// session's turn, which may take until its operation timeout.
+	unlock := d.lockWaiting("to")
+	discoveryDone := make(chan struct{})
+	go func() {
+		defer close(discoveryDone)
+		d.discoverCatalog(context.Background())
+	}()
+	defer func() {
+		unlock()
+		<-discoveryDone
+	}()
+	time.Sleep(200 * time.Millisecond)
+	after := latestCatalogSeq(t, store)
+	source.writeStatus(t, "from", surface.StatusBusy)
+	statusDone := make(chan struct{})
+	go func() {
+		defer close(statusDone)
+		d.refreshCatalogStatus(context.Background())
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if statuses := catalogStatusEvents(t, store, after, "from"); len(statuses) > 0 && statuses[len(statuses)-1] == string(surface.StatusBusy) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("busy status did not publish within 2s while discovery waited on another session")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	unlock()
+	unlock = func() {}
+	<-statusDone
+}
+
 var (
 	commitHookOnce sync.Once
 	commitCounters sync.Map
