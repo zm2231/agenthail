@@ -38,6 +38,9 @@ SOURCES=(
   macOS/AgenthailLink.swift
   macOS/AgenthailProcess.swift
   macOS/AuditFacts.swift
+  macOS/DesktopPalette.swift
+  macOS/InterfaceStore.swift
+  macOS/Backdrop.swift
   macOS/BoundedDock.swift
   macOS/CatalogPosition.swift
   macOS/FirstMessageField.swift

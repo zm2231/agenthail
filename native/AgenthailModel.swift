@@ -57,6 +57,7 @@ final class AgenthailModel: ObservableObject {
     @Published private(set) var fetchedSubagents = SubagentPageCache()
 
     private(set) var api: AgenthailAPI?
+    let interface = InterfaceStore()
     let actionKeys = ActionRetryKeys()
     private(set) var mainPane: SessionPane!
     private var panes: [SessionPane] = []
@@ -995,6 +996,11 @@ final class AgenthailModel: ObservableObject {
     }
 
     private func receive(_ event: AgenthailEvent) {
+        if event.type == "ui.changed" {
+            lastEventID = max(lastEventID, event.id)
+            if let api { interface.load(from: api) }
+            return
+        }
         if event.type == "stream.reset" {
             lastEventID = 0
         } else {
@@ -1017,6 +1023,7 @@ final class AgenthailModel: ObservableObject {
     }
 
     private func eventStreamConnected() {
+        if let api { interface.load(from: api) }
         reconnecting = false
         clearConnectionError()
     }

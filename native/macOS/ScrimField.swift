@@ -118,6 +118,25 @@ enum ScrimField {
         return upsample(grid, width: gw, height: gh, channels: 3, to: image.width, image.height, as: Raster.self)
     }
 
+    /// A fixed tint moved past the boundary, keeping its hue, so a scrim of
+    /// it can always make text readable.
+    static func reachable(_ color: (Float, Float, Float), polarity: Polarity, boundary: Float) -> (Float, Float, Float) {
+        let l = (linear(color.0), linear(color.1), linear(color.2))
+        let y = 0.2126 * l.0 + 0.7152 * l.1 + 0.0722 * l.2
+        switch polarity {
+        case .dark:
+            let limit = boundary * tintDepth
+            guard y > limit else { return color }
+            let scale = limit / y
+            return (gamma(l.0 * scale), gamma(l.1 * scale), gamma(l.2 * scale))
+        case .light:
+            let limit = 1 - (1 - boundary) * tintDepth
+            guard y < limit else { return color }
+            let scale = (1 - limit) / max(1 - y, 1e-6)
+            return (gamma(1 - (1 - l.0) * scale), gamma(1 - (1 - l.1) * scale), gamma(1 - (1 - l.2) * scale))
+        }
+    }
+
     /// The lowest tint opacity at each point of rect at which the shown
     /// colour passes the boundary. Blending is in linear light, as Core
     /// Image composites, so the shown luminance is linear in the opacity.

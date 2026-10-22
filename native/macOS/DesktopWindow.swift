@@ -27,7 +27,7 @@ struct DesktopWindow: View {
                 }
         }
         .disabled(model.paletteVisible)
-        .background(DesktopPalette.window)
+        .windowBackdrop(model.interface)
         .toolbar(removing: .sidebarToggle)
         .environmentObject(model)
         .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
@@ -203,7 +203,7 @@ struct SessionSidebar: View {
 
             ConnectionFooter(model: model)
         }
-        .background(DesktopPalette.side)
+        .glassPane("sidebar", .sidebar, fallback: DesktopPalette.side)
         .background {
             let order = visibleOrder(tree)
             Button("") { step(order, by: -1) }
@@ -654,7 +654,7 @@ struct ConversationPane: View {
                         NSApplication.shared.activate()
                         openWindow(id: "voice")
                     })
-                    .background(DesktopPalette.window)
+                    .backdropSurface(DesktopPalette.window, paneID: "content")
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     if pane.removedSession?.id == session.id {
@@ -680,13 +680,13 @@ struct ConversationPane: View {
                             if let error = pane.requestError {
                                 Text(error).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, DesktopSpace.l).padding(.top, DesktopSpace.xs)
                                     .frame(maxWidth: .infinity)
-                                    .background(DesktopPalette.window)
+                                    .backdropSurface(DesktopPalette.window, paneID: "content")
                             }
                             ComposerView(model: model, pane: pane, session: session)
                         }
                     }
                 }
-            .background(DesktopPalette.window)
+            .glassPane("content", .content, fallback: DesktopPalette.window)
             .environmentObject(pane)
         } else {
             ContentUnavailableView {
@@ -710,7 +710,10 @@ struct ConversationPane: View {
                     Button("Start Agenthail") { model.restartDaemon() }
                 }
             }
-            .background(DesktopPalette.window)
+            .fixedSize()
+            .scrimText("empty")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .backdropSurface(DesktopPalette.window)
         }
     }
 }
@@ -1604,7 +1607,7 @@ struct ComposerView: View {
                     .padding(.top, 6)
                     .padding(.bottom, DesktopSpace.s)
                 }
-                .background(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
+                .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
                 .overlay(RoundedRectangle(cornerRadius: DesktopRadius.sheet).strokeBorder(dropTargeted ? DesktopPalette.accent : DesktopPalette.line, lineWidth: dropTargeted ? 2 : 1))
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
                 .dropDestination(for: URL.self) { urls, _ in
@@ -1636,10 +1639,7 @@ struct ComposerView: View {
         .padding(.top, 40)
         .padding(.bottom, DesktopSpace.xl)
         .frame(maxWidth: .infinity)
-        .background(
-            LinearGradient(colors: [DesktopPalette.window.opacity(0), DesktopPalette.window], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.38))
-                .allowsHitTesting(false)
-        )
+        .backdropFade(DesktopPalette.window, paneID: "content", solidFrom: 0.38)
         .onAppear { focused = true }
     }
 
@@ -1959,7 +1959,7 @@ struct SessionInspector: View {
                 Spacer()
             }
         }
-        .background(DesktopPalette.side)
+        .glassPane("inspector", .sidebar, fallback: DesktopPalette.side)
     }
 }
 
