@@ -110,7 +110,20 @@ struct ComposerTextViewTest {
         textView.paste(nil)
         check(pastedImages.count == 2, "a session that can't take attachments never gets one from a paste")
 
-        check(textView.acceptableDragTypes == [.string], "files and images dropped on the composer go to the attachment drop, not into the text")
+        type("look")
+        textView.pasteAttachments = { pastedImages.append($0) }
+        check(textView.acceptableDragTypes.contains(.fileURL) && textView.acceptableDragTypes.contains(.png), "a session that takes attachments accepts dropped files and images on the text")
+        board.clearContents()
+        let item = NSPasteboardItem()
+        item.setData(png, forType: .png)
+        item.setString("https://example.com/shot.png", forType: .string)
+        board.writeObjects([item])
+        check(textView.dropAttachments(from: board) && pastedImages.count == 3 && textView.string == "look", "a dropped web image attaches instead of inserting its address")
+        board.clearContents()
+        board.setString("plain words", forType: .string)
+        check(!textView.dropAttachments(from: board) && pastedImages.count == 3, "dropped text stays a text drop")
+        textView.pasteAttachments = nil
+        check(textView.acceptableDragTypes == [.string], "a session that can't take attachments only accepts dropped text")
 
         let line = ComposerNSTextView.lineHeight
         func height(_ text: String, _ lines: ClosedRange<Int> = 2...10) -> CGFloat {

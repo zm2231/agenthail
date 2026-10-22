@@ -7,7 +7,9 @@ final class ComposerNSTextView: NSTextView {
     var command: ((StoredShortcut) -> Selector?)?
     var onSubmit: (() -> Void)?
     var focusChanged: ((Bool) -> Void)?
-    var pasteAttachments: ((PastedAttachments) -> Void)?
+    var pasteAttachments: ((PastedAttachments) -> Void)? {
+        didSet { if (oldValue == nil) != (pasteAttachments == nil) { updateDragTypeRegistration() } }
+    }
     var pasteboard = NSPasteboard.general
     private var shiftHeld = false
 
@@ -15,6 +17,8 @@ final class ComposerNSTextView: NSTextView {
         let view = ComposerNSTextView(usingTextLayoutManager: true)
         view.isRichText = false
         view.importsGraphics = false
+        view.usesFontPanel = false
+        view.usesRuler = false
         view.allowsUndo = true
         view.drawsBackground = false
         view.font = font
@@ -58,7 +62,33 @@ final class ComposerNSTextView: NSTextView {
         }
     }
 
-    override var acceptableDragTypes: [NSPasteboard.PasteboardType] { [.string] }
+    static let attachmentDragTypes: [NSPasteboard.PasteboardType] = [.fileURL, .png, .tiff, NSPasteboard.PasteboardType("public.jpeg"), NSPasteboard.PasteboardType("public.heic")]
+
+    override var acceptableDragTypes: [NSPasteboard.PasteboardType] {
+        pasteAttachments == nil ? [.string] : [.string] + Self.attachmentDragTypes
+    }
+
+    func dropAttachments(from pasteboard: NSPasteboard) -> Bool {
+        guard let pasteAttachments, let pasted = ComposerAttachments.pasted(from: pasteboard) else { return false }
+        pasteAttachments(pasted)
+        return true
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        attachmentDrag(sender) ? .copy : super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        attachmentDrag(sender) ? .copy : super.draggingUpdated(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        dropAttachments(from: sender.draggingPasteboard) || super.performDragOperation(sender)
+    }
+
+    private func attachmentDrag(_ sender: NSDraggingInfo) -> Bool {
+        pasteAttachments != nil && ComposerAttachments.pasted(from: sender.draggingPasteboard) != nil
+    }
 
     override func keyDown(with event: NSEvent) {
         if perform(event) { return }
