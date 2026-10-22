@@ -67,7 +67,7 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         AgenthailAPNSEnvironment: $(AGENTHAIL_APNS_ENVIRONMENT)
         AgenthailKeychainGroup: $(AGENTHAIL_KEYCHAIN_GROUP)
-        NSCameraUsageDescription: Scan the pairing code shown by Agenthail on your Mac, or take a photo to send to an agent.
+        NSCameraUsageDescription: Scan the pairing code shown by Agenthail on your computer, or take a photo to send to an agent.
         NSMicrophoneUsageDescription: Talk directly to your Codex Voice orchestrator. Audio is sent to Codex, not transcribed on this device.
         UIBackgroundModes:
           - remote-notification
