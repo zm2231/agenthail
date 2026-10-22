@@ -190,10 +190,23 @@ func ExchangesFromItems(items []TimelineItem, source string) []Exchange {
 	return exchanges
 }
 
-// ExchangeStarts returns the index of the item that opens each exchange, so a
-// page can begin exactly at an exchange.
+// ExchangeStarts returns the index of the first item of each exchange, so a
+// page can begin exactly at an exchange. An exchange begins with the earliest
+// item of its turn, since a turn can record items, such as the instructions
+// a provider injects, before the prompt that opens it.
 func ExchangeStarts(items []TimelineItem) []int {
 	_, starts := groupExchanges(items, "")
+	for index, start := range starts {
+		floor := 0
+		if index > 0 {
+			floor = starts[index-1] + 1
+		}
+		turn := items[start].TurnID
+		for turn != "" && start > floor && items[start-1].TurnID == turn {
+			start--
+		}
+		starts[index] = start
+	}
 	return starts
 }
 

@@ -120,6 +120,25 @@ func TestCodexLimitPagesByTurnNotByMessage(t *testing.T) {
 	if got := exchangeUsers(second.Exchanges); got != "prompt 3|prompt 4|prompt 5" {
 		t.Fatalf("second page=%s", got)
 	}
+	for _, page := range []struct {
+		read  *surface.SessionReadResult
+		turns []string
+	}{{first, []string{"t6", "t7", "t8"}}, {second, []string{"t3", "t4", "t5"}}} {
+		instructions := map[string]int{}
+		for _, item := range page.read.Items {
+			if item.Kind == "instructions" {
+				instructions[item.TurnID]++
+			}
+		}
+		for _, turn := range page.turns {
+			if instructions[turn] != 3 {
+				t.Fatalf("page %v holds %d instructions of %s: %v", page.turns, instructions[turn], turn, instructions)
+			}
+		}
+		if len(instructions) != len(page.turns) {
+			t.Fatalf("page %v holds instructions of other turns: %v", page.turns, instructions)
+		}
+	}
 	for _, exchange := range append(first.Exchanges, second.Exchanges...) {
 		if !strings.HasPrefix(exchange.Assistant, "answer ") {
 			t.Fatalf("exchange=%+v", exchange)

@@ -365,3 +365,86 @@ func TestJournaledCodexContextFromBeforeInstructionsReadsAsInstructions(t *testi
 		t.Fatalf("exchanges=%+v", page.Exchanges)
 	}
 }
+
+func TestCodexJournalContextPastAMebibyteIsReadWholeAndOnce(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	huge := "# AGENTS.md instructions for /work\n\n<INSTRUCTIONS>\n" + strings.Repeat("Keep the tests hermetic and the names neutral.\n", 32<<10) + "</INSTRUCTIONS>"
+	if len(huge) <= 1<<20 {
+		t.Fatalf("fixture is %d bytes, want more than a mebibyte", len(huge))
+	}
+	entry, err := sessionJournalEntry(from.ID, sessionJournalPayload{ItemID: "t1-agents", Op: "upsert", Version: 1, Kind: "message", Role: "user", Body: huge, TurnID: "t1"})
+	if err != nil || entry.BodyRef == "" {
+		t.Fatalf("entry ref=%q err=%v", entry.BodyRef, err)
+	}
+	if _, _, err := r.AppendSessionJournalEntry(entry, registry.SessionJournalRetention{Count: 4096, Bytes: 64 << 20}); err != nil {
+		t.Fatal(err)
+	}
+	appendJournalPayloads(t, r, from.ID,
+		sessionJournalPayload{ItemID: "t1-prompt", Kind: "message", Role: "user", Body: "Fix the build.", TurnID: "t1"},
+		sessionJournalPayload{ItemID: "t1-done", Kind: "done", TurnID: "t1"},
+	)
+	page, err := d.readJournalPage(from.ID, 0, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) == 0 || page.Items[0].ID != "t1-agents" || page.Items[0].Kind != "instructions" {
+		t.Fatalf("items=%+v", page.Items)
+	}
+
+	reads := 0
+	read := codexJournalItemReader(func(ref string) ([]byte, error) {
+		reads++
+		return []byte(huge), nil
+	})
+	var payload sessionJournalPayload
+	if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if item := read(payload); item.Kind != "instructions" {
+			t.Fatalf("item=%+v", item)
+		}
+	}
+	if reads != 1 {
+		t.Fatalf("retained body read %d times for one row", reads)
+	}
+}
+
+func TestJournalPageKeepsTheInstructionsOfItsOldestTurn(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	for turn := 1; turn <= 5; turn++ {
+		id := fmt.Sprintf("t%d", turn)
+		appendJournalPayloads(t, r, from.ID,
+			sessionJournalPayload{ItemID: id + "-instructions", Kind: "instructions", Title: "Instructions", Body: "<environment_context>turn " + id + "</environment_context>", TurnID: id},
+			sessionJournalPayload{ItemID: id + "-prompt", Kind: "message", Role: "user", Body: "prompt " + id, TurnID: id},
+			sessionJournalPayload{ItemID: id + "-answer", Kind: "message", Role: "assistant", Body: "answer " + id, TurnID: id},
+			sessionJournalPayload{ItemID: id + "-done", Kind: "done", TurnID: id},
+		)
+	}
+	seen := map[string]bool{}
+	cursor := uint64(0)
+	for _, want := range [][]int{{4, 5}, {2, 3}, {1}} {
+		page, err := d.readJournalPage(from.ID, cursor, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := map[string]bool{}
+		for _, item := range page.Items {
+			if seen[item.ID] {
+				t.Fatalf("item %s returned on two pages", item.ID)
+			}
+			seen[item.ID], ids[item.ID] = true, true
+		}
+		for _, turn := range want {
+			for _, part := range []string{"instructions", "prompt", "answer", "done"} {
+				if id := fmt.Sprintf("t%d-%s", turn, part); !ids[id] {
+					t.Fatalf("page for turns %v lacks %s: %v", want, id, ids)
+				}
+			}
+		}
+		cursor = uint64(page.NextBefore)
+	}
+	if len(seen) != 20 {
+		t.Fatalf("pages returned %d of 20 items", len(seen))
+	}
+}

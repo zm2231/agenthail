@@ -144,10 +144,6 @@ func journalVisibleItems(entries []journalPageItem, toItem func(sessionJournalPa
 	return items, positions
 }
 
-// journalInjectedContextBodyLimit bounds the full body read to tell whether
-// a Codex row journaled as a prompt is injected context.
-const journalInjectedContextBodyLimit = 1 << 20
-
 // journalItemReader returns how a session's journal rows read as timeline
 // items. A Codex user row journaled before injected context was told apart
 // from prompts reads as instructions when its whole body is Codex's injected
@@ -158,23 +154,36 @@ func (d *Daemon) journalItemReader(sessionID string) func(sessionJournalPayload)
 	if err != nil || kind != string(surface.KindCodex) {
 		return journalTimelineItem
 	}
+	return codexJournalItemReader(func(ref string) ([]byte, error) {
+		body, _, err := d.Registry.SessionJournalBody(sessionID, ref, 0, sessionJournalRetentionBytes)
+		return body, err
+	})
+}
+
+// codexJournalItemReader classifies Codex journal rows, reading each
+// retained body at most once: a page classifies its rows more than once
+// while it looks for where its oldest exchange starts.
+func codexJournalItemReader(readBody func(ref string) ([]byte, error)) func(sessionJournalPayload) surface.TimelineItem {
+	injected := map[string]bool{}
 	return func(payload sessionJournalPayload) surface.TimelineItem {
 		item := journalTimelineItem(payload)
 		if item.Kind != "message" || item.Role != "user" {
 			return item
 		}
-		body := payload.Body
+		isContext := surface.IsCodexInjectedContext(payload.Body)
 		if payload.Truncated {
 			if payload.BodyRef == "" {
 				return item
 			}
-			full, _, err := d.Registry.SessionJournalBody(sessionID, payload.BodyRef, 0, journalInjectedContextBodyLimit)
-			if err != nil {
-				return item
+			known, found := injected[payload.BodyRef]
+			if !found {
+				full, err := readBody(payload.BodyRef)
+				known = err == nil && surface.IsCodexInjectedContext(string(full))
+				injected[payload.BodyRef] = known
 			}
-			body = string(full)
+			isContext = known
 		}
-		if surface.IsCodexInjectedContext(body) {
+		if isContext {
 			item.Kind, item.Role, item.Title = "instructions", "", "Instructions"
 		}
 		return item
