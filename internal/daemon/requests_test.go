@@ -357,8 +357,31 @@ func TestElsewhereWaitingMessageNamesEachKind(t *testing.T) {
 		surface.WaitingApproval: "builder needs your approval",
 		surface.WaitingDialog:   "builder has a dialog open in its terminal",
 	} {
-		if got := elsewhereWaitingMessage("builder", kind); got != want {
+		if got := elsewhereWaitingMessage("builder", surface.Waiting{Kind: kind, Answerable: true}, surface.RuntimeClaudeHost, true); got != want {
 			t.Errorf("%s: %q, want %q", kind, got, want)
+		}
+	}
+}
+
+// A prompt Agenthail does not hold names where it is answered, or how to
+// clear it when nothing shows it.
+func TestElsewhereWaitingMessageSaysWhereAnUnheldPromptIsAnswered(t *testing.T) {
+	for _, test := range []struct {
+		runtime     surface.RuntimeKind
+		restartable bool
+		kind        surface.WaitingKind
+		want        string
+	}{
+		{surface.RuntimeClaudeCLI, false, surface.WaitingApproval, "builder needs your approval in its terminal"},
+		{surface.RuntimeClaudeCLI, false, surface.WaitingQuestion, "builder asks you a question in its terminal"},
+		{surface.RuntimeCodexDesktop, false, surface.WaitingInput, "builder needs your input"},
+		{surface.RuntimeClaudeHost, true, surface.WaitingApproval, "builder is waiting on a prompt Agenthail can't reach. Stop and resume it to clear it"},
+		{surface.RuntimeClaudeBackground, true, surface.WaitingQuestion, "builder is waiting on a prompt Agenthail can't reach. Stop and resume it to clear it"},
+		{surface.RuntimeCodexAppServer, false, surface.WaitingApproval, "builder needs your approval"},
+		{surface.RuntimeClaudeCLI, false, surface.WaitingDialog, "builder has a dialog open in its terminal"},
+	} {
+		if got := elsewhereWaitingMessage("builder", surface.Waiting{Kind: test.kind}, test.runtime, test.restartable); got != test.want {
+			t.Errorf("%s %s: %q, want %q", test.runtime, test.kind, got, test.want)
 		}
 	}
 }

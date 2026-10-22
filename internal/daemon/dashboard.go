@@ -98,6 +98,7 @@ type dashboardSession struct {
 	Status            surface.SessionStatus      `json:"status"`
 	WaitingOn         *surface.Waiting           `json:"waitingOn,omitempty"`
 	BackgroundTasks   *surface.BackgroundTasks   `json:"backgroundTasks,omitempty"`
+	UsageLimit        *surface.UsageLimit        `json:"usageLimit,omitempty"`
 	LastActive        time.Time                  `json:"lastActive,omitempty"`
 	QueueCount        int                        `json:"queueCount"`
 	Open              bool                       `json:"open"`

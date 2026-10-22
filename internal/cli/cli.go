@@ -53,6 +53,8 @@ type App struct {
 	registryMu                sync.Mutex
 	registryErr               error
 	Surfaces                  []SurfaceEntry
+	UIDir                     string
+	uiAuthorName              string
 	DefaultTimeout            time.Duration
 	Version                   string
 	Revision                  string
@@ -234,6 +236,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdHooks(rest)
 	case "permissions":
 		return a.cmdPermissions(rest)
+	case "ui":
+		return a.cmdUI(rest)
 	case "dashboard":
 		return a.cmdDashboard(rest)
 	case "version", "--version":
@@ -391,6 +395,17 @@ Dashboard (optional):
   dashboard remote status       Show remote access state and phone URL
   dashboard remote off          Remove Agenthail's Tailscale Serve route
   dashboard                     Open an enabled dashboard
+
+Interface preferences (ui.conf, versioned; every change is a commit):
+  ui get [--resolved] [--device <class>] [--json]
+                                Print ui.conf, or every value one device uses
+  ui set 'key = value' ...      Change keys; images are copied in and versioned
+  ui unset <key>[@device] ...   Go back to the default
+  ui write <file|->             Replace the whole file after checking it
+  ui check <file|->             Report problems with line numbers
+  ui log | diff [<rev>] | undo [<rev>]
+                                History, what a change did, and revert
+  ui show-defaults [--docs]     Every key with its default and documentation
 
 Other:
   launch <surface>              Launch a surface app with debug settings

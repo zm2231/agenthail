@@ -43,6 +43,7 @@ type Daemon struct {
 	log                  *log.Logger
 	errorMu              sync.Mutex
 	observeErrors        map[string]observedError
+	ui                   *uiState
 	retryMu              sync.Mutex
 	observeRetry         map[string]observeRetry
 	notificationMu       sync.Mutex
@@ -140,6 +141,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		uploads:           uploads.New(uploadsDir(reg)),
 		background:        newBackgroundWork(),
 	}
+	d.ui = newUIState(reg)
 	identity, err := reg.HostIdentity()
 	if err != nil {
 		d.log.Printf("host identity: %s", err)
@@ -262,6 +264,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.superviseClaudeHost(ctx)
 	}()
 	go d.sweepUploads(ctx)
+	uiDone := make(chan struct{})
+	go func() {
+		defer close(uiDone)
+		d.watchUI(ctx)
+	}()
 	observerTicker := time.NewTicker(d.pollInterval)
 	defer observerTicker.Stop()
 	d.scanAndRelay(ctx)
@@ -271,6 +278,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.background.stop()
 			<-catalogDone
 			<-hostDone
+			<-uiDone
 			d.log.Printf("stopping")
 			return nil
 		case <-observerTicker.C:

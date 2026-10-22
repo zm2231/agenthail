@@ -153,6 +153,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	session.Status = observation.Status
 	session.WaitingOn = observation.WaitingOn
 	session.BackgroundTasks = observation.BackgroundTasks
+	session.UsageLimit = observation.UsageLimit
 	if session.Source != source || session.Transport != transport {
 		if err := d.Registry.RegisterSession(*session); err != nil {
 			d.log.Printf("persist refreshed session %s: %s", d.resolveDisplay(session.ID), err)

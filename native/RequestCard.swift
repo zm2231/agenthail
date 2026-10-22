@@ -269,24 +269,28 @@ struct ElicitationForm: Hashable {
     }
 }
 
-/// A session waiting on a prompt Agenthail cannot answer, with where to answer it.
+/// A session waiting on a prompt Agenthail cannot answer, with where to
+/// answer it, or how to clear one nothing shows.
 struct ElsewhereWaitCard: View {
     let waiting: WaitingState
+    let place: WaitingPlace
     let surface: String
     let hostName: String?
     let accent: Color
     let open: (() -> Void)?
+    var restart: (() -> Void)? = nil
 
     /// Whether a session's wait is shown as this card rather than as a request
-    /// to answer. Claude reports a dialog only when nothing else waits, so a
-    /// request still listed alongside one is stale.
+    /// to answer: any wait Agenthail does not hold, such as a dialog, alongside
+    /// which a request still listed is stale.
     static func shows(_ waiting: WaitingState?, readOnly: Bool, respond: Bool) -> Bool {
         guard let waiting else { return false }
-        return waiting.kind == "dialog" || readOnly || !respond
+        return waiting.answerable != true || readOnly || !respond
     }
 
-    static func heading(kind: String, surface: String) -> String {
+    static func heading(kind: String, surface: String, place: WaitingPlace = .elsewhere) -> String {
         let agent = SessionRefinement.surfaceLabel(surface)
+        if place == .restart { return "\(agent) is waiting on a prompt Agenthail can't reach" }
         switch kind {
         case "question": return "\(agent) asks you a question"
         case "input": return "\(agent) needs your input"
@@ -295,17 +299,39 @@ struct ElsewhereWaitCard: View {
         }
     }
 
+    static func detail(place: WaitingPlace, hostName: String?) -> String {
+        switch place {
+        case .restart:
+            return "Nothing shows this prompt, so no one can answer it. Stop and resume the session to clear it; messages you send wait until then."
+        case .terminal:
+            return "Agenthail can't answer this one. Answer it in the session's terminal\(hostName.map { ", in \($0)" } ?? ""). Messages you send wait until then."
+        default:
+            return "Agenthail can't answer this one. Answer it where the session runs\(hostName.map { ", in \($0)" } ?? ", such as its terminal"). Messages you send wait until then."
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(Self.heading(kind: waiting.kind, surface: surface), systemImage: waiting.kind == "approval" ? "hand.raised" : waiting.kind == "dialog" ? "macwindow" : "questionmark.bubble")
+            Label(Self.heading(kind: waiting.kind, surface: surface, place: place), systemImage: place == .restart ? "exclamationmark.bubble" : waiting.kind == "approval" ? "hand.raised" : waiting.kind == "dialog" ? "macwindow" : "questionmark.bubble")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(accent)
-            Text("Agenthail can't answer this one. Answer it where the session runs\(hostName.map { ", in \($0)" } ?? ", such as its terminal"). Messages you send wait until then.")
+            Text(Self.detail(place: place, hostName: hostName))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-            if let open {
-                Button("Open in \(hostName ?? "terminal")", systemImage: "arrow.up.forward.app", action: open)
-                    .buttonStyle(.borderedProminent)
+            HStack {
+                if place == .restart, let restart {
+                    Button("Stop and resume", systemImage: "arrow.clockwise", action: restart)
+                        .buttonStyle(.borderedProminent)
+                }
+                if let open {
+                    if place == .restart, restart != nil {
+                        Button("Open in \(hostName ?? "terminal")", systemImage: "arrow.up.forward.app", action: open)
+                            .buttonStyle(.bordered)
+                    } else {
+                        Button("Open in \(hostName ?? "terminal")", systemImage: "arrow.up.forward.app", action: open)
+                            .buttonStyle(.borderedProminent)
+                    }
+                }
             }
         }
         .padding(12)

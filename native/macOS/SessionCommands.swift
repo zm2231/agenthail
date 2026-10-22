@@ -8,15 +8,32 @@ struct SessionCommands: Commands {
     @Environment(\.openWindow) private var openWindow
 
     private var session: SessionState? { pane?.displayedSession }
+    private var tabs: Bool { pane?.tabsEnabled == true }
     private var writable: Bool { session.map { !$0.isReadOnly } == true && pane?.removedSession == nil }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Session…") {
+            Button("New Session") {
                 showMainWindow()
-                model.newSessionVisible = true
+                model.openNewSession()
             }
             .keyboardShortcut(shortcuts.keyboardShortcut(.newSession))
+            if tabs {
+                Button("New Tab") {
+                    showMainWindow()
+                    model.openNewSession()
+                }
+                .keyboardShortcut(shortcuts.keyboardShortcut(.newTab))
+            }
+        }
+        CommandGroup(replacing: .saveItem) {
+            if tabs, let pane, let active = pane.tabs.active {
+                Button("Close Tab") { pane.closeTab(active) }
+                    .keyboardShortcut(shortcuts.keyboardShortcut(.closeTab))
+            } else {
+                Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
+                    .keyboardShortcut("w")
+            }
         }
         CommandMenu("Session") {
             Button("Go to Session…") {
@@ -37,6 +54,18 @@ struct SessionCommands: Commands {
                 .disabled(session?.canAdopt != true || pane?.removedSession != nil)
             Button("Fork") { if let session { pane?.fork(session) } }
                 .disabled(session.map(SessionOperationAvailability.fork) != true || pane?.removedSession != nil || pane?.forking == true)
+            if tabs, let pane {
+                Divider()
+                Button("Next Tab") { pane.stepTab(1) }
+                    .keyboardShortcut(shortcuts.keyboardShortcut(.nextTab))
+                    .disabled(pane.tabs.tabs.count < 2)
+                Button("Previous Tab") { pane.stepTab(-1) }
+                    .keyboardShortcut(shortcuts.keyboardShortcut(.previousTab))
+                    .disabled(pane.tabs.tabs.count < 2)
+                Button("Keep Tab Open") { if let id = pane.tabs.preview { pane.keepTab(id) } }
+                    .keyboardShortcut(shortcuts.keyboardShortcut(.keepTab))
+                    .disabled(pane.tabs.preview == nil || pane.tabs.preview != pane.tabs.active)
+            }
             Divider()
             Button("Talk to Orchestrator…") { openVoice("") }
             Button("Call This Session…") { if let id = session?.id { openVoice(id) } }

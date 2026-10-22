@@ -1,4 +1,5 @@
 import AppKit
+import os
 import SwiftUI
 
 enum DesktopPalette {
@@ -11,33 +12,66 @@ enum DesktopPalette {
     static let raised = dynamic(raisedHex)
     static let line = dynamic(light: 0xE3E3E6, dark: 0x2E2F33)
     static let line2 = dynamic(light: 0xECECEE, dark: 0x26272A)
-    static let text = dynamic(light: 0x1D1D1F, dark: 0xECECEE)
-    static let text2 = dynamic(light: 0x5F6066, dark: 0xA3A3A8)
-    static let muted = dynamic(light: 0x9A9BA1, dark: 0x6F7075)
+    private static let textHex: (light: UInt32, dark: UInt32) = (0x1D1D1F, 0xECECEE)
+    private static let text2Hex: (light: UInt32, dark: UInt32) = (0x5F6066, 0xA3A3A8)
+    private static let mutedHex: (light: UInt32, dark: UInt32) = (0x6E6E76, 0x8E8E93)
+    private static let attentionHex: (light: UInt32, dark: UInt32) = (0x965A00, 0xFFB224)
+    private static let workingHex: (light: UInt32, dark: UInt32) = (0x2A64CC, 0x7AA7FF)
+    private static let doneHex: (light: UInt32, dark: UInt32) = (0x1A7F4E, 0x4CC38A)
+    private static let failedHex: (light: UInt32, dark: UInt32) = (0xC4271B, 0xFF6B61)
+
+    static let text = dynamic(textHex)
+    static let text2 = dynamic(text2Hex)
+    static let muted = dynamic(mutedHex)
     static let bubble = dynamic(light: 0xF1F1F3, dark: 0x26272A)
     static let fill = dynamic(light: 0xE9E9EC, dark: 0x2A2B2F)
     static let dock = dynamic(light: 0xF7F7F8, dark: 0x1B1C1F)
     static let stop = dynamic(light: 0x3D3E42, dark: 0x48494D)
 
-    static let accent = Color(nsColor: .controlAccentColor)
+    /// The accent ui.conf chose; nil follows the system accent. AppKit
+    /// resolves colours on whichever thread draws, so this sits behind a lock.
+    private static let accentChoice = OSAllocatedUnfairLock<AccentContrast.RGB?>(initialState: nil)
+
+    static func choose(accent: AccentContrast.RGB?) {
+        accentChoice.withLock { $0 = accent }
+    }
+
+    static let accent = Color(nsColor: NSColor(name: nil) { accentRGB(in: $0).nsColor })
     static let accentText = Color(nsColor: NSColor(name: nil) { appearance in
-        let dark = isDark(appearance)
-        let surfaces = [windowHex, sideHex, raisedHex].map { AccentContrast.RGB(hex: dark ? $0.dark : $0.light) }
-        return AccentContrast.readable(AccentContrast.rgb(.controlAccentColor, in: appearance), on: surfaces, dark: dark).nsColor
+        readableAccent(in: appearance).nsColor
     })
     static let onAccent = Color(nsColor: NSColor(name: nil) { appearance in
-        AccentContrast.foreground(on: AccentContrast.rgb(.controlAccentColor, in: appearance)).nsColor
+        AccentContrast.foreground(on: accentRGB(in: appearance)).nsColor
     })
     static let selection = Color(nsColor: NSColor(name: nil) { appearance in
-        AccentContrast.rgb(.controlAccentColor, in: appearance).nsColor.withAlphaComponent(0.18)
+        accentRGB(in: appearance).nsColor.withAlphaComponent(0.18)
     })
 
-    static let attention = dynamic(light: 0x965A00, dark: 0xFFB224)
+    static func accentRGB(in appearance: NSAppearance) -> AccentContrast.RGB {
+        accentChoice.withLock { $0 } ?? AccentContrast.rgb(.controlAccentColor, in: appearance)
+    }
+
+    static func readableAccent(in appearance: NSAppearance) -> AccentContrast.RGB {
+        let dark = isDark(appearance)
+        let surfaces = [windowHex, sideHex, raisedHex].map { AccentContrast.RGB(hex: dark ? $0.dark : $0.light) }
+        return AccentContrast.readable(accentRGB(in: appearance), on: surfaces, dark: dark)
+    }
+
+    /// Every colour text is drawn in, which a scrim must keep readable.
+    static func textRoles(dark: Bool) -> [AccentContrast.RGB] {
+        [textHex, text2Hex, mutedHex, attentionHex, workingHex, doneHex, failedHex].map { AccentContrast.RGB(hex: dark ? $0.dark : $0.light) }
+    }
+
+    static func ground(dark: Bool) -> AccentContrast.RGB {
+        AccentContrast.RGB(hex: dark ? windowHex.dark : windowHex.light)
+    }
+
+    static let attention = dynamic(attentionHex)
     static let attentionBackground = dynamic(light: 0xFFF5E0, dark: 0x2E2414)
     static let attentionLine = dynamic(light: 0xF2D9A6, dark: 0x5C4415)
-    static let working = dynamic(light: 0x2A64CC, dark: 0x7AA7FF)
-    static let done = dynamic(light: 0x1A7F4E, dark: 0x4CC38A)
-    static let failed = dynamic(light: 0xC4271B, dark: 0xFF6B61)
+    static let working = dynamic(workingHex)
+    static let done = dynamic(doneHex)
+    static let failed = dynamic(failedHex)
     static let failedBackground = dynamic(light: 0xFDEDEC, dark: 0x2E1A19)
     static let failedLine = dynamic(light: 0xF5C9C5, dark: 0x5A2B28)
 
@@ -58,7 +92,7 @@ enum DesktopPalette {
         })
     }
 
-    private static func isDark(_ appearance: NSAppearance) -> Bool {
+    static func isDark(_ appearance: NSAppearance) -> Bool {
         appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
     }
 
