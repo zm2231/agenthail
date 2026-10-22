@@ -21,9 +21,10 @@ const (
 )
 
 type journalPageItem struct {
-	seq     uint64
-	size    int
-	payload sessionJournalPayload
+	seq      uint64
+	position uint64
+	size     int
+	payload  sessionJournalPayload
 }
 
 // readJournalPage returns the newest limit exchanges before the cursor, each from the item that
@@ -60,7 +61,7 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 			if err := json.Unmarshal(entry.Payload, &payload); err != nil {
 				return result, fmt.Errorf("decode journal item: %w", err)
 			}
-			chunk = append(chunk, journalPageItem{seq: entry.Seq, size: len(entry.Payload), payload: payload})
+			chunk = append(chunk, journalPageItem{seq: entry.Seq, position: entry.Position, size: len(entry.Payload), payload: payload})
 		}
 		collected = append(chunk, collected...)
 		for _, item := range chunk {
@@ -77,7 +78,7 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 	first, truncated := journalPageStart(collected, positions, starts, limit, reachedStart)
 	result.Truncated = truncated
 	if first > 0 {
-		result.NextBefore = int64(collected[first].seq)
+		result.NextBefore = int64(collected[first].position)
 	} else {
 		result.NextBefore = int64(page.NextBefore)
 		if page.HistoryBefore > 0 {

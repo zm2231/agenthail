@@ -54,7 +54,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 32
+	schemaVersion   = 33
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -329,6 +329,17 @@ func migrateTx(tx *sql.Tx) error {
 		return err
 	}
 	if _, err := tx.Exec(`UPDATE catalog_state SET projection_clock=(SELECT MAX(projection_generation) FROM catalog_sessions) WHERE projection_clock<(SELECT COALESCE(MAX(projection_generation),0) FROM catalog_sessions)`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "session_journal", "position", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if version < 33 {
+		if _, err := tx.Exec(`UPDATE session_journal SET position=seq WHERE position=0`); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS session_journal_position ON session_journal(session_id, position)`); err != nil {
 		return err
 	}
 	if err := ensureColumn(tx, "delivery_intents", "message", `TEXT NOT NULL DEFAULT ''`); err != nil {
@@ -830,6 +841,7 @@ CREATE INDEX IF NOT EXISTS daemon_events_created ON daemon_events(created_at DES
 CREATE TABLE IF NOT EXISTS session_journal (
 	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 	seq INTEGER NOT NULL,
+	position INTEGER NOT NULL DEFAULT 0,
 	kind TEXT NOT NULL,
 	provider_key TEXT NOT NULL DEFAULT '',
 	payload BLOB NOT NULL,

@@ -2116,8 +2116,8 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 				"code":    "history_gap",
 				"message": "The requested older session history is no longer retained.",
 			},
-			"earliestSeq": historyGap.EarliestSeq,
-			"latestSeq":   historyGap.LatestSeq,
+			"earliestPosition": historyGap.Earliest,
+			"latestPosition":   historyGap.Latest,
 		})
 		return
 	}

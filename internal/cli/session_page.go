@@ -27,11 +27,11 @@ type daemonSessionPageClient struct {
 }
 
 type daemonSessionPageError struct {
-	Status      int
-	Code        string
-	Message     string
-	EarliestSeq uint64
-	LatestSeq   uint64
+	Status   int
+	Code     string
+	Message  string
+	Earliest uint64
+	Latest   uint64
 }
 
 func (e *daemonSessionPageError) Error() string {
@@ -92,8 +92,8 @@ type daemonSessionPageResponse struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
-	EarliestSeq uint64 `json:"earliestSeq"`
-	LatestSeq   uint64 `json:"latestSeq"`
+	EarliestPosition uint64 `json:"earliestPosition"`
+	LatestPosition   uint64 `json:"latestPosition"`
 }
 
 func (p daemonSessionPageResponse) pageError(status int) error {
@@ -104,7 +104,7 @@ func (p daemonSessionPageResponse) pageError(status int) error {
 	if message == "" {
 		message = http.StatusText(status)
 	}
-	return &daemonSessionPageError{Status: status, Code: p.Error.Code, Message: message, EarliestSeq: p.EarliestSeq, LatestSeq: p.LatestSeq}
+	return &daemonSessionPageError{Status: status, Code: p.Error.Code, Message: message, Earliest: p.EarliestPosition, Latest: p.LatestPosition}
 }
 
 func (p daemonSessionPageResponse) result(session *surface.Session) *surface.SessionReadResult {

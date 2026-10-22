@@ -14,9 +14,11 @@ import (
 
 var ErrSessionJournalEntryTooLarge = errors.New("session journal entry exceeds byte retention")
 
+// SessionJournalHistoryGapError reports a page cursor before the retained
+// history, with the earliest and latest retained positions.
 type SessionJournalHistoryGapError struct {
-	EarliestSeq uint64
-	LatestSeq   uint64
+	Earliest uint64
+	Latest   uint64
 }
 
 func (e *SessionJournalHistoryGapError) Error() string {
@@ -24,8 +26,11 @@ func (e *SessionJournalHistoryGapError) Error() string {
 }
 
 type SessionJournalEntry struct {
-	SessionID   string
-	Seq         uint64
+	SessionID string
+	Seq       uint64
+	// Position orders the entry in the session's history. It is the seq the
+	// entry was first written with and stays when an upsert gives it a new seq.
+	Position    uint64
 	Kind        string
 	ProviderKey string
 	Payload     []byte
@@ -137,8 +142,8 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 		return SessionJournalPage{}, err
 	}
 	defer tx.Rollback()
-	var earliest, latest sql.NullInt64
-	if err := tx.QueryRow(`SELECT MIN(seq),MAX(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest, &latest); err != nil {
+	var earliest, latest, latestSeq sql.NullInt64
+	if err := tx.QueryRow(`SELECT MIN(position),MAX(position),MAX(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest, &latest, &latestSeq); err != nil {
 		return SessionJournalPage{}, err
 	}
 	var prunedBefore, historyBefore sql.NullInt64
@@ -148,21 +153,21 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 	if before > 0 {
 		historyUnknown := !historyBefore.Valid || historyBefore.Int64 < 0
 		if !earliest.Valid || (prunedBefore.Valid && uint64(prunedBefore.Int64) >= before-1) || (historyUnknown && before <= uint64(earliest.Int64)) {
-			var earliestSeq, latestSeq uint64
+			var earliestPosition, latestPosition uint64
 			if earliest.Valid {
-				earliestSeq = uint64(earliest.Int64)
+				earliestPosition = uint64(earliest.Int64)
 			}
 			if latest.Valid {
-				latestSeq = uint64(latest.Int64)
+				latestPosition = uint64(latest.Int64)
 			}
-			return SessionJournalPage{}, &SessionJournalHistoryGapError{EarliestSeq: earliestSeq, LatestSeq: latestSeq}
+			return SessionJournalPage{}, &SessionJournalHistoryGapError{Earliest: earliestPosition, Latest: latestPosition}
 		}
-		earliestSeq, latestSeq := uint64(earliest.Int64), uint64(latest.Int64)
-		if before < earliestSeq-1 {
-			return SessionJournalPage{}, &SessionJournalHistoryGapError{EarliestSeq: earliestSeq, LatestSeq: latestSeq}
+		earliestPosition, latestPosition := uint64(earliest.Int64), uint64(latest.Int64)
+		if before < earliestPosition-1 {
+			return SessionJournalPage{}, &SessionJournalHistoryGapError{Earliest: earliestPosition, Latest: latestPosition}
 		}
 	}
-	rows, err := tx.Query(`SELECT session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND (?=0 OR seq<?) ORDER BY seq DESC LIMIT ?`, sessionID, before, before, limit+1)
+	rows, err := tx.Query(`SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND (?=0 OR position<?) ORDER BY position DESC LIMIT ?`, sessionID, before, before, limit+1)
 	if err != nil {
 		return SessionJournalPage{}, err
 	}
@@ -181,9 +186,9 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 	var next uint64
 	if len(entries) > limit {
 		entries = entries[:limit]
-		next = entries[len(entries)-1].Seq
-	} else if ((prunedBefore.Valid && prunedBefore.Int64 > 0) || !historyBefore.Valid || historyBefore.Int64 < 0) && len(entries) > 0 && entries[len(entries)-1].Seq == uint64(earliest.Int64) {
-		next = entries[len(entries)-1].Seq
+		next = entries[len(entries)-1].Position
+	} else if ((prunedBefore.Valid && prunedBefore.Int64 > 0) || !historyBefore.Valid || historyBefore.Int64 < 0) && len(entries) > 0 && entries[len(entries)-1].Position == uint64(earliest.Int64) {
+		next = entries[len(entries)-1].Position
 	}
 	for left, right := 0, len(entries)-1; left < right; left, right = left+1, right-1 {
 		entries[left], entries[right] = entries[right], entries[left]
@@ -194,7 +199,7 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 	if err := tx.Commit(); err != nil {
 		return SessionJournalPage{}, err
 	}
-	page := SessionJournalPage{Entries: entries, NextBefore: next, LatestSeq: uint64(latest.Int64)}
+	page := SessionJournalPage{Entries: entries, NextBefore: next, LatestSeq: uint64(latestSeq.Int64)}
 	if next == 0 && (!prunedBefore.Valid || prunedBefore.Int64 == 0) && historyBefore.Valid && historyBefore.Int64 > 0 {
 		page.HistoryBefore = historyBefore.Int64
 	}
@@ -261,6 +266,7 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 					return SessionJournalEntry{}, false, err
 				}
 			}
+			input.Position = existing.Position
 			if _, err := tx.Exec(`UPDATE session_journal SET seq=?,kind=?,payload=?,observed_at=?,bytes=?,body_ref=? WHERE session_id=? AND seq=?`, input.Seq, input.Kind, input.Payload, input.ObservedAt.Format(time.RFC3339Nano), input.Bytes, input.BodyRef, input.SessionID, existing.Seq); err != nil {
 				return SessionJournalEntry{}, false, err
 			}
@@ -276,7 +282,8 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 			return input, true, tx.Commit()
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO session_journal(session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref) VALUES(?,?,?,?,?,?,?,?)`, input.SessionID, input.Seq, input.Kind, input.ProviderKey, input.Payload, input.ObservedAt.Format(time.RFC3339Nano), input.Bytes, input.BodyRef); err != nil {
+	input.Position = input.Seq
+	if _, err := tx.Exec(`INSERT INTO session_journal(session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref) VALUES(?,?,?,?,?,?,?,?,?)`, input.SessionID, input.Seq, input.Position, input.Kind, input.ProviderKey, input.Payload, input.ObservedAt.Format(time.RFC3339Nano), input.Bytes, input.BodyRef); err != nil {
 		return SessionJournalEntry{}, false, err
 	}
 	if err := storeSessionJournalBody(tx, input); err != nil {
@@ -352,7 +359,7 @@ func (r *Registry) SessionJournalAfter(sessionID string, after uint64, limit int
 	if window.Gap {
 		return window, nil
 	}
-	rows, err := r.read.Query(`SELECT session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND seq>? ORDER BY seq LIMIT ?`, sessionID, after, limit)
+	rows, err := r.read.Query(`SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND seq>? ORDER BY seq LIMIT ?`, sessionID, after, limit)
 	if err != nil {
 		return SessionJournalWindow{}, err
 	}
@@ -383,7 +390,7 @@ func (r *Registry) SessionJournalEntryByProviderKey(sessionID, providerKey strin
 }
 
 func sessionJournalByProviderKey(q interface{ QueryRow(string, ...any) *sql.Row }, sessionID, providerKey string) (SessionJournalEntry, bool, error) {
-	entry, err := scanSessionJournalEntry(q.QueryRow(`SELECT session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND provider_key=? AND provider_key!=''`, sessionID, providerKey))
+	entry, err := scanSessionJournalEntry(q.QueryRow(`SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND provider_key=? AND provider_key!=''`, sessionID, providerKey))
 	if err == sql.ErrNoRows {
 		return SessionJournalEntry{}, false, nil
 	}
@@ -392,19 +399,19 @@ func sessionJournalByProviderKey(q interface{ QueryRow(string, ...any) *sql.Row 
 
 func scanSessionJournalEntry(row sessionJournalRow) (SessionJournalEntry, error) {
 	var entry SessionJournalEntry
-	var seq int64
+	var seq, position int64
 	var observedAt string
-	if err := row.Scan(&entry.SessionID, &seq, &entry.Kind, &entry.ProviderKey, &entry.Payload, &observedAt, &entry.Bytes, &entry.BodyRef); err != nil {
+	if err := row.Scan(&entry.SessionID, &seq, &position, &entry.Kind, &entry.ProviderKey, &entry.Payload, &observedAt, &entry.Bytes, &entry.BodyRef); err != nil {
 		return SessionJournalEntry{}, err
 	}
-	if seq < 1 {
-		return SessionJournalEntry{}, fmt.Errorf("invalid session journal sequence %d", seq)
+	if seq < 1 || position < 1 {
+		return SessionJournalEntry{}, fmt.Errorf("invalid session journal sequence %d at %d", seq, position)
 	}
 	parsed, err := time.Parse(time.RFC3339Nano, observedAt)
 	if err != nil {
 		return SessionJournalEntry{}, fmt.Errorf("parse session journal observation time: %w", err)
 	}
-	entry.Seq = uint64(seq)
+	entry.Seq, entry.Position = uint64(seq), uint64(position)
 	entry.ObservedAt = parsed
 	entry.Payload = append([]byte(nil), entry.Payload...)
 	return entry, nil
@@ -422,16 +429,16 @@ func trimSessionJournal(tx *sql.Tx, sessionID string, retention SessionJournalRe
 	if count <= retention.Count && bytes <= retention.Bytes {
 		return nil
 	}
-	rows, err := tx.Query(`SELECT seq,bytes,body_ref FROM session_journal WHERE session_id=? ORDER BY seq`, sessionID)
+	rows, err := tx.Query(`SELECT position,bytes,body_ref FROM session_journal WHERE session_id=? ORDER BY position`, sessionID)
 	if err != nil {
 		return err
 	}
-	var prunedSeq int64
+	var prunedPosition int64
 	prunedBody := false
 	for (count > retention.Count || bytes > retention.Bytes) && rows.Next() {
 		var rowBytes int
 		var bodyRef string
-		if err := rows.Scan(&prunedSeq, &rowBytes, &bodyRef); err != nil {
+		if err := rows.Scan(&prunedPosition, &rowBytes, &bodyRef); err != nil {
 			rows.Close()
 			return err
 		}
@@ -446,10 +453,10 @@ func trimSessionJournal(tx *sql.Tx, sessionID string, retention SessionJournalRe
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM session_journal WHERE session_id=? AND seq<=?`, sessionID, prunedSeq); err != nil {
+	if _, err := tx.Exec(`DELETE FROM session_journal WHERE session_id=? AND position<=?`, sessionID, prunedPosition); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE session_journal_state SET pruned_before=MAX(pruned_before,?),retained_bytes=? WHERE session_id=?`, prunedSeq, bytes, sessionID); err != nil {
+	if _, err := tx.Exec(`UPDATE session_journal_state SET pruned_before=MAX(pruned_before,?),retained_bytes=? WHERE session_id=?`, prunedPosition, bytes, sessionID); err != nil {
 		return err
 	}
 	if !prunedBody {
@@ -535,7 +542,7 @@ func (r *Registry) ReplaceSessionJournal(sessionID string, entries []SessionJour
 	if _, err := tx.Exec(`DELETE FROM session_journal_bodies WHERE session_id=?`, sessionID); err != nil {
 		return nil, err
 	}
-	insert, err := tx.Prepare(`INSERT INTO session_journal(session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref) VALUES(?,?,?,?,?,?,?,?)`)
+	insert, err := tx.Prepare(`INSERT INTO session_journal(session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref) VALUES(?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return nil, err
 	}
@@ -544,13 +551,13 @@ func (r *Registry) ReplaceSessionJournal(sessionID string, entries []SessionJour
 	for index := range entries {
 		entry := &entries[index]
 		next++
-		entry.SessionID, entry.Seq = sessionID, next
+		entry.SessionID, entry.Seq, entry.Position = sessionID, next, next
 		entry.Bytes = len(entry.Payload) + len(entry.FullBody)
 		retained += entry.Bytes
 		if entry.ObservedAt.IsZero() {
 			entry.ObservedAt = time.Now().UTC()
 		}
-		if _, err := insert.Exec(sessionID, entry.Seq, entry.Kind, entry.ProviderKey, entry.Payload, entry.ObservedAt.UTC().Format(time.RFC3339Nano), entry.Bytes, entry.BodyRef); err != nil {
+		if _, err := insert.Exec(sessionID, entry.Seq, entry.Position, entry.Kind, entry.ProviderKey, entry.Payload, entry.ObservedAt.UTC().Format(time.RFC3339Nano), entry.Bytes, entry.BodyRef); err != nil {
 			return nil, err
 		}
 		if err := storeSessionJournalBody(tx, *entry); err != nil {
@@ -564,13 +571,13 @@ func (r *Registry) ReplaceSessionJournal(sessionID string, entries []SessionJour
 		return nil, err
 	}
 	var earliest sql.NullInt64
-	if err := tx.QueryRow(`SELECT MIN(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest); err != nil {
+	if err := tx.QueryRow(`SELECT MIN(position) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	for len(entries) > 0 && earliest.Valid && entries[0].Seq < uint64(earliest.Int64) {
+	for len(entries) > 0 && earliest.Valid && entries[0].Position < uint64(earliest.Int64) {
 		entries = entries[1:]
 	}
 	return entries, nil

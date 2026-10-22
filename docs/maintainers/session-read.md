@@ -25,7 +25,7 @@ the same turns. `timelineBefore` requests turns strictly before the returned
 their identity, role, title, status and retained body reference. If retention
 has pruned history needed by `timelineBefore`, or the journal has no older-history
 boundary, the endpoint returns `409` with
-`error.code` set to `history_gap` and the retained `earliestSeq`/`latestSeq`.
+`error.code` set to `history_gap` and the retained `earliestPosition`/`latestPosition`.
 
 `timeline.nextBefore` is opaque; clients pass it back unchanged and treat `0`
 as the end of history. A seed into an empty journal records the provider's

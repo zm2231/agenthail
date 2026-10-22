@@ -940,3 +940,64 @@ func TestOpenAddsTheTranscriptCheckpointToARegistryAtVersion31(t *testing.T) {
 		t.Fatalf("cleared checkpoint found=%v err=%v", found, err)
 	}
 }
+
+func TestOpenPlacesTheRowsOfARegistryAtVersion31WhereTheirSeqWas(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, r, "session")
+	retention := SessionJournalRetention{Count: 10, Bytes: 1024}
+	for _, key := range []string{"one", "two", "three"} {
+		if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: key, Payload: []byte(`"` + key + `"`)}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "one", Payload: []byte(`"one again"`)}, retention); err != nil {
+		t.Fatal(err)
+	}
+	// Pages before the upgrade ran in seq order, so the newest row was the
+	// upserted "one" at seq 4 and the next cursor was 4.
+	const oldCursor = 4
+	for _, statement := range []string{
+		`DROP INDEX session_journal_position`,
+		`ALTER TABLE session_journal DROP COLUMN position`,
+		`PRAGMA user_version=31`,
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var version int
+	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("user_version=%d err=%v", version, err)
+	}
+	page, err := r.ReadSessionJournalPage("session", 0, 10)
+	if err != nil || journalKeys(t, page.Entries) != "two three one" {
+		t.Fatalf("upgraded page %q err=%v, want rows where their seq was", journalKeys(t, page.Entries), err)
+	}
+	for _, entry := range page.Entries {
+		if entry.Position != entry.Seq {
+			t.Fatalf("upgraded %s at %d with seq %d", entry.ProviderKey, entry.Position, entry.Seq)
+		}
+	}
+	older, err := r.ReadSessionJournalPage("session", oldCursor, 10)
+	if err != nil || journalKeys(t, older.Entries) != "two three" {
+		t.Fatalf("a cursor from before the upgrade pages %q err=%v", journalKeys(t, older.Entries), err)
+	}
+	if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "two", Payload: []byte(`"two again"`)}, retention); err != nil {
+		t.Fatal(err)
+	}
+	if page, err := r.ReadSessionJournalPage("session", 0, 10); err != nil || journalKeys(t, page.Entries) != "two three one" {
+		t.Fatalf("after an upsert %q err=%v", journalKeys(t, page.Entries), err)
+	}
+}
