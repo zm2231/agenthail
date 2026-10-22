@@ -22,21 +22,23 @@ type listProject struct {
 }
 
 type listCatalogView struct {
-	Project       *listProject            `json:"project,omitempty"`
+	Project          *listProject               `json:"project,omitempty"`
 	ClaudeConfigRoot *surface.SessionConfigRoot `json:"claudeConfigRoot,omitempty"`
-	Subagents     *surface.SubagentRollup `json:"-"`
-	Current       bool                    `json:"current"`
-	Archived      bool                    `json:"archived,omitempty"`
+	Subagents        *surface.SubagentRollup    `json:"-"`
+	Holders          []surface.Holder           `json:"-"`
+	Current          bool                       `json:"current"`
+	Archived         bool                       `json:"archived,omitempty"`
 }
 
 func catalogListView(record registry.CatalogSessionState) listCatalogView {
 	var projection struct {
 		listCatalogView
 		Subagents *surface.SubagentRollup `json:"subagents"`
+		Holders   []surface.Holder        `json:"holders"`
 	}
 	_ = json.Unmarshal([]byte(record.ProjectionFingerprint), &projection)
 	view := projection.listCatalogView
-	view.Subagents = projection.Subagents
+	view.Subagents, view.Holders = projection.Subagents, projection.Holders
 	return view
 }
 

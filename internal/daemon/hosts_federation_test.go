@@ -1124,3 +1124,43 @@ func TestFederationReconcileKeepsCommittedRowsDespiteCatalogGap(t *testing.T) {
 		}
 	}
 }
+
+// A conversation open in two terminals on a paired host shows its holders on
+// this host, and a pick made here reaches that host, which resolves the pid
+// among its own processes.
+func TestFederationShowsARemoteConversationsHoldersAndForwardsThePick(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	remote.fake.mu.Lock()
+	shared := remote.fake.sessions["remote-a"]
+	shared.Holders = []surface.Holder{{PID: 4101, TTY: "pts/1", Status: surface.StatusIdle}, {PID: 4102, Status: surface.StatusBusy}}
+	remote.fake.sessions["remote-a"] = shared
+	remote.fake.mu.Unlock()
+	remote.daemon.discoverCatalog(context.Background())
+	qualified := hosts.Qualify(record.ID, "remote-a")
+	awaitFederation(t, "the remote holders mirrored", func() bool {
+		for _, session := range sessionsOf(local.snapshot(t), record.ID) {
+			if session.ID == qualified {
+				return len(session.Holders) == 2 && session.Holders[0].PID == 4101 && session.Holders[0].TTY == "pts/1" && session.Holders[1].PID == 4102
+			}
+		}
+		return false
+	})
+	// The paired host's own adapter judges the pick; this fake is not a Claude
+	// surface, so its refusal shows the pid arrived there.
+	hold := &snapshotHold{release: make(chan struct{})}
+	remote.gate.actions.Store(hold)
+	answered := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		answered <- local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "send", "sessionId": qualified, "message": "to one terminal", "pid": 4102, "pidStartedAt": 1})
+	}()
+	awaitFederation(t, "the pick to reach the paired host", func() bool { return hold.waiting.Load() == 1 })
+	remote.gate.actions.Store(nil)
+	close(hold.release)
+	picked := <-answered
+	if picked.Code != http.StatusConflict || !strings.Contains(picked.Body.String(), "pid names a Claude process") {
+		t.Fatalf("picked send status=%d body=%s, want the paired host to judge the pid", picked.Code, picked.Body.String())
+	}
+	if got := remote.fake.delivered(); len(got) != 0 {
+		t.Fatalf("a pick the paired host refused was delivered: %v", got)
+	}
+}
