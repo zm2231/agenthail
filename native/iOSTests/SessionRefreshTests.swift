@@ -99,12 +99,101 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
-    func testUnsupportedStreamFallsBackToPolling() async throws {
+    func testUnsupportedStreamResubscribesOnceTheSessionCanStream() async throws {
         SessionRefreshProtocol.state.reset(streamUnsupported: true)
+        SessionRefreshProtocol.state.set(snapshotCanStream: false)
         let model = makeModel()
+        await model.refresh()
         await model.loadSession("demo")
-        try await waitUntil(timeout: 6) { SessionRefreshProtocol.state.detailFetches >= 2 }
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.streamRequests >= 1 }
+        try await Task.sleep(for: .seconds(5))
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, 1)
+        XCTAssertEqual(SessionRefreshProtocol.state.streamRequests, 1)
+
+        SessionRefreshProtocol.state.set(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(snapshotCanStream: true)
+        await model.refresh()
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.detailFetches >= 2 && SessionRefreshProtocol.state.streamRequests >= 2 }
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, 2)
+        XCTAssertEqual(SessionRefreshProtocol.state.streamRequests, 2)
         model.selectedSessionID = nil
+    }
+
+    @MainActor
+    func testReconnectResubscribesAnUnsupportedSessionOnce() async throws {
+        let model = try await openUnsupportedSession()
+        SessionRefreshProtocol.state.set(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(snapshotCanStream: true)
+        await model.eventStreamConnected()
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, 2)
+        XCTAssertEqual(SessionRefreshProtocol.state.streamRequests, 2)
+        model.selectedSessionID = nil
+    }
+
+    @MainActor
+    func testReconnectJoinsAPendingResume() async throws {
+        let model = try await openUnsupportedSession()
+        SessionRefreshProtocol.state.set(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(snapshotCanStream: true)
+        SessionRefreshProtocol.state.holdDetail()
+        await model.refresh()
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.detailHeld }
+        let reconnect = Task { await model.eventStreamConnected() }
+        try await Task.sleep(for: .milliseconds(300))
+        SessionRefreshProtocol.state.releaseDetail()
+        await reconnect.value
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, 2)
+        XCTAssertEqual(SessionRefreshProtocol.state.streamRequests, 2)
+        model.selectedSessionID = nil
+    }
+
+    @MainActor
+    func testReconnectJoinsAnOpeningSession() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        let model = makeModel()
+        await model.refresh()
+        SessionRefreshProtocol.state.holdDetail()
+        let load = Task { await model.loadSession("demo") }
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.detailHeld }
+        let reconnect = Task { await model.eventStreamConnected() }
+        try await Task.sleep(for: .milliseconds(300))
+        SessionRefreshProtocol.state.releaseDetail()
+        await load.value
+        await reconnect.value
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, 1)
+        XCTAssertEqual(SessionRefreshProtocol.state.streamRequests, 1)
+        model.selectedSessionID = nil
+    }
+
+    @MainActor
+    func testEventsRefreshAnUnsupportedSessionOnce() async throws {
+        let model = try await openUnsupportedSession()
+        for id in 1...3 {
+            await model.receive(AgenthailEvent(id: UInt64(id), type: "session.updated", timestamp: "", entityId: "demo"))
+        }
+        await model.receive(AgenthailEvent(id: 4, type: "session.updated", timestamp: "", entityId: "other"))
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.detailFetches >= 2 }
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, 2)
+        XCTAssertEqual(SessionRefreshProtocol.state.streamRequests, 1)
+        model.selectedSessionID = nil
+    }
+
+    @MainActor
+    private func openUnsupportedSession() async throws -> AgenthailIOSModel {
+        SessionRefreshProtocol.state.reset(streamUnsupported: true)
+        SessionRefreshProtocol.state.set(snapshotCanStream: false)
+        let model = makeModel()
+        await model.refresh()
+        await model.loadSession("demo")
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.streamRequests >= 1 }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, 1)
+        return model
     }
 
     @MainActor
@@ -142,12 +231,20 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
             condition.withLock {
                 fetches = 0; unsupported = streamUnsupported; detail = "busy"; snapshot = "busy"
                 holdingSnapshot = false; holdingDetail = false; snapshotWaiting = false; detailWaiting = false; passing = 0
+                canStream = true; streams = 0
                 condition.broadcast()
             }
         }
         func set(detailStatus: String) { condition.withLock { detail = detailStatus } }
         func set(snapshotStatus: String) { condition.withLock { snapshot = snapshotStatus } }
         private var passing = 0
+        private var canStream = true
+        private var streams = 0
+        var snapshotCanStream: Bool { condition.withLock { canStream } }
+        var streamRequests: Int { condition.withLock { streams } }
+        func set(snapshotCanStream value: Bool) { condition.withLock { canStream = value } }
+        func set(streamUnsupported value: Bool) { condition.withLock { unsupported = value } }
+        func streamRequested() { condition.withLock { streams += 1 } }
         func holdSnapshot() { condition.withLock { holdingSnapshot = true } }
         func passNextSnapshot() { condition.withLock { passing += 1 } }
         func holdDetail() { condition.withLock { holdingDetail = true } }
@@ -176,7 +273,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
                 while holdingSnapshot { condition.wait() }
                 snapshotWaiting = false
             }
-            return SessionRefreshProtocol.snapshot(status: status)
+            return SessionRefreshProtocol.snapshot(status: status, canStream: canStream)
         }
     }
 
@@ -189,10 +286,15 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         object["session"] = session
         return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
     }
-    static func snapshot(status: String) -> String {
+    static func snapshot(status: String, canStream: Bool) -> String {
         var object = try! JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as! [String: Any]
         var sessions = object["sessions"] as! [[String: Any]]
-        if let index = sessions.firstIndex(where: { $0["id"] as? String == "demo" }) { sessions[index]["status"] = status }
+        if let index = sessions.firstIndex(where: { $0["id"] as? String == "demo" }) {
+            sessions[index]["status"] = status
+            var capabilities = sessions[index]["capabilities"] as! [String: Any]
+            capabilities["stream"] = canStream
+            sessions[index]["capabilities"] = capabilities
+        }
         object["sessions"] = sessions
         return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
     }
@@ -214,6 +316,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/session-metadata":
             body = Self.metadata
         case "/api/v1/session-stream":
+            Self.state.streamRequested()
             if Self.state.streamUnsupported {
                 status = 409
                 body = #"{"error":{"code":"stream_unsupported","message":"no stream"}}"#
