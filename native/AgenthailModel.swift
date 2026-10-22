@@ -371,7 +371,7 @@ final class AgenthailModel: ObservableObject {
             created.host = snapshot?.daemon.pairedHost(owning: detail.session.id)
             pin(created)
         }
-        if let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: id) }) { (pane ?? mainPane).select(session.id) }
+        if let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: id) }) { (pane ?? mainPane).select(session.id, keep: true) }
     }
 
     func attachmentData(sessionID: String, attachment: SessionAttachment) async throws -> Data {

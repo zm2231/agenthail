@@ -124,15 +124,17 @@ final class WindowBackdrop: ObservableObject {
         let workspace = NSWorkspace.shared
         let panes: [BackdropSpec.Pane] = regions.compactMap { id, entry in
             guard case .pane(let role) = entry.region else { return nil }
-            let minimum: Double, strength: Double
             switch role {
-            case .sidebar: (minimum, strength) = (config.sidebarOpacity, config.backgroundOpacity)
-            case .content: (minimum, strength) = (config.contentOpacity, config.backgroundSessionOpacity)
-            case .chrome: (minimum, strength) = (config.chromeOpacity, config.backgroundOpacity)
+            case .sidebar:
+                return BackdropSpec.Pane(id: id, rect: entry.rect.insetBy(dx: gutter, dy: gutter), radius: paneRadius, minimum: Float(config.sidebarOpacity), strength: Float(config.backgroundOpacity))
+            case .content:
+                return BackdropSpec.Pane(id: id, rect: entry.rect.insetBy(dx: gutter, dy: gutter), radius: paneRadius, minimum: Float(config.contentOpacity), strength: Float(config.backgroundSessionOpacity))
+            case .chrome:
+                guard config.chromeOpacity > 0 else { return nil }
+                return BackdropSpec.Pane(id: id, rect: entry.rect, radius: 0, minimum: Float(config.chromeOpacity), strength: Float(config.backgroundOpacity), sharp: true)
             }
-            return BackdropSpec.Pane(id: id, rect: entry.rect.insetBy(dx: gutter, dy: gutter), radius: paneRadius, minimum: Float(minimum), strength: Float(strength))
         }.sorted { $0.id < $1.id }
-        let texts = regions.filter { $0.value.region == .text }.sorted { $0.key < $1.key }.map(\.value.rect)
+        let texts = regions.filter { $0.value.region == .text || $0.value.region == .pane(.chrome) }.sorted { $0.key < $1.key }.map(\.value.rect)
         return BackdropSpec(
             wallpaper: wallpaper,
             fit: config.backgroundFit,
@@ -252,7 +254,16 @@ private struct GlassPane: ViewModifier {
     @Environment(\.windowBackdrop) private var backdrop
 
     func body(content: Content) -> some View {
-        if let backdrop {
+        if let backdrop, region == .pane(.chrome) {
+            content.background {
+                ZStack {
+                    BackdropSlice(backdrop: backdrop, paneID: id, fallback: fallback)
+                    WindowRectReader { rect, _ in backdrop.report(id, rect: rect, region: region) }
+                }
+                .ignoresSafeArea()
+                .onDisappear { backdrop.remove(id) }
+            }
+        } else if let backdrop {
             GlassPaneBody(content: content, id: id, region: region, fallback: fallback, backdrop: backdrop)
         } else {
             content.background(fallback)

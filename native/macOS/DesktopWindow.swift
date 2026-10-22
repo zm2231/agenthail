@@ -12,23 +12,11 @@ struct DesktopWindow: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            SessionSidebar(model: model, pane: pane)
-                .navigationSplitViewColumnWidth(min: 248, ideal: 264, max: 280)
-        } detail: {
-            ConversationPane(model: model, pane: pane)
-                .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
-                .ignoresSafeArea(.container, edges: .top)
-                .navigationSplitViewColumnWidth(min: 340, ideal: 892)
-                .inspector(isPresented: $pane.inspectorVisible) {
-                    SessionInspector(model: model, pane: pane)
-                        .ignoresSafeArea(.container, edges: .top)
-                        .inspectorColumnWidth(min: 270, ideal: 284, max: 300)
-                }
+        WindowChromeLayout(model: model, pane: pane, interface: model.interface) {
+            splitView
         }
         .disabled(model.paletteVisible)
         .windowBackdrop(model.interface)
-        .toolbar(removing: .sidebarToggle)
         .environmentObject(model)
         .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
         .sheet(item: $pane.adoptingSession) { AdoptSessionSheet(model: model, session: $0) }
@@ -57,6 +45,57 @@ struct DesktopWindow: View {
         .focusedSceneObject(pane)
         .onAppear { model.windowAppeared() }
         .onDisappear { model.windowDisappeared() }
+    }
+
+    private var splitView: some View {
+        NavigationSplitView {
+            SessionSidebar(model: model, pane: pane)
+                .belowWindowChrome()
+                .toolbar(removing: .sidebarToggle)
+                .navigationSplitViewColumnWidth(min: 248, ideal: 264, max: 280)
+        } detail: {
+            ConversationPane(model: model, pane: pane)
+                .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
+                .belowWindowChrome()
+                .ignoresSafeArea(.container, edges: .top)
+                .navigationSplitViewColumnWidth(min: 340, ideal: 892)
+                .inspector(isPresented: $pane.inspectorVisible) {
+                    SessionInspector(model: model, pane: pane)
+                        .belowWindowChrome()
+                        .ignoresSafeArea(.container, edges: .top)
+                        .inspectorColumnWidth(min: 270, ideal: 284, max: 300)
+                }
+        }
+    }
+}
+
+private struct WindowChromeLayout<Content: View>: View {
+    @ObservedObject var model: AgenthailModel
+    @ObservedObject var pane: SessionPane
+    @ObservedObject var interface: InterfaceStore
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        let tabs = pane.tabsEnabled
+        VStack(spacing: 0) {
+            content
+                .environment(\.windowChromeTop, tabs ? TitleBarStrip.height : 0)
+                .overlay(alignment: .top) {
+                    if tabs {
+                        TitleBarStrip(model: model, pane: pane, interface: interface)
+                            .ignoresSafeArea(.container, edges: .top)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if let session = pane.archivedTab {
+                        ArchivedTabNotice(pane: pane, session: session, label: interface.config.tabLabel)
+                            .padding(.bottom, 132)
+                            .transition(.opacity)
+                    }
+                }
+            if !interface.config.statusItems.isEmpty { StatusStrip(model: model, pane: pane, interface: interface) }
+        }
+        .background { if tabs { WindowRectReader { _, window in TitleBarStrip.placeWindowButtons(in: window) } } }
     }
 }
 
@@ -355,7 +394,7 @@ extension SessionSidebar {
         let selected = pane.selectedSessionID == session.id
         let needsYou = attention != nil
         return Button {
-            pane.select(session.id)
+            pane.select(session.id, keep: NSEvent.modifierFlags.contains(.command))
         } label: {
             SessionRowView(session: session, title: title, family: family, needsYou: needsYou, reason: showsReason ? attention?.reason : nil, finishedUnseen: model.finishedUnseen.contains(session.id))
                 .padding(.vertical, 6)
@@ -365,6 +404,7 @@ extension SessionSidebar {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture(count: 2).onEnded { pane.keepTab(session.id) })
         .accessibilityAddTraits(selected ? .isSelected : [])
         .contextMenu {
             Button("Open in New Window") { openWindow(id: "session", value: session.id) }

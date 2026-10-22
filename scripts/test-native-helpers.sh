@@ -56,6 +56,7 @@ SOURCES=(
   macOS/SessionOperationControllers.swift
   macOS/SessionOperations.swift
   macOS/SessionPane.swift
+  macOS/SessionTabs.swift
   macOS/ShortcutStore.swift
   macOS/SlashCommand.swift
   macOS/SpotlightIndex.swift
