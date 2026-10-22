@@ -64,6 +64,12 @@ func TestAClaudeSessionIsToldItsCardOncePerStartAndOncePerChange(t *testing.T) {
 	if printed := hooks(prompt); len(printed) != 0 {
 		t.Fatalf("a prompt after the start printed %q, want nothing", printed)
 	}
+	if err := store.RegisterSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	if printed := hooks(prompt); len(printed) != 0 {
+		t.Fatalf("a prompt after a move to another folder the card doesn't show printed %q, want nothing", printed)
+	}
 	if err := store.SetAlias("reviewer", "s1"); err != nil {
 		t.Fatal(err)
 	}

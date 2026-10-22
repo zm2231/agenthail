@@ -40,6 +40,10 @@ var (
 	claudeHooks        = []claudeHook{claudePromptHook, claudeStartHook, claudePromptSubmit}
 )
 
+// claudeSessionContextLimit bounds the session-context hook, registry locks
+// included, well inside the hook's timeout: a prompt never waits on it.
+const claudeSessionContextLimit = 5 * time.Second
+
 // A daemon restarting, as it does on update, drops the held prompt's
 // connection; the hook reconnects for this long so the prompt stays
 // answerable from Agenthail.
@@ -50,8 +54,14 @@ var (
 
 func (a *App) cmdHook(args []string) error {
 	if len(args) == 1 && args[0] == "session-context" {
-		if output := a.sessionContext(os.Stdin, os.Getppid(), time.Now()); output != nil {
-			_ = json.NewEncoder(os.Stdout).Encode(output)
+		done := make(chan map[string]any, 1)
+		go func() { done <- a.sessionContext(os.Stdin, os.Getppid(), time.Now()) }()
+		select {
+		case output := <-done:
+			if output != nil {
+				_ = json.NewEncoder(os.Stdout).Encode(output)
+			}
+		case <-time.After(claudeSessionContextLimit):
 		}
 		return nil
 	}
@@ -214,8 +224,13 @@ func installClaudeHooks(path, executable string) (bool, error) {
 	return true, surface.WriteClaudeSettingsFile(path, updated, mode)
 }
 
+// install moves the hook out of an entry whose matcher narrows it, since
+// that matcher may be another hook's, and Agenthail's hooks run for all.
 func (h claudeHook) install(data []byte, command string) ([]byte, error) {
-	var err error
+	data, err := h.remove(data, func(entry gjson.Result) bool { return !matchesAll(entry) })
+	if err != nil {
+		return nil, err
+	}
 	found := false
 	for i, entry := range gjson.GetBytes(data, "hooks."+h.event).Array() {
 		for j, hook := range entry.Get("hooks").Array() {
@@ -256,7 +271,7 @@ func uninstallClaudeHooks(path string) (bool, error) {
 	}
 	updated := data
 	for _, h := range claudeHooks {
-		if updated, err = h.uninstall(updated); err != nil {
+		if updated, err = h.remove(updated, func(gjson.Result) bool { return true }); err != nil {
 			return false, err
 		}
 	}
@@ -266,10 +281,18 @@ func uninstallClaudeHooks(path string) (bool, error) {
 	return true, surface.WriteClaudeSettingsFile(path, updated, mode)
 }
 
-func (h claudeHook) uninstall(data []byte) ([]byte, error) {
+func matchesAll(entry gjson.Result) bool {
+	matcher := entry.Get("matcher").String()
+	return matcher == "" || matcher == "*"
+}
+
+func (h claudeHook) remove(data []byte, from func(entry gjson.Result) bool) ([]byte, error) {
 	var err error
 	entries := gjson.GetBytes(data, "hooks."+h.event).Array()
 	for i := len(entries) - 1; i >= 0; i-- {
+		if !from(entries[i]) {
+			continue
+		}
 		hooks := entries[i].Get("hooks").Array()
 		kept := 0
 		for j := len(hooks) - 1; j >= 0; j-- {
@@ -291,8 +314,9 @@ func (h claudeHook) uninstall(data []byte) ([]byte, error) {
 }
 
 // The states of Agenthail's hooks in a settings file. An outdated hook is
-// one install wrote before it ran hooks with exec, or with another timeout;
-// a file with some of the hooks is outdated too. Install brings it up to date.
+// one install wrote before it ran hooks with exec, with another timeout, or
+// under a matcher that narrows it; a file with some of the hooks is outdated
+// too. Install brings it up to date.
 const (
 	claudeHookMissing   = "missing"
 	claudeHookOutdated  = "outdated"
@@ -339,7 +363,7 @@ func (h claudeHook) state(data []byte) string {
 			if !h.owns(command) {
 				continue
 			}
-			if strings.HasPrefix(command, claudeHookExec) && hook.Get("timeout").Int() == h.timeout {
+			if matchesAll(entry) && strings.HasPrefix(command, claudeHookExec) && hook.Get("timeout").Int() == h.timeout {
 				return claudeHookInstalled
 			}
 			state = claudeHookOutdated

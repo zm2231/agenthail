@@ -354,3 +354,55 @@ func TestInstallBringsAHookWrittenWithoutExecUpToDate(t *testing.T) {
 		t.Fatalf("status after install = %q", got)
 	}
 }
+
+func TestInstallMovesAgenthailsHookOutOfAMatcherThatNarrowsIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	settings := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0700); err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hook := func(h claudeHook) string {
+		return `{"type":"command","command":` + strconv.Quote(h.command(executable)) + `,"timeout":` + strconv.FormatInt(h.timeout, 10) + `}`
+	}
+	if err := os.WriteFile(settings, []byte(`{"hooks":{
+		"PermissionRequest":[{"matcher":"Bash","hooks":[{"type":"command","command":"guard-bash"},`+hook(claudePromptHook)+`]}],
+		"SessionStart":[{"matcher":"startup","hooks":[`+hook(claudeStartHook)+`]}],
+		"UserPromptSubmit":[{"hooks":[`+hook(claudePromptSubmit)+`]}]}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	app, _ := cliFixture(t, &cliSurface{kind: "claude"})
+	status := func() string {
+		t.Helper()
+		output, err := captureStdout(t, func() error { return app.Run([]string{"hooks", "status"}) })
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(output)
+	}
+	if got := status(); got != settings+": outdated; run: agenthail hooks install" {
+		t.Fatalf("status before install = %q", got)
+	}
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"hooks", "install"}) }); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := gjson.GetBytes(data, "hooks.PermissionRequest").Array()
+	if len(prompt) != 2 || prompt[0].Get("matcher").String() != "Bash" || prompt[0].Get("hooks.#").Int() != 1 || prompt[0].Get("hooks.0.command").String() != "guard-bash" || prompt[1].Get("matcher").String() != "*" || !claudePromptHook.owns(prompt[1].Get("hooks.0.command").String()) {
+		t.Fatalf("PermissionRequest after install: %s", gjson.GetBytes(data, "hooks.PermissionRequest").Raw)
+	}
+	if start := gjson.GetBytes(data, "hooks.SessionStart").Array(); len(start) != 1 || start[0].Get("matcher").Exists() || !claudeStartHook.owns(start[0].Get("hooks.0.command").String()) {
+		t.Fatalf("SessionStart after install: %s", gjson.GetBytes(data, "hooks.SessionStart").Raw)
+	}
+	if got := status(); got != settings+": installed" {
+		t.Fatalf("status after install = %q", got)
+	}
+}

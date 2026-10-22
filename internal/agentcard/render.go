@@ -1,6 +1,8 @@
 package agentcard
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -28,6 +30,13 @@ func Render(card Card) string {
 		fmt.Fprintf(&b, "  %-*s  %s\n", width, command.Line, command.Use)
 	}
 	return b.String()
+}
+
+// Fingerprint identifies what Render tells a session, so a change in a field
+// the card never shows, such as its folder, is not news to it.
+func (card Card) Fingerprint() string {
+	sum := sha256.Sum256([]byte(Render(card)))
+	return hex.EncodeToString(sum[:16])
 }
 
 // RenderChange tells a session that already has its card what it says now.
