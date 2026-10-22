@@ -41,6 +41,10 @@ func (r *Registry) CatalogPresenceRows() ([]CatalogPresenceRow, CatalogListing, 
 		}
 		presence = append(presence, row)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, CatalogListing{}, err
+	}
 	if err := rows.Close(); err != nil {
 		return nil, CatalogListing{}, err
 	}
