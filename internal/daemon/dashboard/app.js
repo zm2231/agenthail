@@ -295,12 +295,7 @@ function startLiveStream() {
     if (item.kind === "goal") { app.history.goal = item.goal || null; renderChat(); return; }
     if (!item.itemId || item.op === "reset") return;
     app.history.transcriptWarning = "";
-    const items = app.history.timeline?.items || [];
-    const index = items.findIndex((value) => value.id === item.itemId);
-    const projected = { id: item.itemId, kind: item.kind, role: item.role, origin: item.origin, sender: item.sender, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, resetsAt: item.resetsAt, truncated: item.truncated, bodyRef: item.bodyRef, attachment: item.attachment, files: item.files, callId: item.callId, turnId: item.turnId };
-    if (item.op === "remove") { if (index >= 0) items.splice(index, 1); }
-    else if (index >= 0) items[index] = projected;
-    else items.push(projected);
+    const items = applyStreamedRow(app.history.timeline?.items || [], envelope);
     app.history.timeline = { ...(app.history.timeline || {}), items };
     app.history.exchanges = exchangesFromItems(items);
     renderChat();
@@ -310,6 +305,16 @@ function startLiveStream() {
     stopLiveStream();
     selectSession(session.id);
   });
+}
+// applyStreamedRow applies a session-stream row as a session page reads it. The
+// daemon sends the page's own item; a host that predates it sends only the raw
+// row. An updated row moves to the end, as its journal entry does.
+function applyStreamedRow(items, envelope) {
+  const row = envelope.data;
+  const rest = items.filter((value) => value.id !== row.itemId);
+  if (row.op === "remove") return rest;
+  const item = envelope.item || { id: row.itemId, kind: row.kind, role: row.role, origin: row.origin, sender: row.sender, title: row.title || row.kind, text: row.body || "", timestamp: row.ts, status: row.status, resetsAt: row.resetsAt, truncated: row.truncated, bodyRef: row.bodyRef, attachment: row.attachment, files: row.files, callId: row.callId, turnId: row.turnId };
+  return [...rest, item];
 }
 function promptOrigin(value) {
   if (value.role === "peer") return "peer";

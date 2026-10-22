@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -222,5 +223,73 @@ func TestAPISessionStreamBodyRequiresReadAuthorizationAndBoundsRanges(t *testing
 	}
 	if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&payload) != nil || payload.Body != "xxxxxx" || payload.Start != 2 || payload.End != 8 || payload.Total != len(body) || !payload.Truncated {
 		t.Fatalf("status=%d payload=%+v", response.StatusCode, payload)
+	}
+}
+
+func TestASessionStreamCarriesEachRowAsTheSessionPageReadsIt(t *testing.T) {
+	d, reg, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent)}
+	adapter.caps.Stream = true
+	d = newTestDaemon(t, reg, []surface.Surface{adapter})
+	rows := []string{
+		`{"itemId":"context-1","version":1,"op":"upsert","kind":"message","role":"user","ts":"2026-10-03T12:00:00Z","body":"<environment_context>cwd</environment_context>"}`,
+		`{"itemId":"prompt-1","version":1,"op":"upsert","kind":"message","role":"user","ts":"2026-10-03T12:00:01Z","body":"hello"}`,
+		`{"itemId":"reply-1","version":1,"op":"upsert","kind":"text","ts":"2026-10-03T12:00:02Z","body":"hi"}`,
+		`{"itemId":"gone","version":1,"op":"remove","kind":"text","ts":"2026-10-03T12:00:03Z"}`,
+		`{"itemId":"e:source","version":1,"op":"reset","kind":"source-error","ts":"2026-10-03T12:00:04Z","reason":"down"}`,
+	}
+	for index, row := range rows {
+		if _, _, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: strconv.Itoa(index), Payload: []byte(row)}, registry.SessionJournalRetention{Count: 50, Bytes: 1 << 20}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := d.readJournalPage(from.ID, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paged := map[string]surface.TimelineItem{}
+	for _, item := range page.Items {
+		paged[item.ID] = item
+	}
+	if paged["context-1"].Kind != "instructions" {
+		t.Fatalf("the page reads injected context as instructions: %+v", paged["context-1"])
+	}
+	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/session-stream?id="+from.ID+"&after=0", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	for seen := 0; seen < len(rows); {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		seen++
+		var envelope struct {
+			Data struct {
+				ItemID string `json:"itemId"`
+			} `json:"data"`
+			Item *surface.TimelineItem `json:"item"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		want, onPage := paged[envelope.Data.ItemID]
+		switch {
+		case !onPage && envelope.Item != nil:
+			t.Fatalf("a row the page leaves out carries an item: %s %+v", envelope.Data.ItemID, envelope.Item)
+		case onPage && (envelope.Item == nil || !reflect.DeepEqual(*envelope.Item, want)):
+			t.Fatalf("row %s streams as %+v, the page reads %+v", envelope.Data.ItemID, envelope.Item, want)
+		}
 	}
 }
