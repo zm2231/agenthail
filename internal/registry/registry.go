@@ -54,7 +54,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 26
+	schemaVersion   = 27
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -321,6 +321,9 @@ func migrateTx(tx *sql.Tx) error {
 		return err
 	}
 	if err := ensureColumn(tx, "paired_devices", "host_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "device_pairings", "device_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
 	if err := ensureColumn(tx, "delivery_intents", "relayed", `INTEGER NOT NULL DEFAULT 0`); err != nil {
@@ -698,7 +701,8 @@ CREATE TABLE IF NOT EXISTS device_pairings (
 	scopes TEXT NOT NULL,
 	expires_at TEXT NOT NULL,
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
-	consumed_at TEXT NOT NULL DEFAULT ''
+	consumed_at TEXT NOT NULL DEFAULT '',
+	device_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS device_pairings_expires ON device_pairings(expires_at);
 CREATE TABLE IF NOT EXISTS paired_devices (

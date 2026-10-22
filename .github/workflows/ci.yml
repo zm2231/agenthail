@@ -60,6 +60,7 @@ jobs:
           node scripts/test-dashboard-holders.mjs
           node scripts/test-dashboard-model.mjs
           node scripts/test-dashboard-config-roots.mjs
+          node scripts/test-dashboard-devices.mjs
           node scripts/test-session-controls.mjs
       - name: Public copy check
         run: scripts/check-public-copy.sh

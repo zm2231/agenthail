@@ -48,7 +48,7 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNU
 extension IOSAppDelegate {
     nonisolated static func pairedAPI() throws -> AgenthailAPI {
         guard let endpoint = KeychainStore.get("endpoint").flatMap(URL.init(string:)), let token = KeychainStore.get("token") else {
-            throw AgenthailAPIError.unavailable("Pair this phone with Agenthail on your Mac first.")
+            throw AgenthailAPIError.unavailable("Pair this phone with Agenthail on your computer first.")
         }
         return AgenthailAPI(baseURL: endpoint, token: token)
     }
@@ -66,6 +66,7 @@ struct AgenthailIOSApp: App {
     @StateObject private var model = AgenthailIOSModel(autoConnect: !sessionPreviewEnabled)
     @StateObject private var voiceCalls = VoiceCallCoordinator()
     @Environment(\.scenePhase) private var scenePhase
+    @State private var wasInBackground = false
 
     var body: some Scene {
         WindowGroup {
@@ -94,7 +95,12 @@ struct AgenthailIOSApp: App {
                 model.operationError = notification.object as? String ?? "This device could not register for notifications."
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { model.resumeConnection() }
+                if phase == .background {
+                    wasInBackground = true
+                } else if phase == .active, wasInBackground {
+                    wasInBackground = false
+                    model.resumeConnection()
+                }
             }
             .onChange(of: model.isPaired) { _, paired in
                 if !paired { voiceCalls.disconnect() }

@@ -24,6 +24,8 @@ type localStatusSurface struct {
 	dir         string
 	statusCalls atomic.Int32
 	duringList  func()
+	// beforeStatus runs ahead of each status read with the call's number.
+	beforeStatus func(call int32)
 }
 
 func (s *localStatusSurface) List(ctx context.Context) ([]surface.Session, error) {
@@ -48,7 +50,10 @@ func (s *localStatusSurface) LocalStatusFiles(session surface.Session) []string 
 }
 
 func (s *localStatusSurface) LocalStatus(_ context.Context, session surface.Session) (surface.Session, error) {
-	s.statusCalls.Add(1)
+	call := s.statusCalls.Add(1)
+	if s.beforeStatus != nil {
+		s.beforeStatus(call)
+	}
 	raw, err := os.ReadFile(s.statusPath(session.ID))
 	if err != nil {
 		return session, err
@@ -486,5 +491,82 @@ func TestWorkingSessionActivityPublishesAtDiscoveryCadence(t *testing.T) {
 	}
 	if got, want := catalogLastActive(t, store, "from"), started.Add(3*time.Minute); !got.Equal(want) {
 		t.Fatalf("lastActive=%s want %s", got, want)
+	}
+}
+
+func TestStatusPassWakesTheObserverOnlyOnAPublishedTransition(t *testing.T) {
+	d, _, source := localStatusFixture(t)
+	d.discoverCatalog(context.Background())
+	d.refreshCatalogStatus(context.Background())
+	drained := func() bool {
+		select {
+		case <-d.observerNudge:
+			return true
+		default:
+			return false
+		}
+	}
+	drained()
+
+	d.refreshCatalogStatus(context.Background())
+	if drained() {
+		t.Fatal("an unchanged status woke the observer")
+	}
+	source.writeStatus(t, "from", surface.StatusBusy)
+	d.refreshCatalogStatus(context.Background())
+	if !drained() {
+		t.Fatal("a busy transition did not wake the observer")
+	}
+	source.writeStatus(t, "from", surface.StatusIdle)
+	d.refreshCatalogStatus(context.Background())
+	if !drained() {
+		t.Fatal("an idle transition did not wake the observer")
+	}
+}
+
+func TestStatusPassWakesTheObserverOnceForManyTransitions(t *testing.T) {
+	d, _, source := localStatusFixture(t)
+	d.discoverCatalog(context.Background())
+	d.refreshCatalogStatus(context.Background())
+	select {
+	case <-d.observerNudge:
+	default:
+	}
+	var wakes atomic.Int32
+	stop := make(chan struct{})
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for {
+			select {
+			case <-d.observerNudge:
+				wakes.Add(1)
+			case <-stop:
+				return
+			}
+		}
+	}()
+	// The second status read of the pass waits for a wake from the first
+	// transition, so a wake sent per transition is always drained before the
+	// next one and counted twice.
+	first := source.statusCalls.Load() + 1
+	source.beforeStatus = func(call int32) {
+		if call <= first {
+			return
+		}
+		deadline := time.Now().Add(300 * time.Millisecond)
+		for wakes.Load() == 0 && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	source.writeStatus(t, "from", surface.StatusBusy)
+	source.writeStatus(t, "to", surface.StatusBusy)
+	d.refreshCatalogStatus(context.Background())
+	source.beforeStatus = nil
+	time.Sleep(50 * time.Millisecond)
+	close(stop)
+	<-drained
+	if got := wakes.Load(); got != 1 {
+		t.Fatalf("two transitions in one pass woke the observer %d times", got)
 	}
 }

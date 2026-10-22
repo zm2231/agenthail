@@ -118,6 +118,10 @@ struct SessionPreview: View {
             waitingSessions[0]["runtime"] = ["launcher": "cmux", "focusable": true]
             snapshot["sessions"] = waitingSessions
         }
+        if ProcessInfo.processInfo.arguments.contains("--preview-attention") {
+            snapshot["attention"] = [["id": 1, "sessionId": "codex-demo", "target": "Review the release pipeline", "queueId": 2, "reason": "Delivery outcome could not be confirmed", "requestedAction": "review", "createdAt": "2026-09-11T18:20:00Z"]]
+            snapshot["deliveryProblems"] = [["deliveryId": 7, "sessionId": "h0123456789ab::remote-demo-2", "sourceSessionId": "saved-demo", "attentionSessionId": "saved-demo", "message": "Check the release notes", "reason": "expired", "status": "expired", "at": "2026-09-11T13:05:00Z"]]
+        }
         if ProcessInfo.processInfo.arguments.contains("--preview-holders") {
             var sharedSessions = snapshot["sessions"] as! [[String: Any]]
             sharedSessions[0]["holders"] = [

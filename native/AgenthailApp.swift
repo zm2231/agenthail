@@ -275,7 +275,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
             header.isEnabled = false
             menu.addItem(header)
             for session in section.sessions {
-                let item = NSMenuItem(title: SessionMenuSection.label(session, in: model.knownSessions), action: #selector(openSession(_:)), keyEquivalent: "")
+                let item = NSMenuItem(title: SessionMenuSection.label(session, in: model.knownSessions, reason: section.reasons[session.id]), action: #selector(openSession(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = session.id
                 menu.addItem(item)
@@ -441,7 +441,7 @@ private struct MenuBarLabel: View {
         .onChange(of: route.latest) { handleRoute() }
         .onChange(of: model.snapshot?.sessions, initial: true) { syncSpotlight() }
         .onChange(of: spotlightSessions) { syncSpotlight() }
-        .onChange(of: SessionTree.needsYou(model.knownSessions, attentionSessionIDs: model.attentionSessionIDs).count, initial: true) { _, count in
+        .onChange(of: model.sessionAttention.count, initial: true) { _, count in
             NSApplication.shared.dockTile.badgeLabel = count > 0 ? String(count) : nil
         }
     }
@@ -493,22 +493,24 @@ private enum MenuBarArtwork {
 private struct SessionMenuSection: Identifiable {
     let title: String
     let sessions: [SessionState]
+    var reasons: [String: String] = [:]
     var id: String { title }
 
     @MainActor
     static func build(_ model: AgenthailModel, limit: Int = 5) -> [SessionMenuSection] {
-        let attention = model.attentionSessionIDs
-        let tree = SessionTree.build(model.knownSessions, filter: .all, attentionSessionIDs: attention)
-        let others = SessionTree.newestFirst(SessionFamilies.build(model.knownSessions).filter { !attention.contains($0.root.id) }, by: SessionTree.activity)
+        let attention = model.sessionAttention
+        let needsYou = SessionTree.needsYou(model.knownSessions, attention: attention)
+        let others = SessionTree.newestFirst(SessionFamilies.build(model.knownSessions).filter { attention[$0.root.id] == nil }, by: SessionTree.activity)
         return [
-            SessionMenuSection(title: "Needs you", sessions: Array(tree.needsYou.prefix(limit))),
+            SessionMenuSection(title: "Needs you", sessions: Array(needsYou.prefix(limit)), reasons: attention.mapValues(\.reason)),
             SessionMenuSection(title: "Working", sessions: Array(others.filter(\.isWorking).map(\.root).prefix(limit))),
             SessionMenuSection(title: "Recent", sessions: Array(others.filter { !$0.isWorking }.map(\.root).prefix(limit)))
         ].filter { !$0.sessions.isEmpty }
     }
 
-    static func label(_ session: SessionState, in sessions: [SessionState]) -> String {
-        "\(SessionFamilies.title(session, in: sessions))  ·  \(session.surface.capitalized)\(session.isWorking ? "" : "  ·  " + relativeAge(session.lastActive))"
+    static func label(_ session: SessionState, in sessions: [SessionState], reason: String? = nil) -> String {
+        if let reason { return "\(SessionFamilies.title(session, in: sessions))  ·  \(reason)" }
+        return "\(SessionFamilies.title(session, in: sessions))  ·  \(session.surface.capitalized)\(session.isWorking ? "" : "  ·  " + relativeAge(session.lastActive))"
     }
 }
 
@@ -521,7 +523,7 @@ private struct AgenthailMenuContent: View {
         Label(model.isConnected ? "Connected" : "Agenthail isn't running", systemImage: model.isConnected ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
         ForEach(SessionMenuSection.build(model)) { section in
             Section(section.title) {
-                ForEach(section.sessions) { session in sessionItem(session) }
+                ForEach(section.sessions) { session in sessionItem(session, reason: section.reasons[session.id]) }
             }
         }
         Divider()
@@ -546,12 +548,12 @@ private struct AgenthailMenuContent: View {
             .keyboardShortcut("q")
     }
 
-    private func sessionItem(_ session: SessionState) -> some View {
+    private func sessionItem(_ session: SessionState, reason: String?) -> some View {
         Button {
             model.mainPane.select(session.id)
             open()
         } label: {
-            Text(SessionMenuSection.label(session, in: model.knownSessions))
+            Text(SessionMenuSection.label(session, in: model.knownSessions, reason: reason))
         }
     }
 

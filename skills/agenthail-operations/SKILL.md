@@ -639,6 +639,18 @@ held by the local daemon (`queued`, held by `hostUnreachable`) and delivered
 once when the host returns; it never expires. `delivery submitted` means the outcome is unknown, so do not resend. Other
 commands refuse remote sessions.
 
+## Phones
+
+The Agenthail iPhone app pairs with a host that has remote access on
+(`agenthail dashboard remote`). A pairing code works once, for five minutes.
+
+```bash
+agenthail devices pair              # draws a QR code and the link, waits until the phone pairs
+agenthail devices pair --json       # prints the code's id, link and expiry, without waiting
+agenthail devices                   # phones paired with this host
+agenthail devices remove <device>   # by name or id; paired hosts are removed with hosts remove
+```
+
 ## Daemon
 
 ```bash

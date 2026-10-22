@@ -51,7 +51,7 @@ struct PairingScreen: View {
                 .frame(width: 112, height: 112)
                 VStack(spacing: 8) {
                     Text("Connect to your agents").font(.largeTitle.bold()).multilineTextAlignment(.center)
-                    Text("In Agenthail on your Mac, open Settings > Devices, turn on Phone access, and choose Show Pairing Code.")
+                    Text("On a computer running Agenthail, run agenthail devices pair, or open Settings in its web dashboard or Mac app, and show a pairing code.")
                         .foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
                 .padding(.horizontal)
@@ -115,7 +115,6 @@ struct MainTabs: View {
                 .tag(2)
         }
         .tint(orange)
-        .task { await model.refresh(fresh: true) }
         .onChange(of: model.requestedSessionID) { _, sessionID in
             if sessionID != nil { selection = 0 }
         }
@@ -214,7 +213,8 @@ struct ConversationListView: View {
                 session.displayName.localizedCaseInsensitiveContains(search) || SessionFamilies.label(session).localizedCaseInsensitiveContains(search) || session.surface.localizedCaseInsensitiveContains(search) || (session.project?.displayName.localizedCaseInsensitiveContains(search) ?? false) || (session.cwd?.localizedCaseInsensitiveContains(search) ?? false)
             }
         }.flatMap(\.sessions)
-        return SessionTree.build(sessions, filter: scope, attentionSessionIDs: Set(model.snapshot?.attention.map(\.sessionId) ?? []))
+        let attention = SessionAttention.build(sessions: model.snapshot?.sessions ?? [], attention: model.snapshot?.attention ?? [], deliveryProblems: model.snapshot?.deliveryProblems ?? [])
+        return SessionTree.build(sessions, filter: scope, attention: attention)
     }
 
     private var families: [SessionFamily] {
@@ -238,6 +238,15 @@ struct ConversationListView: View {
                     .listRowSeparator(.hidden)
             }
             let tree = tree
+            if !tree.needsYou.isEmpty {
+                Section {
+                    ForEach(tree.needsYou) { session in
+                        sessionButton(session, reason: tree.attention[session.id]?.reason, identifierPrefix: "needs-you-")
+                    }
+                } header: {
+                    Text("Needs you").font(.subheadline.weight(.semibold)).foregroundStyle(.primary).textCase(nil)
+                }
+            }
             ForEach(tree.projects) { project in
                 let collapsed = collapsedProjects.contains(project.id)
                 Section {
@@ -341,11 +350,14 @@ struct ConversationListView: View {
         if !expandedFamilies.insert(family.id).inserted { expandedFamilies.remove(family.id) }
     }
 
-    private func sessionButton(_ session: SessionState, title: String? = nil, family: SessionFamily? = nil, snippet: String? = nil) -> some View {
+    private func sessionButton(_ session: SessionState, title: String? = nil, family: SessionFamily? = nil, snippet: String? = nil, reason: String? = nil, identifierPrefix: String = "session-") -> some View {
         Button { openSession(session.id) } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
                     IOSSessionRow(session: session, title: title, family: family)
+                    if let reason {
+                        Text(reason).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                    }
                     if let snippet, !snippet.isEmpty {
                         Text(snippet).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                     }
@@ -363,7 +375,7 @@ struct ConversationListView: View {
                 }
             }
         }
-        .accessibilityIdentifier("session-" + session.id)
+        .accessibilityIdentifier(identifierPrefix + session.id)
     }
 }
 
@@ -582,15 +594,6 @@ struct SessionScreen: View {
                     proxy.scrollTo(first.id, anchor: .top)
                 } else {
                     proxy.scrollTo("bottom", anchor: .bottom)
-                }
-            }
-            .task(id: "activity-" + session.id) {
-#if DEBUG
-                guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
-#endif
-                while !Task.isCancelled {
-                    do { try await Task.sleep(for: .seconds(4)) } catch { return }
-                    await model.refreshSession(session.id)
                 }
             }
             .onChange(of: detail?.timeline?.items) { _, _ in

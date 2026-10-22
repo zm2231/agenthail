@@ -86,9 +86,11 @@ final class AgenthailModel: ObservableObject {
         return listed + pinnedSessions.filter { !listedIDs.contains($0.id) }
     }
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
-    var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.compactMap(\.attentionSessionId)) }
+    var sessionAttention: [String: SessionAttention] {
+        SessionAttention.build(sessions: knownSessions, attention: snapshot?.attention ?? [], deliveryProblems: deliveryProblems)
+    }
     var sessionTree: SessionTree {
-        SessionTree.build(knownSessions, filter: sessionFilter, refinement: sessionRefinement, attentionSessionIDs: attentionSessionIDs)
+        SessionTree.build(knownSessions, filter: sessionFilter, refinement: sessionRefinement, attention: sessionAttention)
     }
 
     init(connecting: Bool = true, api: AgenthailAPI? = nil) {

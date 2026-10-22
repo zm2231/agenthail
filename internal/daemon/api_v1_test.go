@@ -27,7 +27,10 @@ import (
 
 const apiTestPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 
-func TestAPIV1PairsAuthenticatesAndRevokesDevice(t *testing.T) {
+// pairingRemoteAccess turns on remote access through a fake tailscale that
+// serves this daemon at agenthail.example.ts.net:7412.
+func pairingRemoteAccess(t *testing.T) {
+	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	tailscale := filepath.Join(t.TempDir(), "tailscale")
 	script := `#!/bin/sh
@@ -43,6 +46,10 @@ esac
 	if err := SaveDashboardConfig(DashboardConfig{Enabled: true, Listen: defaultDashboardListen, RemoteAccess: RemoteAccessConfig{Enabled: true, Provider: "tailscale", Port: 7412, TailscalePath: tailscale}}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestAPIV1PairsAuthenticatesAndRevokesDevice(t *testing.T) {
+	pairingRemoteAccess(t)
 	d, _, _, _, _ := daemonFixture(t)
 	handler := d.dashboardHandler(&dashboardServer{token: "bootstrap-secret"})
 	pairRequest := httptest.NewRequest(http.MethodPost, "/api/v1/pairings", strings.NewReader(`{"name":"Phone","scopes":["read","control"]}`))

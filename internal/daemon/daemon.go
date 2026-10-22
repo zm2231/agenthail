@@ -52,6 +52,7 @@ type Daemon struct {
 	announcing           map[string]string
 	announcingRefusal    map[int64]int64
 	catalogNudge         chan struct{}
+	observerNudge        chan struct{}
 	// catalogSelected, when set, runs after a catalog publication has chosen
 	// what a session waits on and before its row commits.
 	catalogSelected func(sessionID string)
@@ -133,6 +134,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		catalogLive:       map[string]*catalogLiveSession{},
 		catalogIdentities: newCatalogIdentityCache(),
 		catalogNudge:      make(chan struct{}, 1),
+		observerNudge:     make(chan struct{}, 1),
 		federation:        newFederation(),
 		uploads:           uploads.New(uploadsDir(reg)),
 		background:        newBackgroundWork(),
@@ -271,6 +273,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.log.Printf("stopping")
 			return nil
 		case <-observerTicker.C:
+			d.scanAndRelay(ctx)
+		case <-d.observerNudge:
 			d.scanAndRelay(ctx)
 		}
 	}

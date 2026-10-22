@@ -443,7 +443,7 @@ final class VoiceOperatorModel: ObservableObject {
 #if os(macOS)
         if connectionError != nil { return "Reconnecting to Agenthail" }
 #else
-        if connectionError != nil { return "Reconnecting to your Mac" }
+        if connectionError != nil { return "Reconnecting to your computer" }
 #endif
         if audioConnected { return muted ? "Microphone muted" : "Connected" }
         if dialing { return "Connecting audio…" }
@@ -458,7 +458,7 @@ final class VoiceOperatorModel: ObservableObject {
 #if os(macOS)
         default: return "Connecting to Agenthail…"
 #else
-        default: return "Connecting to your Mac…"
+        default: return "Connecting to your computer…"
 #endif
         }
     }

@@ -285,10 +285,13 @@ func TestAMoveWhoseTransferIsNotAnsweredStaysUnresolvedUntilTheTargetAnswers(t *
 
 	target.gate.transfers.Store(nil)
 	close(hold.release)
+	// Dropping the connections also makes the source reconnect, and a
+	// reconnect recovers sent moves too, so either may settle this one.
 	source.daemon.resumeHostMoves(context.Background(), mustPairedHost(t, source, record.ID))
-	if move, _ := source.reg.SessionMove(unknown.MoveID); move.State != registry.MoveDone {
-		t.Fatalf("recovery left the move %s (%s)", move.State, move.Detail)
-	}
+	awaitFederation(t, "recovery to settle the move", func() bool {
+		move, _ := source.reg.SessionMove(unknown.MoveID)
+		return move.State == registry.MoveDone
+	})
 	if owner, _ := source.reg.SessionHost(session.ID); owner != record.ID {
 		t.Fatalf("owner after recovery=%q", owner)
 	}
@@ -317,6 +320,12 @@ func TestAMoveSentByADaemonThatStoppedIsSettledFromTheTargetsRecord(t *testing.T
 			}
 			manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: source.daemon.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Size: out.Size, SHA256: out.SHA256}
 			encoded, _ := json.Marshal(manifest)
+			// The daemon sending a move holds it until it stops, as moveSession
+			// does, so a reconnect to the host cannot settle it first.
+			release, claimed := claimMove(manifest.ID)
+			if !claimed {
+				t.Fatal("the move is already claimed")
+			}
 			if err := source.reg.BeginMoveOut(manifest.ID, session.ID, record.ID, encoded); err != nil {
 				t.Fatal(err)
 			}
@@ -348,10 +357,12 @@ func TestAMoveSentByADaemonThatStoppedIsSettledFromTheTargetsRecord(t *testing.T
 			if len(source.host.Spawns(t, session.ID)) != spawned {
 				t.Fatal("a send started Claude on a conversation a sent move holds")
 			}
+			release()
 			source.daemon.resumeHostMoves(context.Background(), host)
-			if move, _ := source.reg.SessionMove(manifest.ID); move.State != registry.MoveDone {
-				t.Fatalf("recovery left the move %s (%s)", move.State, move.Detail)
-			}
+			awaitFederation(t, "recovery to settle the move", func() bool {
+				move, _ := source.reg.SessionMove(manifest.ID)
+				return move.State == registry.MoveDone
+			})
 			if spawns := target.host.Spawns(t, session.ID); len(spawns) != 1 {
 				t.Fatalf("the target resumed the conversation %d times", len(spawns))
 			}
