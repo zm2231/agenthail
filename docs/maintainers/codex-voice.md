@@ -1,7 +1,8 @@
 # Speak to an existing Agenthail session through Codex Voice
 
 The iPhone companion has a conversational Codex Voice operator backed by one
-persistent Codex Desktop thread on your Mac. It receives the packaged Agenthail
+persistent Codex thread on Codex's app-server on the host. Codex Desktop does not
+need to be running. It receives the packaged Agenthail
 Operations skill before its first turn. You can discuss a plan, ask about live
 agents, create a new agent, or ask it to send work and read back the result.
 There is no on-device speech recognition, command grammar, separate TTS service,
@@ -14,13 +15,15 @@ distinction between automated checks, real Codex evaluation, and phone testing.
 
 ## Setup and first call
 
-1. Run the matching Agenthail host build. Have Codex Desktop signed in to an
-   account with working native Voice access. Agenthail uses the account and
-   permission configuration of that Desktop app-server, not a second login.
-2. Ensure the existing Desktop bridge is available. `agenthail doctor --json`
-   checks the configured surfaces. For first-time Desktop setup,
-   `agenthail launch codex` launches with the loopback bridge. Do not quit or
-   restart an app that owns active work without the operator's approval.
+1. Run the matching Agenthail host build. Sign Codex in on the host with
+   `codex login` (ChatGPT), or configure Codex with an OpenAI API key that has
+   Realtime API access. Agenthail uses the login of Codex's app-server, not a
+   second one. With a ChatGPT login, voice goes to ChatGPT's realtime service;
+   with an API key, to the OpenAI Realtime API with that key.
+2. Agenthail starts Codex's app-server daemon when a call needs it.
+   `agenthail doctor --json` checks the configured surfaces. An operator that
+   Codex Desktop currently has open keeps running in Desktop, through its
+   loopback bridge, until Desktop closes it.
 3. Follow [phone pairing](../native-apps.md#iphone-app): Tailscale on both devices,
    private HTTPS phone access, and a paired token with `read` and `control`
    scopes. A read-only pairing cannot start Voice.
@@ -76,7 +79,7 @@ iPhone microphone ⇄ Codex realtime voice
                          ▼
                    spoken response
 
-iPhone call controls ── authenticated Agenthail API ── Desktop app-server
+iPhone call controls ── authenticated Agenthail API ── Codex app-server
 iPhone conversation ◄─ live voice events + normal recorded session timeline
 ```
 
@@ -121,8 +124,12 @@ usage remain subject to the signed-in Codex account.
 
 ## Lifecycle, failures, and storage
 
-`prepare` records creation intent, creates the Desktop-owned thread with the full
-skill, saves its returned identity, and registers it for normal session discovery.
+`prepare` records creation intent, creates the operator thread on Codex's
+app-server with the full skill and Agenthail's voice tools, names it, saves its
+returned identity, and registers it for normal session discovery under the
+`@voice` alias. A saved operator is registered with the route and runtime Codex
+reports for it now, not the ones saved with it. `@voice` moves to each new
+operator; it is never taken from a session someone else named.
 No bootstrap turn runs during preparation. Creation with an unknown outcome does
 not create another operator automatically: inspect Codex and the state file before
 attempting recovery.
@@ -132,7 +139,15 @@ the saved state (identity, cursor, and recorded events reset). It is refused whi
 call is active or while a prior creation outcome is unknown. The previous operator is
 not deleted; it remains discoverable in the normal Sessions timeline.
 
-`start` captures the Desktop event cursor before sending the microphone SDP offer.
+`start` opens the call's own connection to Codex's app-server, resumes the
+operator on it, and only then sends the microphone SDP offer on that connection.
+The call's events, its tool calls and their answers all travel on it; another
+call never reads them. An operator Codex Desktop has open uses Desktop's event
+cursor instead. If Codex's login cannot do realtime, the call ends with the
+reason and what fixes it (sign in with `codex login`, or a key with Realtime API
+access); a start Codex definitely refused ends the call instead of leaving it
+unknown. Each call starts with no events from the previous one, and events from
+another realtime session are ignored.
 The peer submits the offer after `setLocalDescription`; ICE gathering may continue
 while signaling proceeds. A network that does not report `complete` gathering is
 not treated as a failed call before the host receives the offer.
@@ -156,7 +171,7 @@ idle → creating → ready → starting → negotiating → connected
 ```
 
 An uncertain start cannot be replayed with another attempt ID until the old call
-ends. A lost renderer event window is marked truncated and cannot silently attach
+ends. A dropped call connection or a lost event window is marked truncated and cannot silently attach
 an SDP from an untrusted window. Native `closed` is the end receipt; a successful
 stop RPC alone is only a hangup request. An event-connection failure and a local
 microphone shutdown are visible separately from confirmed host closure.
@@ -228,13 +243,18 @@ truncate them through a second speech-submission path.
 
 Read these units in order:
 
-1. `internal/surface/surfaces/codex_bridge.go`: actual Desktop renderer message
-   contract. Notifications are flat `method`/`params`; responses contain `message`.
+1. `internal/surface/surfaces/codex_voice_managed.go`: the call's app-server
+   connection, its event window, and tool-call answers repeating Codex's
+   original request id. `codex_bridge.go` is the Desktop renderer contract for
+   an operator Desktop has open: a tool answer is `mcp-response` with
+   `threadId` and `response`, and the hook reinstalls whenever its source
+   changes.
 2. `internal/voice/service.go`: persistent identity, lease, call state, duplicate
    protection, and native request parameters. `skills/operations.go` embeds the
    distributed Operations skill.
-3. `internal/surface/surfaces/codex_voice.go`: existing Desktop owner/client and
-   event cursor. No managed-runtime takeover or approval-policy override.
+3. `internal/surface/surfaces/codex_voice.go`: operator creation and the route
+   choice: Desktop only while Desktop has the operator open, otherwise Codex's
+   app-server. No approval-policy override.
 4. `internal/daemon/voice.go` and `voice_peer.js`: control-scoped Bearer-only API
    and audio-only WebRTC program. A dashboard cookie cannot substitute for a
    valid control token.
@@ -393,8 +413,9 @@ controls, background audio or Bluetooth routing; those need a phone.
 
 ## References and protocol provenance
 
-The implementation was checked against Codex Desktop's bundled CLI/app-server
-0.154.0-alpha.6.2 schema and the native realtime implementation at
+The implementation was checked against the Codex CLI 0.163.0 app-server schema
+(`codex app-server generate-json-schema --experimental`), Codex Desktop's bundled
+CLI/app-server 0.154.0-alpha.6.2 schema and the native realtime implementation at
 [Codex commit 364b511](https://github.com/openai/codex/tree/364b511dcd60bcde3849bde4e579a5c7cad1e96a/codex-rs).
 Relevant contracts are `thread/start`, `thread/realtime/start`, `appendText`,
 `stop`, and their asynchronous notifications. Schema availability is not evidence
@@ -403,7 +424,7 @@ that a particular account can connect; use a real call to verify it.
 [pi-gippity-control](https://github.com/IgorWarzocha/howaboua-pi-stuff/tree/4593f066d447925eae8e3106435f117236690f9e/packages/pi-gippity-control)
 was inspected as a concrete reference for realtime conversation plus tool-capable
 agent delegation and cancellation. Its direct call/auth transport was not copied:
-Agenthail uses the app-server that already owns its Codex Desktop thread. This
+Agenthail goes through Codex's app-server, which owns the operator thread. This
 feature does not substitute the separate STT/LLM/TTS architecture found in other
 voice-agent frameworks.
 
