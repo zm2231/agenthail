@@ -128,7 +128,7 @@ private struct SurfaceCard: View {
             }
             Text(overview.detail)
                 .font(.system(size: DesktopType.secondary))
-                .foregroundStyle(overview.health == .healthy ? DesktopPalette.text2 : DesktopPalette.failed)
+                .foregroundStyle(overview.isQuiet ? DesktopPalette.text2 : DesktopPalette.failed)
                 .textSelection(.enabled)
             if let availability = overview.availability {
                 Text(availability).font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.text2)

@@ -20,6 +20,7 @@ struct SurfaceOverview: Identifiable, Equatable {
     let queued: Int
 
     var id: String { surface.name }
+    var isQuiet: Bool { health == .healthy || surface.isStatedLimit }
     var name: String { SessionRefinement.surfaceLabel(surface.name) }
 
     var stateLabel: String {

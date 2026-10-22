@@ -47,6 +47,8 @@ struct OverviewTest {
         let headless = surface(#"{"name":"notion","connected":false,"health":"signin_unavailable","healthDetail":"Notion: No browser on this computer, so Notion sign-in is unavailable here. If a browser is installed, pin one of its profiles with `agenthail signin use notion <profile>` (see `agenthail signin list`).","capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":true,"interrupt":true,"steer":true}}"#)
         let headlessCard = SurfaceOverview.build(surfaces: [headless], sessions: [], codexRecentHours: 8)[0]
         expect(headlessCard.health == .signinUnavailable && headlessCard.stateLabel == "No browser here" && headlessCard.detail.hasPrefix("No browser on this computer, so Notion sign-in is unavailable here."), "a computer with no browser is a stated limit: \(headlessCard.detail)")
+        expect(headlessCard.isQuiet && unsetCard.isQuiet && !codexCard.isQuiet && claudeCard.isQuiet, "stated limits read quietly, problems do not")
+        expect(!headless.needsAttention && !unset.needsAttention && codex.needsAttention, "stated limits need no attention")
 
         var snapshot = DashboardSnapshot(updatedAt: "2026-10-05T12:00:00Z", eventCursor: nil, hostEpoch: nil, catalogSeq: nil, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [codex, claude, notion], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 8, busyDelivery: "queue")
         expect(OverviewSummary.line(snapshot) == "1 surface connected · 1 agent working · 3 messages waiting", "summary: \(OverviewSummary.line(snapshot))")
