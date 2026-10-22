@@ -79,6 +79,36 @@ enum ComposerAttachments {
         return ComposerAttachment(name: (base.isEmpty ? "image" : base) + ".jpg", data: output as Data, mediaType: "image/jpeg")
     }
 
+    // A copied or dropped item can offer several representations. A file
+    // wins, then an image. Text beside an image (cells copied from a
+    // spreadsheet) keeps the paste as text, unless the text is only the web
+    // address browsers add when copying an image.
+    static func pastedType(_ types: [String], text: String?) -> String? {
+        if types.contains(UTType.fileURL.identifier) { return UTType.fileURL.identifier }
+        let images = types.filter { UTType($0)?.conforms(to: .image) == true }
+        guard !images.isEmpty else { return nil }
+        if let text, !isWebAddress(text) { return nil }
+        return images.first { $0 == UTType.png.identifier } ?? images.first
+    }
+
+    private static func isWebAddress(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.contains(where: \.isWhitespace), let scheme = URL(string: trimmed)?.scheme?.lowercased() else { return false }
+        return ["http", "https", "data"].contains(scheme)
+    }
+
+    // Nil means nothing offered is an attachment, so a paste stays text.
+    @MainActor static func pasted(from providers: [NSItemProvider]) async -> PastedAttachments? {
+        var pasted = PastedAttachments()
+        for provider in providers {
+            let types = provider.registeredTypeIdentifiers
+            let text = types.contains { UTType($0)?.conforms(to: .plainText) == true } ? await provider.loadedText() : nil
+            guard let type = pastedType(types, text: text) else { continue }
+            pasted.add(await provider.loadedData(type), type: type)
+        }
+        return pasted.isEmpty ? nil : pasted
+    }
+
     static func adding(_ new: [ComposerAttachment], to existing: [ComposerAttachment]) -> (attachments: [ComposerAttachment], problem: ComposerAttachmentProblem?) {
         var result = existing
         var problem: ComposerAttachmentProblem?
@@ -90,5 +120,54 @@ enum ComposerAttachments {
             result.append(attachment)
         }
         return (result, problem)
+    }
+}
+
+struct PastedAttachments {
+    private(set) var attachments: [ComposerAttachment] = []
+    private(set) var problem: ComposerAttachmentProblem?
+    private var images = 0
+    private var offered = 0
+
+    var isEmpty: Bool { offered == 0 }
+
+    mutating func add(_ data: Data?, type: String) {
+        offered += 1
+        do throws(ComposerAttachmentProblem) {
+            attachments.append(try attachment(data, type: type))
+        } catch {
+            problem = problem ?? error
+        }
+    }
+
+    private mutating func attachment(_ data: Data?, type: String) throws(ComposerAttachmentProblem) -> ComposerAttachment {
+        if type == UTType.fileURL.identifier {
+            guard let data, let url = URL(dataRepresentation: data, relativeTo: nil), url.isFileURL else { throw .unreadable("The pasted file") }
+            return try ComposerAttachments.file(at: url)
+        }
+        images += 1
+        let name = "Pasted image\(images > 1 ? " \(images)" : "").\(UTType(type)?.preferredFilenameExtension ?? "png")"
+        guard let data, let image = ComposerAttachments.image(data, name: name) else { throw .unreadable(name) }
+        return image
+    }
+}
+
+private extension NSItemProvider {
+    @MainActor func loadedText() async -> String? {
+        await withCheckedContinuation { continuation in
+            _ = loadObject(ofClass: NSString.self) { object, _ in continuation.resume(returning: object as? String) }
+        }
+    }
+
+    @MainActor func loadedData(_ type: String) async -> Data? {
+        await withCheckedContinuation { continuation in
+            if type == UTType.fileURL.identifier {
+                loadItem(forTypeIdentifier: type) { item, _ in
+                    continuation.resume(returning: (item as? URL)?.dataRepresentation ?? item as? Data)
+                }
+            } else {
+                _ = loadDataRepresentation(forTypeIdentifier: type) { data, _ in continuation.resume(returning: data) }
+            }
+        }
     }
 }

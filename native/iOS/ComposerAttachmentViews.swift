@@ -63,12 +63,8 @@ struct ComposerAttachmentMenu: View {
     }
 
     private func pasteImage() {
-        let pasteboard = UIPasteboard.general
-        if let data = pasteboard.data(forPasteboardType: UTType.png.identifier) ?? pasteboard.data(forPasteboardType: UTType.jpeg.identifier) ?? pasteboard.image?.pngData() {
-            addImage(data, name: "Pasted.png")
-        } else {
-            model.addAttachments([], problem: .unreadable("The pasted image"))
-        }
+        let providers = UIPasteboard.general.itemProviders
+        Task { await model.paste(providers) }
     }
 
     private func addImage(_ data: Data, name: String) {
@@ -93,6 +89,31 @@ struct ComposerAttachmentMenu: View {
         }
         model.addAttachments(files, problem: problem)
     }
+}
+
+// The system paste button reads the pasteboard without the paste prompt,
+// and the text field's own Paste only takes text, so this is how a copied
+// image gets into the draft.
+struct ComposerPasteButton: View {
+    @ObservedObject var model: AgenthailIOSModel
+    @State private var hasImages = UIPasteboard.general.hasImages
+
+    var body: some View {
+        Group {
+            if hasImages {
+                PasteButton(supportedContentTypes: [.image]) { providers in
+                    Task { @MainActor in await model.paste(providers) }
+                }
+                .labelStyle(.iconOnly)
+                .buttonBorderShape(.circle)
+                .accessibilityIdentifier("composer-paste")
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)) { _ in refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in refresh() }
+    }
+
+    private func refresh() { hasImages = UIPasteboard.general.hasImages }
 }
 
 struct ComposerAttachmentStrip: View {
