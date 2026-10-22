@@ -157,6 +157,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     deinit {
         sessionStreamTask?.cancel()
+        sessionReload?.task.cancel()
+        unsupportedRefreshTask?.cancel()
         sessionMetadataTask?.cancel()
     }
 
@@ -181,14 +183,18 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         if loaded.isEmpty {
             snapshot = nil
         } else {
-            snapshot = DashboardSnapshot(
+            let merged = DashboardSnapshot(
                 updatedAt: views.map { $0.snapshot?.updatedAt ?? "" }.joined(separator: "|"),
                 eventCursor: nil, hostEpoch: nil, catalogSeq: nil,
                 daemon: DaemonState(running: true, pid: nil, stale: loaded.contains { $0.daemon.stale == true }, refreshError: nil, host: nil, hosts: catalog.hosts),
                 surfaces: [], sessions: catalog.sessions, totalSessions: catalog.sessions.count,
-                queue: [], channels: [], relays: [], history: [], attention: catalog.attention,
+                queue: ordered.flatMap { connection in
+                    (connection.snapshot?.queue ?? []).map { item in var item = item; item.hostID = connection.id; return item }
+                },
+                channels: [], relays: [], history: loaded.flatMap(\.history), attention: catalog.attention,
                 deliveryProblems: catalog.deliveryProblems,
                 codexRecentHours: loaded.first?.codexRecentHours ?? 24, busyDelivery: nil)
+            if snapshot?.hasSamePresentation(as: merged) != true { snapshot = merged }
         }
         hosts = ordered.map { connection in
             PairedHostStatus(id: connection.id, name: connection.name, address: connection.credential.endpoint.host ?? "",
@@ -1007,6 +1013,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         func owned(_ id: String) -> Bool { id.hasPrefix(prefix) }
         if let selected = selectedSessionID, owned(selected) {
             sessionStreamTask?.cancel()
+            cancelSessionReload()
+            unsupportedRefreshTask?.cancel()
             sessionMetadataTask?.cancel()
             selectedDetail = nil
             selectedSessionID = nil
@@ -1317,7 +1325,10 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     func hostDidChange(_ host: HostConnection) {
         guard connections[host.id] === host else { return }
         rebuild()
-        if let snapshot { syncSelectedSession(from: snapshot, seq: host.snapshotSeq) }
+        if let snapshot {
+            syncSelectedSession(from: snapshot, seq: host.snapshotSeq)
+            resumeSessionStream(from: snapshot)
+        }
     }
 
     func hostRefreshed(_ host: HostConnection) async {
@@ -1331,10 +1342,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         else { refreshNotificationRegistration() }
     }
 
-    func hostEventStreamConnected(_ host: HostConnection, refreshed: Bool) async {
+    func hostEventStreamConnected(_ host: HostConnection) async {
         guard connections[host.id] === host, let id = selectedSessionID, catalog.route(for: id)?.hostID == host.id else { return }
-        if refreshed { await refreshSession(id) }
-        startSessionStream(id)
+        await reloadSelectedSession()
+    }
+
+    func host(_ host: HostConnection, receivedEventFor entity: String) {
+        guard connections[host.id] === host else { return }
+        refreshUnsupportedSession(HostCatalog.qualify(host.id, entity))
     }
 
     func host(_ host: HostConnection, rekeyed retired: [String: String]) {

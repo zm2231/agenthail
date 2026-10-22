@@ -3,10 +3,11 @@ import Foundation
 @MainActor
 protocol HostConnectionDelegate: AnyObject {
     func hostDidChange(_ host: HostConnection)
-    func hostEventStreamConnected(_ host: HostConnection, refreshed: Bool) async
+    func hostEventStreamConnected(_ host: HostConnection) async
     func nextStateRequest() -> UInt64
     func host(_ host: HostConnection, rekeyed retired: [String: String])
     func host(_ host: HostConnection, removedSession id: String, unlisted: Bool)
+    func host(_ host: HostConnection, receivedEventFor entity: String)
     func hostRefreshed(_ host: HostConnection) async
     func hostConnected(_ host: HostConnection)
 }
@@ -193,13 +194,12 @@ final class HostConnection {
     func eventStreamConnected() async {
         guard !stopped else { return }
         reconnecting = false
-        let refreshed = !snapshotCoversEventStream
-        if refreshed { _ = await refresh(fresh: true) } else {
+        if !snapshotCoversEventStream { _ = await refresh(fresh: true) } else {
             snapshotCoversEventStream = false
             delegate?.hostDidChange(self)
         }
         guard !stopped else { return }
-        await delegate?.hostEventStreamConnected(self, refreshed: refreshed)
+        await delegate?.hostEventStreamConnected(self)
         guard !stopped else { return }
         startCatalogStream()
     }
@@ -211,9 +211,10 @@ final class HostConnection {
         delegate?.hostDidChange(self)
     }
 
-    private func receive(_ event: AgenthailEvent) async {
+    func receive(_ event: AgenthailEvent) async {
         guard !stopped else { return }
         lastEventID = event.type == "stream.reset" ? 0 : max(lastEventID, event.id)
+        if let entity = event.entityId { delegate?.host(self, receivedEventFor: entity) }
         guard AgenthailIOSModel.shouldRefreshSnapshot(for: event.type) else { return }
         eventRefreshTask?.cancel()
         eventRefreshTask = Task { [weak self] in
