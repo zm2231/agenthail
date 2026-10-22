@@ -152,3 +152,40 @@ func TestASeededJournalServesItsPageAtOnceAndCatchesUpOverTheStreamInTranscriptO
 func strconvUint(value uint64) string {
 	return strconv.FormatUint(value, 10)
 }
+
+func TestAJournalAwaitingRederivationIsRebuiltBeforeItsPage(t *testing.T) {
+	d, r, fake, from, _ := daemonFixture(t)
+	t.Cleanup(d.sources.shutdown)
+	fake.kind = surface.KindClaude
+	fake.caps.Stream = true
+	from.Surface, from.RuntimeKind, from.Transport, from.Transcript = surface.KindClaude, surface.RuntimeClaudeCLI, "", "/transcript.jsonl"
+	if err := r.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	earlierDerivationJournal(t, r, from.ID)
+	adapter := &rederiveSurface{daemonSurface: fake, items: transcriptItems()}
+	d.Surfaces = []surface.Surface{adapter}
+	if !surface.EffectiveCapabilities(adapter, &from).Stream {
+		t.Fatal("the fixture session does not stream, so the page would wait regardless")
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/session?id="+from.ID+"&timeline=1", nil)
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	response := httptest.NewRecorder()
+	d.dashboardHandler(&dashboardServer{token: "secret"}).ServeHTTP(response, request)
+	var page struct {
+		Timeline struct {
+			Items []surface.TimelineItem `json:"items"`
+		} `json:"timeline"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("status=%d err=%v body=%s", response.Code, err, response.Body.String())
+	}
+	var ids []string
+	for _, item := range page.Timeline.Items {
+		ids = append(ids, item.ID)
+	}
+	got := strings.Join(ids, " ")
+	if strings.Contains(" "+got+" ", " task-notification:monitor: ") || !strings.Contains(got, "task-notification:monitor::bbbb") || adapter.calls != 1 {
+		t.Fatalf("page before the journal was rebuilt (%d rebuilds): %s", adapter.calls, got)
+	}
+}

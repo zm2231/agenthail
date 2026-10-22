@@ -51,7 +51,9 @@ An older-page request does not change the active stream cursor.
 Every newest-page read starts the shared session source. A streamable session
 whose journal was seeded before is served from the journal at once; what the
 source then catches up gets later seqs and reaches the client on the session
-stream it opens after the page's `journalSeq`. Any other newest-page read waits
+stream it opens after the page's `journalSeq`. A journal written by an earlier
+item derivation is not: the source's first pass rebuilds it, dropping rows the
+stream has no removal for, so its page waits for that pass. Any other newest-page read waits
 at most two seconds for the source's first pass, and a cold journal is seeded
 by that pass. A seeded journal backed by a transcript (Claude, and Codex with a
 local transcript) catches up by reading the transcript newest-first until it

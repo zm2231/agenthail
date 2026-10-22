@@ -362,6 +362,28 @@ func (s *sessionSource) remove() {
 	}
 }
 
+// servesPageAtOnce reports whether a session's newest page can be read from
+// its journal before its source's first pass: the session streams, its journal
+// was seeded before, and that pass only appends to it. A journal written by an
+// earlier item derivation is rebuilt by the pass instead, which drops rows a
+// client already shown them would keep.
+func (m *sessionSourceManager) servesPageAtOnce(session *surface.Session, adapter surface.Surface) (bool, error) {
+	if !surface.EffectiveCapabilities(adapter, session).Stream {
+		return false, nil
+	}
+	status, seedSeq, _, err := m.registry.SessionJournalSeedCheckpoint(session.ID)
+	if err != nil || status != registry.SessionJournalSeeded || seedSeq == 0 {
+		return false, err
+	}
+	if _, ok := adapter.(surface.TranscriptItemReader); ok {
+		version, err := m.registry.SessionJournalDerivation(session.ID)
+		if err != nil || version < transcriptJournalDerivation {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
 // start runs the session's source, holding it for the page handoff grace,
 // without waiting for its seed.
 func (m *sessionSourceManager) start(session *surface.Session, adapter surface.Surface) error {
