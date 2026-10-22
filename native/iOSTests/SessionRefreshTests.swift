@@ -45,7 +45,7 @@ final class SessionRefreshTests: XCTestCase {
         SessionRefreshProtocol.state.set(detailStatus: "idle")
         await model.refreshSession("demo")
         SessionRefreshProtocol.state.releaseSnapshot()
-        await snapshot.value
+        _ = await snapshot.value
 
         XCTAssertEqual(model.selectedDetail?.session.status, "idle")
     }
@@ -65,7 +65,7 @@ final class SessionRefreshTests: XCTestCase {
         SessionRefreshProtocol.state.passNextSnapshot()
         await model.refresh()
         SessionRefreshProtocol.state.releaseSnapshot()
-        await older.value
+        _ = await older.value
 
         XCTAssertEqual(model.selectedDetail?.session.status, "busy")
     }
