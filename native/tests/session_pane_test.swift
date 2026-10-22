@@ -284,7 +284,7 @@ struct SessionPaneTest {
             }
             if line.contains("/api/v1/requests?") {
                 requestReads += 1
-                return StubServer.hold
+                return requestReads == 1 ? StubServer.hold : StubServer.reply("200 OK", #"{"permissionMode":"default","requests":[]}"#)
             }
             return StubServer.reply("404 Not Found", "{}")
         }
@@ -372,6 +372,11 @@ struct SessionPaneTest {
         check(pagesBeforeFailure > pagesBeforeReturn && requestReads == 1, "reads were open when the session was removed: pages \(pagesBeforeReturn)->\(pagesBeforeFailure), requests \(requestReads)")
         check(streamingPane.detailLoadError == nil && !streamingPane.detailStale && pageRequests == pagesBeforeFailure, "a read that fails after removal neither reports nor retries: error \(streamingPane.detailLoadError ?? "nil"), stale \(streamingPane.detailStale), pages \(pageRequests)")
         check(streamingPane.requestError == nil && streamingPane.requests == nil, "a request read that fails after removal is not shown: \(streamingPane.requestError ?? "nil")")
+        streamingModel.snapshot = listing([responding])
+        streamingPane.reconcile()
+        let resyncDeadline = Date().addingTimeInterval(5)
+        while streamingPane.requests == nil, Date() < resyncDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        check(requestReads == 2 && streamingPane.requests?.permissionMode == "default", "a session that comes back reads its requests again: reads \(requestReads)")
         streamingModel.closePane(streamingPane)
         streamingServer.stop()
 

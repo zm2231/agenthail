@@ -244,6 +244,7 @@ final class SessionPane: ObservableObject, Identifiable {
                     awaitStreamCursor()
                     startDetailLoad(selected)
                     startMetadataLoad(selected)
+                    Task { await syncRequests(for: live) }
                 }
             } else if removedSession?.id != selected, selectedSnapshot?.id == selected {
                 removedSession = selectedSnapshot
@@ -413,6 +414,7 @@ final class SessionPane: ObservableObject, Identifiable {
         metadataTask?.cancel()
         detailLoadTask?.cancel()
         detailLoadTask = nil
+        requestsKey = nil
         detailReloadTask?.cancel()
         detailReloadTask = nil
         detailReloadPending = false
