@@ -115,7 +115,6 @@ struct MainTabs: View {
                 .tag(2)
         }
         .tint(orange)
-        .task { await model.refresh(fresh: true) }
         .onChange(of: model.requestedSessionID) { _, sessionID in
             if sessionID != nil { selection = 0 }
         }

@@ -271,6 +271,7 @@ final class AgenthailIOSModel: ObservableObject {
     private(set) var sessionStreamCursor: UInt64 = 0
     private var sessionStreamMetadataFields: Set<String> = []
     private var connectionTask: Task<Void, Never>?
+    private var snapshotCoversEventStream = false
     private var lastEventID: UInt64 = 0
     private var pushRelayURL: URL?
     private var pendingPairing: PairingLink?
@@ -407,6 +408,7 @@ final class AgenthailIOSModel: ObservableObject {
                     }
                     if await refresh(fresh: true) {
                         guard !Task.isCancelled else { return }
+                        snapshotCoversEventStream = true
                         startEvents()
                         refreshNotificationRegistration()
                         return
@@ -1151,8 +1153,12 @@ final class AgenthailIOSModel: ObservableObject {
 
     func eventStreamConnected() async {
         reconnecting = false
-        _ = await refresh(fresh: true)
-        if let id = selectedSessionID { await refreshSession(id) }
+        if snapshotCoversEventStream {
+            snapshotCoversEventStream = false
+        } else {
+            _ = await refresh(fresh: true)
+            if let id = selectedSessionID { await refreshSession(id) }
+        }
         startCatalogStream()
         if let id = selectedSessionID { startSessionStream(id) }
     }
