@@ -144,7 +144,7 @@ func catalogPageSQL(request CatalogPageRequest, listing CatalogListing) (string,
 		conditions = append(conditions, "NOT "+archived, "(s.status=? OR COALESCE(json_extract(cs.projection_fingerprint,'$.subagents.working'),0)>0)")
 		args = append(args, string(surface.StatusBusy))
 	case "current", "recent":
-		conditions = append(conditions, "NOT "+archived, "(COALESCE(qc.queue_count,0)>0 OR (COALESCE(json_extract(cs.projection_fingerprint,'$.current'),0)=1 AND COALESCE(json_extract(cs.projection_fingerprint,'$.currentReason'),'')!='queued'))")
+		conditions = append(conditions, "NOT "+archived, "(COALESCE(qc.queue_count,0)>0 OR (cs.current=1 AND cs.current_reason!='queued'))")
 	case "all":
 		conditions = append(conditions, "NOT "+archived)
 	case "archived":

@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/zm2231/agenthail/internal/claudetestenv"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -26,7 +27,7 @@ func timelineFixture(t *testing.T, data string) string {
 }
 
 func TestMain(m *testing.M) {
-	os.Unsetenv("CLAUDE_CONFIG_DIR")
+	claudetestenv.Clear()
 	transcriptPollInterval = 20 * time.Millisecond
 	// Adapters write state such as the Codex write lock under HOME, so the
 	// package runs against a scratch HOME rather than the developer's own.

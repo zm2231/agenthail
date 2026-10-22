@@ -54,7 +54,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 28
+	schemaVersion   = 30
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -312,8 +312,18 @@ func migrateTx(tx *sql.Tx) error {
 		{"waiting_on", `BLOB NOT NULL DEFAULT ''`},
 		{"host_queue_count", `INTEGER NOT NULL DEFAULT 0`},
 		{"background_tasks", `BLOB NOT NULL DEFAULT ''`},
+		{"current", `INTEGER NOT NULL DEFAULT 0`},
+		{"current_reason", `TEXT NOT NULL DEFAULT ''`},
 	} {
 		if err := ensureColumn(tx, "catalog_sessions", column.name, column.decl); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(catalogCurrentTriggers); err != nil {
+		return err
+	}
+	if version < 29 {
+		if _, err := tx.Exec(`UPDATE catalog_sessions SET ` + catalogCurrentAssignment("catalog_sessions")); err != nil {
 			return err
 		}
 	}
@@ -395,6 +405,29 @@ func migrateTx(tx *sql.Tx) error {
 	_, err = tx.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
 	return err
 }
+
+// catalogCurrentAssignment sets a catalog row's current and current_reason
+// from its projection, so readers filter and list on the columns instead of
+// parsing every projection.
+func catalogCurrentAssignment(row string) string {
+	projection := row + ".projection_fingerprint"
+	return `current=CASE WHEN json_valid(` + projection + `) THEN COALESCE(json_extract(` + projection + `,'$.current'),0) ELSE 0 END,
+		current_reason=CASE WHEN json_valid(` + projection + `) THEN COALESCE(json_extract(` + projection + `,'$.currentReason'),'') ELSE '' END`
+}
+
+// catalogCurrentTriggers keep current and current_reason equal to the
+// projection in the statement that writes it, whichever writer that is.
+var catalogCurrentTriggers = `
+DROP TRIGGER IF EXISTS catalog_sessions_current_insert;
+CREATE TRIGGER catalog_sessions_current_insert AFTER INSERT ON catalog_sessions
+BEGIN
+	UPDATE catalog_sessions SET ` + catalogCurrentAssignment("NEW") + ` WHERE session_id=NEW.session_id;
+END;
+DROP TRIGGER IF EXISTS catalog_sessions_current_update;
+CREATE TRIGGER catalog_sessions_current_update AFTER UPDATE OF projection_fingerprint ON catalog_sessions
+BEGIN
+	UPDATE catalog_sessions SET ` + catalogCurrentAssignment("NEW") + ` WHERE session_id=NEW.session_id;
+END;`
 
 // backfillIntentUUIDs gives each delivery intent recorded before intents
 // carried a uuid its own, so the unique index can be built over them.
@@ -630,6 +663,12 @@ CREATE TABLE IF NOT EXISTS session_origins (
 	via TEXT NOT NULL,
 	creator_session_id TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS session_context (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	fingerprint TEXT NOT NULL,
+	start_key TEXT NOT NULL DEFAULT '',
+	delivered_at_ms INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS launcher_pending (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -870,7 +909,9 @@ CREATE TABLE IF NOT EXISTS catalog_sessions (
 	discovery_failures INTEGER NOT NULL DEFAULT 0,
 	waiting_on BLOB NOT NULL DEFAULT '',
 	host_queue_count INTEGER NOT NULL DEFAULT 0,
-	background_tasks BLOB NOT NULL DEFAULT ''
+	background_tasks BLOB NOT NULL DEFAULT '',
+	current INTEGER NOT NULL DEFAULT 0,
+	current_reason TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS catalog_surfaces (
 	surface TEXT PRIMARY KEY,
