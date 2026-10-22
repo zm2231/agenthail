@@ -71,6 +71,55 @@ func TestCatalogDiscoveryFailureRetainsRowAndAdvancesStaleGeneration(t *testing.
 	}
 }
 
+func TestRepeatedDiscoveryFailurePublishesOnlyTheStaleTransition(t *testing.T) {
+	r := openTestRegistry(t)
+	observed := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	projection := `{"id":"repeat","surface":"codex","name":"Repeat","cwd":"/work","status":"idle"}`
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: "repeat", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Repeat", Cwd: "/work"}, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "repeat:initial", Type: "session.upserted", EntityID: "repeat", Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if events, err := r.MarkCatalogDiscoveryFailure(surface.KindCodex, "provider unavailable", observed.Add(time.Minute)); err != nil || len(events) != 1 {
+		t.Fatalf("first failure events=%+v err=%v", events, err)
+	}
+	_, latest, err := r.CatalogState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if events, err := r.MarkCatalogDiscoveryFailure(surface.KindCodex, "provider unavailable", observed.Add(time.Duration(i+2)*time.Minute)); err != nil || len(events) != 0 {
+			t.Fatalf("repeat failure %d events=%+v err=%v", i, events, err)
+		}
+	}
+	if _, after, err := r.CatalogState(); err != nil || after != latest {
+		t.Fatalf("latest seq %d -> %d err=%v", latest, after, err)
+	}
+	snapshot, err := r.CatalogSnapshot()
+	if err != nil || len(snapshot.Sessions) != 1 || !snapshot.Sessions[0].Freshness.Stale || snapshot.Sessions[0].Freshness.Generation != 2 {
+		t.Fatalf("snapshot=%+v err=%v", snapshot, err)
+	}
+	var failures int
+	if err := r.db.QueryRow(`SELECT discovery_failures FROM catalog_sessions WHERE session_id='repeat'`).Scan(&failures); err != nil || failures != 4 {
+		t.Fatalf("failures=%d err=%v", failures, err)
+	}
+}
+
+func TestCatalogEventRetentionKeepsNewestWindow(t *testing.T) {
+	r := openTestRegistry(t)
+	total := catalogEventRetention + 25
+	for i := 1; i <= total; i++ {
+		if _, _, err := r.AppendCatalogEvent(CatalogEvent{DedupeKey: fmt.Sprintf("retention:%d", i), Type: "session.upserted", EntityID: "s", Payload: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var count, earliest, latest int
+	if err := r.db.QueryRow(`SELECT COUNT(*),MIN(seq),MAX(seq) FROM catalog_events`).Scan(&count, &earliest, &latest); err != nil {
+		t.Fatal(err)
+	}
+	if count != catalogEventRetention || latest != total || earliest != total-catalogEventRetention+1 {
+		t.Fatalf("count=%d earliest=%d latest=%d", count, earliest, latest)
+	}
+}
+
 func TestDiscoveryFailureBreaksSuccessfulOmissionRun(t *testing.T) {
 	r := openTestRegistry(t)
 	observed := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
