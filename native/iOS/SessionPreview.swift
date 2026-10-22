@@ -91,7 +91,7 @@ struct SessionPreview: View {
         items.append(["id": "7", "kind": "event", "title": "Turn duration", "text": "1m55s", "timestamp": "2026-09-12T04:03:00Z", "truncated": false])
         if reading {
             let instructions = "# AGENTS.md instructions for /Users/demo/projects/fieldnotes\n\n" + String(repeating: "## Repository guidance\n\nRead the current implementation before editing. Preserve the session identity and include meaningful regression coverage.\n\n", count: 30)
-            items.insert(["id": "context", "kind": "message", "role": "user", "title": "user", "text": instructions, "truncated": false], at: 0)
+            items.insert(["id": "context", "kind": "instructions", "title": "Instructions", "text": instructions, "truncated": false], at: 0)
             items.insert(["id": "long-message", "kind": "message", "role": "user", "title": "user", "text": String(repeating: "The phone should show the actual work clearly, including commands, results and context. Keep the transcript readable while the agent works.\n\n", count: 14), "truncated": false], at: 1)
             items[items.count - 2]["text"] = "# The session stays readable while work continues\n\nI found the reconnect boundary. The saved instruction is present, and the agent has its original session identity.\n\n## What the checks show\n\nThe regression suite passes. You can expand the recorded command above to inspect its full input and result.\n\nThe latest update is visible above the composer."
         }

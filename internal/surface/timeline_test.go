@@ -1,6 +1,9 @@
 package surface
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestBoundSessionReadStampsSourceAndKeepsReaderReply(t *testing.T) {
 	session := &Session{Status: StatusIdle}
@@ -62,5 +65,30 @@ func TestExchangesFollowTurnMarkersAndLabelInjectedPrompts(t *testing.T) {
 		if got := (want{exchange.User, exchange.Origin, exchange.Sender, exchange.Assistant}); got != expected || exchange.Timestamp.IsZero() {
 			t.Fatalf("exchange %d = %+v want %+v", index, exchange, expected)
 		}
+	}
+}
+
+func TestExchangeStartsNeverCrossAnEndedTurn(t *testing.T) {
+	reused := []TimelineItem{
+		{Kind: "message", Role: "user", Text: "first", TurnID: "t1"},
+		{Kind: "message", Role: "assistant", Text: "one", TurnID: "t1"},
+		{Kind: "done", TurnID: "t1"},
+		{Kind: "message", Role: "peer", Origin: "peer", Sender: "reviewer", Text: "after the close", TurnID: "t1"},
+		{Kind: "message", Role: "assistant", Text: "two", TurnID: "t1"},
+	}
+	if got := ExchangeStarts(reused); !reflect.DeepEqual(got, []int{0, 3}) {
+		t.Fatalf("starts=%v, want [0 3]", got)
+	}
+	injected := []TimelineItem{
+		{Kind: "instructions", Text: "context", TurnID: "t1"},
+		{Kind: "message", Role: "user", Text: "first", TurnID: "t1"},
+		{Kind: "message", Role: "assistant", Text: "one", TurnID: "t1"},
+		{Kind: "done", TurnID: "t1"},
+		{Kind: "instructions", Text: "context again", TurnID: "t1"},
+		{Kind: "message", Role: "user", Text: "second", TurnID: "t1"},
+		{Kind: "message", Role: "assistant", Text: "two", TurnID: "t1"},
+	}
+	if got := ExchangeStarts(injected); !reflect.DeepEqual(got, []int{0, 4}) {
+		t.Fatalf("starts=%v, want [0 4]", got)
 	}
 }

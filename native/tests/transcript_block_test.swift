@@ -46,7 +46,24 @@ struct TranscriptBlockTest {
         check(item("notice", "API error", text: "Overloaded").noticeText == "Overloaded", "a notice without a reset is its text")
     }
 
+    static func injectedInstructions() {
+        let kinds = TranscriptBlock.build([
+            item("instructions", "Instructions", text: "# AGENTS.md instructions for /work"),
+            item("message", "developer", text: "<canon-recall>recalled</canon-recall>", role: "developer"),
+            item("message", "system", text: "Base rules", role: "system"),
+            item("message", "user", text: "Fix the build", role: "user"),
+            item("instructions", "Instructions", text: "  "),
+        ]).map(\.kind)
+        check(kinds == [
+            .instructions("# AGENTS.md instructions for /work"),
+            .instructions("<canon-recall>recalled</canon-recall>"),
+            .instructions("Base rules"),
+            .user("Fix the build", files: []),
+        ], "injected context is instructions, never the agent's reply: \(kinds)")
+    }
+
     static func main() {
+        injectedInstructions()
         usageLimitNotice()
         injected()
         attachedFiles()

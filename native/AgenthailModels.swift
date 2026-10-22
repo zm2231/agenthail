@@ -1486,6 +1486,11 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     var resetsAt: String? = nil
 
     var isPeerMessage: Bool { kind == "message" && role == "peer" }
+    /// Model input a provider injected, such as project instructions or hook
+    /// context, rather than conversation.
+    var isInstructions: Bool {
+        kind == "instructions" || ((kind == "message" || kind == "text") && (role == "developer" || role == "system"))
+    }
     var peerSender: String { sender.flatMap { $0.isEmpty ? nil : $0 } ?? "another agent" }
     var peerLabel: String { "From \(peerSender)" }
 
