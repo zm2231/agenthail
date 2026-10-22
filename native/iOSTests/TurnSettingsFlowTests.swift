@@ -201,7 +201,8 @@ final class TurnSettingsFlowTests: XCTestCase {
         capabilities["send"] = true
         capabilities["steer"] = true
         object["capabilities"] = capabilities
-        let detail = try JSONDecoder().decode(SessionDetail.self, from: JSONSerialization.data(withJSONObject: object))
+        var detail = try JSONDecoder().decode(SessionDetail.self, from: JSONSerialization.data(withJSONObject: object))
+        detail.session.id = "computer::codex-flow"
         let state = SessionState(id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
                                  status: detail.session.status, lastActive: nil, queueCount: 0, open: true, current: true,
                                  currentReason: nil, capabilities: detail.capabilities, readOnly: false,

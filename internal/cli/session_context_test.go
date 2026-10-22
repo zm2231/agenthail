@@ -34,7 +34,7 @@ func rootHooks(t *testing.T, store *registry.Registry, fake *cliSurface, roots i
 		var wg sync.WaitGroup
 		for _, app := range apps {
 			wg.Go(func() {
-				output := app.sessionContext(strings.NewReader(input), 4242, time.Now())
+				output := app.sessionContext(strings.NewReader(input), surface.KindClaude, 4242, time.Now())
 				if output == nil {
 					return
 				}
@@ -119,6 +119,46 @@ func TestAClaudeSessionFirstSeenAtAPromptGetsItsCardAndAnUnknownOneNothing(t *te
 		if printed := hooks(`{"session_id":"elsewhere","hook_event_name":"` + event + `","source":"startup"}`); len(printed) != 0 {
 			t.Fatalf("%s for an unknown session printed %q", event, printed)
 		}
+	}
+}
+
+func TestTheCodexContextHookTellsARegisteredThreadWhoItIsAndLeavesAnyOtherAlone(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"unknown-thread": {ID: "unknown-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: t.TempDir()}}}
+	app, store := cliFixture(t, fake)
+	if err := store.RegisterSession(surface.Session{ID: "known-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	hook := func(thread string) string {
+		t.Helper()
+		stdin, err := os.CreateTemp(t.TempDir(), "hook-input")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := stdin.WriteString(`{"session_id":"` + thread + `","hook_event_name":"SessionStart","source":"startup"}`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := stdin.Seek(0, 0); err != nil {
+			t.Fatal(err)
+		}
+		previous := os.Stdin
+		os.Stdin = stdin
+		defer func() { os.Stdin = previous }()
+		output, err := captureStdout(t, func() error {
+			return app.Run([]string{"hook", "session-context", "--surface", "codex", "--claude-pid", "4242"})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return output
+	}
+	if output := hook("known-thread"); !strings.HasPrefix(gjson.Get(output, "hookSpecificOutput.additionalContext").String(), "[Agenthail] You are session known-thread (") {
+		t.Fatalf("a registered thread was told %q", output)
+	}
+	if output := hook("unknown-thread"); output != "" {
+		t.Fatalf("a thread Agenthail doesn't know was told %q", output)
+	}
+	if _, err := store.Session("unknown-thread"); err == nil {
+		t.Fatal("the hook registered a thread Agenthail didn't know")
 	}
 }
 

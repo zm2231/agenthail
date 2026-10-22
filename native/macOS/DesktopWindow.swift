@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Textual
+import UniformTypeIdentifiers
 
 struct DesktopWindow: View {
     @ObservedObject var model: AgenthailModel
@@ -1560,6 +1561,7 @@ struct ComposerView: View {
                         .padding(.top, 13)
                         .padding(.bottom, DesktopSpace.xs)
                         .onSubmit { submit(alternate: false) }
+                        .background(ComposerPasteMonitor(isActive: focused && session.capabilities.attach, paste: add))
                     HStack(spacing: DesktopSpace.xs) {
                         if session.capabilities.attach {
                             Button(action: chooseAttachments) {
@@ -1616,11 +1618,13 @@ struct ComposerView: View {
                 .background(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
                 .overlay(RoundedRectangle(cornerRadius: DesktopRadius.sheet).strokeBorder(dropTargeted ? DesktopPalette.accent : DesktopPalette.line, lineWidth: dropTargeted ? 2 : 1))
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
-                .dropDestination(for: URL.self) { urls, _ in
-                    guard session.capabilities.attach, !urls.isEmpty, urls.allSatisfy(\.isFileURL) else { return false }
-                    attach(urls)
+                .onDrop(of: [.fileURL, .image], isTargeted: Binding(get: { dropTargeted }, set: { dropTargeted = $0 && session.capabilities.attach })) { providers in
+                    guard session.capabilities.attach else { return false }
+                    Task {
+                        if let pasted = await ComposerAttachments.pasted(from: providers) { add(pasted) }
+                    }
                     return true
-                } isTargeted: { dropTargeted = $0 && session.capabilities.attach }
+                }
             }
             if let error = model.operationError {
                 Text(error)
@@ -1682,18 +1686,15 @@ struct ComposerView: View {
     }
 
     private func attach(_ urls: [URL]) {
-        var read: [ComposerAttachment] = []
-        var problem: ComposerAttachmentProblem?
-        for url in urls {
-            do throws(ComposerAttachmentProblem) {
-                read.append(try ComposerAttachments.file(at: url))
-            } catch {
-                problem = problem ?? error
-            }
-        }
-        let added = ComposerAttachments.adding(read, to: draft.attachments)
+        var pasted = PastedAttachments()
+        for url in urls { pasted.add(url.dataRepresentation, type: UTType.fileURL.identifier) }
+        add(pasted)
+    }
+
+    private func add(_ pasted: PastedAttachments) {
+        let added = ComposerAttachments.adding(pasted.attachments, to: draft.attachments)
         draft.attachments = added.attachments
-        model.operationError = (problem ?? added.problem)?.message
+        model.operationError = (pasted.problem ?? added.problem)?.message
         focused = true
     }
     private var primarySymbol: String {

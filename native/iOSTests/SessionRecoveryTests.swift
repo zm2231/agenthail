@@ -6,19 +6,18 @@ final class SessionRecoveryTests: XCTestCase {
     func testReconnectReplacesStaleSnapshotAndRefreshesSelectedSession() async throws {
         RecoveryProtocol.state.reset()
         let model = makeModel()
-        await model.loadSession("demo")
+        await model.loadSession("computer::demo")
         RecoveryProtocol.state.configure(stale: true)
         let staleResult = await model.refresh()
         XCTAssertTrue(staleResult)
         XCTAssertEqual(model.connectionError, "Agent catalog refresh failed")
         let before = RecoveryProtocol.state.sessionReads
         RecoveryProtocol.state.configure(stale: false)
-        model.reconnecting = true
-        await model.eventStreamConnected()
+        await model.connection("computer")!.eventStreamConnected()
         XCTAssertNil(model.connectionError)
         XCTAssertFalse(model.reconnecting)
         XCTAssertEqual(RecoveryProtocol.state.sessionReads, before + 1)
-        XCTAssertEqual(model.selectedDetail?.session.id, "demo")
+        XCTAssertEqual(model.selectedDetail?.session.id, "computer::demo")
         XCTAssertEqual(model.snapshot?.daemon.stale, false)
     }
 
@@ -26,8 +25,8 @@ final class SessionRecoveryTests: XCTestCase {
     func testOlderPageDoesNotMoveActiveJournalCursor() async throws {
         RecoveryProtocol.state.reset()
         let model = makeModel()
-        model.selectedSessionID = "demo"
-        await model.refreshSession("demo")
+        model.selectedSessionID = "computer::demo"
+        await model.refreshSession("computer::demo")
         XCTAssertEqual(model.sessionStreamCursor, 2048)
         await model.loadOlderActivity()
         XCTAssertEqual(model.sessionStreamCursor, 2048)
@@ -36,8 +35,8 @@ final class SessionRecoveryTests: XCTestCase {
     func testHistoryGapKeepsCurrentPageAndStopsRepeatingCursor() async throws {
         RecoveryProtocol.state.reset()
         let model = makeModel()
-        model.selectedSessionID = "demo"
-        await model.refreshSession("demo")
+        model.selectedSessionID = "computer::demo"
+        await model.refreshSession("computer::demo")
         let currentItems = model.selectedDetail?.timeline?.items ?? []
         let before = RecoveryProtocol.state.sessionReads
         RecoveryProtocol.state.configure(historyGap: true)
@@ -61,11 +60,11 @@ final class SessionRecoveryTests: XCTestCase {
         RecoveryProtocol.state.configureCatalog(epoch: "epoch-a", sequence: 41)
         let firstRefresh = await model.refresh()
         XCTAssertTrue(firstRefresh)
-        XCTAssertEqual(model.catalogStreamCursor, 41)
+        XCTAssertEqual(model.connection("computer")!.catalogStreamCursor, 41)
         RecoveryProtocol.state.configureCatalog(epoch: "epoch-b", sequence: 2)
         let secondRefresh = await model.refresh()
         XCTAssertTrue(secondRefresh)
-        XCTAssertEqual(model.catalogStreamCursor, 2)
+        XCTAssertEqual(model.connection("computer")!.catalogStreamCursor, 2)
     }
 
     @MainActor
@@ -77,7 +76,7 @@ final class SessionRecoveryTests: XCTestCase {
         let before = RecoveryProtocol.state.freshSnapshotReads
         let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":1,"type":"surface.health","data":{"surface":"new-surface","health":"unavailable","detail":"discovery failed"}}"#.utf8))
 
-        await model.receiveCatalog(event)
+        await model.connection("computer")!.receiveCatalog(event)
 
         XCTAssertEqual(RecoveryProtocol.state.freshSnapshotReads, before + 1)
     }
@@ -86,11 +85,11 @@ final class SessionRecoveryTests: XCTestCase {
         RecoveryProtocol.state.reset()
         let model = makeModel()
         try await sendQueuedInstruction(model)
-        XCTAssertEqual(model.deliveryStatus["demo"], "Queued for demo; sends when current turn ends.")
-        XCTAssertEqual(model.deliveryIDs["demo"], 42)
+        XCTAssertEqual(model.deliveryStatus["computer::demo"], "Queued for demo; sends when current turn ends.")
+        XCTAssertEqual(model.deliveryIDs["computer::demo"], 42)
         RecoveryProtocol.state.configure(queueStatus: "canceled", evidence: "canceled")
-        await model.eventStreamConnected()
-        XCTAssertEqual(model.deliveryStatus["demo"], "Instruction canceled.")
+        await model.connection("computer")!.eventStreamConnected()
+        XCTAssertEqual(model.deliveryStatus["computer::demo"], "Instruction canceled.")
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
     }
 
@@ -99,11 +98,11 @@ final class SessionRecoveryTests: XCTestCase {
         let model = makeModel()
         try await sendQueuedInstruction(model)
         RecoveryProtocol.state.configure(queueFailure: true)
-        await model.refreshSession("demo")
-        XCTAssertEqual(model.deliveryStatus["demo"], "Queued for demo; sends when current turn ends.")
+        await model.refreshSession("computer::demo")
+        XCTAssertEqual(model.deliveryStatus["computer::demo"], "Queued for demo; sends when current turn ends.")
         RecoveryProtocol.state.configure(queueStatus: "dead", evidence: "unknown", queueFailure: false)
-        await model.refreshSession("demo")
-        XCTAssertEqual(model.deliveryStatus["demo"], "Submitted to demo.")
+        await model.refreshSession("computer::demo")
+        XCTAssertEqual(model.deliveryStatus["computer::demo"], "Submitted to demo.")
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
     }
 
@@ -112,14 +111,14 @@ final class SessionRecoveryTests: XCTestCase {
         let model = makeModel()
         try await sendQueuedInstruction(model)
         RecoveryProtocol.state.configure(queueMissing: true)
-        await model.refreshSession("demo")
-        XCTAssertEqual(model.deliveryStatus["demo"], "Queued for demo; sends when current turn ends.")
+        await model.refreshSession("computer::demo")
+        XCTAssertEqual(model.deliveryStatus["computer::demo"], "Queued for demo; sends when current turn ends.")
         RecoveryProtocol.state.configure(evidence: "future-evidence", queueMissing: false)
-        await model.refreshSession("demo")
-        XCTAssertEqual(model.deliveryStatus["demo"], "Queued for demo; sends when current turn ends.")
+        await model.refreshSession("computer::demo")
+        XCTAssertEqual(model.deliveryStatus["computer::demo"], "Queued for demo; sends when current turn ends.")
         RecoveryProtocol.state.configure(evidence: "delivered")
-        await model.refreshSession("demo")
-        XCTAssertEqual(model.deliveryStatus["demo"], "Sent to demo.")
+        await model.refreshSession("computer::demo")
+        XCTAssertEqual(model.deliveryStatus["computer::demo"], "Sent to demo.")
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
     }
 
@@ -128,11 +127,11 @@ final class SessionRecoveryTests: XCTestCase {
         let model = makeModel()
         try await sendQueuedInstruction(model)
         RecoveryProtocol.state.configure(queueStatus: "dead", queueHistorical: false, evidence: "unknown")
-        await model.refreshSession("demo")
-        XCTAssertEqual(model.deliveryStatus["demo"], "Submitted to demo.")
+        await model.refreshSession("computer::demo")
+        XCTAssertEqual(model.deliveryStatus["computer::demo"], "Submitted to demo.")
         RecoveryProtocol.state.configure(queueHistorical: true)
-        await model.refreshSession("demo")
-        XCTAssertEqual(model.deliveryStatus["demo"], "Delivery was never confirmed. Review it in Inbox history.")
+        await model.refreshSession("computer::demo")
+        XCTAssertEqual(model.deliveryStatus["computer::demo"], "Delivery was never confirmed. Review it in Inbox history.")
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
     }
 
@@ -141,8 +140,8 @@ final class SessionRecoveryTests: XCTestCase {
         let model = makeModel()
         try await sendQueuedInstruction(model)
         RecoveryProtocol.state.configure(queueStatus: "dead", queueHistorical: true, evidence: "failed")
-        await model.refreshSession("demo")
-        XCTAssertEqual(model.deliveryStatus["demo"], "Delivery failed. Review it in Inbox history.")
+        await model.refreshSession("computer::demo")
+        XCTAssertEqual(model.deliveryStatus["computer::demo"], "Delivery failed. Review it in Inbox history.")
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
     }
 
@@ -162,12 +161,12 @@ final class SessionRecoveryTests: XCTestCase {
     }
 
     private func sendQueuedInstruction(_ model: AgenthailIOSModel) async throws {
-        await model.loadSession("demo")
+        await model.loadSession("computer::demo")
         _ = await model.refresh()
         model.composer = "Keep the regression test"
         model.send(to: model.snapshot!.sessions[0])
-        for _ in 0..<100 where model.sendingSessionIDs.contains("demo") { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertFalse(model.sendingSessionIDs.contains("demo"))
+        for _ in 0..<100 where model.sendingSessionIDs.contains("computer::demo") { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertFalse(model.sendingSessionIDs.contains("computer::demo"))
     }
 
     private func makeModel() -> AgenthailIOSModel {

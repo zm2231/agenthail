@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -221,10 +222,13 @@ type Orphan struct {
 	Cwd       string `json:"cwd"`
 }
 
+// Listing is what the hosts run. Unanswered names the sockets of hosts that
+// did not answer, whose sessions it cannot name.
 type Listing struct {
-	Sessions []Session `json:"sessions"`
-	Orphans  []Orphan  `json:"orphans"`
-	Draining bool      `json:"draining"`
+	Sessions   []Session `json:"sessions"`
+	Orphans    []Orphan  `json:"orphans"`
+	Draining   bool      `json:"draining"`
+	Unanswered []string  `json:"-"`
 }
 
 type Event struct {
@@ -296,15 +300,13 @@ func (c Client) Open(ctx context.Context, request OpenRequest) (Session, error) 
 	if request.Resume == "" || !(IsCode(err, "held") || errors.Is(err, ErrNotRunning)) {
 		return out, err
 	}
-	for _, host := range c.Retiring() {
-		listing, listErr := host.List(ctx)
-		if listErr != nil {
-			continue
-		}
-		for _, session := range listing.Sessions {
-			if session.SessionID == request.Resume {
-				return session, nil
-			}
+	listing, listErr := c.List(ctx)
+	if listErr != nil {
+		return out, err
+	}
+	for _, session := range listing.Sessions {
+		if session.SessionID == request.Resume {
+			return session, nil
 		}
 	}
 	return out, err
@@ -369,13 +371,9 @@ func (c Client) close(ctx context.Context, sessionID string, ifIdle bool) error 
 	if !(IsCode(err, "not_open") || IsCode(err, "held") || errors.Is(err, ErrNotRunning)) {
 		return err
 	}
-	for _, host := range c.Retiring() {
-		retiringErr := host.closeOn(ctx, sessionID, ifIdle)
-		if IsCode(retiringErr, "not_open") || errors.Is(retiringErr, ErrNotRunning) {
-			continue
-		}
-		return retiringErr
-	}
+	_, err = c.onRetiring(ctx, err, func(ctx context.Context, host Client) (json.RawMessage, error) {
+		return nil, host.closeOn(ctx, sessionID, ifIdle)
+	})
 	return err
 }
 
@@ -456,31 +454,83 @@ func (c Client) sessionCall(ctx context.Context, method string, params, out any)
 	if !(IsCode(err, "not_open") || IsCode(err, "held") || errors.Is(err, ErrNotRunning)) {
 		return err
 	}
-	for _, host := range c.Retiring() {
-		retiringErr := host.call(ctx, method, params, out)
-		if IsCode(retiringErr, "not_open") || errors.Is(retiringErr, ErrNotRunning) {
-			continue
+	result, err := c.onRetiring(ctx, err, func(ctx context.Context, host Client) (json.RawMessage, error) {
+		var result json.RawMessage
+		var target any
+		if out != nil {
+			target = &result
 		}
-		return retiringErr
+		err := host.call(ctx, method, params, target)
+		return result, err
+	})
+	if err == nil && out != nil && result != nil {
+		return json.Unmarshal(result, out)
 	}
 	return err
 }
 
+// onRetiring runs call on every retiring host at once and returns the answer
+// of the one that has the session, so a host that does not answer holds up
+// only a session it may run. When none has it, the answer is notOpen.
+func (c Client) onRetiring(ctx context.Context, notOpen error, call func(context.Context, Client) (json.RawMessage, error)) (json.RawMessage, error) {
+	retiring := c.Retiring()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type answer struct {
+		result json.RawMessage
+		err    error
+	}
+	answers := make(chan answer, len(retiring))
+	for _, host := range retiring {
+		go func() {
+			result, err := call(ctx, host)
+			answers <- answer{result: result, err: err}
+		}()
+	}
+	for range retiring {
+		answer := <-answers
+		if IsCode(answer.err, "not_open") || errors.Is(answer.err, ErrNotRunning) {
+			continue
+		}
+		return answer.result, answer.err
+	}
+	return nil, notOpen
+}
+
 // List is every session the current and retiring hosts run. A process a
 // retiring host runs is the current host's orphan; it is listed once, as the
-// retiring host's session. Draining is the current host's.
+// retiring host's session. Draining is the current host's. The hosts are asked
+// at once, so one that is slow to answer costs the others nothing.
 func (c Client) List(ctx context.Context) (Listing, error) {
-	var out Listing
-	err := c.call(ctx, "list", struct{}{}, &out)
+	hosts := append([]Client{c}, c.Retiring()...)
+	listings := make([]Listing, len(hosts))
+	errs := make([]error, len(hosts))
+	var wg sync.WaitGroup
+	for i, host := range hosts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = host.call(ctx, "list", struct{}{}, &listings[i])
+		}()
+	}
+	wg.Wait()
+	out := listings[0]
+	err := errs[0]
 	answered := err == nil
+	if err != nil {
+		out = Listing{}
+		if !errors.Is(err, ErrNotRunning) {
+			out.Unanswered = append(out.Unanswered, c.Socket)
+		}
+	}
 	served := map[string]bool{}
-	for _, host := range c.Retiring() {
-		var listing Listing
-		if host.call(ctx, "list", struct{}{}, &listing) != nil {
+	for i, host := range hosts[1:] {
+		if errs[i+1] != nil {
+			out.Unanswered = append(out.Unanswered, host.Socket)
 			continue
 		}
 		answered = true
-		for _, session := range listing.Sessions {
+		for _, session := range listings[i+1].Sessions {
 			served[session.SessionID] = true
 			out.Sessions = append(out.Sessions, session)
 		}

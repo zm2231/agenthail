@@ -20,7 +20,7 @@ struct NewSessionSheet: View {
     init(model: AgenthailIOSModel) {
         self.model = model
         let selected = model.snapshot?.sessions.first { $0.id == model.selectedSessionID }
-        _hosts = State(initialValue: CreationHostPicker(daemon: model.snapshot?.daemon, selectedSession: selected))
+        _hosts = State(initialValue: CreationHostPicker(hosts: model.creationHosts, selectedSession: selected))
     }
 
     private var options: SessionCreationOptions? { hosts.options }
@@ -157,9 +157,9 @@ struct NewSessionSheet: View {
                 })
             }
             .task(id: hosts.generation) { await load() }
-            .onChange(of: model.snapshot?.daemon) { _, daemon in
+            .onChange(of: model.creationHosts) { _, next in
                 let before = hosts.generation
-                hosts.update(daemon: daemon)
+                hosts.update(hosts: next)
                 if hosts.generation != before { cwd = ""; selectedSurface = ""; showingModels = false }
             }
             .task(id: "\(hosts.generation)/\(selectedSurface)") {
