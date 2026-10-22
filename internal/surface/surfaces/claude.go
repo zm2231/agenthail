@@ -412,9 +412,9 @@ func (c *Claude) firstUserMessage(path string) string {
 	return ""
 }
 
-// List returns one session per id. A conversation resumed in a second process
-// without Remote Control carries the same session id; the process that opened
-// it first keeps the id, so the later one never takes over its row.
+// List returns one session per conversation. A conversation open in several
+// processes, as when it is resumed or branched into a second terminal, lists
+// every process as a holder and attaches none of them.
 func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 	processes, err := c.conversations(ctx)
 	if err != nil {
@@ -428,24 +428,28 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 	return out, nil
 }
 
-// conversations returns each conversation's earliest started live process,
-// before its status is read.
+// conversations returns each conversation with the live processes that hold
+// it, before its status is read.
 func (c *Claude) conversations(ctx context.Context) ([]claudeProcess, error) {
 	processes, err := c.processes(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]claudeProcess, 0, len(processes))
-	owner := map[string]int{}
+	var order []string
+	held := map[string][]claudeProcess{}
 	for _, process := range processes {
-		if index, seen := owner[process.session.ID]; seen {
-			if process.startedAt < out[index].startedAt {
-				out[index] = process
-			}
-			continue
+		if _, seen := held[process.session.ID]; !seen {
+			order = append(order, process.session.ID)
 		}
-		owner[process.session.ID] = len(out)
-		out = append(out, process)
+		held[process.session.ID] = append(held[process.session.ID], process)
+	}
+	out := make([]claudeProcess, 0, len(order))
+	for _, id := range order {
+		if holders := held[id]; len(holders) > 1 {
+			out = append(out, shareConversation(holders))
+		} else {
+			out = append(out, holders[0])
+		}
 	}
 	return out, nil
 }
@@ -454,6 +458,8 @@ type claudeProcess struct {
 	session   surface.Session
 	record    map[string]any
 	startedAt float64
+	// holders are the processes of a conversation several of them hold.
+	holders []claudeProcess
 }
 
 // enrich reads a process's status, what it waits on, its background tasks and
@@ -461,6 +467,7 @@ type claudeProcess struct {
 // the sessions a caller returns are read.
 func (c *Claude) enrich(ctx context.Context, process *claudeProcess) {
 	c.applyRecordStatus(ctx, &process.session, process.record)
+	applyHoldersStatus(&process.session)
 	if process.session.HasLocal {
 		if rollup, err := c.subagents.rollup(ctx, &process.session); err == nil {
 			process.session.Subagents = rollup
@@ -596,8 +603,10 @@ func (c *Claude) EnsureWritable(_ context.Context, sess *surface.Session) error 
 	if sess == nil {
 		return nil
 	}
-	_, err := c.conversationRoot(sess.ID)
-	return err
+	if _, err := c.conversationRoot(sess.ID); err != nil {
+		return err
+	}
+	return c.ensureOneHolder(sess)
 }
 
 // process builds the session for a record Agenthail can deliver to: one with
@@ -720,10 +729,16 @@ func (c *Claude) peerRecordPath(pid int) string {
 }
 
 func (c *Claude) LocalStatusFiles(session surface.Session) []string {
-	if session.PID <= 0 {
+	var files []string
+	for _, holder := range session.Holders {
+		files = append(files, c.peerRecordPath(holder.PID))
+	}
+	if session.PID > 0 {
+		files = append(files, c.peerRecordPath(session.PID))
+	}
+	if len(files) == 0 {
 		return nil
 	}
-	files := []string{c.peerRecordPath(session.PID)}
 	if session.HasLocal && session.Transcript != "" {
 		files = append(files, session.Transcript)
 	}
@@ -731,6 +746,9 @@ func (c *Claude) LocalStatusFiles(session surface.Session) []string {
 }
 
 func (c *Claude) LocalStatus(ctx context.Context, session surface.Session) (surface.Session, error) {
+	if len(session.Holders) > 0 {
+		return c.sharedLocalStatus(ctx, session)
+	}
 	if session.PID <= 0 {
 		return session, fmt.Errorf("claude session %s has no peer process", session.ID)
 	}
@@ -785,8 +803,13 @@ func (c *Claude) Resolve(ctx context.Context, target string) (*surface.Session, 
 	var exactMatches []claudeProcess
 	for _, process := range processes {
 		s := process.session
-		if strconv.Itoa(s.PID) == target ||
-			s.ID == target ||
+		if pid, err := strconv.Atoi(target); err == nil && pid > 0 {
+			if holder, ok := process.pinned(pid); ok {
+				exactMatches = append(exactMatches, holder)
+				continue
+			}
+		}
+		if s.ID == target ||
 			strings.TrimSuffix(filepath.Base(s.Transcript), ".jsonl") == target {
 			exactMatches = append(exactMatches, process)
 			continue
@@ -801,9 +824,6 @@ func (c *Claude) Resolve(ctx context.Context, target string) (*surface.Session, 
 		matches = exactMatches
 	}
 	if len(matches) == 0 {
-		if process, found, err := c.processByPID(ctx, target); err != nil || found {
-			return process, err
-		}
 		return nil, fmt.Errorf("%w '%s'", surface.ErrSessionNotFound, target)
 	}
 	if len(matches) > 1 {
@@ -815,26 +835,6 @@ func (c *Claude) Resolve(ctx context.Context, target string) (*surface.Session, 
 	}
 	c.enrich(ctx, &matches[0])
 	return &matches[0].session, nil
-}
-
-// processByPID finds a live process that shares its session id with an
-// earlier one, which List leaves out.
-func (c *Claude) processByPID(ctx context.Context, target string) (*surface.Session, bool, error) {
-	pid, err := strconv.Atoi(target)
-	if err != nil || pid <= 0 {
-		return nil, false, nil
-	}
-	processes, err := c.processes(ctx)
-	if err != nil {
-		return nil, false, err
-	}
-	for _, process := range processes {
-		if process.session.PID == pid {
-			c.enrich(ctx, &process)
-			return &process.session, true, nil
-		}
-	}
-	return nil, false, nil
 }
 
 // Observe reads a session whose process exited as offline, unless no other

@@ -201,6 +201,11 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 	if err != nil {
 		return nil, err
 	}
+	if action == "stop" || action == "resume" {
+		if err := c.ensureOneHolder(session); err != nil {
+			return nil, err
+		}
+	}
 	if claudeHosted(session) {
 		return c.hostSessionAction(ctx, session, action)
 	}
@@ -209,7 +214,7 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 		return nil, err
 	}
 	for _, record := range records {
-		if record.Kind != "background" || record.SessionID != session.ID {
+		if record.Kind != "background" || record.SessionID != session.ID || session.HolderPID > 0 && record.PID != session.HolderPID {
 			continue
 		}
 		if action == "status" {

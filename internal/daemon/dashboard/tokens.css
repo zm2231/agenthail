@@ -1264,6 +1264,27 @@ select {
 .steer-button:hover {
   background: var(--hover);
 }
+.holder-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 8px;
+  color: var(--ink);
+  font-size: 13px;
+}
+.holder-picker[hidden] {
+  display: none;
+}
+.holder-picker select {
+  width: auto;
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--ink);
+}
 .composer > p {
   margin: 8px 10px 0;
   color: var(--quiet);

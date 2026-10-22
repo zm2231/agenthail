@@ -376,6 +376,7 @@ function syncComposerAction() {
   steerButton.disabled = steerButton.hidden;
   $("#composer").classList.toggle("is-stopping", stopping);
   $("#composer").classList.toggle("has-steer", !steerButton.hidden);
+  renderHolderPicker();
   if (readOnly) return;
   $("#composer-note").textContent = app.selected?.waitingOn
     ? "This agent is waiting on you. Messages queue until you answer it."
@@ -602,8 +603,44 @@ const collapsedProjectSessions = 5;
 function sessionNeedsYou(session) {
   return session.status === "busy" || (session.subagents?.working || 0) > 0 || session.queueCount > 0 || (app.state.attention || []).some((item) => item.sessionId === session.id);
 }
+function sharedHolders(session) {
+  return session?.surface === "claude" && (session.holders || []).length > 1 ? session.holders : [];
+}
+function holderLabel(holder) {
+  return [`pid ${holder.pid}`, holder.tty, holder.status].filter(Boolean).join(", ");
+}
+// A Claude conversation open in several terminals takes a write only for
+// the terminal chosen here; the daemon refuses one that names none.
+function renderHolderPicker() {
+  const holders = sharedHolders(app.selected);
+  const picker = $("#holder-picker");
+  const select = $("#holder-pid");
+  picker.hidden = holders.length === 0;
+  if (holders.length === 0) {
+    select.innerHTML = "";
+    return;
+  }
+  const chosen = select.dataset.session === app.selected.id ? select.value : "";
+  $("#holder-summary").textContent = `Open in ${holders.length} terminals. Send to`;
+  select.innerHTML = `<option value="">Choose a terminal</option>${holders.map((holder) => `<option value="${escape(String(holder.pid))}">${escape(holderLabel(holder))}</option>`).join("")}`;
+  select.value = holders.some((holder) => String(holder.pid) === chosen) ? chosen : "";
+  select.dataset.session = app.selected.id;
+}
+function chosenHolder(sessionID) {
+  const select = $("#holder-pid");
+  if (sessionID !== app.selected?.id || sharedHolders(app.selected).length === 0 || select.dataset.session !== sessionID) return 0;
+  return Number(select.value) || 0;
+}
+function withHolder(sessionID, payload) {
+  const pid = chosenHolder(sessionID);
+  if (!pid) return payload;
+  const holder = sharedHolders(app.selected).find((candidate) => candidate.pid === pid);
+  const startedAt = Date.parse(holder?.startedAt || "");
+  return Number.isFinite(startedAt) ? { ...payload, pid, pidStartedAt: startedAt } : { ...payload, pid };
+}
 function sessionButton(session) {
-  return `<button class="session ${app.selected?.id === session.id ? "selected" : ""}${session.archived ? " archived" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail">${hostBadge(session)}<span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}${session.archived ? "<span>Archived</span>" : ""}</div></button>`;
+  const holders = sharedHolders(session);
+  return `<button class="session ${app.selected?.id === session.id ? "selected" : ""}${session.archived ? " archived" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail">${hostBadge(session)}<span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}${holders.length ? `<span title="${escape(holders.map(holderLabel).join("; "))}">${holders.length} terminals</span>` : ""}${session.archived ? "<span>Archived</span>" : ""}</div></button>`;
 }
 function projectSection(project, sessions) {
   const expanded = app.expandedProjects.has(project.id);
@@ -1278,6 +1315,11 @@ function renderTimelineMetadata(item) {
   if (item.bodyRef) fields.push(`<span>Body reference: <code>${escape(item.bodyRef)}</code></span>`);
   return fields.length ? `<div class="timeline-meta">${fields.join(" · ")}</div>` : "";
 }
+// isInstructions reports model input a provider injected, such as project
+// instructions or hook context, rather than conversation.
+function isInstructions(item) {
+  return item.kind === "instructions" || (["message", "text"].includes(item.kind) && ["developer", "system"].includes(item.role));
+}
 function renderTimelineItem(item, session) {
   const kind = String(item.kind || "unknown");
   const kindClass = timelineKindClass(kind);
@@ -1285,6 +1327,10 @@ function renderTimelineItem(item, session) {
   const metadata = renderTimelineMetadata(item);
   if (kind === "attachment") {
     return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderImageAttachment(item, session)}${metadata}</section>`;
+  }
+  if (isInstructions(item)) {
+    const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';
+    return `<details class="timeline-item timeline-instructions timeline-collapsible" ${attributes}><summary>Instructions</summary>${metadata}<div class="turn-content">${body}</div></details>`;
   }
   if (kind === "message" && item.role === "peer") {
     return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(item.text, "peer", `From ${item.sender || "another agent"}`, `${session.id}:${item.id}`)}${metadata}</section>`;
@@ -1710,6 +1756,7 @@ function sessionTarget(session) {
   return `${session?.surface || "session"}:${session?.id || "unknown"}`;
 }
 async function logicalAction(scope, actionName, payload) {
+  payload = withHolder(app.selected?.id, payload);
   const request = logicalRequest(scope, actionName, payload);
   try {
     const result = await action(actionName, payload, request.key, request.sessionId);
@@ -1732,6 +1779,7 @@ async function action(action, extra = {}, idempotencyKey = crypto.randomUUID(), 
     action.startsWith("project-");
   if (!app.selected && !networkAction)
     throw Error("Choose a conversation first");
+  if (!networkAction) extra = withHolder(sessionID, extra);
   let response;
   try {
     response = await fetch("/api/action", {
@@ -1958,7 +2006,8 @@ async function send(requestedAction = "send") {
     await load();
     await selectSession(app.selected.id);
   } catch (error) {
-    toast(error.message);
+    const holders = sharedHolders(app.selected);
+    toast(holders.length && !chosenHolder(app.selected.id) ? `Open in ${holders.length} terminals. Choose one above, then send.` : error.message);
   } finally {
     syncComposerAction();
   }

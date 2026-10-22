@@ -218,12 +218,16 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 		message = string(item.Operation)
 	}
 	if surface.IsDeliveryUnavailable(sendErr) {
+		var shared surface.SharedConversationError
+		if errors.As(sendErr, &shared) {
+			sendErr = heldError{err: sendErr, reason: shared.HeldReason()}
+		}
 		refusal, err := d.Registry.DeferMessage(item.ID, sendErr, now)
 		if err != nil {
 			d.log.Printf("defer queue item %d: %s", item.ID, err)
 		}
 		if refusal != 0 {
-			d.announceRefusal(*session, item.ID, refusal)
+			d.announceRefusal(*session, item.ID, refusal, sendErr)
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "deferred", SessionID: session.ID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
 		return
@@ -262,7 +266,7 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 // after both were attempted, so a daemon stopped in between announces it on
 // the next refused attempt rather than never; both carry a key per message, so
 // a repeat replaces the one already shown.
-func (d *Daemon) announceRefusal(session surface.Session, queueID, refusal int64) {
+func (d *Daemon) announceRefusal(session surface.Session, queueID, refusal int64, cause error) {
 	d.announceMu.Lock()
 	if d.announcingRefusal == nil {
 		d.announcingRefusal = map[int64]int64{}
@@ -275,6 +279,12 @@ func (d *Daemon) announceRefusal(session surface.Session, queueID, refusal int64
 	d.announceMu.Unlock()
 	conversationID := session.ConversationID()
 	desktopMessage := fmt.Sprintf("%s refused to start; a queued message is waiting", d.resolveDisplay(conversationID))
+	mobileMessage := "A session refused to start; a queued message is waiting"
+	var shared surface.SharedConversationError
+	if errors.As(cause, &shared) {
+		desktopMessage = fmt.Sprintf("%s is open in %d terminals; a queued message waits until you close all but one, or send it fresh to one terminal", d.resolveDisplay(conversationID), len(shared.Holders))
+		mobileMessage = fmt.Sprintf("A session is open in %d terminals; a queued message is waiting", len(shared.Holders))
+	}
 	key := fmt.Sprintf("refused-%d", queueID)
 	finished := func() {
 		d.announceMu.Lock()
@@ -290,7 +300,7 @@ func (d *Daemon) announceRefusal(session surface.Session, queueID, refusal int64
 		}
 		notificationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		d.notifyPairedDevices(notificationCtx, mobileNotification{Title: "Agenthail", Message: "A session refused to start; a queued message is waiting", SessionID: conversationID, EventType: "delivery.refused", CollapseID: key})
+		d.notifyPairedDevices(notificationCtx, mobileNotification{Title: "Agenthail", Message: mobileMessage, SessionID: conversationID, EventType: "delivery.refused", CollapseID: key})
 		if ctx.Err() != nil {
 			return
 		}
@@ -302,3 +312,13 @@ func (d *Daemon) announceRefusal(session surface.Session, queueID, refusal int64
 		finished()
 	}
 }
+
+// heldError keeps a delivery error's class and explains why its queued
+// message is held.
+type heldError struct {
+	err    error
+	reason string
+}
+
+func (e heldError) Error() string { return e.reason }
+func (e heldError) Unwrap() error { return e.err }

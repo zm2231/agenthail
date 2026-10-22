@@ -57,6 +57,7 @@ jobs:
           node scripts/test-dashboard-rekeys.mjs
           node scripts/test-dashboard-signin.mjs
           node scripts/test-dashboard-projects.mjs
+          node scripts/test-dashboard-holders.mjs
           node scripts/test-dashboard-model.mjs
           node scripts/test-dashboard-config-roots.mjs
           node scripts/test-session-controls.mjs

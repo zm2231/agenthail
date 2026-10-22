@@ -140,6 +140,9 @@ type Session struct {
 	Runtime               *Runtime          `json:"runtime,omitempty"`
 	Subagent              *Subagent         `json:"subagent,omitempty"`
 	Subagents             *SubagentRollup   `json:"subagents,omitempty"`
+	Holders               []Holder          `json:"holders,omitempty"`
+	HolderPID             int               `json:"-"`
+	HolderStart           string            `json:"-"`
 	StreamCursor          uint64            `json:"-"`
 	StreamCursorSet       bool              `json:"-"`
 	TranscriptOffset      int64             `json:"-"`
@@ -149,6 +152,63 @@ type Session struct {
 	CodexPendingEventTurn string            `json:"-"`
 	CodexCurrentTurnID    string            `json:"-"`
 	ClaudeClosingTurn     ClaudeClosingTurn `json:"-"`
+}
+
+// Holder is one of several live processes that hold a conversation open, as
+// when it is resumed or branched into a second terminal. A session lists its
+// holders only when there are several; a write to it then names one holder by
+// HolderPID or is refused, so no single process is chosen for it silently.
+type Holder struct {
+	PID       int           `json:"pid"`
+	TTY       string        `json:"tty,omitempty"`
+	Status    SessionStatus `json:"status"`
+	StartedAt time.Time     `json:"startedAt,omitzero"`
+}
+
+// SharedConversationError refuses a write to a conversation that several live
+// processes hold, naming each one and the target that reaches it.
+type SharedConversationError struct {
+	SessionID string
+	Holders   []Holder
+}
+
+func (e SharedConversationError) Error() string {
+	described, pins := e.describe()
+	return fmt.Sprintf("Claude conversation %s is open in %d terminals: %s; send to one with %s, or close the others", e.SessionID, len(e.Holders), described, pins)
+}
+
+// Unpinnable is the error without its advice to pin one terminal, for an
+// operation a pin cannot settle.
+func (e SharedConversationError) Unpinnable() error { return sharedHolders{e} }
+
+type sharedHolders struct{ SharedConversationError }
+
+func (e sharedHolders) Error() string {
+	described, _ := e.describe()
+	return fmt.Sprintf("Claude conversation %s is open in %d terminals: %s", e.SessionID, len(e.Holders), described)
+}
+
+func (e sharedHolders) Unwrap() error { return e.SharedConversationError }
+
+// HeldReason explains a queued message held because the conversation is
+// open in several terminals, and the two ways to move it on.
+func (e SharedConversationError) HeldReason() string {
+	described, pins := e.describe()
+	return fmt.Sprintf("Claude conversation %s is open in %d terminals: %s. This message is held and delivers once only one terminal is left open; to reach one now, send it fresh with %s", e.SessionID, len(e.Holders), described, pins)
+}
+
+func (e SharedConversationError) describe() (string, string) {
+	described := make([]string, 0, len(e.Holders))
+	pins := make([]string, 0, len(e.Holders))
+	for _, holder := range e.Holders {
+		detail := string(holder.Status)
+		if holder.TTY != "" {
+			detail = holder.TTY + ", " + detail
+		}
+		described = append(described, fmt.Sprintf("pid %d (%s)", holder.PID, detail))
+		pins = append(pins, fmt.Sprintf("claude:%d", holder.PID))
+	}
+	return strings.Join(described, ", "), strings.Join(pins, " or ")
 }
 
 // ClaudeClosingTurn is a Claude turn whose end_turn message has been read but
