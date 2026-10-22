@@ -32,20 +32,21 @@ Agenthail updates the app, command line tool, and background service together. I
 
 ## iPhone app
 
-The iPhone and iPad app requires iOS/iPadOS 18 or later. It pairs with a Mac running Agenthail and reaches it, and the hosts paired with it, privately through Tailscale. It does not make any of them public on the internet.
+The iPhone and iPad app requires iOS/iPadOS 18 or later. It pairs with any computer running Agenthail and reaches it, and the hosts paired with it, privately through Tailscale. It does not make any of them public on the internet.
 
 [Request TestFlight access privately](mailto:zainmer@protonmail.com?subject=Agenthail%20iPhone%20TestFlight%20access&body=Please%20invite%20this%20Apple%20Account%20email%3A%20). An App Store distribution `.ipa` cannot be installed directly on an ordinary iPhone, so GitHub release downloads are not used for the companion app.
 
 To connect it:
 
 1. Install Tailscale on the iPhone and on the computer running Agenthail, and sign both into the same account.
-2. In the Mac app, open Settings > **Devices** and turn on **Phone access**.
-3. Under **Pair an iPhone**, choose **Show Pairing Code**.
-4. Scan the code with the Agenthail iPhone app.
+2. Turn on phone access: run `agenthail dashboard remote`, or turn on **Phone access** in the Mac app's Settings > **Devices**.
+3. Show a pairing code on that computer, any one of these ways:
+   - Run `agenthail devices pair` in a terminal, including over SSH. It draws the code, prints the link, and waits until the phone pairs.
+   - In the web dashboard, open Settings > **iPhone app** and choose **Pair an iPhone**.
+   - In the Mac app, choose **Show Pairing Code** under **Pair an iPhone**.
+4. Scan the code with the iPhone's camera or with **Scan pairing code** in the Agenthail app. A web dashboard open on the iPhone offers **Open in Agenthail** instead.
 
-The iPhone app pairs through the Mac app. On a computer without it, such as a Linux server, `agenthail dashboard remote` or **Open Agenthail on your phone** in the web dashboard's settings opens the dashboard on the phone in the browser instead.
-
-The pairing code expires quickly and works once. You can disconnect a phone from either device.
+The pairing code expires after five minutes and works once. You can disconnect a phone from either device: in the app's Settings, in the web dashboard, in the Mac app, or with `agenthail devices remove <device>`.
 
 On iPhone, **Sessions** is the place to find, start, and continue work. **Inbox** separates current delivery decisions from completed instructions. **Settings** manages the connection and notifications.
 

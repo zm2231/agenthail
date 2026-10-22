@@ -72,7 +72,7 @@ jobs:
         run: |
           xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" -parallel-testing-enabled NO
           plist="$DERIVED/Build/Products/Debug-iphonesimulator/Agenthail.app/Info.plist"
-          test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your Mac, or take a photo to send to an agent."
+          test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your computer, or take a photo to send to an agent."
           test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"
           test "$(plutil -extract UIBackgroundModes.1 raw -o - "$plist")" = "audio"
           test "$(plutil -extract UIBackgroundModes.2 raw -o - "$plist")" = "voip"

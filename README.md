@@ -278,9 +278,15 @@ The iPhone companion is distributed through TestFlight. [Request an iPhone invit
 
 After installing the iPhone app, install Tailscale on the iPhone and on the computer running Agenthail, and sign both into the same account. The phone connects only over Tailscale.
 
-In the Mac app, open Settings > **Devices**, turn on **Phone access**, and choose **Show Pairing Code** under **Pair an iPhone**. The iPhone app can then show current work, open conversations, send or steer messages, and notify you when an agent finishes or is waiting on you. The computer is not opened to the public internet.
+Turn on phone access with `agenthail dashboard remote`, then show a pairing code on that computer and scan it with the iPhone's camera or with **Scan pairing code** in the app:
 
-The iPhone app pairs through the Mac app. On a computer without it, such as a Linux server, `agenthail dashboard remote` or **Open Agenthail on your phone** in the web dashboard's settings opens the dashboard on the phone in the browser instead, over the same Tailscale connection.
+- In a terminal, including over SSH, run `agenthail devices pair`. It draws the code, prints the link, and waits until the phone pairs.
+- In the web dashboard, open Settings > **iPhone app** and choose **Pair an iPhone**. On the iPhone itself, tap **Open in Agenthail** instead of scanning.
+- In the Mac app, open Settings > **Devices**, turn on **Phone access**, and choose **Show Pairing Code**.
+
+The iPhone app can then show current work, open conversations, send or steer messages, and notify you when an agent finishes or is waiting on you. `agenthail devices` lists the phones paired with the computer and `agenthail devices remove <device>` disconnects one. The computer is not opened to the public internet.
+
+`agenthail dashboard remote` also opens the web dashboard on the phone in the browser, over the same Tailscale connection.
 
 Matching voice-enabled builds also offer **Talk to orchestrator**: a real Codex
 Voice conversation that can inspect agents, delegate work, and read replies through

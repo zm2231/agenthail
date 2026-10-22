@@ -48,7 +48,7 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNU
 extension IOSAppDelegate {
     nonisolated static func pairedAPI() throws -> AgenthailAPI {
         guard let endpoint = KeychainStore.get("endpoint").flatMap(URL.init(string:)), let token = KeychainStore.get("token") else {
-            throw AgenthailAPIError.unavailable("Pair this phone with Agenthail on your Mac first.")
+            throw AgenthailAPIError.unavailable("Pair this phone with Agenthail on your computer first.")
         }
         return AgenthailAPI(baseURL: endpoint, token: token)
     }

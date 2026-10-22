@@ -50,7 +50,7 @@ final class NativeVoiceAudio: VoiceAudioClient {
     // The native peer needs no page; only the signaling origin is checked.
     func load(_ request: URLRequest) {
         permittedOrigin = request.url.map(VoiceAPI.secureOrigin) == true
-        onMessage?(permittedOrigin ? "ready" : "unavailable", permittedOrigin ? "" : "Pair with the Mac's secure HTTPS address first.")
+        onMessage?(permittedOrigin ? "ready" : "unavailable", permittedOrigin ? "" : "Pair with your computer's secure HTTPS address first.")
     }
 
     func start() async throws {

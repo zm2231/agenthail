@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -217,14 +218,28 @@ func (d *Daemon) apiEventStreamAuthorized(r *http.Request) bool {
 }
 
 func (d *Daemon) apiPairingsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		status, err := d.Registry.PairingStatus(r.URL.Query().Get("id"))
+		if errors.Is(err, registry.ErrPairingInvalid) {
+			writeAPIError(w, http.StatusNotFound, "pairing_not_found", "No pairing has that id.")
+			return
+		}
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "pairing_status_failed", err.Error())
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, status)
+		return
+	}
 	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use POST to create a pairing.")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use POST to create a pairing, or GET with an id to read one.")
 		return
 	}
 	defer r.Body.Close()
 	var request struct {
 		Name   string   `json:"name"`
 		Scopes []string `json:"scopes"`
+		QR     bool     `json:"qr"`
 	}
 	if err := decodeAPIV1JSON(w, r, &request, true); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "The pairing request is invalid.")
@@ -246,7 +261,17 @@ func (d *Daemon) apiPairingsHandler(w http.ResponseWriter, r *http.Request) {
 	for _, scope := range pairing.Scopes {
 		values.Add("scope", scope)
 	}
-	writeDashboardJSON(w, http.StatusCreated, map[string]any{"id": pairing.ID, "expiresAt": pairing.ExpiresAt, "pairingURL": "agenthail://pair?" + values.Encode(), "endpoint": endpoint, "secret": pairing.Secret, "scopes": pairing.Scopes})
+	pairingURL := "agenthail://pair?" + values.Encode()
+	response := map[string]any{"id": pairing.ID, "expiresAt": pairing.ExpiresAt, "pairingURL": pairingURL, "endpoint": endpoint, "secret": pairing.Secret, "scopes": pairing.Scopes}
+	if request.QR {
+		image, err := RemoteAccessQR(pairingURL)
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "pairing_qr_failed", err.Error())
+			return
+		}
+		response["qr"] = "data:image/png;base64," + base64.StdEncoding.EncodeToString(image)
+	}
+	writeDashboardJSON(w, http.StatusCreated, response)
 }
 
 func (d *Daemon) apiPairHandler(w http.ResponseWriter, r *http.Request) {
@@ -274,7 +299,8 @@ func (d *Daemon) apiPairHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.publishEvent("device.paired", device.ID, device)
-	writeDashboardJSON(w, http.StatusCreated, map[string]any{"device": device, "token": token, "protocol": apiProtocolVersion})
+	identity := d.hostIdentity()
+	writeDashboardJSON(w, http.StatusCreated, map[string]any{"device": device, "token": token, "protocol": apiProtocolVersion, "host": map[string]string{"id": identity.ID, "name": identity.Name}})
 }
 
 func (d *Daemon) apiDevicesHandler(w http.ResponseWriter, r *http.Request) {

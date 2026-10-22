@@ -187,3 +187,32 @@ func TestAHostTokenBelongsToTheHostThatPaired(t *testing.T) {
 		}
 	}
 }
+
+func TestPairingStatusNamesTheDeviceItsCodePaired(t *testing.T) {
+	r := openTestRegistry(t)
+	paired := map[string]string{}
+	for _, name := range []string{"First iPhone", "Second iPhone"} {
+		pairing, err := r.CreateDevicePairing(name, []string{"read"}, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		device, _, err := r.CompleteDevicePairing(pairing.Secret, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		paired[pairing.ID] = device.ID
+	}
+	const sameInstant = "2026-10-22T10:00:00Z"
+	if _, err := r.db.Exec(`UPDATE device_pairings SET consumed_at=?; UPDATE paired_devices SET created_at=?`, sameInstant, sameInstant); err != nil {
+		t.Fatal(err)
+	}
+	for pairingID, deviceID := range paired {
+		status, err := r.PairingStatus(pairingID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.State != PairingPaired || status.Device == nil || status.Device.ID != deviceID {
+			t.Fatalf("pairing %s status=%+v, want device %s", pairingID, status, deviceID)
+		}
+	}
+}
