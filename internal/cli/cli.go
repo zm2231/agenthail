@@ -201,6 +201,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdHosts(rest)
 	case "move":
 		return a.cmdMove(rest)
+	case "devices":
+		return a.cmdDevices(rest)
 	case "project", "projects":
 		return a.cmdProject(rest)
 	case "signin":
@@ -336,6 +338,12 @@ Hosts:
                                  Move an idle Claude session to a paired host
   move list [--unfinished] [--json]
                                  Show moves to and from this host
+
+Phones:
+  devices [--json]               List the phones paired with this host
+  devices pair [--name <label>] [--json]
+                                 Show a code that pairs the iPhone app with this host
+  devices remove <device>        Disconnect a phone from this host
 
 Browser sign-in (Notion and Claude Remote Control only):
   signin [list] [--json]        Show consumers, sign-in profiles and this computer's browser profiles
@@ -666,10 +674,11 @@ func validateCommandFlags(command string, args []string) error {
 		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--root": true, "--host": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--wait": true}, bools: map[string]bool{"--json": true, "--help": true, "--stop-terminal": true}},
 		"channel": {},
 		"project": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}}, "projects": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}},
-		"hosts":  {values: map[string]bool{"--address": true, "--name": true}, bools: map[string]bool{"--json": true, "--help": true}},
-		"move":   {values: map[string]bool{"--to": true, "--wait": true, "--timeout": true}, bools: map[string]bool{"--json": true, "--help": true, "--stop-terminal": true, "--unfinished": true}},
-		"signin": {values: map[string]bool{"--label": true}, bools: map[string]bool{"--json": true, "--help": true}},
-		"doctor": {bools: map[string]bool{"--json": true}}, "permissions": {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
+		"hosts":   {values: map[string]bool{"--address": true, "--name": true}, bools: map[string]bool{"--json": true, "--help": true}},
+		"move":    {values: map[string]bool{"--to": true, "--wait": true, "--timeout": true}, bools: map[string]bool{"--json": true, "--help": true, "--stop-terminal": true, "--unfinished": true}},
+		"devices": {values: map[string]bool{"--name": true}, bools: map[string]bool{"--json": true, "--help": true}},
+		"signin":  {values: map[string]bool{"--label": true}, bools: map[string]bool{"--json": true, "--help": true}},
+		"doctor":  {bools: map[string]bool{"--json": true}}, "permissions": {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
 		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
 		"permission-mode": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "requests": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
