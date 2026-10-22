@@ -43,6 +43,11 @@ final class SessionPane: ObservableObject, Identifiable {
     /// a page read before some of them arrived can be brought up to date.
     private(set) var streamedRows: [SessionStreamEvent] = []
     private(set) var pageReadsInFlight = 0
+    /// Streamed rows apply here as they arrive and reach `detail` at most once
+    /// per `streamPublishInterval`, so a burst of rows renders once.
+    private var unpublishedDetail: SessionDetail?
+    private var publishTask: Task<Void, Never>?
+    static let streamPublishInterval: Duration = .milliseconds(100)
     private var streamAwaitsCursor = false
     private var streamUnsupported = false
     private var detailReloadTask: Task<Void, Never>?
@@ -96,6 +101,7 @@ final class SessionPane: ObservableObject, Identifiable {
         selectionGeneration &+= 1
         detailAppliedGeneration = detailRequestGeneration
         if restoresSelection { UserDefaults.standard.set(id, forKey: "lastSelectedSessionID") }
+        dropUnpublishedDetail()
         detail = model.cachedDetail(id)
         detailStale = detail != nil
         detailRefreshFailed = false
@@ -117,6 +123,7 @@ final class SessionPane: ObservableObject, Identifiable {
         detailLoadTask?.cancel()
         olderTask?.cancel()
         metadataTask?.cancel()
+        dropUnpublishedDetail()
         sessionStreamTask = nil
         detailReloadTask = nil
         detailLoadTask = nil
@@ -139,7 +146,8 @@ final class SessionPane: ObservableObject, Identifiable {
             let loaded = try await api.sessionDetail(id: id, includeTimeline: true)
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), generation > detailAppliedGeneration, removedSession?.id != id else { return true }
             detailAppliedGeneration = generation
-            let previous = detail?.session.id == id ? detail?.timeline : nil
+            let shown = unpublishedDetail ?? detail
+            let previous = shown?.session.id == id ? shown?.timeline : nil
             let fresh = Set(loaded.timeline?.items.map(\.id) ?? [])
             if let previous, previous.items.contains(where: { fresh.contains($0.id) }) {
                 if olderItems.isEmpty { olderCursor = previous.nextBefore }
@@ -153,6 +161,7 @@ final class SessionPane: ObservableObject, Identifiable {
             var merged = metadata.apply(to: loaded)
             let pageSeq = loaded.journalSeq ?? 0
             for row in streamedRows where row.seq > pageSeq { merged = Self.applying(row, to: merged, older: &olderItems) ?? merged }
+            dropUnpublishedDetail()
             detail = merged
             detailStale = false
             detailRefreshFailed = false
@@ -247,6 +256,7 @@ final class SessionPane: ObservableObject, Identifiable {
         detailReloadTask?.cancel()
         detailReloadTask = nil
         detailReloadPending = false
+        dropUnpublishedDetail()
         detail = nil
         detailStale = false
         composerDraft = ComposerDraft()
@@ -261,6 +271,7 @@ final class SessionPane: ObservableObject, Identifiable {
         frozenOlderCursor = nil
         composerDraft = ComposerDraft()
         sessionStreamTask?.cancel()
+        dropUnpublishedDetail()
         detail = nil
         detailStale = false
         selectedSessionID = nil
@@ -424,8 +435,9 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     private func applyMetadata(to id: String) {
-        guard let current = detail, current.session.id == id else { return }
+        guard let current = unpublishedDetail ?? detail, current.session.id == id else { return }
         let merged = metadata.apply(to: current)
+        dropUnpublishedDetail()
         detail = merged
         model.refreshCachedDetail(merged, for: id)
     }
@@ -584,15 +596,30 @@ final class SessionPane: ObservableObject, Identifiable {
 
     @discardableResult
     private func applyStreamedRow(_ event: SessionStreamEvent) -> Bool {
-        guard removedSession == nil, let current = detail, current.session.id == event.sessionId,
+        guard removedSession == nil, let current = unpublishedDetail ?? detail, current.session.id == event.sessionId,
               let updated = Self.applying(event, to: current, older: &olderItems) else { return false }
         if pageReadsInFlight > 0 {
             streamedRows.removeAll { $0.data.itemId == event.data.itemId && !event.data.itemId.isEmpty }
             streamedRows.append(event)
         }
-        detail = updated
-        model.detailLoaded(updated, for: event.sessionId)
+        unpublishedDetail = updated
+        guard publishTask == nil else { return true }
+        publishTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.streamPublishInterval)
+            guard let self, !Task.isCancelled else { return }
+            publishTask = nil
+            guard let pending = unpublishedDetail else { return }
+            unpublishedDetail = nil
+            detail = pending
+            model.detailLoaded(pending, for: pending.session.id)
+        }
         return true
+    }
+
+    private func dropUnpublishedDetail() {
+        publishTask?.cancel()
+        publishTask = nil
+        unpublishedDetail = nil
     }
 
     /// Applies a streamed journal row as a session page reads it: an updated
