@@ -434,6 +434,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var transport: String? = nil
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
+    var usageLimit: UsageLimitState? = nil
     var holders: [SessionHolder]? = nil
     var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
@@ -447,6 +448,9 @@ struct SessionState: Codable, Identifiable, Hashable {
 
     var isWorking: Bool { status == "busy" }
     var isWaitingOnYou: Bool { waitingOn != nil }
+    var waitingPlace: WaitingPlace? {
+        waitingOn.map { WaitingPlace($0, runtimeKind: runtimeKind, lifecycle: isReadOnly ? SessionLifecycle() : capabilities.lifecycle) }
+    }
     /// Between turns with background tasks still running: not finished yet.
     var isWaitingOnBackground: Bool { !isWorking && backgroundTasks?.running == true }
     var isReadOnly: Bool { readOnly == true }
@@ -538,10 +542,54 @@ struct BackgroundTask: Codable, Hashable, Identifiable {
 }
 
 /// A question, plan or approval the session is waiting on its user to answer.
+/// An answerable one is held by Agenthail and answered here.
 struct WaitingState: Codable, Hashable {
     let kind: String
     let id: String
     var since: String? = nil
+    var answerable: Bool? = nil
+}
+
+/// Where a session's wait is answered: here, in its terminal, or wherever
+/// else it runs. A hosted or background session's prompt that Agenthail does
+/// not hold has nowhere to answer it; stopping and resuming the session
+/// clears it.
+enum WaitingPlace: Equatable {
+    case agenthail, dialog, terminal, restart, elsewhere
+
+    init(_ waiting: WaitingState, runtimeKind: String?, lifecycle: SessionLifecycle) {
+        if waiting.answerable == true {
+            self = .agenthail
+        } else if waiting.kind == "dialog" {
+            self = .dialog
+        } else if lifecycle.stop && lifecycle.resume {
+            self = .restart
+        } else if runtimeKind == "claude-cli" {
+            self = .terminal
+        } else {
+            self = .elsewhere
+        }
+    }
+
+    /// The session's status while it waits here.
+    var label: String {
+        switch self {
+        case .agenthail, .elsewhere: return "Waiting on you"
+        case .dialog: return "Dialog open in its terminal"
+        case .terminal: return "Waiting in its terminal"
+        case .restart: return "Prompt out of reach"
+        }
+    }
+}
+
+/// A session whose last turn a usage limit refused, and when it lifts.
+struct UsageLimitState: Codable, Hashable {
+    var resetsAt: String? = nil
+
+    var label: String {
+        guard let resetsAt, let date = ISO8601DateFormatter().date(from: resetsAt) else { return "Usage limit reached" }
+        return "Usage limit, resets \(date.formatted(date: .omitted, time: .shortened))"
+    }
 }
 
 struct SubagentIdentity: Codable, Hashable {
@@ -1164,6 +1212,10 @@ struct SessionDetail: Decodable {
     let transcriptTruncated: Bool?
     let transcriptOriginalBytes: Int?
     let transcriptReturnedBytes: Int?
+
+    var waitingPlace: WaitingPlace? {
+        session.waitingOn.map { WaitingPlace($0, runtimeKind: session.runtimeKind, lifecycle: readOnly ? SessionLifecycle() : capabilities.lifecycle) }
+    }
 }
 
 struct RawSession: Decodable {
@@ -1179,6 +1231,8 @@ struct RawSession: Decodable {
     let runtime: SessionRuntime?
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
+    var usageLimit: UsageLimitState? = nil
+    var runtimeKind: String? = nil
 }
 
 struct GoalState: Decodable {

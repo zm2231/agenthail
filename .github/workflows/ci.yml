@@ -53,6 +53,7 @@ jobs:
           node scripts/test-session-journal.mjs
           node scripts/test-dashboard-idempotency.mjs
           node scripts/test-dashboard-timeline.mjs
+          node scripts/test-dashboard-waiting.mjs
           node scripts/test-dashboard-relays.mjs
           node scripts/test-dashboard-audit.mjs
           node scripts/test-dashboard-rekeys.mjs

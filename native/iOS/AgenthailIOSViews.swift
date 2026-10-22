@@ -530,8 +530,10 @@ struct SessionScreen: View {
                         .accessibilityLabel("Jump to latest")
                     }
                     if let detail, let waiting = detail.session.waitingOn, ElsewhereWaitCard.shows(waiting, readOnly: detail.readOnly, respond: detail.capabilities.respond) {
-                        ElsewhereWaitCard(waiting: waiting, surface: session.surface, hostName: session.runtime?.hostName, accent: SessionStyle.accent,
-                                          open: session.runtime?.focusable == true ? { model.focusSession(session) } : nil)
+                        ElsewhereWaitCard(waiting: waiting, place: detail.waitingPlace ?? .elsewhere,
+                                          surface: session.surface, hostName: session.runtime?.hostName, accent: SessionStyle.accent,
+                                          open: session.runtime?.focusable == true ? { model.focusSession(session) } : nil,
+                                          restart: { model.stopAndResume(session.id) })
                             .id(waiting.id)
                             .padding(.horizontal)
                             .padding(.top, 6)
@@ -1021,8 +1023,8 @@ struct SessionSummary: View {
     }
     private var backgroundWaiting: Bool { detail.session.status != "busy" && detail.session.backgroundTasks?.running == true }
     private var status: some View {
-        Label(detail.session.waitingOn != nil ? "Waiting on you" : detail.session.status == "busy" ? "Working" : backgroundWaiting ? "Waiting on background work" : detail.session.status.capitalized,
-              systemImage: detail.session.waitingOn != nil ? "questionmark.bubble" : detail.session.status == "busy" ? "waveform" : backgroundWaiting ? "hourglass" : "circle")
+        Label(detail.waitingPlace?.label ?? (detail.session.status == "busy" ? "Working" : detail.session.usageLimit?.label ?? (backgroundWaiting ? "Waiting on background work" : detail.session.status.capitalized)),
+              systemImage: detail.session.waitingOn != nil ? "questionmark.bubble" : detail.session.status == "busy" ? "waveform" : detail.session.usageLimit != nil ? "gauge.with.dots.needle.100percent" : backgroundWaiting ? "hourglass" : "circle")
         .font(.subheadline)
         .foregroundStyle(detail.session.status == "busy" ? SessionStyle.accent : .secondary)
     }
@@ -1056,7 +1058,7 @@ struct SessionInspector: View {
             List {
                 Section {
                     LabeledContent("Agent", value: detail.session.surface.capitalized)
-                    LabeledContent("Status", value: detail.session.waitingOn != nil ? "Waiting on you" : liveSession.isWaitingOnBackground ? "Waiting on background work" : detail.session.status.capitalized)
+                    LabeledContent("Status", value: detail.waitingPlace?.label ?? detail.session.usageLimit?.label ?? (liveSession.isWaitingOnBackground ? "Waiting on background work" : detail.session.status.capitalized))
                     if let value = detail.modelLabel { LabeledContent("Model", value: value) }
                     if let configRoot = liveSession.claudeConfigRoot { LabeledContent("Config folder", value: configRoot.summary) }
                     if liveSession.canAdopt { Button("Open in Agenthail", systemImage: "arrow.down.app") { adopting = true } }
@@ -1286,10 +1288,19 @@ struct IOSSessionRow: View {
                 if session.isWaitingOnYou {
                     HStack(spacing: 4) {
                         Image(systemName: "questionmark.bubble")
-                        Text("Waiting on you")
+                        Text(session.waitingPlace?.label ?? "Waiting on you")
                     }
                     .font(.caption)
                     .foregroundStyle(SessionStyle.accent)
+                    .lineLimit(1)
+                    .fixedSize()
+                } else if let limit = session.usageLimit, !session.isWorking {
+                    HStack(spacing: 4) {
+                        Image(systemName: "gauge.with.dots.needle.100percent")
+                        Text(limit.label)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .fixedSize()
                 } else if session.isWorking {
