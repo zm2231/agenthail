@@ -228,3 +228,37 @@ func TestPrepareRegistersASavedOperatorAsItsSurfaceCarriesItNow(t *testing.T) {
 		t.Fatalf("prepare registered an operator its surface no longer has: %v", err)
 	}
 }
+
+func TestTheVoiceAliasFollowsTheCurrentOperatorButIsNeverTakenFromAnotherSession(t *testing.T) {
+	d, r, fake, from, _ := daemonFixture(t)
+	operator := func(id string) surface.Session {
+		session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Source: "agenthail", Transport: "managed", Cwd: "/home/user/.agenthail/voice/operator", Status: surface.StatusIdle}
+		fake.sessions[id] = session
+		return session
+	}
+	ctx := context.Background()
+	if err := d.registerVoiceOperator(ctx, operator("operator-1")); err != nil {
+		t.Fatal(err)
+	}
+	if owner, _ := r.LookupAlias("voice"); owner != "operator-1" {
+		t.Fatalf("@voice=%q", owner)
+	}
+	if err := d.registerVoiceOperator(ctx, operator("operator-2")); err != nil {
+		t.Fatal(err)
+	}
+	if owner, _ := r.LookupAlias("voice"); owner != "operator-2" {
+		t.Fatalf("@voice did not move to the new operator: %q", owner)
+	}
+	if err := r.RemoveAlias("voice"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetAlias("voice", from.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.registerVoiceOperator(ctx, operator("operator-3")); err != nil {
+		t.Fatal(err)
+	}
+	if owner, _ := r.LookupAlias("voice"); owner != from.ID {
+		t.Fatalf("@voice was taken from a session someone named: %q", owner)
+	}
+}

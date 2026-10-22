@@ -3,9 +3,11 @@ package daemon
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -77,7 +79,34 @@ func (d *Daemon) registerVoiceOperator(ctx context.Context, operator surface.Ses
 		return fmt.Errorf("verify voice operator: live session did not retain exact identity %s", operator.ID)
 	}
 	operator.Transport, operator.RuntimeKind = live.Transport, live.RuntimeKind
-	return d.Registry.RegisterSession(operator)
+	if err := d.Registry.RegisterSession(operator); err != nil {
+		return err
+	}
+	return d.claimVoiceAlias(operator)
+}
+
+const voiceAlias = "voice"
+
+// claimVoiceAlias names the current operator @voice. It takes the name from
+// an earlier operator, never from a session someone else named.
+func (d *Daemon) claimVoiceAlias(operator surface.Session) error {
+	owner, err := d.Registry.LookupAlias(voiceAlias)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return err
+	case owner == operator.ID:
+		return nil
+	default:
+		previous, err := d.Registry.Session(owner)
+		if err != nil || previous.Cwd != operator.Cwd {
+			return nil
+		}
+		if err := d.Registry.RemoveAlias(voiceAlias); err != nil {
+			return err
+		}
+	}
+	return d.Registry.SetAlias(voiceAlias, operator.ID)
 }
 
 // resolveVoiceTarget selects a registered session by alias or exact ID and
