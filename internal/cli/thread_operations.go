@@ -138,7 +138,7 @@ func validateThreadOperationArgs(args []string) error {
 	allowed := map[string]bool{"--timeout": true, "--json": true}
 	switch args[0] {
 	case "fork":
-		for _, flag := range []string{"--model", "--last-turn", "--alias"} {
+		for _, flag := range []string{"--model", "--last-turn", "--alias", "--from"} {
 			allowed[flag] = true
 		}
 	case "queue":
