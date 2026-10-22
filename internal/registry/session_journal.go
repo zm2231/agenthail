@@ -345,8 +345,12 @@ func (r *Registry) SessionJournalAfter(sessionID string, after uint64, limit int
 	if limit < 1 {
 		return SessionJournalWindow{Entries: []SessionJournalEntry{}}, nil
 	}
+	// A trim drops the oldest places, whose seqs need not be the lowest: an
+	// upserted row keeps its place under a newer seq. pruned_seq is the
+	// highest seq any trim dropped, so a cursor below it missed a row.
 	var earliest, latest sql.NullInt64
-	if err := r.read.QueryRow(`SELECT MIN(seq),MAX(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest, &latest); err != nil {
+	var prunedSeq uint64
+	if err := r.read.QueryRow(`SELECT MIN(seq),MAX(seq),COALESCE((SELECT pruned_seq FROM session_journal_state WHERE session_id=?),0) FROM session_journal WHERE session_id=?`, sessionID, sessionID).Scan(&earliest, &latest, &prunedSeq); err != nil {
 		return SessionJournalWindow{}, err
 	}
 	window := SessionJournalWindow{Entries: []SessionJournalEntry{}}
@@ -355,7 +359,7 @@ func (r *Registry) SessionJournalAfter(sessionID string, after uint64, limit int
 	}
 	window.EarliestSeq = uint64(earliest.Int64)
 	window.LatestSeq = uint64(latest.Int64)
-	window.Gap = after > 0 && (after < window.EarliestSeq-1 || after > window.LatestSeq)
+	window.Gap = after > 0 && (after < prunedSeq || after > window.LatestSeq)
 	if window.Gap {
 		return window, nil
 	}
@@ -453,10 +457,14 @@ func trimSessionJournal(tx *sql.Tx, sessionID string, retention SessionJournalRe
 	if err := rows.Close(); err != nil {
 		return err
 	}
+	var prunedSeq int64
+	if err := tx.QueryRow(`SELECT MAX(seq) FROM session_journal WHERE session_id=? AND position<=?`, sessionID, prunedPosition).Scan(&prunedSeq); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DELETE FROM session_journal WHERE session_id=? AND position<=?`, sessionID, prunedPosition); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE session_journal_state SET pruned_before=MAX(pruned_before,?),retained_bytes=? WHERE session_id=?`, prunedPosition, bytes, sessionID); err != nil {
+	if _, err := tx.Exec(`UPDATE session_journal_state SET pruned_before=MAX(pruned_before,?),pruned_seq=MAX(pruned_seq,?),retained_bytes=? WHERE session_id=?`, prunedPosition, prunedSeq, bytes, sessionID); err != nil {
 		return err
 	}
 	if !prunedBody {
@@ -536,6 +544,7 @@ func (r *Registry) ReplaceSessionJournal(sessionID string, entries []SessionJour
 	if err := tx.QueryRow(`SELECT next_seq FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&next); err != nil {
 		return nil, err
 	}
+	previous := next
 	if _, err := tx.Exec(`DELETE FROM session_journal WHERE session_id=?`, sessionID); err != nil {
 		return nil, err
 	}
@@ -564,7 +573,9 @@ func (r *Registry) ReplaceSessionJournal(sessionID string, entries []SessionJour
 			return nil, err
 		}
 	}
-	if _, err := tx.Exec(`UPDATE session_journal_state SET next_seq=?,derived_version=?,retained_bytes=? WHERE session_id=?`, next, derivation, retained, sessionID); err != nil {
+	// Every row up to the previous newest is gone: a stream cursor at that
+	// newest receives the rebuilt rows, and an older one reports a gap.
+	if _, err := tx.Exec(`UPDATE session_journal_state SET next_seq=?,derived_version=?,retained_bytes=?,pruned_seq=MAX(pruned_seq,?) WHERE session_id=?`, next, derivation, retained, previous, sessionID); err != nil {
 		return nil, err
 	}
 	if err := trimSessionJournal(tx, sessionID, retention); err != nil {

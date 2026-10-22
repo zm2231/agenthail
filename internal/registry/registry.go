@@ -334,8 +334,17 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureColumn(tx, "session_journal", "position", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	if err := ensureColumn(tx, "session_journal_state", "pruned_seq", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	if version < 33 {
 		if _, err := tx.Exec(`UPDATE session_journal SET position=seq WHERE position=0`); err != nil {
+			return err
+		}
+		// Trims ran in seq order until now, so every seq below a journal's
+		// earliest row was pruned or rewritten; streams keep reporting a gap
+		// for cursors there.
+		if _, err := tx.Exec(`UPDATE session_journal_state SET pruned_seq=MAX(pruned_before,COALESCE((SELECT MIN(seq)-1 FROM session_journal WHERE session_journal.session_id=session_journal_state.session_id),0))`); err != nil {
 			return err
 		}
 	}
@@ -858,6 +867,7 @@ CREATE TABLE IF NOT EXISTS session_journal_state (
 	retained_bytes INTEGER NOT NULL DEFAULT 0,
 	source_epoch TEXT NOT NULL DEFAULT '',
 	pruned_before INTEGER NOT NULL DEFAULT 0,
+	pruned_seq INTEGER NOT NULL DEFAULT 0,
 	seed_status TEXT NOT NULL DEFAULT 'unknown',
 	seed_seq INTEGER NOT NULL DEFAULT 0,
 	seed_identity TEXT NOT NULL DEFAULT '',

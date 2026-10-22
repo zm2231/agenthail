@@ -365,3 +365,54 @@ func TestTheJournalTrimPrunesTheOldestPlacesEvenWhenUpsertedLater(t *testing.T) 
 		t.Fatalf("page before the pruned place: err=%v gap=%+v", err, gap)
 	}
 }
+
+func TestAStreamCursorBelowATrimmedUpsertReportsAGap(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	retention := SessionJournalRetention{Count: 3, Bytes: 1 << 20}
+	for index, key := range []string{"a", "b", "c", "a", "d"} {
+		if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "s", Kind: "item", ProviderKey: key, Payload: []byte(fmt.Sprintf("%q", fmt.Sprint(key, index)))}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if window, err := r.SessionJournalAfter("s", 3, 10); err != nil || !window.Gap {
+		t.Fatalf("after 3 = %+v err=%v, want a gap for the trimmed seq 4", window, err)
+	}
+	if window, err := r.SessionJournalAfter("s", 4, 10); err != nil || window.Gap || journalKeys(t, window.Entries) != "d" {
+		t.Fatalf("after 4 = %+v err=%v", window, err)
+	}
+}
+
+func TestUpsertsOfTheOldestRowsLeaveNoStreamGap(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	retention := SessionJournalRetention{Count: 10, Bytes: 1 << 20}
+	for index, key := range []string{"a", "b", "c", "d", "a", "b"} {
+		if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "s", Kind: "item", ProviderKey: key, Payload: []byte(fmt.Sprintf("%q", fmt.Sprint(key, index)))}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if window, err := r.SessionJournalAfter("s", 1, 10); err != nil || window.Gap || journalKeys(t, window.Entries) != "c d a b" {
+		t.Fatalf("after 1 = %+v err=%v, want every later row and no gap", window, err)
+	}
+}
+
+func TestAReplacedJournalStreamsItsRowsToTheNewestCursorAndAGapToOlderOnes(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	retention := SessionJournalRetention{Count: 10, Bytes: 1 << 20}
+	for _, key := range []string{"a", "b", "c"} {
+		if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "s", Kind: "item", ProviderKey: key, Payload: []byte(`"` + key + `"`)}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := r.ReplaceSessionJournal("s", []SessionJournalEntry{{Kind: "item", ProviderKey: "a", Payload: []byte(`"a"`)}, {Kind: "item", ProviderKey: "c", Payload: []byte(`"c"`)}}, retention, 1); err != nil {
+		t.Fatal(err)
+	}
+	if window, err := r.SessionJournalAfter("s", 3, 10); err != nil || window.Gap || journalKeys(t, window.Entries) != "a c" {
+		t.Fatalf("after the newest cursor = %+v err=%v", window, err)
+	}
+	if window, err := r.SessionJournalAfter("s", 2, 10); err != nil || !window.Gap {
+		t.Fatalf("after an older cursor = %+v err=%v, want a gap", window, err)
+	}
+}
