@@ -62,6 +62,7 @@
 		B44C624C75C0ECD2F23A9F6B /* PushRelayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6106D394E6CAEE8B12827D6 /* PushRelayClient.swift */; };
 		B6D305B6D6F47E2203575903 /* PairingLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3085052480F0B14328A21215 /* PairingLink.swift */; };
 		B935C015C6F2FA2321613C35 /* SessionStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24B656FE4EB45788315815D /* SessionStyle.swift */; };
+		B9CD23CD91B154E5235B3813 /* ComposerPasteUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE0C4EA53BE662D64BEE9AEE /* ComposerPasteUITests.swift */; };
 		BA1BE89FDF679AB91E1F9396 /* VoiceSystemCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EDE788460A077CFD53DEB5B /* VoiceSystemCall.swift */; };
 		CB330794781001FBDB837948 /* LiveSessionActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F88B8E00B9B48773EC294B1B /* LiveSessionActivity.swift */; };
 		CBCA932E315251D8765B458D /* ActivityReadingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3244752A0EB724F241568485 /* ActivityReadingTests.swift */; };
@@ -188,6 +189,7 @@
 		D956D4949F38D33A374345AF /* SessionRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRecoveryTests.swift; sourceTree = "<group>"; };
 		D9D70AE21617F9F5BF4E19E2 /* NativeVoiceAudioTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVoiceAudioTests.swift; sourceTree = "<group>"; };
 		DD6DB02C48C8DEC1677170BC /* SessionCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCapture.swift; sourceTree = "<group>"; };
+		DE0C4EA53BE662D64BEE9AEE /* ComposerPasteUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerPasteUITests.swift; sourceTree = "<group>"; };
 		E11D12B1DC6197256B5C3DBC /* ActivityPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityPresentationTests.swift; sourceTree = "<group>"; };
 		E4A1E18EEE0A6F1BE8B9D3EB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E6106D394E6CAEE8B12827D6 /* PushRelayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRelayClient.swift; sourceTree = "<group>"; };
@@ -253,6 +255,7 @@
 			isa = PBXGroup;
 			children = (
 				3244752A0EB724F241568485 /* ActivityReadingTests.swift */,
+				DE0C4EA53BE662D64BEE9AEE /* ComposerPasteUITests.swift */,
 				7A65688305EB3C5F6866CCBF /* GoalStatusUITests.swift */,
 				82CF227CB7E6B02B97811F14 /* HolderPickerUITests.swift */,
 				5823A988D3C400FB16E2EB6A /* NeedsYouUITests.swift */,
@@ -522,6 +525,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CBCA932E315251D8765B458D /* ActivityReadingTests.swift in Sources */,
+				B9CD23CD91B154E5235B3813 /* ComposerPasteUITests.swift in Sources */,
 				D228ECC8541A3BCD7512D4A3 /* GoalStatusUITests.swift in Sources */,
 				3E9810790B94455AAC3A00A5 /* HolderPickerUITests.swift in Sources */,
 				65BD86F3827C034C03B23A9A /* NeedsYouUITests.swift in Sources */,

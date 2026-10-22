@@ -14,7 +14,7 @@ extension ComposerAttachments {
 }
 
 // The focused text field handles ⌘V before onPasteCommand would see it, so
-// the composer watches the key itself and lets text pastes through.
+// the composer watches the keys itself and lets text pastes through.
 struct ComposerPasteMonitor: NSViewRepresentable {
     let isActive: Bool
     let paste: (PastedAttachments) -> Void
@@ -47,13 +47,18 @@ struct ComposerPasteMonitor: NSViewRepresentable {
             monitor = nil
         }
 
+        // ⌃V pastes too, as in Claude Code; without an image it pastes the
+        // text that ⌘V would, rather than the text field's own ⌃V binding.
         private func pastes(_ event: NSEvent) -> Bool {
-            guard isActive, event.window === window,
-                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-                  event.charactersIgnoringModifiers?.lowercased() == "v",
-                  let pasted = ComposerAttachments.pasted(from: .general) else { return false }
-            paste(pasted)
-            return true
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard isActive, event.window === window, modifiers == .command || modifiers == .control,
+                  event.charactersIgnoringModifiers?.lowercased() == "v" else { return false }
+            if let pasted = ComposerAttachments.pasted(from: .general) {
+                paste(pasted)
+                return true
+            }
+            guard modifiers == .control else { return false }
+            return NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: self)
         }
     }
 }

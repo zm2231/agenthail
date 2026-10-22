@@ -102,7 +102,7 @@ struct SessionPreview: View {
     }
 
     nonisolated static var snapshotJSON: String {
-        let capabilities: [String: Bool] = ["send": true, "stream": true, "reply": true, "goal": true, "goalSet": true, "goalStatus": true, "compact": true, "model": true, "interrupt": true, "steer": true]
+        let capabilities: [String: Bool] = ["send": true, "stream": true, "reply": true, "goal": true, "goalSet": true, "goalStatus": true, "compact": true, "model": true, "interrupt": true, "steer": true, "attach": true]
         let sessions: [[String: Any]] = [
             ["id": "demo", "project": ["id": "project-fieldnotes", "displayName": "fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "kind": "git"], "name": "Make the build reliable", "surface": "claude", "cwd": "/Users/demo/projects/fieldnotes", "status": "busy", "lastActive": "2026-09-12T04:03:00Z", "queueCount": 1, "open": true, "current": true, "capabilities": capabilities],
             ["id": "codex-demo", "project": ["id": "project-fieldnotes", "displayName": "fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "kind": "git"], "name": "Review the release pipeline", "surface": "codex", "cwd": "/Users/demo/projects/fieldnotes", "status": "idle", "lastActive": "2026-09-12T03:45:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities],
@@ -141,7 +141,7 @@ struct SessionPreview: View {
     {
       "session":{"id":"demo","surface":"claude","name":"Make the build reliable","status":"busy","lastActive":"2026-09-07T12:05:00Z","cwd":"/Users/demo/projects/fieldnotes","source":"cli","transport":"local"},
       "journalSeq":2048,
-      "exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"goalSet":true,"goalStatus":true,"compact":true,"model":true,"interrupt":true,"steer":true},
+      "exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"goalSet":true,"goalStatus":true,"compact":true,"model":true,"interrupt":true,"steer":true,"attach":true},
       "readOnly":false,"readOnlyReason":"","model":"Claude Sonnet",
       "models":[{"id":"sonnet","displayName":"Claude Sonnet"},{"id":"opus","displayName":"Claude Opus"}],
       "context":{"usedTokens":86400,"contextWindow":200000,"cumulativeTokens":312000,"compacting":false,"compactionCount":1,"reclaimedTokens":42000,"inputTokens":83000,"cachedInputTokens":60000,"outputTokens":3400},
