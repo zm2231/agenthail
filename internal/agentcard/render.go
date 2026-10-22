@@ -1,6 +1,8 @@
 package agentcard
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -16,13 +18,7 @@ func Render(card Card) string {
 	}
 	var b strings.Builder
 	b.WriteString("[Agenthail] ")
-	b.WriteString(identityLine(card))
-	for _, line := range []string{startedLine(card), leadLine(card), askLine(card)} {
-		if line != "" {
-			b.WriteString(" ")
-			b.WriteString(line)
-		}
-	}
+	b.WriteString(summary(card))
 	b.WriteString("\n\n")
 	b.WriteString(Guide)
 	b.WriteString("\n")
@@ -34,6 +30,28 @@ func Render(card Card) string {
 		fmt.Fprintf(&b, "  %-*s  %s\n", width, command.Line, command.Use)
 	}
 	return b.String()
+}
+
+// Fingerprint identifies what Render tells a session, so a change in a field
+// the card never shows, such as its folder, is not news to it.
+func (card Card) Fingerprint() string {
+	sum := sha256.Sum256([]byte(Render(card)))
+	return hex.EncodeToString(sum[:16])
+}
+
+// RenderChange tells a session that already has its card what it says now.
+func RenderChange(card Card) string {
+	return "[Agenthail] Your Agenthail context changed. " + summary(card) + "\n"
+}
+
+func summary(card Card) string {
+	lines := []string{identityLine(card)}
+	for _, line := range []string{startedLine(card), leadLine(card), askLine(card)} {
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, " ")
 }
 
 func identityLine(card Card) string {
@@ -84,7 +102,12 @@ func leadLine(card Card) string {
 	return fmt.Sprintf("The project's coordinator is @lead (%s).", card.Lead.Ref)
 }
 
+// A session that reports to an agent asks it, so the person hears one voice
+// per piece of work; one that reports to the person asks them directly.
 func askLine(card Card) string {
+	if card.ReportTo != "" {
+		return fmt.Sprintf("Questions go to %s with agenthail send, not to the person.", card.ReportTo)
+	}
 	ask := card.Ask
 	if ask == nil {
 		return ""
@@ -93,10 +116,11 @@ func askLine(card Card) string {
 	if ask.Phone {
 		phone = " and on their phone"
 	}
+	forbidden := " If your own instructions forbid it, they win: put the question in your reply."
 	if ask.Answerable {
-		return fmt.Sprintf("To ask the person, use %s: it reaches them in Agenthail%s, and your turn waits for the answer.", ask.Tool, phone)
+		return fmt.Sprintf("To ask the person, use %s: it reaches them in Agenthail%s, and your turn waits for the answer.", ask.Tool, phone) + forbidden
 	}
-	return fmt.Sprintf("If you ask the person with %s, Agenthail tells them%s, but they answer where this session runs.", ask.Tool, phone)
+	return fmt.Sprintf("If you ask the person with %s, Agenthail tells them%s, but they answer where this session runs.", ask.Tool, phone) + forbidden
 }
 
 func runtimeName(runtime surface.RuntimeKind, kind surface.SurfaceKind) string {

@@ -31,12 +31,12 @@ struct SlashCommandMenu: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 13))
+                .font(.system(size: DesktopType.body))
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, DesktopSpace.xs)
         .background(DesktopPalette.dock, in: shape)
         .overlay(shape.strokeBorder(DesktopPalette.line))
         .accessibilityElement(children: .contain)

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,16 +20,30 @@ import (
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
-// claudePromptHookTimeout is how long, in seconds, Claude lets the hook hold
-// a prompt. The hook ends on its own once the prompt is settled anywhere, so
+const claudeHookExec = "exec "
+
+const claudeHookInputLimit = 1 << 20
+
+type claudeHook struct {
+	event   string
+	args    string
+	matcher string
+	timeout int64
+}
+
+// The prompt hook's timeout is how long, in seconds, Claude lets it hold a
+// prompt. The hook ends on its own once the prompt is settled anywhere, so
 // the limit only matters while the person is away.
-const claudePromptHookTimeout = 86400
+var (
+	claudePromptHook   = claudeHook{event: "PermissionRequest", args: "hook permission-request", matcher: "*", timeout: 86400}
+	claudeStartHook    = claudeHook{event: "SessionStart", args: "hook session-context", timeout: 10}
+	claudePromptSubmit = claudeHook{event: "UserPromptSubmit", args: "hook session-context", timeout: 10}
+	claudeHooks        = []claudeHook{claudePromptHook, claudeStartHook, claudePromptSubmit}
+)
 
-const claudePromptHookArgs = "hook permission-request"
-
-const claudePromptHookExec = "exec "
-
-const claudePromptHookInputLimit = 1 << 20
+// claudeSessionContextLimit bounds the session-context hook, registry locks
+// included, well inside the hook's timeout: a prompt never waits on it.
+const claudeSessionContextLimit = 5 * time.Second
 
 // A daemon restarting, as it does on update, drops the held prompt's
 // connection; the hook reconnects for this long so the prompt stays
@@ -39,8 +54,30 @@ var (
 )
 
 func (a *App) cmdHook(args []string) error {
+	if len(args) > 0 && args[0] == "session-context" {
+		claude := os.Getppid()
+		if len(args) == 3 && args[1] == "--claude-pid" {
+			pid, err := strconv.Atoi(args[2])
+			if err != nil || pid <= 0 {
+				return errors.New("usage: agenthail hook session-context [--claude-pid <pid>]")
+			}
+			claude = pid
+		} else if len(args) != 1 {
+			return errors.New("usage: agenthail hook session-context [--claude-pid <pid>]")
+		}
+		done := make(chan map[string]any, 1)
+		go func() { done <- a.sessionContext(os.Stdin, claude, time.Now()) }()
+		select {
+		case output := <-done:
+			if output != nil {
+				_ = json.NewEncoder(os.Stdout).Encode(output)
+			}
+		case <-time.After(claudeSessionContextLimit):
+		}
+		return nil
+	}
 	if len(args) != 1 || args[0] != "permission-request" {
-		return errors.New("usage: agenthail hook permission-request")
+		return errors.New("usage: agenthail hook permission-request|session-context")
 	}
 	if os.Getenv("CLAUDE_CODE_ENTRYPOINT") != "cli" {
 		return nil
@@ -65,7 +102,7 @@ func (a *App) cmdHook(args []string) error {
 // own dialog.
 func holdClaudePrompt(ctx context.Context, client *daemonAPIClient, input io.Reader, parent int) *surfaces.ClaudePromptDecision {
 	var request daemon.ClaudePermissionRequest
-	if err := json.NewDecoder(io.LimitReader(input, claudePromptHookInputLimit)).Decode(&request.Prompt); err != nil {
+	if err := json.NewDecoder(io.LimitReader(input, claudeHookInputLimit)).Decode(&request.Prompt); err != nil {
 		return nil
 	}
 	request.PID = parent
@@ -122,31 +159,31 @@ func (a *App) cmdHooks(args []string) error {
 	if err != nil {
 		return err
 	}
-	command, err := claudePromptHookCommand()
+	executable, err := os.Executable()
 	if err != nil {
-		return err
+		return fmt.Errorf("locate agenthail binary: %w", err)
 	}
 	for _, root := range roots {
 		path := filepath.Join(root, "settings.json")
 		switch args[0] {
 		case "install":
-			changed, err := installClaudePromptHook(path, command)
+			changed, err := installClaudeHooks(path, executable)
 			if err != nil {
 				return err
 			}
 			fmt.Printf("%s: %s\n", path, map[bool]string{true: "installed", false: "already installed"}[changed])
 		case "uninstall":
-			changed, err := uninstallClaudePromptHook(path)
+			changed, err := uninstallClaudeHooks(path)
 			if err != nil {
 				return err
 			}
 			fmt.Printf("%s: %s\n", path, map[bool]string{true: "removed", false: "not installed"}[changed])
 		case "status":
-			state, err := claudePromptHookState(path)
+			state, err := claudeHooksState(path)
 			if err != nil {
 				return err
 			}
-			if state == claudePromptHookOutdated {
+			if state == claudeHookOutdated {
 				state += "; run: agenthail hooks install"
 			}
 			fmt.Printf("%s: %s\n", path, state)
@@ -155,31 +192,23 @@ func (a *App) cmdHooks(args []string) error {
 	return nil
 }
 
-func claudePromptHookCommand() (string, error) {
-	executable, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("locate agenthail binary: %w", err)
-	}
-	return claudePromptHookCommandFor(executable), nil
+// command is the hook command that runs executable. Claude runs hook commands
+// with /bin/sh -c, and the prompt hook finds its Claude process as its parent;
+// exec keeps a shell such as dash, which does not replace itself with a lone
+// command, from becoming that parent.
+func (h claudeHook) command(executable string) string {
+	return claudeHookExec + "'" + strings.ReplaceAll(executable, "'", `'\''`) + "' " + h.args
 }
 
-// claudePromptHookCommandFor is the hook command that runs executable. Claude
-// runs hook commands with /bin/sh -c, and the hook finds its Claude process as
-// its parent; exec keeps a shell such as dash, which does not replace itself
-// with a lone command, from becoming that parent.
-func claudePromptHookCommandFor(executable string) string {
-	return claudePromptHookExec + "'" + strings.ReplaceAll(executable, "'", `'\''`) + "' " + claudePromptHookArgs
-}
-
-// isClaudePromptHook reports whether a hook command is one `hooks install`
-// wrote: this executable, or another agenthail executable, quoted as install
+// owns reports whether a hook command is this hook as `hooks install` writes
+// it: this executable, or another agenthail executable, quoted as install
 // quotes it and followed by exactly the hook's arguments.
-func isClaudePromptHook(command string) bool {
-	command = strings.TrimPrefix(command, claudePromptHookExec)
-	if own, err := claudePromptHookCommand(); err == nil && command == strings.TrimPrefix(own, claudePromptHookExec) {
+func (h claudeHook) owns(command string) bool {
+	command = strings.TrimPrefix(command, claudeHookExec)
+	if executable, err := os.Executable(); err == nil && command == strings.TrimPrefix(h.command(executable), claudeHookExec) {
 		return true
 	}
-	executable, found := strings.CutSuffix(command, " "+claudePromptHookArgs)
+	executable, found := strings.CutSuffix(command, " "+h.args)
 	if !found || len(executable) < 2 || executable[0] != '\'' || executable[len(executable)-1] != '\'' {
 		return false
 	}
@@ -187,38 +216,16 @@ func isClaudePromptHook(command string) bool {
 	return filepath.IsAbs(path) && filepath.Base(path) == "agenthail"
 }
 
-// installClaudePromptHook adds Agenthail's PermissionRequest hook to one
-// settings file, or points an earlier one at this binary, and leaves every
-// other setting as written.
-func installClaudePromptHook(path, command string) (bool, error) {
+// installClaudeHooks adds Agenthail's hooks to one settings file, or points
+// earlier ones at this binary, and leaves every other setting as written.
+func installClaudeHooks(path, executable string) (bool, error) {
 	data, mode, err := surface.ReadClaudeSettingsFile(path)
 	if err != nil {
 		return false, err
 	}
 	updated := data
-	found := false
-	for i, entry := range gjson.GetBytes(data, "hooks.PermissionRequest").Array() {
-		for j, hook := range entry.Get("hooks").Array() {
-			if !isClaudePromptHook(hook.Get("command").String()) {
-				continue
-			}
-			found = true
-			prefix := fmt.Sprintf("hooks.PermissionRequest.%d.hooks.%d.", i, j)
-			if hook.Get("command").String() != command {
-				if updated, err = sjson.SetBytes(updated, prefix+"command", command); err != nil {
-					return false, err
-				}
-			}
-			if hook.Get("timeout").Int() != claudePromptHookTimeout {
-				if updated, err = sjson.SetBytes(updated, prefix+"timeout", claudePromptHookTimeout); err != nil {
-					return false, err
-				}
-			}
-		}
-	}
-	if !found {
-		entry := map[string]any{"matcher": "*", "hooks": []map[string]any{{"type": "command", "command": command, "timeout": claudePromptHookTimeout}}}
-		if updated, err = sjson.SetBytes(updated, "hooks.PermissionRequest.-1", entry); err != nil {
+	for _, h := range claudeHooks {
+		if updated, err = h.install(updated, h.command(executable)); err != nil {
 			return false, err
 		}
 	}
@@ -228,7 +235,44 @@ func installClaudePromptHook(path, command string) (bool, error) {
 	return true, surface.WriteClaudeSettingsFile(path, updated, mode)
 }
 
-func uninstallClaudePromptHook(path string) (bool, error) {
+// install moves the hook out of an entry whose matcher narrows it, since
+// that matcher may be another hook's, and Agenthail's hooks run for all.
+func (h claudeHook) install(data []byte, command string) ([]byte, error) {
+	data, err := h.remove(data, func(entry gjson.Result) bool { return !matchesAll(entry) })
+	if err != nil {
+		return nil, err
+	}
+	found := false
+	for i, entry := range gjson.GetBytes(data, "hooks."+h.event).Array() {
+		for j, hook := range entry.Get("hooks").Array() {
+			if !h.owns(hook.Get("command").String()) {
+				continue
+			}
+			found = true
+			prefix := fmt.Sprintf("hooks.%s.%d.hooks.%d.", h.event, i, j)
+			if hook.Get("command").String() != command {
+				if data, err = sjson.SetBytes(data, prefix+"command", command); err != nil {
+					return nil, err
+				}
+			}
+			if hook.Get("timeout").Int() != h.timeout {
+				if data, err = sjson.SetBytes(data, prefix+"timeout", h.timeout); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	if found {
+		return data, nil
+	}
+	entry := map[string]any{"hooks": []map[string]any{{"type": "command", "command": command, "timeout": h.timeout}}}
+	if h.matcher != "" {
+		entry["matcher"] = h.matcher
+	}
+	return sjson.SetBytes(data, "hooks."+h.event+".-1", entry)
+}
+
+func uninstallClaudeHooks(path string) (bool, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return false, nil
 	}
@@ -237,23 +281,9 @@ func uninstallClaudePromptHook(path string) (bool, error) {
 		return false, err
 	}
 	updated := data
-	entries := gjson.GetBytes(data, "hooks.PermissionRequest").Array()
-	for i := len(entries) - 1; i >= 0; i-- {
-		hooks := entries[i].Get("hooks").Array()
-		kept := 0
-		for j := len(hooks) - 1; j >= 0; j-- {
-			if !isClaudePromptHook(hooks[j].Get("command").String()) {
-				kept++
-				continue
-			}
-			if updated, err = sjson.DeleteBytes(updated, fmt.Sprintf("hooks.PermissionRequest.%d.hooks.%d", i, j)); err != nil {
-				return false, err
-			}
-		}
-		if kept == 0 && len(hooks) > 0 {
-			if updated, err = sjson.DeleteBytes(updated, fmt.Sprintf("hooks.PermissionRequest.%d", i)); err != nil {
-				return false, err
-			}
+	for _, h := range claudeHooks {
+		if updated, err = h.remove(updated, func(gjson.Result) bool { return true }); err != nil {
+			return false, err
 		}
 	}
 	if string(updated) == string(data) {
@@ -262,35 +292,93 @@ func uninstallClaudePromptHook(path string) (bool, error) {
 	return true, surface.WriteClaudeSettingsFile(path, updated, mode)
 }
 
-// The states of the prompt hook in a settings file. An outdated hook is one
-// install wrote before it ran the hook with exec, or with another timeout;
-// install brings it up to date.
+func matchesAll(entry gjson.Result) bool {
+	matcher := entry.Get("matcher").String()
+	return matcher == "" || matcher == "*"
+}
+
+func (h claudeHook) remove(data []byte, from func(entry gjson.Result) bool) ([]byte, error) {
+	var err error
+	entries := gjson.GetBytes(data, "hooks."+h.event).Array()
+	for i := len(entries) - 1; i >= 0; i-- {
+		if !from(entries[i]) {
+			continue
+		}
+		hooks := entries[i].Get("hooks").Array()
+		kept := 0
+		for j := len(hooks) - 1; j >= 0; j-- {
+			if !h.owns(hooks[j].Get("command").String()) {
+				kept++
+				continue
+			}
+			if data, err = sjson.DeleteBytes(data, fmt.Sprintf("hooks.%s.%d.hooks.%d", h.event, i, j)); err != nil {
+				return nil, err
+			}
+		}
+		if kept == 0 && len(hooks) > 0 {
+			if data, err = sjson.DeleteBytes(data, fmt.Sprintf("hooks.%s.%d", h.event, i)); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return data, nil
+}
+
+// The states of Agenthail's hooks in a settings file. An outdated hook is
+// one install wrote before it ran hooks with exec, with another timeout, or
+// under a matcher that narrows it; a file with some of the hooks is outdated
+// too. Install brings it up to date.
 const (
-	claudePromptHookMissing   = "missing"
-	claudePromptHookOutdated  = "outdated"
-	claudePromptHookInstalled = "installed"
+	claudeHookMissing   = "missing"
+	claudeHookOutdated  = "outdated"
+	claudeHookInstalled = "installed"
 )
 
-func claudePromptHookState(path string) (string, error) {
+func claudeHooksState(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return claudePromptHookMissing, nil
+		return claudeHookMissing, nil
 	}
 	if err != nil {
 		return "", err
 	}
-	state := claudePromptHookMissing
-	for _, entry := range gjson.GetBytes(data, "hooks.PermissionRequest").Array() {
+	states := map[string]int{}
+	for _, h := range claudeHooks {
+		states[h.state(data)]++
+	}
+	switch len(claudeHooks) {
+	case states[claudeHookInstalled]:
+		return claudeHookInstalled, nil
+	case states[claudeHookMissing]:
+		return claudeHookMissing, nil
+	}
+	return claudeHookOutdated, nil
+}
+
+func claudeHookState(path string, h claudeHook) (string, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return claudeHookMissing, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return h.state(data), nil
+}
+
+func (h claudeHook) state(data []byte) string {
+	state := claudeHookMissing
+	for _, entry := range gjson.GetBytes(data, "hooks."+h.event).Array() {
 		for _, hook := range entry.Get("hooks").Array() {
 			command := hook.Get("command").String()
-			if !isClaudePromptHook(command) {
+			if !h.owns(command) {
 				continue
 			}
-			if strings.HasPrefix(command, claudePromptHookExec) && hook.Get("timeout").Int() == claudePromptHookTimeout {
-				return claudePromptHookInstalled, nil
+			if matchesAll(entry) && strings.HasPrefix(command, claudeHookExec) && hook.Get("timeout").Int() == h.timeout {
+				return claudeHookInstalled
 			}
-			state = claudePromptHookOutdated
+			state = claudeHookOutdated
 		}
 	}
-	return state, nil
+	return state
 }

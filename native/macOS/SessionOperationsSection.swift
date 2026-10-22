@@ -74,7 +74,7 @@ struct NativeQueueSection: View {
                     .disabled(queue.busy)
             }
             if writable && queue.loaded {
-                HStack(spacing: 8) {
+                HStack(spacing: DesktopSpace.s) {
                     Button("Add…") { editor = QueueEditor(item: nil, text: "") }
                     if !queue.items.isEmpty {
                         Button("Start next") { Task { await start(nil) } }
@@ -86,8 +86,8 @@ struct NativeQueueSection: View {
             }
             if queue.loaded, let error = queue.error {
                 Text(error)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(DesktopPalette.red)
+                    .font(.system(size: DesktopType.meta))
+                    .foregroundStyle(DesktopPalette.failed)
                     .textSelection(.enabled)
             }
         }
@@ -163,16 +163,16 @@ struct QueueEditorSheet: View {
     private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesktopSpace.m) {
             Text(editor.item == nil ? "Add to Codex queue" : "Edit queued input")
                 .font(.headline)
             Text("Codex starts queued input after the current turn, in order.")
-                .font(.system(size: 12))
+                .font(.system(size: DesktopType.secondary))
                 .foregroundStyle(DesktopPalette.text2)
             TextEditor(text: $text)
                 .font(.body)
                 .frame(minHeight: 100)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(DesktopPalette.line))
+                .overlay(RoundedRectangle(cornerRadius: DesktopRadius.control).stroke(DesktopPalette.line))
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
@@ -182,7 +182,7 @@ struct QueueEditorSheet: View {
                     .disabled(saving || trimmed.isEmpty || trimmed == editor.text.trimmingCharacters(in: .whitespacesAndNewlines))
             }
         }
-        .padding(20)
+        .padding(DesktopSpace.xl)
         .frame(width: 400)
     }
 
@@ -221,15 +221,15 @@ struct BackgroundSessionSection: View {
                     .textSelection(.enabled)
                 if controller.resumeUnchanged {
                     Text("Already running, nothing to resume.")
-                        .font(.system(size: 11.5))
+                        .font(.system(size: DesktopType.meta))
                         .foregroundStyle(DesktopPalette.text2)
                 }
             } else {
                 Text(SessionLifecycleCopy.detail(session))
-                    .font(.system(size: 11.5))
+                    .font(.system(size: DesktopType.meta))
                     .foregroundStyle(DesktopPalette.text2)
             }
-            HStack(spacing: 8) {
+            HStack(spacing: DesktopSpace.s) {
                 if lifecycle.status { Button("Status") { run("status") } }
                 if lifecycle.logs { Button("Logs") { run("logs") } }
                 if lifecycle.stop { Button("Stop") { run("stop") } }
@@ -239,8 +239,8 @@ struct BackgroundSessionSection: View {
             .disabled(controller.busyAction != nil)
             if let error = controller.error {
                 Text(error)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(DesktopPalette.red)
+                    .font(.system(size: DesktopType.meta))
+                    .foregroundStyle(DesktopPalette.failed)
                     .textSelection(.enabled)
             }
         }
@@ -265,18 +265,18 @@ struct BackgroundLogsSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesktopSpace.m) {
             Text("Logs for \(title)")
                 .font(.headline)
             ScrollView {
                 Text(logs.isEmpty ? "No log output." : logs)
-                    .font(.system(size: 11.5, design: .monospaced))
+                    .font(.system(size: DesktopType.meta, design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
+                    .padding(DesktopSpace.s)
             }
-            .background(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(DesktopPalette.line))
+            .background(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+            .overlay(RoundedRectangle(cornerRadius: DesktopRadius.control).stroke(DesktopPalette.line))
             HStack {
                 Button("Copy") {
                     NSPasteboard.general.clearContents()
@@ -287,7 +287,7 @@ struct BackgroundLogsSheet: View {
                     .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(20)
+        .padding(DesktopSpace.xl)
         .frame(width: 560, height: 420)
     }
 }

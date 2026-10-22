@@ -10,22 +10,22 @@ struct AuditEventRow: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
                 Circle()
-                    .fill(failed ? DesktopPalette.red : DesktopPalette.text2)
+                    .fill(failed ? DesktopPalette.failed : DesktopPalette.text2)
                     .frame(width: 6, height: 6)
                 Text(AuditFacts.kindLabel(entry.kind))
                 Spacer()
                 Text(relativeAge(entry.createdAt))
-                    .font(.system(size: 11))
+                    .font(.system(size: DesktopType.caption))
                     .foregroundStyle(DesktopPalette.text2)
                     .help(entry.createdAt)
             }
             route
-                .font(.system(size: 12))
+                .font(.system(size: DesktopType.secondary))
                 .foregroundStyle(DesktopPalette.text2)
                 .textSelection(.enabled)
             Button { expanded.toggle() } label: {
                 Label("View details", systemImage: expanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -33,11 +33,11 @@ struct AuditEventRow: View {
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             if expanded {
                 StructuredText(markdown: AuditFacts.content(entry))
-                    .font(.system(size: 12))
-                    .foregroundStyle(failed ? DesktopPalette.red : DesktopPalette.text)
+                    .font(.system(size: DesktopType.secondary))
+                    .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.text)
                     .textual.textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 4)
+                    .padding(.top, DesktopSpace.xs)
             }
         }
     }

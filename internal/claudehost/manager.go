@@ -29,6 +29,9 @@ type Launch struct {
 	Claude  string
 	Version string
 	Env     []string
+	// Agenthail is the agenthail binary the host runs as each session's
+	// session-context hook; without it sessions are not told who they are.
+	Agenthail string
 }
 
 // Manager starts the host for the daemon. Only the daemon calls Ensure;
@@ -191,6 +194,9 @@ func (m *Manager) spawn(launch Launch, lock *os.File) (<-chan error, error) {
 		"--state", m.stateDir(),
 		"--claude", launch.Claude,
 		"--version", launch.Version)
+	if launch.Agenthail != "" {
+		cmd.Args = append(cmd.Args, "--agenthail", launch.Agenthail)
+	}
 	cmd.Env = launch.Env
 	cmd.Dir = m.stateDir()
 	cmd.Stdout = logFile

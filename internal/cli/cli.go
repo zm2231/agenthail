@@ -367,10 +367,10 @@ Background service:
   daemon install                Keep Agenthail running after login and restarts
   daemon uninstall              Stop Agenthail from starting automatically
 
-Claude prompt hook (answer terminal Claude prompts from Agenthail):
-  hooks install                 Add the PermissionRequest hook to every Claude config root
-  hooks uninstall               Remove it
-  hooks status                  Show where it is installed
+Claude hooks (answer terminal Claude prompts from Agenthail; tell each session who it is):
+  hooks install                 Add Agenthail's hooks to every Claude config root
+  hooks uninstall               Remove them
+  hooks status                  Show where they are installed
 
 Dashboard (optional):
   dashboard enable              Enable the local dashboard and open it
@@ -686,7 +686,7 @@ func validateCommandFlags(command string, args []string) error {
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
 		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
 		"permission-mode": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "requests": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
-		"answer": {values: map[string]bool{"--timeout": true, "--request": true, "--reason": true, "--answers": true}, bools: map[string]bool{"--json": true}}, "interrupt": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "steer": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "control": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "identify": {}, "coordinator": {values: map[string]bool{"--name": true, "--instructions": true, "--permission-mode": true, "--cwd": true, "--model": true, "--host": true}, bools: map[string]bool{"--json": true, "--replace": true}}, "relay": {}, "daemon": {}, "daemon-run": {}, "hook": {}, "hooks": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
+		"answer": {values: map[string]bool{"--timeout": true, "--request": true, "--reason": true, "--answers": true}, bools: map[string]bool{"--json": true}}, "interrupt": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "steer": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "control": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "identify": {}, "coordinator": {values: map[string]bool{"--name": true, "--instructions": true, "--permission-mode": true, "--cwd": true, "--model": true, "--host": true}, bools: map[string]bool{"--json": true, "--replace": true}}, "relay": {}, "daemon": {}, "daemon-run": {}, "hook": {values: map[string]bool{"--claude-pid": true}}, "hooks": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
 	}
 	spec, known := specs[command]
 	if !known {
@@ -3069,13 +3069,13 @@ func (a *App) cmdDoctor(args []string) error {
 	if claudeRootsErr != nil {
 		failures++
 	}
-	promptHook := map[string]string{}
+	claudeHookStates := map[string]string{}
 	for _, root := range claudeRoots {
-		state, err := claudePromptHookState(filepath.Join(root, "settings.json"))
+		state, err := claudeHooksState(filepath.Join(root, "settings.json"))
 		if err != nil {
-			state = claudePromptHookMissing
+			state = claudeHookMissing
 		}
-		promptHook[root] = state
+		claudeHookStates[root] = state
 	}
 	claudeConfigRoots, _ := a.claudeConfigRoots(ctx)
 	service := a.service()
@@ -3093,7 +3093,7 @@ func (a *App) cmdDoctor(args []string) error {
 		grants = &report
 	}
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "claudePromptHook": promptHook, "claudeConfigRoots": claudeConfigRoots, "signin": signins}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeConfigRoots": claudeConfigRoots, "signin": signins}
 		if claudeRootsErr != nil {
 			report["claudeConfigError"] = claudeRootsErr.Error()
 		}
@@ -3118,11 +3118,11 @@ func (a *App) cmdDoctor(args []string) error {
 			if described, ok := surface.ClaudeConfigRootFor(claudeConfigRoots, root); ok {
 				fmt.Printf("  %s\n", describeClaudeConfigRoot(described, time.Now()))
 			}
-			switch promptHook[root] {
-			case claudePromptHookMissing:
-				fmt.Printf("  prompt hook: missing; terminal prompts can't be answered from Agenthail until you run: agenthail hooks install\n")
-			case claudePromptHookOutdated:
-				fmt.Printf("  prompt hook: outdated; terminal prompts may not reach Agenthail until you run: agenthail hooks install\n")
+			switch claudeHookStates[root] {
+			case claudeHookMissing:
+				fmt.Printf("  hooks: missing; terminal prompts can't be answered from Agenthail, and terminal sessions aren't told who they are, until you run: agenthail hooks install\n")
+			case claudeHookOutdated:
+				fmt.Printf("  hooks: outdated; terminal prompts may not reach Agenthail, and terminal sessions may not be told who they are, until you run: agenthail hooks install\n")
 			}
 		}
 		if len(serviceProblems) > 0 {

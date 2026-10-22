@@ -50,22 +50,22 @@ struct SessionRefinementBar: View {
                 }
                 Spacer()
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 8)
+            .padding(.horizontal, DesktopSpace.m)
+            .padding(.bottom, DesktopSpace.s)
         }
     }
 
     private func chip(_ title: String, remove: @escaping () -> Void) -> some View {
         Button(action: remove) {
-            HStack(spacing: 4) {
+            HStack(spacing: DesktopSpace.xs) {
                 Text(title)
                 Image(systemName: "xmark").font(.system(size: 8, weight: .semibold))
             }
-            .font(.system(size: 11.5))
+            .font(.system(size: DesktopType.meta))
             .foregroundStyle(DesktopPalette.text)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, DesktopSpace.s)
             .padding(.vertical, 3)
-            .background(DesktopPalette.selection, in: Capsule())
+            .background(DesktopPalette.fill, in: Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Remove \(title) filter")

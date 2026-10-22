@@ -54,7 +54,7 @@ struct KeyboardSettings: View {
                         }
                 }
                 Text("Brings Agenthail forward with the session palette open, from any app.")
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
             ForEach(Self.groups, id: \.0) { group in
@@ -77,7 +77,7 @@ struct KeyboardSettings: View {
 
     private func row(_ command: AppCommand) -> some View {
         LabeledContent(command.title) {
-            HStack(spacing: 8) {
+            HStack(spacing: DesktopSpace.s) {
                 if store.isCustomized(command) {
                     let blocker = store.defaultBlocker(command)
                     Button("Reset") { store.reset(command) }

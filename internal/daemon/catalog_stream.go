@@ -634,16 +634,43 @@ func (d *Daemon) publishSurfaceHealth(health dashboardSurface, observedAt time.T
 // discovery passes, so a new queue count, a changed Codex window, a lapsed
 // recent session, a subagent entering or leaving the list, or an archive change
 // is published on the next tick.
+type catalogPresence struct {
+	mu      sync.Mutex
+	decoded map[string]decodedProjection
+}
+
+type decodedProjection struct {
+	stored     string
+	projection dashboardSession
+}
+
+// projection decodes a stored projection, reusing the previous pass's
+// decoding while the stored text is unchanged.
+func (p *catalogPresence) projection(id, stored string, seen map[string]decodedProjection) (dashboardSession, bool) {
+	if cached, ok := p.decoded[id]; ok && cached.stored == stored {
+		seen[id] = cached
+		return cached.projection, true
+	}
+	var projection dashboardSession
+	if json.Unmarshal([]byte(stored), &projection) != nil {
+		return dashboardSession{}, false
+	}
+	seen[id] = decodedProjection{stored: stored, projection: projection}
+	return projection, true
+}
+
 func (d *Daemon) publishCatalogPresence() {
 	defer d.refreshHostQueueCounts()
+	d.presence.mu.Lock()
+	defer d.presence.mu.Unlock()
 	counts, err := d.Registry.QueueCounts()
 	if err != nil {
 		d.log.Printf("catalog queue counts: %s", err)
 		return
 	}
-	snapshot, err := d.Registry.CatalogSnapshot()
+	records, listing, err := d.Registry.CatalogPresenceRows()
 	if err != nil {
-		d.log.Printf("catalog queue snapshot: %s", err)
+		d.log.Printf("catalog presence rows: %s", err)
 		return
 	}
 	config, err := LoadDashboardConfig()
@@ -658,7 +685,7 @@ func (d *Daemon) publishCatalogPresence() {
 	}
 	now := time.Now()
 	type localRow struct {
-		record     registry.CatalogSessionState
+		record     registry.CatalogPresenceRow
 		projection dashboardSession
 		adapter    surface.Surface
 	}
@@ -666,11 +693,13 @@ func (d *Daemon) publishCatalogPresence() {
 		row.projection.QueueCount = count
 		row.projection.Current, row.projection.CurrentReason = surface.PresenceFor(row.adapter, row.record.Session, surface.PresenceInput{QueueCount: count, Open: row.projection.Open, Now: now, CodexRecentHours: config.CodexRecentHours})
 	}
-	rows := make([]localRow, 0, len(snapshot.Sessions))
-	projections := make([]dashboardSession, 0, len(snapshot.Sessions))
-	for _, record := range snapshot.Sessions {
-		var projection dashboardSession
-		if record.HostID != "" || json.Unmarshal([]byte(record.ProjectionFingerprint), &projection) != nil {
+	rows := make([]localRow, 0, len(records))
+	projections := make([]dashboardSession, 0, len(records))
+	decoded := make(map[string]decodedProjection, len(records))
+	defer func() { d.presence.decoded = decoded }()
+	for _, record := range records {
+		projection, ok := d.presence.projection(record.Session.ID, record.ProjectionFingerprint, decoded)
+		if !ok {
 			continue
 		}
 		adapter, err := d.adapters().For(&record.Session)
@@ -679,10 +708,10 @@ func (d *Daemon) publishCatalogPresence() {
 		}
 		row := localRow{record: record, projection: projection, adapter: adapter}
 		present(&row, counts[record.Session.ID])
-		hidden := snapshot.Listing.HiddenSubagents(record.Session.ID)
+		hidden := listing.HiddenSubagents(record.Session.ID)
 		row.projection.HiddenSubagents = hidden
 		row.projection.Subagents = addSubagentRollups(projection.ObservedSubagents, hidden)
-		row.projection.Listed = snapshot.Listing.Current(record.Session.ID)
+		row.projection.Listed = listing.Current(record.Session.ID)
 		rows = append(rows, row)
 		projections = append(projections, row.projection)
 	}

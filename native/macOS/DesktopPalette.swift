@@ -2,40 +2,64 @@ import AppKit
 import SwiftUI
 
 enum DesktopPalette {
-    static let side = dynamic(light: 0xF5F4F1, dark: 0x181716)
-    static let window = dynamic(light: 0xFFFFFF, dark: 0x1C1B1A)
-    static let raised = dynamic(light: 0xFFFFFF, dark: 0x24221F)
-    static let line = dynamic(light: 0xE3E0DB, dark: 0x33302D)
-    static let line2 = dynamic(light: 0xEEEBE7, dark: 0x2A2826)
-    static let text = dynamic(light: 0x1D1B19, dark: 0xEDEAE6)
-    static let text2 = dynamic(light: 0x5F5954, dark: 0xAEA79F)
-    static let bubble = dynamic(light: 0xF1EFEC, dark: 0x2B2926)
-    static let selection = dynamic(light: 0xE9E6E2, dark: 0x2C2A27)
-    static let accent = dynamic(light: 0xC2410C, dark: 0xF07A45)
-    static let onAccent = dynamic(light: 0xFFFFFF, dark: 0x1F1208)
-    static let accentText = dynamic(light: 0xB03A0B, dark: 0xF3A27A)
-    static let green = dynamic(light: 0x1F7A3A, dark: 0x62C383)
-    static let amber = dynamic(light: 0xB45309, dark: 0xE6A24F)
-    static let red = dynamic(light: 0xB42318, dark: 0xF28A7E)
-    static let muted = dynamic(light: 0xA39C95, dark: 0x6F6963)
-    static let work = dynamic(light: 0x5B7FA8, dark: 0x8FB0D6)
-    static let dock = dynamic(light: 0xF7F6F4, dark: 0x211F1D)
-    static let warnBackground = dynamic(light: 0xFFF4E5, dark: 0x33261A)
-    static let warnLine = dynamic(light: 0xF0D9B5, dark: 0x5A4224)
-    static let stop = dynamic(light: 0x3F3A36, dark: 0x4A4643)
+    private static let windowHex: (light: UInt32, dark: UInt32) = (0xFFFFFF, 0x17181A)
+    private static let sideHex: (light: UInt32, dark: UInt32) = (0xF3F3F4, 0x1D1E21)
+    private static let raisedHex: (light: UInt32, dark: UInt32) = (0xFFFFFF, 0x232427)
+
+    static let side = dynamic(sideHex)
+    static let window = dynamic(windowHex)
+    static let raised = dynamic(raisedHex)
+    static let line = dynamic(light: 0xE3E3E6, dark: 0x2E2F33)
+    static let line2 = dynamic(light: 0xECECEE, dark: 0x26272A)
+    static let text = dynamic(light: 0x1D1D1F, dark: 0xECECEE)
+    static let text2 = dynamic(light: 0x5F6066, dark: 0xA3A3A8)
+    static let muted = dynamic(light: 0x9A9BA1, dark: 0x6F7075)
+    static let bubble = dynamic(light: 0xF1F1F3, dark: 0x26272A)
+    static let fill = dynamic(light: 0xE9E9EC, dark: 0x2A2B2F)
+    static let dock = dynamic(light: 0xF7F7F8, dark: 0x1B1C1F)
+    static let stop = dynamic(light: 0x3D3E42, dark: 0x48494D)
+
+    static let accent = Color(nsColor: .controlAccentColor)
+    static let accentText = Color(nsColor: NSColor(name: nil) { appearance in
+        let dark = isDark(appearance)
+        let surfaces = [windowHex, sideHex, raisedHex].map { AccentContrast.RGB(hex: dark ? $0.dark : $0.light) }
+        return AccentContrast.readable(AccentContrast.rgb(.controlAccentColor, in: appearance), on: surfaces, dark: dark).nsColor
+    })
+    static let onAccent = Color(nsColor: NSColor(name: nil) { appearance in
+        AccentContrast.foreground(on: AccentContrast.rgb(.controlAccentColor, in: appearance)).nsColor
+    })
+    static let selection = Color(nsColor: NSColor(name: nil) { appearance in
+        AccentContrast.rgb(.controlAccentColor, in: appearance).nsColor.withAlphaComponent(0.18)
+    })
+
+    static let attention = dynamic(light: 0x965A00, dark: 0xFFB224)
+    static let attentionBackground = dynamic(light: 0xFFF5E0, dark: 0x2E2414)
+    static let attentionLine = dynamic(light: 0xF2D9A6, dark: 0x5C4415)
+    static let working = dynamic(light: 0x2A64CC, dark: 0x7AA7FF)
+    static let done = dynamic(light: 0x1A7F4E, dark: 0x4CC38A)
+    static let failed = dynamic(light: 0xC4271B, dark: 0xFF6B61)
+    static let failedBackground = dynamic(light: 0xFDEDEC, dark: 0x2E1A19)
+    static let failedLine = dynamic(light: 0xF5C9C5, dark: 0x5A2B28)
 
     static func statusColor(_ session: SessionState, needsYou: Bool, finishedUnseen: Bool = false) -> Color {
-        if needsYou { return amber }
-        if session.isWorking { return work }
-        if finishedUnseen { return green }
+        if needsYou { return attention }
+        if session.isWorking { return working }
+        if finishedUnseen { return done }
         return muted
+    }
+
+    private static func dynamic(_ pair: (light: UInt32, dark: UInt32)) -> Color {
+        dynamic(light: pair.light, dark: pair.dark)
     }
 
     private static func dynamic(light: UInt32, dark: UInt32) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            return color(isDark ? dark : light)
+            color(isDark(appearance) ? dark : light)
         })
+    }
+
+    private static func isDark(_ appearance: NSAppearance) -> Bool {
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
     }
 
     private static func color(_ hex: UInt32) -> NSColor {
@@ -46,4 +70,32 @@ enum DesktopPalette {
             alpha: 1
         )
     }
+}
+
+enum DesktopType {
+    static let caption: CGFloat = 11
+    static let meta: CGFloat = 11.5
+    static let secondary: CGFloat = 12
+    static let body: CGFloat = 13
+    static let prose: CGFloat = 14.5
+    /// Extra leading that gives prose a 1.58 line height.
+    static let proseLineSpacing: CGFloat = 6
+    static let title: CGFloat = 15
+    static let display: CGFloat = 20
+}
+
+enum DesktopSpace {
+    static let xs: CGFloat = 4
+    static let s: CGFloat = 8
+    static let m: CGFloat = 12
+    static let l: CGFloat = 16
+    static let xl: CGFloat = 20
+    static let xxl: CGFloat = 24
+    static let xxxl: CGFloat = 32
+}
+
+enum DesktopRadius {
+    static let control: CGFloat = 6
+    static let card: CGFloat = 10
+    static let sheet: CGFloat = 14
 }

@@ -35,8 +35,8 @@ struct SettingsError: View {
     var body: some View {
         if let error = model.operationError {
             Label(error, systemImage: "exclamationmark.triangle")
-                .font(.system(size: 12))
-                .foregroundStyle(DesktopPalette.red)
+                .font(.system(size: DesktopType.secondary))
+                .foregroundStyle(DesktopPalette.failed)
                 .textSelection(.enabled)
         }
     }
@@ -52,14 +52,14 @@ struct GeneralSettings: View {
             Section("Connection") {
                 LabeledContent("Agenthail") {
                     Text(connectionLabel)
-                        .foregroundStyle(model.isConnected ? DesktopPalette.green : DesktopPalette.amber)
+                        .foregroundStyle(model.isConnected ? DesktopPalette.done : DesktopPalette.failed)
                 }
                 if let pid = model.snapshot?.daemon.pid {
                     LabeledContent("Process", value: String(pid))
                 }
                 if let listen = model.settings?.dashboard.listen {
                     LabeledContent("Local listener") {
-                        Text(listen).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
+                        Text(listen).font(.system(size: DesktopType.secondary, design: .monospaced)).textSelection(.enabled)
                     }
                 }
                 HStack {
@@ -75,7 +75,7 @@ struct GeneralSettings: View {
                 .pickerStyle(.radioGroup)
                 .disabled(model.snapshot == nil)
                 Text("\(shortcuts.label(.sendAlternate).map { "\($0) always does" } ?? "Send the other way does") the other one. Agents that can't be steered mid-turn send queued messages after the turn. This setting is shared with your iPhone and other Agenthail apps.")
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
             Section {
@@ -88,13 +88,13 @@ struct GeneralSettings: View {
                 Text("Current work")
             } footer: {
                 Text("Codex threads stay in Recent this long after their last activity.")
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
             Section("Spotlight") {
                 Toggle("Show sessions in Spotlight", isOn: $spotlightSessions)
                 Text("Spotlight on this Mac can find sessions by name and folder. Choosing one opens it here.")
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
             SettingsError(model: model)
@@ -126,8 +126,8 @@ struct DevicesSettings: View {
                 }
                 if let remote = model.settings?.remoteAccess {
                     Text(remote.enabled ? "Reachable privately through Tailscale\(remote.dnsName.map { " at \($0)" } ?? "")." : remote.error ?? "Your iPhone can reach this Mac only while phone access is on.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(remote.error == nil ? DesktopPalette.text2 : DesktopPalette.amber)
+                        .font(.system(size: DesktopType.secondary))
+                        .foregroundStyle(remote.error == nil ? DesktopPalette.text2 : DesktopPalette.failed)
                 }
             }
             if let remote = model.settings?.remoteAccess {
@@ -149,7 +149,7 @@ struct DevicesSettings: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(device.name)
                             Text([device.pushEnabled ? "Notifications on" : "Notifications off", device.lastSeenAt.map { "seen \(relativeAge($0))" }].compactMap { $0 }.joined(separator: " · "))
-                                .font(.system(size: 12))
+                                .font(.system(size: DesktopType.secondary))
                                 .foregroundStyle(DesktopPalette.text2)
                         }
                         Spacer()
@@ -176,7 +176,7 @@ private struct HostsSection: View {
             }
             if (daemon.hosts ?? []).isEmpty {
                 Text("No other hosts are paired. Run agenthail hosts invite on the other host, then agenthail hosts add here.")
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
                     .textSelection(.enabled)
             }
@@ -186,18 +186,18 @@ private struct HostsSection: View {
                         Text(host.name)
                         Spacer()
                         Text(host.stateLabel)
-                            .foregroundStyle(host.isHealthy ? DesktopPalette.green : DesktopPalette.amber)
+                            .foregroundStyle(host.isHealthy ? DesktopPalette.done : DesktopPalette.failed)
                     }
                     if let detail = host.detail, !detail.isEmpty {
                         Text(detail)
-                            .font(.system(size: 12))
+                            .font(.system(size: DesktopType.secondary))
                             .foregroundStyle(DesktopPalette.text2)
                             .textSelection(.enabled)
                     }
                     if let notice = host.notice, !notice.isEmpty {
                         Text(notice)
-                            .font(.system(size: 12))
-                            .foregroundStyle(DesktopPalette.amber)
+                            .font(.system(size: DesktopType.secondary))
+                            .foregroundStyle(DesktopPalette.failed)
                             .textSelection(.enabled)
                     }
                 }
@@ -218,10 +218,10 @@ private struct PairingCode: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Scan with Agenthail on iPhone")
                 Text("The code expires in five minutes and works once.")
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
                 Text(pairing.endpoint)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: DesktopType.caption, design: .monospaced))
                     .textSelection(.enabled)
                     .lineLimit(2)
             }
@@ -260,8 +260,8 @@ struct NotificationSettings: View {
                     }
                 }
                 Text(detail(status))
-                    .font(.system(size: 12))
-                    .foregroundStyle(status?.error == nil ? DesktopPalette.text2 : DesktopPalette.amber)
+                    .font(.system(size: DesktopType.secondary))
+                    .foregroundStyle(status?.error == nil ? DesktopPalette.text2 : DesktopPalette.failed)
                 HStack {
                     Button("Send Test Notification") { model.updateNotifications("notifications-test") }
                         .disabled(status?.enabled != true)
@@ -271,7 +271,7 @@ struct NotificationSettings: View {
                 }
             } footer: {
                 Text("Agenthail notifies when an agent finishes or fails, and when a message can't be delivered.")
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
             SettingsError(model: model)
@@ -320,14 +320,14 @@ struct DeliverySettings: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("\(relay.from) → \(relay.to)")
                             Text(relay.pattern)
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(.system(size: DesktopType.caption, design: .monospaced))
                                 .foregroundStyle(DesktopPalette.text2)
                                 .lineLimit(1)
                             Text(relayState(relay))
-                                .font(.system(size: 11))
+                                .font(.system(size: DesktopType.caption))
                                 .foregroundStyle(DesktopPalette.text2)
                             if let error = relay.lastError, !error.isEmpty {
-                                Text(error).font(.system(size: 11)).foregroundStyle(DesktopPalette.text2)
+                                Text(error).font(.system(size: DesktopType.caption)).foregroundStyle(DesktopPalette.text2)
                             }
                         }
                         Spacer()
@@ -356,7 +356,7 @@ struct DeliverySettings: View {
                 Text("Automatic handoffs · \(model.snapshot?.relays.count ?? 0)")
             } footer: {
                 Text("When one session finishes with matching text, Agenthail sends its reply to another.")
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
             Section("Channels") {

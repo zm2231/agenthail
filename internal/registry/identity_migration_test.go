@@ -172,6 +172,7 @@ func seedVersion13(t *testing.T, r *Registry) {
 	exec(`INSERT INTO session_runtime(session_id) VALUES(?),(?),('conversation-native')`, rekeyedBridge, collidedBridge)
 	exec(`INSERT INTO session_archive(session_id,archived_at_ms) VALUES(?,1)`, rekeyedBridge)
 	exec(`INSERT INTO session_origins(session_id,via,creator_session_id) VALUES(?,'agent',?)`, rekeyedBridge, collidedBridge)
+	exec(`INSERT INTO session_context(session_id,fingerprint,delivered_at_ms) VALUES(?,'f',1)`, rekeyedBridge)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, id := range []string{rekeyedBridge, collidedBridge} {
 		exec(`INSERT INTO session_journal(session_id,seq,kind,payload,observed_at,bytes,body_ref) VALUES(?,1,'item','{}',?,2,?)`, id, now, "body-"+id)

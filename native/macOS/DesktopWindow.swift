@@ -72,17 +72,17 @@ struct SessionSidebar: View {
     var body: some View {
         let tree = model.sessionTree
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
+            HStack(spacing: DesktopSpace.m) {
                 ForEach(SessionFilter.allCases) { filter in
                     Button {
                         model.sessionFilter = filter
                     } label: {
-                        HStack(spacing: 4) {
+                        HStack(spacing: DesktopSpace.xs) {
                             Text(filter.rawValue)
                                 .fontWeight(model.sessionFilter == filter ? .semibold : .regular)
                                 .foregroundStyle(model.sessionFilter == filter ? DesktopPalette.text : DesktopPalette.text2)
                             Text("\(tree.counts[filter] ?? 0)")
-                                .font(.system(size: 11))
+                                .font(.system(size: DesktopType.caption))
                                 .foregroundStyle(DesktopPalette.text2)
                         }
                         .lineLimit(1)
@@ -104,18 +104,18 @@ struct SessionSidebar: View {
                 .help(shortcuts.help("New session", .newSession))
                 .accessibilityLabel("New session")
             }
-            .font(.system(size: 12.5))
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-            .padding(.bottom, 8)
+            .font(.system(size: DesktopType.body))
+            .padding(.horizontal, DesktopSpace.l)
+            .padding(.top, DesktopSpace.xs)
+            .padding(.bottom, DesktopSpace.s)
 
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
+                    .font(.system(size: DesktopType.caption))
                     .foregroundStyle(DesktopPalette.text2)
                 TextField("Search sessions", text: Binding(get: { model.searchQuery }, set: { model.search($0) }))
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12.5))
+                    .font(.system(size: DesktopType.body))
                     .focused($searchFocused)
                     .onKeyPress(.escape) {
                         model.search("")
@@ -135,8 +135,8 @@ struct SessionSidebar: View {
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
-            .background(DesktopPalette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: 7))
-            .padding(.horizontal, 12)
+            .background(DesktopPalette.fill, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+            .padding(.horizontal, DesktopSpace.m)
             .padding(.bottom, 10)
             .background {
                 Button("") { searchFocused = true }
@@ -182,23 +182,23 @@ struct SessionSidebar: View {
                                     if expanded { expandedProjects.remove(project.id) } else { expandedProjects.insert(project.id) }
                                 }
                                 .buttonStyle(.plain)
-                                .font(.system(size: 12))
+                                .font(.system(size: DesktopType.secondary))
                                 .foregroundStyle(DesktopPalette.text2)
                                 .padding(.leading, 35)
-                                .padding(.vertical, 4)
+                                .padding(.vertical, DesktopSpace.xs)
                             }
                         }
                     }
                     if tree.projects.isEmpty {
                         Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is running." : model.sessionFilter == .archived ? "Nothing is archived." : "No sessions yet.")
-                            .font(.system(size: 12.5))
+                            .font(.system(size: DesktopType.body))
                             .foregroundStyle(DesktopPalette.text2)
-                            .padding(.horizontal, 8)
+                            .padding(.horizontal, DesktopSpace.s)
                     }
                     }
                 }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 16)
+                .padding(.horizontal, DesktopSpace.s)
+                .padding(.bottom, DesktopSpace.l)
             }
 
             ConnectionFooter(model: model)
@@ -229,10 +229,10 @@ extension SessionSidebar {
             }
             if local.isEmpty {
                 Text("No matching sessions.")
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
                     .padding(.horizontal, 14)
-                    .padding(.vertical, 4)
+                    .padding(.vertical, DesktopSpace.xs)
             }
         }
         if query.count >= 3 {
@@ -251,31 +251,31 @@ extension SessionSidebar {
                                 .foregroundStyle(DesktopPalette.text)
                             if let snippet = result.snippet, !snippet.isEmpty {
                                 Text(snippet)
-                                    .font(.system(size: 11.5))
+                                    .font(.system(size: DesktopType.meta))
                                     .lineLimit(2)
                                     .foregroundStyle(DesktopPalette.text2)
                             }
                         }
-                        .font(.system(size: 13))
+                        .font(.system(size: DesktopType.body))
                         .padding(.vertical, 6)
                         .padding(.horizontal, 14)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(pane.selectedSessionID == result.session.id ? DesktopPalette.selection : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+                        .background(pane.selectedSessionID == result.session.id ? DesktopPalette.selection : Color.clear, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
                 if let error = model.searchError {
                     Text(error)
-                        .font(.system(size: 12))
+                        .font(.system(size: DesktopType.secondary))
                         .foregroundStyle(DesktopPalette.text2)
                         .padding(.horizontal, 14)
                 } else if !model.searching && remote.isEmpty {
                     Text("No older matches.")
-                        .font(.system(size: 12))
+                        .font(.system(size: DesktopType.secondary))
                         .foregroundStyle(DesktopPalette.text2)
                         .padding(.horizontal, 14)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, DesktopSpace.xs)
                 }
             }
         }
@@ -323,7 +323,7 @@ extension SessionSidebar {
                     if expandedFamilies.contains(family.id) { expandedFamilies.remove(family.id) } else { expandedFamilies.insert(family.id) }
                 } label: {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: DesktopType.caption, weight: .semibold))
                         .frame(width: 18, height: 22)
                         .contentShape(Rectangle())
                 }
@@ -359,9 +359,9 @@ extension SessionSidebar {
         } label: {
             SessionRowView(session: session, title: title, family: family, needsYou: needsYou, reason: showsReason ? attention?.reason : nil, finishedUnseen: model.finishedUnseen.contains(session.id))
                 .padding(.vertical, 6)
-                .padding(.horizontal, 8)
+                .padding(.horizontal, DesktopSpace.s)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(selected ? DesktopPalette.selection : (needsYou ? DesktopPalette.warnBackground : Color.clear), in: RoundedRectangle(cornerRadius: 7))
+                .background(selected ? DesktopPalette.selection : (needsYou ? DesktopPalette.attentionBackground : Color.clear), in: RoundedRectangle(cornerRadius: DesktopRadius.control))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -387,10 +387,10 @@ struct SidebarCaption: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 11, weight: .semibold))
+            .font(.system(size: DesktopType.caption, weight: .semibold))
             .foregroundStyle(DesktopPalette.text2)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, DesktopSpace.s)
+            .padding(.vertical, DesktopSpace.xs)
     }
 }
 
@@ -404,13 +404,13 @@ struct ProjectHeaderView: View {
     var body: some View {
         HStack(spacing: 7) {
             Text(String(name.prefix(1)).uppercased())
-                .font(.system(size: 10.5, weight: .bold))
+                .font(.system(size: DesktopType.caption, weight: .semibold))
                 .foregroundStyle(DesktopPalette.text2)
                 .frame(width: 18, height: 18)
-                .background(DesktopPalette.selection, in: RoundedRectangle(cornerRadius: 5))
+                .background(DesktopPalette.fill, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
                 .accessibilityHidden(true)
             Text(name)
-                .font(.system(size: 12.5, weight: .semibold))
+                .font(.system(size: DesktopType.body, weight: .semibold))
                 .foregroundStyle(DesktopPalette.text)
                 .lineLimit(1)
             if let host {
@@ -418,7 +418,7 @@ struct ProjectHeaderView: View {
             }
             if let branch {
                 Text(branch)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: DesktopType.caption, design: .monospaced))
                     .foregroundStyle(DesktopPalette.text2)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -428,7 +428,7 @@ struct ProjectHeaderView: View {
                     .accessibilityLabel("Uncommitted changes")
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, DesktopSpace.s)
         .padding(.vertical, 5)
     }
 }
@@ -446,7 +446,7 @@ struct HostBadge: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
-        .font(.system(size: 10.5))
+        .font(.system(size: DesktopType.caption))
         .foregroundStyle(DesktopPalette.text2)
         .frame(maxWidth: 96, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
@@ -459,9 +459,9 @@ struct CheckoutRowView: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 10))
+                .font(.system(size: DesktopType.caption))
             Text(checkout.label)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: DesktopType.caption, design: .monospaced))
                 .lineLimit(1)
                 .truncationMode(.middle)
             if checkout.dirty {
@@ -471,8 +471,8 @@ struct CheckoutRowView: View {
         }
         .foregroundStyle(DesktopPalette.text2)
         .padding(.leading, 33)
-        .padding(.trailing, 8)
-        .padding(.top, 4)
+        .padding(.trailing, DesktopSpace.s)
+        .padding(.top, DesktopSpace.xs)
         .padding(.bottom, 2)
     }
 }
@@ -495,7 +495,7 @@ struct SessionRowView: View {
                     .foregroundStyle(!session.isUnavailable && (session.open || session.isWorking) ? DesktopPalette.text : DesktopPalette.text2)
                 if let reason {
                     Text(reason)
-                        .font(.system(size: 11.5))
+                        .font(.system(size: DesktopType.meta))
                         .foregroundStyle(DesktopPalette.text2)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -511,14 +511,14 @@ struct SessionRowView: View {
                     Image(systemName: "person.2")
                     Text(family.workingSubagents > 0 ? "\(family.workingSubagents)/\(family.subagentCount)" : "\(family.subagentCount)")
                 }
-                .font(.system(size: 10.5))
-                .foregroundStyle(family.workingSubagents > 0 ? DesktopPalette.work : DesktopPalette.text2)
+                .font(.system(size: DesktopType.caption))
+                .foregroundStyle(family.workingSubagents > 0 ? DesktopPalette.working : DesktopPalette.text2)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(SessionFamilies.subagentSummary(family))
             }
             if session.queueCount > 0 {
                 Text(SessionFacts.queuedLabel(session.queueCount))
-                    .font(.system(size: 10.5))
+                    .font(.system(size: DesktopType.caption))
                     .foregroundStyle(DesktopPalette.text2)
             }
             if !session.sharedHolders.isEmpty {
@@ -526,17 +526,17 @@ struct SessionRowView: View {
                     Image(systemName: "terminal")
                     Text("\(session.sharedHolders.count)")
                 }
-                .font(.system(size: 10.5))
+                .font(.system(size: DesktopType.caption))
                 .foregroundStyle(DesktopPalette.text2)
                 .help(SessionFacts.holdersHelp(session.sharedHolders))
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(SessionFacts.holdersLabel(session.sharedHolders.count))
             }
             Text(relativeAge(session.lastActive))
-                .font(.system(size: 11))
+                .font(.system(size: DesktopType.caption))
                 .foregroundStyle(DesktopPalette.text2)
         }
-        .font(.system(size: 13))
+        .font(.system(size: DesktopType.body))
         .padding(.leading, 6)
         .accessibilityElement(children: .combine)
         .accessibilityValue(needsYou ? "Needs you\(reason.map { ": \($0)" } ?? "") · \(SessionFacts.rowDetail(session))" : SessionFacts.rowDetail(session))
@@ -554,11 +554,11 @@ struct StatusIndicator: View {
             if session.isWorking && !needsYou {
                 ProgressView()
                     .controlSize(.mini)
-                    .tint(DesktopPalette.work)
+                    .tint(DesktopPalette.working)
                     .scaleEffect(0.8)
             } else if session.isWaitingOnBackground && !needsYou {
                 Circle()
-                    .strokeBorder(DesktopPalette.work, lineWidth: 1.5)
+                    .strokeBorder(DesktopPalette.working, lineWidth: 1.5)
                     .frame(width: 7, height: 7)
             } else {
                 Circle()
@@ -591,9 +591,9 @@ struct ConnectionFooter: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DesktopSpace.s) {
             Circle()
-                .fill(model.isConnected ? DesktopPalette.green : DesktopPalette.red)
+                .fill(model.isConnected ? DesktopPalette.done : DesktopPalette.failed)
                 .frame(width: 6, height: 6)
                 .accessibilityHidden(true)
             Text(model.isConnected ? "Connected · this Mac" : model.reconnecting ? "Reconnecting…" : offlineLabel)
@@ -629,9 +629,9 @@ struct ConnectionFooter: View {
             .help("Settings ⌘,")
             .accessibilityLabel("Settings")
         }
-        .font(.system(size: 11.5))
+        .font(.system(size: DesktopType.meta))
         .foregroundStyle(DesktopPalette.text2)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, DesktopSpace.l)
         .padding(.vertical, 10)
         .overlay(alignment: .top) { Rectangle().fill(DesktopPalette.line).frame(height: 1) }
     }
@@ -666,19 +666,19 @@ struct ConversationPane: View {
                                                   open: session.runtime?.focusable == true ? { model.focusInTerminal(session) } : nil)
                                     .id(waiting.id)
                                     .frame(maxWidth: 720)
-                                    .padding(.horizontal, 16)
-                                    .padding(.top, 8)
+                                    .padding(.horizontal, DesktopSpace.l)
+                                    .padding(.top, DesktopSpace.s)
                             } else if let request = pane.requests?.requests.first, pane.detail?.readOnly == false {
                                 RequestCard(request: request, answering: pane.answeringRequest != nil, accent: DesktopPalette.accentText) { decision in
                                     Task { await pane.respond(to: request, decision: decision) }
                                 }
                                 .id(request.id)
                                 .frame(maxWidth: 720)
-                                .padding(.horizontal, 16)
-                                .padding(.top, 8)
+                                .padding(.horizontal, DesktopSpace.l)
+                                .padding(.top, DesktopSpace.s)
                             }
                             if let error = pane.requestError {
-                                Text(error).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 4)
+                                Text(error).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, DesktopSpace.l).padding(.top, DesktopSpace.xs)
                                     .frame(maxWidth: .infinity)
                                     .background(DesktopPalette.window)
                             }
@@ -724,22 +724,22 @@ struct RemovedSessionBar: View {
                 .foregroundStyle(DesktopPalette.text2)
             VStack(alignment: .leading, spacing: 2) {
                 Text("This session is no longer available")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: DesktopType.body, weight: .medium))
                     .foregroundStyle(DesktopPalette.text)
                 Text("Agenthail stopped finding it. You're reading its last loaded content.")
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
             Spacer()
             Button("Close", action: onClose)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(DesktopPalette.dock, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(DesktopPalette.line))
+        .padding(.horizontal, DesktopSpace.l)
+        .padding(.vertical, DesktopSpace.m)
+        .background(DesktopPalette.dock, in: RoundedRectangle(cornerRadius: DesktopRadius.card))
+        .overlay(RoundedRectangle(cornerRadius: DesktopRadius.card).stroke(DesktopPalette.line))
         .frame(maxWidth: 760)
-        .padding(.horizontal, 24)
-        .padding(.bottom, 16)
+        .padding(.horizontal, DesktopSpace.xxl)
+        .padding(.bottom, DesktopSpace.l)
     }
 }
 
@@ -755,13 +755,13 @@ struct ConversationHeader: View {
     var onCall: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DesktopSpace.m) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(session.subagent != nil ? title : session.alias.map { _ in session.name.isEmpty ? session.title : session.name } ?? title)
-                    .font(.system(size: 13.5, weight: .semibold))
+                    .font(.system(size: DesktopType.body, weight: .semibold))
                 if let alias = session.alias, !alias.isEmpty {
                     Text("@\(alias)")
-                        .font(.system(size: 12))
+                        .font(.system(size: DesktopType.secondary))
                         .foregroundStyle(DesktopPalette.text2)
                 }
             }
@@ -771,11 +771,11 @@ struct ConversationHeader: View {
                 StatusIndicator(session: session, needsYou: false)
                 Text(session.isWaitingOnYou ? "Waiting on you" : session.isWorking ? "Working" : session.isWaitingOnBackground ? "Waiting on background work" : session.open ? "Idle" : "Closed")
             }
-            .font(.system(size: 12))
+            .font(.system(size: DesktopType.secondary))
             .foregroundStyle(DesktopPalette.text2)
             let meta = ([session.surface.capitalized, model] + SessionFacts.headerFacts(session, age: relativeAge(session.lastActive)) + [context?.headerLabel]).compactMap { $0 }.joined(separator: " · ")
             Text(meta)
-                .font(.system(size: 12))
+                .font(.system(size: DesktopType.secondary))
                 .foregroundStyle(DesktopPalette.text2)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -783,7 +783,7 @@ struct ConversationHeader: View {
             if session.runtime?.focusable == true, let host = session.runtime?.hostName {
                 Button("Open in \(host)") { onFocusTerminal() }
                     .buttonStyle(.plain)
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.accentText)
                     .help("Bring this session's terminal to the front")
             }
@@ -802,7 +802,7 @@ struct ConversationHeader: View {
             } label: {
                 Image(systemName: "sidebar.right")
                     .frame(width: 30, height: 30)
-                    .background(inspectorVisible ? DesktopPalette.selection : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+                    .background(inspectorVisible ? DesktopPalette.selection : Color.clear, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
             }
             .buttonStyle(.plain)
             .foregroundStyle(DesktopPalette.text2)
@@ -831,21 +831,21 @@ struct TranscriptView: View {
         let sends = model.localSends[session.id] ?? []
         let canResend = pane.removedSession?.id != session.id && session.capabilities.send && !session.isReadOnly
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 20) {
+            LazyVStack(alignment: .leading, spacing: DesktopSpace.xl) {
                 if (pane.olderCursor ?? 0) > 0 || pane.olderError != nil {
                     olderControl
                 }
                 if let error = pane.detail?.readError {
                     Text(error)
-                        .font(.system(size: 12.5))
+                        .font(.system(size: DesktopType.body))
                         .foregroundStyle(DesktopPalette.text2)
                 }
                 if blocks.isEmpty && sends.isEmpty && !session.isWorking && pane.detail != nil && (pane.olderCursor ?? 0) == 0 {
                     VStack(spacing: 6) {
                         Text("No saved exchanges yet")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: DesktopType.title, weight: .semibold))
                         Text("Send a message to start this conversation from Agenthail.")
-                            .font(.system(size: 13))
+                            .font(.system(size: DesktopType.body))
                             .foregroundStyle(DesktopPalette.text2)
                     }
                     .frame(maxWidth: .infinity)
@@ -862,23 +862,23 @@ struct TranscriptView: View {
                     } : nil, onRetry: send.failure == nil || !canResend ? nil : { model.retrySend(send, in: session.id) })
                 }
                 if session.isWorking {
-                    HStack(spacing: 8) {
+                    HStack(spacing: DesktopSpace.s) {
                         StatusIndicator(session: session, needsYou: false)
                         Text(session.isWaitingOnYou ? "Waiting on you" : "Working")
                     }
-                    .font(.system(size: 12.5))
+                    .font(.system(size: DesktopType.body))
                     .foregroundStyle(DesktopPalette.text2)
                 } else if session.isWaitingOnBackground, let background = session.backgroundTasks {
-                    HStack(spacing: 8) {
+                    HStack(spacing: DesktopSpace.s) {
                         StatusIndicator(session: session, needsYou: false)
                         Text("Waiting on background work · \(background.summary)")
                     }
-                    .font(.system(size: 12.5))
+                    .font(.system(size: DesktopType.body))
                     .foregroundStyle(DesktopPalette.text2)
                 }
             }
             .frame(maxWidth: 700)
-            .padding(.horizontal, 24)
+            .padding(.horizontal, DesktopSpace.xxl)
             .padding(.top, 28)
             .padding(.bottom, 12 + MessageActions.height)
             .frame(maxWidth: .infinity)
@@ -898,7 +898,7 @@ struct TranscriptView: View {
                     jumpToLatest()
                 } label: {
                     Label("Jump to latest", systemImage: "arrow.down")
-                        .font(.system(size: 12))
+                        .font(.system(size: DesktopType.secondary))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(DesktopPalette.raised, in: Capsule())
@@ -906,7 +906,7 @@ struct TranscriptView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(DesktopPalette.text2)
-                .padding(16)
+                .padding(DesktopSpace.l)
             }
         }
         .background {
@@ -916,11 +916,11 @@ struct TranscriptView: View {
         }
         .overlay {
             if pane.detail == nil, pane.selectedSessionID == session.id {
-                VStack(spacing: 8) {
+                VStack(spacing: DesktopSpace.s) {
                     ProgressView().controlSize(.small)
                     if let error = pane.detailLoadError {
                         Text("Couldn't load this session. Retrying… \(error)")
-                            .font(.system(size: 12))
+                            .font(.system(size: DesktopType.secondary))
                             .foregroundStyle(DesktopPalette.text2)
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: 360)
@@ -939,20 +939,20 @@ struct TranscriptView: View {
                         Text("Couldn't refresh · showing last loaded")
                     }
                 }
-                .font(.system(size: 11.5))
+                .font(.system(size: DesktopType.meta))
                 .foregroundStyle(DesktopPalette.text2)
                 .padding(.horizontal, 10)
-                .padding(.vertical, 4)
+                .padding(.vertical, DesktopSpace.xs)
                 .background(DesktopPalette.raised, in: Capsule())
                 .overlay(Capsule().stroke(DesktopPalette.line))
-                .padding(.top, 8)
+                .padding(.top, DesktopSpace.s)
                 .transition(.opacity)
             }
         }
     }
 
     private var olderControl: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DesktopSpace.s) {
             if pane.loadingOlder {
                 ProgressView().controlSize(.mini)
             } else if (pane.olderCursor ?? 0) > 0 {
@@ -966,7 +966,7 @@ struct TranscriptView: View {
                 Text(error).foregroundStyle(DesktopPalette.text2)
             }
         }
-        .font(.system(size: 12))
+        .font(.system(size: DesktopType.secondary))
         .frame(maxWidth: .infinity)
     }
 
@@ -1002,7 +1002,7 @@ struct TranscriptBlockView: View {
             ToolRunView(items: items, expanded: $expanded)
         case .annotation(let text):
             Text(text)
-                .font(.system(size: 11.5))
+                .font(.system(size: DesktopType.meta))
                 .foregroundStyle(DesktopPalette.muted)
         case .notice(let text):
             Button { expanded.toggle() } label: {
@@ -1012,7 +1012,7 @@ struct TranscriptBlockView: View {
                         .lineLimit(expanded ? nil : 1)
                         .multilineTextAlignment(.leading)
                 }
-                .font(.system(size: 11.5))
+                .font(.system(size: DesktopType.meta))
                 .foregroundStyle(DesktopPalette.muted)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -1028,7 +1028,7 @@ struct TranscriptBlockView: View {
                         Image(systemName: expanded ? "chevron.down" : "chevron.right")
                         Text("Instructions")
                     }
-                    .font(.system(size: 11.5))
+                    .font(.system(size: DesktopType.meta))
                     .foregroundStyle(DesktopPalette.muted)
                     .contentShape(Rectangle())
                 }
@@ -1036,7 +1036,7 @@ struct TranscriptBlockView: View {
                 .accessibilityHint("Shows what the agent was told")
                 if expanded {
                     Text(text)
-                        .font(.system(size: 11.5, design: .monospaced))
+                        .font(.system(size: DesktopType.meta, design: .monospaced))
                         .foregroundStyle(DesktopPalette.muted)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1061,8 +1061,8 @@ struct AttachmentImageView: View {
                     .resizable()
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(DesktopPalette.line))
+                    .clipShape(RoundedRectangle(cornerRadius: DesktopRadius.card))
+                    .overlay(RoundedRectangle(cornerRadius: DesktopRadius.card).strokeBorder(DesktopPalette.line))
                     .frame(maxWidth: 520, maxHeight: 360, alignment: .leading)
                     .onTapGesture(count: 2) { open(image) }
                     .contextMenu {
@@ -1073,19 +1073,19 @@ struct AttachmentImageView: View {
                         }
                     }
             } else if failed {
-                HStack(spacing: 8) {
+                HStack(spacing: DesktopSpace.s) {
                     Text("Image couldn't be loaded")
-                        .font(.system(size: 11.5))
+                        .font(.system(size: DesktopType.meta))
                         .foregroundStyle(DesktopPalette.muted)
                     Button("Try again") {
                         failed = false
                         retryCount += 1
                     }
                     .buttonStyle(.link)
-                    .font(.system(size: 11.5))
+                    .font(.system(size: DesktopType.meta))
                 }
             } else {
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: DesktopRadius.card)
                     .fill(DesktopPalette.bubble)
                     .frame(width: 220, height: 140)
                     .overlay { ProgressView().controlSize(.small) }
@@ -1129,7 +1129,7 @@ struct UserBubble: View {
         VStack(alignment: .trailing, spacing: 5) {
             if let sender = envelope.sender {
                 Text("From \(sender)")
-                    .font(.system(size: 11))
+                    .font(.system(size: DesktopType.caption))
                     .foregroundStyle(DesktopPalette.text2)
             }
             if editing, let onEdit {
@@ -1154,17 +1154,17 @@ struct UserBubble: View {
 
     @ViewBuilder private func bubble(_ message: String) -> some View {
         Text(message)
-            .font(.system(size: 14))
-            .lineSpacing(3)
+            .font(.system(size: DesktopType.prose))
+            .lineSpacing(DesktopType.proseLineSpacing)
             .lineLimit(expanded ? nil : 8)
             .textSelection(.enabled)
             .padding(.horizontal, 13)
             .padding(.vertical, 9)
-            .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 14))
+            .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
         if message.split(separator: "\n", omittingEmptySubsequences: false).count > 8 || message.count > 700 {
             Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
                 .buttonStyle(.plain)
-                .font(.system(size: 11.5))
+                .font(.system(size: DesktopType.meta))
                 .foregroundStyle(DesktopPalette.text2)
         }
         if let failure {
@@ -1178,11 +1178,11 @@ struct UserBubble: View {
                         .foregroundStyle(DesktopPalette.accentText)
                 }
             }
-            .font(.system(size: 11))
-            .foregroundStyle(DesktopPalette.red)
+            .font(.system(size: DesktopType.caption))
+            .foregroundStyle(DesktopPalette.failed)
         } else if let receipt {
             Text(receipt)
-                .font(.system(size: 11))
+                .font(.system(size: DesktopType.caption))
                 .foregroundStyle(DesktopPalette.text2)
         }
     }
@@ -1217,11 +1217,11 @@ struct AttachedFileChip: View {
                         .foregroundStyle(DesktopPalette.text2)
                 }
             }
-            .font(.system(size: 13))
+            .font(.system(size: DesktopType.body))
             .lineLimit(1)
             .padding(.horizontal, 11)
             .padding(.vertical, 7)
-            .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 10))
+            .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.card))
         }
         .buttonStyle(.plain)
         .disabled(file.path.isEmpty)
@@ -1241,8 +1241,8 @@ struct AssistantReply: View {
 
     var body: some View {
         StructuredText(markdown: text)
-            .font(.system(size: 15.5, design: .serif))
-            .lineSpacing(4)
+            .font(.system(size: DesktopType.prose))
+            .lineSpacing(DesktopType.proseLineSpacing)
             .foregroundStyle(DesktopPalette.text)
             .textual.textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
@@ -1267,13 +1267,13 @@ struct ToolRunView: View {
             } label: {
                 HStack(spacing: 7) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: DesktopType.caption, weight: .semibold))
                     Text(ToolRunSummary.label(items))
                     if failed > 0 {
-                        Text("· \(failed) failed").foregroundStyle(DesktopPalette.red)
+                        Text("· \(failed) failed").foregroundStyle(DesktopPalette.failed)
                     }
                 }
-                .font(.system(size: 12.5))
+                .font(.system(size: DesktopType.body))
                 .foregroundStyle(DesktopPalette.text2)
             }
             .buttonStyle(.plain)
@@ -1292,7 +1292,7 @@ struct ToolRunView: View {
                 }
             }
         }
-        .padding(.leading, 12)
+        .padding(.leading, DesktopSpace.m)
         .overlay(alignment: .leading) { Rectangle().fill(DesktopPalette.line).frame(width: 2) }
     }
 
@@ -1327,25 +1327,25 @@ struct ToolCallRow: View {
         let presentation = ToolPresentation(name: call.title, text: call.text)
         let isCommand: Bool = { if case .command = presentation.content { return true } else { return false } }()
         let firstLine = presentation.summary.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             Button {
                 expanded.toggle()
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Image(systemName: presentation.symbol)
-                        .font(.system(size: 10.5))
+                        .font(.system(size: DesktopType.caption))
                         .frame(width: 14)
                     Text(presentation.intent ?? presentation.title)
                         .lineLimit(1)
                         .layoutPriority(1)
                     Text(isCommand ? "$ " + firstLine : firstLine)
-                        .font(.system(size: 11.5, design: .monospaced))
+                        .font(.system(size: DesktopType.meta, design: .monospaced))
                         .foregroundStyle(presentation.intent == nil ? DesktopPalette.text : DesktopPalette.muted)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                .font(.system(size: 12))
-                .foregroundStyle(failed ? DesktopPalette.red : DesktopPalette.text2)
+                .font(.system(size: DesktopType.secondary))
+                .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.text2)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -1353,17 +1353,17 @@ struct ToolCallRow: View {
             if expanded {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(Self.fullInput(call.text))
-                        .font(.system(size: 11.5, design: .monospaced))
+                        .font(.system(size: DesktopType.meta, design: .monospaced))
                         .foregroundStyle(DesktopPalette.text)
                         .textSelection(.enabled)
                         .lineLimit(40)
-                        .padding(8)
+                        .padding(DesktopSpace.s)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 6))
+                        .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
                     TimelineMetaLine(item: call)
                     if results.isEmpty {
                         Text("No result yet")
-                            .font(.system(size: 11.5))
+                            .font(.system(size: DesktopType.meta))
                             .foregroundStyle(DesktopPalette.muted)
                     }
                     ForEach(results) { result in
@@ -1387,13 +1387,13 @@ struct ReasoningRow: View {
     @State private var expanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             Button {
                 expanded.toggle()
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Image(systemName: "brain")
-                        .font(.system(size: 10.5))
+                        .font(.system(size: DesktopType.caption))
                         .frame(width: 14)
                     Text("Reasoning")
                     Text(item.text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? "")
@@ -1401,16 +1401,16 @@ struct ReasoningRow: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                .font(.system(size: 12))
+                .font(.system(size: DesktopType.secondary))
                 .foregroundStyle(DesktopPalette.text2)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             if expanded {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DesktopSpace.xs) {
                     StructuredText(markdown: item.text)
-                        .font(.system(size: 13, design: .serif))
+                        .font(.system(size: DesktopType.body))
                         .foregroundStyle(DesktopPalette.text2)
                         .textual.textSelection(.enabled)
                     TimelineMetaLine(item: item)
@@ -1429,26 +1429,26 @@ struct ToolOutputBlock: View {
         let failed = ToolRunSummary.isFailure(result)
         let text = result.text
         let preview = ToolRunSummary.outputPreview(text)
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             HStack(spacing: 10) {
                 Text(failed ? "Error output" : "Output")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(failed ? DesktopPalette.red : DesktopPalette.muted)
+                    .font(.system(size: DesktopType.caption, weight: .semibold))
+                    .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.muted)
                 Spacer()
                 if preview.count < text.count {
                     Button(showAll ? "Show less output" : "Show full output") { showAll.toggle() }
                 }
                 Button("Copy output") { copyToPasteboard(text) }
             }
-            .font(.system(size: 11))
+            .font(.system(size: DesktopType.caption))
             .buttonStyle(.link)
             Text(text.isEmpty ? "The tool returned an empty result." : showAll ? text : preview)
-                .font(.system(size: 11.5, design: .monospaced))
-                .foregroundStyle(failed ? DesktopPalette.red : DesktopPalette.text)
+                .font(.system(size: DesktopType.meta, design: .monospaced))
+                .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.text)
                 .textSelection(.enabled)
-                .padding(8)
+                .padding(DesktopSpace.s)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 6))
+                .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
             TimelineMetaLine(item: result)
         }
     }
@@ -1473,7 +1473,7 @@ struct TimelineMetaLine: View {
         let fields = TimelineMetadata.fields(item)
         if !fields.isEmpty {
             Text(fields.joined(separator: " · "))
-                .font(.system(size: 11))
+                .font(.system(size: DesktopType.caption))
                 .foregroundStyle(DesktopPalette.muted)
                 .textSelection(.enabled)
         }
@@ -1512,26 +1512,26 @@ struct ComposerView: View {
             if !attention.isEmpty {
                 BoundedDock {
                     VStack(spacing: 0) {
-                        ForEach(attention) { AttentionBanner(model: model, attention: $0).padding(.bottom, 8) }
+                        ForEach(attention) { AttentionBanner(model: model, attention: $0).padding(.bottom, DesktopSpace.s) }
                     }
                 }
             }
             if session.isReadOnly || !session.capabilities.send {
                 Text(session.readOnlyReason ?? "This session is closed. You can read it, but not message it.")
-                    .font(.system(size: 13))
+                    .font(.system(size: DesktopType.body))
                     .foregroundStyle(DesktopPalette.text2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 15)
                     .padding(.vertical, 13)
-                    .background(DesktopPalette.window, in: RoundedRectangle(cornerRadius: 16))
-                    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(DesktopPalette.line, style: StrokeStyle(lineWidth: 1, dash: [4])))
+                    .background(DesktopPalette.window, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
+                    .overlay(RoundedRectangle(cornerRadius: DesktopRadius.sheet).strokeBorder(DesktopPalette.line, style: StrokeStyle(lineWidth: 1, dash: [4])))
             } else {
                 let queued = model.queuedItems(for: session.id)
                 BoundedDock {
                     VStack(spacing: 0) {
                         ForEach(model.deliveryProblems.filter { $0.sessionId == session.id }) { problem in
                             DeliveryProblemBanner(problem: problem, model: model)
-                                .padding(.bottom, 8)
+                                .padding(.bottom, DesktopSpace.s)
                         }
                         if !queued.isEmpty {
                             QueueDock(model: model, items: queued, target: session, canSteer: canSteer && session.isWorking)
@@ -1553,18 +1553,18 @@ struct ComposerView: View {
                 VStack(spacing: 0) {
                     TextField("Message \(session.title)", text: $draft.text, axis: .vertical)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 14))
+                        .font(.system(size: DesktopType.prose))
                         .lineLimit(2...10)
                         .focused($focused)
                         .padding(.horizontal, 15)
                         .padding(.top, 13)
-                        .padding(.bottom, 4)
+                        .padding(.bottom, DesktopSpace.xs)
                         .onSubmit { submit(alternate: false) }
-                    HStack(spacing: 4) {
+                    HStack(spacing: DesktopSpace.xs) {
                         if session.capabilities.attach {
                             Button(action: chooseAttachments) {
                                 Image(systemName: "paperclip")
-                                    .font(.system(size: 13))
+                                    .font(.system(size: DesktopType.body))
                                     .frame(width: 28, height: 28)
                             }
                             .buttonStyle(.plain)
@@ -1582,9 +1582,9 @@ struct ComposerView: View {
                         Spacer()
                         if session.isWorking && hasText && !draftIsCommand {
                             Text(hint)
-                                .font(.system(size: 11))
+                                .font(.system(size: DesktopType.caption))
                                 .foregroundStyle(DesktopPalette.text2)
-                                .padding(.trailing, 4)
+                                .padding(.trailing, DesktopSpace.xs)
                         }
                         if showsSteerNow {
                             Button("Steer now") { pane.submit(busyDelivery: FollowUpAction.steer.rawValue) }
@@ -1593,7 +1593,7 @@ struct ComposerView: View {
                         }
                         Button(action: primaryAction) {
                             Image(systemName: primarySymbol)
-                                .font(.system(size: primaryIsStop ? 10 : 14, weight: .bold))
+                                .font(.system(size: primaryIsStop ? 10 : 14, weight: .semibold))
                                 .foregroundStyle(DesktopPalette.onAccent)
                                 .frame(width: 32, height: 32)
                                 .background(primaryIsStop ? DesktopPalette.stop : DesktopPalette.accent, in: Circle())
@@ -1609,12 +1609,12 @@ struct ComposerView: View {
                             .hidden()
                             .frame(width: 0, height: 0)
                     }
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, DesktopSpace.s)
                     .padding(.top, 6)
-                    .padding(.bottom, 8)
+                    .padding(.bottom, DesktopSpace.s)
                 }
-                .background(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(dropTargeted ? DesktopPalette.accent : DesktopPalette.line, lineWidth: dropTargeted ? 2 : 1))
+                .background(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
+                .overlay(RoundedRectangle(cornerRadius: DesktopRadius.sheet).strokeBorder(dropTargeted ? DesktopPalette.accent : DesktopPalette.line, lineWidth: dropTargeted ? 2 : 1))
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
                 .dropDestination(for: URL.self) { urls, _ in
                     guard session.capabilities.attach, !urls.isEmpty, urls.allSatisfy(\.isFileURL) else { return false }
@@ -1624,11 +1624,11 @@ struct ComposerView: View {
             }
             if let error = model.operationError {
                 Text(error)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(DesktopPalette.red)
+                    .font(.system(size: DesktopType.meta))
+                    .foregroundStyle(DesktopPalette.failed)
                     .padding(.top, 6)
             } else if model.pendingForks.contains(session.id) {
-                HStack(spacing: 8) {
+                HStack(spacing: DesktopSpace.s) {
                     Text("Codex may still be creating a fork of this session. Check the sidebar before forking again.")
                         .foregroundStyle(DesktopPalette.text2)
                     Button("Fork again") { pane.forkAgain(session) }
@@ -1636,14 +1636,14 @@ struct ComposerView: View {
                         .foregroundStyle(DesktopPalette.accentText)
                         .help("Start another fork instead of waiting for this one")
                 }
-                .font(.system(size: 11.5))
+                .font(.system(size: DesktopType.meta))
                 .padding(.top, 6)
             }
         }
         .frame(maxWidth: 700)
-        .padding(.horizontal, 24)
+        .padding(.horizontal, DesktopSpace.xxl)
         .padding(.top, 40)
-        .padding(.bottom, 20)
+        .padding(.bottom, DesktopSpace.xl)
         .frame(maxWidth: .infinity)
         .background(
             LinearGradient(colors: [DesktopPalette.window.opacity(0), DesktopPalette.window], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.38))
@@ -1753,10 +1753,10 @@ struct DeliveryProblemBanner: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle")
-                .foregroundStyle(DesktopPalette.amber)
+                .foregroundStyle(DesktopPalette.attention)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Not delivered · \(problem.reasonText)")
-                    .font(.system(size: 12.5, weight: .medium))
+                    .font(.system(size: DesktopType.body, weight: .medium))
                 Text(PeerEnvelope(problem.message).body)
                     .lineLimit(2)
                     .foregroundStyle(DesktopPalette.text2)
@@ -1774,11 +1774,11 @@ struct DeliveryProblemBanner: View {
             .foregroundStyle(DesktopPalette.text2)
             .accessibilityLabel("Dismiss")
         }
-        .font(.system(size: 12.5))
-        .padding(.horizontal, 12)
+        .font(.system(size: DesktopType.body))
+        .padding(.horizontal, DesktopSpace.m)
         .padding(.vertical, 9)
-        .background(DesktopPalette.warnBackground, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(DesktopPalette.warnLine))
+        .background(DesktopPalette.attentionBackground, in: RoundedRectangle(cornerRadius: DesktopRadius.card))
+        .overlay(RoundedRectangle(cornerRadius: DesktopRadius.card).strokeBorder(DesktopPalette.attentionLine))
     }
 }
 
@@ -1794,7 +1794,7 @@ struct QueueDock: View {
                 let envelope = PeerEnvelope(item.message)
                 HStack(spacing: 10) {
                     Image(systemName: "text.line.last.and.arrowtriangle.forward")
-                        .font(.system(size: 11))
+                        .font(.system(size: DesktopType.caption))
                         .foregroundStyle(DesktopPalette.text2)
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
@@ -1808,7 +1808,7 @@ struct QueueDock: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                         Text(QueueFacts.summary(item, target: target, attention: model.snapshot?.attention ?? [], age: relativeAge(item.queuedAt)))
-                            .font(.system(size: 11))
+                            .font(.system(size: DesktopType.caption))
                             .foregroundStyle(DesktopPalette.text2)
                             .lineLimit(1)
                     }
@@ -1854,13 +1854,13 @@ struct QueueDock: View {
                     .fixedSize()
                     .accessibilityLabel("More actions")
                 }
-                .font(.system(size: 13))
+                .font(.system(size: DesktopType.body))
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
             }
         }
-        .padding(.top, 4)
-        .padding(.bottom, 4)
+        .padding(.top, DesktopSpace.xs)
+        .padding(.bottom, DesktopSpace.xs)
         .background(DesktopPalette.dock, in: UnevenRoundedRectangle(topLeadingRadius: 14, topTrailingRadius: 14))
         .overlay(UnevenRoundedRectangle(topLeadingRadius: 14, topTrailingRadius: 14).strokeBorder(DesktopPalette.line))
     }
@@ -1893,12 +1893,12 @@ struct AttachmentDock: View {
                     .foregroundStyle(DesktopPalette.text2)
                     .accessibilityLabel("Remove \(attachment.name)")
                 }
-                .font(.system(size: 13))
+                .font(.system(size: DesktopType.body))
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, DesktopSpace.xs)
         .background(DesktopPalette.dock, in: shape)
         .overlay(shape.strokeBorder(DesktopPalette.line))
     }
@@ -1913,11 +1913,11 @@ struct AttachmentThumbnail: View {
                 .resizable()
                 .scaledToFill()
                 .frame(width: 28, height: 28)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .clipShape(RoundedRectangle(cornerRadius: DesktopRadius.control))
                 .accessibilityHidden(true)
         } else {
             Image(systemName: "doc")
-                .font(.system(size: 11))
+                .font(.system(size: DesktopType.caption))
                 .foregroundStyle(DesktopPalette.text2)
                 .frame(width: 28, height: 28)
         }
@@ -1938,7 +1938,7 @@ struct SessionInspector: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 16) {
+            HStack(spacing: DesktopSpace.l) {
                 ForEach(InspectorTab.allCases) { candidate in
                     Button(candidate.rawValue) { tab = candidate }
                         .buttonStyle(.plain)
@@ -1948,8 +1948,8 @@ struct SessionInspector: View {
                 }
                 Spacer()
             }
-            .font(.system(size: 12.5))
-            .padding(.horizontal, 16)
+            .font(.system(size: DesktopType.body))
+            .padding(.horizontal, DesktopSpace.l)
             .frame(height: 52)
             .overlay(alignment: .bottom) { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
             if let session = pane.displayedSession {
@@ -1960,8 +1960,8 @@ struct SessionInspector: View {
                         case .delivery: DeliveryTab(model: model, session: session)
                         }
                     }
-                    .font(.system(size: 12.5))
-                    .padding(16)
+                    .font(.system(size: DesktopType.body))
+                    .padding(DesktopSpace.l)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
@@ -1996,7 +1996,7 @@ struct DetailsTab: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesktopSpace.l) {
             if let context = pane.detail?.context {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -2024,7 +2024,7 @@ struct DetailsTab: View {
                                 }
                             }
                         }
-                        .padding(.top, 4)
+                        .padding(.top, DesktopSpace.xs)
                     }
                     .foregroundStyle(DesktopPalette.text2)
                 }
@@ -2053,7 +2053,7 @@ struct DetailsTab: View {
                                     .truncationMode(.middle)
                             }
                         }
-                        .font(.system(size: 12.5))
+                        .font(.system(size: DesktopType.body))
                         .textSelection(.enabled)
                     }
                     .help(configRoot.summary + "\n" + configRoot.root)
@@ -2127,7 +2127,7 @@ struct DetailsTab: View {
         GridRow {
             Text(label).foregroundStyle(DesktopPalette.text2)
             Text(value)
-                .font(monospaced ? .system(size: 11.5, design: .monospaced) : .system(size: 12.5))
+                .font(monospaced ? .system(size: DesktopType.meta, design: .monospaced) : .system(size: DesktopType.body))
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -2142,7 +2142,7 @@ struct DeliveryTab: View {
         let queued = QueueFacts.undelivered(model.snapshot?.queue ?? [], for: session.id)
         let history = model.snapshot?.history.filter { $0.sessionId == session.id || $0.sourceSessionId == session.id } ?? []
         let problems = model.deliveryProblems(for: session.id)
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesktopSpace.s) {
             if !problems.isEmpty {
                 SidebarCaption("Not delivered").padding(.horizontal, -8)
                 ForEach(problems) { problem in
@@ -2152,7 +2152,7 @@ struct DeliveryTab: View {
             if !queued.isEmpty {
                 SidebarCaption("Undelivered").padding(.horizontal, -8)
                 ForEach(queued) { item in
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: DesktopSpace.xs) {
                         deliveryCard(title: item.target, status: QueueFacts.statusLabel(item.status), text: item.message, detail: QueueFacts.summary(item, target: session, attention: model.snapshot?.attention ?? [], age: relativeAge(item.queuedAt)), problem: item.status == "dead")
                         HStack { QueueItemActions(model: model, item: item) }
                             .controlSize(.small)
@@ -2168,8 +2168,8 @@ struct DeliveryTab: View {
                     AuditEventRow(entry: entry)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 9)
-                        .background(DesktopPalette.window, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(DesktopPalette.line2))
+                        .background(DesktopPalette.window, in: RoundedRectangle(cornerRadius: DesktopRadius.card))
+                        .overlay(RoundedRectangle(cornerRadius: DesktopRadius.card).strokeBorder(DesktopPalette.line2))
                 }
             }
         }
@@ -2181,23 +2181,23 @@ struct DeliveryTab: View {
                 Text(title)
                 Spacer()
                 Text(status)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(problem ? DesktopPalette.amber : DesktopPalette.text2)
+                    .font(.system(size: DesktopType.meta))
+                    .foregroundStyle(problem ? DesktopPalette.attention : DesktopPalette.text2)
             }
             Text(text)
                 .lineLimit(1)
                 .foregroundStyle(DesktopPalette.text2)
             if let detail, !detail.isEmpty {
                 Text(detail)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(problem ? DesktopPalette.amber : DesktopPalette.text2)
+                    .font(.system(size: DesktopType.meta))
+                    .foregroundStyle(problem ? DesktopPalette.attention : DesktopPalette.text2)
                     .lineLimit(3)
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
-        .background(problem ? DesktopPalette.warnBackground : DesktopPalette.window, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(problem ? DesktopPalette.warnLine : DesktopPalette.line2))
+        .background(problem ? DesktopPalette.attentionBackground : DesktopPalette.window, in: RoundedRectangle(cornerRadius: DesktopRadius.card))
+        .overlay(RoundedRectangle(cornerRadius: DesktopRadius.card).strokeBorder(problem ? DesktopPalette.attentionLine : DesktopPalette.line2))
     }
 }
 

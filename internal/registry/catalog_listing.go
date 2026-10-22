@@ -36,7 +36,7 @@ type catalogListingRow struct {
 }
 
 func catalogListingTx(q catalogQuerier) (CatalogListing, error) {
-	rows, err := q.Query(`SELECT s.id,s.host_id,s.parent_session_id,s.source,s.status,CASE WHEN json_valid(cs.projection_fingerprint) THEN COALESCE(json_extract(cs.projection_fingerprint,'$.current'),0) ELSE 0 END
+	rows, err := q.Query(`SELECT s.id,s.host_id,s.parent_session_id,s.source,s.status,cs.current
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id`)
 	if err != nil {
 		return CatalogListing{}, err
@@ -52,6 +52,10 @@ func catalogListingTx(q catalogQuerier) (CatalogListing, error) {
 		busy := status == string(surface.StatusBusy)
 		retired := status == string(surface.StatusOffline) && !current
 		byID[id] = catalogListingRow{entity: hosts.Qualify(hostID, id), parent: parent, subagent: delegatedColumns(parent, source), active: busy || current, busy: busy, retired: retired}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return CatalogListing{}, err
 	}
 	if err := rows.Close(); err != nil {
 		return CatalogListing{}, err
