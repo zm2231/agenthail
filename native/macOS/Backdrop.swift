@@ -158,19 +158,16 @@ enum BackdropRenderer {
             maxima[pane.id] = alpha.max() ?? pane.minimum
         }
 
-        // A pixel's colour is interpolated from the points around it, so each
-        // point must already cover its neighbours' floors.
-        paneAlpha = ScrimField.maxFilter(paneAlpha, width: pw, height: ph, radius: 1)
-        let openShown = ScrimField.maxFilter(openAlpha, width: pw, height: ph, radius: 1)
+        let pixels = CGSize(width: w, height: h)
         let up = CGAffineTransform(scaleX: CGFloat(w) / CGFloat(pw), y: CGFloat(h) / CGFloat(ph))
         let paneTintImage = CIImage(color: CIColor(red: CGFloat(paneTint.0), green: CGFloat(paneTint.1), blue: CGFloat(paneTint.2), colorSpace: srgb)!).cropped(to: full)
         let panes = paneTintImage.applyingFilter("CIBlendWithMask", parameters: [
             kCIInputBackgroundImageKey: paneBase,
-            kCIInputMaskImageKey: scalar(paneAlpha, width: pw, height: ph).samplingLinear().transformed(by: up).cropped(to: full),
+            kCIInputMaskImageKey: pixelMask(paneAlpha, width: pw, height: ph, pixels: pixels),
         ])
         let open = color(scrimTint).samplingLinear().transformed(by: up).cropped(to: full).applyingFilter("CIBlendWithMask", parameters: [
             kCIInputBackgroundImageKey: sharp,
-            kCIInputMaskImageKey: scalar(openShown, width: pw, height: ph).samplingLinear().transformed(by: up).cropped(to: full),
+            kCIInputMaskImageKey: pixelMask(openAlpha, width: pw, height: ph, pixels: pixels),
         ])
         let shown = panes.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: open, kCIInputMaskImageKey: paneMask])
         guard let image = context.createCGImage(shown, from: full, format: .RGBA8, colorSpace: srgb) else { return nil }
@@ -394,6 +391,15 @@ enum BackdropRenderer {
         let x0 = Int(r.minX.rounded(.down)), y0 = Int(r.minY.rounded(.down))
         let x1 = Int(r.maxX.rounded(.up)), y1 = Int(r.maxY.rounded(.up))
         return ScrimField.Rect(x: x0, y: y0, width: max(x1 - x0, 0), height: max(y1 - y0, 0))
+    }
+
+    /// An opacity map scaled to device pixels. A pixel is interpolated from
+    /// the points around it, so each point first takes its neighbours'
+    /// maximum and no pixel shows less than its own point's floor.
+    static func pixelMask(_ values: [Float], width: Int, height: Int, pixels: CGSize) -> CIImage {
+        let grown = ScrimField.maxFilter(values, width: width, height: height, radius: 1)
+        let up = CGAffineTransform(scaleX: pixels.width / CGFloat(width), y: pixels.height / CGFloat(height))
+        return scalar(grown, width: width, height: height).samplingLinear().transformed(by: up).cropped(to: CGRect(origin: .zero, size: pixels))
     }
 
     /// A one-channel map as an image Core Image reads without colour

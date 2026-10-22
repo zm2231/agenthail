@@ -96,6 +96,29 @@ struct BackdropTest {
         return 0
     }
 
+    /// A checkerboard of 0 and 1 at scale 2: every pixel of a 1 point
+    /// borders a 0 point, so plain interpolation would read 0.75 there.
+    static func masks() -> Int {
+        let pw = 20, ph = 20, scale = 2
+        let values = (0..<(pw * ph)).map { Float(($0 % pw + $0 / pw) % 2) }
+        let w = pw * scale, h = ph * scale
+        let image = BackdropRenderer.pixelMask(values, width: pw, height: ph, pixels: CGSize(width: w, height: h))
+        var out = [Float](repeating: 0, count: w * h * 4)
+        out.withUnsafeMutableBytes { BackdropRenderer.context.render(image, toBitmap: $0.baseAddress!, rowBytes: w * 16, bounds: CGRect(x: 0, y: 0, width: w, height: h), format: .RGBAf, colorSpace: nil) }
+        var lowest: Float = 1
+        for y in 0..<h {
+            for x in 0..<w {
+                let point = values[(y / scale) * pw + x / scale]
+                if point == 1 { lowest = min(lowest, out[(y * w + x) * 4]) }
+            }
+        }
+        if lowest < 0.999 {
+            print("FAIL: upsampled mask reads \(lowest) inside a point that needs 1")
+            return 1
+        }
+        return 0
+    }
+
     static func main() {
         let size = CGSize(width: 420, height: 260)
         let scale: CGFloat = 2
@@ -147,6 +170,7 @@ struct BackdropTest {
             }
         }
         failures += spikes()
+        failures += masks()
         if failures > 0 { exit(1) }
         print("backdrop: every text role reads at 4.5:1 or better on the rendered pixels")
     }
