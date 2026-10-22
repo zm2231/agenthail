@@ -510,6 +510,61 @@ func (r *Registry) RemoveHostCatalogRow(hostID, sessionID, entityID, reason stri
 	return event, created, tx.Commit()
 }
 
+// releaseUnservedHostRowTx gives a local registration the id of a mirrored
+// row its host no longer serves. A row the host still serves stays the host's.
+// Sends still held for the host fail: one that never left is failed, one the
+// host may have received is unknown.
+func releaseUnservedHostRowTx(tx *sql.Tx, sessionID, hostID string) error {
+	var served bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM catalog_sessions WHERE session_id=?)`, sessionID).Scan(&served); err != nil {
+		return err
+	}
+	if served {
+		return SessionOwnedError{SessionID: sessionID, HostID: hostID}
+	}
+	rows, err := tx.Query(`SELECT id,status FROM message_queue WHERE session_id=? AND host_request<>'' AND status IN ('pending','inflight')`, sessionID)
+	if err != nil {
+		return err
+	}
+	type held struct {
+		id     int64
+		status string
+	}
+	var sends []held
+	for rows.Next() {
+		var item held
+		if err := rows.Scan(&item.id, &item.status); err != nil {
+			rows.Close()
+			return err
+		}
+		sends = append(sends, item)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	now := time.Now().UnixMilli()
+	for _, item := range sends {
+		failure := fmt.Sprintf("host %s stopped serving this session before the message was sent", hostID)
+		if item.status == "inflight" {
+			failure = fmt.Sprintf("delivery outcome is unknown: host %s stopped serving this session before confirming it; retry explicitly if it did not receive it", hostID)
+		}
+		if _, err := tx.Exec(`UPDATE message_queue SET status='dead',host_request='',refused=0,dead_at_ms=?,last_error=?,available_at_ms=0,inflight_at_ms=0,updated_at=datetime('now') WHERE id=?`, now, failure, item.id); err != nil {
+			return err
+		}
+		if item.status == "inflight" {
+			if err := markQueuedDeliveryIntent(tx, item.id, DeliveryIntentUnknown, surface.EvidenceUnknown, ""); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := finishQueuedDeliveryIntent(tx, item.id, failure); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(`UPDATE sessions SET host_id='',updated_at=datetime('now') WHERE id=? AND host_id=?`, sessionID, hostID)
+	return err
+}
+
 func (r *Registry) HostCatalogRows(hostID string) ([]CatalogSessionState, error) {
 	rows, err := r.read.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.status,s.source,s.transport,s.runtime_kind,s.configured_model,s.last_active_ms,`+sessionSubagentSelect+`,cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.host_queue_count
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id=? ORDER BY s.id`, hostID)

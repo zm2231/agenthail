@@ -139,6 +139,13 @@ func refuseSharedAdoption(conversation string, holders []map[string]any) error {
 	return surface.DeliveryRefused(fmt.Errorf("%w; the Claude host can take it over only once a single terminal holds it, so close the others first", shared.Unpinnable()))
 }
 
+// refuseSharedMove refuses to move a conversation several processes hold:
+// stopping one would leave the others writing to it here.
+func refuseSharedMove(conversation string, holders []map[string]any) error {
+	shared := surface.SharedConversationError{SessionID: conversation, Holders: sessionHolders(holders)}
+	return surface.DeliveryRefused(fmt.Errorf("%w; it can move only once a single terminal holds it, so close the others first", shared.Unpinnable()))
+}
+
 // shareConversation makes one session of the processes that hold a
 // conversation. No process is attached to it, so a write must name one.
 func shareConversation(processes []claudeProcess) claudeProcess {

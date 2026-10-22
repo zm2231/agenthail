@@ -85,8 +85,11 @@ shown; instead the host's entry in `agenthail hosts`, `GET /api/v1/hosts`, the
 snapshot's `daemon.hosts` and the Mac and iPhone host lists carries a notice
 such as `1 session on server not shown: conversation <id> is also a local
 session`. A local session row is never deleted, so the notice clears when the
-host stops serving that session. Neither discovery nor any local registration can take
-over a mirrored row (`SessionOwnedError`). A
+host stops serving that session. While the host serves a session, neither
+discovery nor any local registration can take over its mirrored row
+(`SessionOwnedError`). Once the host stops serving it, the row no longer owns
+the id: the next local registration takes it, and sends still held for the
+host fail, as unknown when the host may have received them. A
 mirror write for a host that is no longer paired is refused, and removing a
 host waits for its mirror and delivery loops to exit before deleting its rows.
 Pairing, attaching, detaching and removing a host are serialized by one

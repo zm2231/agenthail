@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
@@ -249,5 +250,17 @@ func TestClaudeBadAgenthailConfigFailsDiscovery(t *testing.T) {
 				t.Fatalf("sessions=%v err=%v", sessions, err)
 			}
 		})
+	}
+}
+
+func TestResumingAConversationNoRecordNamesRefusesOneInTwoConfigRoots(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	fixture := claudetest.New(t)
+	fixture.Transcript(fixtureConversation, fixture.Home)
+	fixture.AddRoot("claude-work")
+	fixture.Transcript(fixtureConversation, fixture.Home)
+	c := NewClaude(nil, fixture.Home)
+	if _, err := c.resumeAs(context.Background(), fixtureConversation, fixture.Home, claudehost.OpenRequest{}); err == nil || !strings.Contains(err.Error(), "more than one Claude config directory") {
+		t.Fatalf("err=%v", err)
 	}
 }

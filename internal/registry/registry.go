@@ -896,6 +896,18 @@ CREATE TABLE IF NOT EXISTS signin_bindings (
 CREATE TABLE IF NOT EXISTS signin_off (
 	consumer TEXT PRIMARY KEY
 );
+CREATE TABLE IF NOT EXISTS session_moves (
+	id TEXT PRIMARY KEY,
+	conversation TEXT NOT NULL,
+	peer_host TEXT NOT NULL,
+	role TEXT NOT NULL CHECK (role IN ('out','in')),
+	state TEXT NOT NULL,
+	manifest BLOB NOT NULL DEFAULT '',
+	detail TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_moves_conversation ON session_moves(conversation, role, state);
 `
 
 func (r *Registry) RegisterSession(s surface.Session) error {
@@ -919,7 +931,9 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		return err
 	}
 	if owner != "" {
-		return SessionOwnedError{SessionID: s.ID, HostID: owner}
+		if err := releaseUnservedHostRowTx(tx, s.ID, owner); err != nil {
+			return err
+		}
 	}
 	if s.HolderPID > 0 {
 		// A session addressed to one of the processes that hold its
@@ -2230,8 +2244,8 @@ const queuePeerRow = `%[1]s.operation='message' AND %[1]s.author!='person' AND %
 // claimCandidateFilter selects the session's next queued message, the one a
 // claim acts on.
 func claimCandidateFilter(sessionID, busyDelivery string, mode deliverypolicy.Mode) (string, []any) {
-	filter := `session_id=? AND host_request='' AND status IN ('pending','inflight')`
-	args := []any{sessionID}
+	filter := `session_id=? AND host_request='' AND status IN ('pending','inflight') AND NOT EXISTS(SELECT 1 FROM session_moves WHERE conversation=? AND role='out' AND state IN ('preparing','sent'))`
+	args := []any{sessionID, sessionID}
 	if busyDelivery == claimPeer {
 		filter += ` AND id=(SELECT MIN(m.id) FROM message_queue m WHERE m.session_id=? AND m.host_request='' AND m.status IN ('pending','inflight')) AND ` + fmt.Sprintf(queuePeerRow, "message_queue")
 		args = append(args, sessionID)

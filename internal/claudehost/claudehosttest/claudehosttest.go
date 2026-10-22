@@ -28,6 +28,9 @@ type Fixture struct {
 	Home      string
 	Cwd       string
 	ClaudeDir string
+	// Claude is the CLI the hosts run. It is the fake CLI unless a test sets
+	// it before starting a host.
+	Claude string
 }
 
 type Turn struct {
@@ -51,7 +54,7 @@ func New(t testing.TB, home string) *Fixture {
 		home = dir
 		t.Cleanup(func() { os.RemoveAll(dir) })
 	}
-	f := &Fixture{Home: home, Cwd: filepath.Join(home, "work"), ClaudeDir: filepath.Join(home, "fake-claude")}
+	f := &Fixture{Home: home, Cwd: filepath.Join(home, "work"), ClaudeDir: filepath.Join(home, "fake-claude"), Claude: filepath.Join(hostDir(), "test", "fake-claude.mjs")}
 	for _, dir := range []string{f.Cwd, f.ClaudeDir, f.reportDir()} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
@@ -98,7 +101,7 @@ func (f *Fixture) launch(t testing.TB, script, version string, env ...string) cl
 	return claudehost.Launch{
 		Node:    node,
 		Script:  filepath.Join(hostDir, script),
-		Claude:  filepath.Join(hostDir, "test", "fake-claude.mjs"),
+		Claude:  f.Claude,
 		Version: version,
 		Env:     env,
 	}

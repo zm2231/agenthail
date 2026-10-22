@@ -209,13 +209,58 @@ func deliveryError(err error) error {
 // earlier host that still runs holds the conversation, and a Claude that
 // fails to start has refused it.
 func (c *Claude) resume(ctx context.Context, conversation, cwd string) (*surface.Session, error) {
+	return c.resumeAs(ctx, conversation, cwd, claudehost.OpenRequest{})
+}
+
+// claudeTranscriptExists reads the filesystem itself rather than the
+// transcript index, whose folder listings can lag a rename.
+func claudeTranscriptExists(root, conversation string) bool {
+	projects, err := os.ReadDir(filepath.Join(root, "projects"))
+	if err != nil {
+		return false
+	}
+	for _, project := range projects {
+		if !project.IsDir() {
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(root, "projects", project.Name(), conversation+".jsonl")); err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
+}
+
+// resumeAs is resume with the model, permission mode and name of options,
+// for a conversation the host has no settings for yet.
+func (c *Claude) resumeAs(ctx context.Context, conversation, cwd string, options claudehost.OpenRequest) (*surface.Session, error) {
 	root, err := c.conversationRoot(conversation)
 	if err != nil {
 		return nil, err
 	}
+	if root == "" {
+		roots, err := surface.ClaudeConfigRoots(c.home)
+		if err != nil {
+			return nil, err
+		}
+		found := map[string]bool{}
+		for _, candidate := range roots {
+			found[candidate] = claudeTranscriptExists(candidate, conversation)
+		}
+		if root, err = claudeHoldingRoot(conversation, roots, found, nil); err != nil {
+			return nil, err
+		}
+	}
+	// Claude finds no conversation to resume without its transcript, which a
+	// move to another host takes away, so none is started.
+	if root == "" || !claudeTranscriptExists(root, conversation) {
+		return nil, surface.DeliveryTerminal(fmt.Errorf("Claude conversation %s has no transcript on this machine to resume", conversation), surface.DeliveryTargetMissing)
+	}
 	// Claude restores a resumed conversation's title but names the resumed
 	// process anew, so the title is passed back as its name.
-	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd, ConfigDir: surface.ClaudeLaunchConfigDir(c.home, root), Name: c.conversationTitle(ctx, conversation, root)})
+	if options.Name == "" {
+		options.Name = c.conversationTitle(ctx, conversation, root)
+	}
+	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd, ConfigDir: surface.ClaudeLaunchConfigDir(c.home, root), Name: options.Name, Model: options.Model, PermissionMode: options.PermissionMode})
 	if err != nil {
 		return nil, claudeHostResumeError(conversation, err)
 	}
