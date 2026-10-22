@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -174,7 +175,7 @@ func TestAnIdleClaudeSessionMovesToAPairedHostAndRunsThere(t *testing.T) {
 	if alias, _ := target.reg.LookupAlias("builder"); alias != session.ID {
 		t.Fatalf("target alias=%q", alias)
 	}
-	placed := filepath.Join(target.host.Home, ".claude", "projects", strings.NewReplacer("/", "-", ".", "-").Replace(resolved), session.ID+".jsonl")
+	placed := filepath.Join(target.host.Home, ".claude", "projects", regexp.MustCompile(`[^A-Za-z0-9]`).ReplaceAllString(resolved, "-"), session.ID+".jsonl")
 	data, err := os.ReadFile(placed)
 	if err != nil || !strings.HasPrefix(string(data), string(before)) {
 		t.Fatalf("the target's transcript does not continue the source's: err=%v", err)
