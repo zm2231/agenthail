@@ -478,7 +478,14 @@ test("a registration's tag reaches every notification and withdrawal sent throug
   const env = environment({ APNS_KEY_P8: `-----BEGIN PRIVATE KEY-----\n${pkcs8}\n-----END PRIVATE KEY-----`, APNS_KEY_ID: "KEY1234567", APNS_TOPIC: "com.agenthail.ios" })
   const tagged = await (await register(request("POST", await registrationBody(env, { tag: "h0123456789ab" })), env, acceptAttestation)).json()
   const untagged = await (await register(request("POST", await registrationBody(env)), env, acceptAttestation)).json()
-  for (const tag of ["has space", "x".repeat(65), 7, "h/1"]) {
+  for (const tag of ["", "a", "x".repeat(64)]) {
+    const accepted = await register(request("POST", await registrationBody(env, { tag })), env, acceptAttestation)
+    assert.equal(accepted.status, 201)
+    const { installationId } = await accepted.json()
+    const stored = await env.PUSH_DEVICES.get(`device:${installationId}`, "json")
+    assert.equal(stored.tag, tag === "" ? undefined : tag)
+  }
+  for (const tag of ["has space", "x".repeat(65), 7, "h/1", null]) {
     const refused = await register(request("POST", await registrationBody(env, { tag })), env, acceptAttestation)
     assert.equal(refused.status, 400)
     assert.deepEqual(await refused.json(), { error: "invalid_tag" })

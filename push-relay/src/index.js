@@ -63,7 +63,7 @@ export async function register(request, env, verifier = verifyAppAttestation) {
   if (!/^[a-fA-F0-9]{64,256}$/.test(token)) {
     return json({ error: "invalid_device_token" }, 400)
   }
-  const tag = body?.tag ?? ""
+  const tag = body?.tag === undefined ? "" : body.tag
   if (tag !== "" && (typeof tag !== "string" || !/^[A-Za-z0-9._-]{1,64}$/.test(tag))) {
     return json({ error: "invalid_tag" }, 400)
   }
