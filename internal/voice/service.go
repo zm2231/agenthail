@@ -80,7 +80,7 @@ type Provider interface {
 // persistent Codex operator. It is intentionally separate from Provider so
 // other voice transports remain usable without exposing a tool callback.
 type DynamicToolResponder interface {
-	RespondDynamicToolCall(context.Context, string, bool, string) error
+	RespondDynamicToolCall(ctx context.Context, requestID, threadID string, success bool, text string) error
 }
 
 // Target is the selected coding session behind a voice call. The audio plane
@@ -144,7 +144,7 @@ type Service struct {
 	lastSeen                atomic.Int64
 	published               atomic.Pointer[snapshot]
 	running                 bool
-	register                func(surface.Session) error
+	register                func(context.Context, surface.Session) error
 	loadErr                 error
 	boundAttempt            string
 	eventGap                bool
@@ -194,23 +194,23 @@ var systemClock = clock{
 	},
 }
 
-func New(path string, provider Provider, register func(surface.Session) error, commandPath string) *Service {
+func New(path string, provider Provider, register func(context.Context, surface.Session) error, commandPath string) *Service {
 	return NewWithTargets(path, provider, register, commandPath, nil, delivery.Dispatcher{})
 }
 
-func NewWithTargets(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer) *Service {
+func NewWithTargets(path string, provider Provider, register func(context.Context, surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer) *Service {
 	return NewWithTargetsAndOperatorSource(path, provider, register, commandPath, target, dispatcher, nil)
 }
 
-func NewWithTargetsAndOperatorSource(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer, setOperatorSourceActive func(session *surface.Session, active bool)) *Service {
+func NewWithTargetsAndOperatorSource(path string, provider Provider, register func(context.Context, surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer, setOperatorSourceActive func(session *surface.Session, active bool)) *Service {
 	return NewWithTargetsAndOperatorSourceAndStream(path, provider, register, commandPath, target, dispatcher, setOperatorSourceActive, nil)
 }
 
-func NewWithTargetsAndOperatorSourceAndStream(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider) *Service {
+func NewWithTargetsAndOperatorSourceAndStream(path string, provider Provider, register func(context.Context, surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider) *Service {
 	return newService(path, provider, register, commandPath, target, dispatcher, setOperatorSourceActive, stream, systemClock)
 }
 
-func newService(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider, clock clock) *Service {
+func newService(path string, provider Provider, register func(context.Context, surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider, clock clock) *Service {
 	s := &Service{path: path, provider: provider, register: register, commandPath: commandPath, target: target, dispatcher: dispatcher, setOperatorSourceActive: setOperatorSourceActive, stream: stream, clock: clock, speechTimeout: delegatedSpeechTimeout}
 	s.background, s.stop = context.WithCancel(context.Background())
 	s.state.State = State{Protocol: 1, Phase: "idle", Events: []Event{}}
@@ -373,7 +373,7 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 		}
 		if v.Session != nil {
 			if s.register != nil {
-				return s.register(*v.Session)
+				return s.register(ctx, *v.Session)
 			}
 			return nil
 		}
@@ -958,7 +958,7 @@ func (s *Service) createOperator(ctx context.Context) error {
 		return err
 	}
 	if s.register != nil {
-		return s.register(*session)
+		return s.register(ctx, *session)
 	}
 	return nil
 }
@@ -1110,15 +1110,15 @@ func (s *Service) handleDynamicToolCall(ctx context.Context, e Event) {
 	}
 	arguments, _ := e.Params["arguments"].(map[string]any)
 	if tool == "voice_send_to_lead" {
-		s.sendToLead(responder, requestID, arguments)
+		s.sendToLead(responder, requestID, threadID, arguments)
 		return
 	}
 	message, err := s.callTool(ctx, tool, arguments)
 	if err != nil {
-		_ = responder.RespondDynamicToolCall(ctx, requestID, false, err.Error())
+		_ = responder.RespondDynamicToolCall(ctx, requestID, threadID, false, err.Error())
 		return
 	}
-	if err := responder.RespondDynamicToolCall(ctx, requestID, true, message); err != nil {
+	if err := responder.RespondDynamicToolCall(ctx, requestID, threadID, true, message); err != nil {
 		s.state.State.Message = "Voice tool response could not be returned to Codex: " + err.Error()
 	}
 }

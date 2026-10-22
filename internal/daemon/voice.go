@@ -32,7 +32,7 @@ func (d *Daemon) registerVoiceAPI(mux *http.ServeMux, dashboard *dashboardServer
 	if err != nil {
 		provider = nil
 	}
-	s := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(filepath.Dir(d.Registry.Path()), "voice", "operator.json"), provider, d.Registry.RegisterSession, commandPath, d.resolveVoiceTarget, coordinator.Sender{Service: d.coordinator()}, func(session *surface.Session, active bool) {
+	s := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(filepath.Dir(d.Registry.Path()), "voice", "operator.json"), provider, d.registerVoiceOperator, commandPath, d.resolveVoiceTarget, coordinator.Sender{Service: d.coordinator()}, func(session *surface.Session, active bool) {
 		d.setSessionSourceHold(session, active, "voice")
 	}, daemonVoiceStreamProvider{daemon: d})
 	s.SetProjects(voiceProjects{d: d})
@@ -59,6 +59,25 @@ func (p daemonVoiceStreamProvider) PrepareSessionStream(ctx context.Context, ses
 		return sessionstream.Subscription{}, fmt.Errorf("voice session source: %w", err)
 	}
 	return p.daemon.sources.prepareStream(ctx, session, adapter)
+}
+
+// registerVoiceOperator registers the operator as its surface reports it
+// now. A saved operator keeps the route and runtime kind it had when it was
+// created, and those change as the runtimes that can carry it change.
+func (d *Daemon) registerVoiceOperator(ctx context.Context, operator surface.Session) error {
+	adapter := d.adapters().ForSurface(operator.Surface)
+	if adapter == nil {
+		return fmt.Errorf("%s voice operator has no configured adapter", operator.Surface)
+	}
+	live, err := adapter.Resolve(ctx, operator.ID)
+	if err != nil {
+		return fmt.Errorf("verify voice operator: %w", err)
+	}
+	if live == nil || live.ID != operator.ID {
+		return fmt.Errorf("verify voice operator: live session did not retain exact identity %s", operator.ID)
+	}
+	operator.Transport, operator.RuntimeKind = live.Transport, live.RuntimeKind
+	return d.Registry.RegisterSession(operator)
 }
 
 // resolveVoiceTarget selects a registered session by alias or exact ID and

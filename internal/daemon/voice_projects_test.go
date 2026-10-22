@@ -60,7 +60,7 @@ func (c *toolVoice) Request(context.Context, *surface.Session, string, map[strin
 
 func (c *toolVoice) Interrupt(context.Context, *surface.Session) error { return nil }
 
-func (c *toolVoice) RespondDynamicToolCall(_ context.Context, requestID string, success bool, text string) error {
+func (c *toolVoice) RespondDynamicToolCall(_ context.Context, requestID, _ string, success bool, text string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.answers[requestID] = toolAnswer{success, text}
@@ -103,7 +103,10 @@ func (c *toolVoice) await(t *testing.T, tool, id string) toolAnswer {
 func connectToolVoice(t *testing.T, node *federationNode) (*voice.Service, *toolVoice) {
 	t.Helper()
 	call := &toolVoice{answers: map[string]toolAnswer{}}
-	service := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(t.TempDir(), "voice", "operator.json"), call, node.reg.RegisterSession, "/fixture/agenthail", node.daemon.resolveVoiceTarget, node.daemon.dispatcher(), nil, daemonVoiceStreamProvider{daemon: node.daemon})
+	node.fake.mu.Lock()
+	node.fake.sessions["operator"] = surface.Session{ID: "operator", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Voice operator", Transport: "desktop", Status: surface.StatusIdle}
+	node.fake.mu.Unlock()
+	service := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(t.TempDir(), "voice", "operator.json"), call, node.daemon.registerVoiceOperator, "/fixture/agenthail", node.daemon.resolveVoiceTarget, node.daemon.dispatcher(), nil, daemonVoiceStreamProvider{daemon: node.daemon})
 	service.SetProjects(voiceProjects{d: node.daemon})
 	t.Cleanup(service.Close)
 	for _, action := range []voice.Action{{Action: "prepare"}, {Action: "start", AttemptID: "call-a", SDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"}} {

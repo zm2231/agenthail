@@ -2,28 +2,41 @@ package surfaces
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-const codexHookJS = `
+// codexHookSource is installed with its own hash as its ABI, so any change to
+// it replaces the hook a running Desktop already holds.
+const codexHookSource = `
 (() => {
   if (!globalThis.electronBridge || typeof globalThis.electronBridge.sendMessageFromView !== 'function') return 'no-renderer-bridge';
   const current = globalThis.__agenthailCodexDesktopRendererV2;
-  if (current && typeof current.request === 'function') return 'already';
+  if (current && current.abi === __ABI__ && typeof current.request === 'function') return 'already';
   const bridge = {
-    events: [],
-    sequence: 0,
-    next: 0,
-    pending: new Map(),
+    abi: __ABI__,
+    events: current && Array.isArray(current.events) ? current.events.slice() : [],
+    sequence: current && Number.isSafeInteger(current.sequence) ? current.sequence : 0,
+    next: current && Number.isSafeInteger(current.next) ? current.next : 0,
+    pending: current && current.pending instanceof Map ? current.pending : new Map(),
+    toolRequests: new Map(),
   };
+  if (current && current.toolRequests instanceof Map) {
+    for (const [key, request] of current.toolRequests) {
+      if (request && request.id != null) bridge.toolRequests.set(key, {id: request.id, threadId: request.threadId, at: Number.isFinite(request.at) ? request.at : Date.now()});
+    }
+  }
+  if (current) current.retired = true;
   window.addEventListener('message', event => {
     const data = event.data;
-    if (!data || data.hostId !== 'local') return;
+    if (bridge.retired || !data || data.hostId !== 'local') return;
     if (data.type === 'mcp-response' && data.message && data.message.id != null) {
       const id = String(data.message.id);
       const resolve = bridge.pending.get(id);
@@ -40,11 +53,26 @@ const codexHookJS = `
     }
     if (data.type === 'mcp-request' && data.request && data.request.method === 'item/tool/call' && data.request.id != null) {
       const params = data.request.params || {};
+      // Desktop answers its own threads' tool calls where this bridge can't
+      // see it, so requests expire by age; one being answered is far younger.
+      const now = Date.now();
+      for (const [key, request] of bridge.toolRequests) {
+        if (now - request.at < 600000 && bridge.toolRequests.size < 4096) break;
+        bridge.toolRequests.delete(key);
+      }
+      bridge.toolRequests.set(String(data.request.id), {id: data.request.id, threadId: params.threadId, at: now});
       bridge.events.push({sequence: ++bridge.sequence, method: 'item/tool/call', params: {...params, requestId: String(data.request.id)}});
       if (bridge.events.length > 1000) bridge.events.splice(0, bridge.events.length - 1000);
     }
   });
-  bridge.respondDynamicToolCall = (requestId, success, text) => Promise.resolve(globalThis.electronBridge.sendMessageFromView({type:'mcp-response', hostId:'local', message:{id:requestId, result:{success:Boolean(success), contentItems:[{type:'inputText', text:String(text || '')}]}}}));
+  bridge.respondDynamicToolCall = async (requestId, threadId, success, text) => {
+    const key = String(requestId);
+    const request = bridge.toolRequests.get(key);
+    if (!request) throw Error('Dynamic tool request is no longer available');
+    if (request.threadId !== threadId) throw Error('Dynamic tool response thread does not match its request');
+    await globalThis.electronBridge.sendMessageFromView({type:'mcp-response', hostId:'local', threadId, response:{id:request.id, result:{success:Boolean(success), contentItems:[{type:'inputText', text:String(text || '')}]}}});
+    bridge.toolRequests.delete(key);
+  };
   bridge.request = (method, params, timeoutMs) => new Promise(resolve => {
     const id = 'agenthail-' + Date.now() + '-' + (++bridge.next);
     const timer = setTimeout(() => {
@@ -60,13 +88,18 @@ const codexHookJS = `
 })()
 `
 
+var codexHookJS = func() string {
+	sum := sha256.Sum256([]byte(codexHookSource))
+	return strings.ReplaceAll(codexHookSource, "__ABI__", strconvQuote(hex.EncodeToString(sum[:8])))
+}()
+
 func codexRPCJSONJS(method, paramsJSON string, timeout time.Duration) string {
 	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop renderer bridge is unavailable'}});return JSON.stringify(await b.request(%s,%s,%d))}catch(e){return JSON.stringify({error:{code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`,
 		strconvQuote(method), paramsJSON, timeout.Milliseconds())
 }
 
-func codexDynamicToolResponseJS(requestID string, success bool, text string) string {
-	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b||typeof b.respondDynamicToolCall!=='function')return'bridge_unavailable';await b.respondDynamicToolCall(%s,%t,%s);return'ok'}catch(e){return String(e&&e.message||e)}})()`, strconvQuote(requestID), success, strconvQuote(text))
+func codexDynamicToolResponseJS(requestID, threadID string, success bool, text string) string {
+	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b||typeof b.respondDynamicToolCall!=='function')return'bridge_unavailable';await b.respondDynamicToolCall(%s,%s,%t,%s);return'ok'}catch(e){return String(e&&e.message||e)}})()`, strconvQuote(requestID), strconvQuote(threadID), success, strconvQuote(text))
 }
 
 func codexPayloadInitJS(id string) string {
