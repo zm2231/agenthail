@@ -40,6 +40,7 @@ final class SessionPane: ObservableObject, Identifiable {
     private var sessionStreamTask: Task<Void, Never>?
     private var sessionCursor: UInt64 = 0
     private var streamAwaitsCursor = false
+    private var streamUnsupported = false
     private var detailReloadTask: Task<Void, Never>?
     private var detailLoadTask: Task<Void, Never>?
     @Published private(set) var detailLoadError: String?
@@ -204,6 +205,10 @@ final class SessionPane: ObservableObject, Identifiable {
         if let selected = selectedSessionID {
             if let live = sessions.first(where: { $0.id == selected }) {
                 selectedSnapshot = live
+                if streamUnsupported, live.capabilities.stream, removedSession == nil {
+                    awaitStreamCursor()
+                    startDetailLoad(selected)
+                }
                 if removedSession != nil {
                     removedSession = nil
                     olderCursor = frozenOlderCursor
@@ -500,6 +505,7 @@ final class SessionPane: ObservableObject, Identifiable {
         sessionStreamTask?.cancel()
         sessionStreamTask = nil
         streamAwaitsCursor = true
+        streamUnsupported = false
     }
 
     private func startSessionStream(_ id: String, after cursor: UInt64) {
@@ -517,7 +523,11 @@ final class SessionPane: ObservableObject, Identifiable {
                     })
                 } catch {
                     if Task.isCancelled || selectedSessionID != id { return }
-                    if case AgenthailAPIError.streamUnsupported = error { return }
+                    if case AgenthailAPIError.streamUnsupported = error, selectedSnapshot?.capabilities.stream != true {
+                        // A session gains its stream once its transcript exists; reconcile restarts it then.
+                        streamUnsupported = true
+                        return
+                    }
                     if case AgenthailAPIError.streamGap = error {
                         streamAwaitsCursor = true
                         startDetailLoad(id)
