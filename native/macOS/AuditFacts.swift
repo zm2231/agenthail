@@ -2,7 +2,11 @@ import Foundation
 
 enum AuditFacts {
     static func kindLabel(_ kind: String) -> String {
-        (kind.isEmpty ? "event" : kind).replacingOccurrences(of: "_", with: " ").capitalized
+        let words = (kind.isEmpty ? "event" : kind)
+            .split(whereSeparator: { $0 == "_" || $0 == "-" || $0 == " " })
+            .joined(separator: " ")
+            .lowercased()
+        return words.prefix(1).uppercased() + words.dropFirst()
     }
 
     static func target(_ entry: HistoryState) -> String {
@@ -10,7 +14,8 @@ enum AuditFacts {
     }
 
     static func source(_ entry: HistoryState) -> String? {
-        nonEmpty(entry.source)
+        guard let source = nonEmpty(entry.source), source != target(entry) else { return nil }
+        return source
     }
 
     static func isError(_ entry: HistoryState) -> Bool {

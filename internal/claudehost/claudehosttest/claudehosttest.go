@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudehost"
+	"github.com/zm2231/agenthail/internal/claudetestenv"
 )
 
 type Fixture struct {
@@ -42,11 +43,13 @@ type Turn struct {
 	PID      int             `json:"pid"`
 }
 
-// New makes a home short enough for unix socket paths. When home is
-// non-empty it is used instead, so a test can share another fixture's home.
+// New makes a home short enough for unix socket paths, in an environment
+// cleared of the Claude session the test runs in. When home is non-empty it is
+// used instead, with the environment the fixture that made it set up.
 func New(t testing.TB, home string) *Fixture {
 	t.Helper()
 	if home == "" {
+		claudetestenv.Isolate(t)
 		dir, err := os.MkdirTemp("", "ch")
 		if err != nil {
 			t.Fatal(err)

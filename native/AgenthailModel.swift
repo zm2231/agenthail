@@ -20,7 +20,9 @@ final class AgenthailModel: ObservableObject {
     @Published private(set) var finishedUnseen: Set<String> = []
     @Published private(set) var holderPicks: [String: HolderPin] = [:]
     @Published private(set) var snapshotLoadedAt: Date?
-    @Published var newSessionVisible = false
+    @Published var newSessionVisible = false {
+        didSet { if newSessionVisible { paletteVisible = false } }
+    }
     @Published var newSessionMessage: String?
     @Published var paletteVisible = false
     @Published var searchQuery = ""

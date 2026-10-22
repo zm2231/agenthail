@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct CommandPalette: View {
@@ -126,6 +127,7 @@ struct CommandPalette: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(DesktopPalette.line2))
         .shadow(color: .black.opacity(0.35), radius: 24, y: 10)
         .task { fieldFocused = true }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in fieldFocused = true }
         .onChange(of: query) { highlightedID = nil }
     }
 

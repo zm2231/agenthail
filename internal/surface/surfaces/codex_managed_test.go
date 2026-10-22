@@ -319,20 +319,40 @@ func agentMessage(id, phase, text string) map[string]any {
 	return map[string]any{"id": id, "type": "agentMessage", "phase": phase, "text": text}
 }
 
-// managedThreadReads answers thread/read with reads in order, repeating the last.
+// managedThreadReads answers each read of the thread, thread/read or
+// thread/turns/list, with reads in order, repeating the last.
 func managedThreadReads(reads ...map[string]any) func(string, map[string]any) map[string]any {
 	var mu sync.Mutex
 	index := 0
-	return func(method string, _ map[string]any) map[string]any {
-		if method != "thread/read" {
+	return func(method string, params map[string]any) map[string]any {
+		if method != "thread/read" && method != "thread/turns/list" {
 			return nil
 		}
 		mu.Lock()
 		defer mu.Unlock()
 		read := reads[min(index, len(reads)-1)]
 		index++
+		return managedReadAnswer(method, params, read)
+	}
+}
+
+// managedReadAnswer answers a read of the thread from a thread/read result,
+// paging its turns newest first for thread/turns/list.
+func managedReadAnswer(method string, params map[string]any, read map[string]any) map[string]any {
+	if method != "thread/turns/list" {
 		return read
 	}
+	thread, _ := read["thread"].(map[string]any)
+	turns, _ := thread["turns"].([]any)
+	limit := len(turns)
+	if value, ok := params["limit"].(float64); ok && int(value) < limit {
+		limit = int(value)
+	}
+	page := make([]any, 0, limit)
+	for index := len(turns) - 1; index >= 0 && len(page) < limit; index-- {
+		page = append(page, turns[index])
+	}
+	return map[string]any{"data": page}
 }
 
 func TestCodexManagedStreamEmitsAuthoritativeTurnEvents(t *testing.T) {
@@ -431,6 +451,8 @@ func TestManagedStreamRestartsEmitIdempotentAuthoritativeSnapshots(t *testing.T)
 
 func TestCodexManagedStreamForwardsGoalAndContextNotificationsForItsThread(t *testing.T) {
 	fake := startManagedCodex(t, managedThreadReads(managedTurn("turn", "completed", agentMessage("final", "final_answer", "done"))))
+	fake.AddThread(codextest.Thread{ID: "thread"})
+	fake.Load("thread")
 	fake.Notify("thread/goal/cleared", map[string]any{"threadId": "other"})
 	fake.Notify("thread/goal/cleared", map[string]any{"threadId": "thread"})
 	fake.Notify("thread/tokenUsage/updated", map[string]any{

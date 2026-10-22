@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -21,9 +22,30 @@ const timelineReadBudget = 16 << 20
 const timelineTextBudget = 16 << 10
 const timelineItemLimit = 200
 
-// transcriptPollInterval is how often live streams re-read their source.
-// Tests shorten it so stream windows do not dominate the suite.
+// transcriptPollInterval is the longest a live stream waits before re-reading
+// its source; a reported write to the file wakes it sooner. Tests shorten it
+// so stream windows do not dominate the suite.
 var transcriptPollInterval = 300 * time.Millisecond
+
+// transcriptWaiting, when set by a test, runs each time a stream has read its
+// transcript and starts to wait.
+var transcriptWaiting func()
+
+// awaitTranscript waits for a reported write to the transcript or the poll
+// interval, whichever comes first.
+func awaitTranscript(ctx context.Context, wake *filewake.Wake) error {
+	wake.Refresh()
+	if transcriptWaiting != nil {
+		transcriptWaiting()
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-wake.C():
+	case <-time.After(transcriptPollInterval):
+	}
+	return nil
+}
 
 func (c *Claude) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
 	path, err := c.sessionTranscript(session)
@@ -155,6 +177,8 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 	if err != nil {
 		return err
 	}
+	wake := filewake.Follow(path)
+	defer wake.Release()
 	deadline := time.Now().Add(timeout)
 	currentTurnID := session.CodexCurrentTurnID
 	for time.Now().Before(deadline) {
@@ -217,10 +241,8 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 		offset = next
 		session.TranscriptOffset = offset
 		session.TranscriptOffsetSet = true
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(transcriptPollInterval):
+		if err := awaitTranscript(ctx, wake); err != nil {
+			return err
 		}
 	}
 	return fmt.Errorf("stream timed out after %s: %w", timeout, surface.ErrStreamWindow)

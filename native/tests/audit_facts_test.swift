@@ -26,7 +26,10 @@ struct AuditFactsTest {
         let wrapped = HistoryState(id: 5, createdAt: "", kind: "peer_received", sessionId: nil, sourceSessionId: nil, target: nil, source: nil, queueId: nil, message: peer, result: nil, error: nil)
         expect(AuditFacts.content(wrapped) == peer, "peer envelopes keep every recorded attribute, as the web shows them")
 
-        expect(AuditFacts.kindLabel("peer_send") == "Peer Send" && AuditFacts.kindLabel("") == "Event", "kind labels match the web")
+        expect(AuditFacts.kindLabel("peer_send") == "Peer send" && AuditFacts.kindLabel("") == "Event", "kind labels match the web")
+        expect(AuditFacts.kindLabel("transport-accepted") == "Transport accepted", "hyphenated kinds read as words")
+        let selfRoute = event(#"{"id":6,"createdAt":"","kind":"peer_send","sessionId":"s3","source":"claude/builder","target":"claude/builder","message":"m"}"#)
+        expect(AuditFacts.source(selfRoute) == nil && AuditFacts.target(selfRoute) == "claude/builder", "a route to itself names the session once")
         print("audit facts tests passed")
     }
 

@@ -207,6 +207,7 @@ type claudeGlobalConfigCache struct {
 
 type claudeGlobalConfigEntry struct {
 	modified time.Time
+	read     time.Time
 	size     int64
 	root     ClaudeConfigRoot
 }
@@ -224,12 +225,13 @@ func (c *claudeGlobalConfigCache) read(path string) ClaudeConfigRoot {
 	c.mu.Lock()
 	entry, ok := c.entries[path]
 	c.mu.Unlock()
-	if ok && entry.modified.Equal(info.ModTime()) && entry.size == info.Size() {
+	if ok && UnchangedSince(entry.read, entry.modified, info.ModTime()) && entry.size == info.Size() {
 		return entry.root
 	}
+	read := time.Now()
 	root := parseClaudeGlobalConfig(path)
 	c.mu.Lock()
-	c.entries[path] = claudeGlobalConfigEntry{modified: info.ModTime(), size: info.Size(), root: root}
+	c.entries[path] = claudeGlobalConfigEntry{modified: info.ModTime(), read: read, size: info.Size(), root: root}
 	c.mu.Unlock()
 	return root
 }

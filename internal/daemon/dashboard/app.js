@@ -909,7 +909,12 @@ function renderOperations() {
     );
 }
 function auditKindLabel(kind) {
-  return String(kind || "event").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const words = String(kind || "event").replace(/[_-]+/g, " ").trim().toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+function auditRoute(entry) {
+  const target = entry.target || entry.sessionId || "Agenthail";
+  return entry.source && entry.source !== target ? `${escape(entry.source)} <span class="route-arrow">→</span> ${escape(target)}` : escape(target);
 }
 function signinOffHint(detail) {
   const claude = /^Claude Remote Control/.test(detail);
@@ -1178,8 +1183,7 @@ function renderAudit() {
   kindSelect.value = audit.kinds.includes(audit.kind) ? audit.kind : "all";
   audit.kind = kindSelect.value;
   $("#history-list").innerHTML = audit.items.map((entry) => {
-    const target = entry.target || entry.sessionId || "Agenthail";
-    const route = entry.source ? `${escape(entry.source)} <span class="route-arrow">→</span> ${escape(target)}` : escape(target);
+    const route = auditRoute(entry);
     const content = entry.error || entry.message || entry.result || "No message content recorded";
     return `<article class="audit-event"><div class="audit-marker ${entry.error ? "failed" : ""}"></div><div class="audit-event-body"><div class="audit-event-heading"><strong>${escape(auditKindLabel(entry.kind))}</strong><time>${timeAgo(entry.createdAt)}</time></div><div class="audit-route">${route}</div><details><summary>View details</summary><div class="audit-detail${entry.error ? " operation-error" : ""}">${markdown(content)}</div></details></div></article>`;
   }).join("") || `<div class="empty-card">${audit.loading ? "Loading activity." : audit.loaded ? "No activity matches these filters." : "Open Audit to load activity."}</div>`;
