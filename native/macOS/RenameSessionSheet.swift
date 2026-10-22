@@ -18,13 +18,13 @@ struct RenameSessionSheet: View {
     private var unchanged: Bool { SessionHandle.normalized(text) == (session.alias ?? "") }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesktopSpace.m) {
             Text("Rename \(session.title)")
                 .font(.headline)
             Text("Other agents and links use this name to reach the session.")
-                .font(.system(size: 12))
+                .font(.system(size: DesktopType.secondary))
                 .foregroundStyle(DesktopPalette.text2)
-            HStack(spacing: 4) {
+            HStack(spacing: DesktopSpace.xs) {
                 Text("@").foregroundStyle(DesktopPalette.text2)
                 TextField("name", text: $text)
                     .textFieldStyle(.roundedBorder)
@@ -32,8 +32,8 @@ struct RenameSessionSheet: View {
             }
             if let message = error ?? (text.isEmpty ? nil : problem) {
                 Text(message)
-                    .font(.system(size: 12))
-                    .foregroundStyle(DesktopPalette.red)
+                    .font(.system(size: DesktopType.secondary))
+                    .foregroundStyle(DesktopPalette.failed)
             }
             HStack {
                 Spacer()
@@ -44,7 +44,7 @@ struct RenameSessionSheet: View {
                     .disabled(saving || problem != nil || unchanged)
             }
         }
-        .padding(20)
+        .padding(DesktopSpace.xl)
         .frame(width: 380)
     }
 

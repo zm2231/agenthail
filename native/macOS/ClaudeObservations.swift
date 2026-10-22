@@ -12,7 +12,7 @@ struct ClaudeObservationsSection: View {
                         let facts = [run.providerState, run.runType, run.updatedAt.map { "Updated \($0)" }].compactMap { $0 }.filter { !$0.isEmpty }
                         if !facts.isEmpty {
                             Text(facts.joined(separator: " · "))
-                                .font(.system(size: 11.5))
+                                .font(.system(size: DesktopType.meta))
                                 .foregroundStyle(DesktopPalette.text2)
                         }
                     }
@@ -24,8 +24,8 @@ struct ClaudeObservationsSection: View {
                 ForEach(errors.keys.sorted(), id: \.self) { key in
                     if let message = errors[key] {
                         Text("\(key): \(message)")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(DesktopPalette.amber)
+                            .font(.system(size: DesktopType.meta))
+                            .foregroundStyle(DesktopPalette.failed)
                             .textSelection(.enabled)
                     }
                 }

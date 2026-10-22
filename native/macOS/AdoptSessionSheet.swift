@@ -11,11 +11,11 @@ struct AdoptSessionSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesktopSpace.m) {
             Text("Open \(controller.session.title) in Agenthail")
                 .font(.headline)
             Text("Agenthail stops the process that runs the conversation once it is idle and continues it in its own host, in the same config folder.")
-                .font(.system(size: 12))
+                .font(.system(size: DesktopType.secondary))
                 .foregroundStyle(DesktopPalette.text2)
                 .fixedSize(horizontal: false, vertical: true)
             content
@@ -42,7 +42,7 @@ struct AdoptSessionSheet: View {
                 }
             }
         }
-        .padding(20)
+        .padding(DesktopSpace.xl)
         .frame(width: 460)
     }
 
@@ -52,14 +52,14 @@ struct AdoptSessionSheet: View {
             EmptyView()
         case .confirmTerminal(let message):
             Text(message + " Stopping it ends the terminal session; the conversation continues in Agenthail.")
-                .font(.system(size: 12))
+                .font(.system(size: DesktopType.secondary))
                 .fixedSize(horizontal: false, vertical: true)
         case .done(let summary):
-            Text(summary).font(.system(size: 12))
+            Text(summary).font(.system(size: DesktopType.secondary))
         case .failed(let message):
             Text(message)
-                .font(.system(size: 12))
-                .foregroundStyle(DesktopPalette.red)
+                .font(.system(size: DesktopType.secondary))
+                .foregroundStyle(DesktopPalette.failed)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

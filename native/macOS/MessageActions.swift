@@ -27,7 +27,7 @@ struct MessageActions: View {
     private func button(_ id: Action, _ label: String, symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 11.5))
+                .font(.system(size: DesktopType.meta))
                 .frame(width: 24, height: MessageActions.height)
                 .contentShape(Rectangle())
         }
@@ -65,11 +65,11 @@ struct MessageEditor: View {
     private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 8) {
+        VStack(alignment: .trailing, spacing: DesktopSpace.s) {
             TextField("Edit message", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.system(size: 14))
-                .lineSpacing(3)
+                .font(.system(size: DesktopType.prose))
+                .lineSpacing(DesktopType.proseLineSpacing)
                 .lineLimit(1...16)
                 .focused($focused)
                 .onSubmit(send)
@@ -79,11 +79,11 @@ struct MessageEditor: View {
                 }
                 .padding(.horizontal, 13)
                 .padding(.vertical, 9)
-                .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(DesktopPalette.accent))
-            HStack(spacing: 8) {
+                .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
+                .overlay(RoundedRectangle(cornerRadius: DesktopRadius.sheet).strokeBorder(DesktopPalette.accent))
+            HStack(spacing: DesktopSpace.s) {
                 Text("Sends as a new message")
-                    .font(.system(size: 11))
+                    .font(.system(size: DesktopType.caption))
                     .foregroundStyle(DesktopPalette.text2)
                 Button("Cancel", action: onCancel)
                     .controlSize(.small)

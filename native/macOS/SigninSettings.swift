@@ -10,28 +10,28 @@ struct SigninSettings: View {
         Form {
             Section {
                 Text("Notion and Claude sessions reached over Remote Control read your sign-in cookies from your system default browser's last used profile. Pick another profile or turn sign-in off for each below, or run agenthail signin use. Nothing else reads cookies.")
-                    .font(.system(size: 12))
+                    .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
             if let signin = model.signin {
                 Section("Used by") {
                     ForEach(signin.consumers) { consumer in
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: DesktopSpace.xs) {
                             Picker(consumer.label, selection: Binding(get: { consumer.choice }, set: { model.bindSignin(consumer: consumer.id, choice: $0) })) {
                                 Text("Automatic (system default browser)").tag("auto")
                                 ForEach(signin.profiles) { Text($0.label).tag($0.id) }
                                 Text("Off").tag("none")
                             }
                             Text(consumer.resolvedLabel)
-                                .font(.system(size: 12))
+                                .font(.system(size: DesktopType.secondary))
                             if let problem = consumer.problem {
                                 Text(problem)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(DesktopPalette.red)
+                                    .font(.system(size: DesktopType.secondary))
+                                    .foregroundStyle(DesktopPalette.failed)
                                     .textSelection(.enabled)
                             }
                             Text(consumer.purpose)
-                                .font(.system(size: 12))
+                                .font(.system(size: DesktopType.secondary))
                                 .foregroundStyle(DesktopPalette.text2)
                         }
                     }
@@ -46,7 +46,7 @@ struct SigninSettings: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.label)
                                 Text("\(signin.browserLabel(item.browser)) · \(item.profile)")
-                                    .font(.system(size: 12))
+                                    .font(.system(size: DesktopType.secondary))
                                     .foregroundStyle(DesktopPalette.text2)
                             }
                             Spacer()
@@ -75,8 +75,8 @@ struct SigninSettings: View {
                     }
                     ForEach(signin.unavailableBrowsers) { item in
                         Text("\(item.label) is unavailable: \(item.detail ?? "no profiles found").")
-                            .font(.system(size: 12))
-                            .foregroundStyle(DesktopPalette.amber)
+                            .font(.system(size: DesktopType.secondary))
+                            .foregroundStyle(DesktopPalette.text2)
                     }
                 }
             } else if model.signinError == nil {
@@ -84,8 +84,8 @@ struct SigninSettings: View {
             }
             if let error = model.signinError {
                 Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.system(size: 12))
-                    .foregroundStyle(DesktopPalette.red)
+                    .font(.system(size: DesktopType.secondary))
+                    .foregroundStyle(DesktopPalette.failed)
                     .textSelection(.enabled)
             }
         }

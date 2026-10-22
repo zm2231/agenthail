@@ -31,11 +31,11 @@ struct TurnSettingsMenu: View {
                 Button("Reset") { model.setTurnSettings(TurnSettings(), for: sessionID) }
             }
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: DesktopSpace.xs) {
                 Image(systemName: "slider.horizontal.3")
                 if let summary { Text(summary) }
             }
-            .font(.system(size: 11.5))
+            .font(.system(size: DesktopType.meta))
             .foregroundStyle(settings.isEmpty ? DesktopPalette.text2 : DesktopPalette.accentText)
         }
         .menuStyle(.borderlessButton)
