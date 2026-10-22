@@ -616,13 +616,15 @@ nonzero so the caller can report which deliveries failed.
 
 ## Paired Hosts
 
-Another Agenthail daemon on the tailnet can be paired so its sessions appear
-here. Pairing needs remote access on the other host and both daemons running.
+Another Agenthail daemon can be paired so its sessions appear here. Paired
+daemons reach each other over Tailscale. Pairing needs remote access on the
+other host and both daemons running; `--address` takes the other host's
+Tailscale IP when `tailscale status` cannot name it.
 
 ```bash
 agenthail hosts                     # this host, paired hosts, state, session counts
 agenthail hosts invite              # on the other host: prints a pairing link
-agenthail hosts add '<link>' --address <tailnet-ip>
+agenthail hosts add '<link>' --address <host-tailscale-ip>
 agenthail hosts remove server
 agenthail hosts name laptop
 ```

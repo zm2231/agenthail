@@ -326,7 +326,7 @@ Automatic handoffs:
 Hosts:
   hosts [--json]                 List this host and paired hosts with their health
   hosts invite                  Print a pairing link for another host's daemon
-  hosts add <link> [--address <tailnet-ip>] [--name <name>]
+  hosts add <link> [--address <host-tailscale-ip>] [--name <name>]
                                  Pair a host so its sessions appear here
   hosts remove <host>            Unpair a host and drop its sessions from this host
   hosts name [name]              Show or set this host's name
