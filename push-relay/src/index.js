@@ -24,7 +24,7 @@ export default {
         const apnsConfigured = Boolean(env.APNS_KEY_P8 && env.APNS_KEY_ID && env.APPLE_TEAM_ID && env.APNS_TOPIC)
         const rateLimitsConfigured = Boolean(env.REGISTER_RATE_LIMITER && env.SEND_RATE_LIMITER)
         const configured = appAttestConfigured && apnsConfigured && rateLimitsConfigured
-        return json({ ok: configured, service: "agenthail-push", version: env.RELAY_VERSION || "dev", protocol: 2, capabilities: ["apns", "app-attest", "credential-auth", "registration-check", "expiring-registration", "rate-limit", "request-id", "withdraw"], appAttest: { required: true, configured: appAttestConfigured }, apns: { configured: apnsConfigured }, rateLimits: { configured: rateLimitsConfigured } })
+        return json({ ok: configured, service: "agenthail-push", version: env.RELAY_VERSION || "dev", protocol: 2, capabilities: ["apns", "app-attest", "credential-auth", "registration-check", "expiring-registration", "rate-limit", "request-id", "withdraw", "host-tag"], appAttest: { required: true, configured: appAttestConfigured }, apns: { configured: apnsConfigured }, rateLimits: { configured: rateLimitsConfigured } })
       }
       if (request.method === "POST" && url.pathname === "/v1/attest/challenge") {
         return await issueChallenge(request, env)
@@ -63,6 +63,10 @@ export async function register(request, env, verifier = verifyAppAttestation) {
   if (!/^[a-fA-F0-9]{64,256}$/.test(token)) {
     return json({ error: "invalid_device_token" }, 400)
   }
+  const tag = body?.tag ?? ""
+  if (tag !== "" && (typeof tag !== "string" || !/^[A-Za-z0-9._-]{1,64}$/.test(tag))) {
+    return json({ error: "invalid_tag" }, 400)
+  }
   if (!env.APP_ATTEST_CHALLENGES) return json({ error: "app_attest_store_unavailable" }, 503)
   const teamIdentifier = boundedString(env.APPLE_TEAM_ID, 32)
   const bundleIdentifier = boundedString(env.APP_ATTEST_BUNDLE_ID || env.APNS_TOPIC, 255)
@@ -99,6 +103,7 @@ export async function register(request, env, verifier = verifyAppAttestation) {
     environment,
     credentialHash: await sha256(credential),
     appAttestKeyHash: await sha256(keyId),
+    ...(tag ? { tag } : {}),
     attestedAt: new Date().toISOString(),
     createdAt: new Date().toISOString()
   }), { expirationTtl: registrationTTLSeconds })
@@ -198,6 +203,7 @@ export async function send(request, env) {
     eventType: clean(body?.eventType, 80)
   }
   if (collapseID) payload.collapseId = collapseID
+  if (device.stored.tag) payload.host = device.stored.tag
   const requestId = openRequestId(body)
   if (requestId) {
     payload.aps["mutable-content"] = 1
@@ -216,7 +222,9 @@ export async function withdraw(request, env) {
   if (device.refused) return device.refused
   const collapseID = clean(body?.collapseId, 64)
   if (!collapseID) return json({ error: "invalid_withdrawal" }, 400)
-  return deliver(env, device, { "apns-push-type": "background", "apns-priority": "5" }, { aps: { "content-available": 1 }, withdraw: collapseID })
+  const payload = { aps: { "content-available": 1 }, withdraw: collapseID }
+  if (device.stored.tag) payload.host = device.stored.tag
+  return deliver(env, device, { "apns-push-type": "background", "apns-priority": "5" }, payload)
 }
 
 async function sendingDevice(body, env) {
