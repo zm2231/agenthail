@@ -23,14 +23,30 @@ func TestEveryCodexThreadAgenthailStartsCarriesItsTrustedContextHooks(t *testing
 		}
 		return nil
 	})
-	if _, err := isolatedManagedRuntime(t).PrepareManagedTerminalSession(context.Background(), "/tmp/project", ""); err != nil {
+	ctx := context.Background()
+	if _, err := isolatedManagedRuntime(t).PrepareManagedTerminalSession(ctx, "/tmp/project", ""); err != nil {
+		t.Fatal(err)
+	}
+	client, err := dialManagedCodex(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if _, err := createVoiceOperator(ctx, client, "/tmp/project", "operate"); err != nil {
 		t.Fatal(err)
 	}
 	starts := fake.Calls("thread/start")
-	if len(starts) != 1 {
+	if len(starts) != 2 {
 		t.Fatalf("methods=%v", fake.Methods())
 	}
-	data, _ := json.Marshal(starts[0]["config"])
+	for _, start := range starts {
+		requireTrustedContextHooks(t, start)
+	}
+}
+
+func requireTrustedContextHooks(t *testing.T, start map[string]any) {
+	t.Helper()
+	data, _ := json.Marshal(start["config"])
 	var config struct {
 		Hooks map[string]json.RawMessage `json:"hooks"`
 	}
@@ -70,7 +86,7 @@ func TestTheInstalledCodexTrustsTheContextHooksAgenthailDeclares(t *testing.T) {
 	}
 	home := t.TempDir()
 	config := filepath.Join(home, "config.toml")
-	command := CodexContextHookCommand("/usr/local/bin/agenthail")
+	command := CodexContextHookCommand("/opt/it's \"quoted\" \\ é\t\u2028\u2029/agenthail")
 	hooks, state := CodexContextHooks(command, config)
 	var toml strings.Builder
 	toml.WriteString("[hooks]\n")

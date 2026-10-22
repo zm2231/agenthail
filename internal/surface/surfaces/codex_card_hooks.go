@@ -1,12 +1,12 @@
 package surfaces
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -58,13 +58,44 @@ func codexThreadContextConfig() map[string]any {
 
 // codexHookHash is Codex's declaration hash for a command hook with no
 // matcher: sha256 of the sorted compact JSON of the event and its one
-// normalized handler (codex-rs hooks hook_hash and config version_for_toml).
+// normalized handler (codex-rs hooks hook_hash and config version_for_toml),
+// written as serde_json writes it.
 func codexHookHash(eventKey, command string, timeout int) string {
-	identity := map[string]any{"event_name": eventKey, "hooks": []any{map[string]any{"async": false, "command": command, "timeout": timeout, "type": "command"}}}
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	encoder.SetEscapeHTML(false)
-	_ = encoder.Encode(identity)
-	sum := sha256.Sum256(bytes.TrimSuffix(buf.Bytes(), []byte("\n")))
+	identity := `{"event_name":` + serdeJSONString(eventKey) + `,"hooks":[{"async":false,"command":` + serdeJSONString(command) + `,"timeout":` + strconv.Itoa(timeout) + `,"type":"command"}]}`
+	sum := sha256.Sum256([]byte(identity))
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// serdeJSONString escapes only what serde_json escapes: the quote, the
+// backslash and control characters. encoding/json also escapes U+2028 and
+// U+2029, which would change the hash.
+func serdeJSONString(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; c {
+		case '"':
+			b.WriteString(`\"`)
+		case '\\':
+			b.WriteString(`\\`)
+		case '\b':
+			b.WriteString(`\b`)
+		case '\f':
+			b.WriteString(`\f`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			if c < 0x20 {
+				fmt.Fprintf(&b, `\u%04x`, c)
+			} else {
+				b.WriteByte(c)
+			}
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }
