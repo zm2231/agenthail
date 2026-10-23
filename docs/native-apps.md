@@ -38,6 +38,8 @@ Agenthail updates the app, command line tool, and background service together. I
 
 The iPhone and iPad app requires iOS/iPadOS 18 or later. It pairs with any computer running Agenthail and reaches it, and the hosts paired with it, privately through Tailscale. It does not make any of them public on the internet.
 
+Its theme, accent, background and glass come from `ui.conf` on the first computer it paired with, and change when that file changes. The sessions list shows the background with each session on glass; a session, Settings and Inbox read on a tinted pane. Behind text, the tint deepens until text reaches the contrast `ui.conf` asks for (7:1 with Increase Contrast). Where the text colours can't reach it, the surface turns solid, which is the most contrast they get. Reduce Transparency, or `glass = off`, gives plain system surfaces. See [Appearance with ui.conf](ui-conf.md).
+
 [Request TestFlight access privately](mailto:zainmer@protonmail.com?subject=Agenthail%20iPhone%20TestFlight%20access&body=Please%20invite%20this%20Apple%20Account%20email%3A%20). An App Store distribution `.ipa` cannot be installed directly on an ordinary iPhone, so GitHub release downloads are not used for the companion app.
 
 To connect it:

@@ -58,6 +58,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published var pairing = false
     @Published private(set) var completedPairings = 0
     let draft = ComposerDraft()
+    let appearance = PhoneAppearance()
     var composer: String {
         get { draft.text }
         set { draft.text = newValue }
@@ -1373,7 +1374,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     private func clearHost(_ hostID: String) {
         connections[hostID]?.stop()
         connections.removeValue(forKey: hostID)
+        let wasAppearanceHost = hostOrder.first == hostID
         hostOrder.removeAll { $0 == hostID }
+        if wasAppearanceHost, let next = hostOrder.first.flatMap({ connections[$0] }), next.reachable { appearance.load(from: next.api) }
         KeychainStore.remove(PairedCredential.account(for: hostID))
         KeychainStore.remove(HostConnection.relayAccount(hostID))
         clearStoredPush(hostID)
@@ -1717,8 +1720,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     func hostConnected(_ host: HostConnection) {
         guard connections[host.id] === host else { return }
+        if host.id == hostOrder.first { appearance.load(from: host.api) }
         if let pushDeviceToken { registerPush(host, deviceToken: pushDeviceToken) }
         else { refreshNotificationRegistration() }
+    }
+
+    func hostAppearanceChanged(_ host: HostConnection) {
+        guard connections[host.id] === host, host.id == hostOrder.first else { return }
+        appearance.load(from: host.api)
     }
 
     func hostEventStreamConnected(_ host: HostConnection) async {

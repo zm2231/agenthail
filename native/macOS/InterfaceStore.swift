@@ -18,7 +18,7 @@ final class InterfaceStore: ObservableObject {
         loadTask?.cancel()
         loadTask = Task {
             do {
-                let loaded = try await api.uiConfig(device: Self.device)
+                let loaded = try await api.uiConfig(device: Self.device, kind: "mac")
                 if Task.isCancelled { return }
                 let problem = await adopt(loaded, api: api)
                 if Task.isCancelled { return }

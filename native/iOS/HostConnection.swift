@@ -10,6 +10,7 @@ protocol HostConnectionDelegate: AnyObject {
     func host(_ host: HostConnection, receivedEventFor entity: String)
     func hostRefreshed(_ host: HostConnection) async
     func hostConnected(_ host: HostConnection)
+    func hostAppearanceChanged(_ host: HostConnection)
 }
 
 @MainActor
@@ -218,6 +219,7 @@ final class HostConnection {
         guard !stopped else { return }
         lastEventID = event.type == "stream.reset" ? 0 : max(lastEventID, event.id)
         if let entity = event.entityId { delegate?.host(self, receivedEventFor: entity) }
+        if event.type == "ui.changed" { delegate?.hostAppearanceChanged(self) }
         guard AgenthailIOSModel.shouldRefreshSnapshot(for: event.type) else { return }
         eventRefreshTask?.cancel()
         eventRefreshTask = Task { [weak self] in

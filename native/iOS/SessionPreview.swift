@@ -41,6 +41,19 @@ struct SessionPreview: View {
         _model = StateObject(wrappedValue: model)
     }
     var body: some View {
+        AppearanceScope(appearance: model.appearance) { previewBody }
+            .onAppear { if let config = Self.previewAppearance { model.appearance.preview(config) } }
+    }
+
+    static var previewAppearance: UIConfig? {
+        guard let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--preview-backdrop") else { return nil }
+        let arguments = ProcessInfo.processInfo.arguments
+        let background = index + 1 < arguments.count ? arguments[index + 1] : "mesh: 3x3, #2e1972, #182c58, #0e5671, #2d1655, #386870, #2e3340, #591948, #8a3049, #682e2c"
+        guard let json = try? JSONSerialization.data(withJSONObject: ["rev": "", "problems": [], "values": ["background": background, "theme": "system"]]) else { return nil }
+        return try? JSONDecoder().decode(UIConfig.self, from: json)
+    }
+
+    @ViewBuilder private var previewBody: some View {
         if ProcessInfo.processInfo.arguments.contains("--preview-app") {
             MainTabs(model: model)
         } else if ProcessInfo.processInfo.arguments.contains("--preview-new") {

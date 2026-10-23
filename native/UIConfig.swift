@@ -2,13 +2,13 @@ import Foundation
 
 /// ui.conf as the daemon resolved it for this device. Values arrive checked
 /// and filled with defaults; this only reads them.
-struct UIConfig: Decodable, Equatable {
-    struct Problem: Decodable, Equatable, Hashable {
+struct UIConfig: Codable, Equatable {
+    struct Problem: Codable, Equatable, Hashable {
         let line: Int
         let message: String
     }
 
-    enum Value: Decodable, Equatable {
+    enum Value: Codable, Equatable {
         case number(Double)
         case text(String)
         case list([String])
@@ -21,6 +21,15 @@ struct UIConfig: Decodable, Equatable {
                 self = .list(list)
             } else {
                 self = .text(try container.decode(String.self))
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            switch self {
+            case .number(let value): try container.encode(value)
+            case .list(let value): try container.encode(value)
+            case .text(let value): try container.encode(value)
             }
         }
     }

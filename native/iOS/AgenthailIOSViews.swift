@@ -8,7 +8,7 @@ struct AgenthailIOSRoot: View {
     @ObservedObject var model: AgenthailIOSModel
 
     var body: some View {
-        Group {
+        AppearanceScope(appearance: model.appearance) {
             if model.isPaired {
                 MainTabs(model: model)
             } else {
@@ -157,7 +157,7 @@ struct ConversationFlow: View {
                     ConversationListView(model: model, selectedID: wideSelection) { wideSelection = $0; path = [$0] }
                 } detail: {
                     if let wideSelection { SessionRouteView(model: model, sessionID: wideSelection) }
-                    else { ContentUnavailableView("Choose a session", systemImage: "desktopcomputer", description: Text("Follow work on your computers, review results, or give the next instruction.")) }
+                    else { ContentUnavailableView("Choose a session", systemImage: "desktopcomputer", description: Text("Follow work on your computers, review results, or give the next instruction.")).phoneBackdrop(.pane) }
                 }
             } else {
                 NavigationStack(path: $path) {
@@ -246,14 +246,17 @@ struct ConversationListView: View {
             }
             Label(model.reconnecting ? "Reconnecting to your computer" : "Work on your computers", systemImage: "desktopcomputer")
                 .font(.subheadline).foregroundStyle(.secondary).listRowSeparator(.hidden)
+                .listRowBackground(GlassRowBackground(selected: false))
             Picker("Sessions to show", selection: $scope) {
                 ForEach(SessionFilter.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             .listRowSeparator(.hidden)
+            .listRowBackground(GlassRowBackground(selected: false))
             if model.isPaired {
                 VoiceOperatorEntry(model: model)
                     .listRowSeparator(.hidden)
+                    .listRowBackground(GlassRowBackground(selected: false))
             }
             if !tree.needsYou.isEmpty {
                 Section {
@@ -261,7 +264,7 @@ struct ConversationListView: View {
                         sessionButton(session, reason: tree.attention[session.id]?.reason, identifierPrefix: "needs-you-")
                     }
                 } header: {
-                    Text("Needs you").font(.subheadline.weight(.semibold)).foregroundStyle(.primary).textCase(nil)
+                    Text("Needs you").font(.subheadline.weight(.semibold)).foregroundStyle(.primary).textCase(nil).glassLabel()
                 }
             }
             ForEach(tree.projects) { project in
@@ -287,6 +290,7 @@ struct ConversationListView: View {
                             Image(systemName: collapsed ? "chevron.right" : "chevron.down")
                                 .font(.caption.weight(.semibold))
                         }
+                        .glassLabel()
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
                     }
@@ -329,6 +333,7 @@ struct ConversationListView: View {
                     Button("New session", systemImage: "plus") { showingNewSession = true }
                 }
                 .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
             }
             if search.count >= 3 {
                 Section("From saved history") {
@@ -340,7 +345,9 @@ struct ConversationListView: View {
                 }
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(14)
+        .phoneBackdrop(.list)
         .navigationTitle("Sessions")
         .searchable(text: $search, prompt: "Search sessions")
         .task(id: search) { await model.searchSessions(search) }
@@ -388,6 +395,7 @@ struct ConversationListView: View {
             }
             .buttonStyle(.plain)
             .padding(.leading, 16)
+            .listRowBackground(GlassRowBackground(selected: false))
             .accessibilityIdentifier("subagents-" + family.id)
         }
         if expanded {
@@ -419,7 +427,7 @@ struct ConversationListView: View {
             }.contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .listRowBackground(selectedID == session.id ? SessionStyle.surface : Color.clear)
+        .listRowBackground(GlassRowBackground(selected: selectedID == session.id))
         .swipeActions(edge: .trailing) {
             if snippet == nil {
                 Button(session.archived == true ? "Unarchive" : "Archive", systemImage: "archivebox") {
@@ -535,6 +543,7 @@ struct SessionScreen: View {
             }
             .scrollPosition($position)
             .accessibilityIdentifier("session-timeline")
+            .phoneBackdrop(.pane)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .defaultScrollAnchor(followingLatest ? .bottom : nil, for: .sizeChanges)
             .defaultScrollAnchor(.top, for: .alignment)
@@ -561,10 +570,10 @@ struct SessionScreen: View {
             }
             .refreshable { await model.refreshSession(session.id) }
             .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)") { await model.syncRequests(for: session) }
-            .safeAreaInset(edge: .top, spacing: 0) {
+            .edgeBar(.top, spacing: 0) {
                 if let detail { SessionSummary(detail: detail) { showingInfo = true } }
             }
-            .safeAreaInset(edge: .bottom) {
+            .edgeBar(.bottom) {
                 VStack(spacing: 0) {
                     if !atLatest && detail != nil {
                         Button {
@@ -574,7 +583,7 @@ struct SessionScreen: View {
                             Image(systemName: "arrow.down")
                                 .font(.body.weight(.semibold))
                                 .frame(width: 44, height: 44)
-                                .background(.regularMaterial, in: Circle())
+                                .floatingGlass(in: Circle(), interactive: true)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Jump to latest")
@@ -598,11 +607,16 @@ struct SessionScreen: View {
                     if let detail {
                         if detail.readOnly || (!detail.capabilities.send && !detail.capabilities.steer) {
                             Label(detail.readOnlyReason.isEmpty ? "This session does not support messages." : detail.readOnlyReason, systemImage: "lock")
-                                .font(.footnote).foregroundStyle(.secondary).padding().frame(maxWidth: .infinity)
+                                .font(.footnote).foregroundStyle(.secondary)
+                                .padding(.horizontal, 14).padding(.vertical, 10)
+                                .floatingGlass(in: Capsule())
+                                .padding()
                         } else {
                             if !liveSession.composerTurnNotice.isEmpty {
                                 Label(liveSession.composerTurnNotice, systemImage: "terminal")
                                     .font(.footnote).foregroundStyle(.secondary)
+                                    .padding(.horizontal, 12).padding(.vertical, 7)
+                                    .floatingGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                                     .padding(.horizontal).padding(.top, 6)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
@@ -610,7 +624,6 @@ struct SessionScreen: View {
                         }
                     }
                 }
-                .background(.background)
             }
             .toolbar(.hidden, for: .tabBar)
             .navigationTitle(displayTitle)
@@ -828,7 +841,7 @@ struct IOSComposer: View {
                 }
             }
             .padding(10)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26))
+            .floatingGlass(in: RoundedRectangle(cornerRadius: 26, style: .continuous))
             .overlay { RoundedRectangle(cornerRadius: 26).strokeBorder(Color.primary.opacity(0.06)) }
         }
         .frame(maxWidth: SessionStyle.readingWidth)
@@ -1176,7 +1189,6 @@ struct SessionSummary: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(.bar)
         .accessibilityHint("Open session details, context, model and controls")
     }
     private var backgroundWaiting: Bool { detail.session.status != "busy" && detail.session.backgroundTasks?.running == true }
@@ -1454,71 +1466,81 @@ struct IOSSessionRow: View {
         title ?? SessionStyle.title(session)
     }
 
+    @ViewBuilder
+    private func meta(spaced: Bool) -> some View {
+        Text(SessionStyle.agentName(session.surface)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            .lineLimit(1).fixedSize()
+        if let host = session.shortRemoteHostName, showsHost || session.isUnavailable {
+            IOSHostBadge(name: host, unavailable: session.isUnavailable)
+                .accessibilityLabel(session.isUnavailable ? "Unavailable on \(host)" : "On \(host)")
+        }
+        if session.isWaitingOnYou {
+            HStack(spacing: 4) {
+                Image(systemName: "questionmark.bubble")
+                Text(session.waitingPlace?.label ?? "Waiting on you")
+            }
+            .font(.caption)
+            .foregroundStyle(SessionStyle.accent)
+            .lineLimit(1)
+            .fixedSize()
+        } else if let limit = session.limitLabel, !session.isWorking {
+            HStack(spacing: 4) {
+                Image(systemName: "gauge.with.dots.needle.100percent")
+                Text(limit)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize()
+        } else if session.isWorking {
+            HStack(spacing: 4) {
+                Image(systemName: "waveform")
+                Text("Working")
+            }
+            .font(.caption)
+            .foregroundStyle(SessionStyle.accent)
+            .lineLimit(1)
+            .fixedSize()
+        } else if session.isWaitingOnBackground {
+            HStack(spacing: 4) {
+                Image(systemName: "hourglass")
+                Text("Background work")
+            }
+            .font(.caption)
+            .foregroundStyle(SessionStyle.accent)
+            .lineLimit(1)
+            .fixedSize()
+            .accessibilityLabel("Waiting on background work")
+        }
+        if let plan = session.livePlan {
+            HStack(spacing: 4) {
+                Image(systemName: "checklist")
+                Text(plan.badge)
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize()
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(plan.detail)
+        }
+        if spaced { Spacer(minLength: 0) }
+        if let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
+            Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
+                .lineLimit(1).fixedSize()
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(displayTitle).font(.body.weight(.medium)).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2).foregroundStyle(.primary)
             let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
-            layout {
-                Text(SessionStyle.agentName(session.surface)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    .lineLimit(1).fixedSize()
-                if let host = session.shortRemoteHostName, showsHost || session.isUnavailable {
-                    IOSHostBadge(name: host, unavailable: session.isUnavailable)
-                        .accessibilityLabel(session.isUnavailable ? "Unavailable on \(host)" : "On \(host)")
-                }
-                if session.isWaitingOnYou {
-                    HStack(spacing: 4) {
-                        Image(systemName: "questionmark.bubble")
-                        Text(session.waitingPlace?.label ?? "Waiting on you")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(SessionStyle.accent)
-                    .lineLimit(1)
-                    .fixedSize()
-                } else if let limit = session.limitLabel, !session.isWorking {
-                    HStack(spacing: 4) {
-                        Image(systemName: "gauge.with.dots.needle.100percent")
-                        Text(limit)
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .fixedSize()
-                } else if session.isWorking {
-                    HStack(spacing: 4) {
-                        Image(systemName: "waveform")
-                        Text("Working")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(SessionStyle.accent)
-                    .lineLimit(1)
-                    .fixedSize()
-                } else if session.isWaitingOnBackground {
-                    HStack(spacing: 4) {
-                        Image(systemName: "hourglass")
-                        Text("Background work")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(SessionStyle.accent)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .accessibilityLabel("Waiting on background work")
-                }
-                if let plan = session.livePlan {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checklist")
-                        Text(plan.badge)
-                    }
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(plan.detail)
-                }
-                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
-                if let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
-                    Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
-                        .lineLimit(1).fixedSize()
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 4) { meta(spaced: false) }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) { meta(spaced: true) }
+                    VStack(alignment: .leading, spacing: 4) { meta(spaced: false) }
                 }
             }
             if session.isUnavailable, let reason = session.unavailableReason {
@@ -1571,101 +1593,105 @@ struct SettingsView: View {
     @ObservedObject var model: AgenthailIOSModel
     var body: some View {
         List {
-            Section {
-                NavigationLink("Add a computer") { PairingForm(model: model, adding: true) }
-            }
-            ForEach(model.hosts) { host in
+            Group {
                 Section {
-                    Label(connectionLabel(host), systemImage: connectionIcon(host))
-                    if let error = host.error { Text(error).font(.footnote).foregroundStyle(.secondary) }
-                    if let build = host.build {
-                        LabeledContent("Agenthail", value: build.label).font(.footnote).textSelection(.enabled)
-                    }
-                    ForEach(host.surfaces) { surface in
-                        VStack(alignment: .leading, spacing: 4) {
-                            LabeledContent(surface.name.capitalized, value: surface.connected ? "Needs attention" : "Unavailable")
-                            DisclosureGroup("Details") {
-                                if surface.runtime?.advice.isEmpty ?? true, let detail = surface.healthDetail {
-                                    Text(detail).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                    NavigationLink("Add a computer") { PairingForm(model: model, adding: true) }
+                }
+                ForEach(model.hosts) { host in
+                    Section {
+                        Label(connectionLabel(host), systemImage: connectionIcon(host))
+                        if let error = host.error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+                        if let build = host.build {
+                            LabeledContent("Agenthail", value: build.label).font(.footnote).textSelection(.enabled)
+                        }
+                        ForEach(host.surfaces) { surface in
+                            VStack(alignment: .leading, spacing: 4) {
+                                LabeledContent(surface.name.capitalized, value: surface.connected ? "Needs attention" : "Unavailable")
+                                DisclosureGroup("Details") {
+                                    if surface.runtime?.advice.isEmpty ?? true, let detail = surface.healthDetail {
+                                        Text(detail).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                                    }
+                                    ForEach(surface.runtime?.advice ?? [], id: \.self) { line in
+                                        Text(line).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                                    }
                                 }
-                                ForEach(surface.runtime?.advice ?? [], id: \.self) { line in
-                                    Text(line).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                                .font(.footnote)
+                            }
+                        }
+                        ForEach(host.signin) { consumer in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Browser sign-in: \(consumer.label)").font(.headline)
+                                Text(consumer.resolvedLabel).font(.footnote)
+                                if let problem = consumer.problem {
+                                    Text(problem).font(.footnote).foregroundStyle(.orange).textSelection(.enabled)
+                                }
+                                if let unavailable = consumer.unavailable {
+                                    Text(unavailable).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
                                 }
                             }
-                            .font(.footnote)
                         }
-                    }
-                    ForEach(host.signin) { consumer in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Browser sign-in: \(consumer.label)").font(.headline)
-                            Text(consumer.resolvedLabel).font(.footnote)
-                            if let problem = consumer.problem {
-                                Text(problem).font(.footnote).foregroundStyle(.orange).textSelection(.enabled)
-                            }
-                            if let unavailable = consumer.unavailable {
-                                Text(unavailable).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
-                            }
-                        }
-                    }
-                    ForEach(host.peers) { peer in
-                        VStack(alignment: .leading, spacing: 4) {
-                            LabeledContent(peer.name, value: peer.stateLabel)
-                            if let build = peer.build {
-                                Text(build.label).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
-                            }
-                            if let detail = peer.detail, !detail.isEmpty {
-                                Text(detail).font(.footnote).foregroundStyle(.secondary)
-                            }
-                            if let notice = peer.notice, !notice.isEmpty {
-                                Text(notice).font(.footnote).foregroundStyle(.orange).lineLimit(3)
+                        ForEach(host.peers) { peer in
+                            VStack(alignment: .leading, spacing: 4) {
+                                LabeledContent(peer.name, value: peer.stateLabel)
+                                if let build = peer.build {
+                                    Text(build.label).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                                }
+                                if let detail = peer.detail, !detail.isEmpty {
+                                    Text(detail).font(.footnote).foregroundStyle(.secondary)
+                                }
+                                if let notice = peer.notice, !notice.isEmpty {
+                                    Text(notice).font(.footnote).foregroundStyle(.orange).lineLimit(3)
+                                }
                             }
                         }
-                    }
-                    if let person = host.person {
-                        VStack(alignment: .leading, spacing: 4) {
-                            LabeledContent("Your name", value: person.name)
-                            Text(person.set ? "Set in Settings on \(host.name) or with agenthail person name." : "\(host.name)'s account name. Set yours in Settings on \(host.name) or with agenthail person name.")
-                                .font(.footnote).foregroundStyle(.secondary)
+                        if let person = host.person {
+                            VStack(alignment: .leading, spacing: 4) {
+                                LabeledContent("Your name", value: person.name)
+                                Text(person.set ? "Set in Settings on \(host.name) or with agenthail person name." : "\(host.name)'s account name. Set yours in Settings on \(host.name) or with agenthail person name.")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                        }
+                        if model.hosts.count > 1 { LabeledContent("Notifications", value: host.notifications) }
+                        Button("Reconnect") { model.reconnect(host: host.id) }
+                        Button("Remove \(host.name)", role: .destructive) { model.removeHost(host.id) }
+                    } header: {
+                        Text(host.name)
+                    } footer: {
+                        if !host.signin.isEmpty {
+                            Text("Change browser sign-in in Settings > Browser Sign-in on \(host.name), or run agenthail signin use there.")
+                        } else {
+                            Text(host.address)
                         }
                     }
-                    if model.hosts.count > 1 { LabeledContent("Notifications", value: host.notifications) }
-                    Button("Reconnect") { model.reconnect(host: host.id) }
-                    Button("Remove \(host.name)", role: .destructive) { model.removeHost(host.id) }
-                } header: {
-                    Text(host.name)
-                } footer: {
-                    if !host.signin.isEmpty {
-                        Text("Change browser sign-in in Settings > Browser Sign-in on \(host.name), or run agenthail signin use there.")
+                }
+                if model.hosts.count > 1 {
+                    Section {
+                        Picker("Orchestrator", selection: Binding(get: { model.voiceHost?.id ?? "" }, set: { model.voiceHostID = $0 })) {
+                            ForEach(model.hosts) { Text($0.name).tag($0.id) }
+                        }
+                    } header: {
+                        Text("Voice")
+                    } footer: {
+                        Text("Talk to orchestrator calls this computer.")
+                    }
+                }
+                Section("Notifications") {
+                    LabeledContent("Status", value: model.notificationStatus)
+                    if model.notificationStatus == "Enabled" {
+                        Button("Turn off notifications", role: .destructive) { model.turnOffNotifications() }
+                    } else if model.notificationStatus == "Not allowed" {
+                        Button("Open iOS Settings") { model.openNotificationSettings() }
+                    } else if model.notificationStatus == "Setup failed" {
+                        Button("Retry notification setup") { model.requestNotifications() }
                     } else {
-                        Text(host.address)
+                        Button("Enable notifications") { model.requestNotifications() }
                     }
+                    Text("Your computers send an alert when an agent finishes or fails.").font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            if model.hosts.count > 1 {
-                Section {
-                    Picker("Orchestrator", selection: Binding(get: { model.voiceHost?.id ?? "" }, set: { model.voiceHostID = $0 })) {
-                        ForEach(model.hosts) { Text($0.name).tag($0.id) }
-                    }
-                } header: {
-                    Text("Voice")
-                } footer: {
-                    Text("Talk to orchestrator calls this computer.")
-                }
-            }
-            Section("Notifications") {
-                LabeledContent("Status", value: model.notificationStatus)
-                if model.notificationStatus == "Enabled" {
-                    Button("Turn off notifications", role: .destructive) { model.turnOffNotifications() }
-                } else if model.notificationStatus == "Not allowed" {
-                    Button("Open iOS Settings") { model.openNotificationSettings() }
-                } else if model.notificationStatus == "Setup failed" {
-                    Button("Retry notification setup") { model.requestNotifications() }
-                } else {
-                    Button("Enable notifications") { model.requestNotifications() }
-                }
-                Text("Your computers send an alert when an agent finishes or fails.").font(.footnote).foregroundStyle(.secondary)
-            }
+            .listRowBackground(GlassRowBackground(selected: false))
         }
+        .phoneBackdrop(.pane)
         .navigationTitle("Settings")
     }
 
