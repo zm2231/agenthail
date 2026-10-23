@@ -89,7 +89,9 @@ without `@`) is accepted, matching CLI target resolution; the response always ca
 same journal. `Last-Event-ID` is accepted as the same per-session cursor.
 Replay emits entries strictly after the cursor. When retention cannot satisfy a
 cursor, the endpoint returns the typed `stream_gap` response so a client can
-reload a bounded page. Session sequence numbers are never catalog sequence
+reload a bounded page. The journal records the highest sequence a trim or
+rebuild removed; a cursor below it gets the gap, since a trim removes the
+oldest places and an upserted row keeps its place under a newer sequence. Session sequence numbers are never catalog sequence
 numbers. A mutation of an existing provider key receives a new session
 sequence, so a reconnect after its prior version replays the latest value.
 

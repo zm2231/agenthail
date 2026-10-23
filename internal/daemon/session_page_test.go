@@ -131,7 +131,8 @@ func TestDesktopStreamIdentityPreservesJournalAndPageBoundaries(t *testing.T) {
 	if len(page.Items) != 4 {
 		t.Fatalf("items=%+v", page.Items)
 	}
-	if page.Items[1].ID != "codex-turn-1-toolCall-tool-1" || page.Items[1].CallID != "tool-1" || page.Items[2].ID != "codex-turn-1-assistant-assistant-1" || page.Items[2].Text != "authoritative answer" {
+	// The reply began before the tool call, so its final text keeps that place.
+	if page.Items[1].ID != "codex-turn-1-assistant-assistant-1" || page.Items[1].Text != "authoritative answer" || page.Items[2].ID != "codex-turn-1-toolCall-tool-1" || page.Items[2].CallID != "tool-1" {
 		t.Fatalf("first turn page items=%+v", page.Items)
 	}
 	if len(page.Exchanges) != 2 || page.Exchanges[0].User != "next question" || page.Exchanges[0].Assistant != "authoritative answer" || page.Exchanges[1].Assistant != "second answer" {
@@ -159,13 +160,13 @@ func TestDashboardSessionReturnsTypedHistoryGapAfterJournalPrune(t *testing.T) {
 		Error struct {
 			Code string `json:"code"`
 		} `json:"error"`
-		EarliestSeq uint64 `json:"earliestSeq"`
-		LatestSeq   uint64 `json:"latestSeq"`
+		EarliestPosition uint64 `json:"earliestPosition"`
+		LatestPosition   uint64 `json:"latestPosition"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Error.Code != "history_gap" || body.EarliestSeq != 2 || body.LatestSeq != 3 {
+	if body.Error.Code != "history_gap" || body.EarliestPosition != 2 || body.LatestPosition != 3 {
 		t.Fatalf("body=%+v", body)
 	}
 }
