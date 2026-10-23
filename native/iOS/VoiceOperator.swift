@@ -24,6 +24,7 @@ struct AgenthailVoiceOperatorSheet: View {
     @State private var followingLatest = true
     @State private var atLatest = true
     @State private var userScrolling = false
+    @State private var bottomRepin: Task<Void, Never>?
     let openSession: (String) -> Void
 
     init(model: VoiceOperatorModel, openSession: @escaping (String) -> Void) {
@@ -98,8 +99,10 @@ struct AgenthailVoiceOperatorSheet: View {
                         }
                         .accessibilityIdentifier("voice-activity")
                     }
-                    Color.clear.frame(height: 1).id("voice-bottom")
-                }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: .infinity)
+                    // The marker ends the content, so scrolling to it reaches the
+                    // true bottom.
+                    Color.clear.frame(height: 25).id("voice-bottom")
+                }.frame(maxWidth: 640).padding(.horizontal, 24).frame(maxWidth: .infinity)
                 }
                 .defaultScrollAnchor(.bottom, for: .initialOffset)
                 .defaultScrollAnchor(.top, for: .alignment)
@@ -116,6 +119,15 @@ struct AgenthailVoiceOperatorSheet: View {
                     geometry.contentSize.height - geometry.visibleRect.maxY < 80
                 } action: { _, value in
                     atLatest = value
+                }
+                // The navigation bar settles after the first layout and moves
+                // the top inset after the initial offset is set, which leaves
+                // the view past its bottom. Following the latest re-pins the
+                // bottom once an inset change has been applied.
+                .onScrollGeometryChange(for: EdgeInsets.self) { $0.contentInsets } action: { old, new in
+                    guard followingLatest, old != new else { return }
+                    bottomRepin?.cancel()
+                    bottomRepin = Task { if !Task.isCancelled, followingLatest { proxy.scrollTo("voice-bottom", anchor: .bottom) } }
                 }
                 .onChange(of: latestContentMarker) { _, _ in
                     if followingLatest, !showActivity { proxy.scrollTo("voice-bottom", anchor: .bottom) }
@@ -160,7 +172,7 @@ struct AgenthailVoiceOperatorSheet: View {
             }
             .sheet(isPresented: $showDetails) { connectionDetails }
             .onAppear { model.screenAppeared() }
-            .onDisappear { model.screenDisappeared() }
+            .onDisappear { bottomRepin?.cancel(); model.screenDisappeared() }
             .confirmationDialog("Interrupt the orchestrator's current turn? This does not stop delegated agents.", isPresented: $confirmInterrupt) {
                 Button("Interrupt orchestrator", role: .destructive) { Task { await model.interrupt() } }
             }
