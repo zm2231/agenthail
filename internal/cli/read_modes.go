@@ -106,7 +106,7 @@ func printExchangeReports(session *surface.Session, read *surface.SessionReadRes
 
 func replyTurn(exchanges []surface.Exchange, reply *surface.ReplyResult) *surface.TurnMetadata {
 	for index := len(exchanges) - 1; index >= 0; index-- {
-		if exchanges[index].Assistant == reply.Text && exchanges[index].Turn != nil {
+		if !exchanges[index].Command && exchanges[index].Assistant == reply.Text && exchanges[index].Turn != nil {
 			return exchanges[index].Turn
 		}
 	}
