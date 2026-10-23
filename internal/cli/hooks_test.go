@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -279,9 +280,10 @@ func TestThePromptHookGivesUpWhenItsDaemonServiceNeverBringsADaemonBack(t *testi
 	t.Cleanup(func() { claudePromptHookRetry, claudePromptHookUnheldLimit = previousRetry, previousLimit })
 	prompt := `{"session_id":"terminal-1","tool_name":"Bash","tool_input":{"command":"ls"},"permission_suggestions":[]}`
 	decided := make(chan *surfaces.ClaudePromptDecision, 1)
+	var checks atomic.Int32
 	started := time.Now()
 	go func() {
-		decided <- holdClaudePrompt(context.Background(), client, strings.NewReader(prompt), 4242, func() bool { return true })
+		decided <- holdClaudePrompt(context.Background(), client, strings.NewReader(prompt), 4242, func() bool { checks.Add(1); return true })
 	}()
 	select {
 	case decision := <-decided:
@@ -291,9 +293,37 @@ func TestThePromptHookGivesUpWhenItsDaemonServiceNeverBringsADaemonBack(t *testi
 		if elapsed := time.Since(started); elapsed < claudePromptHookUnheldLimit {
 			t.Fatalf("the hook gave up after %v, before the limit", elapsed)
 		}
+		if n := checks.Load(); n != 1 {
+			t.Fatalf("the hook looked up the daemon service %d times in one outage; on macOS each look runs launchctl", n)
+		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the hook kept holding a prompt no daemon came back for")
 	}
+}
+
+func TestThePromptHookKeepsHoldingWhileADaemonHoldsItsPromptBetweenRestarts(t *testing.T) {
+	previousRetry, previousLimit := claudePromptHookRetry, claudePromptHookUnheldLimit
+	claudePromptHookRetry, claudePromptHookUnheldLimit = 10*time.Millisecond, 100*time.Millisecond
+	t.Cleanup(func() { claudePromptHookRetry, claudePromptHookUnheldLimit = previousRetry, previousLimit })
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * claudePromptHookUnheldLimit)
+		panic(http.ErrAbortHandler)
+	}))
+	t.Cleanup(server.Close)
+	client := &daemonAPIClient{baseURL: server.URL, token: "dashboard-synthetic", httpClient: server.Client()}
+	prompt := `{"session_id":"terminal-1","tool_name":"Bash","tool_input":{"command":"ls"},"permission_suggestions":[]}`
+	ctx, cancel := context.WithCancel(context.Background())
+	decided := make(chan *surfaces.ClaudePromptDecision, 1)
+	go func() {
+		decided <- holdClaudePrompt(ctx, client, strings.NewReader(prompt), 4242, func() bool { return true })
+	}()
+	select {
+	case decision := <-decided:
+		t.Fatalf("the hook gave up with %+v though each daemon held its prompt", decision)
+	case <-time.After(6 * claudePromptHookUnheldLimit):
+	}
+	cancel()
+	<-decided
 }
 
 func TestOnlyTheHookCommandInstallWritesIsAgenthails(t *testing.T) {

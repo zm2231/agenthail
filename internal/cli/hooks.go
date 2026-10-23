@@ -134,11 +134,14 @@ func holdClaudePrompt(ctx context.Context, client *daemonAPIClient, input io.Rea
 		if err == nil && status == http.StatusOK {
 			break
 		}
-		if status != 0 || ctx.Err() != nil || !serviceLoaded() {
+		if status != 0 || ctx.Err() != nil {
 			return nil
 		}
 		now := time.Now()
 		if unheldSince.IsZero() || now.Sub(asked) > claudePromptHookRetry {
+			if !serviceLoaded() {
+				return nil
+			}
 			unheldSince = now
 		}
 		if now.Sub(unheldSince) >= claudePromptHookUnheldLimit {
