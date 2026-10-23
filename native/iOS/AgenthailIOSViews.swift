@@ -272,6 +272,9 @@ struct ConversationListView: View {
                                 IOSHostBadge(name: host)
                             }
                             Spacer(minLength: 0)
+                            Text("\(project.sessionCount)")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
                             Image(systemName: collapsed ? "chevron.right" : "chevron.down")
                                 .font(.caption.weight(.semibold))
                         }
@@ -289,7 +292,7 @@ struct ConversationListView: View {
                         }
                     }
                     .accessibilityLabel(project.host.map { "Project \(project.name) on \($0)" } ?? "Project \(project.name)")
-                    .accessibilityValue(collapsed ? "Collapsed" : "Expanded")
+                    .accessibilityValue(project.sessionCountLabel + (collapsed ? ", collapsed" : ", expanded"))
                     .accessibilityIdentifier("project-" + project.id)
                 }
             }
@@ -1416,6 +1419,18 @@ struct IOSSessionRow: View {
                     .lineLimit(1)
                     .fixedSize()
                     .accessibilityLabel("Waiting on background work")
+                }
+                if let plan = session.livePlan {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checklist")
+                        Text(plan.badge)
+                    }
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(plan.detail)
                 }
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
                 if let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {

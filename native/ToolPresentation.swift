@@ -17,6 +17,10 @@ struct ToolPresentation {
         case .plan(let steps): return steps.map { $0.0 }.joined(separator: " · ")
         case .raw(let text):
             if let data = text.data(using: .utf8), let input = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if name == "TaskUpdate", let id = input["taskId"] as? String {
+                    return (["Task \(id)"] + [(input["status"] as? String)?.replacingOccurrences(of: "_", with: " ")].compactMap { $0 }).joined(separator: " · ")
+                }
+                if name == "TaskCreate", let subject = input["subject"] as? String, !subject.isEmpty { return subject }
                 for key in ["description", "file_path", "path", "pattern", "query", "url", "prompt"] {
                     if let value = input[key] as? String, !value.isEmpty { return value }
                 }
@@ -38,6 +42,8 @@ struct ToolPresentation {
             case "WebSearch": return "Search the web"
             case "WebFetch": return "Open webpage"
             case "Agent", "Task": return "Delegate to agent"
+            case "TaskCreate": return "Add task"
+            case "TaskUpdate": return "Update task"
             default:
                 return name.replacingOccurrences(of: "functions.", with: "")
                     .replacingOccurrences(of: "mcp__", with: "")
@@ -59,6 +65,7 @@ struct ToolPresentation {
             case "Grep", "Glob", "WebSearch": return "magnifyingglass"
             case "WebFetch": return "globe"
             case "Agent", "Task": return "person.2"
+            case "TaskCreate", "TaskUpdate": return "checklist"
             default: return "wrench.and.screwdriver"
             }
         }
@@ -71,7 +78,7 @@ struct ToolPresentation {
             content = .raw(text)
             return
         }
-        if let description = input["description"] as? String, !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if !["TaskCreate", "TaskUpdate"].contains(name), let description = input["description"] as? String, !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             intent = description
         }
         if let command = input["command"] as? String ?? input["cmd"] as? String {

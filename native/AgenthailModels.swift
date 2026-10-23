@@ -498,6 +498,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var usageLimit: UsageLimitState? = nil
     var limitResume: LimitResumeState? = nil
     var activity: SessionActivity? = nil
+    var plan: SessionPlan? = nil
     var holders: [SessionHolder]? = nil
     var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
@@ -521,6 +522,13 @@ struct SessionState: Codable, Identifiable, Hashable {
         activity?.quietNote(now: now).map { "Working · " + $0 } ?? "Working"
     }
     var isWaitingOnYou: Bool { waitingOn != nil }
+    /// The task list's progress while the session is open and has steps
+    /// left. The row keeps the plan after the session closes; a session that
+    /// stopped part way shows no badge.
+    var livePlan: SessionPlan? {
+        guard open, status != "offline", !isUnavailable, let plan, plan.total > 0, plan.done < plan.total else { return nil }
+        return plan
+    }
     var waitingPlace: WaitingPlace? {
         waitingOn.map { WaitingPlace($0, runtimeKind: runtimeKind, lifecycle: isReadOnly ? SessionLifecycle() : capabilities.lifecycle) }
     }
@@ -722,6 +730,18 @@ struct SessionActivity: Codable, Hashable {
         guard minutes >= 60 else { return "\(minutes) min" }
         return minutes % 60 == 0 ? "\(minutes / 60) hr" : "\(minutes / 60) hr \(minutes % 60) min"
     }
+}
+
+/// How far a session is through the task list its agent keeps, as its
+/// daemon reads it. current is the step in progress, when one is.
+struct SessionPlan: Codable, Hashable {
+    let done: Int
+    let total: Int
+    var current: String? = nil
+
+    var badge: String { "\(done)/\(total)" }
+    var spokenLabel: String { "\(done) of \(total) tasks done" }
+    var detail: String { current.map { spokenLabel + " · " + $0 } ?? spokenLabel }
 }
 
 struct SubagentIdentity: Codable, Hashable {

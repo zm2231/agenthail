@@ -26,7 +26,7 @@ const context = {
   labels: { codex: "Codex", claude: "Claude Code" },
   escape: (value) => String(value ?? "").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"),
   displayName: (session) => session.name, rawDisplayName: (session) => session.name,
-  presenceTone: () => "idle", presenceLabel: () => "Ready",
+  presenceTone: () => "idle", presenceLabel: () => "Ready", livePlan: () => null,
 };
 vm.runInNewContext(source.slice(start, end), context);
 const ids = (list) => list.map((session) => session.id).join(",");
@@ -38,6 +38,7 @@ assert(ids(vm.runInContext("scopedSessions()", context)).includes("hidden"), "Sh
 const { html, count } = vm.runInContext('renderProjects("")', context);
 assert.equal(count, 2);
 const widgetSection = html.slice(0, html.indexOf("</section>"));
+assert.match(widgetSection, /<span class="project-name">widget<\/span><span class="project-count" title="(\d+) sessions">\1<\/span>/, "the project header counts its sessions");
 for (const id of ["w0", "w4", "busy", "queued", "flagged", "lead"]) assert.match(widgetSection, new RegExp(`data-session="${id}"`), `${id} is visible in a collapsed project`);
 assert.doesNotMatch(widgetSection, /data-session="w5"/, "older idle sessions collapse");
 assert.match(widgetSection, /Show 2 more/);

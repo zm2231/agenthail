@@ -528,6 +528,18 @@ function workingLabel(session, now = Date.now()) {
   const note = quietNote(session.activity, now);
   return note ? `Working · ${note}` : "Working";
 }
+// The task list's progress while the session is open and has steps left. The
+// row keeps the plan after the session closes; a session that stopped part
+// way shows no badge.
+function livePlan(session) {
+  const plan = session.plan;
+  if (!session.open || session.status === "offline" || session.unavailableReason || !plan?.total || plan.done >= plan.total) return null;
+  return plan;
+}
+function planDetail(plan) {
+  const done = `${plan.done} of ${plan.total} tasks done`;
+  return plan.current ? `${done} · ${plan.current}` : done;
+}
 function presenceLabel(session, now = Date.now()) {
   if (session.waitingOn) return waitingLabels[waitingPlace(session)];
   if (limitLabel(session)) return limitLabel(session);
@@ -720,7 +732,8 @@ function withHolder(sessionID, payload) {
 }
 function sessionButton(session) {
   const holders = sharedHolders(session);
-  return `<button class="session ${app.selected?.id === session.id ? "selected" : ""}${session.archived ? " archived" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail">${hostBadge(session)}<span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}${holders.length ? `<span title="${escape(holders.map(holderLabel).join("; "))}">${holders.length} terminals</span>` : ""}${session.archived ? "<span>Archived</span>" : ""}</div></button>`;
+  const plan = livePlan(session);
+  return `<button class="session ${app.selected?.id === session.id ? "selected" : ""}${session.archived ? " archived" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail">${hostBadge(session)}<span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${plan ? `<span title="${escape(planDetail(plan))}"><span aria-hidden="true">${plan.done}/${plan.total}</span><span class="sr-only">${escape(planDetail(plan))}</span></span>` : ""}${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}${holders.length ? `<span title="${escape(holders.map(holderLabel).join("; "))}">${holders.length} terminals</span>` : ""}${session.archived ? "<span>Archived</span>" : ""}</div></button>`;
 }
 function projectSection(project, sessions) {
   const expanded = app.expandedProjects.has(project.id);
@@ -729,7 +742,7 @@ function projectSection(project, sessions) {
   const hidden = ordered.length - shown.length;
   const host = (project.checkouts || []).filter((checkout) => checkout.host.state !== "local").map((checkout) => `<span class="host-badge" title="${escape(`On ${checkout.host.name}${checkout.archived ? " (archived there)" : ""}`)}">${escape(shortHostName(checkout.host.name))}</span>`).join("");
   const toggle = project.archived ? "project-unarchive" : "project-archive";
-  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}${coordinatorChip(project.coordinators || [])}${project.archived ? "" : `<button class="link-button" type="button" data-project-message="${escape(project.id)}" data-project-name="${escape(project.displayName)}" title="${escape(`Send one message to every active conversation in ${project.displayName}`)}">Message</button>`}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button>${projectMenu(project)}</header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
+  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span><span class="project-count" title="${ordered.length} ${ordered.length === 1 ? "session" : "sessions"}">${ordered.length}</span>${host}${coordinatorChip(project.coordinators || [])}${project.archived ? "" : `<button class="link-button" type="button" data-project-message="${escape(project.id)}" data-project-name="${escape(project.displayName)}" title="${escape(`Send one message to every active conversation in ${project.displayName}`)}">Message</button>`}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button>${projectMenu(project)}</header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
 }
 // projectMenu lists what a person can change about a project: its name once
 // it was added on some host, a new conversation and the lead in one of its
@@ -1665,8 +1678,10 @@ function toolLine(call) {
   const command = input?.command ?? input?.cmd;
   if (typeof command === "string") return { verb: "Run", object: input.description || firstLine(command), code: !input.description };
   if (name === "apply_patch") return { verb: "Edit", object: toolChanges(call).map(change => baseName(change.path)).join(", "), code: true };
-  const verbs = { Read: "Read", read_file: "Read", NotebookRead: "Read", view_image: "Read", Write: "Write", write_file: "Write", Edit: "Edit", MultiEdit: "Edit", NotebookEdit: "Edit", Grep: "Search", Glob: "Search", LS: "Search", ToolSearch: "Search", WebSearch: "Search the web", web_search: "Search the web", WebFetch: "Open", Agent: "Delegate", Task: "Delegate", spawn_agent: "Delegate", TodoWrite: "Update plan", update_plan: "Update plan" };
+  const verbs = { Read: "Read", read_file: "Read", NotebookRead: "Read", view_image: "Read", Write: "Write", write_file: "Write", Edit: "Edit", MultiEdit: "Edit", NotebookEdit: "Edit", Grep: "Search", Glob: "Search", LS: "Search", ToolSearch: "Search", WebSearch: "Search the web", web_search: "Search the web", WebFetch: "Open", Agent: "Delegate", Task: "Delegate", spawn_agent: "Delegate", TodoWrite: "Update plan", update_plan: "Update plan", TaskCreate: "Add task", TaskUpdate: "Update task" };
   const verb = verbs[name] || name.replace(/^functions\./, "").replace(/^mcp__/, "").replace(/__/g, " · ").replace(/_/g, " ");
+  if (name === "TaskCreate" && typeof input?.subject === "string") return { verb, object: input.subject, code: false };
+  if (name === "TaskUpdate" && input?.taskId) return { verb, object: [`Task ${input.taskId}`, input.status?.replace(/_/g, " ")].filter(Boolean).join(" · "), code: false };
   if (typeof input?.pattern === "string") return { verb, object: input.pattern, code: true };
   const path = input?.file_path || input?.path || input?.notebook_path;
   if (typeof path === "string") return { verb, object: baseName(path), code: true };

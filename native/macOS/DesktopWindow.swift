@@ -184,7 +184,7 @@ struct SessionSidebar: View {
                         let shown = expanded ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: pane.selectedSessionID)
                         let single = project.checkouts.count == 1 ? project.checkouts.first : nil
                         VStack(alignment: .leading, spacing: 1) {
-                            ProjectHeaderView(name: project.name, host: project.host, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived)
+                            ProjectHeaderView(name: project.name, host: project.host, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived, sessionCount: project.sessionCount)
                                 .contextMenu {
                                     if let identity = project.identity {
                                         Button(project.archived ? "Unarchive Project" : "Archive Project") { model.setProjectArchived(identity.id, !project.archived) }
@@ -424,6 +424,7 @@ struct ProjectHeaderView: View {
     var branch: String? = nil
     var dirty = false
     var archived = false
+    var sessionCount = 0
 
     var body: some View {
         HStack(spacing: 7) {
@@ -450,6 +451,13 @@ struct ProjectHeaderView: View {
             if dirty {
                 Circle().fill(DesktopPalette.muted).frame(width: 5, height: 5)
                     .accessibilityLabel("Uncommitted changes")
+            }
+            if sessionCount > 0 {
+                Spacer(minLength: 4)
+                Text("\(sessionCount)")
+                    .font(.system(size: DesktopType.caption).monospacedDigit())
+                    .foregroundStyle(DesktopPalette.text2)
+                    .accessibilityLabel(SessionTree.sessionCountLabel(sessionCount))
             }
         }
         .padding(.horizontal, DesktopSpace.s)
@@ -549,6 +557,17 @@ struct SessionRowView: View {
                 .foregroundStyle(family.workingSubagents > 0 ? DesktopPalette.working : DesktopPalette.text2)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(SessionFamilies.subagentSummary(family))
+            }
+            if let plan = session.livePlan {
+                HStack(spacing: 3) {
+                    Image(systemName: "checklist")
+                    Text(plan.badge)
+                }
+                .font(.system(size: DesktopType.caption).monospacedDigit())
+                .foregroundStyle(DesktopPalette.text2)
+                .help(plan.detail)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(plan.spokenLabel)
             }
             if session.queueCount > 0 {
                 Text(SessionFacts.queuedLabel(session.queueCount))
