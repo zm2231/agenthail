@@ -1304,9 +1304,32 @@ func sendToFakeTarget(t *testing.T, socketDir string, send func(target string) e
 }
 
 func TestAWorkerNamesItsSenderByTheAliasARepliesTo(t *testing.T) {
+	s := surface.Session{ID: "aliased-sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "a long working title", Status: surface.StatusIdle}
+	alias := "reviewer-" + strings.Repeat("x", 80)
+	listed, content := sendThroughWorker(t, context.Background(), s, alias)
+	if listed != "agenthail/claude: @"+alias {
+		t.Fatalf("peer name=%q", listed)
+	}
+	if !strings.Contains(content, `from-name="agenthail/claude: @`+alias+`"`) {
+		t.Fatalf("content=%q", content)
+	}
+}
+
+func TestThePersonIsNamedNotAddressedEvenWithAnAlias(t *testing.T) {
+	person, _ := surface.AgenthailSender(surface.PersonSessionID, "")
+	_, content := sendThroughWorker(t, surface.WithPersonName(context.Background(), "Ada Lovelace"), person, "me")
+	if !strings.Contains(content, `from-name="agenthail/person: Ada Lovelace"`) {
+		t.Fatalf("content=%q", content)
+	}
+}
+
+// sendThroughWorker sends one message as s, holding alias, through a peer
+// worker's control socket, and returns the name the worker lists and the
+// envelope the target received.
+func sendThroughWorker(t *testing.T, ctx context.Context, s surface.Session, alias string) (string, string) {
+	t.Helper()
 	home, regPath := shortTempDir(t, "cp-home-"), filepath.Join(t.TempDir(), "registry.db")
 	socketDir := shortTempDir(t, "cp-socks-")
-	s := surface.Session{ID: "aliased-sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "a long working title", Status: surface.StatusIdle}
 	reg, err := registry.Open(regPath)
 	if err != nil {
 		t.Fatal(err)
@@ -1314,7 +1337,6 @@ func TestAWorkerNamesItsSenderByTheAliasARepliesTo(t *testing.T) {
 	if err := reg.RegisterSession(s); err != nil {
 		t.Fatal(err)
 	}
-	alias := "reviewer-" + strings.Repeat("x", 80)
 	if err := reg.SetAlias(alias, s.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -1325,8 +1347,8 @@ func TestAWorkerNamesItsSenderByTheAliasARepliesTo(t *testing.T) {
 		t.Fatal(err)
 	}
 	var record sessionRecord
-	if err := json.Unmarshal(data, &record); err != nil || record.Name != "agenthail/claude: @"+alias {
-		t.Fatalf("peer name=%q err=%v", record.Name, err)
+	if err := json.Unmarshal(data, &record); err != nil {
+		t.Fatal(err)
 	}
 	child := exec.Command(os.Args[0], "-test.run=TestClaudePeerFakeTarget", "--")
 	child.Env = append(os.Environ(), "CLAUDEPEER_TARGET_DIR="+socketDir)
@@ -1337,7 +1359,7 @@ func TestAWorkerNamesItsSenderByTheAliasARepliesTo(t *testing.T) {
 	if err := child.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer child.Process.Kill()
+	t.Cleanup(func() { _ = child.Process.Kill(); _ = child.Wait() })
 	reader := bufio.NewReader(stdout)
 	var target Ready
 	readyLine, err := reader.ReadString('\n')
@@ -1347,7 +1369,7 @@ func TestAWorkerNamesItsSenderByTheAliasARepliesTo(t *testing.T) {
 	if err := json.Unmarshal([]byte(readyLine), &target); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Send(context.Background(), worker.ControlPath, s.ID, target.SocketPath, "ready for review"); err != nil {
+	if _, err := Send(ctx, worker.ControlPath, s.ID, target.SocketPath, "ready for review"); err != nil {
 		t.Fatal(err)
 	}
 	line, _ := reader.ReadString('\n')
@@ -1356,7 +1378,5 @@ func TestAWorkerNamesItsSenderByTheAliasARepliesTo(t *testing.T) {
 	if err := json.Unmarshal([]byte(line), &sent); err != nil || json.Unmarshal(sent.Message, &body) != nil {
 		t.Fatalf("invalid frame=%s: %v", line, err)
 	}
-	if !strings.Contains(body.Content, `from-name="agenthail/claude: @`+alias+`"`) {
-		t.Fatalf("content=%q", body.Content)
-	}
+	return record.Name, body.Content
 }
