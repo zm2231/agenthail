@@ -138,7 +138,7 @@ struct QueueListView: View {
     private func queueRow(_ item: QueueState) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text(item.isHistorical && item.evidence == "unknown" ? "Never confirmed" : item.isHistorical && item.evidence == "failed" ? "Delivery failed" : item.evidence == "transport_accepted" ? "Transport accepted" : item.status == "dead" ? "Delivery needs review" : item.status == "inflight" ? "Sending" : item.status.capitalized)
+                Text(item.outcomeLabel)
                     .font(.subheadline.weight(.semibold)).foregroundStyle(item.status == "dead" && !item.isHistorical ? .orange : .secondary)
                 Spacer()
                 if let date = item.queuedDate {

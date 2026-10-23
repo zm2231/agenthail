@@ -44,6 +44,11 @@ struct QueueFactsTest {
         expect(QueueFacts.reason(queue(2, status: "pending", evidence: "transport_accepted"), target: nil) == "Transport accepted; receiver completion is pending", "transport accepted evidence wins")
         expect(QueueFacts.reason(queue(3, status: "dead", evidence: "unknown"), target: nil) == "Submitted", "a live unknown outcome reads as submitted")
         expect(QueueFacts.reason(queue(3, status: "dead", evidence: "unknown", historical: true), target: nil) == "Delivery was never confirmed", "a historical unknown outcome was never confirmed")
+        expect(queue(4, status: "inflight", evidence: "unknown", historical: false).outcomeLabel == "Submitted", "a live unknown in flight leads with the receipt")
+        expect(queue(5, status: "dead", evidence: "unknown", historical: false).outcomeLabel == "Submitted", "a live unknown awaiting review leads with the receipt")
+        expect(queue(6, status: "dead", evidence: "unknown", historical: true).outcomeLabel == "Never confirmed", "a historical unknown leads with never confirmed")
+        expect(queue(7, status: "dead", evidence: "failed", historical: true).outcomeLabel == "Delivery failed", "a historical failure")
+        expect(queue(8, status: "inflight").outcomeLabel == "Sending" && queue(9, status: "dead", evidence: "failed").outcomeLabel == "Delivery needs review", "other rows lead with their status")
         expect(QueueFacts.reason(dead, target: nil) == "Delivery failed", "failed evidence")
         expect(QueueFacts.reason(canceled, target: nil) == "Canceled", "non-pending status uses its label")
 
