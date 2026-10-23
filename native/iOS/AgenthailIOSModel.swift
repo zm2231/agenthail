@@ -33,6 +33,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     @Published private(set) var snapshot: DashboardSnapshot? {
         didSet {
+            sessionFamilies = SessionFamilies.build(snapshot?.sessions ?? [])
+            sessionAttention = SessionAttention.build(sessions: snapshot?.sessions ?? [], attention: snapshot?.attention ?? [], deliveryProblems: snapshot?.deliveryProblems ?? [])
+            listedTree = nil
             if let snapshot {
                 HolderPins.shared.prune(to: snapshot.sessions)
                 let picks = HolderPins.shared.all
@@ -46,6 +49,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published private(set) var creationHosts: [CreationHost] = []
     @Published private(set) var projects: [String: ListedProject] = [:]
     @Published private(set) var holderPicks: [String: HolderPin] = [:]
+    private(set) var sessionFamilies: [SessionFamily] = []
+    private(set) var sessionAttention: [String: SessionAttention] = [:]
+    private var listedTree: (scope: SessionFilter, search: String, tree: SessionTree)?
     @Published var selectedDetail: SessionDetail? {
         didSet { paintOpeningSession() }
     }
@@ -919,6 +925,20 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     private func refresh(host hostID: String) async {
         _ = await connections[hostID]?.refresh(fresh: true)
+    }
+
+    /// The session list for a scope and search, built once per catalog change
+    /// rather than on every view update.
+    func sessionTree(scope: SessionFilter, search: String) -> SessionTree {
+        if let listed = listedTree, listed.scope == scope, listed.search == search { return listed.tree }
+        let families = sessionFamilies.filter { family in
+            search.isEmpty || family.sessions.contains { session in
+                session.displayName.localizedCaseInsensitiveContains(search) || SessionFamilies.label(session).localizedCaseInsensitiveContains(search) || session.surface.localizedCaseInsensitiveContains(search) || (session.project?.displayName.localizedCaseInsensitiveContains(search) ?? false) || (session.cwd?.localizedCaseInsensitiveContains(search) ?? false)
+            }
+        }
+        let tree = SessionTree.build(families.flatMap(\.sessions), families: families, filter: scope, attention: sessionAttention)
+        listedTree = (scope, search, tree)
+        return tree
     }
 
     func loadSession(_ id: String) async {

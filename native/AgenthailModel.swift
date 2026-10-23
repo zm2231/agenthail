@@ -5,6 +5,7 @@ import Foundation
 final class AgenthailModel: ObservableObject {
     @Published var snapshot: DashboardSnapshot? {
         didSet {
+            rederive()
             trackFinishedSessions(from: oldValue)
             pruneStore()
             if let snapshot {
@@ -26,7 +27,9 @@ final class AgenthailModel: ObservableObject {
     @Published private(set) var searchResults: [SessionSearchItem] = []
     @Published private(set) var searching = false
     @Published private(set) var searchError: String?
-    @Published private(set) var pinnedSessions: [SessionState] = []
+    @Published private(set) var pinnedSessions: [SessionState] = [] {
+        didSet { rederive() }
+    }
     private var searchTask: Task<Void, Never>?
     @Published var devices: [DeviceState] = []
     @Published var signin: SigninState?
@@ -52,8 +55,12 @@ final class AgenthailModel: ObservableObject {
     @Published var pendingForks: Set<String> = []
     @Published var loading = false
     @Published var operationsVisible = false
-    @Published var sessionFilter: SessionFilter = .recent
-    @Published var sessionRefinement = SessionRefinement()
+    @Published var sessionFilter: SessionFilter = .recent {
+        didSet { rederive() }
+    }
+    @Published var sessionRefinement = SessionRefinement() {
+        didSet { rederive() }
+    }
     @Published private(set) var localSends: [String: [LocalSend]] = [:]
     @Published private var turnSettingsDrafts: [String: TurnSettings] = [:]
     @Published private(set) var fetchedSubagents = SubagentPageCache()
@@ -87,17 +94,21 @@ final class AgenthailModel: ObservableObject {
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
-    var knownSessions: [SessionState] {
+    private(set) var knownSessions: [SessionState] = []
+    var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
+    private(set) var sessionFamilies: [SessionFamily] = []
+    private(set) var sessionAttention: [String: SessionAttention] = [:]
+    private(set) var sessionTree = SessionTree.build([], filter: .recent, attention: [:])
+
+    /// Rebuilds the sidebar's sessions, attention and tree when one of their
+    /// inputs changes, so views read them instead of rebuilding them.
+    private func rederive() {
         let listed = snapshot?.sessions ?? []
         let listedIDs = Set(listed.map(\.id))
-        return listed + pinnedSessions.filter { !listedIDs.contains($0.id) }
-    }
-    var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
-    var sessionAttention: [String: SessionAttention] {
-        SessionAttention.build(sessions: knownSessions, attention: snapshot?.attention ?? [], deliveryProblems: deliveryProblems)
-    }
-    var sessionTree: SessionTree {
-        SessionTree.build(knownSessions, filter: sessionFilter, refinement: sessionRefinement, attention: sessionAttention)
+        knownSessions = listed + pinnedSessions.filter { !listedIDs.contains($0.id) }
+        sessionFamilies = SessionFamilies.build(knownSessions)
+        sessionAttention = SessionAttention.build(sessions: knownSessions, attention: snapshot?.attention ?? [], deliveryProblems: deliveryProblems)
+        sessionTree = SessionTree.build(knownSessions, families: sessionFamilies, filter: sessionFilter, refinement: sessionRefinement, attention: sessionAttention)
     }
 
     init(connecting: Bool = true, api: AgenthailAPI? = nil) {

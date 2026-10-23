@@ -221,15 +221,7 @@ struct ConversationListView: View {
     @State private var projectConfirmation: ProjectConfirmation?
     @State private var newSessionPlace: NewSessionPlace?
 
-    private var tree: SessionTree {
-        let sessions = SessionFamilies.build(model.snapshot?.sessions ?? []).filter { family in
-            search.isEmpty || family.sessions.contains { session in
-                session.displayName.localizedCaseInsensitiveContains(search) || SessionFamilies.label(session).localizedCaseInsensitiveContains(search) || session.surface.localizedCaseInsensitiveContains(search) || (session.project?.displayName.localizedCaseInsensitiveContains(search) ?? false) || (session.cwd?.localizedCaseInsensitiveContains(search) ?? false)
-            }
-        }.flatMap(\.sessions)
-        let attention = SessionAttention.build(sessions: model.snapshot?.sessions ?? [], attention: model.snapshot?.attention ?? [], deliveryProblems: model.snapshot?.deliveryProblems ?? [])
-        return SessionTree.build(sessions, filter: scope, attention: attention)
-    }
+    private var tree: SessionTree { model.sessionTree(scope: scope, search: search) }
 
     private func projectsWithoutSessions(_ tree: SessionTree) -> [ListedProject] {
         guard (scope == .recent || scope == .all) && search.isEmpty else { return [] }
