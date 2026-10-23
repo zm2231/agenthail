@@ -152,13 +152,9 @@ func codexTurnsNotListedYet(err error) bool {
 	return false
 }
 
-// readLatestTurn reads the thread's newest turn with all of its items. A new
-// thread whose turns cannot be listed yet reads as having none.
+// readLatestTurn reads the thread's newest turn with all of its items.
 func (c *Codex) readLatestTurn(ctx context.Context, conn codexClient, threadID string) (*codexThread, error) {
 	turns, err := c.listThreadTurnsView(ctx, conn, threadID, 1, "full")
-	if codexTurnsNotListedYet(err) {
-		return &codexThread{ID: threadID, Status: surface.StatusUnknown}, nil
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -245,6 +241,7 @@ func (c *Codex) listThreadTurns(ctx context.Context, conn codexClient, threadID 
 
 // listThreadTurnsView lists the newest limit turns, oldest first. itemsView
 // "full" returns every item of each turn; empty leaves the server's summary.
+// A new thread whose turns cannot be listed yet has none.
 func (c *Codex) listThreadTurnsView(ctx context.Context, conn codexClient, threadID string, limit int, itemsView string) ([]any, error) {
 	if limit < 1 {
 		limit = 1
@@ -258,6 +255,9 @@ func (c *Codex) listThreadTurnsView(ctx context.Context, conn codexClient, threa
 		params["itemsView"] = itemsView
 	}
 	response, err := conn.Request(ctx, "thread/turns/list", params, 5*time.Second)
+	if codexTurnsNotListedYet(err) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("thread/turns/list: %w", err)
 	}

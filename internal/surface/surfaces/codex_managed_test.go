@@ -687,3 +687,37 @@ func TestCodexSessionCarriesWaitingFromThreadStatus(t *testing.T) {
 		t.Fatalf("idle session=%+v", idle)
 	}
 }
+
+func TestCodexManagedThreadWithNoTurnsYetReadsEmptyAndTakesItsFirstTurn(t *testing.T) {
+	fake := startManagedCodex(t, func(method string, _ map[string]any) map[string]any {
+		switch method {
+		case "thread/read":
+			return map[string]any{"thread": map[string]any{"id": "thread", "source": "vscode", "status": map[string]any{"type": "idle"}, "canAcceptDirectInput": true}}
+		case "thread/resume":
+			return map[string]any{"error": map[string]any{"code": float64(-32600), "message": "no rollout found for thread id thread"}}
+		case "thread/turns/list":
+			return map[string]any{"error": map[string]any{"code": float64(-32600), "message": "thread thread is not materialized yet; thread/turns/list is unavailable before first user message"}}
+		case "turn/start":
+			return map[string]any{"turn": map[string]any{"id": "first-turn"}}
+		}
+		return nil
+	})
+	fake.AddThread(codextest.Thread{ID: "thread", Originator: "agenthail"})
+	codex := isolatedManagedRuntime(t)
+	if observation, err := codex.Observe(context.Background(), managedSession()); err != nil || observation.ActiveTurnID != "" || observation.Reply != nil {
+		t.Fatalf("observation=%+v err=%v", observation, err)
+	}
+	if exchanges, err := codex.Tail(context.Background(), managedSession(), 5); err != nil || len(exchanges) != 0 {
+		t.Fatalf("exchanges=%+v err=%v", exchanges, err)
+	}
+	if batch, err := codex.ReadCompletions(context.Background(), managedSession(), ""); err != nil || len(batch.Events) != 0 {
+		t.Fatalf("completions=%+v err=%v", batch, err)
+	}
+	sent, err := codex.Send(context.Background(), managedSession(), "hello")
+	if err != nil || sent == nil || !sent.Accepted || sent.UUID != "first-turn" {
+		t.Fatalf("sent=%+v err=%v methods=%v", sent, err, fake.Methods())
+	}
+	if starts := fake.Calls("turn/start"); len(starts) != 1 || starts[0]["threadId"] != "thread" {
+		t.Fatalf("turn/start=%v", starts)
+	}
+}

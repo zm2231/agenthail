@@ -214,6 +214,16 @@ func (r *Registry) RecordSessionJournalHistoryBoundary(sessionID string, before 
 	return err
 }
 
+// LowerSessionJournalHistoryBoundary moves a recorded history boundary back
+// to before when it lies past it.
+func (r *Registry) LowerSessionJournalHistoryBoundary(sessionID string, before int64) error {
+	if strings.TrimSpace(sessionID) == "" || before < 0 {
+		return fmt.Errorf("invalid session journal history boundary")
+	}
+	_, err := r.db.Exec(`UPDATE session_journal_state SET history_before=? WHERE session_id=? AND history_before>?`, before, sessionID, before)
+	return err
+}
+
 func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retention SessionJournalRetention) (SessionJournalEntry, bool, error) {
 	if strings.TrimSpace(input.SessionID) == "" || strings.TrimSpace(input.Kind) == "" {
 		return SessionJournalEntry{}, false, fmt.Errorf("session journal entry requires session and kind")
@@ -529,6 +539,20 @@ func (r *Registry) SessionJournalDerivation(sessionID string) (int, error) {
 // newest sequence, so a reader resuming from any earlier cursor receives the
 // rebuilt rows, and records derivation. It returns the entries retained.
 func (r *Registry) ReplaceSessionJournal(sessionID string, entries []SessionJournalEntry, retention SessionJournalRetention, derivation int) ([]SessionJournalEntry, error) {
+	return r.replaceSessionJournal(sessionID, entries, retention, derivation, nil)
+}
+
+// RestartSessionJournal replaces a session's journal like
+// ReplaceSessionJournal for a transcript read afresh, whose history before
+// the entries starts at historyBefore.
+func (r *Registry) RestartSessionJournal(sessionID string, entries []SessionJournalEntry, retention SessionJournalRetention, derivation int, historyBefore int64) ([]SessionJournalEntry, error) {
+	if historyBefore < 0 {
+		return nil, fmt.Errorf("invalid session journal history boundary")
+	}
+	return r.replaceSessionJournal(sessionID, entries, retention, derivation, &historyBefore)
+}
+
+func (r *Registry) replaceSessionJournal(sessionID string, entries []SessionJournalEntry, retention SessionJournalRetention, derivation int, historyBefore *int64) ([]SessionJournalEntry, error) {
 	if strings.TrimSpace(sessionID) == "" || retention.Count < 1 || retention.Bytes < 1 {
 		return nil, fmt.Errorf("invalid session journal replacement")
 	}
@@ -578,6 +602,11 @@ func (r *Registry) ReplaceSessionJournal(sessionID string, entries []SessionJour
 	// newest receives the rebuilt rows, and an older one reports a gap.
 	if _, err := tx.Exec(`UPDATE session_journal_state SET next_seq=?,derived_version=?,retained_bytes=?,pruned_seq=MAX(pruned_seq,?) WHERE session_id=?`, next, derivation, retained, previous, sessionID); err != nil {
 		return nil, err
+	}
+	if historyBefore != nil {
+		if _, err := tx.Exec(`UPDATE session_journal_state SET history_before=?,pruned_before=0 WHERE session_id=?`, *historyBefore, sessionID); err != nil {
+			return nil, err
+		}
 	}
 	if err := trimSessionJournal(tx, sessionID, retention); err != nil {
 		return nil, err

@@ -76,6 +76,23 @@ does not hold stay after the item they followed. The journal records the
 derivation, so it is not rebuilt again. A stream client resuming from the
 newest cursor receives the rebuilt rows as upserts of the same items; an
 older cursor gets the `409` `stream_gap` response and reloads the page.
+
+A Codex revert continues the thread in a new rollout whose
+`session_meta.history_base` names the rollout it continues and where that
+file's retained history ends. Discovery records the new rollout as the
+session's transcript. Reads follow `history_base` back through each rollout,
+verifying the thread id and offsets, and page the retained bytes as one
+history, so provider cursors cross rollouts; a compressed `.jsonl.zst`
+ancestor is read through a decompressed copy in the user cache directory. A
+source, running or starting, accepts the new rollout when its lineage reaches
+the rollout the journal last trusted: it journals the retained items it had
+not seen and removes the reverted ones it had. A catch-up that reads the
+thread back to its start clears the older-history boundary recorded against
+the earlier rollout. When the lineage cannot be traced, the source rebuilds
+the journal in one transaction from a fresh read of the new rollout, with a
+`notice` item saying it was reloaded, removes the rows that read does not
+hold, and starts older history at that read's cursor.
+
 Concurrent reads share one source and one pass, and a source that is already
 running returns at once. The page never calls a provider's metadata methods. Provider read failures are reported separately
 from an empty transcript. Sources preserve the provider's truncation flag and

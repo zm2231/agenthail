@@ -126,6 +126,10 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     private var sessionMetadataTask: Task<Void, Never>?
     private var sessionServer: HostConnection?
     private(set) var sessionStreamCursor: UInt64 = 0
+    private var pageReadsInFlight = 0
+    /// Rows streamed while a page read is in flight, so a page read before
+    /// some of them arrived can be brought up to date.
+    private var rowsDuringPageRead: [SessionStreamEvent] = []
     private var sessionMetadata = MetadataOverlay()
     private var stateRequests: UInt64 = 0
     private var selectedSessionStateSeq: UInt64 = 0
@@ -801,14 +805,24 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         sessionRequestID = requestID
         let seq = nextStateRequest()
         let requestServer = server(for: id)
+        pageReadsInFlight += 1
+        defer {
+            pageReadsInFlight -= 1
+            if pageReadsInFlight == 0 { rowsDuringPageRead = [] }
+        }
         do {
             let (connection, route) = try resolveServer(id)
             var detail = try await connection.api.sessionDetail(id: route.sessionID, includeTimeline: true)
             detail.session.id = id
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID, server(for: id) === connection else { return }
             if !olderActivity.isEmpty {
-                let retained = Set(olderActivity.map(\.id) + (detail.timeline?.items.map(\.id) ?? []))
-                olderActivity += (selectedDetail?.timeline?.items ?? []).filter { !retained.contains($0.id) }
+                let fresh = Set(detail.timeline?.items.map(\.id) ?? [])
+                let retained = fresh.union(olderActivity.map(\.id))
+                let shown = selectedDetail?.timeline?.items ?? []
+                // Only rows before the page's start fell off it; later rows it lacks are newer than it.
+                let shared = shown.firstIndex { fresh.contains($0.id) } ?? shown.count
+                let fellOff = shown[..<shared].filter { !retained.contains($0.id) }
+                if !fellOff.isEmpty { olderActivity += fellOff }
             }
             var merged = sessionMetadata.apply(to: detail)
             if seq < selectedSessionStateSeq, let current = selectedDetail?.session, current.id == id {
@@ -822,6 +836,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             selectedDetail = merged
             if let journalSeq = detail.journalSeq {
                 sessionStreamCursor = journalSeq
+                for row in rowsDuringPageRead where row.seq > journalSeq {
+                    applySessionStreamEvent(row, route: route, server: connection, replaying: true)
+                }
             }
             if olderActivity.isEmpty { activityCursor = detail.timeline?.nextBefore }
             sessionError = nil
@@ -951,7 +968,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 throw AgenthailAPIError.unavailable(page.timeline?.unavailableReason ?? "Older activity is unavailable.")
             }
             let known = Set(olderActivity.map(\.id) + (selectedDetail?.timeline?.items.map(\.id) ?? []))
-            olderActivity = timeline.items.filter { !known.contains($0.id) } + olderActivity
+            let earlier = timeline.items.filter { !known.contains($0.id) }
+            if !earlier.isEmpty { olderActivity = earlier + olderActivity }
             activityCursor = timeline.nextBefore
             olderActivityError = nil
         } catch {
@@ -1457,10 +1475,11 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         applySessionStreamEvent(event, route: route, server: connection)
     }
 
-    private func applySessionStreamEvent(_ event: SessionStreamEvent, route: SessionRoute, server connection: HostConnection) {
+    private func applySessionStreamEvent(_ event: SessionStreamEvent, route: SessionRoute, server connection: HostConnection, replaying: Bool = false) {
         guard event.stream == "session", event.sessionId == route.sessionID, let selected = selectedSessionID,
               catalog.route(for: selected) == route, server(for: selected) === connection,
               var detail = selectedDetail, detail.session.id == selected else { return }
+        if pageReadsInFlight > 0, !replaying { rowsDuringPageRead.append(event) }
         sessionStreamCursor = max(sessionStreamCursor, event.seq)
         if event.data.kind == "context" {
             sessionMetadata.stream(context: event.data.context)
@@ -1479,8 +1498,11 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? (event.data.kind == "attachment" ? "Image" : event.data.kind), text: event.data.body ?? (event.data.kind == "attachment" ? "Image attachment" : ""), timestamp: event.data.ts, callId: event.data.callId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.truncationReason, bodyRef: event.data.bodyRef, attachment: event.data.attachment, sender: event.data.sender, files: event.data.files, resetsAt: event.data.resetsAt)
         if event.data.op == "remove" {
             timeline.items.removeAll { $0.id == event.data.itemId }
+            if olderActivity.contains(where: { $0.id == event.data.itemId }) { olderActivity.removeAll { $0.id == event.data.itemId } }
         } else if let index = timeline.items.firstIndex(where: { $0.id == event.data.itemId }) {
             timeline.items[index] = item
+        } else if let index = olderActivity.firstIndex(where: { $0.id == event.data.itemId }) {
+            olderActivity[index] = item
         } else {
             timeline.items.append(item)
         }

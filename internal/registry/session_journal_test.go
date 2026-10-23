@@ -442,3 +442,39 @@ func TestAJournalReplacedWithNothingReportsAGapToCursorsBeforeItsNewest(t *testi
 		t.Fatalf("after a cursor past the newest = %+v err=%v, want a gap", window, err)
 	}
 }
+
+func TestARestartedSessionJournalStartsItsHistoryAtTheFreshRead(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	retention := SessionJournalRetention{Count: 2, Bytes: 1024}
+	if err := r.RecordSessionJournalHistoryBoundary("session", 900); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"a", "b", "c"} {
+		if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: key, Payload: []byte(key)}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := r.ReadSessionJournalPage("session", 0, 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.RestartSessionJournal("session", []SessionJournalEntry{{Kind: "item", ProviderKey: "d", Payload: []byte("d")}}, retention, 0, 40); err != nil {
+		t.Fatal(err)
+	}
+	page, err := r.ReadSessionJournalPage("session", 0, 10)
+	if err != nil || len(page.Entries) != 1 || page.Entries[0].ProviderKey != "d" || page.HistoryBefore != 40 || page.NextBefore != 0 {
+		t.Fatalf("page=%+v err=%v, want only d with history before 40", page, err)
+	}
+	if err := r.LowerSessionJournalHistoryBoundary("session", 60); err != nil {
+		t.Fatal(err)
+	}
+	if page, err := r.ReadSessionJournalPage("session", 0, 10); err != nil || page.HistoryBefore != 40 {
+		t.Fatalf("history before=%d err=%v, want 40 kept when lowering to a later cursor", page.HistoryBefore, err)
+	}
+	if err := r.LowerSessionJournalHistoryBoundary("session", 0); err != nil {
+		t.Fatal(err)
+	}
+	if page, err := r.ReadSessionJournalPage("session", 0, 10); err != nil || page.HistoryBefore != 0 || page.NextBefore != 0 {
+		t.Fatalf("page=%+v err=%v, want no older history", page, err)
+	}
+}

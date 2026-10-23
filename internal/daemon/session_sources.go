@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -32,6 +34,7 @@ var (
 	sessionSnapshotRefreshInterval = 5 * time.Second
 	sessionPageHandoffGrace        = 5 * time.Second
 	ErrSessionSourceManagerClosed  = errors.New("session source manager is closed")
+	sessionTranscriptMoveCheck     = 2 * time.Second
 	errTranscriptReplaced          = fmt.Errorf("transcript identity changed: %w", surface.ErrTranscriptUnavailable)
 )
 
@@ -296,11 +299,23 @@ func (s *sessionSource) run() {
 		}
 		return
 	}
+	followDelay := sessionSeedRetryDelay
 	for {
 		current := s.session
 		if refreshed, refreshErr := s.manager.registry.Session(s.session.ID); refreshErr == nil {
 			current = *refreshed
 		}
+		if err := s.followTranscript(current); err != nil {
+			if s.ctx.Err() == nil {
+				s.appendSourceError(err)
+			}
+			if !s.wait(followDelay) {
+				break
+			}
+			followDelay = min(2*followDelay, sessionSeedRetryMaxDelay)
+			continue
+		}
+		followDelay = sessionSeedRetryDelay
 		current.StreamCursor = s.streamCursor
 		current.StreamCursorSet = s.streamCursorSet
 		current.TranscriptOffset = s.session.TranscriptOffset
@@ -311,7 +326,26 @@ func (s *sessionSource) run() {
 		current.CodexCurrentTurnID = s.session.CodexCurrentTurnID
 		current.ClaudeClosingTurn = s.session.ClaudeClosingTurn
 		current.TranscriptFromStart = s.session.TranscriptFromStart
-		streamErr := s.adapter.Stream(s.ctx, &current, "", s.append, 30*time.Minute)
+		streamContext, stopStream := context.WithCancel(s.ctx)
+		var moved atomic.Bool
+		watched := make(chan struct{})
+		if _, ok := s.adapter.(surface.TranscriptContinuer); ok && current.Transcript != "" {
+			go func() {
+				defer close(watched)
+				s.watchTranscriptMove(streamContext, current.Transcript, func() {
+					moved.Store(true)
+					stopStream()
+				})
+			}()
+		} else {
+			close(watched)
+		}
+		streamErr := s.adapter.Stream(streamContext, &current, "", s.append, 30*time.Minute)
+		stopStream()
+		<-watched
+		if moved.Load() {
+			streamErr = nil
+		}
 		if current.Transcript == s.session.Transcript && current.TranscriptIdentity != "" && (current.TranscriptIdentity == s.session.TranscriptIdentity || !s.session.TranscriptOffsetSet) && current.TranscriptOffsetSet && current.TranscriptOffset >= s.session.TranscriptOffset {
 			s.session.TranscriptOffset = current.TranscriptOffset
 			s.session.TranscriptOffsetSet = true
@@ -341,6 +375,41 @@ func (s *sessionSource) run() {
 		select {
 		case <-s.ctx.Done():
 		case <-time.After(time.Second):
+		}
+	}
+}
+
+// followTranscript moves the source to the transcript the registry now
+// names when it continues the one the source was reading.
+func (s *sessionSource) followTranscript(current surface.Session) error {
+	if _, ok := s.adapter.(surface.TranscriptContinuer); !ok || current.Transcript == "" || s.session.Transcript == "" || current.Transcript == s.session.Transcript {
+		return nil
+	}
+	previous := s.session
+	s.session.Transcript = current.Transcript
+	s.session.TranscriptOffset = 0
+	s.session.TranscriptOffsetSet = false
+	ctx, cancel := context.WithTimeout(s.ctx, sessionJournalSeedTimeout)
+	defer cancel()
+	if err := s.catchUpLocalTranscript(ctx, previous.TranscriptIdentity, previous.Transcript); err != nil {
+		s.session = previous
+		return err
+	}
+	return nil
+}
+
+func (s *sessionSource) watchTranscriptMove(ctx context.Context, transcript string, moved func()) {
+	ticker := time.NewTicker(sessionTranscriptMoveCheck)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if refreshed, err := s.manager.registry.Session(s.session.ID); err == nil && refreshed.Transcript != "" && refreshed.Transcript != transcript {
+				moved()
+				return
+			}
 		}
 	}
 }
@@ -502,7 +571,7 @@ func (s *sessionSource) loadSeed() error {
 	if seeded && transcriptBacked {
 		caughtUp, err := s.catchUpFromCheckpoint(ctx, trustedIdentity)
 		if err == nil && !caughtUp {
-			err = s.catchUpLocalTranscript(ctx, trustedIdentity)
+			err = s.catchUpLocalTranscript(ctx, trustedIdentity, "")
 		}
 		if err == nil {
 			err = s.rederiveJournal(ctx)
@@ -523,6 +592,9 @@ func (s *sessionSource) loadSeed() error {
 		return err
 	}
 	if trustedIdentity != "" && read.TranscriptIdentity != trustedIdentity {
+		if _, continues := s.adapter.(surface.TranscriptContinuer); continues {
+			return s.catchUpLocalTranscript(ctx, trustedIdentity, "")
+		}
 		return fmt.Errorf("Codex local transcript was replaced before catch-up: %w", errTranscriptReplaced)
 	}
 	if read.TranscriptOffsetSet {
@@ -633,7 +705,11 @@ func (s *sessionSource) wait(delay time.Duration) bool {
 	}
 }
 
-func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdentity string) error {
+// catchUpLocalTranscript journals what the transcript gained since the
+// journal last read it, trustedIdentity at trustedPath when the caller knows
+// the path. A transcript that moved to a file continuing it is followed, and
+// the items the move dropped are removed.
+func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdentity, trustedPath string) error {
 	known, err := s.knownJournalItems()
 	if err != nil {
 		return fmt.Errorf("read journal seed identities: %w", err)
@@ -642,6 +718,9 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 	before := int64(0)
 	transcriptIdentity := trustedIdentity
 	var end int64
+	var dropped []surface.TimelineItem
+	continued := false
+	readToStart := false
 	for {
 		s.providerMu.Lock()
 		read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Before: before, Limit: 40})
@@ -670,11 +749,24 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 		if transcriptIdentity == "" {
 			transcriptIdentity = read.TranscriptIdentity
 		} else if read.TranscriptIdentity != transcriptIdentity {
-			phase := "during catch-up"
-			if len(pages) == 0 {
-				phase = "before catch-up"
+			continuer, ok := s.adapter.(surface.TranscriptContinuer)
+			if !ok || len(pages) > 0 {
+				phase := "during catch-up"
+				if len(pages) == 0 {
+					phase = "before catch-up"
+				}
+				return fmt.Errorf("%s transcript was replaced %s: %w", s.session.Surface, phase, errTranscriptReplaced)
 			}
-			return fmt.Errorf("%s transcript was replaced %s: %w", s.session.Surface, phase, errTranscriptReplaced)
+			s.providerMu.Lock()
+			dropped, continued, err = continuer.TranscriptContinuation(ctx, &s.session, trustedPath, transcriptIdentity)
+			s.providerMu.Unlock()
+			if err != nil {
+				return err
+			}
+			if !continued {
+				return s.restartJournal(read)
+			}
+			transcriptIdentity = read.TranscriptIdentity
 		}
 		if read.TranscriptOffsetSet && !s.session.TranscriptOffsetSet {
 			s.session.TranscriptOffset = read.TranscriptOffset
@@ -689,7 +781,11 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 			end = read.TranscriptOffset
 		}
 		pages = append(pages, read.Items)
-		if timelineItemsOverlapJournal(read.Items, known) || read.NextBefore == 0 {
+		if timelineItemsOverlapJournal(read.Items, known) {
+			break
+		}
+		if read.NextBefore == 0 {
+			readToStart = true
 			break
 		}
 		before = read.NextBefore
@@ -697,10 +793,123 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 	for index := len(pages) - 1; index >= 0; index-- {
 		s.appendSeedItems(pages[index])
 	}
+	if continued {
+		s.removeDroppedItems(dropped, known)
+	}
+	// Cursors into a continued transcript address its whole history, so a
+	// boundary recorded against the file it continues no longer holds once
+	// the journal has read that history back to its start.
+	if continued && readToStart {
+		if err := s.manager.registry.LowerSessionJournalHistoryBoundary(s.session.ID, 0); err != nil {
+			return err
+		}
+	}
 	if err := s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, transcriptIdentity); err != nil {
 		return err
 	}
 	return s.recordTranscriptCheckpoint(end, transcriptIdentity)
+}
+
+// restartJournal rebuilds the journal from a fresh read of a transcript that
+// replaced the one the journal was read from but cannot be shown to continue
+// it, with a notice saying so. Rows the fresh read does not hold are removed.
+func (s *sessionSource) restartJournal(read *surface.SessionReadResult) error {
+	notice := surface.TimelineItem{
+		ID:        "transcript-restart:" + read.TranscriptIdentity,
+		Kind:      "notice",
+		Title:     "Conversation reloaded",
+		Text:      "This conversation moved to a new transcript that could not be matched to the one shown before, so it was read again from the new transcript.",
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	var fresh []surface.StreamEvent
+	keep := map[string]bool{}
+	for _, item := range append(slices.Clone(read.Items), notice) {
+		if item.ID == "" {
+			continue
+		}
+		event := seedEvent(s.session.Surface, item)
+		keep[event.ProviderKey] = true
+		fresh = append(fresh, event)
+	}
+	var events []surface.StreamEvent
+	for before := uint64(0); ; {
+		page, err := s.manager.registry.ReadSessionJournalPage(s.session.ID, before, 200)
+		var gap *registry.SessionJournalHistoryGapError
+		if errors.As(err, &gap) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		for _, entry := range page.Entries {
+			var payload sessionJournalPayload
+			if json.Unmarshal(entry.Payload, &payload) != nil || payload.Op == "remove" || payload.Kind == "source-error" || payload.ProviderKey == "" || keep[payload.ProviderKey] {
+				continue
+			}
+			keep[payload.ProviderKey] = true
+			events = append(events, surface.StreamEvent{ID: payload.ItemID, ProviderKey: payload.ProviderKey, Operation: "remove", Kind: payload.Kind, TurnID: payload.TurnID, Final: true})
+		}
+		if page.NextBefore == 0 {
+			break
+		}
+		before = page.NextBefore
+	}
+	events = append(events, fresh...)
+	entries := make([]registry.SessionJournalEntry, 0, len(events))
+	bodies := map[string]string{}
+	for _, event := range events {
+		s.mu.Lock()
+		payload, bodyKey := s.normalizeLocked(event)
+		s.mu.Unlock()
+		entry, err := sessionJournalEntry(s.session.ID, payload)
+		if err != nil {
+			return err
+		}
+		if bodyKey != "" {
+			bodies[bodyKey] = payload.Body
+		}
+		entries = append(entries, entry)
+	}
+	derivation, err := s.manager.registry.SessionJournalDerivation(s.session.ID)
+	if err != nil {
+		return err
+	}
+	restarted, err := s.manager.registry.RestartSessionJournal(s.session.ID, entries, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes}, derivation, max(0, read.NextBefore))
+	if err != nil {
+		return err
+	}
+	s.session.TranscriptOffset = read.TranscriptOffset
+	s.session.TranscriptOffsetSet = read.TranscriptOffsetSet
+	s.session.CodexPendingEventUser = read.CodexPendingEventUser
+	s.session.CodexPendingEventTurn = read.CodexPendingEventTurn
+	s.session.CodexCurrentTurnID = read.CodexCurrentTurnID
+	s.session.ClaudeClosingTurn = read.ClaudeClosingTurn
+	s.session.TranscriptIdentity = read.TranscriptIdentity
+	s.mu.Lock()
+	for key, body := range bodies {
+		s.appendBodies[key] = body
+	}
+	s.mu.Unlock()
+	if len(restarted) > 0 {
+		s.wakeFollowers()
+	}
+	if err := s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.TranscriptIdentity); err != nil {
+		return err
+	}
+	return s.recordTranscriptCheckpoint(read.TranscriptOffset, read.TranscriptIdentity)
+}
+
+func (s *sessionSource) removeDroppedItems(items []surface.TimelineItem, known map[string]struct{}) {
+	for _, item := range items {
+		if item.ID == "" {
+			continue
+		}
+		event := seedEvent(s.session.Surface, item)
+		if _, ok := known[event.ProviderKey]; !ok {
+			continue
+		}
+		s.append(surface.StreamEvent{ID: event.ID, ProviderKey: event.ProviderKey, Operation: "remove", Kind: item.Kind, TurnID: item.TurnID, Final: true})
+	}
 }
 
 // transcriptJournalDerivation versions how a transcript-backed journal's

@@ -9,6 +9,7 @@ require (
 	github.com/google/pprof v0.0.0-20250630185457-6e76a2b096b5
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/klauspost/compress v1.20.3
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tidwall/gjson v1.20.0
 	github.com/tidwall/sjson v1.2.5
