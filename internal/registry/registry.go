@@ -1340,13 +1340,21 @@ func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error)
 	return "", fmt.Errorf("reserve generated alias: exhausted candidates for %q", base)
 }
 
-// PeerSession finds the session whose Claude peer id is peerID, the
-// from-session a peer message carries, with the paired host that owns it.
-// Peer ids are derived, not stored, so it hashes every session's id; with a
-// few thousand sessions that is a few milliseconds, and only a target that
-// matches nothing else reaches it.
-func (r *Registry) PeerSession(peerID string) (id, hostID string, found bool, err error) {
-	if _, err := uuid.Parse(peerID); err != nil {
+// CanonicalSession names the session ref identifies, with the paired host
+// that owns it: ref is a session id, or the Claude peer id a peer message
+// carries as from-session. It is the one place both agenthail send and the
+// action API turn a peer id into its session. Peer ids are derived, not
+// stored, so a ref that is no session id hashes every session's id; with a
+// few thousand sessions that is a few milliseconds.
+func (r *Registry) CanonicalSession(ref string) (id, hostID string, found bool, err error) {
+	err = r.read.QueryRow(`SELECT id,host_id FROM sessions WHERE id=?`, ref).Scan(&id, &hostID)
+	if err == nil {
+		return id, hostID, true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, err
+	}
+	if _, err := uuid.Parse(ref); err != nil {
 		return "", "", false, nil
 	}
 	rows, err := r.read.Query(`SELECT id,surface,host_id FROM sessions`)
@@ -1359,7 +1367,7 @@ func (r *Registry) PeerSession(peerID string) (id, hostID string, found bool, er
 		if err := rows.Scan(&id, &kind, &hostID); err != nil {
 			return "", "", false, err
 		}
-		if strings.EqualFold(surface.PeerUUID(surface.SurfaceKind(kind), id), peerID) {
+		if strings.EqualFold(surface.PeerUUID(surface.SurfaceKind(kind), id), ref) {
 			return id, hostID, true, nil
 		}
 	}
