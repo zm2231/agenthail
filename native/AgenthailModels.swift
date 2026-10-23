@@ -1341,6 +1341,21 @@ enum PersonNameDraft {
     }
 }
 
+/// Whether each Claude config folder starts Remote Control in new sessions.
+/// `atStartup` is nil when the folder leaves it to Claude's default.
+struct ClaudeRemoteControlState: Decodable, Equatable {
+    struct Root: Decodable, Equatable, Identifiable {
+        let root: String
+        let name: String
+        let atStartup: Bool?
+        let problem: String?
+        var id: String { root }
+    }
+
+    let available: Bool
+    let roots: [Root]
+}
+
 struct DashboardSettingsState: Decodable {
     let dashboard: DashboardConfigState
     let remoteAccess: RemoteAccessState

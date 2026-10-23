@@ -116,6 +116,32 @@ struct GeneralSettings: View {
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
+            if let remoteControl = model.claudeRemoteControl, remoteControl.available, !remoteControl.roots.isEmpty {
+                Section {
+                    ForEach(remoteControl.roots) { root in
+                        LabeledContent {
+                            if let problem = root.problem {
+                                Text(problem).foregroundStyle(DesktopPalette.failed).textSelection(.enabled)
+                            } else {
+                                Toggle("", isOn: Binding(get: { root.atStartup == true }, set: { model.setClaudeRemoteControl(root: root.root, atStartup: $0) }))
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                            }
+                        } label: {
+                            Text(root.name)
+                            if root.problem == nil, root.atStartup == nil {
+                                Text("Not set; Claude's default applies")
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Claude Remote Control at startup")
+                } footer: {
+                    Text("New Claude sessions in a config folder with this on start Remote Control, so what you write here reaches them as your own turn. Sessions already running keep what they started with.")
+                        .font(.system(size: DesktopType.secondary))
+                        .foregroundStyle(DesktopPalette.text2)
+                }
+            }
             Section("Spotlight") {
                 Toggle("Show sessions in Spotlight", isOn: $spotlightSessions)
                 Text("Spotlight on this Mac can find sessions by name and folder. Choosing one opens it here.")

@@ -35,6 +35,7 @@ final class AgenthailModel: ObservableObject {
     @Published var signinError: String?
     @Published var pairing: PairingResponse?
     @Published var settings: DashboardSettingsState?
+    @Published var claudeRemoteControl: ClaudeRemoteControlState?
     @Published var audit: [HistoryState] = []
     @Published var auditKinds: [String] = []
     @Published var auditHasMore = false
@@ -507,6 +508,19 @@ final class AgenthailModel: ObservableObject {
             await loadAudit(reset: true)
         } catch {
             operationError = AgenthailAPIError.userMessage(error)
+        }
+        claudeRemoteControl = try? await api.claudeRemoteControl()
+    }
+
+    func setClaudeRemoteControl(root: String, atStartup: Bool) {
+        guard let api else { return }
+        Task {
+            do {
+                claudeRemoteControl = try await api.setClaudeRemoteControl(root: root, atStartup: atStartup)
+                operationError = nil
+            } catch {
+                operationError = AgenthailAPIError.userMessage(error)
+            }
         }
     }
 

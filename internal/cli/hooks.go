@@ -162,11 +162,28 @@ func cancelWhenOrphaned(ctx context.Context, parent int, cancel func()) {
 }
 
 func (a *App) cmdHooks(args []string) error {
+	usage := errors.New("usage: agenthail hooks install [--remote-control on|off] | uninstall|status [codex]")
+	var remoteControl *bool
+	if hasFlag(args, "--remote-control") {
+		value := flagVal(args, "--remote-control")
+		if value != "on" && value != "off" {
+			return usage
+		}
+		on := value == "on"
+		remoteControl = &on
+	}
+	args = stripFlags(args)
+	if remoteControl != nil && (len(args) != 1 || args[0] != "install") {
+		return usage
+	}
 	if len(args) < 1 || len(args) > 2 || (args[0] != "install" && args[0] != "uninstall" && args[0] != "status") || (len(args) == 2 && args[1] != "codex") {
-		return errors.New("usage: agenthail hooks install|uninstall|status [codex]")
+		return usage
 	}
 	if len(args) == 2 {
 		return cmdCodexHooks(args[0])
+	}
+	if remoteControl != nil && !a.claudeRemoteControlAvailable() {
+		return errors.New("this install has no Claude Remote Control, so Agenthail could not use it; leave --remote-control off this command")
 	}
 	home, _ := os.UserHomeDir()
 	roots, err := surface.ClaudeConfigRoots(home)
@@ -177,9 +194,80 @@ func (a *App) cmdHooks(args []string) error {
 	if err != nil {
 		return fmt.Errorf("locate agenthail binary: %w", err)
 	}
+	if err := a.claudeHooksAt(args[0], roots, executable); err != nil {
+		return err
+	}
+	if args[0] == "uninstall" || !a.claudeRemoteControlAvailable() {
+		return nil
+	}
+	return reportClaudeRemoteControl(home, args[0], remoteControl)
+}
+
+func (a *App) claudeRemoteControlAvailable() bool {
+	source, ok := a.adapters().ForSurface(surface.KindClaude).(interface{ RemoteControlAvailable() bool })
+	return ok && source.RemoteControlAvailable()
+}
+
+// reportClaudeRemoteControl sets remoteControlAtStartup in every root when
+// asked, and otherwise shows it: status for each root, install only when a
+// root leaves it unset.
+func reportClaudeRemoteControl(home, action string, set *bool) error {
+	if set != nil {
+		roots, err := surface.ClaudeConfigRoots(home)
+		if err != nil {
+			return err
+		}
+		for _, root := range roots {
+			changed, err := surface.WriteClaudeRemoteControl(root, *set)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("%s: Remote Control at startup %s%s\n", surface.ClaudeSettingsPath(root), onOff(*set), map[bool]string{true: "", false: " (already)"}[changed])
+		}
+		return nil
+	}
+	settings, err := surface.ReadClaudeRemoteControl(home)
+	if err != nil {
+		return err
+	}
+	unset := 0
+	for _, setting := range settings {
+		if setting.Problem == "" && setting.AtStartup == nil {
+			unset++
+		}
+		if action == "status" {
+			fmt.Printf("%s: Remote Control at startup %s\n", setting.SettingsPath, describeRemoteControlAtStartup(setting))
+		}
+	}
+	if action == "install" && unset > 0 {
+		fmt.Println(remoteControlHint)
+	}
+	return nil
+}
+
+const remoteControlHint = "Remote Control at startup is unset; agenthail hooks install --remote-control on starts it in each new Claude session, so what you write in Agenthail arrives there as your own turn."
+
+func describeRemoteControlAtStartup(setting surface.ClaudeRemoteControl) string {
+	switch {
+	case setting.Problem != "":
+		return "unknown: " + setting.Problem
+	case setting.AtStartup == nil:
+		return "unset (Claude's default)"
+	}
+	return onOff(*setting.AtStartup)
+}
+
+func onOff(on bool) string {
+	if on {
+		return "on"
+	}
+	return "off"
+}
+
+func (a *App) claudeHooksAt(action string, roots []string, executable string) error {
 	for _, root := range roots {
 		path := filepath.Join(root, "settings.json")
-		switch args[0] {
+		switch action {
 		case "install":
 			changed, err := installClaudeHooks(path, executable)
 			if err != nil {

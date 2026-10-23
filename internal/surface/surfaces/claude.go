@@ -158,6 +158,8 @@ func (c *Claude) DisableRemoteControl() {
 	c.localOnly = true
 }
 
+func (c *Claude) RemoteControlAvailable() bool { return !c.localOnly }
+
 func (c *Claude) Health(ctx context.Context) error {
 	processes, err := c.conversations(ctx)
 	native, bridged := false, false

@@ -369,6 +369,14 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "person-name", "personName": name])
     }
 
+    func claudeRemoteControl() async throws -> ClaudeRemoteControlState {
+        try await get("/api/v1/claude/remote-control")
+    }
+
+    func setClaudeRemoteControl(root: String, atStartup: Bool) async throws -> ClaudeRemoteControlState {
+        try await post("/api/v1/claude/remote-control", body: ["root": root, "atStartup": atStartup])
+    }
+
     func updateDashboardConfig(busyDelivery: String, codexRecentHours: Int) async throws {
         let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "dashboard-config", "codexRecentHours": codexRecentHours, "busyDelivery": busyDelivery])
     }
