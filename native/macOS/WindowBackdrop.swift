@@ -22,9 +22,10 @@ final class WindowBackdrop: ObservableObject {
     @Published private(set) var border: Double = 0
     @Published private(set) var composerOpacity: Double = 0.5
 
-    private(set) var regions: [String: (rect: CGRect, region: Region)] = [:]
-    private var probes: [String: WeakProbe] = [:]
-    private var departed: [WeakProbe] = []
+    /// Keyed by reader, not by region id: two views can briefly report the
+    /// same id while one replaces the other, and each withdraws only its own.
+    private(set) var regions: [UUID: (id: String, rect: CGRect, region: Region)] = [:]
+    private var probes: [UUID: WeakProbe] = [:]
     private var scale: CGFloat = 2
     private var dark = true
     private var config = UIConfig.defaults
@@ -76,38 +77,28 @@ final class WindowBackdrop: ObservableObject {
         schedule()
     }
 
-    /// A report claims the region for the reader that sent it, unless that
-    /// reader's view has gone: a report it queued before leaving is dropped.
-    func report(_ id: String, rect: CGRect, region: Region, from probe: WindowRectReader.RectProbe) {
-        guard !departed.contains(where: { $0.probe === probe }) else { return }
-        probes[id] = WeakProbe(probe: probe)
-        if let current = regions[id], current.rect == rect, current.region == region { return }
-        regions[id] = (rect, region)
+    func report(_ key: UUID, id: String, rect: CGRect, region: Region) {
+        if let current = regions[key], current.id == id, current.rect == rect, current.region == region { return }
+        regions[key] = (id, rect, region)
         schedule()
     }
 
-    /// Withdraws the region only if `probe` holds it: another view may
-    /// already have taken the same region over.
-    func remove(_ id: String, probe: WindowRectReader.RectProbe?) {
-        departed = departed.filter { $0.probe != nil && $0.probe !== probe }
-        if let probe { departed.append(WeakProbe(probe: probe)) }
-        if let holder = probes[id]?.probe, holder !== probe { return }
-        probes[id] = nil
-        guard regions.removeValue(forKey: id) != nil else { return }
+    func remove(_ key: UUID) {
+        probes[key] = nil
+        guard regions.removeValue(forKey: key) != nil else { return }
         schedule()
     }
 
     /// Keeps the view that reports a region, so a render measures it again:
     /// a probe hears about its own moves, not its ancestors'.
-    func attach(_ id: String, probe: WindowRectReader.RectProbe) {
-        departed.removeAll { $0.probe == nil || $0.probe === probe }
-        probes[id] = WeakProbe(probe: probe)
+    func attach(_ key: UUID, probe: WindowRectReader.RectProbe) {
+        probes[key] = WeakProbe(probe: probe)
     }
 
     private func remeasure() {
-        for (id, weak) in probes {
-            guard let rect = weak.probe?.measure(), let current = regions[id] else { continue }
-            regions[id] = (rect, current.region)
+        for (key, weak) in probes {
+            guard let rect = weak.probe?.measure(), let current = regions[key] else { continue }
+            regions[key] = (current.id, rect, current.region)
         }
     }
 
@@ -149,7 +140,9 @@ final class WindowBackdrop: ObservableObject {
             scrimTint = color.map { .color(Float($0.red), Float($0.green), Float($0.blue)) } ?? .auto
         }
         let workspace = NSWorkspace.shared
-        let panes: [BackdropSpec.Pane] = regions.compactMap { id, entry in
+        let entries = regions.sorted { ($0.value.id, $0.key.uuidString) < ($1.value.id, $1.key.uuidString) }.map(\.value)
+        let panes: [BackdropSpec.Pane] = entries.compactMap { entry in
+            let id = entry.id
             guard case .pane(let role) = entry.region else { return nil }
             switch role {
             case .sidebar:
@@ -161,8 +154,8 @@ final class WindowBackdrop: ObservableObject {
                 return BackdropSpec.Pane(id: id, rect: entry.rect, radius: 0, minimum: Float(config.chromeOpacity), strength: Float(config.backgroundOpacity), sharp: true)
             }
         }.sorted { $0.id < $1.id }
-        let texts = regions.filter { $0.value.region == .text || $0.value.region == .pane(.chrome) }.sorted { $0.key < $1.key }.map(\.value.rect)
-        let paneTexts = regions.filter { $0.value.region == .text }.sorted { $0.key < $1.key }.map(\.value.rect)
+        let texts = entries.filter { $0.region == .text || $0.region == .pane(.chrome) }.map(\.rect)
+        let paneTexts = entries.filter { $0.region == .text }.map(\.rect)
         return BackdropSpec(
             wallpaper: wallpaper,
             fit: config.backgroundFit,
@@ -392,26 +385,43 @@ private struct FloatingGlassBody<Content: View, S: InsettableShape>: View {
     }
 }
 
-/// Reports one region's rect to the backdrop and withdraws it when the
-/// view goes away, speaking only for the reader it attached.
-struct RegionReader: View {
+/// One view's claim on a backdrop region, for as long as its reader is in
+/// the window.
+@MainActor
+final class RegionHandle {
+    let key = UUID()
     let id: String
     let region: WindowBackdrop.Region
-    let backdrop: WindowBackdrop
-    @State private var attached = AttachedProbe()
+    private weak var backdrop: WindowBackdrop?
 
-    var body: some View {
-        WindowRectReader(probe: { probe in
-            attached.probe = probe
-            backdrop.attach(id, probe: probe)
-        }) { rect, _ in
-            if let probe = attached.probe { backdrop.report(id, rect: rect, region: region, from: probe) }
-        }
-        .onDisappear { backdrop.remove(id, probe: attached.probe) }
+    init(id: String, region: WindowBackdrop.Region, backdrop: WindowBackdrop) {
+        self.id = id
+        self.region = region
+        self.backdrop = backdrop
     }
 
-    private final class AttachedProbe {
-        weak var probe: WindowRectReader.RectProbe?
+    func attach(_ probe: WindowRectReader.RectProbe) {
+        backdrop?.attach(key, probe: probe)
+    }
+
+    func report(_ rect: CGRect) {
+        backdrop?.report(key, id: id, rect: rect, region: region)
+    }
+
+    func leave() {
+        backdrop?.remove(key)
+    }
+}
+
+struct RegionReader: View {
+    @State private var handle: RegionHandle
+
+    init(id: String, region: WindowBackdrop.Region, backdrop: WindowBackdrop) {
+        _handle = State(initialValue: RegionHandle(id: id, region: region, backdrop: backdrop))
+    }
+
+    var body: some View {
+        WindowRectReader(probe: { handle.attach($0) }, onLeave: { handle.leave() }) { rect, _ in handle.report(rect) }
     }
 }
 

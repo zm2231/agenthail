@@ -5,23 +5,33 @@ import SwiftUI
 /// works across split view columns, which SwiftUI coordinate spaces don't.
 struct WindowRectReader: NSViewRepresentable {
     var probe: ((RectProbe) -> Void)? = nil
+    var onLeave: (() -> Void)? = nil
     let onChange: (CGRect, NSWindow) -> Void
 
     func makeNSView(context: Context) -> RectProbe {
         let view = RectProbe()
         view.onChange = onChange
+        view.onLeave = onLeave
         probe?(view)
         return view
     }
 
     func updateNSView(_ view: RectProbe, context: Context) {
         view.onChange = onChange
+        view.onLeave = onLeave
         probe?(view)
         view.post()
     }
 
+    static func dismantleNSView(_ view: RectProbe, coordinator: ()) {
+        view.onLeave?()
+    }
+
     final class RectProbe: NSView {
         var onChange: ((CGRect, NSWindow) -> Void)?
+        /// Called when the view leaves its window or is taken down, which
+        /// SwiftUI's appear and disappear callbacks do not track reliably.
+        var onLeave: (() -> Void)?
         nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
         private var last: CGRect?
         private var lastAppearance: NSAppearance.Name?
@@ -32,7 +42,10 @@ struct WindowRectReader: NSViewRepresentable {
             super.viewDidMoveToWindow()
             observers.forEach(NotificationCenter.default.removeObserver)
             observers = []
-            guard let window else { return }
+            guard let window else {
+                onLeave?()
+                return
+            }
             for name in [NSWindow.didResizeNotification, NSWindow.didEndLiveResizeNotification, NSWindow.didChangeBackingPropertiesNotification] {
                 observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
                     MainActor.assumeIsolated { self?.post(force: true) }
@@ -87,8 +100,10 @@ struct WindowRectReader: NSViewRepresentable {
             guard force || rect != last || appearance != lastAppearance else { return }
             last = rect
             lastAppearance = appearance
-            let onChange = onChange
-            DispatchQueue.main.async { onChange?(rect, window) }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.window === window else { return }
+                self.onChange?(rect, window)
+            }
         }
 
         deinit {
