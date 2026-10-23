@@ -37,10 +37,10 @@ type fixtureProvider struct {
 	gate         *gate
 	// ticks releases one Poll each, as its wait running out would; arrived
 	// releases one as Codex sending an event would.
-	ticks    <-chan time.Time
-	arrived  chan struct{}
-	lastWait time.Duration
-	toolCalls    []struct {
+	ticks     <-chan time.Time
+	arrived   chan struct{}
+	lastWait  time.Duration
+	toolCalls []struct {
 		requestID string
 		success   bool
 		text      string
