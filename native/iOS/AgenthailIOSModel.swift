@@ -360,7 +360,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         case "delivered": return detail ?? "Sent"
         case "failed": return "Delivery failed"
         case "unknown", nil: return "Submitted"
-        case "held": return "Delivery held. Review it in Inbox before retrying."
+        case "held": return "Held by the receiver."
         case "canceled": return "Instruction canceled."
         default: return "Delivery status: \(evidence ?? "unknown")"
         }
@@ -924,7 +924,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             case "failed-history": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox history."
             case "transport_accepted": deliveryStatus[sessionID] = "Accepted for \(item.target); not yet confirmed."
             case "delivered": deliveryStatus[sessionID] = "Sent to \(item.target)."
-            case "held": deliveryStatus[sessionID] = "Delivery held. Review it in Inbox before retrying."
+            case "held": deliveryStatus[sessionID] = "Held by the receiver."
             case "canceled": deliveryStatus[sessionID] = "Instruction canceled."
             default: continue
             }

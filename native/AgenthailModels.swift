@@ -1002,6 +1002,23 @@ struct QueueState: Decodable, Identifiable, Equatable {
             : "Queued for \(target); sends when current turn ends."
     }
 
+    /// An unconfirmed live delivery is a neutral receipt, whatever retry state
+    /// the queue holds it in.
+    var outcomeLabel: String {
+        switch (evidence, isHistorical) {
+        case ("unknown", true): return "Never confirmed"
+        case ("unknown", false): return "Submitted"
+        case ("failed", true): return "Delivery failed"
+        case ("transport_accepted", _): return "Transport accepted"
+        default:
+            switch status {
+            case "dead": return "Delivery needs review"
+            case "inflight": return "Sending"
+            default: return status.capitalized
+            }
+        }
+    }
+
     /// Why a pending message has not been delivered yet.
     var holdLabel: String {
         switch heldBy {
