@@ -839,7 +839,9 @@ func TestDashboardStreamsSelectedSessionOverSSE(t *testing.T) {
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	server := httptest.NewServer(handler)
 	defer server.Close()
-	request, err := http.NewRequest(http.MethodGet, server.URL+"/api/session-stream?id=from&after=0", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/session-stream?id=from&after=0", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -852,20 +854,25 @@ func TestDashboardStreamsSelectedSessionOverSSE(t *testing.T) {
 	if response.StatusCode != http.StatusOK || !strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") {
 		t.Fatalf("status=%d headers=%v", response.StatusCode, response.Header)
 	}
+	// Context is session state, not a transcript row: it may come before or
+	// after the text, since a restarted stream replaces it with a later seq.
 	reader := bufio.NewReader(response.Body)
-	var body string
+	var rows []string
 	for {
 		line, readErr := reader.ReadString('\n')
 		if readErr != nil {
-			t.Fatal(readErr)
+			t.Fatalf("stream ended before the context usage, after %v: %v", rows, readErr)
 		}
-		if strings.HasPrefix(line, "data: ") {
-			body = line
-			break
+		if !strings.HasPrefix(line, "data: ") {
+			continue
 		}
-	}
-	if !strings.Contains(body, `"kind":"context"`) || !strings.Contains(body, `"usedTokens":90000`) {
-		t.Fatalf("stream body=%s", body)
+		rows = append(rows, line)
+		if strings.Contains(line, `"kind":"context"`) {
+			if !strings.Contains(line, `"usedTokens":90000`) {
+				t.Fatalf("context row=%s", line)
+			}
+			return
+		}
 	}
 }
 
