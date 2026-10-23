@@ -296,21 +296,24 @@ func TestALiveSourceLeavesItsCheckpointWhereItsStreamStopped(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	for {
-		d.sources.mu.Lock()
-		running := len(d.sources.sources)
-		d.sources.mu.Unlock()
-		if running == 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("page source did not stop after its handoff lease")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
 	// A stopped source leaves the map before its stream returns and records
 	// where it stopped.
-	d.sources.running.Wait()
+	waitForSourcesToStop := func() {
+		for {
+			d.sources.mu.Lock()
+			running := len(d.sources.sources)
+			d.sources.mu.Unlock()
+			if running == 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("page source did not stop after its handoff lease")
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		d.sources.running.Wait()
+	}
+	waitForSourcesToStop()
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -319,7 +322,10 @@ func TestALiveSourceLeavesItsCheckpointWhereItsStreamStopped(t *testing.T) {
 		t.Fatalf("checkpoint after the stream stopped = %+v found=%v err=%v, want offset %d", checkpoint, found, err, info.Size())
 	}
 	appendToFile(t, path, claudeTurns(conversation, 4, 4))
-	got := readDashboardExchangesWhen(t, handler, conversation, func(got []pageExchange) bool { return len(got) == 4 })
+	readDashboardExchanges(t, handler, conversation, "")
+	deadline = time.Now().Add(5 * time.Second)
+	waitForSourcesToStop()
+	got := readDashboardExchanges(t, handler, conversation, "")
 	if len(got) != 4 || got[3].User != "question 4" || got[3].Assistant != "answer 4" {
 		t.Fatalf("page after the source stopped=%+v", got)
 	}
