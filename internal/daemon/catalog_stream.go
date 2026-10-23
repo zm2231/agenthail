@@ -477,6 +477,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 			})
 		}
 		d.forgetCatalogLive(adapter.Name(), seen)
+		d.followLiveSessions(adapter.Name(), sessions, openSessions, complete)
 		if err := d.catalog.recordDiscovery(adapter.Name(), seen, observedAt, complete); err != nil {
 			d.log.Printf("catalog discovery %s: %s", adapter.Name(), err)
 		}

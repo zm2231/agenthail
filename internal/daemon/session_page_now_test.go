@@ -32,10 +32,10 @@ func (c *slowCatchUpClaude) TranscriptItems(ctx context.Context, session *surfac
 	return c.Claude.TranscriptItems(ctx, session, request)
 }
 
-func TestASeededJournalServesItsPageAtOnceAndCatchesUpOverTheStreamInTranscriptOrder(t *testing.T) {
-	previousGrace := sessionPageHandoffGrace
-	sessionPageHandoffGrace = 10 * time.Millisecond
-	t.Cleanup(func() { sessionPageHandoffGrace = previousGrace })
+func TestACatchUpThatOutlastsThePageWaitArrivesOverTheStreamInTranscriptOrder(t *testing.T) {
+	previousGrace, previousWait := sessionPageHandoffGrace, sessionPageCatchUpWait
+	sessionPageHandoffGrace, sessionPageCatchUpWait = 10*time.Millisecond, 100*time.Millisecond
+	t.Cleanup(func() { sessionPageHandoffGrace, sessionPageCatchUpWait = previousGrace, previousWait })
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	d, r, _, _, _ := daemonFixture(t)
 	t.Cleanup(d.sources.shutdown)
@@ -87,7 +87,7 @@ func TestASeededJournalServesItsPageAtOnceAndCatchesUpOverTheStreamInTranscriptO
 		t.Fatalf("status=%d err=%v body=%s", response.Code, err, response.Body.String())
 	}
 	if elapsed >= catchUpDelay/2 || len(page.Exchanges) != 2 || page.JournalSeq == 0 {
-		t.Fatalf("page took %v with %d exchanges at seq %d; want the journal's page at once", elapsed, len(page.Exchanges), page.JournalSeq)
+		t.Fatalf("page took %v with %d exchanges at seq %d; want the journal's page once the wait runs out", elapsed, len(page.Exchanges), page.JournalSeq)
 	}
 
 	server := httptest.NewServer(handler)

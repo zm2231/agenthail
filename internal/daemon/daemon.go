@@ -103,6 +103,9 @@ type Daemon struct {
 	limitResumeEnabled func() bool
 	// limitResumesRead, when set, runs each time usage-limit stops are read.
 	limitResumesRead func()
+	// liveSources names the surface of each session the catalog holds a
+	// source for because its process is live.
+	liveSources map[string]surface.SurfaceKind
 }
 
 func (d *Daemon) SetLaunchers(launchers []surface.Launcher) {
@@ -150,6 +153,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		events:            newEventHub(reg),
 		sources:           newSessionSourceManager(reg),
 		sourceHolds:       map[string]map[string]func(){},
+		liveSources:       map[string]surface.SurfaceKind{},
 		catalogLive:       map[string]*catalogLiveSession{},
 		catalogIdentities: newCatalogIdentityCache(),
 		catalogNudge:      make(chan struct{}, 1),
