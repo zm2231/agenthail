@@ -148,10 +148,18 @@ func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waitin
 			mobile.RequestID = request.ID
 			actions = request.Actions()
 		}
-		if err := d.notifyDesktop("Agenthail", desktopMessage, mobile.SessionID, "agenthail-"+key, mobile.RequestID, actions); err != nil {
-			d.log.Printf("desktop notification: %s", err)
-		}
+		// The desktop notification goes through a helper app that can take
+		// seconds to start, so the phone is told alongside it.
+		var desktop sync.WaitGroup
+		desktop.Add(1)
+		go func() {
+			defer desktop.Done()
+			if err := d.notifyDesktop("Agenthail", desktopMessage, mobile.SessionID, "agenthail-"+key, mobile.RequestID, actions); err != nil {
+				d.log.Printf("desktop notification: %s", err)
+			}
+		}()
 		d.notifyPairedDevices(notificationCtx, mobile)
+		desktop.Wait()
 		if ctx.Err() != nil {
 			return
 		}
