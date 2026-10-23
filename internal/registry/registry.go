@@ -2340,8 +2340,8 @@ func (r *Registry) ReconcileAttentionItems(now time.Time) error {
 // queued as a new attempt, so the earlier failure leaves the problem list and
 // a later outcome is reported again.
 func (r *Registry) RetryMessage(id int64) error {
-	var sessionID, message string
-	_ = r.db.QueryRow(`SELECT session_id,message FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message)
+	var sessionID, message, hostRequest string
+	_ = r.db.QueryRow(`SELECT session_id,message,host_request FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message, &hostRequest)
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -2359,6 +2359,9 @@ func (r *Registry) RetryMessage(id int64) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+	if hostRequest != "" {
+		r.signalChange(ChangeHostDeliveries)
 	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "retry", SessionID: sessionID, QueueID: id, Message: message, Result: "scheduled"})
 	return r.ReconcileAttentionItems(r.now())

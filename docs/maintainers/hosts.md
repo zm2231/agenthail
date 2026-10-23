@@ -222,8 +222,9 @@ clients send one; the daemon generates one otherwise):
   such as Tailscale Serve without the `Agenthail-Host` header), the row is
   inflight with evidence `unknown`, and the CLI reports `delivery submitted`.
 - While the host is connected the daemon replays held rows with the same key,
-  as soon as a row is held and again every five seconds. Holding a row, from
-  any process, touches `changes/host-deliveries` next to the registry; the
+  as soon as a row is held and again every five seconds. Holding a row,
+  retrying a dead one, or handing a moved session's queue to its new host,
+  from any process, touches `changes/host-deliveries` next to the registry; the
   daemon follows that file and wakes each host's delivery loop. The touch is
   only a hint, and the five-second tick still retries anything it misses.
   Each row is claimed inflight before it is sent, so a canceled message or

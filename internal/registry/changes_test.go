@@ -53,3 +53,40 @@ func TestASignalThatCannotBeWrittenNeverFailsTheSendItSignals(t *testing.T) {
 		t.Fatalf("held=%+v err=%v", held, err)
 	}
 }
+
+func TestRetryingADeadHostSendTouchesItsChangeSignalAndALocalOneDoesNot(t *testing.T) {
+	r := registryWithAHostSession(t)
+	path, err := r.ChangeSignal(ChangeHostDeliveries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := r.QueueHostDelivery("remote-thread", "held", "key-held", []byte(`{"action":"send"}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RegisterSession(surface.Session{ID: "local-thread", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+		t.Fatal(err)
+	}
+	local, err := r.QueueMessageWithKey("local-thread", "local", "key-local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`UPDATE message_queue SET status='dead' WHERE id IN (?,?)`, held, local); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name    string
+		id      int64
+		touched bool
+	}{{"local", local, false}, {"host", held, true}} {
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.RetryMessage(test.id); err != nil {
+			t.Fatalf("%s retry: %v", test.name, err)
+		}
+		if data, err := os.ReadFile(path); err != nil || (len(data) > 0) != test.touched {
+			t.Fatalf("%s retry signal=%q err=%v, want touched=%v", test.name, data, err, test.touched)
+		}
+	}
+}
