@@ -5,10 +5,11 @@ import Foundation
 struct QueueFactsTest {
     static func main() {
         let caps = Capabilities()
-        func queue(_ id: Int64, status: String, evidence: String = "queued", lastError: String? = nil, session: String = "s1", heldBy: String? = nil) -> QueueState {
+        func queue(_ id: Int64, status: String, evidence: String = "queued", lastError: String? = nil, session: String = "s1", heldBy: String? = nil, historical: Bool? = nil) -> QueueState {
             var fields: [String: Any] = ["id": id, "sessionId": session, "target": "@builder", "message": "check the build", "status": status, "attempts": 1, "queuedAt": "2026-10-18 06:00:00", "evidence": evidence]
             if let lastError { fields["lastError"] = lastError }
             if let heldBy { fields["heldBy"] = heldBy }
+            if let historical { fields["historical"] = historical }
             return try! JSONDecoder().decode(QueueState.self, from: JSONSerialization.data(withJSONObject: fields))
         }
         func session(_ id: String, surface: String = "claude", status: String = "idle", readOnly: Bool? = nil, reason: String? = nil, transport: String? = nil) -> SessionState {
@@ -41,7 +42,8 @@ struct QueueFactsTest {
         expect(QueueFacts.reason(pending, target: session("s1", surface: "codex", status: "notLoaded")) == "Codex conversation is not available to load", "unloadable Codex")
         expect(QueueFacts.reason(queue(1, status: "pending", heldBy: "hostUnreachable"), target: session("s1", surface: "codex", status: "notLoaded")) == "Held: this agent's host is unreachable", "a send the paired host never received names the host")
         expect(QueueFacts.reason(queue(2, status: "pending", evidence: "transport_accepted"), target: nil) == "Transport accepted; receiver completion is pending", "transport accepted evidence wins")
-        expect(QueueFacts.reason(queue(3, status: "dead", evidence: "unknown"), target: nil) == "Delivery outcome is unknown", "unknown evidence")
+        expect(QueueFacts.reason(queue(3, status: "dead", evidence: "unknown"), target: nil) == "Submitted", "a live unknown outcome reads as submitted")
+        expect(QueueFacts.reason(queue(3, status: "dead", evidence: "unknown", historical: true), target: nil) == "Delivery was never confirmed", "a historical unknown outcome was never confirmed")
         expect(QueueFacts.reason(dead, target: nil) == "Delivery failed", "failed evidence")
         expect(QueueFacts.reason(canceled, target: nil) == "Canceled", "non-pending status uses its label")
 

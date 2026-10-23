@@ -900,7 +900,7 @@ function renderSurfaceFilter() {
 }
 function queueReason(item) {
 	if (item.evidence === "transport_accepted") return "Transport accepted; receiver completion is pending";
-	if (item.evidence === "unknown") return "Delivery outcome is unknown";
+	if (item.evidence === "unknown") return item.historical ? "Delivery was never confirmed" : "Submitted";
 	if (item.evidence === "failed") return "Delivery failed";
 	if (item.status !== "pending") return statusLabel(item.status);
   if (item.heldBy === "hostUnreachable")
@@ -950,11 +950,11 @@ function renderOperations() {
         const label = {
           queued: "Queued",
           transport_accepted: "Transport accepted",
-          held: "Held by receiver",
+          held: "Held by the receiver",
           delivered: "Delivered",
           reply_observed: "Reply observed",
           failed: "Failed",
-          unknown: "Delivery uncertain",
+          unknown: "Never confirmed",
           canceled: "Canceled",
         }[entry.evidence] || auditKindLabel(entry.kind);
         const detail = entry.error || entry.message || entry.result || "No details recorded";

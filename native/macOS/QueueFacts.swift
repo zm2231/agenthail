@@ -14,7 +14,7 @@ enum QueueFacts {
     static func reason(_ item: QueueState, target: SessionState?) -> String {
         switch item.evidence {
         case "transport_accepted": return "Transport accepted; receiver completion is pending"
-        case "unknown": return "Delivery outcome is unknown"
+        case "unknown": return item.isHistorical ? "Delivery was never confirmed" : "Submitted"
         case "failed": return "Delivery failed"
         default: break
         }

@@ -141,11 +141,11 @@ struct DeliveryOutcome: Identifiable, Equatable {
         switch evidence {
         case "queued": return "Queued"
         case "transport_accepted": return "Transport accepted"
-        case "held": return "Held by receiver"
+        case "held": return "Held by the receiver"
         case "delivered": return "Delivered"
         case "reply_observed": return "Reply observed"
         case "failed": return "Failed"
-        case "unknown": return "Delivery uncertain"
+        case "unknown": return "Never confirmed"
         case "canceled": return "Canceled"
         default: return kind.replacingOccurrences(of: "_", with: " ").capitalized
         }
