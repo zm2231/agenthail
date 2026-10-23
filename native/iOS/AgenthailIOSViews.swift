@@ -1023,7 +1023,7 @@ struct IOSTimelineRow: View {
             ContextRecordRow(title: title, item: item)
         } else if item.kind == "notice" {
             TranscriptDivider(text: "\(item.title): \(item.noticeText)")
-        } else if item.kind == "message" {
+        } else if item.isSaid {
             IOSMessage(label: messageLabel, text: item.text, color: .secondary, timestamp: item.timestamp, files: item.files ?? [], peer: item.isPeerMessage, finished: finished)
             if item.truncated { ShortenedNote() }
         } else if item.kind == "attachment" {

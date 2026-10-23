@@ -53,6 +53,14 @@ final class ActivityPresentationTests: XCTestCase {
         XCTAssertEqual(TurnClock.clock("1m55s"), "1:55")
     }
 
+    func testStreamedCodexReplyTakesItsTurnDuration() throws {
+        let json = #"[{"id":"t","kind":"text","title":"Assistant","text":"Done.","timestamp":"2026-09-12T04:03:00Z","truncated":false},{"id":"d","kind":"event","title":"Turn duration","text":"42s","truncated":false},{"id":"p","kind":"text","role":"peer","title":"peer","text":"Ping","truncated":false},{"id":"d2","kind":"event","title":"Turn duration","text":"3s","truncated":false}]"#
+        let groups = TimelineGroup.make(try JSONDecoder().decode([TimelineItem].self, from: Data(json.utf8)))
+        XCTAssertEqual(groups.map(\.id), ["t", "p", "d2"], "a text reply without a role is the agent's and takes the duration; a peer's does not")
+        XCTAssertEqual(groups[0].finished, "42s")
+        XCTAssertTrue(groups[0].items[0].isSaid)
+    }
+
     func testWorkspaceSurvivesSnapshotAndSearchDecoding() throws {
         let snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))
         XCTAssertEqual(snapshot.sessions.first?.cwd, "/Users/demo/projects/fieldnotes")

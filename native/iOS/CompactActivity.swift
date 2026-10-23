@@ -8,10 +8,14 @@ extension EnvironmentValues {
     @Entry var revealRow: (String) -> Void = { _ in }
 }
 
+extension TimelineItem {
+    /// Something said rather than done: Codex streams its replies as text records, other agents as messages.
+    var isSaid: Bool { kind == "message" || kind == "text" }
+}
+
 struct TimelineGroup: Identifiable {
     let id: String
     var items: [TimelineItem]
-    var isMessage: Bool { items.first?.kind == "message" }
     var callCount: Int { items.filter { $0.kind == "toolCall" }.count }
     var errorCount: Int { items.filter(ToolRunSummary.isFailure).count }
     var isActivity: Bool { items.allSatisfy { ["toolCall", "toolResult", "reasoning"].contains($0.kind) } }
@@ -20,7 +24,7 @@ struct TimelineGroup: Identifiable {
     /// An agent's reply, with the duration of the turn it ended when the host recorded one.
     var isReply: Bool {
         guard let first = items.first else { return false }
-        return first.kind == "message" && first.role == "assistant" && !first.isInstructions
+        return first.isSaid && (first.role ?? "assistant") == "assistant" && !first.isInstructions
     }
     var finished: String? { isReply ? items.dropFirst().first(where: Self.isTurnDuration)?.text : nil }
 
@@ -54,7 +58,7 @@ struct TimelineGroup: Identifiable {
         var groups: [TimelineGroup] = []
         var calls: [String: Int] = [:]
         for item in items {
-            if item.kind == "message" { calls.removeAll() }
+            if item.isSaid { calls.removeAll() }
             if item.kind == "toolResult", let callID = item.callId, let index = calls[callID] {
                 groups[index].items.append(item)
             } else {
@@ -261,7 +265,7 @@ struct ToolOutput: View {
         let failed = ToolRunSummary.isFailure(result)
         let preview = ToolRunSummary.outputPreview(result.text)
         let lines = result.text.split(separator: "\n", omittingEmptySubsequences: false)
-        let shown = rows.current(shownLines) ?? (rows.isOpen("output-" + result.id) == true ? Self.page : 0)
+        let shown = rows.current(shownLines) ?? rows.count("output-" + result.id) ?? 0
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(failed ? "Error output" : "Output").font(.caption.weight(.semibold))
@@ -306,7 +310,7 @@ struct ToolOutput: View {
 
     private func show(_ count: Int) {
         shownLines = rows.choice(count)
-        rows.set("output-" + result.id, open: count > 0)
+        rows.set("output-" + result.id, count: count)
     }
 }
 
