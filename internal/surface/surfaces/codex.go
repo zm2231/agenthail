@@ -728,12 +728,17 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 	return observation, nil
 }
 
+// activeTurnID returns the thread's running turn, or "" when none runs. A new
+// thread whose turns cannot be listed yet has none, so its first turn can start.
 func (c *Codex) activeTurnID(ctx context.Context, conn codexClient, threadID string) (string, error) {
 	response, err := conn.Request(ctx, "thread/turns/list", map[string]any{
 		"threadId":      threadID,
 		"limit":         1,
 		"sortDirection": "desc",
 	}, 5*time.Second)
+	if codexTurnsNotListedYet(err) {
+		return "", nil
+	}
 	if err != nil {
 		return "", fmt.Errorf("thread/turns/list: %w", err)
 	}

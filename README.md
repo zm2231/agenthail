@@ -114,7 +114,7 @@ The dashboard and the Mac app create conversations the same way. When a conversa
 
 A conversation created in Codex Desktop stays with Desktop. Start Desktop with `agenthail launch codex`; Agenthail then uses a loopback-only bridge to the app-server that already owns those conversations. If Codex is already open, quit it and run that command before using Desktop message controls. While Desktop is closed, its conversations are read only in Agenthail, and Agenthail never loads them into the daemon, because a loaded thread locks Desktop out for up to 30 minutes.
 
-For an interactive terminal on the daemon, run `agenthail codex` in a project folder.
+For an interactive terminal on the daemon, run `agenthail codex` in a project folder. If the terminal closes before its first message, the conversation still takes a first message from Agenthail until Codex unloads it, after 30 idle minutes by default. Codex keeps nothing for a conversation that never had a message, so Agenthail then marks it offline and leaves it out of the current session list.
 
 If a writer lock outlives the process that held it, Agenthail reports an ownership conflict instead of retrying. After confirming no `agenthail codex` terminal is active, run `agenthail codex --repair-managed-runtime`. That restarts only Codex's app-server daemon; it never restarts Codex Desktop.
 
