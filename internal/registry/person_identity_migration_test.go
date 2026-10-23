@@ -54,7 +54,7 @@ func TestSchema34MovesTheOperatorsMessagesToThePersonAndTheCLI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.db.Exec(`PRAGMA user_version=31`); err != nil {
+	if _, err := r.db.Exec(`PRAGMA user_version=33`); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Close(); err != nil {
