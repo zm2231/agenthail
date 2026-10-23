@@ -324,10 +324,11 @@ final class SessionPane: ObservableObject, Identifiable {
             let shown = unpublishedDetail ?? detail
             let previous = shown?.session.id == id ? shown?.timeline : nil
             let fresh = Set(loaded.timeline?.items.map(\.id) ?? [])
-            if let previous, previous.items.contains(where: { fresh.contains($0.id) }) {
+            if let previous, let shared = previous.items.firstIndex(where: { fresh.contains($0.id) }) {
+                // Only rows before the page's start fell off it; later rows it lacks are newer than it.
                 if olderItems.isEmpty { olderCursor = previous.nextBefore }
                 let retained = fresh.union(olderItems.map(\.id))
-                olderItems += previous.items.filter { !retained.contains($0.id) }
+                olderItems += previous.items[..<shared].filter { !retained.contains($0.id) }
             } else if olderItems.isEmpty || previous?.items.isEmpty == false {
                 olderItems = []
                 olderCursor = loaded.timeline?.nextBefore
@@ -825,8 +826,9 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     /// Applies a streamed journal row as a session page reads it: an updated
-    /// row moves to the end, as its journal entry does, so a later reload shows
-    /// the same rows in the same order. Returns nil for a row it cannot apply.
+    /// row keeps its place, as its journal entry does, and a new row goes at
+    /// the end, so a later reload shows the same rows in the same order.
+    /// Returns nil for a row it cannot apply.
     static func applying(_ event: SessionStreamEvent, to detail: SessionDetail, older: inout [TimelineItem]) -> SessionDetail? {
         guard var timeline = detail.timeline else { return nil }
         let id = event.data.itemId
@@ -836,9 +838,13 @@ final class SessionPane: ObservableObject, Identifiable {
             timeline.items.removeAll { $0.id == id }
             older.removeAll { $0.id == id }
         } else if let item = event.item {
-            timeline.items.removeAll { $0.id == item.id }
-            older.removeAll { $0.id == item.id }
-            timeline.items.append(item)
+            if let index = timeline.items.firstIndex(where: { $0.id == item.id }) {
+                timeline.items[index] = item
+            } else if let index = older.firstIndex(where: { $0.id == item.id }) {
+                older[index] = item
+            } else {
+                timeline.items.append(item)
+            }
             timeline.unavailableReason = nil
         } else {
             return nil

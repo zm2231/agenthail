@@ -175,6 +175,28 @@ final class AgenthailIOSTests: XCTestCase {
         XCTAssertEqual(model.selectedDetail?.timeline?.items, before)
     }
 
+    @MainActor
+    func testSessionStreamUpdatesARowInPlaceWhereverItIsShown() throws {
+        let model = Self.computerModel()
+        var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        detail.session.id = "computer::demo"
+        let ids = try XCTUnwrap(detail.timeline?.items.map(\.id))
+        model.selectedSessionID = detail.session.id
+        model.selectedDetail = detail
+        model.olderActivity = [TimelineItem(id: "early", kind: "message", role: "assistant", title: "assistant", text: "early", timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)]
+        func update(_ id: String, _ body: String, seq: Int) throws {
+            model.applySessionStreamEvent(try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":\#(seq),"type":"item","data":{"itemId":"\#(id)","version":2,"kind":"message","op":"upsert","role":"assistant","title":"assistant","ts":"2026-10-03T12:00:00Z","body":"\#(body)","truncated":false}}"#.utf8)))
+        }
+
+        try update(ids[0], "edited", seq: 1)
+        XCTAssertEqual(model.selectedDetail?.timeline?.items.map(\.id), ids)
+        XCTAssertEqual(model.selectedDetail?.timeline?.items.first?.text, "edited")
+
+        try update("early", "edited early", seq: 2)
+        XCTAssertEqual(model.selectedDetail?.timeline?.items.map(\.id), ids)
+        XCTAssertEqual(model.olderActivity.map(\.text), ["edited early"])
+    }
+
     func testSessionDateReadsEveryTimestampForm() {
         let whole = ISO8601DateFormatter.sessionDate("2026-10-04T15:58:00Z")
         XCTAssertEqual(whole, Date(timeIntervalSince1970: 1_791_129_480))

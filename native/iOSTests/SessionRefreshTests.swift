@@ -19,6 +19,26 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testARefreshMovesOnlyRowsBeforeThePageIntoOlderActivity() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        let model = makeModel()
+        model.selectedSessionID = "computer::demo"
+        await model.refreshSession("computer::demo")
+        var detail = try XCTUnwrap(model.selectedDetail)
+        let page = try XCTUnwrap(detail.timeline?.items)
+        func row(_ id: String) -> TimelineItem {
+            TimelineItem(id: id, kind: "message", role: "assistant", title: "assistant", text: id, timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        }
+        detail.timeline?.items = [row("fell-off")] + page + [row("streamed")]
+        model.selectedDetail = detail
+        model.olderActivity = [row("earlier")]
+
+        await model.refreshSession("computer::demo")
+
+        XCTAssertEqual(model.olderActivity.map(\.id), ["earlier", "fell-off"])
+    }
+
+    @MainActor
     func testSnapshotStatusReachesOpenSession() async {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
