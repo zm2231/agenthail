@@ -53,8 +53,6 @@ final class SpotlightSync {
     private var consecutiveFailures = 0
     private(set) var indexed: [String: SpotlightEntry] = [:]
 
-    /// coalesce is how long an update waits for more before indexing, so a
-    /// burst of session changes indexes once.
     init(store: SpotlightStore, retryDelay: Duration = .seconds(30), coalesce: Duration = .zero, permanent: @escaping (Error) -> Bool = { _ in false }, failed: @escaping (Error) -> Void = { _ in }) {
         self.store = store
         self.retryDelay = retryDelay

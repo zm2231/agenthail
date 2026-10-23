@@ -1,56 +1,5 @@
 import Foundation
 
-/// Catalog events read from one stream connection wait here until the main
-/// actor takes them all at once, so a burst of events costs one snapshot
-/// change instead of one per event, and the reader never waits on the main
-/// actor. Past its bound the inbox stops taking events and reports an
-/// overflow, so its owner reloads from a snapshot instead of applying the
-/// backlog.
-final class CatalogInbox: @unchecked Sendable {
-    enum Contents {
-        case events([CatalogStreamEvent])
-        case overflow
-    }
-
-    private let lock = NSLock()
-    private let bound: Int
-    private let ready: @Sendable () -> Void
-    private var pending: [CatalogStreamEvent] = []
-    private var overflowed = false
-    private var scheduled = false
-
-    /// ready runs once when events arrive and not again until they are taken,
-    /// so the owner schedules at most one drain at a time.
-    init(bound: Int = 2000, ready: @escaping @Sendable () -> Void) {
-        self.bound = bound
-        self.ready = ready
-    }
-
-    func append(_ event: CatalogStreamEvent) {
-        let schedule: Bool = lock.withLock {
-            guard !overflowed else { return false }
-            if pending.count >= bound {
-                pending.removeAll()
-                overflowed = true
-            } else {
-                pending.append(event)
-            }
-            defer { scheduled = true }
-            return !scheduled
-        }
-        if schedule { ready() }
-    }
-
-    func take() -> Contents {
-        lock.withLock {
-            scheduled = false
-            if overflowed { return .overflow }
-            defer { pending.removeAll(keepingCapacity: true) }
-            return .events(pending)
-        }
-    }
-}
-
 struct CatalogRemoval: Equatable {
     let id: String
     let unlisted: Bool

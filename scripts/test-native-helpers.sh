@@ -22,6 +22,8 @@ SOURCES=(
   DuplicateApplicationPolicy.swift
   EventRetryBackoff.swift
   CatalogBatch.swift
+  CatalogInbox.swift
+  CatalogFeed.swift
   HolderPins.swift
   OperationsRefreshPolicy.swift
   RequestAnswer.swift

@@ -79,10 +79,8 @@ final class AgenthailModel: ObservableObject {
     private var refreshTask: Task<Void, Never>?
     private var statusRefreshTask: Task<Void, Never>?
     private var lastEventID: UInt64 = 0
-    private var catalogStreamTask: Task<Void, Never>?
     private var catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
-    private var catalogInbox: CatalogInbox?
-    var catalogInboxBound = 2000
+    lazy var catalogFeed = makeCatalogFeed()
     let store = SessionStore(limits: .desktop)
     private var drafts: [String: ComposerDraft] = [:]
     private var rekeys = SessionRekeys()
@@ -153,7 +151,6 @@ final class AgenthailModel: ObservableObject {
         eventTask?.cancel()
         refreshTask?.cancel()
         statusRefreshTask?.cancel()
-        catalogStreamTask?.cancel()
     }
 
     func pickHolder(_ holder: SessionHolder?, for sessionID: String) {
@@ -177,7 +174,7 @@ final class AgenthailModel: ObservableObject {
                     lastEventID = 0
                     if await refresh(fresh: true) {
                         startEvents()
-                        startCatalogStream()
+                        catalogFeed.start()
                         startStatusRefresh()
                         return
                     }
@@ -234,8 +231,8 @@ final class AgenthailModel: ObservableObject {
 
     func adoptRefreshed(_ loaded: DashboardSnapshot) {
         adopt(loaded.keepingCatalog(of: snapshot, appliedThrough: catalogPosition.cursor))
-        if catalogPosition.adopt(snapshotEpoch: loaded.hostEpoch, snapshotSeq: loaded.catalogSeq), catalogStreamTask != nil {
-            startCatalogStream()
+        if catalogPosition.adopt(snapshotEpoch: loaded.hostEpoch, snapshotSeq: loaded.catalogSeq), catalogFeed.isRunning {
+            catalogFeed.start()
         }
     }
 
@@ -1080,65 +1077,15 @@ final class AgenthailModel: ObservableObject {
         change(&localSends[sessionID]![index])
     }
 
-    /// After a stream gap or an overflowed inbox the stream resumes only once
-    /// a fresh snapshot has been adopted, retrying it until one is.
-    func startCatalogStream(afterFreshSnapshot: Bool = false) {
-        catalogStreamTask?.cancel()
-        catalogInbox = nil
-        catalogStreamTask = Task {
-            let backoff = EventRetryBackoff()
-            var resync = afterFreshSnapshot
-            while !Task.isCancelled {
-                guard let api else { return }
-                if resync {
-                    let adopted = await refresh(fresh: true)
-                    if Task.isCancelled { return }
-                    guard adopted else {
-                        try? await Task.sleep(for: .seconds(backoff.nextDelay()))
-                        continue
-                    }
-                    resync = false
-                }
-                let inbox = openCatalogInbox()
-                do {
-                    try await api.streamCatalog(after: catalogPosition.cursor, onConnected: {}, onEvent: { event in
-                        backoff.reset()
-                        inbox.append(event)
-                    })
-                } catch {
-                    if Task.isCancelled { return }
-                    if case AgenthailAPIError.streamGap = error {
-                        catalogInbox = nil
-                        catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
-                        resync = true
-                        continue
-                    }
-                    try? await Task.sleep(for: .seconds(backoff.nextDelay()))
-                }
-            }
-        }
-    }
-
-    /// The inbox one stream connection reads into. It replaces any earlier
-    /// one, whose events are read again from the cursor if still needed.
-    func openCatalogInbox() -> CatalogInbox {
-        let inbox = CatalogInbox(bound: catalogInboxBound) { [weak self] in
-            RunLoop.main.perform(inModes: [.common]) {
-                MainActor.assumeIsolated { self?.drainCatalogInbox() }
-            }
-        }
-        catalogInbox = inbox
-        return inbox
-    }
-
-    private func drainCatalogInbox() {
-        guard let inbox = catalogInbox else { return }
-        switch inbox.take() {
-        case .overflow:
-            startCatalogStream(afterFreshSnapshot: true)
-        case .events(let events):
-            applyCatalogEvents(events)
-        }
+    private func makeCatalogFeed() -> CatalogFeed {
+        CatalogFeed(CatalogFeed.Host(
+            api: { [weak self] in self?.api },
+            cursor: { [weak self] in self?.catalogPosition.cursor ?? 0 },
+            refresh: { [weak self] in await self?.refresh(fresh: true) ?? false },
+            resetCursor: { [weak self] in self?.catalogPosition = CatalogPosition(epoch: nil, cursor: 0) },
+            apply: { [weak self] in self?.applyCatalogEvents($0) },
+            stopped: { [weak self] in self == nil }
+        ))
     }
 
     func applyCatalogEvents(_ events: [CatalogStreamEvent]) {

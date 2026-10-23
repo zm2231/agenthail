@@ -20,7 +20,12 @@ final class ResyncProtocol: URLProtocol, @unchecked Sendable {
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func stopLoading() {}
+    private var held = false
+
+    override func stopLoading() {
+        guard held, let name = request.url?.host else { return }
+        Self.lock.withLock { Self.hosts[name]?.log.append("stream closed") }
+    }
 
     override func startLoading() {
         let url = request.url!
@@ -44,6 +49,7 @@ final class ResyncProtocol: URLProtocol, @unchecked Sendable {
         }
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": status == 200 && !snapshot ? "text/event-stream" : "application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        if body == "hold" { held = true; return }
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
@@ -61,7 +67,7 @@ struct CatalogResyncTest {
         configuration.protocolClasses = [ResyncProtocol.self]
         let api = AgenthailAPI(baseURL: URL(string: "http://\(host)")!, token: "t", session: URLSession(configuration: configuration))
         let model = AgenthailModel(connecting: false, api: api)
-        model.catalogInboxBound = bound
+        model.catalogFeed.bound = bound
         model.adoptRefreshed(listing(seq: 10))
         return model
     }
@@ -81,7 +87,7 @@ struct CatalogResyncTest {
         let gap = #"{"error":{"code":"stream_gap","message":"cursor expired"}}"#
         ResyncProtocol.serve("gap.test", failures: 2, seq: 40, streams: [(409, gap)])
         let afterGap = model("gap.test")
-        afterGap.startCatalogStream()
+        afterGap.catalogFeed.start()
         let gapOrder = ["stream after 10", "snapshot failed", "snapshot failed", "snapshot 40", "stream after 40"]
         check(waitForLog("gap.test", gapOrder, within: 15), "after a stream gap the stream waits for a fresh snapshot, through failures: \(ResyncProtocol.log("gap.test"))")
 
@@ -90,9 +96,18 @@ struct CatalogResyncTest {
         ResyncProtocol.serve("overflow.test", failures: 1, seq: 60, streams: [(200, events)])
         _ = afterGap
         let overflowed = model("overflow.test", bound: 3)
-        overflowed.startCatalogStream()
+        overflowed.catalogFeed.start()
         let overflowOrder = ["stream after 10", "snapshot failed", "snapshot 60", "stream after 60"]
         check(waitForLog("overflow.test", overflowOrder, within: 15), "an overflowed inbox resumes only after a fresh snapshot: \(ResyncProtocol.log("overflow.test"))")
+
+        ResyncProtocol.serve("release.test", failures: 0, seq: 10, streams: [(200, "hold")])
+        var released: AgenthailModel? = model("release.test")
+        released?.catalogFeed.start()
+        check(waitForLog("release.test", ["stream after 10"], within: 5), "the stream opens: \(ResyncProtocol.log("release.test"))")
+        weak let feed = released?.catalogFeed
+        released = nil
+        check(feed == nil, "an open stream does not keep a released model's feed")
+        check(waitForLog("release.test", ["stream after 10", "stream closed"], within: 5), "releasing the model closes its stream: \(ResyncProtocol.log("release.test"))")
         print("catalog resync tests passed")
     }
 

@@ -44,6 +44,8 @@ let package = Package(
                 "SessionStore.swift",
                 "EventRetryBackoff.swift",
                 "CatalogBatch.swift",
+                "CatalogInbox.swift",
+                "CatalogFeed.swift",
                 "ToolPresentation.swift",
                 "TextDiff.swift",
                 "DiffPresentation.swift",

@@ -44,7 +44,7 @@ struct CatalogBurstTest {
         let model = AgenthailModel(connecting: false)
         model.sessionFilter = .running
         model.adoptRefreshed(listing([session("a", "idle")], seq: 10))
-        let inbox = model.openCatalogInbox()
+        let inbox = model.catalogFeed.openInbox()
         inbox.append(upserted(11, "a", "busy"))
         inbox.append(upserted(12, "a", "idle"))
         model.adoptRefreshed(listing([session("a", "busy")], seq: 11))
@@ -69,8 +69,6 @@ struct CatalogBurstTest {
         func mark() { lock.withLock { last = Date() } }
     }
 
-    /// The sidebar re-renders once per snapshot change, which on a loaded Mac
-    /// took tens of milliseconds, so a burst of events must not cost one each.
     @MainActor
     static func burstKeepsTheSidebarCurrent() {
         let ids = (0..<30).map { "s\($0)" }
@@ -83,7 +81,7 @@ struct CatalogBurstTest {
             Thread.sleep(forTimeInterval: 0.05)
         }
         defer { render.cancel() }
-        let inbox = model.openCatalogInbox()
+        let inbox = model.catalogFeed.openInbox()
 
         func burst(_ events: [(String, String)], from seq: UInt64) -> Emitted {
             let emitted = Emitted()
@@ -115,9 +113,9 @@ struct CatalogBurstTest {
     @MainActor
     static func overflowReloadsInsteadOfApplyingTheBacklog() {
         let model = AgenthailModel(connecting: false)
-        model.catalogInboxBound = 5
+        model.catalogFeed.bound = 5
         model.adoptRefreshed(listing([session("a", "idle")], seq: 1))
-        let inbox = model.openCatalogInbox()
+        let inbox = model.catalogFeed.openInbox()
         for seq in 2...10 { inbox.append(upserted(UInt64(seq), "a", "busy", name: "backlog \(seq)")) }
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         check(model.knownSessions.first?.name == "a", "an overflowed backlog is not applied: \(model.knownSessions.map(\.name))")

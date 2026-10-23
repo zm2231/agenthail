@@ -34,9 +34,7 @@ final class HostConnection {
     private var connectionTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
     private var eventRefreshTask: Task<Void, Never>?
-    private var catalogStreamTask: Task<Void, Never>?
-    private var catalogInbox: CatalogInbox?
-    var catalogInboxBound = 2000
+    lazy var catalogFeed = makeCatalogFeed()
     weak var delegate: HostConnectionDelegate?
 
     init(credential: PairedHostCredential, session: URLSession) {
@@ -59,7 +57,6 @@ final class HostConnection {
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
-        catalogStreamTask?.cancel()
     }
 
     var name: String { snapshot?.daemon.host?.name ?? credential.hostName }
@@ -117,7 +114,7 @@ final class HostConnection {
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
-        catalogStreamTask?.cancel()
+        catalogFeed.stop()
         reachable = false
         reconnecting = false
     }
@@ -149,7 +146,7 @@ final class HostConnection {
             if catalogHostEpoch != loaded.hostEpoch {
                 catalogHostEpoch = loaded.hostEpoch
                 catalogStreamCursor = loaded.catalogSeq ?? 0
-                if catalogStreamTask != nil { startCatalogStream() }
+                if catalogFeed.isRunning { catalogFeed.start() }
             } else {
                 catalogStreamCursor = max(catalogStreamCursor, loaded.catalogSeq ?? catalogStreamCursor)
             }
@@ -208,7 +205,7 @@ final class HostConnection {
         guard !stopped else { return }
         await delegate?.hostEventStreamConnected(self)
         guard !stopped else { return }
-        startCatalogStream()
+        catalogFeed.start()
     }
 
     func recordStreamInterruption(probeError: Error?) {
@@ -232,62 +229,18 @@ final class HostConnection {
         }
     }
 
-    /// After a stream gap or an overflowed inbox the stream resumes only once
-    /// a fresh snapshot has been adopted, retrying it until one is.
-    func startCatalogStream(afterFreshSnapshot: Bool = false) {
-        catalogStreamTask?.cancel()
-        catalogInbox = nil
-        catalogStreamTask = Task {
-            let backoff = EventRetryBackoff()
-            var resync = afterFreshSnapshot
-            while !Task.isCancelled, !stopped {
-                if resync {
-                    let adopted = await refresh(fresh: true)
-                    if Task.isCancelled || stopped { return }
-                    guard adopted else {
-                        try? await Task.sleep(for: .seconds(backoff.nextDelay()))
-                        continue
-                    }
-                    resync = false
-                }
-                let inbox = openCatalogInbox()
-                do {
-                    try await api.streamCatalog(after: catalogStreamCursor, onConnected: {}, onEvent: { event in
-                        backoff.reset()
-                        inbox.append(event)
-                    })
-                } catch {
-                    if Task.isCancelled || stopped { return }
-                    if case AgenthailAPIError.streamGap = error {
-                        catalogInbox = nil
-                        catalogStreamCursor = 0
-                        resync = true
-                        continue
-                    }
-                    try? await Task.sleep(for: .seconds(backoff.nextDelay()))
-                }
-            }
-        }
-    }
-
-    private func openCatalogInbox() -> CatalogInbox {
-        let inbox = CatalogInbox(bound: catalogInboxBound) { [weak self] in
-            RunLoop.main.perform(inModes: [.common]) {
-                MainActor.assumeIsolated { self?.drainCatalogInbox() }
-            }
-        }
-        catalogInbox = inbox
-        return inbox
-    }
-
-    private func drainCatalogInbox() {
-        guard !stopped, let inbox = catalogInbox else { return }
-        switch inbox.take() {
-        case .overflow:
-            startCatalogStream(afterFreshSnapshot: true)
-        case .events(let events):
-            if applyCatalog(events) { Task { await refresh(fresh: true) } }
-        }
+    private func makeCatalogFeed() -> CatalogFeed {
+        CatalogFeed(CatalogFeed.Host(
+            api: { [weak self] in self?.api },
+            cursor: { [weak self] in self?.catalogStreamCursor ?? 0 },
+            refresh: { [weak self] in await self?.refresh(fresh: true) ?? false },
+            resetCursor: { [weak self] in self?.catalogStreamCursor = 0 },
+            apply: { [weak self] events in
+                guard let self, applyCatalog(events) else { return }
+                Task { await self.refresh(fresh: true) }
+            },
+            stopped: { [weak self] in self?.stopped ?? true }
+        ))
     }
 
     func receiveCatalog(_ events: [CatalogStreamEvent]) async {
