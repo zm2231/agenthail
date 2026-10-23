@@ -1,4 +1,4 @@
-import { blendFloor, boundary, gamma, linear, luminance, passes } from "./ui-contrast.js";
+import { blendFloor, boundary, gamma, linear, passes } from "./ui-contrast.js";
 
 const MESH_WIDTH = 192;
 
@@ -55,7 +55,7 @@ const FIT = {
 };
 const POSITION = { center: "center", top: "center top", bottom: "center bottom", left: "left center", right: "right center" };
 
-function hex(colour) {
+export function hex(colour) {
   return `#${colour.map((v) => Math.round(v * 255).toString(16).padStart(2, "0")).join("")}`;
 }
 
@@ -128,23 +128,49 @@ export function textureStyle(texture, strength, spacing) {
   return null;
 }
 
-export function pageScrim(samples, roles, polarity, target, ground) {
+function solveScrim(visit, roles, polarity, target, ground) {
   const limit = boundary(roles, polarity, target);
+  const [gr, gg, gb] = ground;
+  const colour = [0, 0, 0];
   let alpha = 0;
-  for (const colour of samples) {
-    if (passes(luminance(colour.map((v, i) => v + (ground[i] - v) * alpha)), limit, polarity)) continue;
+  visit((r, g, b) => {
+    const shown = 0.2126 * linear(r + (gr - r) * alpha) + 0.7152 * linear(g + (gg - g) * alpha) + 0.0722 * linear(b + (gb - b) * alpha);
+    if (passes(shown, limit, polarity)) return true;
+    colour[0] = r;
+    colour[1] = g;
+    colour[2] = b;
     alpha = Math.max(alpha, blendFloor(colour, ground, polarity, limit));
-    if (alpha >= 1) break;
-  }
+    return alpha < 1;
+  });
   return alpha;
 }
 
-export function composite(picture, strength, ground, dim, polarity) {
+export function pageScrim(samples, roles, polarity, target, ground) {
+  return solveScrim((check) => {
+    for (const [r, g, b] of samples) if (!check(r, g, b)) return;
+  }, roles, polarity, target, ground);
+}
+
+export function scrimForColours(colours, { strength, dim, ground, polarity, texture, textureStrength, roles, target }) {
   const veil = polarity === "dark" ? 0 : 1;
-  return picture.map((v, i) => {
-    const shown = ground[i] + (v - ground[i]) * strength;
-    return shown + (veil - shown) * dim;
-  });
+  const shown = (byte, i) => {
+    const over = ground[i] + (byte / 255 - ground[i]) * strength;
+    return over + (veil - over) * dim;
+  };
+  const grain = texture === "grain" && textureStrength > 0 ? textureStrength * 0.5 : 0;
+  const lines = texture === "scanlines" && textureStrength > 0 && polarity === "light" ? textureStrength : 0;
+  const lift = polarity === "light" ? (v) => v + (Math.max(2 * v - 1, 0) - v) * grain : (v) => v + (Math.min(2 * v, 1) - v) * grain;
+  return solveScrim((check) => {
+    for (let k = 0; k < colours.length; k++) {
+      const n = colours[k];
+      const r = shown((n >> 16) & 255, 0);
+      const g = shown((n >> 8) & 255, 1);
+      const b = shown(n & 255, 2);
+      if (!check(r, g, b)) return;
+      if (grain && !check(lift(r), lift(g), lift(b))) return;
+      if (lines && !check(r * (1 - lines), g * (1 - lines), b * (1 - lines))) return;
+    }
+  }, roles, polarity, target, ground);
 }
 
 export function imageRect(imageWidth, imageHeight, width, height, fit, position) {
@@ -166,28 +192,18 @@ export function gradientLine(angle, width, height) {
   return { x0: cx - (dx * length) / 2, y0: cy - (dy * length) / 2, x1: cx + (dx * length) / 2, y1: cy + (dy * length) / 2 };
 }
 
-export function textureExtremes(colour, texture, strength, polarity) {
-  if (!(strength > 0)) return [];
-  if (texture === "scanlines") return polarity === "light" ? [colour.map((v) => v * (1 - strength))] : [];
-  if (texture === "grain") {
-    const a = strength * 0.5;
-    const extreme = polarity === "light" ? (v) => Math.max(2 * v - 1, 0) : (v) => Math.min(2 * v, 1);
-    return [colour.map((v) => v + (extreme(v) - v) * a)];
-  }
-  return [];
-}
-
 export function distinctColours(data) {
   const seen = new Uint8Array(1 << 21);
-  const out = [];
+  const out = new Uint32Array(Math.min(data.length >> 2, 1 << 24));
+  let count = 0;
   for (let i = 0; i < data.length; i += 4) {
     const n = (data[i] << 16) | (data[i + 1] << 8) | data[i + 2];
     const bit = 1 << (n & 7);
     if (seen[n >> 3] & bit) continue;
     seen[n >> 3] |= bit;
-    out.push([data[i] / 255, data[i + 1] / 255, data[i + 2] / 255]);
+    out[count++] = n;
   }
-  return out;
+  return out.slice(0, count);
 }
 
 function canvas(document, width, height) {
@@ -197,7 +213,7 @@ function canvas(document, width, height) {
   return element;
 }
 
-export function createBackdrop({ document, loadImage }) {
+export function createBackdrop({ document, measure }) {
   const root = document.createElement("div");
   root.className = "ui-backdrop";
   root.setAttribute("aria-hidden", "true");
@@ -232,45 +248,9 @@ export function createBackdrop({ document, loadImage }) {
     return element.toDataURL();
   };
 
-  const sample = async (spec, fit, position, width, height, scale, ground) => {
-    const w = Math.max(Math.round(width * scale), 1);
-    const h = Math.max(Math.round(height * scale), 1);
-    const element = canvas(document, w, h);
-    const context = element.getContext("2d", { willReadFrequently: true });
-    context.fillStyle = hex(ground);
-    context.fillRect(0, 0, w, h);
-    if (spec.kind === "image") {
-      const image = await loadImage(backgroundURL(spec.path));
-      if (!image) return null;
-      const iw = image.naturalWidth * scale;
-      const ih = image.naturalHeight * scale;
-      if (fit === "tile") {
-        for (let y = 0; y < h; y += ih) for (let x = 0; x < w; x += iw) context.drawImage(image, x, y, iw, ih);
-      } else {
-        const rect = imageRect(iw, ih, w, h, fit, position);
-        context.drawImage(image, rect.x, rect.y, rect.width, rect.height);
-      }
-    } else if (spec.kind === "linear") {
-      const line = gradientLine(spec.angle, w, h);
-      const gradient = context.createLinearGradient(line.x0, line.y0, line.x1, line.y1);
-      for (const stop of spec.stops) gradient.addColorStop(Math.min(Math.max(stop.location, 0), 1), hex(stop.colour));
-      context.fillStyle = gradient;
-      context.fillRect(0, 0, w, h);
-    } else if (spec.kind === "mesh") {
-      const size = meshSize(width / Math.max(height, 1));
-      const small = canvas(document, size.width, size.height);
-      const smallContext = small.getContext("2d");
-      const image = smallContext.createImageData(size.width, size.height);
-      image.data.set(meshPixels(spec, size.width, size.height));
-      smallContext.putImageData(image, 0, 0);
-      context.drawImage(small, 0, 0, w, h);
-    }
-    return distinctColours(context.getImageData(0, 0, w, h).data);
-  };
-
   const render = async (look) => {
     const mine = ++generation;
-    const { spec, fit, position, strength, dim, texture, textureStrength, textureSpacing, polarity, ground, roles, target, readable, width, height, scale } = look;
+    const { spec, fit, position, strength, dim, texture, textureStrength, textureSpacing, polarity, ground, readable, width, height } = look;
     const style = pictureStyle(spec, fit, position, spec?.kind === "mesh" ? meshURL(spec, width, height) : null);
     document.documentElement.toggleAttribute("data-backdrop", Boolean(style));
     Object.assign(layers.picture.style, { backgroundImage: "", backgroundSize: "", backgroundRepeat: "", backgroundPosition: "" }, style || {});
@@ -284,18 +264,14 @@ export function createBackdrop({ document, loadImage }) {
       layers.scrim.style.opacity = "0";
       return 0;
     }
-    const pixels = await sample(spec, fit, position, width, height, scale || 1, ground);
-    if (mine !== generation) return null;
-    let samples = [];
-    if (pixels) {
-      for (const pixel of pixels) {
-        const shown = composite(pixel, strength, ground, dim, polarity);
-        samples.push(shown, ...textureExtremes(shown, texture, textureStrength, polarity));
-      }
-    } else {
-      samples = [polarity === "dark" ? [1, 1, 1] : [0, 0, 0]];
+    let measured = null;
+    try {
+      measured = await measure(look);
+    } catch {
+      measured = null;
     }
-    const alpha = pageScrim(samples, roles, polarity, target, ground);
+    if (mine !== generation) return null;
+    const alpha = measured ?? 1;
     layers.scrim.style.background = hex(ground);
     layers.scrim.style.opacity = String(alpha);
     return alpha;

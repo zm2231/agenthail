@@ -4,7 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as contrast from "../internal/daemon/dashboard/js/ui-contrast.js";
 import * as backdrop from "../internal/daemon/dashboard/js/ui-backdrop.js";
-import { applyTheme, backdropLook, effectiveTarget, parseHex, resolveTheme, start } from "../internal/daemon/dashboard/js/ui.js";
+import { createSampler, sampleSize } from "../internal/daemon/dashboard/js/ui-sampler.js";
+import { applyTheme, backdropLook, effectiveTarget, parseHex, resolveTheme, start, workerMeasure } from "../internal/daemon/dashboard/js/ui.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const vectors = JSON.parse(fs.readFileSync(path.join(root, "scripts/fixtures/contrast-vectors.json"), "utf8"));
@@ -261,7 +262,7 @@ const colourOf = (doc) => (value) => surfaces[doc.documentElement.dataset.theme]
   close(zero.y1, 0, "and ends at the top");
 
   const flower = new Uint8ClampedArray([10, 10, 10, 255, 10, 10, 10, 255, 250, 240, 230, 255, 10, 10, 10, 255]);
-  assert.deepEqual(backdrop.distinctColours(flower), [[10 / 255, 10 / 255, 10 / 255], [250 / 255, 240 / 255, 230 / 255]], "every distinct pixel is measured, so a one-pixel highlight counts");
+  assert.deepEqual([...backdrop.distinctColours(flower)], [0x0a0a0a, 0xfaf0e6], "every distinct pixel is measured, so a one-pixel highlight counts");
   assert.equal(backdrop.textureStyle("scanlines", 0), null);
   assert.match(backdrop.textureStyle("scanlines", 0.2, 4).backgroundImage, /rgb\(0 0 0 \/ 0\.2\) 0 1px, transparent 1px 4px/);
   assert.deepEqual(backdrop.textureStyle("grain", 0.4), { opacity: "0.2", mixBlendMode: "overlay" });
@@ -271,10 +272,6 @@ const colourOf = (doc) => (value) => surfaces[doc.documentElement.dataset.theme]
   const ink = contrast.luminance([0.93, 0.92, 0.9]);
   const quiet = contrast.luminance([0.75, 0.73, 0.7]);
   const ground = [0.09, 0.094, 0.102];
-  const shown = backdrop.composite([1, 1, 1], 0.5, ground, 0.25, "dark");
-  closeAll(shown, ground.map((g) => (g + (1 - g) * 0.5) * 0.75), "strength blends over the ground, then dim darkens");
-  closeAll(backdrop.composite([0, 0, 0], 1, [1, 1, 1], 0.5, "light"), [0.5, 0.5, 0.5], "dim lightens in light");
-
   for (const [polarity, roles, base, samples] of [
     ["dark", [ink, quiet], ground, [[0.05, 0.05, 0.05], [0.3, 0.6, 0.9], [0.95, 0.9, 0.8]]],
     ["light", [contrast.luminance([0.2, 0.2, 0.2]), contrast.luminance([0.3, 0.3, 0.3])], [0.97, 0.96, 0.95], [[0.8, 0.2, 0.2], [0.1, 0.1, 0.3]]],
@@ -289,12 +286,34 @@ const colourOf = (doc) => (value) => surfaces[doc.documentElement.dataset.theme]
   }
   assert.equal(backdrop.pageScrim([[0.02, 0.02, 0.02]], [ink], "dark", 4.5, ground), 0, "a dark enough picture needs no scrim");
 
-  const [bright] = backdrop.textureExtremes([0.2, 0.6, 0.8], "grain", 0.4, "dark");
-  closeAll(bright, [0.2 + 0.2 * 0.2, 0.6 + 0.4 * 0.2, 0.8 + 0.2 * 0.2], "grain's brightest overlay pixel is measured for light text");
-  const [darkest] = backdrop.textureExtremes([0.2, 0.6, 0.8], "grain", 0.4, "light");
-  closeAll(darkest, [0.2 - 0.2 * 0.2, 0.6 - 0.4 * 0.2, 0.8 - 0.2 * 0.2], "and its darkest for dark text");
-  assert.deepEqual(backdrop.textureExtremes([0.5, 0.5, 0.5], "scanlines", 0.2, "dark"), [], "scanlines only darken, which never hurts light text");
-  closeAll(backdrop.textureExtremes([0.5, 0.5, 0.5], "scanlines", 0.2, "light")[0], [0.4, 0.4, 0.4], "but they are measured for dark text");
+  const pack = ([r, g, b]) => (r << 16) | (g << 8) | b;
+  const look = { strength: 1, dim: 0, ground, polarity: "dark", texture: "none", textureStrength: 0, roles: [ink, quiet], target: 4.5 };
+  const same = (colours, overrides, expected, message) =>
+    assert.equal(backdrop.scrimForColours(Uint32Array.from(colours.map(pack)), { ...look, ...overrides }), backdrop.pageScrim(expected, overrides.roles || look.roles, overrides.polarity || look.polarity, look.target, overrides.ground || ground), message);
+  same([[255, 255, 255]], { strength: 0.5, dim: 0.25 }, [ground.map((g) => (g + (1 - g) * 0.5) * 0.75)], "strength blends over the ground, then dim darkens");
+  const lightRoles = [contrast.luminance([0.2, 0.2, 0.2])];
+  same([[0, 0, 0]], { dim: 0.5, polarity: "light", ground: [1, 1, 1], roles: lightRoles }, [[0.5, 0.5, 0.5]], "dim lightens in light");
+  const c = [51, 153, 204].map((v) => v / 255);
+  same([[51, 153, 204]], { texture: "grain", textureStrength: 0.4 }, [c, c.map((v) => v + (Math.min(2 * v, 1) - v) * 0.2)], "grain's brightest overlay pixel is measured for light text");
+  same([[51, 153, 204]], { texture: "grain", textureStrength: 0.4, polarity: "light", ground: [1, 1, 1], roles: lightRoles }, [c, c.map((v) => v + (Math.max(2 * v - 1, 0) - v) * 0.2)], "and its darkest for dark text");
+  same([[128, 128, 128]], { texture: "scanlines", textureStrength: 0.2 }, [[128 / 255, 128 / 255, 128 / 255]], "scanlines only darken, which never hurts light text");
+  same([[128, 128, 128]], { texture: "scanlines", textureStrength: 0.2, polarity: "light", ground: [1, 1, 1], roles: lightRoles }, [[128 / 255, 128 / 255, 128 / 255], [0.8 * 128 / 255, 0.8 * 128 / 255, 0.8 * 128 / 255]], "but they are measured for dark text");
+
+  const many = new Uint32Array(1 << 20);
+  for (let i = 0; i < many.length; i++) many[i] = (i * 16 + (i >> 4)) & 0xffffff;
+  const before = process.memoryUsage().heapUsed;
+  const started = performance.now();
+  const alpha = backdrop.scrimForColours(many, look);
+  const elapsed = performance.now() - started;
+  const grown = process.memoryUsage().heapUsed - before;
+  let expected = 0;
+  for (let i = 0; i < many.length; i += 8192) {
+    const chunk = [...many.subarray(i, i + 8192)].map((n) => [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => v / 255));
+    expected = Math.max(expected, backdrop.pageScrim(chunk, look.roles, "dark", 4.5, ground));
+  }
+  assert.equal(alpha, expected, "a million distinct colours give the same scrim as measuring each one separately");
+  assert.ok(elapsed < 2000, `in bounded time (${elapsed.toFixed(0)} ms)`);
+  assert.ok(grown < 16 * 1024 * 1024, `without a heap object per colour (${(grown / 1048576).toFixed(1)} MiB)`);
 }
 
 {
@@ -432,6 +451,142 @@ for (const [name, set] of [["dark", dark], ["light", light]]) {
   }
   applyTheme(doc, { theme: name }, name === "dark", colourOf, 4.5);
   assert.equal(doc.documentElement.style.properties.has("--quiet"), false, `${name}: at 4.5 the palette is used as it is`);
+}
+
+{
+  const made = [];
+  let reads = 0;
+  let bright = [255, 255, 255];
+  const makeCanvas = (width, height) => {
+    made.push([width, height]);
+    return {
+      getContext: () => ({
+        fillRect() {},
+        drawImage() {},
+        putImageData() {},
+        createLinearGradient: () => ({ addColorStop() {} }),
+        createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+        getImageData: (x, y, w, h) => {
+          reads++;
+          const data = new Uint8ClampedArray(w * h * 4).fill(20);
+          data.set([...bright, 255], 0);
+          return { data };
+        },
+      }),
+    };
+  };
+  let loads = 0;
+  const sampler = createSampler({ makeCanvas, loadImage: async (url) => (loads++, url.includes("missing") ? null : { width: 400, height: 300 }) });
+  const ink = contrast.luminance([0.93, 0.92, 0.9]);
+  const look = {
+    spec: { kind: "image", path: "art/field-dark.jpg" },
+    fit: "cover",
+    position: "center",
+    width: 800,
+    height: 600,
+    scale: 2,
+    strength: 1,
+    dim: 0,
+    ground: [0.09, 0.094, 0.102],
+    polarity: "dark",
+    texture: "none",
+    textureStrength: 0,
+    roles: [ink],
+    target: 4.5,
+  };
+  const full = await sampler.measure(look);
+  assert.ok(full > 0, "a bright pixel needs a scrim");
+  assert.deepEqual(made[0], [1600, 1200], "a high-density display is sampled at its own pixels");
+  assert.deepEqual(sampleSize({ width: 390, height: 844, scale: 3 }), { width: 1170, height: 2532 });
+  assert.equal(await sampler.measure(look), full);
+  assert.deepEqual([reads, loads], [1, 1], "the same background, size and ground are drawn once");
+  const softer = await sampler.measure({ ...look, strength: 0.3, texture: "grain", textureStrength: 0.2, target: 7 });
+  assert.ok(softer < full, "strength, texture and target re-solve from the cached colours");
+  assert.equal(reads, 1, "without drawing again");
+  bright = [10, 10, 10];
+  assert.equal(await sampler.measure({ ...look, width: 801 }), 0, "a new size draws again");
+  assert.equal(reads, 2);
+  assert.equal(await sampler.measure({ ...look, spec: { kind: "image", path: "missing.png" } }), null, "a picture that fails to load gives no measurement");
+  assert.equal(await sampler.measure({ ...look, spec: { kind: "none" } }), null);
+}
+
+{
+  const listeners = {};
+  const posted = [];
+  const worker = { addEventListener: (type, fn) => (listeners[type] = fn), postMessage: (message) => posted.push(message) };
+  const measure = workerMeasure(worker);
+  const first = measure({ n: 1 });
+  const second = measure({ n: 2 });
+  listeners.message({ data: { id: posted[1].id, alpha: 0.4 } });
+  listeners.message({ data: { id: posted[0].id, alpha: 0.7 } });
+  assert.deepEqual([await first, await second], [0.7, 0.4], "answers are matched to their requests");
+  const pending = measure({ n: 3 });
+  listeners.error(new Event("error"));
+  assert.equal(await pending, null, "a worker that fails answers nothing");
+  assert.equal(await measure({ n: 4 }), null, "and later requests do not wait on it");
+}
+
+{
+  const element = () => {
+    const node = { style: {}, children: [], className: "", setAttribute() {}, append: (child) => node.children.push(child) };
+    return node;
+  };
+  const attributes = new Set();
+  const document = {
+    createElement: element,
+    body: { prepend() {} },
+    documentElement: { toggleAttribute: (name, on) => (on ? attributes.add(name) : attributes.delete(name)) },
+  };
+  const answers = [];
+  const view = backdrop.createBackdrop({ document, measure: () => new Promise((resolve, reject) => answers.push({ resolve, reject })) });
+  const look = { spec: { kind: "linear", angle: 90, stops: [{ colour: [0, 0, 0], location: 0 }, { colour: [1, 1, 1], location: 1 }] }, fit: "cover", position: "center", strength: 1, dim: 0, texture: "none", textureStrength: 0, textureSpacing: 3, polarity: "dark", ground: [0.1, 0.1, 0.1], readable: true, width: 800, height: 600 };
+  const older = view.render(look);
+  const newer = view.render(look);
+  answers[1].resolve(0.3);
+  answers[0].resolve(0.9);
+  assert.deepEqual([await older, await newer], [null, 0.3]);
+  assert.equal(view.layers.scrim.style.opacity, "0.3", "a slower, older measurement never replaces a newer one");
+  const failed = view.render(look);
+  answers[2].resolve(null);
+  await failed;
+  assert.equal(view.layers.scrim.style.opacity, "1", "with no measurement, text stays readable on solid ground");
+  const thrown = view.render(look);
+  answers[3].reject(new Error("gone"));
+  await thrown;
+  assert.equal(view.layers.scrim.style.opacity, "1");
+  assert.equal(attributes.has("data-backdrop"), true);
+}
+
+{
+  const doc = fakeDocument();
+  doc.documentElement.hasAttribute = () => false;
+  const windowListeners = [];
+  const renders = [];
+  class Silent {
+    addEventListener() {}
+  }
+  start({
+    document: doc,
+    fetch: async () => ({ ok: true, json: async () => ({ values: { theme: "dark", background: "gradient: 90deg, #000000 0%, #ffffff 100%" } }) }),
+    EventSource: Silent,
+    matchMedia: () => ({ matches: false }),
+    storage: null,
+    colourOf: colourOf(doc),
+    backdrop: { render: async (look) => renders.push(look) },
+    viewport: () => ({ width: 800, height: 600, scale: 1 }),
+    MutationObserver: class {
+      observe() {}
+    },
+    addEventListener: (type, handler) => windowListeners.push([type, handler]),
+    debounce: 1,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const count = renders.length;
+  assert.deepEqual(windowListeners.map(([type]) => type), ["resize"], "the page listens for resizing, never scrolling, so scrolling the chat never remeasures");
+  windowListeners[0][1]();
+  windowListeners[0][1]();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(renders.length, count + 1, "and a burst of resizes remeasures once");
 }
 
 console.log("dashboard ui ok");
