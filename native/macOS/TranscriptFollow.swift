@@ -1,5 +1,10 @@
 import SwiftUI
 
+extension EnvironmentValues {
+    /// Stops following the live edge, so a row a person expands or collapses stays under the pointer.
+    @Entry var holdTranscriptPlace: () -> Void = {}
+}
+
 struct TranscriptFollow<ID: Equatable>: ViewModifier {
     let transcript: ID
     let leadingRow: String?
@@ -33,8 +38,12 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 } else if !following, inserted, phase == .idle {
                     let target = max(new.contentSize.height - (old.contentSize.height - old.contentOffset.y), 0)
                     settle { $0.scrollTo(y: target) }
+                } else if !following, phase == .idle, Self.atBottom(new) {
+                    // Content that shrank to the reader's position, or now fits, leaves nothing to jump to.
+                    following = true
                 }
             }
+            .environment(\.holdTranscriptPlace) { following = false }
             .onChange(of: transcript) {
                 generation &+= 1
                 placedLeadingRow = leadingRow
