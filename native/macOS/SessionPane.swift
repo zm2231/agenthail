@@ -8,7 +8,11 @@ final class SessionPane: ObservableObject, Identifiable {
     let restoresSelection: Bool
     unowned let model: AgenthailModel
 
-    @Published private(set) var selectedSessionID: String?
+    @Published private(set) var selectedSessionID: String? {
+        didSet {
+            if selectedSessionID != oldValue { endOpenInterval("left") }
+        }
+    }
     @Published private(set) var tabs = SessionTabs() {
         didSet {
             if restoresSelection, tabs != oldValue, let data = try? JSONEncoder().encode(tabs) {
@@ -68,7 +72,7 @@ final class SessionPane: ObservableObject, Identifiable {
     private var detailReloadTask: Task<Void, Never>?
     private var detailLoadTask: Task<Void, Never>?
     private static let signposter = OSSignposter(subsystem: "com.agenthail.app", category: "SessionOpen")
-    private var openInterval: OSSignpostIntervalState?
+    private var openInterval: (id: OSSignpostID, state: OSSignpostIntervalState)?
     @Published private(set) var detailLoadError: String?
     private var olderTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
@@ -221,19 +225,19 @@ final class SessionPane: ObservableObject, Identifiable {
         detailStale = false
         composerDraft = ComposerDraft()
         selectedSessionID = nil
-        endOpenInterval("cleared")
     }
 
     /// Marks a session open in Instruments, from the switch until the
-    /// daemon's first page for it is shown or the open fails or is abandoned.
+    /// daemon's first page for it is shown or the open is abandoned.
     private func beginOpenInterval(cached: Bool) {
         endOpenInterval("superseded")
-        openInterval = Self.signposter.beginInterval("Session open", id: Self.signposter.makeSignpostID(), "cached \(cached)")
+        let id = Self.signposter.makeSignpostID()
+        openInterval = (id, Self.signposter.beginInterval("Session open", id: id, "cached \(cached)"))
     }
 
     private func endOpenInterval(_ outcome: String) {
         guard let openInterval else { return }
-        Self.signposter.endInterval("Session open", openInterval, "\(outcome, privacy: .public)")
+        Self.signposter.endInterval("Session open", openInterval.state, "\(outcome, privacy: .public)")
         self.openInterval = nil
     }
 
@@ -347,7 +351,7 @@ final class SessionPane: ObservableObject, Identifiable {
         } catch {
             guard !closed, sessionLoadIsCurrent(id, selectedID: selectedSessionID), removedSession?.id != id, !error.isCancellation else { return true }
             detailLoadError = AgenthailAPIError.userMessage(error)
-            endOpenInterval("failed")
+            if let openInterval { Self.signposter.emitEvent("Session open failed", id: openInterval.id) }
             if detail?.session.id == id {
                 detailStale = true
                 detailRefreshFailed = true
@@ -586,6 +590,7 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     private func freezeRemovedSession() {
+        endOpenInterval("removed")
         streamAwaitsCursor = false
         sessionStreamTask?.cancel()
         dropUnpublishedDetail()
