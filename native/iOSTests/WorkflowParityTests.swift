@@ -271,6 +271,8 @@ final class WorkflowParityTests: XCTestCase {
         model.send(to: try XCTUnwrap(model.snapshot?.sessions.first))
         XCTAssertEqual(model.composer, "a quick question")
         XCTAssertNil(model.stashes["computer::old"])
+        for _ in 0 ..< 200 where !ParityProtocol.state.actions.contains(where: { $0["action"] as? String == "send" }) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(ParityProtocol.state.actions.last?["message"] as? String, "half written")
         model.toggleStash()
         model.host(try XCTUnwrap(model.connection("computer")), rekeyed: ["old": "new"])
         XCTAssertNil(model.stashes["computer::old"])
