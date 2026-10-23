@@ -735,6 +735,8 @@ func (r *Registry) ForwardSender(request map[string]any, source string) (bool, e
 		request["author"], request["personName"] = string(surface.AuthorPerson), name
 		return true, nil
 	case surface.CLISessionID:
+		delete(request, "author")
+		delete(request, "personName")
 		return true, nil
 	}
 	return false, nil
