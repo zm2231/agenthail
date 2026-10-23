@@ -8,10 +8,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/atomicfile"
 )
 
 func (a *App) uiSnapshot(parsed uiArgs) error {
@@ -47,7 +48,7 @@ func (a *App) uiSnapshot(parsed uiArgs) error {
 	if err != nil {
 		return fmt.Errorf("the app sent an image that is not a PNG: %w", err)
 	}
-	if err := writeSnapshot(out, image); err != nil {
+	if err := atomicfile.Write(out, image, 0o600); err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stdout, "wrote %s (%dx%d pixels)\n", out, width, height)
@@ -71,20 +72,4 @@ func pngSize(image []byte) (int, int, error) {
 		return 0, 0, errors.New("missing PNG header")
 	}
 	return int(binary.BigEndian.Uint32(image[16:20])), int(binary.BigEndian.Uint32(image[20:24])), nil
-}
-
-func writeSnapshot(out string, image []byte) error {
-	temp, err := os.CreateTemp(filepath.Dir(out), ".snapshot-*.png")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(temp.Name())
-	if _, err := temp.Write(image); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temp.Name(), out)
 }

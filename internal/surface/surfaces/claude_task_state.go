@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/atomicfile"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -78,15 +79,7 @@ func (c *Claude) saveTaskScan(scan *claudeTaskScan) {
 		return
 	}
 	c.taskPrune.Do(func() { pruneTaskStates(dir) })
-	temp, err := os.CreateTemp(dir, ".scan-*")
-	if err != nil {
-		return
-	}
-	_, writeErr := temp.Write(encoded)
-	closeErr := temp.Close()
-	if writeErr != nil || closeErr != nil || os.Rename(temp.Name(), c.taskStatePath(scan.Path)) != nil {
-		_ = os.Remove(temp.Name())
-	}
+	_ = atomicfile.Write(c.taskStatePath(scan.Path), encoded, 0o600)
 }
 
 func pruneTaskStates(dir string) {
@@ -95,7 +88,7 @@ func pruneTaskStates(dir string) {
 		return
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".scan-") {
+		if strings.HasPrefix(entry.Name(), ".") {
 			if info, err := entry.Info(); err == nil && time.Since(info.ModTime()) > time.Hour {
 				_ = os.Remove(filepath.Join(dir, entry.Name()))
 			}

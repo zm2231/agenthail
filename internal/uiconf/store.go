@@ -14,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/atomicfile"
 )
 
 const (
@@ -119,7 +121,7 @@ func (s *Store) Write(text, author, message string) (State, bool, error) {
 	if _, err := s.commitLocked(Person, "Edited by hand"); err != nil {
 		return State{}, false, err
 	}
-	if err := writeAtomic(s.Path(), []byte(text)); err != nil {
+	if err := atomicfile.Write(s.Path(), []byte(text), 0o600); err != nil {
 		return State{}, false, err
 	}
 	changed, err := s.commitLocked(author, message)
@@ -144,7 +146,7 @@ func (s *Store) Update(author, message string, change func(string) string) (Stat
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return State{}, false, err
 	}
-	if err := writeAtomic(s.Path(), []byte(change(string(current)))); err != nil {
+	if err := atomicfile.Write(s.Path(), []byte(change(string(current))), 0o600); err != nil {
 		return State{}, false, err
 	}
 	changed, err := s.commitLocked(author, message)
@@ -306,7 +308,7 @@ func (s *Store) ImportBackgroundData(name string, body io.Reader) (string, error
 	if err := os.MkdirAll(filepath.Join(s.dir, backgroundsDir), 0o700); err != nil {
 		return "", err
 	}
-	if err := writeAtomic(filepath.Join(s.dir, rel), data); err != nil {
+	if err := atomicfile.Write(filepath.Join(s.dir, rel), data, 0o600); err != nil {
 		return "", err
 	}
 	return rel, nil
@@ -445,26 +447,4 @@ func (s *Store) gitAs(author string, args ...string) (string, error) {
 		return stdout.String(), fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.String(), nil
-}
-
-func writeAtomic(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return err
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
 }

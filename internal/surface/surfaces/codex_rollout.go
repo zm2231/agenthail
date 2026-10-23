@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/zm2231/agenthail/internal/atomicfile"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -194,20 +195,8 @@ func codexReadableRollout(source string) (string, error) {
 		return "", err
 	}
 	defer decoder.Close()
-	temp, err := os.CreateTemp(dir, "decompress-*")
-	if err != nil {
-		return "", err
-	}
-	defer os.Remove(temp.Name())
-	if _, err := io.Copy(temp, decoder); err != nil {
-		temp.Close()
+	if err := atomicfile.WriteFrom(path, decoder, 0600); err != nil {
 		return "", fmt.Errorf("decompress Codex rollout: %w", err)
-	}
-	if err := temp.Close(); err != nil {
-		return "", err
-	}
-	if err := os.Rename(temp.Name(), path); err != nil {
-		return "", err
 	}
 	return path, nil
 }

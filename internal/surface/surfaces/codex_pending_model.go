@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/atomicfile"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -65,19 +66,7 @@ func saveCodexPendingModel(threadID string, pending codexPendingModel) error {
 	if err != nil {
 		return err
 	}
-	temp, err := os.CreateTemp(filepath.Dir(path), ".pending-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(temp.Name())
-	if _, err := temp.Write(data); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temp.Name(), path)
+	return atomicfile.Write(path, data, 0600)
 }
 
 func clearCodexPendingModel(threadID string) error {

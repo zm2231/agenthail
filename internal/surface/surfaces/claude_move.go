@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/zm2231/agenthail/internal/atomicfile"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -231,7 +232,7 @@ func (c *Claude) ArchiveMove(conversation, moveID string) error {
 		return err
 	}
 	encoded, _ := json.Marshal(origin)
-	if err := writeFileAtomic(filepath.Join(dir, "origin.json"), encoded); err != nil {
+	if err := atomicfile.Write(filepath.Join(dir, "origin.json"), encoded, 0600); err != nil {
 		return err
 	}
 	for _, part := range claudeMoveParts(conversation) {
@@ -307,14 +308,6 @@ func renameIfPresent(from, to string) error {
 		return fmt.Errorf("move %s: %s already exists", from, to)
 	}
 	return os.Rename(from, to)
-}
-
-func writeFileAtomic(name string, data []byte) error {
-	temp := name + ".tmp"
-	if err := os.WriteFile(temp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(temp, name)
 }
 
 // WriteMoveArchive streams an archived conversation as a tar of its parts:
