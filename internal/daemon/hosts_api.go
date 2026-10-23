@@ -830,8 +830,14 @@ func (d *Daemon) sessionRelativeTo(owner *pairedHost, ref string) (string, error
 // the host whose token sent the request, and becomes its mirrored row when
 // that host is paired back, otherwise a sender with no reply address.
 func (d *Daemon) routeSource(ctx context.Context, request map[string]any, target *pairedHost) (bool, error) {
-	if source, _ := request["sourceSessionId"].(string); request["author"] == string(surface.AuthorPerson) && strings.TrimSpace(source) != "" {
-		return false, fmt.Errorf("a person's message cannot also name a source session")
+	if author, present := request["author"]; present {
+		source, _ := request["sourceSessionId"].(string)
+		if author != string(surface.AuthorPerson) && author != "" {
+			return false, fmt.Errorf(`author must be "person" when set`)
+		}
+		if author == string(surface.AuthorPerson) && strings.TrimSpace(source) != "" {
+			return false, fmt.Errorf("a person's message cannot also name a source session")
+		}
 	}
 	named, err := d.routePersonName(ctx, request, target)
 	if err != nil {

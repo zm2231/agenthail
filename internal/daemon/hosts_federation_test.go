@@ -410,8 +410,17 @@ func TestAPersonsMessageToAnotherHostKeepsTheNameTheirOwnHostHasForThem(t *testi
 			t.Fatalf("send status=%d body=%s", response.Code, response.Body.String())
 		}
 	}
-	if response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": qualified, "message": "not the person", "author": "person", "sourceSessionId": surface.CLISessionID}); response.Code != http.StatusBadRequest {
-		t.Fatalf("a person's send that also names the CLI: status=%d body=%s", response.Code, response.Body.String())
+	for _, invalid := range []map[string]string{
+		{"author": "person", "sourceSessionId": surface.CLISessionID},
+		{"author": "invalid", "sourceSessionId": surface.PersonSessionID},
+	} {
+		request := map[string]string{"action": "send", "sessionId": qualified, "message": "not the person"}
+		for key, value := range invalid {
+			request[key] = value
+		}
+		if response := local.request(t, http.MethodPost, "/api/v1/actions", request); response.Code != http.StatusBadRequest {
+			t.Fatalf("%v: status=%d body=%s", invalid, response.Code, response.Body.String())
+		}
 	}
 	remote.fake.mu.Lock()
 	sources, persons := append([]string(nil), remote.fake.sources...), append([]string(nil), remote.fake.persons...)
