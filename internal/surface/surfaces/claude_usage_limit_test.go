@@ -44,7 +44,7 @@ func TestAUsageLimitedTurnEndsTheReplyWithTheLimit(t *testing.T) {
 		{line: []byte(`{"type":"user","uuid":"u1","timestamp":"2026-10-09T10:11:10Z","message":{"role":"user","content":"keep going"}}`)},
 		{line: []byte(claudeUsageLimitLine)},
 	}
-	reply := claudeTranscriptReply(records, "claude", nil)
+	reply, _ := claudeTranscriptReply(records, "claude", nil)
 	if !reply.Done || !strings.Contains(reply.Error, "out of usage") || !strings.Contains(reply.Error, "session limit") {
 		t.Fatalf("reply=%+v", reply)
 	}
