@@ -1343,7 +1343,7 @@ func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error)
 // PeerSession finds the session whose Claude peer id is peerID, the
 // from-session a peer message carries, with the paired host that owns it.
 // Peer ids are derived, not stored, so it hashes every session's id; with a
-// few thousand sessions that is about a millisecond, and only a target that
+// few thousand sessions that is a few milliseconds, and only a target that
 // matches nothing else reaches it.
 func (r *Registry) PeerSession(peerID string) (id, hostID string, found bool, err error) {
 	if _, err := uuid.Parse(peerID); err != nil {
