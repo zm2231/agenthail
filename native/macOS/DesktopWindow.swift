@@ -48,18 +48,18 @@ struct DesktopWindow: View {
             SessionSidebar(model: model, pane: pane)
                 .belowWindowChrome()
                 .toolbar(removing: .sidebarToggle)
-                .navigationSplitViewColumnWidth(min: 248, ideal: 264, max: 280)
+                .navigationSplitViewColumnWidth(min: DesktopColumns.sidebar.min, ideal: DesktopColumns.sidebar.ideal, max: DesktopColumns.sidebar.max)
         } detail: {
             ConversationPane(model: model, pane: pane)
                 .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
                 .belowWindowChrome()
                 .ignoresSafeArea(.container, edges: .top)
-                .navigationSplitViewColumnWidth(min: 340, ideal: 892)
+                .navigationSplitViewColumnWidth(min: DesktopColumns.detail.min, ideal: DesktopColumns.detail.ideal)
                 .inspector(isPresented: Binding(get: { pane.inspectorVisible && pane.displayedSession != nil }, set: { if pane.displayedSession != nil { pane.inspectorVisible = $0 } })) {
                     SessionInspector(model: model, pane: pane)
                         .belowWindowChrome()
                         .ignoresSafeArea(.container, edges: .top)
-                        .inspectorColumnWidth(min: 270, ideal: 284, max: 300)
+                        .inspectorColumnWidth(min: DesktopColumns.inspector.min, ideal: DesktopColumns.inspector.ideal, max: DesktopColumns.inspector.max)
                 }
         }
     }
@@ -101,85 +101,18 @@ struct SessionSidebar: View {
     @Environment(\.openWindow) private var openWindow
     @State private var expandedProjects: Set<String> = []
     @State private var expandedFamilies: Set<String> = []
-    @FocusState private var searchFocused: Bool
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
     var body: some View {
         let tree = model.sessionTree
         VStack(spacing: 0) {
-            HStack(spacing: DesktopSpace.m) {
-                ForEach(SessionFilter.allCases) { filter in
-                    Button {
-                        model.sessionFilter = filter
-                    } label: {
-                        HStack(spacing: DesktopSpace.xs) {
-                            Text(filter.rawValue)
-                                .fontWeight(model.sessionFilter == filter ? .semibold : .regular)
-                                .foregroundStyle(model.sessionFilter == filter ? DesktopPalette.text : DesktopPalette.text2)
-                            Text("\(tree.counts[filter] ?? 0)")
-                                .font(.system(size: DesktopType.caption))
-                                .foregroundStyle(DesktopPalette.text2)
-                        }
-                        .lineLimit(1)
-                        .fixedSize()
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(model.sessionFilter == filter ? .isSelected : [])
-                    .help(shortcuts.help("\(SessionFacts.filterSummary(filter, codexRecentHours: model.snapshot?.codexRecentHours ?? 5)).", filter.command))
-                }
-                Spacer()
-                SessionRefinementMenu(model: model)
-                Button {
-                    model.openNewSession()
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(DesktopPalette.text2)
-                .help(shortcuts.help("New session", .newSession))
-                .accessibilityLabel("New session")
-            }
-            .font(.system(size: DesktopType.body))
-            .padding(.horizontal, DesktopSpace.l)
-            .padding(.top, DesktopSpace.xs)
-            .padding(.bottom, DesktopSpace.s)
-            .scrimText("sidebar-filters")
-
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: DesktopType.caption))
-                    .foregroundStyle(DesktopPalette.text2)
-                TextField("Search sessions", text: Binding(get: { model.searchQuery }, set: { model.search($0) }))
-                    .textFieldStyle(.plain)
-                    .font(.system(size: DesktopType.body))
-                    .focused($searchFocused)
-                    .onKeyPress(.escape) {
-                        model.search("")
-                        searchFocused = false
-                        return .handled
-                    }
-                if !model.searchQuery.isEmpty {
-                    Button {
-                        model.search("")
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(DesktopPalette.muted)
-                    .accessibilityLabel("Clear search")
-                }
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .background(DesktopPalette.fill, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
-            .padding(.horizontal, DesktopSpace.m)
-            .padding(.bottom, 10)
-            .scrimText("sidebar-search")
-            .background {
-                Button("") { searchFocused = true }
-                    .keyboardShortcut(shortcuts.keyboardShortcut(.findSession))
-                    .hidden()
-            }
+            SessionSidebarHeader(
+                model: model,
+                counts: tree.counts,
+                help: { shortcuts.help("\(SessionFacts.filterSummary($0, codexRecentHours: model.snapshot?.codexRecentHours ?? 5)).", $0.command) },
+                newSessionHelp: shortcuts.help("New session", .newSession),
+                findShortcut: shortcuts.keyboardShortcut(.findSession)
+            )
             SessionRefinementBar(model: model)
                 .scrimText("sidebar-refinement")
 
