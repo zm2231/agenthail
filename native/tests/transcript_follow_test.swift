@@ -211,6 +211,23 @@ struct TranscriptFollowTest {
         spin(0.3)
         expect(!feed.following, "a reader who scrolled up a little is not following")
         expect(renders["R35", default: 0] == before, "leaving the live edge does not redraw rows that stayed on screen, R35 drew \(renders["R35", default: 0] - before) more times")
+
+        feed.transcript = "L"
+        feed.rows = rows("L", 60)
+        spin(0.6)
+        expectBottom(scroll, "a fresh transcript shows the live edge")
+        // A lazy stack that re-measures rows can put the offset back within the same layout pass that anchored a resize to the bottom.
+        let held = offset(scroll)
+        feed.rows += rows("Lg", 3)
+        hosting.layoutSubtreeIfNeeded()
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: held))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        hosting.layoutSubtreeIfNeeded()
+        spin(0.5)
+        feed.rows += rows("Lh", 2)
+        spin(0.5)
+        expectBottom(scroll, "layout that moves the offset while a resize settles does not stop following")
+        expect(feed.following, "layout that moves the offset while a resize settles leaves the reader following")
     }
 
     @MainActor

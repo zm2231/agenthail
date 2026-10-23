@@ -23,6 +23,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     @State private var phase: ScrollPhase = .idle
     @State private var generation = 0
     @State private var placedLeadingRow: String?
+    @State private var pass = LayoutPass()
 
     static var bottomSlack: CGFloat { 70 }
 
@@ -39,9 +40,16 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { old, new in
                 let inserted = leadingRow != placedLeadingRow && placedLeadingRow.map(hasRow) == true
                 placedLeadingRow = leadingRow
-                if old.contentSize == new.contentSize && old.containerSize == new.containerSize {
-                    // A jump's animation passes through offsets short of the bottom; they are not the reader leaving it.
-                    if phase != .animating { following = Self.atBottom(new) }
+                let resized = old.contentSize != new.contentSize || old.containerSize != new.containerSize
+                if resized { pass.markResized() }
+                if !resized {
+                    if following, phase == .idle, pass.resized, !Self.atBottom(new) {
+                        // Layout that moves the offset in the same pass as a resize, as a lazy stack re-measuring rows does, is not the reader leaving the bottom.
+                        settle { $0.scrollTo(edge: .bottom) }
+                    } else if phase != .animating {
+                        // A jump's animation passes through offsets short of the bottom; they are not the reader leaving it.
+                        following = Self.atBottom(new)
+                    }
                 } else if following, phase == .idle || phase == .animating, !Self.atBottom(new) {
                     settle { $0.scrollTo(edge: .bottom) }
                 } else if !following, inserted, phase == .idle {
@@ -68,6 +76,18 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             guard scheduled == generation else { return }
             move(&position)
         }
+    }
+}
+
+/// Whether the layout pass now running resized the transcript. A reference, so marking it does not redraw the transcript.
+@MainActor
+private final class LayoutPass {
+    private(set) var resized = false
+
+    func markResized() {
+        guard !resized else { return }
+        resized = true
+        DispatchQueue.main.async { self.resized = false }
     }
 }
 
