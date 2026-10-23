@@ -119,7 +119,7 @@ func TestDaemonServicePlistRunsAtStandardProcessType(t *testing.T) {
 // The daemon posts desktop notifications through the app its installer
 // names, so the service keeps that name.
 func TestTheDaemonServiceKeepsTheAppItsInstallerNamed(t *testing.T) {
-	t.Setenv("AGENTHAIL_MAC_APP", "/Users/someone/.local/share/agenthail/Agenthail.app/Contents/MacOS/Agenthail")
+	t.Setenv("AGENTHAIL_MAC_APP", "/Users/demo/.local/share/agenthail/Agenthail.app/Contents/MacOS/Agenthail")
 	if !slices.Contains(serviceEnvironmentKeys, "AGENTHAIL_MAC_APP") || serviceEnvironment()["AGENTHAIL_MAC_APP"] != os.Getenv("AGENTHAIL_MAC_APP") {
 		t.Fatalf("the service drops AGENTHAIL_MAC_APP: keys=%v", serviceEnvironmentKeys)
 	}
