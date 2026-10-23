@@ -1,6 +1,7 @@
 package voice
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -57,4 +58,35 @@ func TestASourceThatLostItsEventsIsAskedAgainOnlyOnTheNextTick(t *testing.T) {
 		defer p.mu.Unlock()
 		return p.polls-before == 2
 	})
+}
+
+func TestAPollWaitsNoLongerThanTheCallsNextDeadline(t *testing.T) {
+	f, p := fixture(t)
+	connectFixture(t, f)
+	apply(t, f, Action{Action: "heartbeat", AttemptID: "call-a"})
+	waitForWait := func(want time.Duration) {
+		t.Helper()
+		waitFor(t, fmt.Sprintf("a poll bounded at %v", want), func() bool {
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			return p.lastWait == want
+		})
+	}
+	f.advance(38 * time.Second)
+	f.tick()
+	waitForWait(2*time.Second + time.Millisecond)
+	f.advance(2*time.Second + time.Millisecond)
+	f.tick()
+	if requests, _, _ := p.snapshot(); len(requests) != 2 || requests[1] != "thread/realtime/stop" {
+		t.Fatalf("the heartbeat expiry did not request the hangup when due: %v", requests)
+	}
+	waitForWait(pollWait)
+	f.advance(28 * time.Second)
+	f.tick()
+	waitForWait(2*time.Second + time.Millisecond)
+	f.advance(2*time.Second + time.Millisecond)
+	f.tick()
+	if got := f.View(); got.Phase != "unknown" {
+		t.Fatalf("the hangup give-up did not end the call when due: %+v", got)
+	}
 }
