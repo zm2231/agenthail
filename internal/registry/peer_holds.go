@@ -37,7 +37,7 @@ func (r *Registry) HoldPeerMessage(m PeerMessage, reason string) (bool, error) {
 		if _, err := appendDeliveryProblemEvent(tx, intent); err != nil {
 			return false, err
 		}
-		if intent.Relayed || intent.SenderSessionID == OperatorSessionID || surface.IsUnrepliableSender(intent.SenderSessionID) {
+		if intent.Relayed || !readsNotices(intent.SenderSessionID) {
 			return true, nil
 		}
 		notice := fmt.Sprintf("[agenthail delivery held id=%d target=%s] The message you sent to %s has not reached its model. %s", intent.ID, intent.TargetSessionID, intent.TargetSessionID, reason)
