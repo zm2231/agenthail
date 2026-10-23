@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -119,38 +118,53 @@ func TestPeerRegistrationFollowsDiscoveryWithoutWaitingForTheTicker(t *testing.T
 }
 
 func TestPeerRegistrationRunsOncePerBurstOfDiscoveryCommits(t *testing.T) {
-	settle := claudePeerChangeSettle
-	claudePeerChangeSettle = 400 * time.Millisecond
-	t.Cleanup(func() { claudePeerChangeSettle = settle })
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { reg.Close() })
-	d := newTestDaemon(t, reg, []surface.Surface{&daemonSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}}})
 	ctx, cancel := context.WithCancel(context.Background())
-	passes := make(chan struct{}, 32)
+	changed := make(chan struct{}, 1)
+	tick := make(chan time.Time)
+	settling := make(chan chan time.Time)
+	passes := make(chan chan struct{})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		d.runClaudePeerRegistration(ctx, func(context.Context, []surface.Session) map[string]error { return nil }, func(time.Time) { passes <- struct{}{} })
+		settleChanges(ctx, changed, tick, func() <-chan time.Time {
+			settled := make(chan time.Time)
+			select {
+			case settling <- settled:
+			case <-ctx.Done():
+			}
+			return settled
+		}, func() {
+			resume := make(chan struct{})
+			select {
+			case passes <- resume:
+			case <-ctx.Done():
+				return
+			}
+			select {
+			case <-resume:
+			case <-ctx.Done():
+			}
+		})
 	}()
 	defer func() { cancel(); <-done }()
-	select {
-	case <-passes:
-	case <-time.After(5 * time.Second):
-		t.Fatal("startup pass did not run")
-	}
-	for index := range 5 {
-		id := fmt.Sprintf("burst-%d", index)
-		session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy, LastActive: time.Now()}
-		if _, _, err := d.catalog.publishSession(registry.CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:" + id, Type: "session.upserted", EntityID: id, Payload: []byte(`{}`)}); err != nil {
-			t.Fatal(err)
+	signal := func() {
+		select {
+		case changed <- struct{}{}:
+		default:
 		}
-		time.Sleep(50 * time.Millisecond)
 	}
-	time.Sleep(time.Second)
-	if count := len(passes); count != 1 {
-		t.Fatalf("%d passes after a burst of five commits, want one", count)
+	close(<-passes)
+	signal()
+	settled := <-settling
+	for range 4 {
+		signal()
 	}
+	close(settled)
+	resume := <-passes
+	if len(changed) != 0 {
+		t.Fatal("a change made while the burst settled is left for a second pass")
+	}
+	close(resume)
+	tick <- time.Now()
+	close(<-passes)
 }
