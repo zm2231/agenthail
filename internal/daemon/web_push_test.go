@@ -248,14 +248,47 @@ func TestWithdrawsAreSentOnceAndSpacedSoEachCanCloseThePreviousMarker(t *testing
 			withdrawn = append(withdrawn, push)
 		}
 	}
-	if len(withdrawn) != 2 || withdrawn[0].message.CollapseID != shown || withdrawn[1].message.CollapseID != other {
+	if len(withdrawn) != 2 || withdrawn[0].message.CollapseID == withdrawn[1].message.CollapseID {
 		t.Fatalf("withdraws=%+v", withdrawn)
 	}
-	if waited := withdrawn[0].at.Sub(start); waited < webPushCloseAge {
-		t.Fatalf("a repeated withdraw went %s after its question was sent", waited)
+	for _, push := range withdrawn {
+		if waited := push.at.Sub(start); push.message.CollapseID == shown && waited < webPushCloseAge {
+			t.Fatalf("a repeated withdraw went %s after its question was sent", waited)
+		}
 	}
-	if waited := withdrawn[1].at.Sub(start); waited < 2*webPushCloseAge {
-		t.Fatalf("the next withdraw went %s after the question, before the previous marker could be closed", waited)
+	if gap := withdrawn[1].at.Sub(withdrawn[0].at); gap < webPushCloseAge {
+		t.Fatalf("withdraws went %s apart, before the previous marker could be closed", gap)
+	}
+}
+
+func TestWithdrawsNoBrowserGotDoNotDelayALaterOne(t *testing.T) {
+	browser := newTestPushBrowser(t)
+	service := newTestPushService(t, browser)
+	endpoint := service.server.URL + "/push/secret-capability"
+	reg, device := subscribedTestBrowser(t, endpoint, browser)
+	if err := reg.RemoveBrowserPushSubscription(device.ID); err != nil {
+		t.Fatal(err)
+	}
+	d := newTestDaemon(t, reg, nil)
+	closeAge(t, 500*time.Millisecond)
+	for _, question := range []string{"one", "two", "three"} {
+		d.withdrawFromPairedDevices(context.Background(), waitingNotificationKey("session", question))
+	}
+	d.background.wait()
+	if err := reg.SaveBrowserPushSubscription(browser.subscription(device.ID, endpoint)); err != nil {
+		t.Fatal(err)
+	}
+	key := waitingNotificationKey("session", "after-subscribing")
+	start := time.Now()
+	d.notifyPairedDevices(context.Background(), mobileNotification{Title: "Agenthail", Message: "Question", EventType: "session.waiting", CollapseID: key})
+	d.withdrawFromPairedDevices(context.Background(), key)
+	d.background.wait()
+	pushes := service.received()
+	if len(pushes) != 2 || pushes[1].message.Type != "withdraw" {
+		t.Fatalf("pushes=%+v", pushes)
+	}
+	if waited := pushes[1].at.Sub(start); waited < webPushCloseAge || waited >= 2*webPushCloseAge {
+		t.Fatalf("the withdraw went %s after its question; it should wait only its close age", waited)
 	}
 }
 

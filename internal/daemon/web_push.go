@@ -39,12 +39,15 @@ var webPushCloseAge = 35 * time.Second
 // browserWithdrawals spaces the withdraws sent to browsers so that each
 // closes only notifications Safari will close: the question, at least
 // webPushCloseAge after it was sent, and the Answered marker the previous
-// withdraw left, at least webPushCloseAge after that withdraw.
+// withdraw left, at least webPushCloseAge after that withdraw went out.
 type browserWithdrawals struct {
 	mu      sync.Mutex
 	shown   map[string]time.Time
 	pending map[string]bool
-	next    time.Time
+	// sending is held from the wait for the previous withdraw through a
+	// send, so withdraws go out one at a time; lastSent is guarded by it.
+	sending  sync.Mutex
+	lastSent time.Time
 }
 
 // shownAt records that a question went to browsers. Questions sent longer
@@ -63,10 +66,10 @@ func (w *browserWithdrawals) shownAt(collapseID string, now time.Time) {
 	w.shown[collapseID] = now
 }
 
-// reserve is when the withdraw for collapseID may be sent, holding that time
-// for it; ok is false when a withdraw for it is already waiting. A question
+// reserve is when the question under collapseID can be closed, marking a
+// withdraw for it as waiting; ok is false when one already is. A question
 // this daemon did not send is taken to be old enough.
-func (w *browserWithdrawals) reserve(collapseID string, now time.Time) (at time.Time, ok bool) {
+func (w *browserWithdrawals) reserve(collapseID string, now time.Time) (closable time.Time, ok bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.pending[collapseID] {
@@ -75,22 +78,34 @@ func (w *browserWithdrawals) reserve(collapseID string, now time.Time) (at time.
 	if w.pending == nil {
 		w.pending = map[string]bool{}
 	}
-	at = now
-	if shown, found := w.shown[collapseID]; found && shown.Add(webPushCloseAge).After(at) {
-		at = shown.Add(webPushCloseAge)
-	}
-	if w.next.After(at) {
-		at = w.next
-	}
-	w.next = at.Add(webPushCloseAge)
 	w.pending[collapseID] = true
-	return at, true
+	closable = now
+	if shown, found := w.shown[collapseID]; found {
+		closable = shown.Add(webPushCloseAge)
+	}
+	return closable, true
 }
 
-func (w *browserWithdrawals) sent(collapseID string) {
+func (w *browserWithdrawals) done(collapseID string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	delete(w.pending, collapseID)
+}
+
+// waitUntil sleeps until at, returning false if ctx ends first.
+func waitUntil(ctx context.Context, at time.Time) bool {
+	wait := time.Until(at)
+	if wait <= 0 {
+		return ctx.Err() == nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 type webPushKeys struct {
@@ -206,46 +221,52 @@ func (d *Daemon) notifyBrowsers(ctx context.Context, notification mobileNotifica
 // shows the answered question.
 func (d *Daemon) withdrawFromBrowsers(collapseID string) {
 	collapseID = boundedNotificationText(collapseID, 64)
-	at, ok := d.browserWithdrawals.reserve(collapseID, time.Now())
+	closable, ok := d.browserWithdrawals.reserve(collapseID, time.Now())
 	if !ok {
 		return
 	}
 	started := d.background.start(func(ctx context.Context) {
-		defer d.browserWithdrawals.sent(collapseID)
-		timer := time.NewTimer(time.Until(at))
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-		case <-ctx.Done():
+		w := &d.browserWithdrawals
+		defer w.done(collapseID)
+		if !waitUntil(ctx, closable) {
+			return
+		}
+		w.sending.Lock()
+		defer w.sending.Unlock()
+		if !w.lastSent.IsZero() && !waitUntil(ctx, w.lastSent.Add(webPushCloseAge)) {
 			return
 		}
 		sendCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		d.sendToBrowsers(sendCtx, webPushMessage{Type: "withdraw", CollapseID: collapseID}, webpush.UrgencyNormal, "withdraw browser notification")
+		if d.sendToBrowsers(sendCtx, webPushMessage{Type: "withdraw", CollapseID: collapseID}, webpush.UrgencyNormal, "withdraw browser notification") {
+			w.lastSent = time.Now()
+		}
 	})
 	if !started {
-		d.browserWithdrawals.sent(collapseID)
+		d.browserWithdrawals.done(collapseID)
 	}
 }
 
-func (d *Daemon) sendToBrowsers(ctx context.Context, message webPushMessage, urgency webpush.Urgency, what string) {
+// sendToBrowsers sends message to every subscribed browser, reporting
+// whether it went to any.
+func (d *Daemon) sendToBrowsers(ctx context.Context, message webPushMessage, urgency webpush.Urgency, what string) bool {
 	subscriptions, err := d.Registry.BrowserPushSubscriptions()
 	if err != nil {
 		d.log.Printf("load browser push subscriptions: %s", err)
-		return
+		return false
 	}
 	if len(subscriptions) == 0 {
-		return
+		return false
 	}
 	keys, err := webPushKey()
 	if err != nil {
 		d.log.Printf("%s: %s", what, err)
-		return
+		return false
 	}
 	payload, err := json.Marshal(message)
 	if err != nil {
 		d.log.Printf("%s: %s", what, err)
-		return
+		return false
 	}
 	var wait sync.WaitGroup
 	concurrency := make(chan struct{}, 4)
@@ -273,6 +294,7 @@ func (d *Daemon) sendToBrowsers(ctx context.Context, message webPushMessage, urg
 		}()
 	}
 	wait.Wait()
+	return true
 }
 
 // webPushTopic is the Topic header for a collapse key. A topic is at most 32
