@@ -138,8 +138,8 @@ func (v *CodexVoice) Request(ctx context.Context, s *surface.Session, method str
 	return err
 }
 
-func (v *CodexVoice) Release(threadID string) {
-	if link := v.link(threadID); link != nil {
+func (v *CodexVoice) Release(threadID string, cursor voice.Cursor) {
+	if link := v.link(threadID); link != nil && link.source == cursor.Source {
 		v.dropLink(threadID, link)
 	}
 }

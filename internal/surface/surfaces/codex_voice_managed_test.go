@@ -344,11 +344,16 @@ func TestAnOperatorThatCannotBeNamedRefusesTheCall(t *testing.T) {
 
 func TestAReleasedCallClosesItsConnection(t *testing.T) {
 	_, v, session := managedVoice(t, signedIn(chatgptAccount))
-	if _, err := v.Cursor(context.Background(), session); err != nil {
+	cursor, err := v.Cursor(context.Background(), session)
+	if err != nil {
 		t.Fatal(err)
 	}
 	link := v.link(session.ID)
-	v.Release(session.ID)
+	v.Release(session.ID, voice.Cursor{Source: "managed:an-earlier-call"})
+	if v.link(session.ID) != link {
+		t.Fatal("releasing an earlier call closed the current call's link")
+	}
+	v.Release(session.ID, cursor)
 	if v.link(session.ID) != nil {
 		t.Fatal("a released call kept its link")
 	}
