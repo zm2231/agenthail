@@ -111,8 +111,10 @@ run_slot() {
 	local base response jit hook_sha started exec_pid run_pid phase=waiting
 	base="$(image)"
 	[ -n "$base" ] || { log "slot $slot: no agenthail-ci-YYYYMMDD image"; exit 1; }
-	hook_sha="$(shasum -a 256 "$hooks/job-started.sh" | cut -d' ' -f1)"
-	[ -n "$hook_sha" ] || { log "slot $slot: no job-started hook at $hooks/job-started.sh"; exit 1; }
+	if ! hook_sha="$(shasum -a 256 "$hooks/job-started.sh" 2>/dev/null | cut -d' ' -f1)" || [ -z "$hook_sha" ]; then
+		log "slot $slot: no job-started hook at $hooks/job-started.sh, not starting a runner"
+		exit 3
+	fi
 	echo booting >"$state/slot-$slot.phase"
 	discard_vm "$vm"
 	tart clone "$base" "$vm"
