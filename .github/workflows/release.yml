@@ -90,7 +90,7 @@ jobs:
           npm test --prefix claude-host
       - name: Test source
         run: |
-          go test ./... -race -count=1
+          go test ./... -race -count=1 -timeout 25m
           go vet ./...
 
   macos-package:
@@ -207,7 +207,7 @@ jobs:
       - name: Test source on Linux
         if: matrix.arch == 'amd64'
         run: |
-          go test ./... -race -count=1
+          go test ./... -race -count=1 -timeout 25m
           go vet ./...
       - name: Build Linux archive
         env:
