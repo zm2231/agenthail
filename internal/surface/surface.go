@@ -1006,6 +1006,14 @@ type CatalogLister interface {
 	CatalogList(ctx context.Context) ([]Session, bool, error)
 }
 
+// CatalogWatcher names the folders where a new session of the surface first
+// appears, so the daemon can list the surface as soon as an entry is created
+// there instead of at its next discovery pass. They are asked again after
+// every pass and every wake, so they may follow the date or the config roots.
+type CatalogWatcher interface {
+	CatalogWatchDirs() []string
+}
+
 func DeriveName(explicit, preview string, maxLen int) string {
 	if explicit != "" {
 		return truncate(explicit, maxLen)
