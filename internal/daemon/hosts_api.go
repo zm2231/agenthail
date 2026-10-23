@@ -868,6 +868,10 @@ func (d *Daemon) routeSender(ctx context.Context, request map[string]any, target
 		return senderName != "", nil
 	}
 	if target != nil {
+		delete(request, "sourceSessionId")
+		if own, err := d.Registry.ForwardSender(request, source); err != nil || own {
+			return own, err
+		}
 		routed, rawID, err := d.routeSession(source)
 		if err != nil {
 			return false, err

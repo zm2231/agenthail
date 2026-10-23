@@ -698,8 +698,8 @@ type HostSend struct {
 	Key       string
 	// SourceSessionID names the sender. One of this host's sessions goes
 	// qualified with this host's id, so the owner can reply across the
-	// pairing; only its own host names a session as a sender, so any other
-	// sender goes as this host's operator.
+	// pairing; the person and the Agenthail CLI go as the owner's own
+	// (ForwardSender), and any other sender goes without one.
 	SourceSessionID string
 	BusyDelivery    string
 	// RelayHops counts relay legs so far, so a relay loop that crosses hosts
@@ -721,9 +721,32 @@ func (r *Registry) QueueHostSend(send HostSend) (int64, error) {
 	return r.QueueHostDelivery(send.SessionID, send.Message, send.Key, request, false)
 }
 
+// ForwardSender names the person or the Agenthail CLI on a request for a
+// paired host, which has its own of each: the person goes as the author with
+// the name this host has for them, the CLI as no sender at all. It reports
+// false for any other sender.
+func (r *Registry) ForwardSender(request map[string]any, source string) (bool, error) {
+	switch source {
+	case surface.PersonSessionID:
+		name, err := r.PersonName()
+		if err != nil {
+			return false, err
+		}
+		request["author"], request["personName"] = string(surface.AuthorPerson), name
+		return true, nil
+	case surface.CLISessionID:
+		return true, nil
+	}
+	return false, nil
+}
+
 func (r *Registry) hostSendRequest(send HostSend) ([]byte, error) {
 	request := map[string]any{"action": "send", "sessionId": send.SessionID, "message": send.Message}
-	if send.SourceSessionID != "" && r.localSession(send.SourceSessionID) {
+	own, err := r.ForwardSender(request, send.SourceSessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !own && send.SourceSessionID != "" && r.localSession(send.SourceSessionID) {
 		identity, err := r.HostIdentity()
 		if err != nil {
 			return nil, err

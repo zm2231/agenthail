@@ -35,7 +35,8 @@ func moveSession(t *testing.T, node *federationNode, id, cwd string, lastActive 
 	}
 }
 
-func TestAProjectChannelReachesItsActiveConversationsOnEveryHost(t *testing.T) {
+func widgetOnTwoHosts(t *testing.T) (*federationNode, *federationNode, registry.PairedHost) {
+	t.Helper()
 	local, remote, record := pairedFederation(t)
 	localRepo := widgetRepo(t, "https://github.com/example/widget.git")
 	remoteRepo := widgetRepo(t, "https://github.com/example/widget.git")
@@ -61,6 +62,11 @@ func TestAProjectChannelReachesItsActiveConversationsOnEveryHost(t *testing.T) {
 		return false
 	})
 
+	return local, remote, record
+}
+
+func TestAProjectChannelReachesItsActiveConversationsOnEveryHost(t *testing.T) {
+	local, remote, record := widgetOnTwoHosts(t)
 	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#widget", "message": "standup", "sourceSessionId": "local-a"})
 	var answer struct {
 		Target     broadcast.Target      `json:"target"`
@@ -173,5 +179,31 @@ func TestAChannelSendThatFailsForAMemberNamesEveryRecipient(t *testing.T) {
 	response := runDashboardAction(t, d, `{"action":"channel-send","channel":"reviewers","message":"handoff"}`)
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "0 sent, 0 queued, 0 submitted, 1 failed ("+d.resolveDisplay(to.ID)+" failed: ") || !strings.Contains(response.Body.String(), "model rejected") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+}
+
+func TestThePersonsChannelPostReachesAnotherHostAsThePersonWithTheirName(t *testing.T) {
+	local, remote, _ := widgetOnTwoHosts(t)
+	for node, name := range map[*federationNode]string{local: "Ada at her Mac", remote: "root"} {
+		if err := node.reg.SetPersonName(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#widget", "message": "standup", "author": "person"}); response.Code != http.StatusOK {
+		t.Fatalf("send status=%d body=%s", response.Code, response.Body)
+	}
+	awaitFederation(t, "the remote member and coordinator received the post", func() bool { return len(remote.fake.delivered()) == 2 })
+	remote.fake.mu.Lock()
+	sources, persons := append([]string(nil), remote.fake.sources...), append([]string(nil), remote.fake.persons...)
+	remote.fake.mu.Unlock()
+	for i := range sources {
+		if sources[i] != surface.PersonSessionID || persons[i] != "Ada at her Mac" {
+			t.Fatalf("sources=%v persons=%v, want the person named by their own host", sources, persons)
+		}
+	}
+	for _, message := range remote.fake.delivered() {
+		if !strings.HasPrefix(message, "[from Ada at her Mac via #widget] standup") {
+			t.Fatalf("delivered=%q", remote.fake.delivered())
+		}
 	}
 }

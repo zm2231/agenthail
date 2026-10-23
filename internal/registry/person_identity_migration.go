@@ -2,6 +2,7 @@ package registry
 
 import (
 	"database/sql"
+	"fmt"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -36,12 +37,57 @@ func splitOperator(tx *sql.Tx) error {
 		`UPDATE delivery_history SET source_session_id=?2 WHERE source_session_id=?3`,
 		`UPDATE message_queue SET source_session_id=?2 WHERE source_session_id=?3`,
 		`UPDATE session_origins SET creator_session_id=?2 WHERE creator_session_id=?3`,
-		`DELETE FROM message_queue WHERE session_id=?3`,
-		`DELETE FROM sessions WHERE id=?3`,
 	} {
 		if _, err := tx.Exec(statement, surface.PersonSessionID, surface.CLISessionID, retiredOperatorID); err != nil {
 			return err
 		}
 	}
-	return nil
+	return dropOperatorSession(tx)
+}
+
+// dropOperatorSession deletes every row that still names the operator through
+// a foreign key, then the operator itself, so no cascade decides what goes.
+// What is left belongs to the operator as a session (an alias, catalog,
+// runtime or journal row, a channel membership, a notice queued to it) or is
+// a route to or from it, which never fires because no model reads it.
+func dropOperatorSession(tx *sql.Tx) error {
+	references, err := sessionReferences(tx)
+	if err != nil {
+		return err
+	}
+	for _, ref := range references {
+		if _, err := tx.Exec(`DELETE FROM "`+ref.table+`" WHERE "`+ref.column+`"=?`, retiredOperatorID); err != nil {
+			return err
+		}
+	}
+	for _, ref := range references {
+		var left int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM "`+ref.table+`" WHERE "`+ref.column+`"=?`, retiredOperatorID).Scan(&left); err != nil {
+			return err
+		}
+		if left != 0 {
+			return fmt.Errorf("%s.%s still names %s", ref.table, ref.column, retiredOperatorID)
+		}
+	}
+	_, err = tx.Exec(`DELETE FROM sessions WHERE id=?`, retiredOperatorID)
+	return err
+}
+
+type sessionReference struct{ table, column string }
+
+func sessionReferences(tx *sql.Tx) ([]sessionReference, error) {
+	rows, err := tx.Query(`SELECT m.name, f."from" FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f WHERE m.type='table' AND f."table"='sessions'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var references []sessionReference
+	for rows.Next() {
+		var ref sessionReference
+		if err := rows.Scan(&ref.table, &ref.column); err != nil {
+			return nil, err
+		}
+		references = append(references, ref)
+	}
+	return references, rows.Err()
 }

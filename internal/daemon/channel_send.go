@@ -39,7 +39,11 @@ func (b daemonBroadcastDelivery) PeerCoordinator(ctx context.Context, spec regis
 		return nil, fmt.Errorf("host %s is not paired", spec.HostID)
 	}
 	request := map[string]any{"action": "coordinator-send", "name": spec.Name, "message": message}
-	if source != "" {
+	own, err := b.d.Registry.ForwardSender(request, source)
+	if err != nil {
+		return nil, err
+	}
+	if !own && source != "" {
 		if owner, err := b.d.Registry.SessionHost(source); err == nil && owner == "" {
 			request["sourceSessionId"] = hosts.Qualify(b.d.hostIdentity().ID, source)
 			request["sourceName"] = b.d.senderName(source)

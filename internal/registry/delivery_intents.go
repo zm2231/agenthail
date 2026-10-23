@@ -403,7 +403,7 @@ func (r *Registry) QueueDeliveryUsingIntent(intentID int64, message, deliveryKey
 	if status != string(DeliveryIntentSubmitted) {
 		return 0, 0, fmt.Errorf("delivery intent %d is not submitted", intentID)
 	}
-	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,uploads,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, targetSessionID, message, QueueOperationMessage, deliveryKey, options.Model, senderSessionID, options.TurnOptions, 0, options.BusyDelivery, options.Author, options.Uploads)
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,uploads,person_name,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, targetSessionID, message, QueueOperationMessage, deliveryKey, options.Model, senderSessionID, options.TurnOptions, 0, options.BusyDelivery, options.Author, options.Uploads, options.PersonName)
 	if err != nil {
 		if deliveryKey == "" || !strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return 0, 0, err
