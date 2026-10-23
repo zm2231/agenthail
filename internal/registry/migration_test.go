@@ -941,7 +941,7 @@ func TestOpenAddsTheTranscriptCheckpointToARegistryAtVersion31(t *testing.T) {
 	}
 }
 
-func TestOpenPlacesTheRowsOfARegistryAtVersion31WhereTheirSeqWas(t *testing.T) {
+func TestOpenPlacesTheRowsOfARegistryAtVersion32WhereTheirSeqWas(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	r, err := Open(path)
 	if err != nil {
@@ -963,7 +963,8 @@ func TestOpenPlacesTheRowsOfARegistryAtVersion31WhereTheirSeqWas(t *testing.T) {
 	for _, statement := range []string{
 		`DROP INDEX session_journal_position`,
 		`ALTER TABLE session_journal DROP COLUMN position`,
-		`PRAGMA user_version=31`,
+		`ALTER TABLE session_journal_state DROP COLUMN pruned_seq`,
+		`PRAGMA user_version=32`,
 	} {
 		if _, err := r.db.Exec(statement); err != nil {
 			t.Fatal(err)
