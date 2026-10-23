@@ -345,7 +345,13 @@ type catalogLiveSession struct {
 	stamps   []string
 }
 
-func (d *Daemon) discoverCatalog(ctx context.Context) {
+func (d *Daemon) discoverCatalog(ctx context.Context) { d.discoverCatalogOf(ctx, nil) }
+
+// discoverCatalogOf runs a discovery pass over the surfaces in only, or over
+// every surface when only is nil. Each surface's part of a pass stands alone,
+// so a pass of one surface lists, publishes and retires that surface's
+// sessions without waiting on the others.
+func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.SurfaceKind]bool) {
 	config, err := LoadDashboardConfig()
 	if err != nil {
 		d.log.Printf("catalog config: %s", err)
@@ -382,6 +388,9 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		d.catalogIdentities.setProjects(projects)
 	}
 	for _, adapter := range d.Surfaces {
+		if only != nil && !only[adapter.Name()] {
+			continue
+		}
 		priorStamps := map[string]catalogLiveSession{}
 		d.catalogLiveMu.Lock()
 		for id, live := range d.catalogLive {

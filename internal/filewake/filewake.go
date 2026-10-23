@@ -1,7 +1,8 @@
-// Package filewake wakes readers that tail a file when it is written, so a
-// reader polling on a timer can react to an append at once. A wake only says
-// the file may have changed; readers still re-read and keep their timer, which
-// covers any change the platform does not report.
+// Package filewake wakes readers that tail a file when it is written, or that
+// list a directory when an entry appears in it, so a reader polling on a timer
+// can react at once. A wake only says something may have changed; readers
+// still re-read and keep their timer, which covers any change the platform
+// does not report.
 package filewake
 
 import (
@@ -29,6 +30,7 @@ type Watcher struct {
 	add     func(string) error
 	broken  bool
 	files   map[string]*watchedFile
+	dirs    map[string]*watchedFile
 	refused map[string]bool
 }
 
@@ -39,11 +41,13 @@ type watchedFile struct {
 	wakes    map[*Wake]struct{}
 }
 
-// Wake is one reader's interest in a file. C fires after a reported change; it
-// is nil when the file is not watched, which leaves the reader on its timer.
+// Wake is one reader's interest in a file or a directory. C fires after a
+// reported change; it is nil when the path is not watched, which leaves the
+// reader on its timer.
 type Wake struct {
 	owner *Watcher
 	path  string
+	dir   bool
 	ch    chan struct{}
 	once  sync.Once
 }
@@ -52,6 +56,10 @@ var shared = New(DefaultLimit, log.Printf)
 
 // Follow registers interest in path with the process-wide watcher.
 func Follow(path string) *Wake { return shared.Follow(path) }
+
+// FollowDir registers interest in new entries of dir with the process-wide
+// watcher.
+func FollowDir(dir string) *Wake { return shared.FollowDir(dir) }
 
 // Watched reports whether the watcher is watching path.
 func (w *Watcher) Watched(path string) bool {
@@ -62,19 +70,36 @@ func (w *Watcher) Watched(path string) bool {
 }
 
 func New(limit int, logf func(string, ...any)) *Watcher {
-	return &Watcher{limit: limit, logf: logf, files: map[string]*watchedFile{}, refused: map[string]bool{}}
+	return &Watcher{limit: limit, logf: logf, files: map[string]*watchedFile{}, dirs: map[string]*watchedFile{}, refused: map[string]bool{}}
 }
 
 // Follow registers interest in path. Release the returned Wake when the reader
 // stops.
-func (w *Watcher) Follow(path string) *Wake {
+func (w *Watcher) Follow(path string) *Wake { return w.follow(path, false) }
+
+// FollowDir registers interest in dir: its Wake fires when an entry is created
+// in it or moved into it, and not when an existing entry is written, so a
+// reader that lists the directory learns of a new entry at once. Release the
+// returned Wake when the reader stops.
+func (w *Watcher) FollowDir(dir string) *Wake { return w.follow(dir, true) }
+
+// watched is the map of followed files or of followed directories.
+func (w *Watcher) watched(dir bool) map[string]*watchedFile {
+	if dir {
+		return w.dirs
+	}
+	return w.files
+}
+
+func (w *Watcher) follow(path string, dir bool) *Wake {
 	path = filepath.Clean(path)
-	wake := &Wake{owner: w, path: path, ch: make(chan struct{}, 1)}
+	wake := &Wake{owner: w, path: path, dir: dir, ch: make(chan struct{}, 1)}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	file := w.files[path]
+	watched := w.watched(dir)
+	file := watched[path]
 	if file == nil {
-		if len(w.files) >= w.limit || !w.startLocked() {
+		if len(w.files)+len(w.dirs) >= w.limit || !w.startLocked() {
 			wake.ch = nil
 			return wake
 		}
@@ -92,7 +117,7 @@ func (w *Watcher) Follow(path string) *Wake {
 			return wake
 		}
 		delete(w.refused, path)
-		w.files[path] = file
+		watched[path] = file
 	}
 	file.wakes[wake] = struct{}{}
 	w.armLocked(path, file)
@@ -106,6 +131,7 @@ func (w *Watcher) Close() error {
 	defer w.mu.Unlock()
 	w.broken = true
 	w.files = map[string]*watchedFile{}
+	w.dirs = map[string]*watchedFile{}
 	if w.watcher == nil {
 		return nil
 	}
@@ -126,7 +152,7 @@ func (k *Wake) Refresh() {
 	w := k.owner
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if file := w.files[k.path]; file != nil {
+	if file := w.watched(k.dir)[k.path]; file != nil {
 		w.armLocked(k.path, file)
 	}
 }
@@ -140,7 +166,8 @@ func (k *Wake) Release() {
 		w := k.owner
 		w.mu.Lock()
 		defer w.mu.Unlock()
-		file := w.files[k.path]
+		watched := w.watched(k.dir)
+		file := watched[k.path]
 		if file == nil {
 			return
 		}
@@ -148,10 +175,12 @@ func (k *Wake) Release() {
 		if len(file.wakes) > 0 {
 			return
 		}
-		if file.armed {
+		// A file and a directory are never one path, but a path followed both
+		// ways keeps its platform watch until neither follows it.
+		if file.armed && w.watched(!k.dir)[k.path] == nil {
 			_ = w.watcher.Remove(k.path)
 		}
-		delete(w.files, k.path)
+		delete(watched, k.path)
 	})
 }
 
@@ -209,7 +238,7 @@ func (w *Watcher) run(watcher *fsnotify.Watcher) {
 			if !open {
 				return
 			}
-			w.notify(filepath.Clean(event.Name), event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename))
+			w.notify(filepath.Clean(event.Name), event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename), event.Has(fsnotify.Create))
 		case err, open := <-watcher.Errors:
 			if !open {
 				return
@@ -224,19 +253,34 @@ func watchingFileAt(path string, file *watchedFile) bool {
 	return err == nil && file.identity != nil && os.SameFile(file.identity, info)
 }
 
-func (w *Watcher) notify(path string, gone bool) {
+// notify wakes the readers of a changed file, and the readers of its
+// directory when the change created it.
+func (w *Watcher) notify(path string, gone, created bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	file := w.files[path]
-	if file == nil {
-		return
+	if file := w.files[path]; file != nil {
+		w.settleLocked(path, file, gone)
+		wakeAll(file)
 	}
-	// A remove or rename can arrive after a reader already re-armed the path
-	// on the file that replaced the watched one; that watch stays.
+	if dir := w.dirs[path]; dir != nil {
+		w.settleLocked(path, dir, gone)
+	}
+	if dir := w.dirs[filepath.Dir(path)]; created && dir != nil {
+		wakeAll(dir)
+	}
+}
+
+// settleLocked drops the watch on a path whose file was removed or renamed
+// away. A remove or rename can arrive after a reader already re-armed the
+// path on the file that replaced the watched one; that watch stays.
+func (w *Watcher) settleLocked(path string, file *watchedFile, gone bool) {
 	if gone && file.armed && !watchingFileAt(path, file) {
 		file.armed = false
 		_ = w.watcher.Remove(path)
 	}
+}
+
+func wakeAll(file *watchedFile) {
 	for wake := range file.wakes {
 		select {
 		case wake.ch <- struct{}{}:

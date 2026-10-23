@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -89,6 +90,33 @@ func (c *Codex) CatalogList(ctx context.Context) ([]surface.Session, bool, error
 		c.sweepMu.Unlock()
 	}
 	return sessions, complete, err
+}
+
+// CatalogWatchDirs are the folders where a new thread's rollout file
+// appears: Codex's sessions folder and its newest year, month and day
+// folders. Watching each level means the folder for a new day is watched as
+// soon as Codex creates it, before its first rollout lands.
+func (c *Codex) CatalogWatchDirs() []string {
+	dir := filepath.Join(codexHome(), "sessions")
+	dirs := []string{dir}
+	for range 3 {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			break
+		}
+		newest := ""
+		for _, entry := range entries {
+			if entry.IsDir() && entry.Name() > newest {
+				newest = entry.Name()
+			}
+		}
+		if newest == "" {
+			break
+		}
+		dir = filepath.Join(dir, newest)
+		dirs = append(dirs, dir)
+	}
+	return dirs
 }
 
 // Presence counts a Codex session current while it works, has queued messages,

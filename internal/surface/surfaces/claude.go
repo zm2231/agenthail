@@ -517,6 +517,20 @@ func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
 	return out, nil
 }
 
+// CatalogWatchDirs are the folders where each Claude process writes its
+// session record when it starts, one per config root.
+func (c *Claude) CatalogWatchDirs() []string {
+	roots, err := surface.ClaudeConfigRoots(c.home)
+	if err != nil {
+		return nil
+	}
+	dirs := make([]string, 0, len(roots))
+	for _, root := range roots {
+		dirs = append(dirs, filepath.Join(root, "sessions"))
+	}
+	return dirs
+}
+
 // claudeSessionRecord is a Claude process's session record and the config
 // root it was written under.
 type claudeSessionRecord struct {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
+	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/uploads"
@@ -319,17 +320,25 @@ func (d *Daemon) runCatalog(ctx context.Context) {
 	}()
 	defer func() { <-statusDone }()
 	defer d.catalogIdentities.wait()
+	wakes := newCatalogWakes(d.Surfaces, filewake.FollowDir)
+	defer wakes.close()
 	discoveryTicker := time.NewTicker(catalogDiscoveryInterval)
 	defer discoveryTicker.Stop()
+	wakes.sync()
 	d.discoverCatalog(ctx)
+	wakes.sync()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-discoveryTicker.C:
 			d.discoverCatalog(ctx)
+			wakes.sync()
 		case <-d.catalogNudge:
 			d.discoverCatalog(ctx)
+			wakes.sync()
+		case <-wakes.signal:
+			d.discoverCatalogOf(ctx, wakes.take())
 		}
 	}
 }
