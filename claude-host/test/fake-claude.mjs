@@ -339,7 +339,8 @@ if (process.env.FAKE_CLAUDE_RECORD) {
 // Like Claude 2.1.305, a session that runs without permission prompts holds a
 // peer message whose sender states no permission class or another one. A host
 // has no prompt to approve it, so it is dropped once FAKE_CLAUDE_HOLD_MS (five
-// minutes in Claude) pass.
+// minutes in Claude) pass, or once the file FAKE_CLAUDE_HOLD_RELEASE names
+// exists.
 function holdCause(content) {
   const own = permissionMode === 'bypassPermissions' ? 'bypass' : 'prompting';
   const stated = /^<cross-session-message [^>]*from-mode="(bypass|prompting)"/.exec(typeof content === 'string' ? content : '')?.[1];
@@ -351,7 +352,23 @@ function hold(frame, cause) {
   const base = { type: 'system', subtype: 'peer_message_hold', lane: 'socket', from: frame.from ?? '', session_id: sessionId };
   const uuid = { message_uuid: typeof frame.uuid === 'string' ? frame.uuid : crypto.randomUUID() };
   write({ ...base, ...uuid, state: 'held', cause, uuid: crypto.randomUUID() });
-  setTimeout(() => write({ ...base, ...uuid, state: 'dropped', outcome: 'expired', uuid: crypto.randomUUID() }), Number(process.env.FAKE_CLAUDE_HOLD_MS ?? 300000));
+  let dropped = false;
+  const drop = () => {
+    if (dropped) return;
+    dropped = true;
+    write({ ...base, ...uuid, state: 'dropped', outcome: 'expired', uuid: crypto.randomUUID() });
+  };
+  setTimeout(drop, Number(process.env.FAKE_CLAUDE_HOLD_MS ?? 300000));
+  const release = process.env.FAKE_CLAUDE_HOLD_RELEASE;
+  if (release) {
+    const poll = setInterval(() => {
+      if (fs.existsSync(release)) {
+        clearInterval(poll);
+        drop();
+      }
+    }, 20);
+    poll.unref();
+  }
 }
 
 const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
