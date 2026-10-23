@@ -429,6 +429,7 @@
   "labels" : {
     "failed" : "The turn failed before a result",
     "interrupted" : "Interrupted before a result",
+    "later" : "Result recorded further down",
     "running" : "Running",
     "unrecorded" : "No result recorded"
   },
@@ -722,6 +723,112 @@
         }
       ],
       "name" : "an item with no turn",
+      "states" : {
+        "c" : "running"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
+          "callId" : "k",
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "m",
+          "kind" : "event",
+          "text" : "",
+          "title" : "Task notification",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "callId" : "k",
+          "id" : "r",
+          "kind" : "toolResult",
+          "text" : "",
+          "title" : "toolResult",
+          "truncated" : false,
+          "turnId" : "t1"
+        }
+      ],
+      "name" : "a result after an injected event",
+      "states" : {
+        "c" : "later"
+      }
+    },
+    {
+      "active" : false,
+      "items" : [
+        {
+          "callId" : "k",
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "m",
+          "kind" : "message",
+          "text" : "",
+          "title" : "message",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "callId" : "k",
+          "id" : "r",
+          "kind" : "toolResult",
+          "text" : "",
+          "title" : "toolResult",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "d",
+          "kind" : "done",
+          "status" : "cancelled",
+          "text" : "",
+          "title" : "done",
+          "truncated" : false,
+          "turnId" : "t1"
+        }
+      ],
+      "name" : "a result after an injected event, idle",
+      "states" : {
+        "c" : "later"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
+          "callId" : "k",
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "callId" : "j",
+          "id" : "r",
+          "kind" : "toolResult",
+          "text" : "",
+          "title" : "toolResult",
+          "truncated" : false,
+          "turnId" : "t1"
+        }
+      ],
+      "name" : "another call's result",
       "states" : {
         "c" : "running"
       }

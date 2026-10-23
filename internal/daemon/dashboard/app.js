@@ -1,6 +1,14 @@
 const $ = (selector) => document.querySelector(selector);
 let tools;
-const toolsReady = import("/js/tool-activity.js").then((module) => { tools = module; });
+let toolsLoading = null;
+// A failed import is retried on the next load rather than leaving the page without its renderer.
+function loadTools() {
+  toolsLoading ||= import("/js/tool-activity.js").then(
+    (module) => { tools = module; },
+    (error) => { toolsLoading = null; throw error; },
+  );
+  return toolsLoading;
+}
 const app = {
   state: {
     sessions: [],
@@ -1398,7 +1406,6 @@ function renderAll() {
     `Synced ${new Date(app.state.updatedAt || Date.now()).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 async function load(fresh = false) {
-  await toolsReady;
   if (app.loading) return;
   app.loading = true;
   const slowTimer = setTimeout(() => {
@@ -1411,6 +1418,7 @@ async function load(fresh = false) {
     }
   }, 2000);
   try {
+    await loadTools();
     const response = await fetch(`/api/state${fresh ? "?fresh=1" : ""}`);
     if (!response.ok) throw Error(await response.text());
     const state = await response.json();

@@ -351,6 +351,18 @@ assert(pending({ status: "busy" }, { id: "x", kind: "done", turnId: "t8", status
 assert(pending({ status: "idle" }).includes("No result recorded"), "a quiet session's call with no end recorded claims nothing more");
 assert(!pending({ status: "busy" }).includes("No result yet"), "no surface guesses that a result is coming");
 assert(pending({ status: "busy" }).includes("$ sleep 600\ntimeout: 600"), "input reads as a command and its fields, not JSON");
+const split = pending({ status: "busy" }, { id: "n1", kind: "event", title: "Task notification", text: "done", turnId: "t9" }, { id: "p1-r", kind: "toolResult", title: "Bash result", text: "slept", callId: "p1", turnId: "t9" });
+assert(split.includes("Result recorded further down") && split.includes("slept") && !split.includes(">Running<"), "a result that lands after another item is pointed to, not called missing");
+{
+  const loader = source.slice(source.indexOf("let toolsLoading"), source.indexOf("const app = {"));
+  let attempts = 0;
+  const box = { importModule: async () => { attempts += 1; if (attempts === 1) throw new Error("offline"); return { ok: true }; } };
+  vm.runInNewContext(`let tools;\n${loader.replace("import(", "importModule(")}\nglobalThis.loadTools = loadTools; globalThis.current = () => tools;`, box);
+  await assert.rejects(box.loadTools(), /offline/, "a failed import reaches load's error handling");
+  await box.loadTools();
+  assert.equal(attempts, 2, "the next load retries the import");
+  assert.deepEqual(box.current(), { ok: true });
+}
 const written = context.renderTimeline(call("w1", "Write", { file_path: "/work/One.swift", content: "one\n" }), session);
 assert(written.includes('<span>One.swift</span><span class="added">+1</span>'), `a final newline does not count as another line: ${written.match(/file-chips.*?<\/div>/)?.[0]}`);
 const long = context.renderTimeline(Array.from({ length: 7 }, (_, index) => call(`b${index}`, "Bash", { command: `go test ./case${index}` })).flat(), session);

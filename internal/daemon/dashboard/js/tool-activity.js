@@ -171,6 +171,7 @@ export const callStateLabels = {
   interrupted: "Interrupted before a result",
   failed: "The turn failed before a result",
   unrecorded: "No result recorded",
+  later: "Result recorded further down",
 };
 
 // A call whose turn has no recorded end reads as running only while its
@@ -185,6 +186,8 @@ export function toolCallStates(items, active) {
   for (const item of items) {
     if (callKinds.includes(item.kind)) {
       open.push(item);
+    } else if (item.kind === "toolResult" && item.callId) {
+      end("later", (call) => call.callId === item.callId);
     } else if (item.kind === "done" || (item.kind === "event" && item.title === "Turn interrupted")) {
       const status = item.status || "";
       const state = item.kind === "event" || interruptedStatuses.includes(status) ? "interrupted" : failedStatuses.includes(status) ? "failed" : "unrecorded";

@@ -262,11 +262,11 @@ extension ToolPresentation {
     }
 }
 
-/// What became of a call with no recorded result, read from the timeline after it: the turn that made it
-/// ended, was interrupted or failed, or it is still going. Never a guess: a call whose turn has no recorded
-/// end reads as running only while its session is active.
+/// What became of a call shown without its result, read from the timeline after it: its result came later
+/// apart from it, or the turn that made it ended, was interrupted or failed, or it is still going. Never a
+/// guess: a call whose turn has no recorded end reads as running only while its session is active.
 enum ToolCallState: String {
-    case running, interrupted, failed, unrecorded
+    case running, interrupted, failed, unrecorded, later
 
     var label: String {
         switch self {
@@ -274,6 +274,7 @@ enum ToolCallState: String {
         case .interrupted: return "Interrupted before a result"
         case .failed: return "The turn failed before a result"
         case .unrecorded: return "No result recorded"
+        case .later: return "Result recorded further down"
         }
     }
 }
@@ -294,6 +295,8 @@ struct ToolCallStates: Equatable {
         for item in items {
             if ToolRunSummary.isCall(item) {
                 open.append(item)
+            } else if item.kind == "toolResult", let call = item.callId {
+                end(.later) { $0.callId == call }
             } else if item.kind == "done" || (item.kind == "event" && item.title == "Turn interrupted") {
                 let state = item.kind == "event" ? .interrupted : Self.state(ending: item.status ?? "")
                 end(state) { $0.turnId == nil || item.turnId == nil || $0.turnId == item.turnId }

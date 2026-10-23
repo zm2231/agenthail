@@ -43,9 +43,10 @@ struct ToolActivityVectorsTest {
         ("custom", "[1,2]"),
     ]
 
-    static func item(_ id: String, _ kind: String, turn: String? = nil, status: String? = nil, title: String? = nil) -> [String: Any] {
+    static func item(_ id: String, _ kind: String, turn: String? = nil, status: String? = nil, title: String? = nil, call: String? = nil) -> [String: Any] {
         var item: [String: Any] = ["id": id, "kind": kind, "title": title ?? kind, "text": "", "truncated": false]
         if let turn { item["turnId"] = turn }
+        if let call { item["callId"] = call }
         if let status { item["status"] = status }
         return item
     }
@@ -63,6 +64,9 @@ struct ToolActivityVectorsTest {
         ("a call with no turn", [item("c", "tool"), item("d", "done", turn: "t1", status: "interrupted")], true),
         ("an end with no turn", [item("c", "command", turn: "t1"), item("d", "done")], true),
         ("an item with no turn", [item("c", "toolCall", turn: "t1"), item("m", "message")], true),
+        ("a result after an injected event", [item("c", "toolCall", turn: "t1", call: "k"), item("m", "event", turn: "t1", title: "Task notification"), item("r", "toolResult", turn: "t1", call: "k")], true),
+        ("a result after an injected event, idle", [item("c", "toolCall", turn: "t1", call: "k"), item("m", "message", turn: "t1"), item("r", "toolResult", turn: "t1", call: "k"), item("d", "done", turn: "t1", status: "cancelled")], false),
+        ("another call's result", [item("c", "toolCall", turn: "t1", call: "k"), item("r", "toolResult", turn: "t1", call: "j")], true),
         ("parallel calls", [item("a", "toolCall", turn: "t1"), item("b", "toolCall", turn: "t1"), item("d", "done", turn: "t1", status: "cancelled"), item("c", "toolCall", turn: "t2")], true),
     ]
 
@@ -84,7 +88,7 @@ struct ToolActivityVectorsTest {
             return ["name": name, "items": items, "active": active,
                     "states": Dictionary(uniqueKeysWithValues: calls.map { ($0.id, states[$0.id].rawValue) })]
         }
-        let labels = Dictionary(uniqueKeysWithValues: [ToolCallState.running, .interrupted, .failed, .unrecorded].map { ($0.rawValue, $0.label) })
+        let labels = Dictionary(uniqueKeysWithValues: [ToolCallState.running, .interrupted, .failed, .unrecorded, .later].map { ($0.rawValue, $0.label) })
         return ["calls": presentations, "states": states, "labels": labels]
     }
 
