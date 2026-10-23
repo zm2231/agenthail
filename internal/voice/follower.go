@@ -137,7 +137,8 @@ func (s *Service) runFollower(ctx context.Context, f *follower) {
 				reason = "the session journal source failed"
 			}
 			s.followerFailed(f, errors.New(reason))
-			continue
+			s.refollow(f, reason)
+			return
 		}
 		if event.TurnID == "" {
 			continue
@@ -311,6 +312,30 @@ func (s *Service) endTurn(f *follower, turnID string) {
 	delete(f.typed, turnID)
 	delete(f.retired, turnID)
 	s.unlock()
+}
+
+// refollow replaces a follower whose source failed with a new one on the
+// same session, as a source error ends its consumer. The new follower keeps
+// the retired turns and the queued replies, so a turn of the failed source is
+// never taken for a typed one.
+func (s *Service) refollow(f *follower, reason string) {
+	s.mu.Lock()
+	if s.follow != f {
+		s.unlock()
+		return
+	}
+	replies := s.replies
+	s.followTarget(&f.target)
+	if next := s.follow; next != nil {
+		next.retired = f.retired
+		for i := range replies {
+			replies[i].f = next
+		}
+		s.replies = replies
+	}
+	s.state.State.Message = "The session's journal failed and voice is following it again: " + reason
+	s.appendEvent(Event{Method: "voice/target/refollowed", Params: map[string]any{"targetId": f.target.ID, "error": reason}})
+	_ = s.commit()
 }
 
 // followerFailed fails the delegations the follower was speaking for, as a

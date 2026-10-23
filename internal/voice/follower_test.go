@@ -353,7 +353,7 @@ func TestSpeechAboutASessionStillBeingHandedOverIsCancelledWhenVoiceLeavesIt(t *
 	}
 }
 
-func TestASourceErrorEndsItsDelegationsAndTheirTurnsStayWithThem(t *testing.T) {
+func TestASourceErrorEndsItsFollowerAndTheNextOneLeavesItsTurnsAlone(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Fieldnotes build", Transport: "desktop", Status: surface.StatusIdle}, streaming: make(chan struct{})}
 	f := newFixture(t, fixtureOptions{target: target})
 	f.target = target
@@ -364,8 +364,9 @@ func TestASourceErrorEndsItsDelegationsAndTheirTurnsStayWithThem(t *testing.T) {
 	})
 	apply(t, f, Action{Action: "delegate", AttemptID: "call-a", MessageID: "m", Text: "Do work"})
 	target.journal.emit(sessionstream.Event{Kind: "source-error", Reason: "transcript read failed"})
-	testkit.Eventually(t, "the source error to end the delegation", 5*time.Second, func() bool {
-		return hasEventWith(f.View(), "voice/delegation/failed", "error", "transcript read failed")
+	testkit.Eventually(t, "the source error to end the delegation and its follower", 5*time.Second, func() bool {
+		prepared, cancelled := target.journal.subscriptions()
+		return hasEventWith(f.View(), "voice/delegation/failed", "error", "transcript read failed") && hasEventWith(f.View(), "voice/target/refollowed", "error", "transcript read failed") && prepared == 2 && cancelled == 1
 	})
 	target.journal.emit(sessionstream.Event{ItemID: "reply", Version: 1, Kind: "text", Role: "assistant", TurnID: "target-turn", Body: "Resumed reply.", Final: true})
 	target.journal.emit(sessionstream.Event{ItemID: "done", Version: 1, Kind: "done", TurnID: "target-turn", Status: "failed", Body: "late failure"})

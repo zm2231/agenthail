@@ -133,8 +133,11 @@ about it is spoken:
   for that request to settle, at most 30 seconds. Past that it is taken as typed,
   recorded in the call as `voice/target/turn-unattributed` and written to the
   daemon log.
-- A journal source error ends the requests whose turns voice was following;
-  their turns are not followed again, even if the source recovers.
+- A journal source error ends the follower and the requests whose turns it
+  was following, as it ends any journal consumer. Voice then follows the
+  session again with a new subscription, recorded as `voice/target/refollowed`;
+  the turns of the failed requests are not followed again, even if the source
+  recovers, and replies waiting for a pause are kept.
 
 Everything said about the session runs under its follower, so moving voice to
 another session or back to the orchestrator cancels an update or reply still
