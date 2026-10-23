@@ -216,9 +216,9 @@ struct NewSessionView: View {
     }
 
     private var agentLabel: String {
-        let chosen = draft.form.model.isEmpty ? draft.listedDefault : draft.agentModels.first { $0.id == draft.form.model }
+        let chosen = draft.form.model.isEmpty ? nil : draft.agentModels.first { $0.id == draft.form.model }?.displayName ?? draft.form.model
         let account = NewSessionLabels.account(draft.claudeConfigRoots, choice: draft.form.configRoot)
-        return NewSessionLabels.agent(draft.form.agent, model: draft.form.listsModels ? chosen?.displayName ?? "Default model" : nil, effort: draft.form.effort, account: account)
+        return NewSessionLabels.agent(draft.form.agent, model: draft.form.listsModels ? chosen : nil, effort: draft.form.effort, account: account)
     }
 
     private var placeLabel: String {
