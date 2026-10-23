@@ -42,6 +42,8 @@ jobs:
       - name: Cookie bridge dependencies
         working-directory: sidecar
         run: npm ci --ignore-scripts
+      - name: Stage the shipped Node
+        run: scripts/fetch-node.sh
       - name: Race tests
         run: go test ./... -race -count=1 -timeout 25m
       - name: Build
@@ -131,6 +133,8 @@ jobs:
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
           npm test --prefix claude-host
+      - name: Stage the shipped Node
+        run: scripts/fetch-node.sh
       - name: Race tests
         run: go test ./... -race -count=1 -timeout 25m
       - name: Build Linux archives
@@ -139,6 +143,11 @@ jobs:
             GOOS=linux GOARCH=$arch AGENTHAIL_VERSION=v0.0.0-ci scripts/package-release.sh
           done
           (cd dist && sha256sum -c agenthail-v0.0.0-ci-linux-amd64.tar.gz.sha256 agenthail-v0.0.0-ci-linux-arm64.tar.gz.sha256)
+          mkdir -p "$RUNNER_TEMP/inspect"
+          tar -xzf dist/agenthail-v0.0.0-ci-linux-amd64.tar.gz -C "$RUNNER_TEMP/inspect"
+          root="$RUNNER_TEMP/inspect/agenthail-v0.0.0-ci-linux-amd64"
+          test "$("$root/runtime/node/bin/node" --version)" = v22.23.1
+          (cd "$root/claude-host" && "$root/runtime/node/bin/node" -e "import('@anthropic-ai/claude-agent-sdk').then(module => { if (!module.query) process.exit(1) })")
 
   installer:
     if: ${{ !github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size }}
