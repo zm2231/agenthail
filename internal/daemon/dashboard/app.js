@@ -1557,8 +1557,11 @@ function baseName(path) {
 function firstLine(text) {
   return String(text || "").split("\n").find(line => line.trim()) || "";
 }
+// A final newline ends the last line rather than starting another.
 function textLines(text) {
-  return text ? String(text).split("\n") : [];
+  const lines = String(text ?? "").split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  return lines;
 }
 // Lines added and removed between two texts, from their longest common
 // subsequence; texts too large to compare count every line as changed.

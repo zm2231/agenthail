@@ -306,6 +306,8 @@ assert(run.includes('<span>App.swift</span><span class="added">+4</span><span cl
 assert(run.includes("Finished 3:13 · "), "the reply that ends a turn shows how long it took and when");
 assert(!run.includes("timeline-annotation"), "the duration joins the reply rather than standing alone");
 assert(/<footer class="turn-footer"><span class="turn-status">Finished 3:13[^<]*<\/span><span class="turn-actions"><button class="turn-action" type="button" data-copy-text="Fixed.">Copy<\/button>/.test(run), "Copy sits on the footer line beside the time");
+const written = context.renderTimeline(call("w1", "Write", { file_path: "/work/One.swift", content: "one\n" }), session);
+assert(written.includes('<span>One.swift</span><span class="added">+1</span>'), `a final newline does not count as another line: ${written.match(/file-chips.*?<\/div>/)?.[0]}`);
 const long = context.renderTimeline(Array.from({ length: 7 }, (_, index) => call(`b${index}`, "Bash", { command: `go test ./case${index}` })).flat(), session);
 assert(long.includes('class="tool-line tool-fold"') && long.includes("Ran 7 commands"), "a run of more than six calls folds into one summary line");
 const six = context.renderTimeline(Array.from({ length: 6 }, (_, index) => call(`s${index}`, "Bash", { command: `go test ./case${index}` })).flat(), session);
