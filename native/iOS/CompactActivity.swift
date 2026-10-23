@@ -111,13 +111,14 @@ struct CompactActivityGroup: View {
                         }
                     }
                     if group.folds {
-                        Button("Collapse activity", systemImage: "chevron.up") {
+                        Button {
                             // Collapsing from the end removes the rows on screen; bring the run back rather than leave the offset past the content.
                             set(false)
                             revealRow(top)
+                        } label: {
+                            CollapseLabel(title: "Collapse activity")
                         }
-                        .font(.footnote.weight(.medium))
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .buttonStyle(.plain)
                         .accessibilityIdentifier("collapse-activity-" + group.id)
                     }
                 }
@@ -141,6 +142,18 @@ struct CompactActivityGroup: View {
 }
 
 /// "◆ Run swift test": the shape every tool, reasoning and output line shares.
+/// The control at the end of an open run or tool, the full row wide and at least 44 points tall to tap.
+struct CollapseLabel: View {
+    let title: String
+
+    var body: some View {
+        Label(title, systemImage: "chevron.up")
+            .font(.footnote.weight(.medium))
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+    }
+}
+
 struct ToolLineLabel: View {
     let verb: String
     let object: String
@@ -149,15 +162,20 @@ struct ToolLineLabel: View {
     var failures = 0
     var trailing: String? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .subheadline) private var markWidth = Self.indent - 6
 
     static let indent: CGFloat = 18
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
+            // Set in the line's own font and scaled about its centre, the mark stays on the middle of the
+            // first line at every text size; a fixed small font would sit on the baseline.
             Text("◆")
-                .font(.system(size: 9))
+                .font(.subheadline)
+                .fixedSize()
+                .scaleEffect(0.6)
                 .foregroundStyle(failed ? .red : .secondary)
-                .frame(width: Self.indent - 6, alignment: .leading)
+                .frame(width: markWidth, alignment: .leading)
                 .accessibilityHidden(true)
             Text(verb)
                 .font(.subheadline)
@@ -241,10 +259,7 @@ struct ToolActivityRow: View {
                         set(false)
                         revealRow(top)
                     } label: {
-                        Label("Collapse tool", systemImage: "chevron.up")
-                            .font(.footnote.weight(.medium))
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .contentShape(Rectangle())
+                        CollapseLabel(title: "Collapse tool")
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("collapse-tool-" + call.id)

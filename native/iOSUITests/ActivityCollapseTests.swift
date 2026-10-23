@@ -16,6 +16,8 @@ final class ActivityCollapseTests: XCTestCase {
         for _ in 0..<12 where !collapse.isHittable { timeline.swipeUp() }
         if collapse.frame.maxY > timeline.frame.maxY - 140 { timeline.swipeUp() }
         XCTAssertTrue(collapse.isHittable)
+        XCTAssertGreaterThanOrEqual(collapse.frame.height, 44, "the control should be a full-size tap target, at \(collapse.frame)")
+        XCTAssertGreaterThan(collapse.frame.width, timeline.frame.width / 2, "the control should span the row, at \(collapse.frame)")
         collapse.tapWhenStill()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: collapse)], timeout: 5), .completed)
         // Give the scroll view time to settle before reading what it shows.
@@ -50,6 +52,7 @@ final class ActivityCollapseTests: XCTestCase {
         if collapse.frame.maxY > timeline.frame.maxY - 140 { timeline.swipeUp() }
         XCTAssertTrue(collapse.isHittable)
         XCTAssertFalse(tool.isHittable, "the tool's line should have scrolled above the screen before collapsing")
+        XCTAssertGreaterThanOrEqual(collapse.frame.height, 44, "the control should be a full-size tap target, at \(collapse.frame)")
         collapse.tapWhenStill()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: collapse)], timeout: 5), .completed)
         RunLoop.current.run(until: Date().addingTimeInterval(1))
