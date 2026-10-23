@@ -1039,6 +1039,7 @@ final class AgenthailModel: ObservableObject {
 
     func dismissDeliveryProblem(_ problem: DeliveryProblem) {
         guard let api else { return }
+        let position = snapshot?.deliveryProblems?.firstIndex { $0.deliveryId == problem.deliveryId }
         removeDeliveryProblem(problem.deliveryId)
         Task {
             do {
@@ -1046,6 +1047,9 @@ final class AgenthailModel: ObservableObject {
                 operationError = nil
             } catch {
                 operationError = AgenthailAPIError.userMessage(error)
+                if let position, snapshot?.deliveryProblems?.contains(where: { $0.deliveryId == problem.deliveryId }) == false {
+                    snapshot?.deliveryProblems?.insert(problem, at: min(position, snapshot?.deliveryProblems?.count ?? 0))
+                }
                 _ = await refresh(fresh: true)
             }
         }
