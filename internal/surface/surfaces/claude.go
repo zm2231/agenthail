@@ -134,7 +134,22 @@ func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities
 		capabilities.Interrupt = false
 		capabilities.Commands = false
 	}
+	if sess.Transport == "uds" && !c.canSendHumanTurn(sess) {
+		capabilities.TurnNotice = c.turnNotice()
+	}
 	return capabilities
+}
+
+// turnNotice is for a live terminal session reached only over its peer
+// socket, where a person's message is a note the model reads, not their turn.
+// It names Remote Control only on an install that has it; a client that can
+// adopt the session offers that remedy itself.
+func (c *Claude) turnNotice() string {
+	notice := "What you write reaches this terminal session as a note from Agenthail, not as your own turn."
+	if c.localOnly {
+		return notice
+	}
+	return notice + " Run /remote-control in its terminal to write as yourself."
 }
 
 // DisableRemoteControl limits the surface to local Claude Code sessions on an

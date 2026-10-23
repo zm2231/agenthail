@@ -577,3 +577,25 @@ func TestClaudeAdvertisesRemoteControlCommandsOnlyWhereControlReachesThem(t *tes
 		t.Fatalf("an install without Remote Control dropped the host's controls: %+v", caps)
 	}
 }
+
+func TestClaudeTellsThePersonWhenTheyReachALiveTerminalOnlyAsANote(t *testing.T) {
+	adapter := NewClaude(nil, t.TempDir())
+	live := os.Getpid()
+	terminal := &surface.Session{ID: "terminal", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", PID: live}
+	for name, session := range map[string]*surface.Session{
+		"remote control": {ID: "bridged", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", PID: live},
+		"hosted":         {ID: "hosted", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: live},
+		"exited":         {ID: "exited", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"},
+	} {
+		if notice := adapter.SessionCapabilities(session).TurnNotice; notice != "" {
+			t.Fatalf("%s: a session that takes the person's turn has a notice: %q", name, notice)
+		}
+	}
+	if notice := adapter.SessionCapabilities(terminal).TurnNotice; !strings.Contains(notice, "/remote-control") {
+		t.Fatalf("live terminal notice = %q", notice)
+	}
+	adapter.DisableRemoteControl()
+	if notice := adapter.SessionCapabilities(terminal).TurnNotice; notice == "" || strings.Contains(notice, "/remote-control") {
+		t.Fatalf("an install without Remote Control offers it: %q", notice)
+	}
+}

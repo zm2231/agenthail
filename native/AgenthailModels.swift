@@ -310,14 +310,18 @@ struct Capabilities: Codable, Hashable {
     var commands = false
     var respond = false
     var permissionMode = false
+    /// Why what the person writes reaches the session only as a note from
+    /// Agenthail, and what would make it their own turn; empty when it is.
+    var turnNotice = ""
     var lifecycle = SessionLifecycle()
 
-    init(send: Bool = false, stream: Bool = false, reply: Bool = false, goal: Bool = false, goalSet: Bool = false, compact: Bool = false, model: Bool = false, interrupt: Bool = false, steer: Bool = false, attach: Bool = false, commands: Bool = false, respond: Bool = false, permissionMode: Bool = false, lifecycle: SessionLifecycle = SessionLifecycle()) {
-        (self.send, self.stream, self.reply, self.goal, self.goalSet, self.compact, self.model, self.interrupt, self.steer, self.attach, self.commands, self.respond, self.permissionMode, self.lifecycle) = (send, stream, reply, goal, goalSet, compact, model, interrupt, steer, attach, commands, respond, permissionMode, lifecycle)
+    init(send: Bool = false, stream: Bool = false, reply: Bool = false, goal: Bool = false, goalSet: Bool = false, compact: Bool = false, model: Bool = false, interrupt: Bool = false, steer: Bool = false, attach: Bool = false, commands: Bool = false, respond: Bool = false, permissionMode: Bool = false, turnNotice: String = "", lifecycle: SessionLifecycle = SessionLifecycle()) {
+        (self.send, self.stream, self.reply, self.goal, self.goalSet, self.compact, self.model, self.interrupt, self.steer, self.attach, self.commands, self.respond, self.permissionMode, self.turnNotice, self.lifecycle) = (send, stream, reply, goal, goalSet, compact, model, interrupt, steer, attach, commands, respond, permissionMode, turnNotice, lifecycle)
     }
 
     // A paired host on an older release omits goalSet, attach, commands,
-    // respond, permissionMode and lifecycle; it cannot do any of them.
+    // respond, permissionMode, turnNotice and lifecycle; it cannot do any of
+    // them and has no notice to give.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         send = try container.decode(Bool.self, forKey: .send)
@@ -333,6 +337,7 @@ struct Capabilities: Codable, Hashable {
         commands = try container.decodeIfPresent(Bool.self, forKey: .commands) ?? false
         respond = try container.decodeIfPresent(Bool.self, forKey: .respond) ?? false
         permissionMode = try container.decodeIfPresent(Bool.self, forKey: .permissionMode) ?? false
+        turnNotice = try container.decodeIfPresent(String.self, forKey: .turnNotice) ?? ""
         lifecycle = try container.decodeIfPresent(SessionLifecycle.self, forKey: .lifecycle) ?? SessionLifecycle()
     }
 }
@@ -441,6 +446,12 @@ struct SessionState: Codable, Identifiable, Hashable {
     var holders: [SessionHolder]? = nil
     var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
+    /// The turn notice, with the app's own remedy when it can adopt the session.
+    var composerTurnNotice: String {
+        let notice = capabilities.turnNotice
+        guard !notice.isEmpty, canAdopt else { return notice }
+        return notice + " Open in Agenthail also makes it your own turn."
+    }
     /// A session its daemon can open in Agenthail's host.
     var canAdopt: Bool { capabilities.lifecycle.adopt && !isReadOnly }
 

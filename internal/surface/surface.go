@@ -906,6 +906,10 @@ type Capabilities struct {
 	// Commands is a session that takes Claude Remote Control's context, usage,
 	// status, effort and rename commands.
 	Commands bool `json:"commands"`
+	// TurnNotice, when set, tells the person that what they write reaches the
+	// session only as a note from Agenthail, not as their own turn, and what
+	// would change that.
+	TurnNotice string `json:"turnNotice,omitempty"`
 	// Lifecycle is what the session's runtime does to the session itself.
 	Lifecycle Lifecycle `json:"lifecycle"`
 }

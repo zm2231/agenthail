@@ -1584,6 +1584,14 @@ struct ComposerView: View {
                             DeliveryProblemBanner(problem: problem, model: model)
                                 .padding(.bottom, DesktopSpace.s)
                         }
+                        if !session.composerTurnNotice.isEmpty {
+                            Text(session.composerTurnNotice)
+                                .font(.system(size: DesktopType.caption))
+                                .foregroundStyle(DesktopPalette.text2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 15)
+                                .padding(.bottom, DesktopSpace.s)
+                        }
                         if !queued.isEmpty {
                             QueueDock(model: model, items: queued, target: session, canSteer: canSteer && session.isWorking)
                                 .padding(.horizontal, 10)
