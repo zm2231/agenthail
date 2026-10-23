@@ -36,6 +36,11 @@ final class InterfaceStore: ObservableObject {
         publish()
     }
 
+    func dropPreview() {
+        overlay = [:]
+        publish()
+    }
+
     /// Sends one change; the daemon's answer replaces any preview. Returns the
     /// daemon's reason when it refuses the change.
     @discardableResult

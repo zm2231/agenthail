@@ -24,7 +24,6 @@ struct AppearanceSettings: View {
     private var chosenBackground: String { config.chosen["background"] ?? "" }
 
     static let accents = ["#4f8ff7", "#3fb68b", "#e9a23b", "#e5534b", "#a371f7", "#e86ba5"]
-    static let imageTypes: [UTType] = [.png, .jpeg, .heic, .webP]
 
     var body: some View {
         Form {
@@ -120,6 +119,7 @@ struct AppearanceSettings: View {
         } message: {
             Text(draft.scope == .thisMac ? "This removes every appearance setting made for this Mac only." : "This removes every appearance setting that applies to all devices. Settings made for this Mac only stay.")
         }
+        .onDisappear { AccentPanel.shared.dismiss() }
         .task {
             guard let api = model.api else { return }
             presets = (try? await api.uiPresets()) ?? []
@@ -308,6 +308,7 @@ struct AppearanceSettings: View {
 
     private func write(_ change: UIChange) {
         guard let api = model.api else {
+            interface.dropPreview()
             error = "Agenthail isn't connected."
             return
         }
@@ -316,7 +317,7 @@ struct AppearanceSettings: View {
 
     private func chooseImage() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = Self.imageTypes
+        panel.allowedContentTypes = [.image]
         panel.allowsMultipleSelection = false
         panel.message = "Choose a background image"
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -333,10 +334,6 @@ struct AppearanceSettings: View {
     }
 
     private func importImage(_ url: URL) {
-        guard let type = UTType(filenameExtension: url.pathExtension), Self.imageTypes.contains(where: type.conforms(to:)) else {
-            error = "Choose a PNG, JPEG, HEIC or WebP image."
-            return
-        }
         guard let api = model.api else {
             error = "Agenthail isn't connected."
             return
@@ -362,21 +359,36 @@ struct AppearanceSettings: View {
 @MainActor
 final class AccentPanel: NSObject, NSWindowDelegate {
     static let shared = AccentPanel()
-    private var picked: ((NSColor) -> Void)?
+    private var pick = PendingPick<NSColor>()
 
     func open(start: NSColor?, picked: @escaping (NSColor) -> Void) {
-        self.picked = picked
+        pick.begin(picked)
         let panel = NSColorPanel.shared
         panel.showsAlpha = false
         if let start { panel.color = start }
+        panel.setTarget(self)
+        panel.setAction(#selector(colourChanged(_:)))
         panel.delegate = self
         panel.makeKeyAndOrderFront(nil)
     }
 
+    /// Called when the pane goes away: the pick is dropped and the panel closed.
+    func dismiss() {
+        guard NSColorPanel.shared.delegate === self else { return }
+        pick.cancel()
+        NSColorPanel.shared.close()
+    }
+
+    @objc private func colourChanged(_ sender: NSColorPanel) {
+        pick.markChanged()
+    }
+
     func windowWillClose(_ notification: Notification) {
-        guard let picked else { return }
-        self.picked = nil
-        picked(NSColorPanel.shared.color)
+        let panel = NSColorPanel.shared
+        panel.setTarget(nil)
+        panel.setAction(nil)
+        panel.delegate = nil
+        pick.finish()?(panel.color)
     }
 }
 

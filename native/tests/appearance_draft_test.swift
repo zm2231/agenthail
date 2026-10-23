@@ -39,6 +39,24 @@ struct AppearanceDraftTest {
         let preset = UIPreset(value: "art: tide", name: "Tide", dark: "image: art/tide-dark.jpg", light: "image: art/tide-light.jpg")
         check(preset.background(dark: true) == .image(path: "art/tide-dark.jpg") && preset.background(dark: false) == .image(path: "art/tide-light.jpg"), "a preset tile shows the picture for the current appearance")
 
+
+        var delivered: [String] = []
+        var pick = PendingPick<String>()
+        pick.begin { delivered.append($0) }
+        pick.markChanged()
+        pick.finish()?("#123456")
+        check(delivered == ["#123456"], "a changed colour is delivered when the panel closes, got \(delivered)")
+        pick.finish()?("#654321")
+        check(delivered == ["#123456"], "a pick is delivered once, got \(delivered)")
+        pick.begin { delivered.append($0) }
+        pick.finish()?("#abcdef")
+        check(delivered == ["#123456"], "closing the panel without a change writes nothing, got \(delivered)")
+        pick.begin { delivered.append($0) }
+        pick.markChanged()
+        pick.cancel()
+        pick.markChanged()
+        pick.finish()?("#fedcba")
+        check(delivered == ["#123456"], "a pick whose pane closed first writes nothing, got \(delivered)")
         if failures > 0 { exit(1) }
         print("appearance draft: settings become checked ui.conf lines for the right devices")
     }

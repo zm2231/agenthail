@@ -68,3 +68,29 @@ struct AppearanceDraft: Equatable {
         "mesh: 3x3, " + colors.joined(separator: ", ")
     }
 }
+
+/// A colour panel pick that is delivered once, when the panel closes, only if
+/// the colour changed and the pane that asked for it is still open.
+struct PendingPick<Value> {
+    private var deliver: ((Value) -> Void)?
+    private var changed = false
+
+    mutating func begin(_ deliver: @escaping (Value) -> Void) {
+        self.deliver = deliver
+        changed = false
+    }
+
+    mutating func markChanged() {
+        if deliver != nil { changed = true }
+    }
+
+    mutating func cancel() {
+        deliver = nil
+        changed = false
+    }
+
+    mutating func finish() -> ((Value) -> Void)? {
+        defer { cancel() }
+        return changed ? deliver : nil
+    }
+}
