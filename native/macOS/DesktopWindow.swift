@@ -2062,65 +2062,6 @@ struct QueueDock: View {
     }
 }
 
-struct AttachmentChips: View {
-    @Binding var attachments: [ComposerAttachment]
-
-    var body: some View {
-        ChipFlow(spacing: DesktopSpace.xs) {
-            ForEach(attachments) { attachment in
-                HStack(spacing: DesktopSpace.xs) {
-                    AttachmentThumbnail(attachment: attachment, side: 18)
-                    Text(attachment.name)
-                        .foregroundStyle(DesktopPalette.text)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: 220, alignment: .leading)
-                        .fixedSize(horizontal: true, vertical: false)
-                    Button {
-                        attachments.removeAll { $0.id == attachment.id }
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: DesktopType.caption, weight: .semibold))
-                            .frame(width: 14, height: 14)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(DesktopPalette.text2)
-                    .accessibilityLabel("Remove \(attachment.name)")
-                }
-                .font(.system(size: DesktopType.meta))
-                .padding(.leading, 3)
-                .padding(.trailing, 6)
-                .frame(height: 24)
-                .background(DesktopPalette.dock, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
-                .overlay(RoundedRectangle(cornerRadius: DesktopRadius.control).strokeBorder(DesktopPalette.line))
-                .help("\(attachment.name), \(ByteCountFormatter.string(fromByteCount: Int64(attachment.data.count), countStyle: .file))")
-            }
-        }
-    }
-}
-
-struct AttachmentThumbnail: View {
-    let attachment: ComposerAttachment
-    var side: CGFloat = 28
-
-    var body: some View {
-        if attachment.isImage, let image = NSImage(data: attachment.data) {
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: side, height: side)
-                .clipShape(RoundedRectangle(cornerRadius: DesktopRadius.control))
-                .accessibilityHidden(true)
-        } else {
-            Image(systemName: "doc")
-                .font(.system(size: DesktopType.caption))
-                .foregroundStyle(DesktopPalette.text2)
-                .frame(width: side, height: side)
-        }
-    }
-}
-
 enum InspectorTab: String, CaseIterable, Identifiable {
     case details = "Details"
     case delivery = "Delivery"
@@ -2258,18 +2199,7 @@ struct DetailsTab: View {
                     .foregroundStyle(DesktopPalette.text2)
                 }
             }
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    Text("Agent").foregroundStyle(DesktopPalette.text2)
-                    Spacer(minLength: DesktopSpace.s)
-                    Button("Rename") { pane.renamingSession = session }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(DesktopPalette.accentText)
-                }
-                Text(session.alias.map { "@\($0)" } ?? session.name)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            InspectorAgentName(name: session.alias.map { "@\($0)" } ?? session.name) { pane.renamingSession = session }
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 9) {
                 detailRow("Surface", session.surface.capitalized)
                 if let configRoot = session.claudeConfigRoot {
@@ -2333,17 +2263,7 @@ struct DetailsTab: View {
                 }
                 if let project = session.project?.displayName { detailRow("Project", project) }
                 if let branch = session.checkout?.branch ?? session.checkout?.detachedHead { detailRow("Branch", branch, monospaced: true) }
-                if let path = session.checkout?.path ?? session.cwd {
-                    GridRow {
-                        Text("Checkout").foregroundStyle(DesktopPalette.text2)
-                        Text((path as NSString).abbreviatingWithTildeInPath)
-                            .font(.system(size: DesktopType.meta, design: .monospaced))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .textSelection(.enabled)
-                            .help(path)
-                    }
-                }
+                if let path = session.checkout?.path ?? session.cwd { InspectorPathRow(label: "Checkout", path: path) }
             }
             if canControl && session.capabilities.compact {
                 Button("Compact context") { pane.compactContext() }

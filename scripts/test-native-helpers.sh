@@ -77,6 +77,7 @@ SOURCES=(
   macOS/SessionOperationControllers.swift
   macOS/SessionOperations.swift
   macOS/NewSessionDraft.swift
+  macOS/NewSessionLabels.swift
   macOS/SessionPane.swift
   macOS/SessionRefinementMenu.swift
   macOS/SessionSidebarHeader.swift
