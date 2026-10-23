@@ -1283,7 +1283,7 @@ func (r *Registry) SetAlias(name, sessionID string) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err := setAliasTx(tx, name, sessionID); err != nil {
+	if err := setAliasTx(tx, name, sessionID, r.now()); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1301,7 +1301,7 @@ func (e AliasTakenError) Error() string {
 // setAliasTx names a session. A coordinator's name moves only through the
 // coordinator, so it is neither given to another session nor taken from the
 // session it names, and a name a session being started holds waits for it.
-func setAliasTx(tx *sql.Tx, name, sessionID string) error {
+func setAliasTx(tx *sql.Tx, name, sessionID string, now time.Time) error {
 	if strings.EqualFold(name, LeadAlias) {
 		return ErrReservedAlias
 	}
@@ -1323,7 +1323,7 @@ func setAliasTx(tx *sql.Tx, name, sessionID string) error {
 			return CoordinatorAliasError{Name: held}
 		}
 	}
-	if err := aliasReservedTx(tx, name, ""); err != nil {
+	if err := aliasReservedTx(tx, name, "", now); err != nil {
 		return err
 	}
 	return bindAliasTx(tx, name, sessionID)
@@ -1379,7 +1379,7 @@ func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error)
 			continue
 		}
 		var reserved AliasReservedError
-		if err := aliasReservedTx(tx, candidate, ""); errors.As(err, &reserved) {
+		if err := aliasReservedTx(tx, candidate, "", r.now()); errors.As(err, &reserved) {
 			continue
 		} else if err != nil {
 			return "", err
