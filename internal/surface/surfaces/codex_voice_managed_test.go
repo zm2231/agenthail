@@ -42,7 +42,7 @@ func pollUntil(t *testing.T, v *CodexVoice, cursor voice.Cursor, threadID string
 	deadline := time.Now().Add(5 * time.Second)
 	var collected voice.Batch
 	for {
-		batch, err := v.Poll(context.Background(), cursor, threadID)
+		batch, err := v.Poll(context.Background(), cursor, threadID, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -214,6 +214,54 @@ func TestAManagedCallStartRefusalSaysWhatFixesTheLogin(t *testing.T) {
 	}
 }
 
+func TestAManagedPollReturnsAToolCallAsSoonAsCodexSendsIt(t *testing.T) {
+	daemon, v, session := managedVoice(t, signedIn(chatgptAccount))
+	cursor, err := v.Cursor(context.Background(), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type polled struct {
+		batch voice.Batch
+		err   error
+		at    time.Time
+	}
+	done := make(chan polled, 1)
+	go func() {
+		batch, err := v.Poll(context.Background(), cursor, session.ID, 5*time.Second)
+		done <- polled{batch, err, time.Now()}
+	}()
+	select {
+	case got := <-done:
+		t.Fatalf("the poll returned before Codex sent anything: %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+	sent := time.Now()
+	var after voice.Cursor
+	daemon.Request(7, "item/tool/call", map[string]any{"threadId": session.ID, "namespace": "agenthail", "tool": "voice_projects", "arguments": map[string]any{}, "callId": "c1", "turnId": "t1"})
+	select {
+	case got := <-done:
+		if got.err != nil || len(got.batch.Events) != 1 || got.batch.Events[0].Method != "item/tool/call" {
+			t.Fatalf("batch=%+v err=%v", got.batch, got.err)
+		}
+		if elapsed := got.at.Sub(sent); elapsed >= 100*time.Millisecond {
+			t.Fatalf("the tool call took %v to reach the poll", elapsed)
+		}
+		after = got.batch.Cursor
+	case <-time.After(5 * time.Second):
+		t.Fatal("the poll waited out its bound with a tool call pending")
+	}
+	started := time.Now()
+	batch, err := v.Poll(context.Background(), after, session.ID, 30*time.Millisecond)
+	if err != nil || len(batch.Events) != 0 || batch.Lost || time.Since(started) < 30*time.Millisecond {
+		t.Fatalf("a quiet poll returned %+v err=%v after %v", batch, err, time.Since(started))
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
+	if _, err := v.Poll(ctx, batch.Cursor, session.ID, 5*time.Second); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled poll returned %v", err)
+	}
+}
+
 func TestADroppedManagedCallConnectionReportsLostEvents(t *testing.T) {
 	_, v, session := managedVoice(t, signedIn(chatgptAccount))
 	cursor, err := v.Cursor(context.Background(), session)
@@ -223,7 +271,7 @@ func TestADroppedManagedCallConnectionReportsLostEvents(t *testing.T) {
 	_ = v.link(session.ID).client.ws.Close()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		batch, err := v.Poll(context.Background(), cursor, session.ID)
+		batch, err := v.Poll(context.Background(), cursor, session.ID, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -238,7 +286,7 @@ func TestADroppedManagedCallConnectionReportsLostEvents(t *testing.T) {
 	if v.link(session.ID) != nil {
 		t.Fatal("the dropped connection stayed the call's link")
 	}
-	if batch, err := v.Poll(context.Background(), cursor, session.ID); err != nil || !batch.Lost {
+	if batch, err := v.Poll(context.Background(), cursor, session.ID, 0); err != nil || !batch.Lost {
 		t.Fatalf("batch=%+v err=%v", batch, err)
 	}
 }

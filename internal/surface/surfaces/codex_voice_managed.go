@@ -39,6 +39,8 @@ type voiceLink struct {
 	closed   bool
 	// followed closes when the link stops reading its connection.
 	followed chan struct{}
+	// appended closes, and is replaced, when the link takes new events.
+	appended chan struct{}
 }
 
 type voiceToolRequest struct {
@@ -69,7 +71,7 @@ func (v *CodexVoice) openVoiceLink(ctx context.Context, session *surface.Session
 			return nil, classifyCodexWrite(fmt.Errorf("name the voice operator: %w", err))
 		}
 	}
-	link := &voiceLink{client: managed, threadID: session.ID, source: "managed:" + uuid.NewString(), requests: map[string]voiceToolRequest{}, followed: make(chan struct{})}
+	link := &voiceLink{client: managed, threadID: session.ID, source: "managed:" + uuid.NewString(), requests: map[string]voiceToolRequest{}, followed: make(chan struct{}), appended: make(chan struct{})}
 	if response, err := managed.Request(ctx, "account/read", map[string]any{}, 5*time.Second); err == nil {
 		result, _ := response["result"].(map[string]any)
 		link.account, _ = result["account"].(map[string]any)
@@ -96,6 +98,13 @@ func (l *voiceLink) collect() {
 	events := l.client.DrainNotifications()
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	taken := l.sequence
+	defer func() {
+		if l.sequence != taken {
+			close(l.appended)
+			l.appended = make(chan struct{})
+		}
+	}()
 	for _, event := range events {
 		if threadID, _ := event.Params["threadId"].(string); threadID != l.threadID || !voiceEventMethod(event) {
 			continue
@@ -142,11 +151,34 @@ func voiceEventMethod(event codexEvent) bool {
 	return false
 }
 
-func (l *voiceLink) poll(after voice.Cursor) (voice.Batch, error) {
+// poll returns the events after the cursor as soon as there are any, or an
+// empty batch once wait passes, the link stops following or ctx ends.
+func (l *voiceLink) poll(ctx context.Context, after voice.Cursor, wait time.Duration) (voice.Batch, error) {
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	for {
+		batch, appended := l.read(after)
+		if len(batch.Events) > 0 || batch.Lost || wait <= 0 {
+			return batch, nil
+		}
+		select {
+		case <-appended:
+		case <-l.followed:
+			batch, _ = l.read(after)
+			return batch, nil
+		case <-timer.C:
+			return batch, nil
+		case <-ctx.Done():
+			return batch, ctx.Err()
+		}
+	}
+}
+
+func (l *voiceLink) read(after voice.Cursor) (voice.Batch, <-chan struct{}) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if after.Source != l.source {
-		return voice.Batch{Cursor: voice.Cursor{Source: l.source, Position: l.sequence}, Lost: true}, nil
+		return voice.Batch{Cursor: voice.Cursor{Source: l.source, Position: l.sequence}, Lost: true}, l.appended
 	}
 	lost := after.Position > l.sequence || (len(l.events) > 0 && l.events[0].Sequence > after.Position+1)
 	var events []voice.Event
@@ -162,7 +194,7 @@ func (l *voiceLink) poll(after voice.Cursor) (voice.Batch, error) {
 	if l.client.failed() && !l.closed {
 		lost = true
 	}
-	return voice.Batch{Cursor: voice.Cursor{Source: l.source, Position: l.sequence}, Events: events, Lost: lost}, nil
+	return voice.Batch{Cursor: voice.Cursor{Source: l.source, Position: l.sequence}, Events: events, Lost: lost}, l.appended
 }
 
 func (l *voiceLink) respond(requestID, threadID string, success bool, text string) error {

@@ -147,7 +147,9 @@ cursor instead. If Codex's login cannot do realtime, the call ends with the
 reason and what fixes it (sign in with `codex login`, or a key with Realtime API
 access); a start Codex definitely refused ends the call instead of leaving it
 unknown. Each call starts with no events from the previous one, and events from
-another realtime session are ignored.
+another realtime session are ignored. The host waits on the call's events rather
+than checking for them on a timer, so a tool call reaches its handler as soon as
+Codex sends it.
 The peer submits the offer after `setLocalDescription`; ICE gathering may continue
 while signaling proceeds. A network that does not report `complete` gathering is
 not treated as a failed call before the host receives the offer.

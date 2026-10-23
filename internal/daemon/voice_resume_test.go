@@ -36,13 +36,19 @@ func (c *voiceCall) Cursor(context.Context, *surface.Session) (voice.Cursor, err
 	return voice.Cursor{Source: "fixture", Position: 10}, nil
 }
 
-func (c *voiceCall) Poll(_ context.Context, after voice.Cursor, _ string) (voice.Batch, error) {
+func (c *voiceCall) Poll(ctx context.Context, after voice.Cursor, _ string, wait time.Duration) (voice.Batch, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.polled {
-		return voice.Batch{Cursor: after}, nil
-	}
+	polled := c.polled
 	c.polled = true
+	c.mu.Unlock()
+	if polled {
+		select {
+		case <-time.After(wait):
+			return voice.Batch{Cursor: after}, nil
+		case <-ctx.Done():
+			return voice.Batch{Cursor: after}, ctx.Err()
+		}
+	}
 	return voice.Batch{Cursor: voice.Cursor{Source: "fixture", Position: 20}, Events: []voice.Event{
 		{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}},
 		{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}},

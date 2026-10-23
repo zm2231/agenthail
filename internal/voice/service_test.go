@@ -35,6 +35,11 @@ type fixtureProvider struct {
 	respondErr   error
 	releases     []string
 	gate         *gate
+	// ticks releases one Poll each, as its wait running out would; arrived
+	// releases one as Codex sending an event would.
+	ticks    <-chan time.Time
+	arrived  chan struct{}
+	lastWait time.Duration
 	toolCalls    []struct {
 		requestID string
 		success   bool
@@ -229,7 +234,22 @@ func (p *fixtureProvider) Cursor(ctx context.Context, _ *surface.Session) (Curso
 	}
 	return Cursor{Source: "fixture", Position: 10}, nil
 }
-func (p *fixtureProvider) Poll(ctx context.Context, after Cursor, _ string) (Batch, error) {
+func (p *fixtureProvider) Poll(ctx context.Context, after Cursor, _ string, wait time.Duration) (Batch, error) {
+	p.mu.Lock()
+	arrived := p.arrived
+	p.lastWait = wait
+	p.mu.Unlock()
+	if wait > 0 {
+		select {
+		case <-arrived:
+		case _, open := <-p.ticks:
+			if !open {
+				return Batch{Cursor: after}, errors.New("fixture closed")
+			}
+		case <-ctx.Done():
+			return Batch{Cursor: after}, ctx.Err()
+		}
+	}
 	if err := p.gate.wait(ctx, "Poll"); err != nil {
 		return Batch{}, err
 	}
@@ -433,6 +453,7 @@ func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 	t.Helper()
 	g := &gate{entered: make(chan string, 16)}
 	f := &voiceFixture{t: t, gate: g, provider: &fixtureProvider{polled: make(chan struct{}, 1), gate: g}, path: filepath.Join(t.TempDir(), "voice", "operator.json"), ticks: make(chan time.Time), now: time.Unix(1_700_000_000, 0)}
+	f.provider.ticks = f.ticks
 	var resolver TargetResolver
 	if options.path != "" {
 		f.path = options.path
@@ -1189,7 +1210,6 @@ func TestNativeHeartbeatExpiryPreservesTerminalReason(t *testing.T) {
 	if got := f.View(); got.Phase != "ended" || got.TerminalReason != "phone_disconnected" {
 		t.Fatalf("terminal reason was not preserved: %+v", got)
 	}
-	f.ticks <- time.Time{}
 	waitForRelease(t, p, "operator")
 }
 
