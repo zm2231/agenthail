@@ -35,6 +35,7 @@ let package = Package(
                 "HolderPins.swift",
                 "ComposerAttachment.swift",
                 "ComposerTextSync.swift",
+                "ComposerCompletion.swift",
                 "SessionSelection.swift",
                 "ProjectActions.swift",
                 "SessionTree.swift",

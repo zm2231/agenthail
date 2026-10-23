@@ -36,6 +36,7 @@ targets:
       - path: HolderPins.swift
       - path: ComposerAttachment.swift
       - path: ComposerTextSync.swift
+      - path: ComposerCompletion.swift
       - path: SessionSelection.swift
       - path: ProjectActions.swift
       - path: SessionTree.swift

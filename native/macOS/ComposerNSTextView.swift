@@ -9,6 +9,7 @@ final class ComposerNSTextView: NSTextView {
     var onUpFromFirstLine: (() -> Bool)?
     var onDownFromLastLine: (() -> Bool)?
     var onSubmit: (() -> Void)?
+    var completionKey: ((CompletionKey) -> Bool)?
     var focusChanged: ((Bool) -> Void)?
     var pasteAttachments: ((PastedAttachments) -> Void)? {
         didSet { if (oldValue == nil) != (pasteAttachments == nil) { updateDragTypeRegistration() } }
@@ -124,17 +125,19 @@ final class ComposerNSTextView: NSTextView {
                 insertNewlineIgnoringFieldEditor(nil)
             } else if selectedRange().length == 0, let backslash = ComposerReturn.continuation(in: string, caret: selectedRange().location) {
                 insertText("\n", replacementRange: backslash)
-            } else {
+            } else if completionKey?(.accept) != true {
                 onSubmit?()
             }
         case #selector(moveUp(_:)):
+            if completionKey?(.up) == true { return }
             if !(selectedRange().length == 0 && onFirstLine && onUpFromFirstLine?() == true) { super.doCommand(by: selector) }
         case #selector(moveDown(_:)):
+            if completionKey?(.down) == true { return }
             if !(selectedRange().length == 0 && onLastLine && onDownFromLastLine?() == true) { super.doCommand(by: selector) }
         case #selector(insertLineBreak(_:)):
             insertNewlineIgnoringFieldEditor(nil)
         case #selector(insertTab(_:)):
-            window?.selectNextKeyView(nil)
+            if completionKey?(.accept) != true { window?.selectNextKeyView(nil) }
         case #selector(insertBacktab(_:)):
             window?.selectPreviousKeyView(nil)
         case #selector(cancelOperation(_:)):
@@ -202,4 +205,8 @@ final class ComposerNSTextView: NSTextView {
         NSAttributedString(string: placeholder, attributes: [.font: font ?? Self.font, .foregroundColor: Self.placeholderColor])
             .draw(at: origin)
     }
+}
+
+enum CompletionKey {
+    case up, down, accept
 }

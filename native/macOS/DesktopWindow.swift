@@ -1480,6 +1480,10 @@ struct ComposerView: View {
     @State private var focused = false
     @State private var dropTargeted = false
     @State private var dismissedSlash: String?
+    @State private var caret = 0
+    @State private var highlighted = 0
+    @State private var mentionFiles: (query: String, files: [SessionFile])?
+    @State private var editor = ComposerEditor()
     @State private var modeChanged = false
     @State private var showingSent = false
     @State private var searchingSent = false
@@ -1487,12 +1491,14 @@ struct ComposerView: View {
 
     private var followUp: FollowUpAction { model.busyDelivery }
     @ObservedObject private var draft: ComposerDraft
+    @ObservedObject private var store: SessionStore
 
     init(model: AgenthailModel, pane: SessionPane, session: SessionState) {
         self.model = model
         self.pane = pane
         self.session = session
         self.draft = pane.composerDraft
+        self.store = model.store
     }
 
     private var hasText: Bool { !draft.isEmpty }
@@ -1549,15 +1555,12 @@ struct ComposerView: View {
                     }
                 }
                 .scrimText("dock-notices")
-                if !slashSuggestions.isEmpty {
-                    SlashCommandMenu(suggestions: slashSuggestions, roundedTop: queued.isEmpty) { choice in
-                        draft.text = choice
-                        focused = true
-                    }
-                    .padding(.horizontal, 10)
+                if completionOpen {
+                    CompletionMenu(suggestions: completion.items, notice: completion.notice, highlighted: highlighted, roundedTop: queued.isEmpty, choose: accept)
+                        .padding(.horizontal, 10)
                 }
                 VStack(spacing: 0) {
-                    ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt) { submit(alternate: false) }
+                    ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt, editor: editor, onCaret: { caret = $0 }, completionKey: completionKey) { submit(alternate: false) }
                         .id(session.id)
                         .padding(.horizontal, 15)
                         .padding(.top, 13)
@@ -1703,26 +1706,84 @@ struct ComposerView: View {
         }
         .onAppear { focused = true }
         .task(id: session.id) { await model.loadPrompts(for: session.id) }
+        .task(id: mentionQuery) { await loadMentionFiles(mentionQuery) }
+        .onChange(of: completion.items.map(\.id)) { highlighted = 0 }
     }
 
     private var primaryIsStop: Bool { SessionPane.stopAvailable(session, removed: false, draftEmpty: draft.isEmpty) }
     private var draftIsCommand: Bool {
-        draft.attachments.isEmpty && (SlashInput(draft.text, available: SlashCommand.allCases) != .message || !slashSuggestions.isEmpty)
+        draft.attachments.isEmpty && (SlashInput(draft.text, available: SlashCommand.allCases) != .message || completesAppCommand)
     }
     private var showsSteerNow: Bool { session.isWorking && canSteer && hasText && !draftIsCommand && resolvedAction(alternate: false) == .queue }
-    private var slashSuggestions: [SlashCommandMenu.Suggestion] {
-        guard draft.attachments.isEmpty, dismissedSlash != draft.text else { return [] }
-        if let query = SlashCommand.modelQuery(for: draft.text), session.capabilities.model {
-            let options = pane.detail?.models ?? []
-            if options.contains(where: { $0.id == query }) { return [] }
-            return options
-                .filter { query.isEmpty || $0.id.localizedCaseInsensitiveContains(query) || $0.displayName.localizedCaseInsensitiveContains(query) }
-                .map { SlashCommandMenu.Suggestion(id: "model:" + $0.id, title: $0.displayName, detail: $0.id == pane.detail?.model ? "Current" : $0.id == pane.detail?.nextTurnModel ? "From next turn" : ($0.description ?? $0.id), insertion: "/model " + $0.id) }
+    private var modelSuggestions: [CompletionItem]? {
+        guard draft.attachments.isEmpty, dismissedSlash != draft.text, let query = SlashCommand.modelQuery(for: draft.text), session.capabilities.model else { return nil }
+        let options = pane.detail?.models ?? []
+        if options.contains(where: { $0.id == query }) { return [] }
+        return options
+            .filter { query.isEmpty || $0.id.localizedCaseInsensitiveContains(query) || $0.displayName.localizedCaseInsensitiveContains(query) }
+            .map { CompletionItem(id: "model:" + $0.id, title: $0.displayName, detail: $0.id == pane.detail?.model ? "Current" : $0.id == pane.detail?.nextTurnModel ? "From next turn" : ($0.description ?? $0.id), insertion: "/model " + $0.id) }
+    }
+
+    private var completionToken: CompletionToken? {
+        guard dismissedSlash != draft.text, modelSuggestions == nil else { return nil }
+        return CompletionToken.at(draft.text, caret: min(caret, (draft.text as NSString).length))
+    }
+
+    private var mentionQuery: String? {
+        completionToken.flatMap { $0.trigger == .mention ? $0.query : nil }
+    }
+
+    private var completion: (items: [CompletionItem], notice: String?) {
+        if let models = modelSuggestions { return (models, nil) }
+        guard let token = completionToken else { return ([], nil) }
+        let appCommands = draft.attachments.isEmpty ? SlashCommand.available(capabilities: session.capabilities, working: session.isWorking, waitingOnYou: session.isWaitingOnYou).map {
+            CompletionItem(id: $0.token, title: $0.token, detail: $0.summary, insertion: $0.token + ($0.needsArgument ? " " : ""))
+        } : []
+        let runtime = store.commands[session.id]
+        let mentioning = token.trigger == .mention
+        let items = ComposerCompletion.items(for: token, appCommands: appCommands, runtime: runtime, sessions: mentioning ? ComposerCompletion.sessions(model.knownSessions, from: session) : [], files: mentioning && mentionFiles?.query == token.query ? mentionFiles?.files ?? [] : [])
+        return (items, ComposerCompletion.notice(for: token, runtime: runtime))
+    }
+
+    private var completionOpen: Bool { !completion.items.isEmpty || completion.notice != nil }
+
+    private var completesAppCommand: Bool {
+        guard !completion.items.isEmpty else { return false }
+        return modelSuggestions != nil || (completionToken?.trigger == .command && completionToken?.atStart == true)
+    }
+
+    private func completionKey(_ key: CompletionKey) -> Bool {
+        let items = completion.items
+        guard !items.isEmpty else { return false }
+        switch key {
+        case .up: highlighted = (min(highlighted, items.count - 1) - 1 + items.count) % items.count
+        case .down: highlighted = (min(highlighted, items.count - 1) + 1) % items.count
+        case .accept:
+            let item = items[min(highlighted, items.count - 1)]
+            if let token = completionToken, (draft.text as NSString).substring(with: token.range) == item.insertion.trimmingCharacters(in: .whitespaces) { return false }
+            accept(item)
         }
-        let available = SlashCommand.available(capabilities: session.capabilities, working: session.isWorking, waitingOnYou: session.isWaitingOnYou)
-        return SlashCommand.suggestions(for: draft.text, available: available).map {
-            SlashCommandMenu.Suggestion(id: $0.token, title: $0.token, detail: $0.summary, insertion: $0.token + ($0.needsArgument ? " " : ""))
+        return true
+    }
+
+    private func loadMentionFiles(_ query: String?) async {
+        guard let query, let api = model.api else { return }
+        try? await Task.sleep(for: .milliseconds(120))
+        guard !Task.isCancelled else { return }
+        let found = try? await api.sessionFiles(id: session.id, query: query)
+        guard !Task.isCancelled else { return }
+        mentionFiles = (query, found?.files ?? [])
+    }
+
+    private func accept(_ item: CompletionItem) {
+        if modelSuggestions != nil {
+            draft.text = item.insertion
+        } else if let token = completionToken {
+            let change = ComposerCompletion.edit(item, in: draft.text, at: token)
+            editor.replace(change.range, with: change.replacement, caret: change.caret)
         }
+        highlighted = 0
+        focused = true
     }
 
     private var permissionMode: String? {
@@ -1744,7 +1805,7 @@ struct ComposerView: View {
             }
             return false
         case .interrupt:
-            if !slashSuggestions.isEmpty {
+            if completionOpen {
                 dismissedSlash = draft.text
                 draft.escapeHandled()
                 return true
@@ -1862,10 +1923,7 @@ struct ComposerView: View {
 
     private func submit(alternate: Bool) {
         guard hasText else { return }
-        if let first = slashSuggestions.first, String(draft.text.drop { $0.isWhitespace }) != first.insertion {
-            draft.text = first.insertion
-            return
-        }
+        if completionKey(.accept) { return }
         let explicit = session.isWorking && alternate && canSteer ? resolvedAction(alternate: true).rawValue : nil
         pane.submit(busyDelivery: explicit)
     }

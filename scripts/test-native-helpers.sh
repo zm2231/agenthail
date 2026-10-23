@@ -18,6 +18,7 @@ SOURCES=(
   AgenthailModels.swift
   ComposerAttachment.swift
   ComposerTextSync.swift
+  ComposerCompletion.swift
   DuplicateApplicationPolicy.swift
   EventRetryBackoff.swift
   HolderPins.swift
