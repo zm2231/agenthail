@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
@@ -18,8 +17,7 @@ func TestAgentSendToAConversationOpenInTwoTerminalsNamesThePinsAndAPinReachesOne
 	first := fixture.Holder(conversation, fixture.Home)
 	later := fixture.Holder(conversation, fixture.Home)
 	peers := claudetest.ListenPeerManager(t, fixture.Home)
-	app, r := cliFixture(t, &cliSurface{kind: surface.KindClaude})
-	app.Surfaces[0].Surface = surfaces.NewClaude(nil, fixture.Home)
+	app, r := claudeCLIFixture(t, surfaces.NewClaude(nil, fixture.Home))
 
 	listed, err := captureStdout(t, func() error { return app.Run([]string{"list"}) })
 	if err != nil || !strings.Contains(listed, fmt.Sprintf("2 terminals: %d", first.PID)) || !strings.Contains(listed, strconv.Itoa(later.PID)) {

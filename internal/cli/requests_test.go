@@ -23,8 +23,7 @@ func hostedClaudeApp(t *testing.T) (*App, *registry.Registry, *claudehosttest.Fi
 	id := uuid.NewString()
 	host.Open(t, client, id)
 	claude := surfaces.NewClaude(nil, fixture.Home)
-	app, r := cliFixture(t, &cliSurface{kind: surface.KindClaude})
-	app.Surfaces[0].Surface = claude
+	app, r := claudeCLIFixture(t, claude)
 	var session surface.Session
 	claudehosttest.WaitFor(t, "the host session", func() bool {
 		sessions, err := claude.List(context.Background())
