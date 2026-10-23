@@ -21,6 +21,7 @@ import (
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/tailscale"
 	"github.com/zm2231/agenthail/internal/uploads"
 )
 
@@ -257,11 +258,11 @@ type tailscalePeerStatus struct {
 }
 
 var tailnetAddress = func(dnsName string) (string, error) {
-	path, err := tailscaleExecutable(normalizeRemoteAccessConfig(RemoteAccessConfig{}).TailscalePath)
+	path, err := tailscale.Executable("")
 	if err != nil {
 		return "", err
 	}
-	output, err := runTailscale(path, "status", "--json")
+	output, err := tailscale.Command(path)("status", "--json")
 	if err != nil {
 		return "", err
 	}

@@ -3,48 +3,17 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"net"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
-	"strings"
 	"time"
 
-	qrcode "github.com/skip2/go-qrcode"
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/tailscale"
 )
-
-const dashboardSharePort = 7412
-
-type dashboardShareRunner func(args ...string) ([]byte, error)
-
-type tailscaleNodeStatus struct {
-	BackendState string `json:"BackendState"`
-	Self         struct {
-		DNSName string `json:"DNSName"`
-		Online  bool   `json:"Online"`
-	} `json:"Self"`
-}
-
-type tailscaleServeStatus struct {
-	AllowFunnel map[string]bool `json:"AllowFunnel"`
-	TCP         map[string]struct {
-		HTTP bool `json:"HTTP"`
-	} `json:"TCP"`
-	Web map[string]struct {
-		Handlers map[string]struct {
-			Proxy string `json:"Proxy"`
-		} `json:"Handlers"`
-	} `json:"Web"`
-}
-
-func funnelEnabled(status tailscaleServeStatus, dnsName string, port int) bool {
-	return status.AllowFunnel[net.JoinHostPort(dnsName, strconv.Itoa(port))]
-}
 
 type dashboardShareResult struct {
 	URL       string    `json:"url"`
@@ -58,163 +27,8 @@ func dashboardShareQRPath() string {
 	return filepath.Join(filepath.Dir(daemon.PidFilePath()), "dashboard-share.png")
 }
 
-func tailscaleExecutable(explicit string) (string, error) {
-	candidates := []string{explicit, os.Getenv("AGENTHAIL_TAILSCALE")}
-	if runtime.GOOS == "darwin" {
-		candidates = append(candidates, "/Applications/Tailscale.app/Contents/MacOS/Tailscale")
-	}
-	if path, err := exec.LookPath("tailscale"); err == nil {
-		candidates = append(candidates, path)
-	}
-	for _, candidate := range candidates {
-		if candidate == "" {
-			continue
-		}
-		resolved, err := filepath.EvalSymlinks(candidate)
-		if err != nil {
-			resolved = candidate
-		}
-		info, err := os.Stat(resolved)
-		if err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0111 != 0 {
-			return resolved, nil
-		}
-	}
-	return "", fmt.Errorf("Tailscale CLI was not found; install Tailscale, sign in, then run 'agenthail dashboard remote' again")
-}
-
-func tailscaleRunner(path string) dashboardShareRunner {
-	return func(args ...string) ([]byte, error) {
-		command := exec.Command(path, args...)
-		output, err := command.CombinedOutput()
-		if err != nil {
-			return output, fmt.Errorf("tailscale %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
-		}
-		return output, nil
-	}
-}
-
-func readTailscaleNode(run dashboardShareRunner) (tailscaleNodeStatus, error) {
-	output, err := run("status", "--json")
-	if err != nil {
-		return tailscaleNodeStatus{}, err
-	}
-	var status tailscaleNodeStatus
-	if err := json.Unmarshal(output, &status); err != nil {
-		return tailscaleNodeStatus{}, fmt.Errorf("parse Tailscale status: %w", err)
-	}
-	status.Self.DNSName = strings.TrimSuffix(status.Self.DNSName, ".")
-	if status.Self.DNSName == "" {
-		return tailscaleNodeStatus{}, fmt.Errorf("Tailscale did not report a MagicDNS name; enable MagicDNS for this tailnet")
-	}
-	if !status.Self.Online && status.BackendState != "Running" {
-		return tailscaleNodeStatus{}, fmt.Errorf("Tailscale is installed but offline; connect it before sharing the dashboard")
-	}
-	return status, nil
-}
-
-func readTailscaleServe(run dashboardShareRunner) (tailscaleServeStatus, error) {
-	output, err := run("serve", "status", "--json")
-	if err != nil {
-		return tailscaleServeStatus{}, err
-	}
-	var status tailscaleServeStatus
-	if err := json.Unmarshal(output, &status); err != nil {
-		return tailscaleServeStatus{}, fmt.Errorf("parse Tailscale Serve status: %w", err)
-	}
-	return status, nil
-}
-
-func serveProxy(status tailscaleServeStatus, dnsName string, port int) string {
-	host := net.JoinHostPort(dnsName, strconv.Itoa(port))
-	if port == 80 {
-		host = dnsName + ":80"
-	}
-	entry, ok := status.Web[host]
-	if !ok {
-		return ""
-	}
-	return entry.Handlers["/"].Proxy
-}
-
-func serveUsesHTTPS(run dashboardShareRunner, dnsName string, port int) (bool, error) {
-	output, err := run("serve", "status")
-	if err != nil {
-		return false, err
-	}
-	host := dnsName
-	if port != 443 {
-		host = net.JoinHostPort(dnsName, strconv.Itoa(port))
-	}
-	return strings.Contains(string(output), "https://"+host), nil
-}
-
-func configureDashboardShare(run dashboardShareRunner, dnsName, target string, port int) error {
-	status, err := readTailscaleServe(run)
-	if err != nil {
-		return err
-	}
-	portKey := strconv.Itoa(port)
-	proxy := serveProxy(status, dnsName, port)
-	httpsReady, err := serveUsesHTTPS(run, dnsName, port)
-	if err != nil {
-		return err
-	}
-	if funnelEnabled(status, dnsName, port) {
-		return fmt.Errorf("Tailscale Funnel is enabled on port %d; disable Funnel before sharing Agenthail privately", port)
-	}
-	if _, used := status.TCP[portKey]; used && proxy != "" && proxy != target {
-		return fmt.Errorf("Tailscale Serve port %d already proxies %s; run 'agenthail dashboard remote off' only if that route belongs to Agenthail", port, proxy)
-	}
-	if _, used := status.TCP[portKey]; used && proxy == "" {
-		return fmt.Errorf("Tailscale Serve port %d is already in use by another service", port)
-	}
-	ownedHTTP := proxy == target && !httpsReady
-	if ownedHTTP {
-		if _, err := run("serve", "--http="+portKey, "off"); err != nil {
-			return err
-		}
-	}
-	if proxy != target || !httpsReady {
-		if _, err := run("serve", "--bg", "--yes", "--https="+portKey, target); err != nil {
-			if ownedHTTP {
-				_, _ = run("serve", "--bg", "--yes", "--http="+portKey, target)
-			}
-			return err
-		}
-	}
-	status, err = readTailscaleServe(run)
-	if err != nil {
-		return err
-	}
-	if serveProxy(status, dnsName, port) != target {
-		return fmt.Errorf("Tailscale Serve did not retain the Agenthail proxy on port %d", port)
-	}
-	if httpsReady, err := serveUsesHTTPS(run, dnsName, port); err != nil || !httpsReady {
-		if err != nil {
-			return err
-		}
-		return fmt.Errorf("Tailscale Serve did not enable HTTPS on port %d", port)
-	}
-	if funnelEnabled(status, dnsName, port) {
-		return fmt.Errorf("Tailscale Funnel became enabled on port %d; sharing was not accepted", port)
-	}
-	return nil
-}
-
-func remoteDashboardURL(dnsName string, port int) string {
-	return (&url.URL{Scheme: "https", Host: net.JoinHostPort(dnsName, strconv.Itoa(port)), Path: "/"}).String()
-}
-
-func dashboardShareTarget(listen string) (string, error) {
-	_, port, err := net.SplitHostPort(listen)
-	if err != nil || port == "" {
-		return "", fmt.Errorf("dashboard listen address must be host:port")
-	}
-	return "http://" + net.JoinHostPort("127.0.0.1", port), nil
-}
-
 func writeDashboardQR(value, path string) error {
-	data, err := qrcode.Encode(value, qrcode.Medium, 512)
+	data, err := daemon.RemoteAccessQR(value)
 	if err != nil {
 		return fmt.Errorf("encode dashboard QR: %w", err)
 	}
@@ -295,8 +109,8 @@ func dashboardDaemonRunning() bool {
 	return running
 }
 
-func dashboardRemoteEnabled(config daemon.DashboardConfig, status tailscaleServeStatus, dnsName, target string, httpsReady bool) bool {
-	return config.Enabled && target != "" && serveProxy(status, dnsName, dashboardSharePort) == target && httpsReady && !funnelEnabled(status, dnsName, dashboardSharePort)
+func dashboardRemoteEnabled(config daemon.DashboardConfig, serve tailscale.Serve, dnsName, target string, httpsReady bool) bool {
+	return config.Enabled && serve.Routes(dnsName, target, daemon.DefaultRemoteAccessPort, httpsReady)
 }
 
 func (a *App) cmdDashboardRemote(args, positional []string) error {
@@ -304,54 +118,31 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 	if len(positional) > 0 {
 		action = positional[0]
 	}
-	path, err := tailscaleExecutable(flagVal(args, "--tailscale"))
+	path, err := tailscale.Executable(flagVal(args, "--tailscale"))
+	if errors.Is(err, tailscale.ErrNotInstalled) {
+		return fmt.Errorf("%w; install Tailscale, sign in, then run 'agenthail dashboard remote' again", err)
+	}
 	if err != nil {
 		return err
 	}
-	run := tailscaleRunner(path)
-	node, err := readTailscaleNode(run)
+	run := tailscale.Command(path)
+	node, err := tailscale.ReadNode(run)
 	if err != nil {
 		return err
 	}
 	asJSON := hasFlag(args, "--json")
 	switch action {
 	case "off":
-		status, err := readTailscaleServe(run)
-		if err != nil {
-			return err
-		}
 		config, err := daemon.LoadDashboardConfig()
 		if err != nil {
 			return err
 		}
-		target, err := dashboardShareTarget(config.Listen)
+		target, err := tailscale.Target(config.Listen)
 		if err != nil {
 			return err
 		}
-		proxy := serveProxy(status, node.Self.DNSName, dashboardSharePort)
-		if proxy == "" {
-			config.RemoteAccess.Enabled = false
-			if err := daemon.SaveDashboardConfig(config); err != nil {
-				return err
-			}
-			if asJSON {
-				return json.NewEncoder(os.Stdout).Encode(map[string]any{"enabled": false, "port": dashboardSharePort})
-			}
-			fmt.Println("remote dashboard access is already disabled")
-			return nil
-		}
-		if proxy != target {
-			return fmt.Errorf("refusing to remove Tailscale Serve port %d because it now proxies %s", dashboardSharePort, proxy)
-		}
-		httpsReady, err := serveUsesHTTPS(run, node.Self.DNSName, dashboardSharePort)
+		removed, err := tailscale.Unpublish(run, node.Self.DNSName, target, daemon.DefaultRemoteAccessPort)
 		if err != nil {
-			return err
-		}
-		protocol := "--http="
-		if httpsReady {
-			protocol = "--https="
-		}
-		if _, err := run("serve", protocol+strconv.Itoa(dashboardSharePort), "off"); err != nil {
 			return err
 		}
 		config.RemoteAccess.Enabled = false
@@ -359,12 +150,16 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 			return err
 		}
 		if asJSON {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"enabled": false, "port": dashboardSharePort})
+			return json.NewEncoder(os.Stdout).Encode(map[string]any{"enabled": false, "port": daemon.DefaultRemoteAccessPort})
 		}
-		fmt.Println("remote dashboard access disabled")
+		if removed {
+			fmt.Println("remote dashboard access disabled")
+		} else {
+			fmt.Println("remote dashboard access is already disabled")
+		}
 		return nil
 	case "status":
-		status, err := readTailscaleServe(run)
+		status, err := tailscale.ReadServe(run)
 		if err != nil {
 			return err
 		}
@@ -372,24 +167,24 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 		if err != nil {
 			return err
 		}
-		target, err := dashboardShareTarget(config.Listen)
+		target, err := tailscale.Target(config.Listen)
 		if err != nil {
 			return err
 		}
-		httpsReady, err := serveUsesHTTPS(run, node.Self.DNSName, dashboardSharePort)
+		httpsReady, err := tailscale.ServesHTTPS(run, node.Self.DNSName, daemon.DefaultRemoteAccessPort)
 		if err != nil {
 			return err
 		}
 		enabled := dashboardRemoteEnabled(config, status, node.Self.DNSName, target, httpsReady)
 		if asJSON {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"enabled": enabled, "dashboardEnabled": config.Enabled, "dnsName": node.Self.DNSName, "https": httpsReady, "port": dashboardSharePort, "proxy": serveProxy(status, node.Self.DNSName, dashboardSharePort)})
+			return json.NewEncoder(os.Stdout).Encode(map[string]any{"enabled": enabled, "dashboardEnabled": config.Enabled, "dnsName": node.Self.DNSName, "https": httpsReady, "port": daemon.DefaultRemoteAccessPort, "proxy": status.Proxy(node.Self.DNSName, daemon.DefaultRemoteAccessPort)})
 		}
 		if !enabled {
 			fmt.Println("remote dashboard access: off")
 			return nil
 		}
 		fmt.Println("remote dashboard access: on")
-		fmt.Printf("phone: %s (sign in with a link from 'agenthail dashboard remote')\n", remoteDashboardURL(node.Self.DNSName, dashboardSharePort))
+		fmt.Printf("phone: %s (sign in with a link from 'agenthail dashboard remote')\n", tailscale.URL(node.Self.DNSName, daemon.DefaultRemoteAccessPort))
 		return nil
 	case "on":
 	default:
@@ -399,14 +194,14 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 	if err != nil {
 		return err
 	}
-	target, err := dashboardShareTarget(config.Listen)
+	target, err := tailscale.Target(config.Listen)
 	if err != nil {
 		return err
 	}
-	if err := configureDashboardShare(run, node.Self.DNSName, target, dashboardSharePort); err != nil {
+	if err := tailscale.Publish(run, node.Self.DNSName, target, daemon.DefaultRemoteAccessPort); err != nil {
 		return err
 	}
-	config.RemoteAccess = daemon.RemoteAccessConfig{Enabled: true, Provider: "tailscale", Port: dashboardSharePort, TailscalePath: path}
+	config.RemoteAccess = daemon.RemoteAccessConfig{Enabled: true, Provider: "tailscale", Port: daemon.DefaultRemoteAccessPort, TailscalePath: path}
 	if err := daemon.SaveDashboardConfig(config); err != nil {
 		return err
 	}
@@ -414,7 +209,7 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 	if err != nil {
 		return err
 	}
-	result := dashboardShareResult{URL: link.URL, ExpiresAt: link.ExpiresAt, QRPath: dashboardShareQRPath(), DNSName: node.Self.DNSName, Port: dashboardSharePort}
+	result := dashboardShareResult{URL: link.URL, ExpiresAt: link.ExpiresAt, QRPath: dashboardShareQRPath(), DNSName: node.Self.DNSName, Port: daemon.DefaultRemoteAccessPort}
 	if err := writeDashboardQR(result.URL, result.QRPath); err != nil {
 		return err
 	}
