@@ -134,7 +134,7 @@ final class PhoneAppearance: ObservableObject {
             do {
                 let loaded = try await api.uiConfig(device: UIDevice.current.name, kind: Self.deviceKind)
                 if Task.isCancelled { return }
-                var wallpaper = self.wallpaper
+                var wallpaper = wallpaperID(loaded) == nil ? nil : self.wallpaper
                 var wallpaperData: Data?
                 if case .image(let path) = loaded.background, wallpaper?.id != path {
                     let data = try await api.uiBackground(path: path)

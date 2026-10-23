@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 @testable import Agenthail
 
@@ -85,8 +86,16 @@ final class PhoneAppearanceTests: XCTestCase {
         UIConfigURLProtocol.state.image = Data()
         try await load(appearance) { appearance.config.rev == "two" }
 
+        UIConfigURLProtocol.state.body = #"{"rev":"three","values":{"background":"none"},"problems":[]}"#
+        try await load(appearance) { appearance.config.rev == "three" }
+        XCTAssertNil(appearance.wallpaper)
+
+        UIConfigURLProtocol.state.body = #"{"rev":"four","values":{"background":"image: backgrounds/sea.png"},"problems":[]}"#
+        UIConfigURLProtocol.state.image = Self.png
+        try await load(appearance) { appearance.config.rev == "four" && appearance.active }
+
         let relaunched = PhoneAppearance(cache: cache)
-        XCTAssertEqual(relaunched.config.rev, "two")
+        XCTAssertEqual(relaunched.config.rev, "four")
         XCTAssertEqual(relaunched.wallpaper?.id, "backgrounds/sea.png")
         XCTAssertTrue(relaunched.active)
     }
