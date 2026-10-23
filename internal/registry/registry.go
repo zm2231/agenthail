@@ -66,14 +66,29 @@ func SchemaVersion() int { return schemaVersion }
 
 // NewerSchemaError is returned by Open for a registry a newer agenthail has
 // migrated. This build does not know that schema, so it refuses to read or
-// write it rather than run against tables it would misuse.
+// write it rather than run against tables it would misuse. Backup is the
+// copy taken before that migration when it is one this build can read.
 type NewerSchemaError struct {
-	Found     int
-	Supported int
+	Found        int
+	Supported    int
+	Path         string
+	Backup       string
+	BackupSchema int
 }
 
 func (e *NewerSchemaError) Error() string {
-	return fmt.Sprintf("registry is schema %d; this agenthail supports %d; install a newer agenthail", e.Found, e.Supported)
+	refusal := fmt.Sprintf("registry is schema %d; this agenthail supports %d; install a newer agenthail", e.Found, e.Supported)
+	if e.Backup == "" {
+		return refusal
+	}
+	aside := strings.TrimSuffix(e.Path, filepath.Ext(e.Path)) + fmt.Sprintf("-v%d.db", e.Found)
+	return fmt.Sprintf("%s, or go back to the copy taken before that upgrade (schema %d; anything changed since is lost): agenthail daemon stop; mv -- %s %s; rm -f -- %s %s; cp -- %s %s; agenthail daemon start", refusal, e.BackupSchema, shellQuote(e.Path), shellQuote(aside), shellQuote(e.Path+"-wal"), shellQuote(e.Path+"-shm"), shellQuote(e.Backup), shellQuote(e.Path))
+}
+
+// shellQuote quotes a path for a POSIX shell, so a printed command runs on
+// any path a home directory can have.
+func shellQuote(path string) string {
+	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
 }
 
 func defaultPath() string {
@@ -81,11 +96,20 @@ func defaultPath() string {
 	return filepath.Join(home, ".agenthail", "registry.db")
 }
 
+// Open opens the registry at path, migrating it to this build's schema after
+// copying it beside itself.
 func Open(path string) (*Registry, error) {
-	private := path == ""
-	if private {
-		path = defaultPath()
-	}
+	return open(path, false, true)
+}
+
+// OpenDefault opens the registry in the user's home. A build that may not
+// upgrade it, a development build without AGENTHAIL_ALLOW_DEV_MIGRATION,
+// still creates a new one but refuses to migrate an existing one.
+func OpenDefault(allowUpgrade bool) (*Registry, error) {
+	return open(defaultPath(), true, allowUpgrade)
+}
+
+func open(path string, private, allowUpgrade bool) (*Registry, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, fmt.Errorf("create registry directory: %w", err)
 	}
@@ -98,7 +122,7 @@ func Open(path string) (*Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := r.migrate(); err != nil {
+	if err := r.migrate(allowUpgrade); err != nil {
 		r.Close()
 		return nil, err
 	}
@@ -166,25 +190,48 @@ func (r *Registry) Close() error { return errors.Join(r.read.Close(), r.db.Close
 
 // migrate brings the database to the current schema in one transaction, so an
 // interrupted upgrade leaves the previous schema intact.
-func (r *Registry) migrate() error {
+//
+// An existing registry is copied first, under the transaction's write lock so
+// the copy holds the schema it is named for.
+func (r *Registry) migrate(allowUpgrade bool) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	var version int
+	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	switch {
+	case version > schemaVersion:
+		return r.newerSchemaError(version)
+	case version > 0 && version < schemaVersion && !allowUpgrade:
+		return &DevUpgradeError{Path: r.diskPath(), Found: version, Target: schemaVersion}
+	case version > 0 && version < schemaVersion:
+		if err := r.backUpBeforeMigration(version, schemaVersion); err != nil {
+			return err
+		}
+	}
 	if err := migrateTx(tx); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
+func (r *Registry) newerSchemaError(found int) *NewerSchemaError {
+	refusal := &NewerSchemaError{Found: found, Supported: schemaVersion, Path: r.diskPath()}
+	backup := migrationBackupPath(refusal.Path, found)
+	if schema := schemaOf(backup); schema > 0 && schema <= schemaVersion {
+		refusal.Backup, refusal.BackupSchema = backup, schema
+	}
+	return refusal
+}
+
 func migrateTx(tx *sql.Tx) error {
 	var version int
 	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
-	}
-	if version > schemaVersion {
-		return &NewerSchemaError{Found: version, Supported: schemaVersion}
 	}
 	if err := setAsideReleasedProjectsTable(tx); err != nil {
 		return err

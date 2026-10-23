@@ -171,13 +171,13 @@ cd "$REPO_DIR"
 if [ -n "${AGENTHAIL_PREBUILT_BINARY:-}" ]; then
 	cp "$AGENTHAIL_PREBUILT_BINARY" "$STAGE_DIR/agenthail"
 elif [ -d "$REPO_DIR/cmd/agenthail" ]; then
-	BUILD_VERSION="${AGENTHAIL_VERSION:-dev}"
+	BUILD_VERSION="${AGENTHAIL_VERSION:-source}"
 	BUILD_REVISION="unknown"
 	BUILD_AT=""
 	if git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
 		BUILD_REVISION="$(git -C "$REPO_DIR" rev-parse HEAD)"
 		if [ -z "${AGENTHAIL_VERSION:-}" ]; then
-			BUILD_VERSION="$(git -C "$REPO_DIR" describe --tags --always 2>/dev/null || echo dev)"
+			BUILD_VERSION="$(git -C "$REPO_DIR" describe --tags --always 2>/dev/null || echo source)"
 		fi
 		if [ -n "$(git -C "$REPO_DIR" status --porcelain 2>/dev/null)" ]; then
 			BUILD_VERSION="$BUILD_VERSION-dirty"

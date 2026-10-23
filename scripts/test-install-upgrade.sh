@@ -73,7 +73,7 @@ if [ -z "$PYTHON_BIN" ]; then
 	exit 1
 fi
 
-(cd "$ROOT" && go build -trimpath -o "$TMP/agenthail" ./cmd/agenthail)
+(cd "$ROOT" && go build -trimpath -ldflags "-X main.version=v0.0.0-install-test" -o "$TMP/agenthail" ./cmd/agenthail)
 AGENTHAIL_CLI_SOURCE="$TMP/agenthail" AGENTHAIL_CODESIGN_IDENTITY=- "$ROOT/scripts/build-macos-app.sh" "$TMP/Agenthail.app" "$(uname -m)" >/dev/null
 
 install_once() {
