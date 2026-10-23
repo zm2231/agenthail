@@ -80,22 +80,33 @@ func (l *sessionFileLists) get(ctx context.Context, cwd string, now time.Time) *
 		l.building[cwd] = done
 		l.mu.Unlock()
 
-		list := buildFileList(ctx, cwd, now)
+		return l.build(ctx, cwd, now, done)
+	}
+}
+
+// The listing is shared with every request waiting on it, so one request
+// going away must not cut it short; its own deadline still bounds it.
+func (l *sessionFileLists) build(ctx context.Context, cwd string, now time.Time, done chan struct{}) *sessionFileList {
+	var list *sessionFileList
+	defer func() {
 		l.mu.Lock()
 		delete(l.building, cwd)
 		close(done)
-		if l.lists == nil {
-			l.lists = map[string]*sessionFileList{}
-		}
-		l.lists[cwd] = list
-		l.touch(cwd)
-		for len(l.recent) > sessionFilesCachedLists {
-			delete(l.lists, l.recent[0])
-			l.recent = l.recent[1:]
+		if list != nil {
+			if l.lists == nil {
+				l.lists = map[string]*sessionFileList{}
+			}
+			l.lists[cwd] = list
+			l.touch(cwd)
+			for len(l.recent) > sessionFilesCachedLists {
+				delete(l.lists, l.recent[0])
+				l.recent = l.recent[1:]
+			}
 		}
 		l.mu.Unlock()
-		return list
-	}
+	}()
+	list = buildFileList(context.WithoutCancel(ctx), cwd, now)
+	return list
 }
 
 func (l *sessionFileLists) touch(cwd string) {

@@ -239,6 +239,39 @@ func TestSessionFilesBoundTheirCacheAndShareABuild(t *testing.T) {
 	}
 }
 
+func TestSessionFilesACancelledRequestDoesNotCutASharedListingShort(t *testing.T) {
+	saved := buildFileList
+	t.Cleanup(func() { buildFileList = saved })
+	started := make(chan struct{})
+	release := make(chan struct{})
+	buildFileList = func(ctx context.Context, cwd string, now time.Time) *sessionFileList {
+		close(started)
+		<-release
+		if ctx.Err() != nil {
+			return &sessionFileList{truncated: true, built: now}
+		}
+		return &sessionFileList{files: []sessionFile{{Path: "kept.go"}}, built: now}
+	}
+	lists := sessionFileLists{}
+	now := time.Now()
+	owner, cancel := context.WithCancel(context.Background())
+	ownerDone := make(chan *sessionFileList)
+	go func() { ownerDone <- lists.get(owner, "/same", now) }()
+	<-started
+	waiterDone := make(chan *sessionFileList)
+	go func() { waiterDone <- lists.get(context.Background(), "/same", now) }()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	close(release)
+	<-ownerDone
+	if got := <-waiterDone; got.truncated || filePaths(got.files) != "kept.go" {
+		t.Fatalf("the waiter got %+v after the first request went away", got)
+	}
+	if cached := lists.lists["/same"]; cached == nil || cached.truncated {
+		t.Fatalf("cached %+v", cached)
+	}
+}
+
 func TestSessionFilesAStalledGitCannotHoldTheRequest(t *testing.T) {
 	bin := t.TempDir()
 	if err := os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\nexec /bin/sleep 30\n"), 0o755); err != nil {
