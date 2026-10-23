@@ -225,6 +225,29 @@ func seededClaudeStreamSession(t *testing.T, path, transport string) *surface.Se
 	return &surface.Session{ID: "bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: transport, Transcript: path, HasLocal: true, TranscriptOffset: seed.TranscriptOffset, TranscriptOffsetSet: true, TranscriptIdentity: seed.TranscriptIdentity}
 }
 
+func TestAClaudeWindowShorterThanItsTurnReplayStillReadsWhatWasAppended(t *testing.T) {
+	var history strings.Builder
+	history.WriteString(`{"type":"user","uuid":"u1","message":{"content":"long turn"}}` + "\n")
+	block := strings.Repeat("x", 4096)
+	for record := 0; record < 500; record++ {
+		fmt.Fprintf(&history, `{"type":"assistant","uuid":"a%d","message":{"id":"m%d","content":[{"type":"text","text":%q}]}}`+"\n", record, record, block)
+	}
+	history.WriteString(`{"type":"system","subtype":"turn_duration","durationMs":10}` + "\n")
+	history.WriteString(`{"type":"user","uuid":"u2","message":{"content":"next turn"}}` + "\n")
+	path := writeTranscript(t, history.String())
+	session := seededClaudeStreamSession(t, path, "")
+	appendRecords(t, path, `{"type":"assistant","uuid":"after","message":{"id":"after","content":[{"type":"text","text":"written after the seed"}]}}`+"\n")
+	var texts []string
+	err := NewClaude(nil, t.TempDir()).Stream(context.Background(), session, "", func(event surface.StreamEvent) {
+		if event.Text != "" {
+			texts = append(texts, event.Text)
+		}
+	}, 5*time.Millisecond)
+	if !errors.Is(err, surface.ErrStreamWindow) || len(texts) != 1 || texts[0] != "written after the seed" {
+		t.Fatalf("err=%v texts=%q", err, texts)
+	}
+}
+
 func TestClaudeSourceStreamResumesAtSeedBoundaryWithoutReplayingHistory(t *testing.T) {
 	var history strings.Builder
 	for turn := 1; turn <= 30; turn++ {

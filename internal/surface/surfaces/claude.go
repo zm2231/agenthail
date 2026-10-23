@@ -1293,7 +1293,6 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		}
 		offset += int64(len(prefix))
 	}
-	deadline := time.Now().Add(timeout)
 	file, err := os.Open(path)
 	if err != nil {
 		return err
@@ -1303,6 +1302,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 	if err != nil {
 		return err
 	}
+	deadline := time.Now().Add(timeout)
 	turns := newClaudeTurnTracker(replayed.current, closing)
 	turns.meter, turns.between, turns.betweenKnown = replayed.meter, replayed.between, replayed.betweenKnown
 	completed := false
