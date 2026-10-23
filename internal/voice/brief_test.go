@@ -11,12 +11,20 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-type fixedBriefer struct{ src BriefSource }
+type fixedBriefer struct {
+	src      BriefSource
+	outcomes map[string]TurnOutcome
+	err      error
+}
 
 func (b fixedBriefer) BriefSource(_ context.Context, session *surface.Session) BriefSource {
 	src := b.src
 	src.Session = *session
 	return src
+}
+
+func (b fixedBriefer) TurnOutcomes(context.Context, *surface.Session, []string) (map[string]TurnOutcome, error) {
+	return b.outcomes, b.err
 }
 
 func briefTime(minute int) time.Time { return time.Date(2026, 10, 23, 12, minute, 0, 0, time.UTC) }

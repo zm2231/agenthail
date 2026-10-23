@@ -76,10 +76,11 @@ func (s *Service) delegate(ctx context.Context, a Action, spoken bool) error {
 			s.settleDelegation(f, a.MessageID, "", a.Text)
 		} else {
 			s.settleDelegation(f, a.MessageID, receipt.TurnID, "")
+			s.keepRequest(requestRecord{MessageID: a.MessageID, TargetID: addressed.ID, TurnID: receipt.TurnID, Prompt: a.Text})
 		}
 	}
 	if !s.sameCall(attemptID, sourceID, targetID) {
-		s.unlock()
+		_ = s.commit()
 		if err == nil {
 			err = errors.New("the call ended or moved before the request's reply could be followed")
 		}

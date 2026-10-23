@@ -99,7 +99,7 @@ func (s *Service) runFollower(ctx context.Context, f *follower) {
 			s.followVoiceTurn(ctx, f, messages, event, previous)
 		}
 		if event.Terminal() {
-			s.endTurn(f, event.TurnID)
+			s.endTurn(f, event.TurnID, messages != nil)
 			if messages != nil || typed != nil {
 				s.refreshBrief(ctx, f)
 			}
@@ -147,12 +147,18 @@ func (s *Service) followVoiceTurn(ctx context.Context, f *follower, messages []s
 	}
 }
 
-func (s *Service) endTurn(f *follower, turnID string) {
+// A voice turn followed to its end gave voice its outcome, so its requests are done.
+func (s *Service) endTurn(f *follower, turnID string, voiceTurn bool) {
 	s.mu.Lock()
 	delete(f.voice, turnID)
 	delete(f.typed, turnID)
 	delete(f.retired, turnID)
-	s.unlock()
+	if !voiceTurn || s.follow != f {
+		s.unlock()
+		return
+	}
+	s.requestDone(turnID)
+	_ = s.commit()
 }
 
 // Carries the retired turns so a recovered source cannot recast them as typed.
@@ -183,8 +189,11 @@ func (s *Service) followerFailed(f *follower, err error) {
 		messages = append(messages, ids...)
 		delete(f.voice, turnID)
 		f.retired[turnID] = true
+		s.requestDone(turnID)
 	}
+	s.stage()
 	s.unlock()
+	_ = s.flush()
 	for _, messageID := range messages {
 		s.recordDelegationFailure(f.attemptID, messageID, f.target.ID, err)
 	}

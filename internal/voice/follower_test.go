@@ -276,6 +276,10 @@ func (b *compactingBriefer) BriefSource(_ context.Context, session *surface.Sess
 	return BriefSource{Session: *session, Compactions: &count, Exchanges: []surface.Exchange{{User: "Why?", Assistant: fmt.Sprintf("Answer after %d compactions.", count)}}}
 }
 
+func (b *compactingBriefer) TurnOutcomes(context.Context, *surface.Session, []string) (map[string]TurnOutcome, error) {
+	return map[string]TurnOutcome{}, nil
+}
+
 func (b *compactingBriefer) compact() {
 	b.mu.Lock()
 	defer b.mu.Unlock()

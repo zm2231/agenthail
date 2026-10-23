@@ -146,10 +146,11 @@ type Action struct {
 }
 
 type diskState struct {
-	State                   State    `json:"state"`
-	Owner                   string   `json:"owner"`
-	Messages                []string `json:"messages"`
-	NativeHeartbeatEnrolled bool     `json:"nativeHeartbeatEnrolled,omitempty"`
+	State                   State           `json:"state"`
+	Owner                   string          `json:"owner"`
+	Messages                []string        `json:"messages"`
+	Requests                []requestRecord `json:"requests,omitempty"`
+	NativeHeartbeatEnrolled bool            `json:"nativeHeartbeatEnrolled,omitempty"`
 	// ToolsNoticeShown records that a call ended while the outdated tools
 	// notice was shown, so it is shown once per operator.
 	ToolsNoticeShown bool `json:"toolsNoticeShown,omitempty"`
@@ -670,7 +671,7 @@ func (s *Service) start(ctx context.Context, owner string, a Action) error {
 	}
 	briefer := s.briefer
 	s.unlock()
-	brief, briefInfo := buildBrief(ctx, briefer, target)
+	brief, briefInfo, outcomes := s.briefFor(ctx, briefer, target)
 	cursor, err := s.provider.Cursor(ctx, &session)
 	if err != nil {
 		return err
@@ -726,6 +727,7 @@ func (s *Service) start(ctx context.Context, owner string, a Action) error {
 	if v.Phase != "ended" {
 		s.observe()
 		s.followTarget(v.Target)
+		s.followEarlier(v.Target, outcomes)
 	}
 	if saveErr := s.commit(); saveErr != nil {
 		return saveErr
@@ -910,12 +912,13 @@ func (s *Service) selectTarget(ctx context.Context, requested string, change tar
 		}
 	}
 	var briefInfo *BriefInfo
+	var outcomes map[string]TurnOutcome
 	if transfer {
 		text := "Voice has returned to the Agenthail orchestrator. Resume the normal Agenthail operations workflow and respond directly to the user."
 		if target != nil {
 			text = "Voice has transferred to the selected Agenthail session. Do not do the work yourself. The host will deliver completed user requests to that session and provide its correlated updates as developer messages. Speak those supplied updates concisely."
 			var brief string
-			if brief, briefInfo = buildBrief(callCtx, briefer, target.Session); brief != "" {
+			if brief, briefInfo, outcomes = s.briefFor(callCtx, briefer, target.Session); brief != "" {
 				text += "\n\n" + brief
 			}
 		}
@@ -940,12 +943,16 @@ func (s *Service) selectTarget(ctx context.Context, requested string, change tar
 		v.Target, v.CodingProvider, v.Brief = nil, "", nil
 		v.Message = "Voice is with the Agenthail orchestrator."
 		s.stopFollowing()
+		if transfer {
+			s.followEarlier(nil, nil)
+		}
 		return "", s.commit()
 	}
 	v.Target = target.Session
 	if transfer {
 		v.Brief = briefInfo
 		s.followTarget(target.Session)
+		s.followEarlier(target.Session, outcomes)
 	}
 	v.CodingProvider = string(target.Adapter.Name())
 	if transfer {

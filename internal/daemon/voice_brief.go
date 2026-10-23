@@ -67,9 +67,7 @@ func (b voiceBriefs) BriefSource(ctx context.Context, session *surface.Session) 
 	return src
 }
 
-// within returns read's result, or ctx's error once ctx ends first. The
-// registry's reads take no context, so a read past the deadline finishes in
-// the background and its result is dropped.
+// The registry's reads take no context, so a late read finishes in the background and is dropped.
 func within[T any](ctx context.Context, read func() (T, error)) (T, error) {
 	type result struct {
 		value T
