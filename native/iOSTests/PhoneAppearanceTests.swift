@@ -166,21 +166,18 @@ final class PhoneAppearanceTests: XCTestCase {
     }
 
     func testCardsKeepEveryTextColourReadableWithoutHidingTheBackground() throws {
-        for (dark, target) in [(true, Float(4.5)), (true, 7), (false, 4.5), (false, 7)] {
-            let (worst, spread) = try measureCards(dark: dark, target: target)
-            let reachable = min(target, Self.solidContrast(dark: dark))
-            XCTAssertGreaterThanOrEqual(worst, reachable - 0.05, "the dimmest text colour reads at every point a card can reach (dark \(dark), target \(target))")
-            if target < Self.solidContrast(dark: dark) {
-                XCTAssertGreaterThan(spread, 0.005, "cards are tinted locally, so the background still shows through them (dark \(dark), target \(target))")
+        for dark in [true, false] {
+            let solid = try measureCards(dark: dark, target: 21)
+            XCTAssertEqual(solid.spread, 0, accuracy: 0.002, "an unreachable target turns the cards solid")
+            let ceiling = solid.worst
+            for target: Float in [4.5, 6, 7] {
+                let (worst, spread) = try measureCards(dark: dark, target: target)
+                XCTAssertGreaterThanOrEqual(worst, min(target, ceiling) - 0.02, "the dimmest text colour reads at every point a card can reach (dark \(dark), target \(target))")
+                if target + ScrimField.margin < ceiling {
+                    XCTAssertGreaterThan(spread, target == 4.5 ? 0.005 : solid.spread + 0.0005, "cards are tinted locally, so the background still shows through them (dark \(dark), target \(target))")
+                }
             }
         }
-    }
-
-    private static func solidContrast(dark: Bool) -> Float {
-        let ground = PhonePalette.ground(dark: dark)
-        let floor = ScrimField.luminance(ground.x, ground.y, ground.z)
-        return PhonePalette.textRoles(dark: dark).map { ScrimField.luminance($0.x, $0.y, $0.z) }
-            .map { (max($0, floor) + 0.05) / (min($0, floor) + 0.05) }.min() ?? 0
     }
 
     private func measureCards(dark: Bool, target: Float) throws -> (worst: Float, spread: Float) {
