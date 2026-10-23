@@ -178,3 +178,36 @@ func TestAMoveInIsPreparedOnceAbortedForGoodAndTakesTheSourcesRow(t *testing.T) 
 		t.Fatalf("the source's late row took the session back: %v", err)
 	}
 }
+
+func TestAMoveInTakesASessionAThirdHostNoLongerServes(t *testing.T) {
+	r := openTestRegistry(t)
+	source, third := "h00000000000a", "h00000000000b"
+	for id, name := range map[string]string{source: "laptop", third: "vps"} {
+		if _, err := r.AddHost(PairedHost{ID: id, Name: name, Endpoint: "https://" + name + ".example.ts.net:7412", Address: "100.64.0.3", Token: "ahd_secret"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entity := third + "::" + moveConversation
+	if _, _, err := r.ApplyHostCatalogRow(third, HostCatalogRow{Session: surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.PrepareMoveIn("move-1", moveConversation, source, []byte(`{"a":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetMoveState("move-1", MoveReceived, "", MovePrepared); err != nil {
+		t.Fatal(err)
+	}
+	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, HasLocal: true}
+	if _, err := r.TakeMovedSession("move-1", session, "", nil); !errors.As(err, &SessionOwnedError{}) {
+		t.Fatalf("a move took a session another host still serves: %v", err)
+	}
+	if _, _, err := r.RemoveHostCatalogRow(third, moveConversation, entity, "gone"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.TakeMovedSession("move-1", session, "", nil); err != nil {
+		t.Fatalf("a move could not take a session its last host stopped serving: %v", err)
+	}
+	if owner, _ := r.SessionHost(moveConversation); owner != "" {
+		t.Fatalf("owner=%q", owner)
+	}
+}
