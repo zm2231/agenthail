@@ -1526,7 +1526,8 @@ struct IOSSessionRow: View {
             .lineLimit(1).fixedSize()
         if let host = session.shortRemoteHostName, showsHost || session.isUnavailable {
             IOSHostBadge(name: host, unavailable: session.isUnavailable)
-                .accessibilityLabel(session.isUnavailable ? "Unavailable on \(host)" : "On \(host)")
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("On \(host)")
         }
         if session.isWaitingOnYou {
             HStack(spacing: 4) {
@@ -1537,6 +1538,12 @@ struct IOSSessionRow: View {
             .foregroundStyle(PhonePalette.attention)
             .lineLimit(1)
             .fixedSize()
+        } else if session.isUnavailable {
+            Text("Unavailable")
+                .font(.caption)
+                .foregroundStyle(PhonePalette.failed)
+                .lineLimit(1)
+                .fixedSize()
         } else if let limit = session.limitLabel, !session.isWorking {
             HStack(spacing: 4) {
                 Image(systemName: "gauge.with.dots.needle.100percent")
@@ -1639,7 +1646,7 @@ struct IOSHostBadge: View {
             Text(name).lineLimit(1).truncationMode(.tail)
         }
         .font(.caption)
-        .foregroundStyle(unavailable ? Color.orange : Color.secondary)
+        .foregroundStyle(unavailable ? PhonePalette.failed : Color.secondary)
         .frame(maxWidth: 110, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
         .layoutPriority(-1)

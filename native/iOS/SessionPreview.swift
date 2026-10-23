@@ -193,6 +193,12 @@ struct SessionPreview: View {
             limited[4]["status"] = "idle"
             snapshot["sessions"] = limited
         }
+        if ProcessInfo.processInfo.arguments.contains("--preview-host-offline") {
+            var offline = snapshot["sessions"] as! [[String: Any]]
+            offline[4]["host"] = ["id": "h0123456789ab", "name": "vps.example.ts.net", "state": "unreachable"]
+            offline[4]["unavailableReason"] = "vps.example.ts.net is offline"
+            snapshot["sessions"] = offline
+        }
         if ProcessInfo.processInfo.arguments.contains("--preview-attention") {
             snapshot["attention"] = [["id": 1, "sessionId": "codex-demo", "target": "Review the release pipeline", "queueId": 2, "reason": "Delivery outcome could not be confirmed", "requestedAction": "review", "createdAt": "2026-09-11T18:20:00Z"]]
             snapshot["deliveryProblems"] = [["deliveryId": 7, "sessionId": "h0123456789ab::remote-demo-2", "sourceSessionId": "saved-demo", "attentionSessionId": "saved-demo", "message": "Check the release notes", "reason": "expired", "status": "expired", "at": "2026-09-11T13:05:00Z"]]
