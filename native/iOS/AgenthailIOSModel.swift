@@ -948,6 +948,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         if switching { beginOpenInterval(id) }
         sessionError = nil
         loadingSession = selectedDetail == nil
+        loadCommands(id)
         if resumes {
             sessionServer = server(for: id)
             startSessionStream(id)
@@ -980,6 +981,19 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard let open = openInterval, !open.painted, selectedDetail?.session.id == open.session else { return }
         openInterval?.painted = true
         _ = NextFrame { Self.signposter.emitEvent("Session painted", id: open.id) }
+    }
+
+    private func loadCommands(_ id: String) {
+        guard case let (connection, route)? = try? resolveServer(id), let read = store.beginCommandsRead(id) else { return }
+        Task { [store] in
+            do {
+                store.commandsRead(try await connection.api.sessionCommands(id: route.sessionID), for: id, read: read)
+            } catch {
+                var olderHost = false
+                if case AgenthailAPIError.olderHost = error { olderHost = true }
+                store.commandsRead(nil, for: id, read: read, retry: !olderHost && !(error is CancellationError))
+            }
+        }
     }
 
     private func keepSelectedSession() {
@@ -1697,6 +1711,10 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
               var detail = selectedDetail, detail.session.id == selected else { return }
         if pageReadsInFlight > 0, !replaying { rowsDuringPageRead.append(event) }
         sessionStreamCursor = max(sessionStreamCursor, event.seq)
+        if event.data.kind == "commands" {
+            store.commandsStreamed(RuntimeCommands(commands: event.data.commands ?? [], unavailable: event.data.unavailable ?? ""), for: selected)
+            return
+        }
         if event.data.kind == "context" {
             sessionMetadata.stream(context: event.data.context)
             detail.context = event.data.context

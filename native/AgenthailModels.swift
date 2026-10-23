@@ -1825,6 +1825,24 @@ struct SessionStreamItem: Decodable {
     let reason: String?
     let attachment: SessionAttachment?
     let files: [AttachedFile]?
+    var commands: [RuntimeCommand]? = nil
+    var unavailable: String? = nil
+}
+
+/// A command the session's runtime runs, as the composer offers it. `insert`
+/// is the text it puts in the prompt, so clients never branch on the runtime.
+struct RuntimeCommand: Decodable, Equatable, Sendable {
+    var name: String
+    var description: String
+    var argumentHint: String
+    var insert: String
+}
+
+/// The runtime commands a session can run now; `unavailable` says why there
+/// are none when its route cannot run them.
+struct RuntimeCommands: Decodable, Equatable, Sendable {
+    var commands: [RuntimeCommand]
+    var unavailable: String
 }
 
 struct SessionStreamBody: Decodable {

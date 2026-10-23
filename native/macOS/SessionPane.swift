@@ -376,6 +376,7 @@ final class SessionPane: ObservableObject, Identifiable {
             startDetailLoad(id)
         }
         startMetadataLoad(id)
+        loadCommands(id)
     }
 
     func close() {
@@ -742,6 +743,22 @@ final class SessionPane: ObservableObject, Identifiable {
         startMetadataLoad(id)
     }
 
+    private func loadCommands(_ id: String) {
+        guard let api = model.api, let read = model.store.beginCommandsRead(id) else { return }
+        Task { [store = model.store] in
+            do {
+                store.commandsRead(try await api.sessionCommands(id: id), for: id, read: read)
+            } catch {
+                store.commandsRead(nil, for: id, read: read, retry: !(error is CancellationError) && !Self.isOlderHost(error))
+            }
+        }
+    }
+
+    private static func isOlderHost(_ error: Error) -> Bool {
+        if case AgenthailAPIError.olderHost = error { return true }
+        return false
+    }
+
     private func applyMetadata(to id: String) {
         guard let current = unpublishedDetail ?? detail, current.session.id == id else { return }
         let merged = metadata.apply(to: current)
@@ -890,6 +907,11 @@ final class SessionPane: ObservableObject, Identifiable {
     private func receiveSessionEvent(_ event: SessionStreamEvent) {
         guard event.stream == "session", event.sessionId == selectedSessionID else { return }
         sessionCursor = max(sessionCursor, event.seq)
+        if event.data.kind == "commands" {
+            model.store.commandsStreamed(RuntimeCommands(commands: event.data.commands ?? [], unavailable: event.data.unavailable ?? ""), for: event.sessionId)
+            advanceAppliedCursor(event.seq)
+            return
+        }
         if event.data.kind == "context" || event.data.kind == "goal" {
             guard removedSession == nil else { return }
             if event.data.kind == "context" { metadata.stream(context: event.data.context) } else { metadata.stream(goal: event.data.goal) }

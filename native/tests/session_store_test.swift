@@ -76,6 +76,31 @@ struct SessionStoreTest {
         }
         check(timeline.items.map(\.id) == ["a", "b", "c", "d"] && timeline.items.map(\.text) == ["a2", "b2", "c1", "d1"] && older.map(\.text) == ["z2"], "an updated row keeps its place wherever it is shown, and a new row goes at the end: \(timeline.items.map(\.id))")
 
+        let review = RuntimeCommand(name: "review", description: "Review a PR", argumentHint: "[pr]", insert: "/review")
+        let listed = RuntimeCommands(commands: [review], unavailable: "")
+        let commanded = SessionStore(limits: .desktop)
+        let first = commanded.beginCommandsRead("A")
+        check(first != nil && commanded.beginCommandsRead("A") == nil, "a session's commands are read once")
+        commanded.commandsRead(listed, for: "A", read: first!)
+        check(commanded.commands["A"] == listed, "a read seeds the session's commands")
+        let racing = commanded.beginCommandsRead("B")!
+        let remote = RuntimeCommands(commands: [], unavailable: "Commands run only when this session has Remote Control")
+        commanded.commandsStreamed(remote, for: "B")
+        commanded.commandsRead(listed, for: "B", read: racing)
+        check(commanded.commands["B"] == remote, "a read that lands after a streamed list does not replace it")
+        let olderHost = commanded.beginCommandsRead("C")!
+        commanded.commandsRead(nil, for: "C", read: olderHost)
+        check(commanded.commands["C"] == nil && commanded.beginCommandsRead("C") == nil, "a computer without the commands route leaves them unset and is not asked again")
+        let flaky = commanded.beginCommandsRead("D")!
+        commanded.commandsRead(nil, for: "D", read: flaky, retry: true)
+        check(commanded.beginCommandsRead("D") != nil, "a read that failed for another reason is tried again on the next open")
+        var commandRekeys = SessionRekeys()
+        commandRekeys.record(["A": "conversation-a"])
+        commanded.carry(commandRekeys)
+        check(commanded.commands["conversation-a"] == listed && commanded.commands["A"] == nil, "a rekeyed session keeps its commands")
+        commanded.prune(keeping: ["B"])
+        check(commanded.commands.keys.sorted() == ["B"], "commands of sessions that no longer exist are dropped: \(commanded.commands.keys.sorted())")
+
         var live = SessionState(id: "L", surface: "claude", name: "l", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(respond: true), readOnly: true, readOnlyReason: "elsewhere")
         live.waitingOn = nil
         let refreshed = SessionStore.live(detail("L"), live)

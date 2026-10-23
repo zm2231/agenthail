@@ -24,7 +24,7 @@ struct WarmSession {
 }
 
 @MainActor
-final class SessionStore {
+final class SessionStore: ObservableObject {
     struct Limits {
         var sessions: Int
         var bytes: Int
@@ -44,6 +44,11 @@ final class SessionStore {
     private var sessions: [String: WarmSession] = [:]
     private var order: [String] = []
     private var opened: [String: Date] = [:]
+    /// The runtime commands each session can run, read once and then kept
+    /// current by its stream.
+    @Published private(set) var commands: [String: RuntimeCommands] = [:]
+    private var commandReads: [String: UInt64] = [:]
+    private var commandRevision: UInt64 = 0
 
     init(limits: Limits) {
         self.limits = limits
@@ -82,11 +87,43 @@ final class SessionStore {
 
     func prune(keeping known: Set<String>) {
         for id in order where !known.contains(id) { forget(id) }
+        let gone = commands.keys.filter { !known.contains($0) }
+        if !gone.isEmpty { gone.forEach { commands.removeValue(forKey: $0) } }
+        commandReads = commandReads.filter { known.contains($0.key) }
+    }
+
+    /// Starts the one read of a session's commands; nil when it was read.
+    func beginCommandsRead(_ id: String) -> UInt64? {
+        guard commandReads[id] == nil else { return nil }
+        commandRevision &+= 1
+        commandReads[id] = commandRevision
+        return commandRevision
+    }
+
+    /// A read's answer, unless a streamed list replaced it while it was in
+    /// flight. A failed read leaves the session without runtime commands; one
+    /// that may succeed later is read again on the next open.
+    func commandsRead(_ value: RuntimeCommands?, for id: String, read: UInt64, retry: Bool = false) {
+        guard commandReads[id] == read else { return }
+        guard let value else {
+            if retry { commandReads.removeValue(forKey: id) }
+            return
+        }
+        if commands[id] != value { commands[id] = value }
+    }
+
+    func commandsStreamed(_ value: RuntimeCommands, for id: String) {
+        commandRevision &+= 1
+        commandReads[id] = commandRevision
+        if commands[id] != value { commands[id] = value }
     }
 
     /// A carried session keeps its rows but not its cursor, which counts rows
     /// in the retired id's journal.
     func carry(_ rekeys: SessionRekeys) {
+        var held = commands
+        if rekeys.carry(&held) { commands = held }
+        _ = rekeys.carry(&commandReads)
         guard rekeys.carry(&sessions) else { return }
         _ = rekeys.carry(&opened)
         for (id, session) in sessions where session.detail.session.id != id {

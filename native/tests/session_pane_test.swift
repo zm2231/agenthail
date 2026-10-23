@@ -573,6 +573,12 @@ struct SessionPaneTest {
         let staleDeadline = Date().addingTimeInterval(5)
         while warmPane.detailStale, Date() < staleDeadline { try? await Task.sleep(for: .milliseconds(20)) }
         check(!warmPane.detailStale, "a resumed stream marks the cached rows current")
+        let commandsFrame = "id: 101\nevent: item\ndata: " + #"{"stream":"session","sessionId":"W1","seq":101,"type":"item","data":{"itemId":"","version":1,"op":"upsert","kind":"commands","ts":"2026-10-23T00:00:00Z","truncated":false,"commands":[{"name":"review","description":"Review a PR","argumentHint":"[pr]","insert":"/review"}],"unavailable":""}}"# + "\n\n"
+        warmServer.push(commandsFrame, to: "id=W1")
+        let commandsDeadline = Date().addingTimeInterval(5)
+        while warmModel.store.commands["W1"] == nil, Date() < commandsDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        check(warmModel.store.commands["W1"]?.commands.map(\.insert) == ["/review"] && warmModel.store.commands["W1"]?.unavailable == "", "a streamed command list replaces the session's commands: \(String(describing: warmModel.store.commands["W1"]))")
+        check(warmPane.timelineItems.map(\.id) == ["a", "b"], "a command list adds no transcript row: \(warmPane.timelineItems.map(\.id))")
 
         warmPane.select("W2")
         await waitForStream("W2", from: beforeReturn)
