@@ -33,6 +33,7 @@ struct GoalSection: View {
         .onChange(of: pane.selectedSessionID) {
             if pane.selectedSessionID != editor.sessionID { reset() }
         }
+        .onChange(of: pane.detail?.goal?.objective) { expanded = false }
     }
 
     private func goalView(_ goal: GoalState) -> some View {
