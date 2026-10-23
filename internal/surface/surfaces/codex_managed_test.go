@@ -427,6 +427,17 @@ func TestCodexManagedStreamEmitsAuthoritativeTurnEvents(t *testing.T) {
 	}
 }
 
+func TestAManagedStreamWindowThatHasAlreadyRunOutStillReadsOnce(t *testing.T) {
+	startManagedCodex(t, managedThreadReads(managedTurn("turn-1", "inProgress", agentMessage("answer", "", "hello"))))
+	var texts []string
+	err := isolatedManagedRuntime(t).Stream(context.Background(), managedSession(), "", func(event surface.StreamEvent) {
+		texts = append(texts, event.Text)
+	}, 0)
+	if !errors.Is(err, surface.ErrStreamWindow) || len(texts) != 1 || texts[0] != "hello" {
+		t.Fatalf("err=%v texts=%q", err, texts)
+	}
+}
+
 func TestManagedStreamRestartsEmitIdempotentAuthoritativeSnapshots(t *testing.T) {
 	var events []surface.StreamEvent
 	for _, body := range []string{"hello", "hello", "hello world"} {

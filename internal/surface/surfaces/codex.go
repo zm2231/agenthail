@@ -1180,7 +1180,7 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 		notified = notifier.Notified()
 	}
 	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	for first := true; first || time.Now().Before(deadline); first = false {
 		thread, err := c.managedStreamRead(ctx, client, sess.ID, uuid)
 		if err != nil {
 			return err
