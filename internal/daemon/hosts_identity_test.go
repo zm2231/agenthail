@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -253,6 +255,7 @@ func TestFederationChannelReachesAMemberOnAnotherHost(t *testing.T) {
 	if channels, _ := vps.reg.ListChannels(); len(channels) != 0 {
 		t.Fatalf("joining a member made the channel on its host: %+v", channels)
 	}
+	sent := time.Now()
 	send := laptop.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "crew", "message": "standup", "sourceSessionId": "laptop-a"})
 	if send.Code != http.StatusOK || !strings.Contains(send.Body.String(), `"queued":1`) {
 		t.Fatalf("channel-send status=%d body=%s", send.Code, send.Body.String())
@@ -265,8 +268,37 @@ func TestFederationChannelReachesAMemberOnAnotherHost(t *testing.T) {
 		}
 		return false
 	})
+	if took := time.Since(sent); took > heldSendPromptness {
+		t.Fatalf("the channel message took %s to reach a connected host, want under %s", took, heldSendPromptness)
+	}
 	if lastSender(t, vps) != "laptop-a" {
 		t.Fatalf("vps member got it from %v", vps.fake.senders())
+	}
+}
+
+// heldSendPromptness bounds how long a send held for a connected host may wait,
+// well under the delivery tick that retries it.
+const heldSendPromptness = 2 * time.Second
+
+func TestASendAnotherProcessHoldsForAConnectedHostGoesOutBeforeTheDeliveryTick(t *testing.T) {
+	if hostDeliveryInterval <= heldSendPromptness {
+		t.Fatalf("delivery tick %s is not longer than %s", hostDeliveryInterval, heldSendPromptness)
+	}
+	laptop, vps, _, _ := pairedBothWays(t)
+	other, err := registry.Open(laptop.reg.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { other.Close() })
+	sent := time.Now()
+	if _, err := other.QueueHostSend(registry.HostSend{SessionID: "vps-a", Message: "from another process", Key: "other-process-" + uuid.NewString(), SourceSessionID: "laptop-a"}); err != nil {
+		t.Fatal(err)
+	}
+	awaitFederation(t, "the vps session received the held send", func() bool {
+		return slices.Contains(vps.fake.delivered(), "from another process")
+	})
+	if took := time.Since(sent); took > heldSendPromptness {
+		t.Fatalf("the held send took %s to reach a connected host, want under %s", took, heldSendPromptness)
 	}
 }
 
