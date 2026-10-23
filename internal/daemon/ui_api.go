@@ -97,6 +97,8 @@ func (d *Daemon) registerUIAPI(mux *http.ServeMux, dashboard *dashboardServer) {
 		}
 		d.apiV1Guard(dashboard, scope, d.apiUIBackgroundHandler)(w, r)
 	})
+	mux.HandleFunc("/api/v1/ui/snapshot", d.apiV1Guard(dashboard, "read", d.apiUISnapshotHandler))
+	mux.HandleFunc("/api/v1/ui/snapshot/", d.apiV1Guard(dashboard, "read", d.apiUISnapshotUploadHandler))
 }
 
 type uiChangeRequest struct {

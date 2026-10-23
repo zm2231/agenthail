@@ -1716,6 +1716,39 @@ struct AgenthailEvent: Decodable {
     let type: String
     let timestamp: String
     let entityId: String?
+    let snapshot: SnapshotRequest?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, type, timestamp, entityId, data
+    }
+
+    init(id: UInt64, type: String, timestamp: String, entityId: String?, snapshot: SnapshotRequest? = nil) {
+        self.id = id
+        self.type = type
+        self.timestamp = timestamp
+        self.entityId = entityId
+        self.snapshot = snapshot
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UInt64.self, forKey: .id)
+        type = try container.decode(String.self, forKey: .type)
+        timestamp = try container.decode(String.self, forKey: .timestamp)
+        entityId = try container.decodeIfPresent(String.self, forKey: .entityId)
+        snapshot = type == "ui.snapshot.requested" ? try container.decodeIfPresent(SnapshotRequest.self, forKey: .data) : nil
+    }
+}
+
+struct SnapshotRequest: Decodable, Equatable {
+    let id: String
+    let session: String?
+    let width: Int?
+    let height: Int?
+    let device: String?
+    let expiresAt: Int64
+
+    var expired: Bool { Int64(Date().timeIntervalSince1970 * 1000) >= expiresAt }
 }
 
 struct SessionTimeline: Decodable {

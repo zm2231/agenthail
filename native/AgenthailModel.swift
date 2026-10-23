@@ -62,6 +62,7 @@ final class AgenthailModel: ObservableObject {
     let interface = InterfaceStore()
     let actionKeys = ActionRetryKeys()
     private(set) var mainPane: SessionPane!
+    weak var mainWindow: NSWindow?
     private var panes: [SessionPane] = []
     private var visibleWindows = 0
     private var connectionTask: Task<Void, Never>?
@@ -1147,6 +1148,13 @@ final class AgenthailModel: ObservableObject {
         if event.type == "ui.changed" {
             lastEventID = max(lastEventID, event.id)
             if let api { interface.load(from: api) }
+            return
+        }
+        if event.type == "ui.snapshot.requested" {
+            lastEventID = max(lastEventID, event.id)
+            if let request = event.snapshot, !request.expired, let api {
+                WindowSnapshot.answer(request, model: self, api: api)
+            }
             return
         }
         if event.type == "stream.reset" {

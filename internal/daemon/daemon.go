@@ -51,6 +51,7 @@ type Daemon struct {
 	errorMu              sync.Mutex
 	observeErrors        map[string]observedError
 	ui                   *uiState
+	snapshots            *snapshotRelay
 	retryMu              sync.Mutex
 	observeRetry         map[string]observeRetry
 	notificationMu       sync.Mutex
@@ -166,6 +167,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		limitResumes:      newLimitResumer(),
 	}
 	d.ui = newUIState(reg)
+	d.snapshots = newSnapshotRelay()
 	identity, err := reg.HostIdentity()
 	if err != nil {
 		d.log.Printf("host identity: %s", err)

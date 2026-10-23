@@ -6,10 +6,13 @@ import UniformTypeIdentifiers
 struct DesktopWindow: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject var pane: SessionPane
+    private let snapshot: Bool
 
-    init(model: AgenthailModel) {
+    /// A snapshot pane draws an offscreen copy that leaves the person's window, focus and saved layout alone.
+    init(model: AgenthailModel, snapshotPane: SessionPane? = nil) {
         self.model = model
-        self.pane = model.mainPane
+        self.pane = snapshotPane ?? model.mainPane
+        self.snapshot = snapshotPane != nil
     }
 
     var body: some View {
@@ -39,8 +42,9 @@ struct DesktopWindow: View {
             }
         }
         .focusedSceneObject(pane)
-        .onAppear { model.windowAppeared() }
-        .onDisappear { model.windowDisappeared() }
+        .background { if !snapshot { MainWindowReader(model: model) } }
+        .onAppear { if !snapshot { model.windowAppeared() } }
+        .onDisappear { if !snapshot { model.windowDisappeared() } }
     }
 
     @ViewBuilder private var splitView: some View {
