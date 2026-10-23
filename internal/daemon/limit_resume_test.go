@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -423,5 +424,47 @@ func TestTheCatalogReadsUsageLimitStopsOncePerPassWhateverItsSize(t *testing.T) 
 	small, large := reads(2), reads(40)
 	if small != large || small > 3 {
 		t.Fatalf("stop reads: %d for 2 sessions, %d for 40", small, large)
+	}
+}
+
+func TestAQueueConflictRereadsTheStopReleasedWithItsNotice(t *testing.T) {
+	f := newLimitFixture(t, "worker")
+	refusedAt := time.Now().Add(-time.Minute).Truncate(time.Second)
+	if err := f.r.RecordLimitStop(f.fake.sessions["worker"], "/roots/work", surface.LimitStop{TurnID: "u1", RefusedAt: refusedAt, ResetsAt: refusedAt.Add(time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := f.d.limitResumeRows()
+	if err != nil || stale["worker"] == nil {
+		t.Fatalf("stale=%v err=%v", stale, err)
+	}
+	if released, err := f.r.ReleaseLimitStop("worker", "u1", limitWaiting, surface.LimitResumeNotice(), "limit-resume:worker:u1", time.Now()); err != nil || !released {
+		t.Fatalf("released=%v err=%v", released, err)
+	}
+	view, err := f.d.loadCatalogViewState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.d.publishCatalogSession(context.Background(), f.fake, f.fake.sessions["worker"], catalogIdentity{}, "", 0, stale["worker"], false, DashboardConfig{}, view, time.Now().UTC(), nil, nil) {
+		t.Fatal("the session was not published")
+	}
+	window, err := f.r.CatalogEventsAfter(0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row dashboardSession
+	for _, event := range window.Events {
+		if event.Type != "session.upserted" || event.EntityID != "worker" {
+			continue
+		}
+		var payload struct {
+			Session dashboardSession `json:"session"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		row = payload.Session
+	}
+	if row.ID != "worker" || row.QueueCount != 1 || row.LimitResume != nil {
+		t.Fatalf("published row: queue=%d limitResume=%+v", row.QueueCount, row.LimitResume)
 	}
 }

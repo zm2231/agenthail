@@ -668,7 +668,9 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 			d.log.Printf("catalog session %s: %s", d.resolveDisplay(session.ID), publishErr)
 			return false
 		}
-		queueCount = conflict.QueueCount
+		// A stop released with its notice changed the queue this row was
+		// read against, so the stop is read again too.
+		queueCount, limitResume = conflict.QueueCount, d.limitResumeRow(session.ID)
 	}
 	d.log.Printf("catalog session %s remained unstable while publishing queue projection", d.resolveDisplay(session.ID))
 	return false
@@ -874,7 +876,7 @@ func (d *Daemon) publishCatalogPresence() {
 					d.log.Printf("catalog view projection %s: %s", d.resolveDisplay(session.ID), err)
 					break
 				}
-				outputs.queueCount = conflict.QueueCount
+				outputs.queueCount, outputs.limitResume = conflict.QueueCount, d.limitResumeRow(session.ID)
 				outputs.current, outputs.currentReason = presence(pending.adapter, session, row.projection.Open, conflict.QueueCount)
 				if attempt == 2 {
 					d.log.Printf("catalog queue projection %s remained unstable", d.resolveDisplay(session.ID))
