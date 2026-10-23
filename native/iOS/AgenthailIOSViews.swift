@@ -538,7 +538,7 @@ struct SessionScreen: View {
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
-                .coordinateSpace(.named(TimelineGroup.contentSpace))
+                .coordinateSpace(.named(TranscriptRows.contentSpace))
             }
             .scrollPosition($position)
             .accessibilityIdentifier("session-timeline")

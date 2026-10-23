@@ -970,16 +970,7 @@ struct TranscriptView: View {
                         resend(text, attachments: send.failure != nil ? send.attachments : [])
                     } : nil, onRetry: send.failure == nil || !canResend ? nil : { model.retrySend(send, in: session.id) })
                 }
-                if session.isWorking {
-                    HStack(spacing: DesktopSpace.s) {
-                        StatusIndicator(session: session, needsYou: false)
-                        TimelineView(.everyMinute) { context in
-                            Text(session.waitingPlace?.label ?? session.workingLabel(now: context.date))
-                        }
-                    }
-                    .font(.system(size: DesktopType.body))
-                    .foregroundStyle(DesktopPalette.text2)
-                } else if session.isWaitingOnBackground, let background = session.backgroundTasks {
+                if session.isWaitingOnBackground, let background = session.backgroundTasks {
                     HStack(spacing: DesktopSpace.s) {
                         StatusIndicator(session: session, needsYou: false)
                         Text("Waiting on background work · \(background.summary)")
@@ -993,6 +984,7 @@ struct TranscriptView: View {
             .padding(.top, DesktopSpace.l)
             .padding(.bottom, Self.bottomPadding)
             .frame(maxWidth: .infinity)
+            .coordinateSpace(.named(TranscriptRows.contentSpace))
             .environment(\.transcriptRows, TranscriptRows(memory: pane.rowMemory, session: session.id))
             .environment(\.toolCallStates, ToolCallStates(items: pane.timelineItems, active: session.isWorking || session.isWaitingOnYou))
             .environment(\.transcriptOverhang, layout.overhang)

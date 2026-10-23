@@ -1,29 +1,11 @@
 import SwiftUI
 
-extension EnvironmentValues {
-    /// Scrolls the transcript so this point of its content, measured in `TimelineGroup.contentSpace`, sits
-    /// at the top. Set by the view that owns the scroll view. A collapse from the end calls it in the same
-    /// transaction: it scrolls to an offset rather than to a row id, because once the offset is past the
-    /// shrunken content no row is laid out and an id lands on the stack's estimated heights.
-    @Entry var revealRow: (CGFloat) -> Void = { _ in }
-}
-
-extension View {
-    /// Keeps `top` at this view's top in the transcript's content, for `revealRow`.
-    func contentTop(_ top: Binding<CGFloat>) -> some View {
-        onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(TimelineGroup.contentSpace)).minY } action: { top.wrappedValue = $0 }
-    }
-}
-
 extension TimelineItem {
     /// Something said rather than done: Codex streams its replies as text records, other agents as messages.
     var isSaid: Bool { kind == "message" || kind == "text" }
 }
 
 struct TimelineGroup: Identifiable {
-    /// The coordinate space of a transcript's scroll content.
-    static let contentSpace = "timeline-content"
-
     let id: String
     var items: [TimelineItem]
     var callCount: Int { items.filter { $0.kind == "toolCall" }.count }
