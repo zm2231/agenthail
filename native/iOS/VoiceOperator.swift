@@ -120,7 +120,7 @@ struct AgenthailVoiceOperatorSheet: View {
                 } action: { _, value in
                     atLatest = value
                 }
-                .onChange(of: latestContentMarker) { _, _ in
+                .onChange(of: model.latestContentMarker) { _, _ in
                     if followingLatest, !showActivity { scrollPosition.scrollTo(edge: .bottom) }
                 }
                 .onChange(of: showActivity) { _, expanded in
@@ -186,13 +186,6 @@ struct AgenthailVoiceOperatorSheet: View {
         }
     }
 
-    // Only new words follow the latest activity; call events such as a
-    // heartbeat or mute change nothing on screen.
-    private var latestContentMarker: String {
-        let transcript = model.state?.transcripts.last
-        let item = model.detail?.timeline?.items.last
-        return "\(transcript?.id ?? ""):\(transcript?.text ?? ""):\(item?.id ?? ""):\(item?.text ?? "")"
-    }
 
     private var controls: some View {
         VStack(spacing: 16) {

@@ -197,6 +197,14 @@ final class VoiceOperatorModel: ObservableObject {
         polling?.cancel(); polling = nil
     }
 
+    // Only new words follow the latest activity; call events such as a
+    // heartbeat or mute change nothing on screen.
+    var latestContentMarker: String {
+        let transcript = state?.transcripts.last
+        let item = detail?.timeline?.items.last
+        return "\(transcript?.id ?? ""):\(transcript?.text ?? ""):\(item?.id ?? ""):\(item?.text ?? "")"
+    }
+
     func activityAttachment(_ item: TimelineItem) async -> Data? {
         guard let timelineAPI, let id = detail?.session.id, let attachment = item.attachment else { return nil }
         let data = try? await timelineAPI.sessionAttachment(sessionID: id, id: attachment.id)
