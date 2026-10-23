@@ -37,136 +37,136 @@ struct AgenthailVoiceOperatorSheet: View {
 
     var body: some View {
         NavigationStack {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
-                    if model.isPreview { Text("Sample conversation").font(.caption).foregroundStyle(.secondary) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                if model.isPreview { Text("Sample conversation").font(.caption).foregroundStyle(.secondary) }
 #if DEBUG && targetEnvironment(simulator)
-                    if VoiceEvaluation.enabled {
-                        HStack {
-                            Text("Simulated microphone · Real Codex").font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            Button("Speak next request") { VoiceEvaluation.device.speakNext() }
-                                .font(.caption).disabled(!model.audioConnected)
-                        }
+                if VoiceEvaluation.enabled {
+                    HStack {
+                        Text("Simulated microphone · Real Codex").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Speak next request") { VoiceEvaluation.device.speakNext() }
+                            .font(.caption).disabled(!model.audioConnected)
                     }
+                }
 #endif
-                    HStack(spacing: 12) {
-                        Image(systemName: model.audioConnected ? "waveform" : "waveform.slash")
-                            .font(.title2).foregroundStyle(model.audioConnected ? Color.accentColor : Color.secondary)
-                            .frame(width: 44, height: 44).background(.quaternary, in: Circle())
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(model.connectionTitle).font(.headline)
-                            Text(model.committedRoute).font(.subheadline).foregroundStyle(.secondary)
-                        }
-                        Spacer(minLength: 0)
-                        if model.working || model.dialing { ProgressView() }
-                    }.padding(.vertical, 12)
-                    if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-                    if let connectionError = model.connectionError { Text(connectionError).foregroundStyle(.orange) }
-                    if let message = model.state?.message, !message.isEmpty { Text(message).foregroundStyle(.orange).textSelection(.enabled) }
-                    if model.state?.occupied == true { Text("Another paired device owns this call. You can inspect the operator timeline.") }
-                    if let state = model.state, !state.transcripts.isEmpty {
-                        ForEach(state.transcripts) { item in
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(item.role == "user" ? "You" : (model.state?.target == nil ? "Orchestrator" : "Selected session")).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
-                                Text(item.text).font(.body).lineSpacing(4).textSelection(.enabled)
-                            }
-                        }
-                    } else {
-                        VStack(alignment: .leading, spacing: 20) {
-                            Text("What would you like to work on?").font(.title2.weight(.semibold))
-                            Text("Talk to the Agenthail orchestrator, or route this call to one exact existing Codex or Claude session.").font(.body).foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 14) {
-                                Label("What are you working on?", systemImage: "bubble.left")
-                                Label("Review the failing tests.", systemImage: "bubble.left")
-                            }.font(.subheadline).foregroundStyle(.secondary)
-                        }.padding(.vertical, 16)
+                HStack(spacing: 12) {
+                    Image(systemName: model.audioConnected ? "waveform" : "waveform.slash")
+                        .font(.title2).foregroundStyle(model.audioConnected ? Color.accentColor : Color.secondary)
+                        .frame(width: 44, height: 44).background(.quaternary, in: Circle())
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(model.connectionTitle).font(.headline)
+                        Text(model.committedRoute).font(.subheadline).foregroundStyle(.secondary)
                     }
-                    if model.state?.truncated == true { Text("Showing recent voice activity. Recorded agent work remains in the full timeline.").font(.caption).foregroundStyle(.secondary) }
-                    if let activityError = model.activityError { Text(activityError).font(.caption).foregroundStyle(.orange) }
-                    if let detail = model.detail {
-                        DisclosureGroup(isExpanded: $showActivity) {
-                            VStack(alignment: .leading, spacing: 12) {
-                                if detail.readOnly { Text(detail.readOnlyReason).foregroundStyle(.orange) }
-                                if let timeline = detail.timeline {
-                                    if let unavailable = timeline.unavailableReason { Text(unavailable).foregroundStyle(.secondary) }
-                                    ForEach(TimelineGroup.make(timeline.items)) { group in
-                                        CompactActivityGroup(group: group, attachmentLoader: { item in await model.activityAttachment(item) }) { followingLatest = false }
-                                    }
-                                    if timeline.truncated { Text("Earlier activity is in the full timeline.").font(.caption) }
+                    Spacer(minLength: 0)
+                    if model.working || model.dialing { ProgressView() }
+                }.padding(.vertical, 12)
+                if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+                if let connectionError = model.connectionError { Text(connectionError).foregroundStyle(.orange) }
+                if let message = model.state?.message, !message.isEmpty { Text(message).foregroundStyle(.orange).textSelection(.enabled) }
+                if model.state?.occupied == true { Text("Another paired device owns this call. You can inspect the operator timeline.") }
+                if let state = model.state, !state.transcripts.isEmpty {
+                    ForEach(state.transcripts) { item in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(item.role == "user" ? "You" : (model.state?.target == nil ? "Orchestrator" : "Selected session")).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                            Text(item.text).font(.body).lineSpacing(4).textSelection(.enabled)
+                        }
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text("What would you like to work on?").font(.title2.weight(.semibold))
+                        Text("Talk to the Agenthail orchestrator, or route this call to one exact existing Codex or Claude session.").font(.body).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 14) {
+                            Label("What are you working on?", systemImage: "bubble.left")
+                            Label("Review the failing tests.", systemImage: "bubble.left")
+                        }.font(.subheadline).foregroundStyle(.secondary)
+                    }.padding(.vertical, 16)
+                }
+                if model.state?.truncated == true { Text("Showing recent voice activity. Recorded agent work remains in the full timeline.").font(.caption).foregroundStyle(.secondary) }
+                if let activityError = model.activityError { Text(activityError).font(.caption).foregroundStyle(.orange) }
+                if let detail = model.detail {
+                    DisclosureGroup(isExpanded: $showActivity) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if detail.readOnly { Text(detail.readOnlyReason).foregroundStyle(.orange) }
+                            if let timeline = detail.timeline {
+                                if let unavailable = timeline.unavailableReason { Text(unavailable).foregroundStyle(.secondary) }
+                                ForEach(TimelineGroup.make(timeline.items)) { group in
+                                    CompactActivityGroup(group: group, attachmentLoader: { item in await model.activityAttachment(item) }) { followingLatest = false }
                                 }
-                                Button("Open full timeline") { openSession(detail.session.id) }
-                            }.padding(.top, 12)
-                            .environment(\.transcriptRows, TranscriptRows(memory: rowMemory, session: detail.session.id))
-                        } label: {
-                            Label(detail.session.status == "busy" ? "Orchestrator is working" : "Agent activity", systemImage: "terminal")
-                                .font(.subheadline.weight(.medium)).frame(minHeight: 44)
-                                .accessibilityIdentifier("voice-activity")
-                        }
-                    }
-                    Color.clear.frame(height: 1).id("voice-bottom")
-                }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: .infinity)
-                .environment(\.revealRow) { position.scrollTo(y: $0) }
-                .coordinateSpace(.named(TimelineGroup.contentSpace))
-                }
-                .scrollPosition($position)
-                .defaultScrollAnchor(.bottom, for: .initialOffset)
-                .defaultScrollAnchor(.top, for: .alignment)
-                .onScrollPhaseChange { _, phase in
-                    if phase == .interacting {
-                        userScrolling = true
-                        followingLatest = false
-                    } else if phase == .idle && userScrolling {
-                        followingLatest = atLatest
-                        userScrolling = false
-                    }
-                }
-                .onScrollGeometryChange(for: Bool.self) { geometry in
-                    geometry.contentSize.height - geometry.visibleRect.maxY < 80
-                } action: { _, value in
-                    atLatest = value
-                }
-                // The navigation bar settles after the first layout and moves
-                // the top inset after the initial offset is set, which leaves
-                // the view past its bottom. Following the latest re-pins the
-                // bottom once an inset change has been applied.
-                .onScrollGeometryChange(for: EdgeInsets.self) { $0.contentInsets } action: { old, new in
-                    guard followingLatest, old != new else { return }
-                    bottomRepin?.cancel()
-                    bottomRepin = Task { if !Task.isCancelled, followingLatest { position.scrollTo(edge: .bottom) } }
-                }
-                .onChange(of: model.latestContentMarker) { _, _ in
-                    if followingLatest, !showActivity { position.scrollTo(edge: .bottom) }
-                }
-                .onChange(of: showActivity) { _, expanded in
-                    if expanded { followingLatest = false }
-                }
-                .onChange(of: model.state?.session?.id) { _, _ in
-                    followingLatest = true
-                    atLatest = true
-                    position.scrollTo(edge: .bottom)
-                }
-                .safeAreaInset(edge: .bottom) {
-                    // The button floats above the controls so showing it never
-                    // changes the inset, which would move the transcript and
-                    // flip whether it is at the latest activity.
-                    controls.overlay(alignment: .top) {
-                        if !atLatest {
-                            Button {
-                                followingLatest = true
-                                position.scrollTo(edge: .bottom)
-                            } label: {
-                                Image(systemName: "arrow.down")
-                                    .font(.body.weight(.semibold))
-                                    .frame(width: 44, height: 44)
-                                    .background(.regularMaterial, in: Circle())
+                                if timeline.truncated { Text("Earlier activity is in the full timeline.").font(.caption) }
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Jump to latest voice activity")
-                            .alignmentGuide(.top) { $0[.bottom] + 8 }
-                        }
+                            Button("Open full timeline") { openSession(detail.session.id) }
+                        }.padding(.top, 12)
+                        .environment(\.transcriptRows, TranscriptRows(memory: rowMemory, session: detail.session.id))
+                    } label: {
+                        Label(detail.session.status == "busy" ? "Orchestrator is working" : "Agent activity", systemImage: "terminal")
+                            .font(.subheadline.weight(.medium)).frame(minHeight: 44)
+                            .accessibilityIdentifier("voice-activity")
                     }
                 }
+                Color.clear.frame(height: 1).id("voice-bottom")
+            }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: .infinity)
+            .environment(\.revealRow) { position.scrollTo(y: $0) }
+            .coordinateSpace(.named(TimelineGroup.contentSpace))
+            }
+            .scrollPosition($position)
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
+            .defaultScrollAnchor(.top, for: .alignment)
+            .onScrollPhaseChange { _, phase in
+                if phase == .interacting {
+                    userScrolling = true
+                    followingLatest = false
+                } else if phase == .idle && userScrolling {
+                    followingLatest = atLatest
+                    userScrolling = false
+                }
+            }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentSize.height - geometry.visibleRect.maxY < 80
+            } action: { _, value in
+                atLatest = value
+            }
+            // The navigation bar settles after the first layout and moves
+            // the top inset after the initial offset is set, which leaves
+            // the view past its bottom. Following the latest re-pins the
+            // bottom once an inset change has been applied.
+            .onScrollGeometryChange(for: EdgeInsets.self) { $0.contentInsets } action: { old, new in
+                guard followingLatest, old != new else { return }
+                bottomRepin?.cancel()
+                bottomRepin = Task { if !Task.isCancelled, followingLatest { position.scrollTo(edge: .bottom) } }
+            }
+            .onChange(of: model.latestContentMarker) { _, _ in
+                if followingLatest, !showActivity { position.scrollTo(edge: .bottom) }
+            }
+            .onChange(of: showActivity) { _, expanded in
+                if expanded { followingLatest = false }
+            }
+            .onChange(of: model.state?.session?.id) { _, _ in
+                followingLatest = true
+                atLatest = true
+                position.scrollTo(edge: .bottom)
+            }
+            .safeAreaInset(edge: .bottom) {
+                // The button floats above the controls so showing it never
+                // changes the inset, which would move the transcript and
+                // flip whether it is at the latest activity.
+                controls.overlay(alignment: .top) {
+                    if !atLatest {
+                        Button {
+                            followingLatest = true
+                            position.scrollTo(edge: .bottom)
+                        } label: {
+                            Image(systemName: "arrow.down")
+                                .font(.body.weight(.semibold))
+                                .frame(width: 44, height: 44)
+                                .background(.regularMaterial, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Jump to latest voice activity")
+                        .alignmentGuide(.top) { $0[.bottom] + 8 }
+                    }
+                }
+            }
             .navigationTitle(model.state?.target == nil ? "Talk to orchestrator" : "Session voice")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
