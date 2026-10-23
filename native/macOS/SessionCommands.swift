@@ -86,7 +86,7 @@ struct SessionCommands: Commands {
                 .keyboardShortcut(shortcuts.keyboardShortcut(filter.command))
             }
             Divider()
-            Button(pane?.inspectorVisible == true ? "Hide Inspector" : "Show Inspector") { pane?.inspectorVisible.toggle() }
+            Button(pane?.inspectorShown == true ? "Hide Inspector" : "Show Inspector") { pane?.toggleInspector() }
                 .keyboardShortcut(shortcuts.keyboardShortcut(.toggleInspector))
                 .disabled(pane == nil)
             Button("Refresh") { model.refreshNow(pane) }

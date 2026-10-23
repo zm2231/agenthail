@@ -55,13 +55,24 @@ struct DesktopWindow: View {
                 .belowWindowChrome()
                 .ignoresSafeArea(.container, edges: .top)
                 .navigationSplitViewColumnWidth(min: DesktopColumns.detail.min, ideal: DesktopColumns.detail.ideal)
-                .inspector(isPresented: Binding(get: { pane.inspectorVisible && pane.displayedSession != nil }, set: { if pane.displayedSession != nil { pane.inspectorVisible = $0 } })) {
+                .overlay(alignment: .trailing) {
+                    if !pane.inspectorDocks && pane.inspectorOverlay && pane.displayedSession != nil {
+                        SessionInspector(model: model, pane: pane)
+                            .frame(width: DesktopColumns.inspector.ideal)
+                            .belowWindowChrome()
+                            .ignoresSafeArea(.container, edges: .top)
+                            .shadow(color: .black.opacity(0.18), radius: 16, x: -4)
+                            .transition(.move(edge: .trailing))
+                    }
+                }
+                .inspector(isPresented: Binding(get: { pane.inspectorDocks && pane.inspectorVisible && pane.displayedSession != nil }, set: { if pane.inspectorDocks && pane.displayedSession != nil { pane.inspectorVisible = $0 } })) {
                     SessionInspector(model: model, pane: pane)
                         .belowWindowChrome()
                         .ignoresSafeArea(.container, edges: .top)
                         .inspectorColumnWidth(min: DesktopColumns.inspector.min, ideal: DesktopColumns.inspector.ideal, max: DesktopColumns.inspector.max)
                 }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pane.fitWindow(width: $0) }
     }
 }
 
@@ -623,7 +634,7 @@ struct ConversationPane: View {
             TranscriptView(model: model, pane: pane, session: session)
                 .task(id: SessionPane.requestSyncKey(session)) { await pane.syncRequests(for: session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.modelLabel, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
+                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.modelLabel, context: pane.detail?.context, inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)
                         NSApplication.shared.activate()
                         openWindow(id: "voice")

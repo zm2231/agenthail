@@ -36,6 +36,8 @@ final class SessionPane: ObservableObject, Identifiable {
     @Published private(set) var loadingOlder = false
     @Published private(set) var olderError: String?
     @Published var inspectorVisible = true
+    @Published private(set) var inspectorDocks = true
+    @Published private(set) var inspectorOverlay = false
     @Published var renamingSession: SessionState?
     @Published var adoptingSession: SessionState?
     @Published private(set) var forking = false
@@ -85,6 +87,23 @@ final class SessionPane: ObservableObject, Identifiable {
     private var selectionGeneration: UInt64 = 0
     private var detailRequestGeneration: UInt64 = 0
     private var detailAppliedGeneration: UInt64 = 0
+
+    /// Whether the inspector is on screen, docked or over the conversation.
+    var inspectorShown: Bool { inspectorDocks ? inspectorVisible : inspectorOverlay }
+
+    func toggleInspector() {
+        if inspectorDocks { inspectorVisible.toggle() } else { inspectorOverlay.toggle() }
+    }
+
+    /// A window too narrow to dock the inspector shows it over the
+    /// conversation on request instead, and forgets that request once it
+    /// can dock again.
+    func fitWindow(width: CGFloat) {
+        let docks = width >= ColumnFit.inspectorDocks
+        guard docks != inspectorDocks else { return }
+        inspectorDocks = docks
+        inspectorOverlay = false
+    }
 
     init(model: AgenthailModel, restoresSelection: Bool) {
         self.model = model
