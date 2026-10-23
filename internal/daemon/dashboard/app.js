@@ -1472,18 +1472,10 @@ function timelineItemAttributes(item) {
   if (item.status) attributes.push(`data-status="${escape(item.status)}"`);
   return attributes.join(" ");
 }
+// Titles, call ids, statuses and raw timestamps stay in data attributes for
+// debugging; a reader only needs to know the host shortened a record.
 function renderTimelineMetadata(item) {
-  const fields = [];
-  if (item.title) fields.push(`<span>Title: ${escape(item.title)}</span>`);
-  if (item.callId) fields.push(`<span>Call: ${escape(item.callId)}</span>`);
-  if (item.status) fields.push(`<span>Status: ${escape(item.status)}</span>`);
-  if (item.timestamp) fields.push(`<time datetime="${escape(item.timestamp)}">${escape(item.timestamp)}</time>`);
-  if (item.truncated) {
-    const reason = item.truncationReason ? ` (${escape(item.truncationReason)})` : "";
-    fields.push(`<span>Content truncated${reason}</span>`);
-  }
-  if (item.bodyRef) fields.push(`<span>Body reference: <code>${escape(item.bodyRef)}</code></span>`);
-  return fields.length ? `<div class="timeline-meta">${fields.join(" · ")}</div>` : "";
+  return item.truncated ? '<div class="timeline-meta">Shortened by the host</div>' : "";
 }
 // isInstructions reports model input a provider injected, such as project
 // instructions or hook context, rather than conversation.
@@ -1514,7 +1506,7 @@ function renderTimelineItem(item, session) {
   if (kind === "notice") {
     const resets = Date.parse(item.resetsAt || "");
     const until = resets ? ` Resets ${new Date(resets).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.` : "";
-    return `<p class="timeline-item timeline-notice" role="status" ${attributes}><strong>${escape(item.title || "Notice")}</strong> ${escape(item.text || "")}${escape(until)}</p>`;
+    return `<div class="timeline-item timeline-notice" role="status" ${attributes}><strong>${escape(item.title || "Notice")}</strong> ${escape(item.text || "")}${escape(until)}${metadata}</div>`;
   }
   if (["toolCall", "toolResult", "reasoning"].includes(kind)) {
     const title = item.title || kind;

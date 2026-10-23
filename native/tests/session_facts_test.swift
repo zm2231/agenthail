@@ -51,18 +51,29 @@ struct SessionFactsTest {
         expect(SettingsCounts.history(50) == "50+" && SettingsCounts.history(12) == "12", "history count caps like the web")
 
         let detailed = item("toolResult", title: "Bash", timestamp: "2026-10-18T06:00:00Z", callId: "call_synthetic", status: "completed", truncated: true, reason: "size limit", bodyRef: "body/synthetic")
-        expect(TimelineMetadata.fields(detailed) == ["Title: Bash", "Call: call_synthetic", "Status: completed", "2026-10-18T06:00:00Z", "Content truncated (size limit)", "Body reference: body/synthetic"], "timeline metadata lists every field like the web")
-        expect(TimelineMetadata.fields(item("toolResult", truncated: true)) == ["Content truncated"], "truncation without a reason")
-        expect(TimelineMetadata.fields(item("reasoning")).isEmpty, "no fields, no line")
+        expect(TimelineMetadata.note(detailed) == "Shortened by the host", "a shortened record says so and nothing else")
+        expect(TimelineMetadata.note(item("toolResult", title: "Bash", timestamp: "2026-10-18T06:00:00Z", callId: "call_synthetic", status: "completed", bodyRef: "body/synthetic")) == nil, "titles, call ids, statuses, timestamps and body references are not shown")
+
+        let shortenedRecords = [
+            item("message", role: "user", truncated: true),
+            item("message", role: "assistant", truncated: true),
+            item("message", role: "peer", truncated: true),
+            item("instructions", truncated: true),
+            item("attachment", truncated: true),
+            item("notice", truncated: true),
+            item("event", title: "Turn duration", truncated: true),
+            item("event", title: "Hook", truncated: true),
+        ]
+        for record in shortenedRecords {
+            let blocks = TranscriptBlock.build([record])
+            expect(!blocks.isEmpty && blocks.allSatisfy(\.truncated), "a shortened \(record.kind) \(record.role ?? "") record keeps its note in the transcript")
+        }
 
         expect(AgenthailAPIError.userMessage(URLError(.cannotConnectToHost)) == AgenthailAPIError.disconnectedGuidance, "connection failures become reconnect guidance")
         expect(AgenthailAPIError.userMessage(AgenthailAPIError.request(409, "synthetic conflict")) == "synthetic conflict", "other errors keep their message")
         let unknown = AgenthailAPIError.outcomeUnknown(AgenthailAPIError.userMessage(URLError(.networkConnectionLost)))
         expect((unknown.errorDescription ?? "").contains(AgenthailAPIError.disconnectedGuidance) && (unknown.errorDescription ?? "").contains("outcome is unknown"), "an uncertain action keeps reconnect guidance and unknown-outcome safety")
 
-        let sourced = [item("message", role: "user", timestamp: "t1"), item("message", role: "assistant", timestamp: "t2"), item("event", title: "Compacted", status: "done"), item("notice", timestamp: "t3"), item("attachment", timestamp: "t4")]
-        let blocks = TranscriptBlock.build(sourced)
-        expect(blocks.count == sourced.count && zip(blocks, sourced).allSatisfy { $0.source == $1 }, "every non-tool block keeps its timeline item for details")
         print("session facts tests passed")
     }
 

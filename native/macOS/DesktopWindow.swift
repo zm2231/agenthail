@@ -896,7 +896,6 @@ struct TranscriptView: View {
                 }
                 ForEach(blocks) { block in
                     TranscriptBlockView(block: block, onEdit: canResend ? { resend($0) } : nil)
-                        .timelineDetails(block.source)
                 }
                 ForEach(sends) { send in
                     UserBubble(text: send.text, receipt: send.status, files: send.files, failure: send.failure, onEdit: canResend ? { text in
@@ -1034,16 +1033,34 @@ struct TranscriptBlockView: View {
     @State private var expanded = false
     @Environment(\.holdTranscriptPlace) private var holdPlace
 
+    private var note: String? { block.truncated ? TimelineMetadata.shortened : nil }
+
     var body: some View {
         switch block.kind {
         case .user(let text, let files):
-            UserBubble(text: text, receipt: nil, files: files, onEdit: onEdit)
+            UserBubble(text: text, receipt: note, files: files, onEdit: onEdit)
         case .assistant(let text):
-            AssistantReply(text: text)
+            AssistantReply(text: text, note: note)
         case .peer(let sender, let text):
-            UserBubble(text: text, receipt: nil, sender: sender)
+            UserBubble(text: text, receipt: note, sender: sender)
         case .tools(let items):
             ToolRunView(items: items, expanded: $expanded)
+        default:
+            VStack(alignment: .leading, spacing: DesktopSpace.xs) {
+                record
+                if let note {
+                    Text(note)
+                        .font(.system(size: DesktopType.caption))
+                        .foregroundStyle(DesktopPalette.muted)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var record: some View {
+        switch block.kind {
+        case .user, .assistant, .peer, .tools:
+            EmptyView()
         case .annotation(let text):
             Text(text)
                 .font(.system(size: DesktopType.meta))
@@ -1282,15 +1299,23 @@ struct AttachedFileChip: View {
 
 struct AssistantReply: View {
     let text: String
+    var note: String? = nil
     @State private var hovering = false
 
     var body: some View {
-        StructuredText(markdown: text)
-            .font(.system(size: DesktopType.prose))
-            .lineSpacing(DesktopType.proseLineSpacing)
-            .foregroundStyle(DesktopPalette.text)
-            .textual.textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: DesktopSpace.xs) {
+            StructuredText(markdown: text)
+                .font(.system(size: DesktopType.prose))
+                .lineSpacing(DesktopType.proseLineSpacing)
+                .foregroundStyle(DesktopPalette.text)
+                .textual.textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            if let note {
+                Text(note)
+                    .font(.system(size: DesktopType.caption))
+                    .foregroundStyle(DesktopPalette.muted)
+            }
+        }
             .overlay(alignment: .bottomLeading) {
                 MessageActions(text: text, revealed: hovering)
                     .offset(y: MessageActions.height)
@@ -1333,6 +1358,11 @@ struct ToolRunView: View {
                     case .output(let result):
                         ToolOutputBlock(result: result)
                             .padding(.leading, 21)
+                            .contextMenu {
+                                if let id = result.callId, !id.isEmpty {
+                                    Button("Copy call ID") { copyToPasteboard(id) }
+                                }
+                            }
                     case .reasoning(let item):
                         ReasoningRow(item: item)
                     }
@@ -1409,7 +1439,7 @@ struct ToolCallRow: View {
                         .padding(DesktopSpace.s)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
-                    TimelineMetaLine(item: call)
+                    ShortenedNote(item: call)
                     if results.isEmpty {
                         Text("No result yet")
                             .font(.system(size: DesktopType.meta))
@@ -1426,6 +1456,9 @@ struct ToolCallRow: View {
             Button("Copy input") { copyToPasteboard(call.text) }
             if !results.isEmpty {
                 Button("Copy output") { copyToPasteboard(results.map(\.text).joined(separator: "\n\n")) }
+            }
+            if let id = call.callId, !id.isEmpty {
+                Button("Copy call ID") { copyToPasteboard(id) }
             }
         }
     }
@@ -1464,7 +1497,7 @@ struct ReasoningRow: View {
                         .font(.system(size: DesktopType.body))
                         .foregroundStyle(DesktopPalette.text2)
                         .textual.textSelection(.enabled)
-                    TimelineMetaLine(item: item)
+                    ShortenedNote(item: item)
                 }
                 .padding(.leading, 21)
             }
@@ -1501,33 +1534,19 @@ struct ToolOutputBlock: View {
                 .padding(DesktopSpace.s)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
-            TimelineMetaLine(item: result)
+            ShortenedNote(item: result)
         }
     }
 }
 
-extension View {
-    @ViewBuilder func timelineDetails(_ item: TimelineItem?) -> some View {
-        let fields = item.map(TimelineMetadata.fields) ?? []
-        if fields.isEmpty {
-            self
-        } else {
-            self.help(fields.joined(separator: " · "))
-                .accessibilityHint(fields.joined(separator: ", "))
-        }
-    }
-}
-
-struct TimelineMetaLine: View {
+struct ShortenedNote: View {
     let item: TimelineItem
 
     var body: some View {
-        let fields = TimelineMetadata.fields(item)
-        if !fields.isEmpty {
-            Text(fields.joined(separator: " · "))
+        if let note = TimelineMetadata.note(item) {
+            Text(note)
                 .font(.system(size: DesktopType.caption))
                 .foregroundStyle(DesktopPalette.muted)
-                .textSelection(.enabled)
         }
     }
 }
