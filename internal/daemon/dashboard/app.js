@@ -200,13 +200,17 @@ function exchangePrompt(exchange) {
   if (exchange.origin) return { ...message, label: exchange.origin };
   return message;
 }
-function renderMessage(text, kind, label, turnKey, files = []) {
+// The footer line carries the turn's time and its actions, so revealing
+// Copy on hover never adds a line or moves the text.
+function renderMessage(text, kind, label, turnKey, files = [], footer = "") {
   const safeText = String(text || "");
   const editable = kind === "user" && label === "Conversation input";
   const edit = editable ? `<button class="turn-action" type="button" data-edit-message="${escape(safeText)}">Edit</button>` : "";
   const content = safeText ? `<div class="turn-content">${markdown(safeText)}</div>` : "";
-  const actions = safeText ? `<div class="turn-actions"><button class="turn-action" type="button" data-copy-text="${escape(safeText)}">Copy</button>${edit}</div>` : "";
-  return `<article class="turn ${kind}" data-turn-key="${escape(turnKey)}"><header class="turn-header"><span class="turn-label">${escape(label)}</span></header>${content}${renderAttachedFiles(files)}${actions}</article>`;
+  const actions = safeText ? `<span class="turn-actions"><button class="turn-action" type="button" data-copy-text="${escape(safeText)}">Copy</button>${edit}</span>` : "";
+  const status = footer ? `<span class="turn-status">${escape(footer)}</span>` : "";
+  const footerLine = status || actions ? `<footer class="turn-footer">${status}${actions}</footer>` : "";
+  return `<article class="turn ${kind}" data-turn-key="${escape(turnKey)}"><header class="turn-header"><span class="turn-label">${escape(label)}</span></header>${content}${renderAttachedFiles(files)}${footerLine}</article>`;
 }
 function fileSize(bytes) {
   if (!bytes) return "";
@@ -1482,7 +1486,7 @@ function renderTimelineMetadata(item) {
 function isInstructions(item) {
   return item.kind === "instructions" || (["message", "text"].includes(item.kind) && ["developer", "system"].includes(item.role));
 }
-function renderTimelineItem(item, session) {
+function renderTimelineItem(item, session, turnEnd = null) {
   const kind = String(item.kind || "unknown");
   const kindClass = timelineKindClass(kind);
   const attributes = timelineItemAttributes(item);
@@ -1495,12 +1499,18 @@ function renderTimelineItem(item, session) {
     return `<details class="timeline-item timeline-instructions timeline-collapsible" ${attributes}><summary>Instructions</summary>${metadata}<div class="turn-content">${body}</div></details>`;
   }
   if (kind === "message" && item.role === "peer") {
-    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(item.text, "peer", `From ${item.sender || "another agent"}`, `${session.id}:${item.id}`)}${metadata}</section>`;
+    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(item.text, "peer", `From ${item.sender || "another agent"}`, `${session.id}:${item.id}`, [], clockTime(item.timestamp))}${metadata}</section>`;
   }
   if (["text", "message", "assistant"].includes(kind)) {
     const user = item.role === "user";
     const content = user ? handoffMessage(item.text) : { text: item.text, label: labels[session.surface] || session.surface };
-    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(content.text, user ? "user" : "agent", content.label, `${session.id}:${item.id}`, user ? item.files : [])}${metadata}</section>`;
+    const kindName = !user ? "agent" : content.label.startsWith("From ") ? "peer" : "user";
+    const footer = user ? clockTime(item.timestamp) : turnEnd ? turnFooter(turnEnd.text, turnEnd.timestamp || item.timestamp) : "";
+    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(content.text, kindName, content.label, `${session.id}:${item.id}`, user ? item.files : [], footer)}${metadata}</section>`;
+  }
+  if (kind === "event") {
+    const text = [item.title, item.status].filter(Boolean).join(" · ") + (item.text ? `: ${item.text}` : "");
+    return `<p class="timeline-item timeline-divider" ${attributes}><span>${escape(text)}</span>${metadata}</p>`;
   }
   if (kind === "done") return "";
   if (kind === "notice") {
@@ -1508,18 +1518,209 @@ function renderTimelineItem(item, session) {
     const until = resets ? ` Resets ${new Date(resets).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.` : "";
     return `<div class="timeline-item timeline-notice" role="status" ${attributes}><strong>${escape(item.title || "Notice")}</strong> ${escape(item.text || "")}${escape(until)}${metadata}</div>`;
   }
-  if (["toolCall", "toolResult", "reasoning"].includes(kind)) {
-    const title = item.title || kind;
-    const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';
-    const copy = kind === "toolResult" && item.text ? `<button class="soft-button copy-output" type="button" data-copy-text="${escape(item.text)}">Copy output</button>` : "";
-    return `<details class="timeline-item timeline-${kindClass} timeline-collapsible" ${attributes}><summary>${escape(title)} <span class="timeline-kind">${escape(kind)}</span></summary>${metadata}<div class="turn-content">${body}</div>${copy}</details>`;
-  }
+  if (toolKinds.includes(kind)) return renderToolRun([item]);
   const title = item.title || "Unknown timeline item";
   const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';
   return `<article class="turn timeline-item timeline-${kindClass} timeline-unknown" ${attributes}><header class="turn-header"><span class="turn-label">${escape(title)}</span><span class="timeline-kind">${escape(kind)}</span></header>${metadata}<div class="turn-content">${body}</div></article>`;
 }
+function clockTime(timestamp) {
+  const date = new Date(timestamp || "");
+  if (Number.isNaN(date.getTime())) return "";
+  const today = new Date().toDateString() === date.toDateString();
+  return date.toLocaleString([], today ? { hour: "numeric", minute: "2-digit" } : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+// "3m13s" reads as "3:13"; anything unparsed is shown as recorded.
+function durationClock(value) {
+  const text = String(value || "");
+  const match = text.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
+  if (!text || !match) return text;
+  const [hours, minutes, seconds] = [match[1], match[2], match[3]].map(part => Number(part || 0));
+  const pad = number => String(number).padStart(2, "0");
+  return hours ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
+}
+function turnFooter(duration, timestamp) {
+  return [duration ? `Finished ${durationClock(duration)}` : "", clockTime(timestamp)].filter(Boolean).join(" · ");
+}
+const toolKinds = ["toolCall", "toolResult", "reasoning", "tool", "command"];
+const foldToolsAfter = 6;
+function toolInput(text) {
+  try {
+    const value = JSON.parse(text || "");
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+function baseName(path) {
+  return String(path || "").split("/").filter(Boolean).pop() || String(path || "");
+}
+function firstLine(text) {
+  return String(text || "").split("\n").find(line => line.trim()) || "";
+}
+function textLines(text) {
+  return text ? String(text).split("\n") : [];
+}
+// Lines added and removed between two texts, from their longest common
+// subsequence; texts too large to compare count every line as changed.
+function lineCounts(before, after) {
+  const a = textLines(before);
+  const b = textLines(after);
+  if (a.length * b.length > 250000) return { added: b.length, removed: a.length };
+  let previous = new Array(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = new Array(b.length + 1).fill(0);
+    for (let j = 1; j <= b.length; j += 1) {
+      current[j] = a[i - 1] === b[j - 1] ? previous[j - 1] + 1 : Math.max(previous[j], current[j - 1]);
+    }
+    previous = current;
+  }
+  const common = previous[b.length];
+  return { added: b.length - common, removed: a.length - common };
+}
+function patchChanges(patch) {
+  const changes = [];
+  for (const line of String(patch || "").split("\n")) {
+    const file = line.match(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/);
+    if (file) changes.push({ path: file[1].trim(), added: 0, removed: 0 });
+    else if (line.startsWith("*** ") || !changes.length) continue;
+    else if (line.startsWith("+")) changes[changes.length - 1].added += 1;
+    else if (line.startsWith("-")) changes[changes.length - 1].removed += 1;
+  }
+  return changes;
+}
+function toolChanges(call) {
+  const input = toolInput(call.text);
+  const name = call.title || "";
+  const path = input?.file_path || input?.path;
+  if (name === "apply_patch") return patchChanges(input?.input || input?.patch || call.text);
+  if (!input || !path) return [];
+  if (typeof input.old_string === "string" && typeof input.new_string === "string") return [{ path, ...lineCounts(input.old_string, input.new_string) }];
+  if (["Write", "write_file"].includes(name) && typeof input.content === "string") return [{ path, added: textLines(input.content).length, removed: 0 }];
+  if (name === "MultiEdit" && Array.isArray(input.edits)) {
+    return [input.edits.reduce((total, edit) => {
+      const counts = lineCounts(edit.old_string || "", edit.new_string || "");
+      return { path, added: total.added + counts.added, removed: total.removed + counts.removed };
+    }, { path, added: 0, removed: 0 })];
+  }
+  return [];
+}
+// What a call did, as a verb and the thing it acted on, for a one-line entry.
+function toolLine(call) {
+  const name = call.title || call.kind || "Tool";
+  const input = toolInput(call.text);
+  const command = input?.command ?? input?.cmd;
+  if (typeof command === "string") return { verb: "Run", object: input.description || firstLine(command), code: !input.description };
+  if (name === "apply_patch") return { verb: "Edit", object: toolChanges(call).map(change => baseName(change.path)).join(", "), code: true };
+  const verbs = { Read: "Read", read_file: "Read", NotebookRead: "Read", view_image: "Read", Write: "Write", write_file: "Write", Edit: "Edit", MultiEdit: "Edit", NotebookEdit: "Edit", Grep: "Search", Glob: "Search", LS: "Search", ToolSearch: "Search", WebSearch: "Search the web", web_search: "Search the web", WebFetch: "Open", Agent: "Delegate", Task: "Delegate", spawn_agent: "Delegate", TodoWrite: "Update plan", update_plan: "Update plan" };
+  const verb = verbs[name] || name.replace(/^functions\./, "").replace(/^mcp__/, "").replace(/__/g, " · ").replace(/_/g, " ");
+  if (typeof input?.pattern === "string") return { verb, object: input.pattern, code: true };
+  const path = input?.file_path || input?.path || input?.notebook_path;
+  if (typeof path === "string") return { verb, object: baseName(path), code: true };
+  const detail = input ? ["description", "query", "url", "prompt"].map(key => input[key]).find(value => typeof value === "string" && value) : firstLine(call.text);
+  return { verb, object: firstLine(detail || ""), code: false };
+}
+function isFailedTool(item) {
+  return item.status === "failed" || item.status === "error";
+}
+function renderToolLine(line, failed, attributes, body, open) {
+  const object = line.object ? `<span class="tool-object${line.code ? " code" : ""}">${escape(line.object)}</span>` : "";
+  return `<details class="timeline-item tool-line${failed ? " failed" : ""}" ${attributes}${open ? " open" : ""}><summary><span class="tool-mark" aria-hidden="true">◆</span><span class="tool-verb">${escape(line.verb)}</span>${object}${failed ? '<span class="tool-failed">failed</span>' : ""}</summary><div class="tool-body">${body}</div></details>`;
+}
+function renderToolOutput(result) {
+  const metadata = renderTimelineMetadata(result);
+  const failed = isFailedTool(result);
+  const body = result.text ? `<pre class="tool-output${failed ? " failed" : ""}">${escape(result.text)}</pre>` : '<p class="timeline-empty">The tool returned an empty result.</p>';
+  const copy = result.text ? `<button class="soft-button copy-output" type="button" data-copy-text="${escape(result.text)}">Copy output</button>` : "";
+  return `<div class="tool-result" ${timelineItemAttributes(result)}><div class="tool-result-label">${failed ? "Error output" : "Output"}</div>${body}${copy}${metadata}</div>`;
+}
+function renderToolRun(items) {
+  const entries = [];
+  const calls = new Map();
+  for (const item of items) {
+    if (item.kind === "toolResult" && item.callId && calls.has(item.callId)) {
+      calls.get(item.callId).results.push(item);
+    } else if (item.kind === "toolResult" || item.kind === "reasoning") {
+      entries.push({ item, results: [] });
+    } else {
+      const entry = { item, results: [] };
+      if (item.callId) calls.set(item.callId, entry);
+      entries.push(entry);
+    }
+  }
+  const lines = entries.map(({ item, results }) => {
+    const attributes = timelineItemAttributes(item);
+    if (item.kind === "reasoning") {
+      const body = item.text ? `<div class="turn-content">${markdown(item.text)}</div>` : '<p class="timeline-empty">No recorded content.</p>';
+      return renderToolLine({ verb: "Thought", object: firstLine(item.text), code: false }, false, attributes, body + renderTimelineMetadata(item), false);
+    }
+    if (item.kind === "toolResult") {
+      return renderToolLine({ verb: "Output", object: firstLine(item.text), code: true }, isFailedTool(item), attributes, renderToolOutput(item), isFailedTool(item));
+    }
+    const failed = isFailedTool(item) || results.some(isFailedTool);
+    const input = item.text ? `<pre class="tool-input">${escape(item.text)}</pre>` : '<p class="timeline-empty">No recorded input.</p>';
+    const outputs = results.length ? results.map(renderToolOutput).join("") : '<p class="timeline-empty">No result yet</p>';
+    return renderToolLine(toolLine(item), failed, attributes, (failed ? "" : input + renderTimelineMetadata(item)) + outputs, failed);
+  });
+  const changes = [];
+  for (const { item, results } of entries) {
+    if (item.kind === "reasoning" || item.kind === "toolResult" || isFailedTool(item) || results.some(isFailedTool)) continue;
+    for (const change of toolChanges(item)) {
+      const existing = changes.find(other => other.path === change.path);
+      if (existing) {
+        existing.added += change.added;
+        existing.removed += change.removed;
+      } else {
+        changes.push({ ...change });
+      }
+    }
+  }
+  const chips = changes.length ? `<div class="file-chips">${changes.map(change => `<span class="file-chip" title="${escape(change.path)}" aria-label="${escape(`${baseName(change.path)}, ${change.added} added, ${change.removed} removed`)}"><span>${escape(baseName(change.path))}</span>${change.added ? `<span class="added">+${change.added}</span>` : ""}${change.removed ? `<span class="removed">−${change.removed}</span>` : ""}</span>`).join("")}</div>` : "";
+  const callCount = entries.filter(entry => entry.item.kind !== "reasoning" && entry.item.kind !== "toolResult").length;
+  if (callCount <= foldToolsAfter) return `<section class="tool-run">${lines.join("")}${chips}</section>`;
+  const failures = entries.filter(({ item, results }) => isFailedTool(item) || results.some(isFailedTool)).length;
+  const summary = `<summary><span class="tool-mark" aria-hidden="true">◆</span><span class="tool-verb">${escape(toolRunLabel(entries))}</span>${failures ? `<span class="tool-failed">${failures} failed</span>` : ""}</summary>`;
+  return `<section class="tool-run"><details class="tool-line tool-fold">${summary}<div class="tool-fold-lines">${lines.join("")}</div></details>${chips}</section>`;
+}
+function toolRunLabel(entries) {
+  const counts = new Map();
+  for (const { item } of entries) {
+    if (item.kind === "reasoning" || item.kind === "toolResult") continue;
+    const verb = toolLine(item).verb;
+    counts.set(verb, (counts.get(verb) || 0) + 1);
+  }
+  const phrases = { Run: ["ran 1 command", "ran %d commands"], Read: ["read 1 file", "read %d files"], Edit: ["edited 1 file", "edited %d files"], Write: ["wrote 1 file", "wrote %d files"], Search: ["searched once", "searched %d times"] };
+  const parts = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([verb, count]) => {
+    const phrase = phrases[verb];
+    return phrase ? (count === 1 ? phrase[0] : phrase[1].replace("%d", count)) : `${verb} ×${count}`;
+  });
+  const text = parts.slice(0, 2).join(" and ") + (parts.length > 2 ? ` +${parts.length - 2} more` : "");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 function renderTimeline(items, session) {
-  return items.map(item => renderTimelineItem(item, session)).join("");
+  const out = [];
+  let run = [];
+  const flush = () => {
+    if (run.length) out.push(renderToolRun(run));
+    run = [];
+  };
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (toolKinds.includes(item.kind)) {
+      run.push(item);
+      continue;
+    }
+    flush();
+    if (item.kind === "event" && item.title === "Turn duration") {
+      out.push(`<p class="timeline-item timeline-annotation" ${timelineItemAttributes(item)}>${escape(turnFooter(item.text, item.timestamp))}</p>`);
+      continue;
+    }
+    const next = items[index + 1];
+    const ends = next?.kind === "event" && next.title === "Turn duration";
+    out.push(renderTimelineItem(item, session, ends ? next : null));
+    if (ends && ["text", "message", "assistant"].includes(item.kind) && item.role !== "user" && item.role !== "peer" && !isInstructions(item)) index += 1;
+  }
+  flush();
+  return out.join("");
 }
 function timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents) {
   return JSON.stringify([
