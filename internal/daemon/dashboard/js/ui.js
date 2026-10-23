@@ -67,7 +67,7 @@ export function applyTheme(document, values, prefersDark, colourOf, target = 4.5
   return theme;
 }
 
-export function backdropLook(values, theme, { sessionOpen, highContrast, colourOf, width, height }) {
+export function backdropLook(values, theme, { sessionOpen, highContrast, colourOf, width, height, scale = 1 }) {
   const number = (key, fallback) => (Number.isFinite(values[key]) ? values[key] : fallback);
   const ground = colourOf("var(--paper)");
   return {
@@ -86,6 +86,7 @@ export function backdropLook(values, theme, { sessionOpen, highContrast, colourO
     readable: highContrast || values["glass.readability"] !== "off",
     width,
     height,
+    scale,
   };
 }
 
@@ -196,7 +197,7 @@ if (typeof window !== "undefined" && window.document) {
     storage: window.localStorage,
     colourOf: browserColour(window.document),
     backdrop: createBackdrop({ document: window.document, loadImage }),
-    viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+    viewport: () => ({ width: window.innerWidth, height: window.innerHeight, scale: window.devicePixelRatio || 1 }),
     MutationObserver: window.MutationObserver,
     addEventListener: window.addEventListener.bind(window),
   });
