@@ -44,6 +44,10 @@ struct TextDiffTest {
         check(patch.map(\.path) == ["a.go", "c.go"] && patch[0].hunks.count == 2, "a patch keeps each file and each section: \(patch.map(\.path)) \(patch.first?.hunks.count ?? 0)")
         check(patch[0].change == FileChange(path: "a.go", added: 1, removed: 2) && patch[1].change == FileChange(path: "c.go", added: 0, removed: 0), "patch counts come from its lines")
 
+        let crlf = FileDiff.patch("*** Begin Patch\r\n*** Update File: a.go\r\n+new\r\n-old\r\n keep\r\n*** End Patch\r\n")
+        check(crlf.map(\.path) == ["a.go"] && crlf[0].hunks.flatMap(\.lines).map(\.text) == ["new", "old", "keep"] && crlf[0].change == FileChange(path: "a.go", added: 1, removed: 1), "a patch with CRLF line endings reads like one with LF: \(crlf)")
+        let crlfEdit = TextDiff(before: "a\r\nb\r\n", after: "a\r\nc\r\n")
+        check(crlfEdit.lines.map(\.text) == ["a", "b", "c"] && crlfEdit.added == 1 && crlfEdit.removed == 1, "an edit with CRLF line endings is diffed line by line: \(crlfEdit.lines.map(\.text))")
         let entries = DiffEntry.entries(patch[0].hunks)
         check(entries.map(\.id) == Array(0..<entries.count) && entries.contains { $0.content == .hunk }, "entries are numbered across hunks with a break between them")
 

@@ -106,7 +106,7 @@ struct FileChange: Equatable {
 
     /// The text's lines; a final newline ends the last line rather than starting another.
     static func lines(_ text: String) -> [Substring] {
-        var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var lines = text.split(omittingEmptySubsequences: false) { $0 == "\n" || $0 == "\r\n" }
         if lines.last?.isEmpty == true { lines.removeLast() }
         return lines
     }

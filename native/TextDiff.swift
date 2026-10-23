@@ -187,7 +187,7 @@ struct FileDiff: Equatable {
             if files[files.count - 1].hunks.isEmpty { files[files.count - 1].hunks.append([]) }
             files[files.count - 1].hunks[files[files.count - 1].hunks.count - 1].append(TextDiff.Line(kind: kind, text: String(line.dropFirst())))
         }
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        for line in FileChange.lines(text) {
             if let path = ["*** Update File: ", "*** Add File: ", "*** Delete File: "].lazy.compactMap({ line.hasPrefix($0) ? String(line.dropFirst($0.count)) : nil }).first {
                 files.append((path.trimmingCharacters(in: .whitespaces), []))
             } else if line.hasPrefix("*** ") || files.isEmpty {
