@@ -48,7 +48,7 @@ func TestCodexCatchupRejectsReplacementBeforeFirstPageAfterRegistryReopen(t *tes
 		t.Fatal(err)
 	}
 	adapter := providers.NewCodex("http://127.0.0.1:1")
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	first, err := manager.prepareStream(context.Background(), &from, adapter)
 	if err != nil {
 		reg.Close()
@@ -81,8 +81,8 @@ func TestCodexCatchupRejectsReplacementBeforeFirstPageAfterRegistryReopen(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reg.Close()
-	manager = newSessionSourceManager(reg)
+	t.Cleanup(func() { reg.Close() })
+	manager = newTestSourceManager(t, reg)
 	second, err := manager.prepareStream(context.Background(), &from, adapter)
 	if err == nil {
 		second.Cancel()
@@ -131,7 +131,7 @@ func TestLegacySeedCheckpointNeverAcceptsReplacementAcrossRetries(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reg.Close()
+	t.Cleanup(func() { reg.Close() })
 	from := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: transcript, HasLocal: true}
 	if err := reg.RegisterSession(from); err != nil {
 		t.Fatal(err)
@@ -152,7 +152,7 @@ func TestLegacySeedCheckpointNeverAcceptsReplacementAcrossRetries(t *testing.T) 
 		t.Fatal(err)
 	}
 	adapter := providers.NewCodex("http://127.0.0.1:1")
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	for attempt := 0; attempt < 2; attempt++ {
 		if _, err := manager.prepareStream(context.Background(), &from, adapter); !errors.Is(err, surface.ErrTranscriptUnavailable) || !strings.Contains(err.Error(), "identity checkpoint is unavailable") {
 			t.Fatalf("attempt %d err=%v, want durable missing-identity failure", attempt+1, err)
@@ -203,7 +203,7 @@ func TestSessionSourceRefreshesConfiguredModelBeforeContextEmission(t *testing.T
 		t.Fatal(err)
 	}
 	adapter := &contextRefreshSurface{daemonSurface: fake, seen: make(chan string, 1)}
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: adapter, epoch: "epoch", appendBodies: map[string]string{}}
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: adapter, epoch: "epoch", appendBodies: map[string]string{}}
 	updated := from
 	updated.ConfiguredModel = "claude-sonnet-4"
 	if err := reg.RegisterSession(updated); err != nil {
@@ -222,7 +222,7 @@ func TestSessionSourceRefreshesConfiguredModelBeforeContextEmission(t *testing.T
 
 func TestSessionSourceJournalsToolResultAttachmentMetadataWithoutBytes(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
 	source.append(surface.StreamEvent{ID: "tool-result", ProviderKey: "tool-result", Kind: "toolResult", Role: "user", Title: "Tool result", CallID: "call-1", Text: "caption", Attachment: &surface.Attachment{ID: "attachment:0:0:hash", MediaType: "image/png", Bytes: 4}})
 	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
 	if err != nil || len(page.Entries) != 1 {
@@ -235,7 +235,7 @@ func TestSessionSourceJournalsToolResultAttachmentMetadataWithoutBytes(t *testin
 
 func TestSessionSourceTurnPhasePreservesAssistantBody(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	source.append(surface.StreamEvent{ID: "answer", ProviderKey: "answer", Operation: "upsert", Kind: "text", Role: "assistant", Text: "The complete answer", Version: 19})
 	source.append(surface.StreamEvent{ID: "answer", ProviderKey: "answer", Operation: "phase", Kind: "done", Version: 19})
 	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
@@ -256,7 +256,7 @@ func TestSessionSourceTurnPhasePreservesAssistantBody(t *testing.T) {
 
 func TestSessionJournalInlineBodyKeepsUTF8Boundary(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	body := strings.Repeat("a", sessionStreamBodyBytes-1) + "é rest"
 	source.append(surface.StreamEvent{ID: "unicode", Kind: "text", Text: body})
@@ -281,7 +281,7 @@ func TestSessionJournalPreservesProviderTruncationForSeedAndLive(t *testing.T) {
 	for _, mode := range []string{"seed", "live", "seed-metadata"} {
 		t.Run(mode, func(t *testing.T) {
 			_, reg, fake, from, _ := daemonFixture(t)
-			source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+			source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 			item := surface.TimelineItem{ID: "partial", Kind: "event", Text: "bounded preview", Truncated: true, TruncationReason: "timeline text limit"}
 			if mode == "live" {
 				source.append(surface.StreamEvent{ID: item.ID, ProviderKey: "timeline:" + item.ID, Operation: "upsert", Kind: item.Kind, Text: item.Text, Truncated: item.Truncated, TruncationReason: item.TruncationReason})
@@ -312,7 +312,7 @@ func TestSessionJournalPreservesProviderTruncationForSeedAndLive(t *testing.T) {
 
 func TestTruncatedSeedDoesNotMarkRetainedAuthoritativeBodyIncomplete(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	source.append(surface.StreamEvent{ID: "answer", ProviderKey: "timeline:answer", Operation: "upsert", Kind: "text", Text: "complete answer"})
 	source.appendSeedItems([]surface.TimelineItem{{ID: "answer", Kind: "text", Text: "complete", Truncated: true, TruncationReason: "timeline text limit"}})
 	entry, found, err := reg.SessionJournalEntryByProviderKey(from.ID, "timeline:answer")
@@ -330,7 +330,7 @@ func TestTruncatedSeedDoesNotMarkRetainedAuthoritativeBodyIncomplete(t *testing.
 
 func TestSessionJournalBodyBudgetKeepsPreviewWithoutDeadReference(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	body := strings.Repeat("x", sessionJournalRetentionBytes)
 	source.append(surface.StreamEvent{ID: "oversized", Kind: "text", Text: body})
@@ -390,7 +390,7 @@ func TestSessionSourcePersistsStreamFailureAsReset(t *testing.T) {
 		streamErr:     errors.New(strings.Repeat("upstream unavailable ", 32)),
 	}
 	adapter.caps.Stream = true
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -425,7 +425,7 @@ func TestSessionSourceDoesNotJournalNormalStreamWindow(t *testing.T) {
 		streamErr:     surface.ErrStreamWindow,
 	}
 	adapter.caps.Stream = true
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -460,7 +460,7 @@ func TestSessionSourceSeedsJournalBeforeSubscribeReturns(t *testing.T) {
 		events:        make(chan surface.StreamEvent),
 		items:         []surface.TimelineItem{{ID: "seed-1", Kind: "text", Text: "seeded"}},
 	}
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -488,7 +488,7 @@ func TestSessionSourceUnifiesCodexSeedAndLiveProviderIdentity(t *testing.T) {
 		items:         []surface.TimelineItem{{ID: "codex:turn-1:assistant:item-1", Kind: "text", Text: "seeded"}},
 	}
 	adapter.caps.Stream = true
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -551,7 +551,7 @@ func TestSessionSourceSeedsWithoutUnsupportedLiveStream(t *testing.T) {
 		items:         []surface.TimelineItem{{ID: "seed-uds", Kind: "text", Text: "peer seed"}},
 	}
 	adapter.caps.Stream = false
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -585,7 +585,7 @@ func TestSessionSourceKeepsUnsupportedTailOpenWithoutRetryNoise(t *testing.T) {
 		streamErr:     surface.ErrUnsupported,
 	}
 	adapter.caps.Stream = true
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -634,7 +634,7 @@ func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapter := providers.NewClaude(nil, t.TempDir())
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -744,7 +744,7 @@ func TestClaudeSessionSourceJournalsFullTimelineAcrossTransports(t *testing.T) {
 				t.Fatal(err)
 			}
 			adapter := providers.NewClaude(nil, t.TempDir())
-			manager := newSessionSourceManager(reg)
+			manager := newTestSourceManager(t, reg)
 			subscription, err := manager.subscribe(&from, adapter)
 			if err != nil {
 				t.Fatal(err)
@@ -827,7 +827,7 @@ func TestClaudeSessionSourceJournalsInterruptedTerminalBeforeNextTurn(t *testing
 				t.Fatal(err)
 			}
 			adapter := providers.NewClaude(nil, t.TempDir())
-			subscription, err := newSessionSourceManager(reg).subscribe(&from, adapter)
+			subscription, err := newTestSourceManager(t, reg).subscribe(&from, adapter)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -894,7 +894,7 @@ func TestSessionSourceSharesOneUpstreamAndJournalsNormalizedEvents(t *testing.T)
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 1)}
 	adapter.caps.Stream = true
-	manager := newSessionSourceManager(registry)
+	manager := newTestSourceManager(t, registry)
 	first, err := manager.subscribe(&from, adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -948,7 +948,7 @@ func TestPrepareStreamDropsSeedBufferAndKeepsFastPostCursorEvent(t *testing.T) {
 		items:         []surface.TimelineItem{{ID: "seed", Kind: "text", Role: "assistant", Text: "seed"}},
 	}
 	adapter.caps.Stream = true
-	manager := newSessionSourceManager(registry)
+	manager := newTestSourceManager(t, registry)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	subscription, err := manager.prepareStream(ctx, &from, adapter)
@@ -977,7 +977,7 @@ func TestPrepareStreamFollowsABurstItsConsumerIsSlowToRead(t *testing.T) {
 		adapter.items = append(adapter.items, surface.TimelineItem{ID: fmt.Sprintf("seed-%d", i), Kind: "text", Role: "assistant", Text: "seed"})
 	}
 	adapter.caps.Stream = true
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	defer manager.shutdown()
 	subscription, err := manager.prepareStream(context.Background(), &from, adapter)
 	if err != nil {
@@ -1020,7 +1020,7 @@ func TestSessionSourceAccumulatesStableProviderAppendIntoOneJournalEntry(t *test
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 2)}
 	adapter.caps.Stream = true
-	manager := newSessionSourceManager(registry)
+	manager := newTestSourceManager(t, registry)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -1055,7 +1055,7 @@ func TestSessionSourceAccumulatesStableProviderAppendIntoOneJournalEntry(t *test
 
 func TestSessionSourceAssignsIdentityToProviderEventsWithoutOne(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
-	manager := newSessionSourceManager(registry)
+	manager := newTestSourceManager(t, registry)
 	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
 	first, _ := source.normalizeLocked(surface.StreamEvent{Kind: "event", Text: "one"})
 	second, _ := source.normalizeLocked(surface.StreamEvent{Kind: "event", Text: "two"})
@@ -1066,7 +1066,7 @@ func TestSessionSourceAssignsIdentityToProviderEventsWithoutOne(t *testing.T) {
 
 func TestSessionSourceKeepsMetadataStateInOneJournalRow(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	source.append(surface.StreamEvent{ID: "visible", ProviderKey: "visible", Operation: "upsert", Kind: "message", Role: "assistant", Text: "keep me"})
 	for index := 1; index <= 50; index++ {
 		source.append(surface.StreamEvent{Kind: "context", Context: &surface.ContextUsage{UsedTokens: int64(index)}})
@@ -1094,7 +1094,7 @@ func TestSessionSourceKeepsMetadataStateInOneJournalRow(t *testing.T) {
 
 func TestSessionSourceNormalizesGoalUpdatesAndClears(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
-	manager := newSessionSourceManager(registry)
+	manager := newTestSourceManager(t, registry)
 	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
 	budget := int64(500)
 	updated, _ := source.normalizeLocked(surface.StreamEvent{ID: "goal:1", ProviderKey: "goal:1", Kind: "goal", Operation: "replace", Goal: &surface.GoalState{Objective: "verify", Status: surface.GoalStatusPaused, TimeUsedSeconds: 12, TokensUsed: 34, TokenBudget: &budget}})
@@ -1126,7 +1126,7 @@ func TestSessionSourceSeedOverlapDoesNotRepublishOrAdvanceJournal(t *testing.T) 
 		}},
 	}
 	adapter.caps.Stream = true
-	manager := newSessionSourceManager(registry)
+	manager := newTestSourceManager(t, registry)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -1187,7 +1187,7 @@ func TestSessionSourceSeedHandoffPreservesPrefixAndSuppressesDesktopReplay(t *te
 			Timestamp: "2026-10-04T00:00:00Z",
 		}},
 	}
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: adapter, epoch: "epoch", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: adapter, epoch: "epoch", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	source.seedJournal()
 
 	for _, event := range []surface.StreamEvent{
@@ -1252,7 +1252,7 @@ func TestHeldSourceRestartsAfterUpstreamEnds(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &restartingSource{daemonSurface: fake}
 	adapter.caps.Stream = true
-	manager := newSessionSourceManager(registry)
+	manager := newTestSourceManager(t, registry)
 	release, err := manager.hold(&from, adapter, "active-turn")
 	if err != nil {
 		t.Fatal(err)
@@ -1282,7 +1282,7 @@ func TestClaudeSessionSourceResumesTurnsWrittenWhileUnheld(t *testing.T) {
 	if err := reg.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
-	firstManager := newSessionSourceManager(reg)
+	firstManager := newTestSourceManager(t, reg)
 	first, err := firstManager.subscribe(&from, providers.NewClaude(nil, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
@@ -1300,7 +1300,7 @@ func TestClaudeSessionSourceResumesTurnsWrittenWhileUnheld(t *testing.T) {
 		t.Fatal(err)
 	}
 	file.Close()
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	second, err := manager.subscribe(&from, providers.NewClaude(nil, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
@@ -1351,7 +1351,7 @@ func TestClaudeSessionSourceJournalsInjectedPromptOrigins(t *testing.T) {
 	if err := reg.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	subscription, err := manager.subscribe(&from, providers.NewClaude(nil, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
@@ -1421,7 +1421,7 @@ func TestClaudeSessionSourceJournalsInjectedPromptOrigins(t *testing.T) {
 
 func TestSessionJournalKeepsAttachedFilesForTheChatPage(t *testing.T) {
 	d, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
 	files := []surface.AttachedFile{{Name: "notes.txt", Path: "/uploads/abc/notes.txt", Bytes: 16}}
 	source.append(surface.StreamEvent{ID: "user-1", ProviderKey: "user-1", Kind: "message", Role: "user", Title: "user", Text: "read this", Files: files})
 	page, err := d.readJournalPage(from.ID, 0, 10)
@@ -1435,7 +1435,7 @@ func TestSessionJournalKeepsAttachedFilesForTheChatPage(t *testing.T) {
 
 func TestAUsageLimitNoticeKeepsItsResetTimeThroughTheJournal(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(registry), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	source := &sessionSource{manager: newTestSourceManager(t, registry), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
 	notice := surface.TimelineItem{ID: "n", Kind: "notice", Title: "Usage limit reached", Text: "You've hit your session limit", Status: surface.TimelineUsageLimit, ResetsAt: "2026-10-21T11:00:00Z"}
 	payload, _ := source.normalizeLocked(seedEvent(surface.KindClaude, notice))
 	encoded, err := json.Marshal(payload)

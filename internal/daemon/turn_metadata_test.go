@@ -9,7 +9,7 @@ import (
 
 func TestAJournalPageCarriesTheMetadataOfEachTurn(t *testing.T) {
 	d, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "turns", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "turns", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	duration := int64(4200)
 	live := surface.NewTurnMetadata(surface.TurnCompleted, surface.TurnMeasure{Model: "gpt-fixture", DurationMs: &duration, Usage: &surface.TurnUsage{InputTokens: 250, OutputTokens: 50}})
 	seeded := surface.NewTurnMetadata(surface.TurnInterrupted, surface.TurnMeasure{Model: "gpt-fixture"})

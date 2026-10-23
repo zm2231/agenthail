@@ -646,7 +646,7 @@ func detachedSource(manager *sessionSourceManager, session surface.Session, adap
 
 func TestAViewerThatReconnectsBeforeTheFirstTurnStillGetsTheFirstReply(t *testing.T) {
 	claude, session, r, path := newHostedSourceFixture(t)
-	manager := newSessionSourceManager(r)
+	manager := newTestSourceManager(t, r)
 	if err := detachedSource(manager, session, claude).loadSeed(); err != nil {
 		t.Fatal(err)
 	}
@@ -676,7 +676,7 @@ func TestAViewerThatReconnectsBeforeTheFirstTurnStillGetsTheFirstReply(t *testin
 
 func TestAHostedTranscriptThatGoesMissingIsNotReadAsNewByTheNextSource(t *testing.T) {
 	claude, session, r, path := newHostedSourceFixture(t)
-	manager := newSessionSourceManager(r)
+	manager := newTestSourceManager(t, r)
 	t.Cleanup(manager.shutdown)
 	subscription, err := manager.subscribe(&session, claude)
 	if err != nil {
