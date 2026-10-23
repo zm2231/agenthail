@@ -1985,8 +1985,8 @@ async function action(action, extra = {}, idempotencyKey = crypto.randomUUID(), 
       } else if (typeof typed === "string") {
         failure.message = typed;
         failure.code = body.code || "";
-        failure.unknown = body.unknown === true;
       }
+      failure.unknown = body.unknown === true || failure.code === "host_outcome_unknown";
     } catch {}
     throw failure;
   }
@@ -2002,7 +2002,7 @@ function deliveryStatusLabel(result) {
   return status === "queued" ? "Queued" : status === "submitted" ? "Submitted" : "Sent";
 }
 function creationFailureMessage(error) {
-  return error?.code === "create_unknown"
+  return error?.unknown
     ? "Agenthail can't tell whether this session started; check the sidebar before trying again."
     : friendlyError(error);
 }
