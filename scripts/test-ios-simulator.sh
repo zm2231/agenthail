@@ -4,7 +4,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/agenthail-ios-simulator.XXXXXX")"
+# Under /tmp, not TMPDIR: the links below must start on the internal disk.
+WORK="$(mktemp -d /tmp/agenthail-ios-simulator.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/bin"
 
@@ -68,6 +69,26 @@ run 2 xcodebuild test -scheme AgenthailIOS -derivedDataPath /Volumes/disk/dd
 
 XCODE_DERIVED_DATA=/Volumes/disk/DerivedData run 2 xcodebuild test -scheme AgenthailIOS
 [ -z "$locked" ] || fail "Xcode's own derived data location under /Volumes was not refused"
+
+mkdir -p "$WORK/volume"
+ln -s /Volumes "$WORK/volumes"
+run 2 xcodebuild test -scheme AgenthailIOS -derivedDataPath "$WORK/volumes/disk/dd"
+[ -z "$locked" ] || fail "derived data reached through a link to /Volumes took the simulator"
+XCODE_DERIVED_DATA="$WORK/volumes/disk/DerivedData" run 2 xcodebuild test -scheme AgenthailIOS
+[ -z "$locked" ] || fail "Xcode's own derived data location reached through a link to /Volumes was not refused"
+ln -s "$WORK/volume" "$WORK/internal"
+run 0 xcodebuild test -scheme AgenthailIOS -derivedDataPath "$WORK/internal/dd"
+[ -n "$locked" ] || fail "derived data reached through a link to the internal disk was refused"
+
+run 0 xcodebuild build -scheme test
+[ "$(tr '\n' ' ' <<<"$locked")" = "xcodebuild build -scheme test " ] || fail "a scheme named test made a build a test run: $locked"
+run 0 xcodebuild -quiet test -scheme AgenthailIOS
+grep -qx -- -collect-test-diagnostics <<<"$locked" || fail "a test action after a flag without a value was missed: $locked"
+
+run 0 cp /tmp/xcodebuild-notes /tmp/out
+[ "$(tr '\n' ' ' <<<"$locked")" = "cp /tmp/xcodebuild-notes /tmp/out " ] || fail "a command that only names xcodebuild in a path was changed or refused: $locked"
+run 2 env FOO=1 xcodebuild test -scheme AgenthailIOS
+[ -z "$locked" ] || fail "xcodebuild run through env was run unchecked"
 
 run 2 sh -c "xcodebuild test -scheme AgenthailIOS"
 [ -z "$locked" ] || fail "xcodebuild inside a shell was run unchecked"
