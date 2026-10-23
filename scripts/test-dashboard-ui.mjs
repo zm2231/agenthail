@@ -260,6 +260,8 @@ const colourOf = (doc) => (value) => surfaces[doc.documentElement.dataset.theme]
   close(zero.y0, 100, "0deg starts at the bottom");
   close(zero.y1, 0, "and ends at the top");
 
+  const flower = new Uint8ClampedArray([10, 10, 10, 255, 10, 10, 10, 255, 250, 240, 230, 255, 10, 10, 10, 255]);
+  assert.deepEqual(backdrop.distinctColours(flower), [[10 / 255, 10 / 255, 10 / 255], [250 / 255, 240 / 255, 230 / 255]], "every distinct pixel is measured, so a one-pixel highlight counts");
   assert.equal(backdrop.textureStyle("scanlines", 0), null);
   assert.match(backdrop.textureStyle("scanlines", 0.2, 4).backgroundImage, /rgb\(0 0 0 \/ 0\.2\) 0 1px, transparent 1px 4px/);
   assert.deepEqual(backdrop.textureStyle("grain", 0.4), { opacity: "0.2", mixBlendMode: "overlay" });
@@ -315,6 +317,8 @@ const colourOf = (doc) => (value) => surfaces[doc.documentElement.dataset.theme]
   const look = backdropLook(values, "dark", base);
   assert.deepEqual(look.spec, { kind: "image", path: "art/tide-dark.jpg" });
   assert.equal(look.strength, 1, "empty views use background.opacity");
+  assert.equal(look.scale, 1);
+  assert.equal(backdropLook(values, "dark", { ...base, scale: 2 }).scale, 2, "a high-density display is sampled at its own pixels");
   assert.equal(look.roles.length, 3, "every text role is measured");
   assert.equal(backdropLook(values, "dark", { ...base, sessionOpen: true }).strength, 0.4, "an open session uses background.session-opacity");
   assert.equal(backdropLook(values, "light", base).spec.path, "art/tide-light.jpg", "light draws background.light");

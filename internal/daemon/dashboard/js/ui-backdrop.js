@@ -1,7 +1,6 @@
 import { blendFloor, boundary, gamma, linear, luminance, passes } from "./ui-contrast.js";
 
 const MESH_WIDTH = 192;
-const SAMPLE_SCALE = 8;
 
 function hexColour(value) {
   const match = /^#([0-9a-f]{6})$/i.exec(value || "");
@@ -133,7 +132,7 @@ export function pageScrim(samples, roles, polarity, target, ground) {
   const limit = boundary(roles, polarity, target);
   let alpha = 0;
   for (const colour of samples) {
-    if (passes(luminance(colour), limit, polarity)) continue;
+    if (passes(luminance(colour.map((v, i) => v + (ground[i] - v) * alpha)), limit, polarity)) continue;
     alpha = Math.max(alpha, blendFloor(colour, ground, polarity, limit));
     if (alpha >= 1) break;
   }
@@ -178,6 +177,19 @@ export function textureExtremes(colour, texture, strength, polarity) {
   return [];
 }
 
+export function distinctColours(data) {
+  const seen = new Uint8Array(1 << 21);
+  const out = [];
+  for (let i = 0; i < data.length; i += 4) {
+    const n = (data[i] << 16) | (data[i + 1] << 8) | data[i + 2];
+    const bit = 1 << (n & 7);
+    if (seen[n >> 3] & bit) continue;
+    seen[n >> 3] |= bit;
+    out.push([data[i] / 255, data[i + 1] / 255, data[i + 2] / 255]);
+  }
+  return out;
+}
+
 function canvas(document, width, height) {
   const element = document.createElement("canvas");
   element.width = width;
@@ -220,9 +232,9 @@ export function createBackdrop({ document, loadImage }) {
     return element.toDataURL();
   };
 
-  const sample = async (spec, fit, position, width, height, ground) => {
-    const w = Math.max(Math.round(width / SAMPLE_SCALE), 1);
-    const h = Math.max(Math.round(height / SAMPLE_SCALE), 1);
+  const sample = async (spec, fit, position, width, height, scale, ground) => {
+    const w = Math.max(Math.round(width * scale), 1);
+    const h = Math.max(Math.round(height * scale), 1);
     const element = canvas(document, w, h);
     const context = element.getContext("2d", { willReadFrequently: true });
     context.fillStyle = hex(ground);
@@ -230,8 +242,8 @@ export function createBackdrop({ document, loadImage }) {
     if (spec.kind === "image") {
       const image = await loadImage(backgroundURL(spec.path));
       if (!image) return null;
-      const iw = image.naturalWidth / SAMPLE_SCALE;
-      const ih = image.naturalHeight / SAMPLE_SCALE;
+      const iw = image.naturalWidth * scale;
+      const ih = image.naturalHeight * scale;
       if (fit === "tile") {
         for (let y = 0; y < h; y += ih) for (let x = 0; x < w; x += iw) context.drawImage(image, x, y, iw, ih);
       } else {
@@ -253,15 +265,12 @@ export function createBackdrop({ document, loadImage }) {
       smallContext.putImageData(image, 0, 0);
       context.drawImage(small, 0, 0, w, h);
     }
-    const data = context.getImageData(0, 0, w, h).data;
-    const out = [];
-    for (let i = 0; i < data.length; i += 4) out.push([data[i] / 255, data[i + 1] / 255, data[i + 2] / 255]);
-    return out;
+    return distinctColours(context.getImageData(0, 0, w, h).data);
   };
 
   const render = async (look) => {
     const mine = ++generation;
-    const { spec, fit, position, strength, dim, texture, textureStrength, textureSpacing, polarity, ground, roles, target, readable, width, height } = look;
+    const { spec, fit, position, strength, dim, texture, textureStrength, textureSpacing, polarity, ground, roles, target, readable, width, height, scale } = look;
     const style = pictureStyle(spec, fit, position, spec?.kind === "mesh" ? meshURL(spec, width, height) : null);
     document.documentElement.toggleAttribute("data-backdrop", Boolean(style));
     Object.assign(layers.picture.style, { backgroundImage: "", backgroundSize: "", backgroundRepeat: "", backgroundPosition: "" }, style || {});
@@ -275,7 +284,7 @@ export function createBackdrop({ document, loadImage }) {
       layers.scrim.style.opacity = "0";
       return 0;
     }
-    const pixels = await sample(spec, fit, position, width, height, ground);
+    const pixels = await sample(spec, fit, position, width, height, scale || 1, ground);
     if (mine !== generation) return null;
     let samples = [];
     if (pixels) {
