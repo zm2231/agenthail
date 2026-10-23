@@ -25,6 +25,7 @@ struct AgenthailVoiceOperatorSheet: View {
     @State private var atLatest = true
     @State private var userScrolling = false
     @State private var position = ScrollPosition(edge: .bottom)
+    @State private var bottomRepin: Task<Void, Never>?
     let rowMemory: TranscriptRowMemory
     let openSession: (String) -> Void
 
@@ -125,6 +126,15 @@ struct AgenthailVoiceOperatorSheet: View {
                 } action: { _, value in
                     atLatest = value
                 }
+                // The navigation bar settles after the first layout and moves
+                // the top inset after the initial offset is set, which leaves
+                // the view past its bottom. Following the latest re-pins the
+                // bottom once an inset change has been applied.
+                .onScrollGeometryChange(for: EdgeInsets.self) { $0.contentInsets } action: { old, new in
+                    guard followingLatest, old != new else { return }
+                    bottomRepin?.cancel()
+                    bottomRepin = Task { if !Task.isCancelled, followingLatest { position.scrollTo(edge: .bottom) } }
+                }
                 .onChange(of: model.latestContentMarker) { _, _ in
                     if followingLatest, !showActivity { position.scrollTo(edge: .bottom) }
                 }
@@ -170,7 +180,7 @@ struct AgenthailVoiceOperatorSheet: View {
             }
             .sheet(isPresented: $showDetails) { connectionDetails }
             .onAppear { model.screenAppeared() }
-            .onDisappear { model.screenDisappeared() }
+            .onDisappear { bottomRepin?.cancel(); model.screenDisappeared() }
             .confirmationDialog("Interrupt the orchestrator's current turn? This does not stop delegated agents.", isPresented: $confirmInterrupt) {
                 Button("Interrupt orchestrator", role: .destructive) { Task { await model.interrupt() } }
             }
