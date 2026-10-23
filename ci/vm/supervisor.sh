@@ -8,6 +8,7 @@ label="agenthail-vm"
 slots="${AGENTHAIL_CI_VM_SLOTS:-2}"
 cpu="${AGENTHAIL_CI_VM_CPU:-4}"
 memory_mb="${AGENTHAIL_CI_VM_MEMORY_MB:-8192}"
+hooks="${AGENTHAIL_CI_HOOKS_DIR:-$HOME/actions-runner-agenthail-hooks}"
 min_free_gb=25
 max_vm_minutes=50
 idle_minutes=5
@@ -107,14 +108,16 @@ finish_slot() {
 }
 
 run_slot() {
-	local base response jit started exec_pid run_pid phase=waiting
+	local base response jit hook_sha started exec_pid run_pid phase=waiting
 	base="$(image)"
 	[ -n "$base" ] || { log "slot $slot: no agenthail-ci-YYYYMMDD image"; exit 1; }
+	hook_sha="$(shasum -a 256 "$hooks/job-started.sh" | cut -d' ' -f1)"
+	[ -n "$hook_sha" ] || { log "slot $slot: no job-started hook at $hooks/job-started.sh"; exit 1; }
 	echo booting >"$state/slot-$slot.phase"
 	discard_vm "$vm"
 	tart clone "$base" "$vm"
 	tart set "$vm" --cpu "$cpu" --memory "$memory_mb"
-	tart run --no-graphics --net-softnet --net-softnet-block=192.168.0.0/16 "$vm" >/dev/null 2>&1 &
+	tart run --no-graphics --net-softnet --net-softnet-block=192.168.0.0/16 --dir="hooks:$hooks:ro" "$vm" >/dev/null 2>&1 &
 	run_pid=$!
 	for _ in $(seq 1 60); do
 		tart exec "$vm" true >/dev/null 2>&1 && break
@@ -131,7 +134,23 @@ run_slot() {
 	echo waiting >"$state/slot-$slot.phase"
 	log "slot $slot: $base booted, runner $runner_id waiting for a job"
 
-	printf '%s\n' "$jit" | tart exec -i "$vm" /bin/bash -c 'read -r jit; p="$(cat ~/actions-runner/.path)" && [ -n "$p" ] || exit 1; PATH="$p" exec ~/actions-runner/run.sh --jitconfig "$jit"' >"$logs/slot-$slot-runner.log" 2>&1 &
+	# The runner's .env hook path resolves through ~/actions-runner-hooks into
+	# the read-only share of the host's hooks directory. The runner does not
+	# start unless that path holds exactly the host's copy, so a missing share
+	# fails closed and counts toward the circuit breaker.
+	printf '%s\n%s\n' "$jit" "$hook_sha" | tart exec -i "$vm" /bin/bash -c '
+		read -r jit; read -r want
+		shared="/Volumes/My Shared Files/hooks"
+		hook=~/actions-runner-hooks/job-started.sh
+		grep -qx "ACTIONS_RUNNER_HOOK_JOB_STARTED=$hook" ~/actions-runner/.env || { echo "runner .env does not set the job-started hook" >&2; exit 1; }
+		if [ "$(readlink ~/actions-runner-hooks)" != "$shared" ]; then
+			rm -rf ~/actions-runner-hooks && ln -s "$shared" ~/actions-runner-hooks || exit 1
+		fi
+		for _ in $(seq 1 15); do [ -f "$hook" ] && break; sleep 2; done
+		have="$(shasum -a 256 "$hook" 2>/dev/null | cut -d" " -f1)"
+		[ -n "$have" ] && [ "$have" = "$want" ] || { echo "the job-started hook share is missing or differs from the host copy" >&2; exit 1; }
+		p="$(cat ~/actions-runner/.path)" && [ -n "$p" ] || exit 1
+		PATH="$p" exec ~/actions-runner/run.sh --jitconfig "$jit"' >"$logs/slot-$slot-runner.log" 2>&1 &
 	exec_pid=$!
 	unset jit
 	started="$(date +%s)"
