@@ -168,6 +168,22 @@ final class StaleConnectionTests: XCTestCase {
     }
 
     @MainActor
+    func testMentionFilesComeFromTheComputerThatRunsTheSession() async throws {
+        KeychainStore.removeAll()
+        ServedSessionProtocol.state.reset(holdDetailOn: nil)
+        defer { KeychainStore.removeAll() }
+        try AgenthailIOSTests.pair("hsrv", "https://srv.tailnet.ts.net", name: "srv")
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        model.connect()
+        for _ in 0..<150 where model.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
+        let files = await model.sessionFiles("hsrv::demo", query: "read me")
+        XCTAssertEqual(files, [SessionFile(path: "srv/demo/read me", dir: false)])
+        let unknown = await model.sessionFiles("hgone::demo", query: "x")
+        XCTAssertNil(unknown)
+        model.forgetHost("hsrv")
+    }
+
+    @MainActor
     func testReconnectingAComputerDropsItsOldRequestsAndOlderActivity() async throws {
         KeychainStore.removeAll()
         ServedSessionProtocol.state.reset(holdDetailOn: nil)
@@ -611,6 +627,11 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
                 Self.state.waitIfHeld(host, path)
                 respond(#"{"commands":[{"name":"\#(host)","description":"","argumentHint":"","insert":"/\#(host)"}],"unavailable":""}"#)
             }
+        case "/api/v1/session-files":
+            let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let id = items.first { $0.name == "id" }?.value ?? ""
+            let query = items.first { $0.name == "q" }?.value ?? ""
+            respond(#"{"files":[{"path":"\#(host)/\#(id)/\#(query)","dir":false}],"truncated":false}"#)
         case "/api/v1/session-stream":
             Self.state.open(host, self)
             open()

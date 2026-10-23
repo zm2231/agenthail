@@ -675,6 +675,8 @@ struct IOSComposer: View {
     @State private var showingTurnSettings = false
     @State private var showingPrompts = false
     @State private var loadedModels: [ModelOption]?
+    @State private var completionState = CompletionState(session: "", caret: 0)
+    @State private var editor = IOSComposerEditor()
 
     private var steering: Bool { detail.session.status == "busy" && detail.session.waitingOn == nil && detail.capabilities.steer && model.busyDelivery(for: detail.session.id) == "steer" }
     private var sending: Bool { model.sendingSessionIDs.contains(session.id) }
@@ -736,12 +738,19 @@ struct IOSComposer: View {
                     .disabled(!empty)
                     .accessibilityIdentifier("composer-stash")
                 }
+                if !completion.items.isEmpty || completion.notice != nil {
+                    CompletionRow(suggestions: completion.items, notice: completion.notice, choose: accept) {
+                        updateCompletion { $0.dismissed = draft.text }
+                    }
+                }
                 IOSComposerTextView(
                     text: $draft.text,
                     placeholder: steering ? "Steer this turn…" : "Message this agent…",
                     label: steering ? "Instruction for the current turn" : "Message to this agent",
                     lines: 1 ... 6,
-                    pasteAttachments: detail.capabilities.attach && detail.capabilities.send && !sending ? { model.paste($0) } : nil
+                    pasteAttachments: detail.capabilities.attach && detail.capabilities.send && !sending ? { model.paste($0) } : nil,
+                    editor: editor,
+                    onCaret: { caret in updateCompletion { $0.caret = caret } }
                 )
                 .padding(.horizontal, 8).padding(.top, 8)
                 let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
@@ -853,6 +862,48 @@ struct IOSComposer: View {
             }
         }
         .onChange(of: session.id) { _, _ in loadedModels = nil }
+        .task(id: mentionRequest) { await loadMentionFiles(mentionRequest) }
+    }
+
+    private var scopedCompletion: CompletionState { completionState.scoped(to: session.id, draft: draft.text) }
+
+    private func updateCompletion(_ change: (inout CompletionState) -> Void) {
+        var state = scopedCompletion
+        change(&state)
+        completionState = state
+    }
+
+    private var completionToken: CompletionToken? {
+        guard scopedCompletion.dismissed != draft.text else { return nil }
+        return CompletionToken.at(draft.text, caret: min(scopedCompletion.caret, (draft.text as NSString).length))
+    }
+
+    private var mentionRequest: MentionRequest? {
+        completionToken.flatMap { $0.trigger == .mention ? MentionRequest(session: session.id, query: $0.query) : nil }
+    }
+
+    private var completion: (items: [CompletionItem], notice: String?) {
+        guard let token = completionToken else { return ([], nil) }
+        let runtime = model.store.commands[session.id]
+        let mentioning = token.trigger == .mention
+        let files = scopedCompletion.files
+        let items = ComposerCompletion.items(for: token, appCommands: [], runtime: runtime, sessions: mentioning ? ComposerCompletion.sessions(model.snapshot?.sessions ?? [], from: session) : [], files: mentioning && files?.query == token.query ? files?.files ?? [] : [])
+        return (items, ComposerCompletion.notice(for: token, runtime: runtime))
+    }
+
+    private func loadMentionFiles(_ request: MentionRequest?) async {
+        guard let request else { return }
+        try? await Task.sleep(for: .milliseconds(120))
+        guard !Task.isCancelled else { return }
+        let found = await model.sessionFiles(request.session, query: request.query)
+        guard !Task.isCancelled else { return }
+        updateCompletion { $0.files = (request.query, found ?? []) }
+    }
+
+    private func accept(_ item: CompletionItem) {
+        guard let token = completionToken else { return }
+        let change = ComposerCompletion.edit(item, in: draft.text, at: token)
+        editor.replace(change.range, with: change.replacement, caret: change.caret)
     }
 
     private var modelName: String { detail.model ?? SessionStyle.agentName(detail.session.surface) }

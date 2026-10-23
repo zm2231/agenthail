@@ -1015,6 +1015,13 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         _ = NextFrame { Self.signposter.emitEvent("Session painted", id: open.id) }
     }
 
+    /// Files an `@` in this session's draft can name, from the computer that
+    /// runs it; nil when that computer can't be asked.
+    func sessionFiles(_ id: String, query: String) async -> [SessionFile]? {
+        guard let resolved = try? resolve(id) else { return nil }
+        return try? await resolved.api.sessionFiles(id: resolved.route.sessionID, query: query).files
+    }
+
     private func loadCommands(_ id: String) {
         guard case let (connection, route)? = try? resolveServer(id), let read = store.beginCommandsRead(id) else { return }
         Task { [weak self, store] in
