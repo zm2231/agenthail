@@ -57,6 +57,12 @@ func (h *claudeHost) forget() {
 	h.mu.Unlock()
 }
 
+// HostChanged drops the cached host listing after the host reports a change
+// to what a session waits on or runs, so the next read sees it.
+func (c *Claude) HostChanged() {
+	c.host.forget()
+}
+
 // listing is the host's sessions and orphans by conversation, with their
 // process ids. A host that does not answer is read from its state file, which
 // names the processes it started. While any host does not answer, a process
