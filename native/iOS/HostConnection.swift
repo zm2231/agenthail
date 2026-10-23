@@ -179,8 +179,9 @@ final class HostConnection {
                     if Task.isCancelled || stopped { return }
                     reconnecting = true
                     do {
-                        _ = try await api.version()
+                        let version = try await api.version()
                         guard !stopped else { return }
+                        build = version.build
                         recordStreamInterruption(probeError: nil)
                     } catch {
                         guard !stopped else { return }
