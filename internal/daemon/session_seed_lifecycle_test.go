@@ -45,7 +45,7 @@ func TestSessionSourceDoesNotPersistFailedSeedAsSuccess(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	adapter := &emptySeedSurface{daemonSurface: fake, started: make(chan struct{}, 2), seedErr: errors.New("provider unavailable")}
 	adapter.caps.Stream = true
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	if _, err := manager.prepareStream(context.Background(), &from, adapter); err == nil {
 		t.Fatal("failed seed was accepted")
 	}
@@ -79,7 +79,7 @@ func TestCodexSourceRecoversRecordsAfterSuccessfulSeedAndColdRestart(t *testing.
 		t.Fatal(err)
 	}
 	adapter := surfaces.NewCodex("http://127.0.0.1:1")
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	first, err := manager.prepareStream(context.Background(), &from, adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +170,7 @@ func TestCodexCatchupRejectsSamePathTranscriptReplacement(t *testing.T) {
 		},
 	}
 	adapter.caps.Stream = true
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	first, err := manager.prepareStream(context.Background(), &from, adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -250,7 +250,7 @@ func TestSessionSourceSeedDoesNotPromoteCallIDToTurnID(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	adapter := &identitySeedSurface{emptySeedSurface: &emptySeedSurface{daemonSurface: fake, started: make(chan struct{}, 1)}}
 	adapter.caps.Stream = true
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	subscription, err := manager.prepareStream(context.Background(), &from, adapter)
 	if err != nil {
 		t.Fatal(err)

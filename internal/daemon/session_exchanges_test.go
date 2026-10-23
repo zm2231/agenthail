@@ -161,7 +161,7 @@ func TestSourceStartRederivesAnEarlierJournalOnce(t *testing.T) {
 	earlierDerivationJournal(t, r, from.ID)
 	adapter := &rederiveSurface{daemonSurface: fake, items: transcriptItems()}
 	start := func() {
-		source := &sessionSource{manager: newSessionSourceManager(r), session: from, adapter: adapter, epoch: "rederive", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+		source := &sessionSource{manager: newTestSourceManager(t, r), session: from, adapter: adapter, epoch: "rederive", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 		if err := source.loadSeed(); err != nil {
 			t.Fatal(err)
 		}
@@ -210,7 +210,7 @@ func TestSessionStreamCursorRecoversAcrossARederivedJournal(t *testing.T) {
 	}
 	earlierDerivationJournal(t, r, from.ID)
 	adapter := &rederiveSurface{daemonSurface: fake, items: transcriptItems()}
-	source := &sessionSource{manager: newSessionSourceManager(r), session: from, adapter: adapter, epoch: "rederive", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	source := &sessionSource{manager: newTestSourceManager(t, r), session: from, adapter: adapter, epoch: "rederive", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	if err := source.catchUpLocalTranscript(context.Background(), "transcript"); err != nil {
 		t.Fatal(err)
 	}

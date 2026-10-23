@@ -19,19 +19,35 @@ func newTestDaemon(t testing.TB, r *registry.Registry, surfaces []surface.Surfac
 	return d
 }
 
-func TestATestDaemonStopsItsSessionSourcesWhenTheTestEnds(t *testing.T) {
-	var d *Daemon
-	t.Run("holds a source", func(t *testing.T) {
-		daemon, _, fake, from, _ := daemonFixture(t)
-		d = daemon
+func TestTestSessionSourcesStopWhenTheTestEnds(t *testing.T) {
+	var managers []*sessionSourceManager
+	t.Run("holds sources", func(t *testing.T) {
+		d, reg, fake, from, to := daemonFixture(t)
+		replacement := newTestSourceManager(t, reg)
+		managers = append(managers, d.sources, replacement)
 		if _, err := d.sources.hold(&from, fake, "test"); err != nil {
 			t.Fatal(err)
 		}
+		d.sources = replacement
+		if _, err := replacement.hold(&to, fake, "test"); err != nil {
+			t.Fatal(err)
+		}
 	})
-	d.sources.mu.Lock()
-	running, closed := len(d.sources.sources), d.sources.closed
-	d.sources.mu.Unlock()
-	if running != 0 || !closed {
-		t.Fatalf("after the test ended: %d sources running, manager closed=%v", running, closed)
+	for index, manager := range managers {
+		manager.mu.Lock()
+		running, closed := len(manager.sources), manager.closed
+		manager.mu.Unlock()
+		if running != 0 || !closed {
+			t.Fatalf("manager %d after the test ended: %d sources running, closed=%v", index, running, closed)
+		}
 	}
+}
+
+// newTestSourceManager is a session source manager for a test. Its cleanup
+// shuts the sources down before the cleanups registered earlier close the
+// registry they write to.
+func newTestSourceManager(t testing.TB, r *registry.Registry) *sessionSourceManager {
+	manager := newSessionSourceManager(r)
+	t.Cleanup(manager.shutdown)
+	return manager
 }

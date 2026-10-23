@@ -25,7 +25,7 @@ func TestAPISessionStreamReplaysJournalWithoutNewProviderRead(t *testing.T) {
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 1)}
 	adapter.caps.Stream = true
 	d = newTestDaemon(t, reg, []surface.Surface{adapter})
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	d.sources = manager
 	first, err := manager.subscribe(&from, adapter)
 	if err != nil {
@@ -331,7 +331,7 @@ func TestASessionStreamThatStopsReadingDuringABurstStillReceivesEveryRow(t *test
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 200)}
 	adapter.caps.Stream = true
 	d = newTestDaemon(t, reg, []surface.Surface{adapter})
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	defer manager.shutdown()
 	d.sources = manager
 	subscription, err := manager.subscribe(&from, adapter)
