@@ -55,7 +55,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 34
+	schemaVersion   = 35
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -799,6 +799,16 @@ CREATE TABLE IF NOT EXISTS session_runtime (
 	waiting_since_ms INTEGER NOT NULL DEFAULT 0,
 	waiting_announced INTEGER NOT NULL DEFAULT 0,
 	waiting_answerable INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS limit_resumes (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	turn_id TEXT NOT NULL,
+	account_key TEXT NOT NULL DEFAULT '',
+	refused_at_ms INTEGER NOT NULL DEFAULT 0,
+	resets_at_ms INTEGER NOT NULL DEFAULT 0,
+	state TEXT NOT NULL DEFAULT 'waiting',
+	attempts INTEGER NOT NULL DEFAULT 0,
+	updated_at_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS session_origins (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
@@ -2075,6 +2085,9 @@ const (
 	QueueHeldRetrying QueueHold = "retrying"
 	QueueHeldBehind   QueueHold = "behind"
 	QueueHeldUnloaded QueueHold = "notLoaded"
+	// QueueHeldLimited is a message to a session a usage limit stopped; it
+	// waits for the limit to reset.
+	QueueHeldLimited QueueHold = "limited"
 	// QueueHeldHostUnreachable is a send to a paired host's session that the
 	// host never received; it is replayed with its key when the host returns.
 	QueueHeldHostUnreachable QueueHold = "hostUnreachable"
@@ -2120,6 +2133,7 @@ func queueHoldCase(canSteer bool, mode deliverypolicy.Mode) string {
 	}
 	return `CASE WHEN q.status!='pending' THEN ''
 		WHEN q.host_request!='' THEN 'hostUnreachable'
+		WHEN ` + fmt.Sprintf(limitHeldFilter, "q.session_id") + ` THEN 'limited'
 		WHEN ` + fmt.Sprintf(queueToPeerSocket, "q") + ` AND ` + fmt.Sprintf(queuePeerRow, "q") + ` THEN CASE WHEN q.id!=` + fmt.Sprintf(earliest, "") + ` THEN 'behind' WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END
 		WHEN COALESCE(sr.waiting_id,'')!='' THEN 'waiting'` + steer + `
 		WHEN ` + queueTargetStatus + `='busy' THEN 'busy'
@@ -2448,8 +2462,8 @@ const queuePeerRow = `%[1]s.operation='message' AND %[1]s.author!='person' AND %
 // claimCandidateFilter selects the session's next queued message, the one a
 // claim acts on.
 func claimCandidateFilter(sessionID, busyDelivery string, mode deliverypolicy.Mode) (string, []any) {
-	filter := `session_id=? AND host_request='' AND status IN ('pending','inflight') AND NOT EXISTS(SELECT 1 FROM session_moves WHERE conversation=? AND role='out' AND state IN ('preparing','sent'))`
-	args := []any{sessionID, sessionID}
+	filter := `session_id=? AND host_request='' AND status IN ('pending','inflight') AND NOT EXISTS(SELECT 1 FROM session_moves WHERE conversation=? AND role='out' AND state IN ('preparing','sent')) AND NOT ` + fmt.Sprintf(limitHeldFilter, "?")
+	args := []any{sessionID, sessionID, sessionID}
 	if busyDelivery == claimPeer {
 		filter += ` AND id=(SELECT MIN(m.id) FROM message_queue m WHERE m.session_id=? AND m.host_request='' AND m.status IN ('pending','inflight')) AND ` + fmt.Sprintf(queuePeerRow, "message_queue")
 		args = append(args, sessionID)
