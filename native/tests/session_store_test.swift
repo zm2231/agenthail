@@ -106,6 +106,11 @@ struct SessionStoreTest {
         commanded.prune(keeping: ["B"])
         check(commanded.commands.keys.sorted() == ["B"], "commands of sessions that no longer exist are dropped: \(commanded.commands.keys.sorted())")
 
+        let replaced = try! JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"B","seq":7,"type":"item","data":{"itemId":"state:commands","version":2,"op":"replace","kind":"commands","ts":"2026-10-23T08:00:00Z","truncated":false,"unavailable":"Commands run only when this session has Remote Control."}}"#.utf8))
+        check(replaced.data.kind == "commands" && replaced.data.commands == nil && replaced.data.unavailable == "Commands run only when this session has Remote Control.", "a commands row that omits an empty list still decodes")
+        let listedRow = try! JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"B","seq":8,"type":"item","data":{"itemId":"state:commands","version":3,"op":"replace","kind":"commands","ts":"2026-10-23T08:00:01Z","truncated":false,"commands":[{"name":"review","description":"Review a PR","argumentHint":"[pr]","insert":"/review"}]}}"#.utf8))
+        check(listedRow.data.commands == [review] && listedRow.data.unavailable == nil, "a commands row that omits an empty reason still decodes")
+
         var live = SessionState(id: "L", surface: "claude", name: "l", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(respond: true), readOnly: true, readOnlyReason: "elsewhere")
         live.waitingOn = nil
         let refreshed = SessionStore.live(detail("L"), live)
