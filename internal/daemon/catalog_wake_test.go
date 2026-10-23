@@ -227,3 +227,19 @@ func TestAFolderWhoseParentIsMissingIsLeftToTheTicker(t *testing.T) {
 		t.Fatalf("followed %v, want no ancestor above the missing folder's parent", followed)
 	}
 }
+
+func TestAMissingFolderInTheHomeFolderIsLeftToTheTicker(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	claude := newWatchingSurface(surface.KindClaude, func() []string { return []string{filepath.Join(home, "sessions")} })
+	followed := []string{}
+	wakes := newCatalogWakes([]surface.Surface{claude}, func(dir string) *filewake.Wake {
+		followed = append(followed, dir)
+		return filewake.FollowDir(dir)
+	})
+	defer wakes.close()
+	wakes.sync()
+	if len(followed) != 0 {
+		t.Fatalf("followed %v, want the home folder left unwatched", followed)
+	}
+}

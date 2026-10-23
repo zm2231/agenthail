@@ -3,6 +3,7 @@ package daemon
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/zm2231/agenthail/internal/filewake"
@@ -28,9 +29,9 @@ type catalogWakes struct {
 
 // catalogWake follows one folder. A folder a surface names is followed
 // itself; one that does not exist yet is waited for from its parent, which
-// asks for a pass only once the folder appears. A higher ancestor is left to
-// the ticker: on kqueue a followed folder costs a descriptor per entry, and
-// the nearest existing one may be the home folder.
+// asks for a pass only once the folder appears. A higher ancestor, or a
+// parent that is the home folder or above it, is left to the ticker: on
+// kqueue a followed folder costs a descriptor per entry.
 type catalogWake struct {
 	kinds  map[surface.SurfaceKind]bool
 	named  bool
@@ -67,7 +68,7 @@ func (c *catalogWakes) sync() {
 				continue
 			}
 			parent := filepath.Dir(dir)
-			if parent == dir || !existingDir(parent) {
+			if parent == dir || holdsHome(parent) || !existingDir(parent) {
 				continue
 			}
 			watch := want(parent)
@@ -181,4 +182,13 @@ func anyExistingDir(paths []string) bool {
 		}
 	}
 	return false
+}
+
+func holdsHome(dir string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	relative, err := filepath.Rel(dir, filepath.Clean(home))
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
