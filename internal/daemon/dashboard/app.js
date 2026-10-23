@@ -437,6 +437,7 @@ function showView(name) {
     .forEach((link) =>
       link.classList.toggle("active", link.dataset.view === view),
     );
+  document.documentElement.toggleAttribute("data-session-open", view === "conversations");
   if (location.hash !== `#${view}`) history.replaceState(null, "", `#${view}`);
   if (view === "conversations" && app.hasState && !app.selected && !mobileConversationView()) {
     const first = scopedSessions()[0] || app.state.sessions[0];
