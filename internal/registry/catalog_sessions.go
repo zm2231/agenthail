@@ -722,6 +722,11 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 	if err := tx.QueryRow(`SELECT MAX(seq) FROM catalog_events`).Scan(&latest); err != nil {
 		return CatalogSnapshot{}, err
 	}
+	rows, err := tx.Query(catalogSnapshotQuery)
+	if err != nil {
+		return CatalogSnapshot{}, err
+	}
+	defer rows.Close()
 	snapshot := CatalogSnapshot{HostEpoch: epoch, Surfaces: []CatalogSurfaceState{}}
 	if latest.Valid {
 		if latest.Int64 < 0 {
@@ -729,7 +734,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		}
 		snapshot.CatalogSeq = uint64(latest.Int64)
 	}
-	if snapshot.Sessions, err = queryRows(tx, []CatalogSessionState{}, scanCatalogSession, catalogSnapshotQuery); err != nil {
+	if snapshot.Sessions, err = appendRows([]CatalogSessionState{}, rows, scanCatalogSession); err != nil {
 		return CatalogSnapshot{}, err
 	}
 	surfaces, err := catalogSurfaces(tx)
