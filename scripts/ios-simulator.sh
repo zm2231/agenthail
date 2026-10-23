@@ -34,7 +34,7 @@ case "${2:-}" in
     [ "$#" -ge 3 ] || usage
     shift 2
     # Fixed path, not TMPDIR: every session on this machine must contend for the same lock.
-    lock="${AGENTHAIL_SIMULATOR_LOCK_DIR:-/tmp}/agenthail-simulator-$udid.lock"
+    lock="/tmp/agenthail-simulator-$udid.lock"
     xcrun simctl boot "$udid" 2>/dev/null || true
     xcrun simctl bootstatus "$udid" -b >/dev/null
     AGENTHAIL_SIMULATOR_UDID="$udid" exec lockf -k "$lock" "$@"
