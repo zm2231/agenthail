@@ -223,6 +223,24 @@ func TestSessionCreateReportsAcceptedLaunchWithoutRetrySignal(t *testing.T) {
 	}
 }
 
+func TestAnAcceptedLaunchThatLostItsNameSaysSo(t *testing.T) {
+	d, r, fake, _, _ := daemonFixture(t)
+	fake.kind = surface.KindClaude
+	d.Surfaces = []surface.Surface{fake}
+	d.SetLaunchers([]surface.Launcher{&launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}, launchErr: surface.LaunchAcceptedError{Launcher: surface.LauncherCMUX, Err: errors.New("malformed output")}}})
+	w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", fmt.Sprintf(`{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello","cwd":%q,"alias":"builder"}`, t.TempDir()))
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != http.StatusAccepted || body["accepted"] != true {
+		t.Fatalf("status=%d body=%s err=%v", w.Code, w.Body.String(), err)
+	}
+	if body["warning"] != "Submitted to cmux. Its name @builder wasn't kept; name it once it appears in the sidebar." {
+		t.Fatalf("warning=%v", body["warning"])
+	}
+	if err := r.SetAlias("builder", "from"); err != nil {
+		t.Fatalf("the name the warning says was not kept is still held: %v", err)
+	}
+}
+
 func TestSessionCreateRejectsAliasCollisionBeforeLaunch(t *testing.T) {
 	d, r, fake, from, _ := daemonFixture(t)
 	fake.kind = surface.KindClaude
