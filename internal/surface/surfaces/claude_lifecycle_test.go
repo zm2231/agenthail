@@ -163,7 +163,8 @@ func TestClaudeStopThatCannotRunIsAFailureNotUnknown(t *testing.T) {
 	home := t.TempDir()
 	script := `#!/bin/sh
 if [ "$1" = agents ]; then
- printf '[{"id":"job12345","sessionId":"fixture-session","kind":"background","cwd":"%s/removed","state":"working"}]\n' "$HOME"
+ printf '[{"id":"job12345","sessionId":"fixture-session","kind":"background","cwd":"%s","state":"working"}]\n' "$HOME"
+ rm "$0"
 fi
 `
 	binary := filepath.Join(home, "claude")
@@ -182,5 +183,40 @@ func TestClaudeCreationTheHostNeverReceivedIsAFailureNotUnknown(t *testing.T) {
 	session, sent, err := NewClaude(nil, host.Home).StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
 	if session != nil || sent != nil || !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("session=%+v sent=%+v err=%v", session, sent, err)
+	}
+}
+
+func TestClaudeStopsAJobWhoseFolderIsGone(t *testing.T) {
+	home := t.TempDir()
+	script := `#!/bin/sh
+if [ "$1" = agents ]; then
+ printf '[{"id":"job12345","sessionId":"fixture-session","kind":"background","cwd":"%s/removed","state":"working"}]\n' "$HOME"
+else
+ echo "$@" >> "$HOME/calls"
+fi
+`
+	binary := filepath.Join(home, "claude")
+	if err := os.WriteFile(binary, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
+	c := NewClaude(nil, home)
+	for _, action := range []string{"stop", "logs"} {
+		if _, err := c.SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, action); err != nil {
+			t.Fatalf("%s: %v", action, err)
+		}
+	}
+	calls, err := os.ReadFile(filepath.Join(home, "calls"))
+	if err != nil || string(calls) != "stop job12345\nlogs job12345\n" {
+		t.Fatalf("calls=%q err=%v", calls, err)
+	}
+}
+
+func TestClaudeCreationInAFolderThatIsGoneSaysSo(t *testing.T) {
+	home, c := fakeBackgroundClaude(t)
+	gone := filepath.Join(home, "removed")
+	session, _, err := c.BackgroundStarter().StartSession(context.Background(), surface.SessionStartOptions{Message: "hello", Cwd: gone})
+	if session != nil || !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryOutcomeUnknown(err) || !strings.Contains(err.Error(), "folder "+gone+" is gone") {
+		t.Fatalf("session=%+v err=%v", session, err)
 	}
 }
