@@ -1047,8 +1047,15 @@ func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*s
 }
 
 func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
+	var commands *commandsWatch
+	if uuid == "" {
+		onEvent = serializedEvents(onEvent)
+		listed := *sess
+		commands = watchCommands(ctx, func(ctx context.Context) (*surface.RuntimeCommands, error) { return c.Commands(ctx, &listed) }, onEvent)
+		defer commands.Stop()
+	}
 	if sess.Transport == codexTransportManaged {
-		return c.streamManaged(ctx, sess, uuid, onEvent, timeout)
+		return c.streamManaged(ctx, sess, uuid, onEvent, commands, timeout)
 	}
 	if !sess.TranscriptOffsetSet {
 		read, err := c.ReadSession(ctx, sess, surface.SessionReadRequest{Limit: timelineItemLimit})
@@ -1092,13 +1099,13 @@ func codexDesktopKeyKind(kind string) string {
 	}
 }
 
-func (c *Codex) streamManaged(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
+func (c *Codex) streamManaged(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), commands *commandsWatch, timeout time.Duration) error {
 	client, err := c.openReader(ctx, sess)
 	if err != nil {
 		return err
 	}
 	defer client.Close()
-	return c.streamManagedClient(ctx, client, sess, uuid, onEvent, timeout)
+	return c.streamManagedClient(ctx, client, sess, uuid, onEvent, commands, timeout)
 }
 
 func codexManagedAuthoritativeStreamEvent(turnID string, item codexAssistantItem) surface.StreamEvent {
@@ -1150,7 +1157,7 @@ func (c *Codex) subscribeManagedThread(ctx context.Context, client codexClient, 
 	return err == nil
 }
 
-func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
+func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), commands *commandsWatch, timeout time.Duration) error {
 	emitted := ""
 	baselineTurnID := ""
 	finalEmitted := false
@@ -1166,6 +1173,10 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 		}
 		changed := false
 		for _, event := range notifier.DrainNotifications() {
+			if event.Method == "skills/changed" && commands != nil {
+				commands.Refresh()
+				continue
+			}
 			if !codexContainsID(event.Params, sess.ID) {
 				continue
 			}

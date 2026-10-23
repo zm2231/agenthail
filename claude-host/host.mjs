@@ -34,6 +34,13 @@ const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 const MAX_REQUEST_INPUT = 16 << 10;
 const MAX_REQUEST_TEXT = 2000;
 const MAX_SETTINGS = 2000;
+// A command listing starts Claude for a folder without a conversation. Its
+// session id starts with this prefix, so Agenthail does not take the
+// process's session record for a session.
+const LISTING_SESSION_PREFIX = '00000000-0000-4000-8000-';
+const LISTING_FRESH_MS = 5 * 60_000;
+const LISTING_TIMEOUT_MS = Number(process.env.AGENTHAIL_CLAUDE_HOST_LISTING_TIMEOUT_MS) || 15_000;
+const MAX_LISTINGS = 64;
 const DECLINED = 'The person declined this request.';
 const WITHDRAWN = 'The request was withdrawn before anyone answered it.';
 
@@ -109,6 +116,20 @@ class Session {
     this.ambient = new Set();
     this.context = null;
     this.measuring = null;
+    this.offered = null;
+    this.commands = null;
+    this.terminalCommands = new Set();
+  }
+
+  // setCommands keeps the commands a person can run in the session, without
+  // the ones Claude says only a terminal runs.
+  setCommands(commands) {
+    if (Array.isArray(commands)) this.offered = commands;
+    if (!this.offered) return;
+    const next = runnableCommands(this.offered, this.terminalCommands);
+    if (JSON.stringify(next) === JSON.stringify(this.commands)) return;
+    this.commands = next;
+    emit(this.id, 'commands', { commands: next });
   }
 
   // measureAfter records, off the message loop and one result at a time, the
@@ -265,6 +286,7 @@ class Session {
       autoCompact: this.context?.autoCompact ?? null,
       requests: [...this.pending.values()].map((p) => p.request),
       tasks: this.describeTasks(),
+      commands: this.commands,
     };
   }
 
@@ -349,6 +371,7 @@ const methods = {
     killSession(s);
     return {};
   },
+  commands: listCommands,
   list: () => ({
     sessions: [...sessions.values()].map((s) => s.describe()),
     orphans: liveOrphans(),
@@ -403,6 +426,7 @@ async function open(params) {
   sessions.set(id, s);
   let exited;
   const exit = new Promise((resolve) => (exited = resolve));
+  let init;
   try {
     s.query = query({
       prompt: s.input(),
@@ -437,7 +461,7 @@ async function open(params) {
       },
     });
     s.done = run(s, exit);
-    await Promise.race([
+    init = await Promise.race([
       s.query.initializationResult(),
       exit.then((status) => Promise.reject(new StartError(`Claude exited while starting: ${s.stderr.trim() || 'no output'}`, status))),
       timeout(OPEN_TIMEOUT_MS, 'Claude did not start'),
@@ -448,9 +472,97 @@ async function open(params) {
     if (!s.done) sessions.delete(id);
     throw new HostError(error instanceof StartError && error.refused ? 'refused' : 'open_failed', error.message);
   }
+  s.setCommands(init.commands);
   if (params.permissionMode || params.model) s.remember();
   s.setState('idle');
   return s.describe();
+}
+
+// runnableCommands is one entry per name a person can type. Rows can share a
+// name, and /name runs Claude's own command when one has it. Names Claude
+// keeps for itself start with two underscores.
+function runnableCommands(commands, terminal) {
+  const byName = new Map();
+  for (const command of commands) {
+    const name = typeof command?.name === 'string' ? command.name : '';
+    if (!name || name.startsWith('__') || terminal.has(name)) continue;
+    if (byName.has(name) && !command.builtin) continue;
+    byName.set(name, {
+      name,
+      description: typeof command.description === 'string' ? command.description : '',
+      argumentHint: typeof command.argumentHint === 'string' ? command.argumentHint : '',
+    });
+  }
+  return [...byName.values()];
+}
+
+// listings caches, per folder and config directory, the commands Claude
+// offers a session started there. A listing older than LISTING_FRESH_MS is
+// answered from the cache while a new one runs. Listings run one at a time,
+// each killed after LISTING_TIMEOUT_MS, and the same folder is listed once
+// however many ask.
+const listings = new Map();
+let listingQueue = Promise.resolve();
+
+async function listCommands({ cwd, configDir } = {}) {
+  if (typeof cwd !== 'string' || !path.isAbsolute(cwd) || !fs.statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) {
+    throw new HostError('invalid', `cwd must be an existing absolute directory: ${cwd}`);
+  }
+  if (configDir !== undefined && configDir !== '' && (typeof configDir !== 'string' || !path.isAbsolute(configDir))) {
+    throw new HostError('invalid', `configDir must be an absolute path: ${configDir}`);
+  }
+  const key = `${configDir || ''}\0${cwd}`;
+  let entry = listings.get(key);
+  if (!entry) {
+    entry = { commands: null, listedAt: 0, running: null };
+    listings.set(key, entry);
+    while (listings.size > MAX_LISTINGS) listings.delete(listings.keys().next().value);
+  }
+  if (!entry.running && Date.now() - entry.listedAt > LISTING_FRESH_MS) {
+    const listed = listingQueue.then(() => listFolder(cwd, configDir || ''));
+    listingQueue = listed.catch(() => {});
+    entry.running = listed.then(
+      (commands) => {
+        entry.commands = commands;
+        entry.listedAt = Date.now();
+      },
+      (error) => log(`listing Claude's commands for ${cwd} failed: ${error.message}`),
+    ).finally(() => {
+      entry.running = null;
+    });
+  }
+  if (!entry.commands) await entry.running;
+  if (!entry.commands) throw new HostError('listing_failed', `Claude did not list its commands for ${cwd}`);
+  return { commands: entry.commands, listedAt: new Date(entry.listedAt).toISOString() };
+}
+
+// listFolder starts Claude in cwd without a prompt and reads the commands it
+// reports while starting. Without a turn Claude writes no conversation and
+// calls no model. Hooks and MCP servers stay off: neither changes which
+// commands exist, and a hook could take the process for a session.
+async function listFolder(cwd, configDir) {
+  const abort = new AbortController();
+  const listing = query({
+    prompt: (async function* () {
+      await new Promise((resolve) => abort.signal.addEventListener('abort', resolve));
+    })(),
+    options: {
+      cwd,
+      sessionId: LISTING_SESSION_PREFIX + randomUUID().slice(-12),
+      abortController: abort,
+      env: { ...process.env, ENABLE_CLAUDEAI_MCP_SERVERS: 'false', ...(configDir ? { CLAUDE_CONFIG_DIR: configDir } : {}) },
+      pathToClaudeCodeExecutable: args.claude,
+      settingSources: ['user', 'project', 'local'],
+      extraArgs: { 'strict-mcp-config': null, settings: JSON.stringify({ disableAllHooks: true }) },
+    },
+  });
+  try {
+    const init = await Promise.race([listing.initializationResult(), timeout(LISTING_TIMEOUT_MS, 'Claude did not list its commands')]);
+    return runnableCommands(init.commands ?? [], new Set());
+  } finally {
+    abort.abort();
+    listing.close();
+  }
 }
 
 function permissionRequest(tool, input, options) {
@@ -733,6 +845,12 @@ async function run(s, exit) {
       if (message.type === 'system' && (message.subtype === 'init' || message.subtype === 'status') && PERMISSION_MODES.has(message.permissionMode) && message.permissionMode !== s.permissionMode) {
         s.permissionMode = message.permissionMode;
         emit(s.id, 'permission_mode', { permissionMode: s.permissionMode });
+      }
+      if (message.type === 'system' && message.subtype === 'init' && Array.isArray(message.terminal_slash_commands)) {
+        s.terminalCommands = new Set(message.terminal_slash_commands);
+        s.setCommands();
+      } else if (message.type === 'system' && message.subtype === 'commands_changed') {
+        s.setCommands(message.commands);
       }
       if (message.type === 'system' && message.subtype === 'session_state_changed') {
         s.stateEvents = true;

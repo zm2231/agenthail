@@ -352,7 +352,9 @@ func TestAManagedStreamWaitsForTheFirstTurnOfANewThread(t *testing.T) {
 	var events []surface.StreamEvent
 	go func() {
 		done <- isolatedManagedRuntime(t).Stream(context.Background(), managedSession(), "", func(event surface.StreamEvent) {
-			events = append(events, event)
+			if event.Kind != "commands" {
+				events = append(events, event)
+			}
 		}, 5*time.Second)
 	}()
 	awaitCalls(t, fake, "thread/turns/list", 3)

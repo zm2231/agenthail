@@ -43,6 +43,9 @@ func TestClaudeCatchUpPageCarriesTheLiveTurnsAndDoneKeys(t *testing.T) {
 	live := map[string]string{}
 	liveDone := map[string]string{}
 	err = NewClaude(nil, t.TempDir()).Stream(context.Background(), session, "", func(event surface.StreamEvent) {
+		if event.Kind == "commands" {
+			return
+		}
 		if event.Kind == "done" {
 			liveDone[event.ID] = event.TurnID
 		} else if event.ID != "" {
