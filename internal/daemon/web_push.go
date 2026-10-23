@@ -30,84 +30,6 @@ const webPushQuestionTTL = 15 * 60
 
 var webPushHTTPClient webpush.HTTPClient = &http.Client{Timeout: 12 * time.Second}
 
-// webPushCloseAge is how old a browser notification must be before a
-// withdraw closes it. Safari refuses to close a service worker's notification
-// in its first 30 seconds, so an earlier withdraw would leave it shown; the
-// rest covers the push service's delivery.
-var webPushCloseAge = 35 * time.Second
-
-// browserWithdrawals spaces the withdraws sent to browsers so that each
-// closes only notifications Safari will close: the question, at least
-// webPushCloseAge after it was sent, and the Answered marker the previous
-// withdraw left, at least webPushCloseAge after that withdraw went out.
-type browserWithdrawals struct {
-	mu      sync.Mutex
-	shown   map[string]time.Time
-	pending map[string]bool
-	// sending is held from the wait for the previous withdraw through a
-	// send, so withdraws go out one at a time; lastSent is guarded by it.
-	sending  sync.Mutex
-	lastSent time.Time
-}
-
-// shownAt records that a question went to browsers. Questions sent longer
-// than webPushCloseAge ago are forgotten: they can be closed at any time.
-func (w *browserWithdrawals) shownAt(collapseID string, now time.Time) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.shown == nil {
-		w.shown = map[string]time.Time{}
-	}
-	for key, at := range w.shown {
-		if now.Sub(at) >= webPushCloseAge {
-			delete(w.shown, key)
-		}
-	}
-	w.shown[collapseID] = now
-}
-
-// reserve is when the question under collapseID can be closed, marking a
-// withdraw for it as waiting; ok is false when one already is. A question
-// this daemon did not send is taken to be old enough.
-func (w *browserWithdrawals) reserve(collapseID string, now time.Time) (closable time.Time, ok bool) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.pending[collapseID] {
-		return time.Time{}, false
-	}
-	if w.pending == nil {
-		w.pending = map[string]bool{}
-	}
-	w.pending[collapseID] = true
-	closable = now
-	if shown, found := w.shown[collapseID]; found {
-		closable = shown.Add(webPushCloseAge)
-	}
-	return closable, true
-}
-
-func (w *browserWithdrawals) done(collapseID string) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	delete(w.pending, collapseID)
-}
-
-// waitUntil sleeps until at, returning false if ctx ends first.
-func waitUntil(ctx context.Context, at time.Time) bool {
-	wait := time.Until(at)
-	if wait <= 0 {
-		return ctx.Err() == nil
-	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return true
-	case <-ctx.Done():
-		return false
-	}
-}
-
 type webPushKeys struct {
 	PublicKey  string `json:"publicKey"`
 	PrivateKey string `json:"privateKey"`
@@ -204,9 +126,6 @@ func (d *Daemon) notifyBrowsers(ctx context.Context, notification mobileNotifica
 		CollapseID: boundedNotificationText(notification.CollapseID, 64),
 		RequestID:  boundedNotificationText(notification.RequestID, 240),
 	}
-	if message.CollapseID != "" {
-		d.browserWithdrawals.shownAt(message.CollapseID, time.Now())
-	}
 	urgency := webpush.UrgencyNormal
 	if notification.EventType == "session.waiting" {
 		urgency = webpush.UrgencyHigh
@@ -215,58 +134,40 @@ func (d *Daemon) notifyBrowsers(ctx context.Context, notification mobileNotifica
 }
 
 // withdrawFromBrowsers closes the notification each browser shows under
-// collapseID once browserWithdrawals allows; until then it waits in the
-// background, so a phone's withdraw is not held up. A message with the same
-// topic also replaces an undelivered one, so a browser that was offline never
-// shows the answered question.
-func (d *Daemon) withdrawFromBrowsers(collapseID string) {
-	collapseID = boundedNotificationText(collapseID, 64)
-	closable, ok := d.browserWithdrawals.reserve(collapseID, time.Now())
-	if !ok {
-		return
-	}
-	started := d.background.start(func(ctx context.Context) {
-		w := &d.browserWithdrawals
-		defer w.done(collapseID)
-		if !waitUntil(ctx, closable) {
-			return
-		}
-		w.sending.Lock()
-		defer w.sending.Unlock()
-		if !w.lastSent.IsZero() && !waitUntil(ctx, w.lastSent.Add(webPushCloseAge)) {
-			return
-		}
-		sendCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		defer cancel()
-		if d.sendToBrowsers(sendCtx, webPushMessage{Type: "withdraw", CollapseID: collapseID}, webpush.UrgencyNormal, "withdraw browser notification") {
-			w.lastSent = time.Now()
-		}
-	})
-	if !started {
-		d.browserWithdrawals.done(collapseID)
-	}
+// collapseID. A message with the same topic also replaces an undelivered
+// one, so a browser that was offline never shows the answered question.
+// Browsers on Apple's push service are left out: see withdrawsClose.
+func (d *Daemon) withdrawFromBrowsers(ctx context.Context, collapseID string) {
+	d.sendToBrowsers(ctx, webPushMessage{Type: "withdraw", CollapseID: boundedNotificationText(collapseID, 64)}, webpush.UrgencyNormal, "withdraw browser notification")
 }
 
-// sendToBrowsers sends message to every subscribed browser, reporting
-// whether it went to any.
-func (d *Daemon) sendToBrowsers(ctx context.Context, message webPushMessage, urgency webpush.Urgency, what string) bool {
+func (d *Daemon) sendToBrowsers(ctx context.Context, message webPushMessage, urgency webpush.Urgency, what string) {
 	subscriptions, err := d.Registry.BrowserPushSubscriptions()
 	if err != nil {
 		d.log.Printf("load browser push subscriptions: %s", err)
-		return false
+		return
+	}
+	if message.Type == "withdraw" {
+		closing := subscriptions[:0]
+		for _, subscription := range subscriptions {
+			if withdrawsClose(subscription.Endpoint) {
+				closing = append(closing, subscription)
+			}
+		}
+		subscriptions = closing
 	}
 	if len(subscriptions) == 0 {
-		return false
+		return
 	}
 	keys, err := webPushKey()
 	if err != nil {
 		d.log.Printf("%s: %s", what, err)
-		return false
+		return
 	}
 	payload, err := json.Marshal(message)
 	if err != nil {
 		d.log.Printf("%s: %s", what, err)
-		return false
+		return
 	}
 	var wait sync.WaitGroup
 	concurrency := make(chan struct{}, 4)
@@ -294,7 +195,15 @@ func (d *Daemon) sendToBrowsers(ctx context.Context, message webPushMessage, urg
 		}()
 	}
 	wait.Wait()
-	return true
+}
+
+// withdrawsClose is whether a withdraw sent to endpoint removes the answered
+// question. Safari, whose subscriptions are on Apple's push service, keeps a
+// service worker's notification in Notification Center after close(), so a
+// withdraw there would only add an Answered notification beside it.
+func withdrawsClose(endpoint string) bool {
+	parsed, err := url.Parse(endpoint)
+	return err != nil || parsed.Hostname() != "web.push.apple.com"
 }
 
 // webPushTopic is the Topic header for a collapse key. A topic is at most 32

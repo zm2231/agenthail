@@ -34,16 +34,11 @@ async function show(message) {
 // in the background" notice. So an answered marker is shown silently and
 // closed at once, which the system removes before presenting it. The marker
 // has its own tag: under the question's tag it would replace a notification
-// still on screen instead of arriving new. Safari refuses to close a
-// notification in its first 30 seconds, so there the marker stays until the
-// next withdraw closes it with the question; the daemon sends a withdraw only
-// once its question is past that age.
+// still on screen instead of arriving new.
 async function withdraw(message) {
   if (!message.collapseId) return;
+  for (const notification of await self.registration.getNotifications({ tag: message.collapseId })) notification.close();
   const marker = `${message.collapseId}:answered`;
-  for (const notification of await self.registration.getNotifications()) {
-    if (notification.tag === message.collapseId || notification.tag.endsWith(":answered")) notification.close();
-  }
   await self.registration.showNotification("Agenthail", { body: "Answered", icon, badge: icon, tag: marker, silent: true });
   for (const notification of await self.registration.getNotifications({ tag: marker })) notification.close();
 }

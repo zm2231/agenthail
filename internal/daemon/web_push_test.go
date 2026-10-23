@@ -103,7 +103,6 @@ func (b testPushBrowser) decrypt(t *testing.T, body []byte) []byte {
 type receivedPush struct {
 	header  http.Header
 	message webPushMessage
-	at      time.Time
 }
 
 type testPushService struct {
@@ -123,7 +122,7 @@ func newTestPushService(t *testing.T, browser testPushBrowser) *testPushService 
 			t.Errorf("payload: %v", err)
 		}
 		service.mu.Lock()
-		service.pushes = append(service.pushes, receivedPush{header: r.Header.Clone(), message: message, at: time.Now()})
+		service.pushes = append(service.pushes, receivedPush{header: r.Header.Clone(), message: message})
 		status := service.status
 		service.mu.Unlock()
 		w.WriteHeader(status)
@@ -164,23 +163,14 @@ func TestBrowsersGetEncryptedNotificationsAndWithdrawals(t *testing.T) {
 	service := newTestPushService(t, browser)
 	reg, _ := subscribedTestBrowser(t, service.server.URL+"/push/secret-capability", browser)
 	d := newTestDaemon(t, reg, nil)
-	closeAge(t, 300*time.Millisecond)
 	key := waitingNotificationKey("session", "question")
-	start := time.Now()
 	d.notifyPairedDevices(context.Background(), mobileNotification{Title: "Agenthail", Message: "Claude asks you a question", SessionID: "session", TurnID: "question", EventType: "session.waiting", CollapseID: key, RequestID: "request"})
 	d.withdrawFromPairedDevices(context.Background(), key)
-	if pushes := service.received(); len(pushes) != 1 {
-		t.Fatalf("a question was withdrawn before browsers can close it: %+v", pushes)
-	}
-	d.background.wait()
 	pushes := service.received()
 	if len(pushes) != 2 {
 		t.Fatalf("pushes=%+v", pushes)
 	}
 	shown, withdrawn := pushes[0], pushes[1]
-	if waited := withdrawn.at.Sub(start); waited < webPushCloseAge {
-		t.Fatalf("the withdraw came %s after its question was sent", waited)
-	}
 	if want := (webPushMessage{Type: "notify", Title: "Agenthail", Message: "Claude asks you a question", SessionID: "session", TurnID: "question", EventType: "session.waiting", CollapseID: key, RequestID: "request"}); shown.message != want {
 		t.Fatalf("shown=%+v", shown.message)
 	}
@@ -207,88 +197,46 @@ func TestBrowsersGetEncryptedNotificationsAndWithdrawals(t *testing.T) {
 	}
 }
 
-func closeAge(t *testing.T, age time.Duration) {
-	t.Helper()
-	previous := webPushCloseAge
-	webPushCloseAge = age
-	t.Cleanup(func() { webPushCloseAge = previous })
+type recordingPushClient struct {
+	mu    sync.Mutex
+	hosts []string
 }
 
-func TestAWithdrawForAQuestionThisDaemonDidNotSendGoesAtOnce(t *testing.T) {
-	browser := newTestPushBrowser(t)
-	service := newTestPushService(t, browser)
-	reg, _ := subscribedTestBrowser(t, service.server.URL+"/push/secret-capability", browser)
-	d := newTestDaemon(t, reg, nil)
-	closeAge(t, time.Hour)
-	key := waitingNotificationKey("session", "before-restart")
-	d.withdrawFromPairedDevices(context.Background(), key)
-	d.background.wait()
-	if pushes := service.received(); len(pushes) != 1 || pushes[0].message != (webPushMessage{Type: "withdraw", CollapseID: key}) {
-		t.Fatalf("pushes=%+v", pushes)
-	}
+func (c *recordingPushClient) Do(request *http.Request) (*http.Response, error) {
+	c.mu.Lock()
+	c.hosts = append(c.hosts, request.URL.Hostname())
+	c.mu.Unlock()
+	return &http.Response{StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader("")), Request: request}, nil
 }
 
-func TestWithdrawsAreSentOnceAndSpacedSoEachCanCloseThePreviousMarker(t *testing.T) {
-	browser := newTestPushBrowser(t)
-	service := newTestPushService(t, browser)
-	reg, _ := subscribedTestBrowser(t, service.server.URL+"/push/secret-capability", browser)
-	d := newTestDaemon(t, reg, nil)
-	closeAge(t, 300*time.Millisecond)
-	shown := waitingNotificationKey("session", "shown")
-	other := waitingNotificationKey("session", "other")
-	start := time.Now()
-	d.notifyPairedDevices(context.Background(), mobileNotification{Title: "Agenthail", Message: "Question", EventType: "session.waiting", CollapseID: shown})
-	d.withdrawFromPairedDevices(context.Background(), shown)
-	d.withdrawFromPairedDevices(context.Background(), shown)
-	d.withdrawFromPairedDevices(context.Background(), other)
-	d.background.wait()
-	var withdrawn []receivedPush
-	for _, push := range service.received() {
-		if push.message.Type == "withdraw" {
-			withdrawn = append(withdrawn, push)
+func TestSafariIsNotifiedButNeverSentAWithdraw(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	reg := registryTestRegistry(t)
+	for _, endpoint := range []string{"https://web.push.apple.com/safari", "https://fcm.googleapis.com/fcm/send/chrome"} {
+		pairing, err := reg.CreateDevicePairing("Browser", registry.BrowserScopes, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		device, _, err := reg.CompleteBrowserPairing(pairing.Secret)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := reg.SaveBrowserPushSubscription(newTestPushBrowser(t).subscription(device.ID, endpoint)); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if len(withdrawn) != 2 || withdrawn[0].message.CollapseID == withdrawn[1].message.CollapseID {
-		t.Fatalf("withdraws=%+v", withdrawn)
-	}
-	for _, push := range withdrawn {
-		if waited := push.at.Sub(start); push.message.CollapseID == shown && waited < webPushCloseAge {
-			t.Fatalf("a repeated withdraw went %s after its question was sent", waited)
-		}
-	}
-	if gap := withdrawn[1].at.Sub(withdrawn[0].at); gap < webPushCloseAge {
-		t.Fatalf("withdraws went %s apart, before the previous marker could be closed", gap)
-	}
-}
-
-func TestWithdrawsNoBrowserGotDoNotDelayALaterOne(t *testing.T) {
-	browser := newTestPushBrowser(t)
-	service := newTestPushService(t, browser)
-	endpoint := service.server.URL + "/push/secret-capability"
-	reg, device := subscribedTestBrowser(t, endpoint, browser)
-	if err := reg.RemoveBrowserPushSubscription(device.ID); err != nil {
-		t.Fatal(err)
-	}
+	client := &recordingPushClient{}
+	previous := webPushHTTPClient
+	webPushHTTPClient = client
+	t.Cleanup(func() { webPushHTTPClient = previous })
 	d := newTestDaemon(t, reg, nil)
-	closeAge(t, 500*time.Millisecond)
-	for _, question := range []string{"one", "two", "three"} {
-		d.withdrawFromPairedDevices(context.Background(), waitingNotificationKey("session", question))
-	}
-	d.background.wait()
-	if err := reg.SaveBrowserPushSubscription(browser.subscription(device.ID, endpoint)); err != nil {
-		t.Fatal(err)
-	}
-	key := waitingNotificationKey("session", "after-subscribing")
-	start := time.Now()
+	key := waitingNotificationKey("session", "question")
 	d.notifyPairedDevices(context.Background(), mobileNotification{Title: "Agenthail", Message: "Question", EventType: "session.waiting", CollapseID: key})
+	notified := len(client.hosts)
 	d.withdrawFromPairedDevices(context.Background(), key)
-	d.background.wait()
-	pushes := service.received()
-	if len(pushes) != 2 || pushes[1].message.Type != "withdraw" {
-		t.Fatalf("pushes=%+v", pushes)
-	}
-	if waited := pushes[1].at.Sub(start); waited < webPushCloseAge || waited >= 2*webPushCloseAge {
-		t.Fatalf("the withdraw went %s after its question; it should wait only its close age", waited)
+	withdrawn := client.hosts[notified:]
+	if notified != 2 || len(withdrawn) != 1 || withdrawn[0] != "fcm.googleapis.com" {
+		t.Fatalf("notified %d browsers, withdrew from %v", notified, withdrawn)
 	}
 }
 
