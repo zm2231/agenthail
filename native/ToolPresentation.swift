@@ -116,8 +116,11 @@ struct FileChange: Equatable {
         return (difference.insertions.count, difference.removals.count)
     }
 
+    /// The text's lines; a final newline ends the last line rather than starting another.
     static func lines(_ text: String) -> [Substring] {
-        text.isEmpty ? [] : text.split(separator: "\n", omittingEmptySubsequences: false)
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        if lines.last?.isEmpty == true { lines.removeLast() }
+        return lines
     }
 
     /// Reads a patch in the `*** Begin Patch` format some agents send instead of edit arguments.

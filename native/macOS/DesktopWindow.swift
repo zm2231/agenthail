@@ -1031,12 +1031,12 @@ struct TranscriptView: View {
 struct TranscriptBlockView: View {
     let block: TranscriptBlock
     var onEdit: ((String) -> Void)? = nil
-    @State private var opened: Bool?
+    @State private var opened: RowChoice<Bool>?
     @Environment(\.transcriptRows) private var rows
     @Environment(\.holdTranscriptPlace) private var holdPlace
 
     private var note: String? { block.truncated ? TimelineMetadata.shortened : nil }
-    private var expanded: Bool { opened ?? rows.isOpen(block.id) ?? false }
+    private var expanded: Bool { rows.current(opened) ?? rows.isOpen(block.id) ?? false }
 
     var body: some View {
         switch block.kind {
@@ -1045,7 +1045,7 @@ struct TranscriptBlockView: View {
             if let sender = envelope.sender {
                 PeerMessage(sender: sender, text: envelope.body, time: TurnClock.time(block.timestamp), note: note)
             } else {
-                UserBubble(text: text, receipt: note, time: TurnClock.time(block.timestamp), files: files, onEdit: onEdit)
+                UserBubble(text: text, receipt: note, time: TurnClock.time(block.timestamp), files: files, onEdit: onEdit, row: block.id)
             }
         case .assistant(let text):
             AssistantReply(text: text, note: note, footer: block.finished.map { TurnClock.footer(duration: $0, at: block.timestamp) })
@@ -1068,7 +1068,7 @@ struct TranscriptBlockView: View {
     private func toggle() {
         holdPlace()
         let next = !expanded
-        opened = next
+        opened = rows.choice(next)
         rows.set(block.id, open: next)
     }
 
@@ -1198,10 +1198,15 @@ struct UserBubble: View {
     var failure: String? = nil
     var onEdit: ((String) -> Void)? = nil
     var onRetry: (() -> Void)? = nil
-    @State private var expanded = false
+    /// The transcript row this message is, so "Show more" is remembered with the session's other rows.
+    var row: String? = nil
+    @State private var opened: RowChoice<Bool>?
+    @Environment(\.transcriptRows) private var rows
     @Environment(\.holdTranscriptPlace) private var holdPlace
     @State private var editing = false
     @State private var hovering = false
+
+    private var expanded: Bool { rows.current(opened) ?? row.flatMap { rows.isOpen("more-" + $0) } ?? false }
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 5) {
@@ -1236,7 +1241,11 @@ struct UserBubble: View {
                 .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
         }
         if text.split(separator: "\n", omittingEmptySubsequences: false).count > 8 || text.count > 700 {
-            Button(expanded ? "Show less" : "Show more") { holdPlace(); expanded.toggle() }
+            Button(expanded ? "Show less" : "Show more") {
+                holdPlace()
+                opened = rows.choice(!expanded)
+                if let row { rows.set("more-" + row, open: !expanded) }
+            }
                 .buttonStyle(.plain)
                 .font(.system(size: DesktopType.meta))
                 .foregroundStyle(DesktopPalette.text2)

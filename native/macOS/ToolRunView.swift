@@ -7,21 +7,21 @@ import Textual
 struct ToolRunView: View {
     let id: String
     let items: [TimelineItem]
-    @State private var opened: Bool?
+    @State private var opened: RowChoice<Bool>?
     @Environment(\.transcriptRows) private var rows
     @Environment(\.holdTranscriptPlace) private var holdPlace
 
     var body: some View {
         let entries = ToolRunSummary.entries(items)
         let folds = ToolRunSummary.folds(entries)
-        let open = !folds || (opened ?? rows.isOpen(id) ?? false)
+        let open = !folds || (rows.current(opened) ?? rows.isOpen(id) ?? false)
         let changes = FileChange.merged(entries.flatMap(\.changes))
         VStack(alignment: .leading, spacing: 2) {
             if folds {
                 let failed = items.filter(ToolRunSummary.isFailure).count
                 Button {
                     holdPlace()
-                    opened = !open
+                    opened = rows.choice(!open)
                     rows.set(id, open: !open)
                 } label: {
                     ToolLineLabel(verb: ToolRunSummary.label(items), object: "", isCode: false, failed: false, failures: failed, trailing: open ? "chevron.down" : "chevron.right")
@@ -102,7 +102,7 @@ struct ToolLineLabel: View {
 struct ToolLine: View {
     let call: TimelineItem
     let results: [TimelineItem]
-    @State private var opened: Bool?
+    @State private var opened: RowChoice<Bool>?
     @Environment(\.transcriptRows) private var rows
     @Environment(\.holdTranscriptPlace) private var holdPlace
 
@@ -130,11 +130,11 @@ struct ToolLine: View {
         let presentation = ToolPresentation(name: call.title, text: call.text)
         let object = presentation.object
         // A failure is the one line that opens itself, so its output is on screen without a click.
-        let open = opened ?? rows.isOpen(call.id) ?? failed
+        let open = rows.current(opened) ?? rows.isOpen(call.id) ?? failed
         VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             Button {
                 holdPlace()
-                opened = !open
+                opened = rows.choice(!open)
                 rows.set(call.id, open: !open)
             } label: {
                 ToolLineLabel(verb: presentation.verb, object: object.text, isCode: object.isCode, failed: failed)
@@ -174,16 +174,16 @@ struct ToolLine: View {
 
 struct ReasoningLine: View {
     let item: TimelineItem
-    @State private var opened: Bool?
+    @State private var opened: RowChoice<Bool>?
     @Environment(\.transcriptRows) private var rows
     @Environment(\.holdTranscriptPlace) private var holdPlace
 
     var body: some View {
-        let open = opened ?? rows.isOpen(item.id) ?? false
+        let open = rows.current(opened) ?? rows.isOpen(item.id) ?? false
         VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             Button {
                 holdPlace()
-                opened = !open
+                opened = rows.choice(!open)
                 rows.set(item.id, open: !open)
             } label: {
                 ToolLineLabel(verb: "Thought", object: item.text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? "", isCode: false, failed: false)
@@ -208,17 +208,17 @@ struct ReasoningLine: View {
 /// Output recorded without the call that produced it, such as a result from an earlier page.
 struct OutputLine: View {
     let result: TimelineItem
-    @State private var opened: Bool?
+    @State private var opened: RowChoice<Bool>?
     @Environment(\.transcriptRows) private var rows
     @Environment(\.holdTranscriptPlace) private var holdPlace
 
     var body: some View {
         let failed = ToolRunSummary.isFailure(result)
-        let open = opened ?? rows.isOpen(result.id) ?? failed
+        let open = rows.current(opened) ?? rows.isOpen(result.id) ?? failed
         VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             Button {
                 holdPlace()
-                opened = !open
+                opened = rows.choice(!open)
                 rows.set(result.id, open: !open)
             } label: {
                 ToolLineLabel(verb: "Output", object: result.text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? "", isCode: true, failed: failed)
@@ -242,7 +242,7 @@ struct OutputLine: View {
 
 struct ToolOutputBlock: View {
     let result: TimelineItem
-    @State private var shownLines: Int?
+    @State private var shownLines: RowChoice<Int>?
     @Environment(\.transcriptRows) private var rows
     @Environment(\.holdTranscriptPlace) private var holdPlace
 
@@ -253,7 +253,7 @@ struct ToolOutputBlock: View {
         let failed = ToolRunSummary.isFailure(result)
         let preview = ToolRunSummary.outputPreview(result.text)
         let lines = result.text.split(separator: "\n", omittingEmptySubsequences: false)
-        let shown = shownLines ?? (rows.isOpen("output-" + result.id) == true ? Self.page : 0)
+        let shown = rows.current(shownLines) ?? (rows.isOpen("output-" + result.id) == true ? Self.page : 0)
         VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             HStack(spacing: 10) {
                 Text(failed ? "Error output" : "Output")
@@ -295,7 +295,7 @@ struct ToolOutputBlock: View {
 
     private func show(_ count: Int) {
         holdPlace()
-        shownLines = count
+        shownLines = rows.choice(count)
         rows.set("output-" + result.id, open: count > 0)
     }
 }

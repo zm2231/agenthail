@@ -16,6 +16,10 @@ struct ToolPresentationTest {
         let write = ToolPresentation(name: "Write", text: json(["file_path": "/work/New.swift", "content": "one\ntwo"]))
         check(write.changes == [FileChange(path: "/work/New.swift", added: 2, removed: 0)], "a write adds every line")
 
+        let terminated = ToolPresentation(name: "Write", text: json(["file_path": "/work/One.swift", "content": "one\n"]))
+        check(terminated.changes == [FileChange(path: "/work/One.swift", added: 1, removed: 0)], "a final newline does not count as another line: \(terminated.changes)")
+        check(FileChange.lines("").isEmpty && FileChange.lines("a\n\n").count == 2, "an empty text has no lines and a blank last line still counts")
+
         let multi = ToolPresentation(name: "MultiEdit", text: json(["file_path": "/work/M.swift", "edits": [["old_string": "x", "new_string": "y"], ["old_string": "", "new_string": "z"]]]))
         check(multi.changes == [FileChange(path: "/work/M.swift", added: 2, removed: 1)], "a multi-edit sums its edits: \(multi.changes)")
 

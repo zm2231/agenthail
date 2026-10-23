@@ -28,7 +28,21 @@ struct TranscriptRows: Equatable {
 
     @MainActor func set(_ row: String, open: Bool) { memory?.set(row, open: open, in: session) }
 
+    /// A row's own copy of a choice, so toggling redraws that row. It counts only while the transcript shows
+    /// the session it was made in: rows outlive a session switch and timeline ids can repeat across sessions.
+    func choice<Value>(_ value: Value) -> RowChoice<Value> { RowChoice(session: session, value: value) }
+
+    func current<Value>(_ choice: RowChoice<Value>?) -> Value? {
+        guard let choice, choice.session == session else { return nil }
+        return choice.value
+    }
+
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.memory === rhs.memory && lhs.session == rhs.session }
+}
+
+struct RowChoice<Value> {
+    fileprivate let session: String
+    fileprivate let value: Value
 }
 
 extension EnvironmentValues {
