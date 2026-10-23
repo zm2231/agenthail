@@ -34,6 +34,7 @@ type Ask struct {
 	Tool       string `json:"tool,omitempty"`
 	Answerable bool   `json:"answerable"`
 	Phone      bool   `json:"phone"`
+	Browser    bool   `json:"browser"`
 }
 
 type Command struct {
@@ -193,6 +194,11 @@ func (s Sources) ask(session surface.Session) (*Ask, error) {
 		return nil, fmt.Errorf("read paired phones: %w", err)
 	}
 	ask.Phone = len(targets) > 0
+	browsers, err := s.Registry.BrowserPushSubscriptions()
+	if err != nil {
+		return nil, fmt.Errorf("read notified browsers: %w", err)
+	}
+	ask.Browser = len(browsers) > 0
 	return ask, nil
 }
 

@@ -68,7 +68,7 @@ const (
 	// schemaVersion names one schema: a registry at it is opened without
 	// migrating, so any change to the schema or migrateTx takes a new version
 	// (TestTheSchemaChangesOnlyWithItsVersion).
-	schemaVersion   = 38
+	schemaVersion   = 39
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -963,6 +963,13 @@ CREATE TABLE IF NOT EXISTS device_push_targets (
 	installation_id TEXT NOT NULL,
 	credential TEXT NOT NULL,
 	enabled INTEGER NOT NULL DEFAULT 1,
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS browser_push_subscriptions (
+	device_id TEXT PRIMARY KEY REFERENCES paired_devices(id) ON DELETE CASCADE,
+	endpoint TEXT NOT NULL,
+	p256dh TEXT NOT NULL,
+	auth TEXT NOT NULL,
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS daemon_events (

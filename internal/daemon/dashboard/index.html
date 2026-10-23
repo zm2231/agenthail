@@ -10,6 +10,7 @@
     <title>Agenthail</title>
     <link rel="icon" href="/favicon.png" type="image/png" />
     <link rel="apple-touch-icon" href="/logo.png" />
+    <link rel="manifest" href="/js/manifest.webmanifest" />
     <link rel="stylesheet" href="/tokens.css?v=18" />
   </head>
   <body>
@@ -507,6 +508,13 @@
                 <div class="empty-card">Checking Tailscale.</div>
               </div>
             </section>
+            <section class="settings-card browser-push-card" id="browser-push-card">
+              <div class="settings-card-heading">
+                <h2>Notifications in this browser</h2>
+                <p>Get a notification when a session needs you or finishes, even with the dashboard closed. A question's notification goes away once it is answered anywhere.</p>
+              </div>
+              <label class="setting-row"><div><strong>Notify this browser</strong><p id="browser-push-note">Checking this browser.</p></div><input id="browser-push-toggle" type="checkbox" disabled></label>
+            </section>
             <section class="settings-card devices-card" id="devices-card">
               <div class="settings-card-heading">
                 <h2>iPhone app</h2>
@@ -589,7 +597,7 @@
       </form>
     </dialog>
     <div class="toast" id="toast" role="status" hidden></div>
-    <script src="/app.js?v=19"></script>
+    <script src="/app.js?v=20"></script>
     <script type="module" src="/js/ui.js"></script>
   </body>
 </html>

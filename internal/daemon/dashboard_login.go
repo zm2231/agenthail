@@ -98,6 +98,16 @@ func (dashboard *dashboardServer) authorized(r *http.Request) bool {
 	return err == nil
 }
 
+// browserDevice is the browser device a dashboard cookie signs in.
+func (dashboard *dashboardServer) browserDevice(r *http.Request) (registry.Device, bool) {
+	cookie, err := r.Cookie(dashboardCookieName)
+	if err != nil || dashboard.devices == nil {
+		return registry.Device{}, false
+	}
+	device, err := dashboard.devices.AuthenticateDevice(cookie.Value, "settings")
+	return device, err == nil && device.Browser
+}
+
 type browserDevices interface {
 	CompleteBrowserPairing(secret string) (registry.Device, string, error)
 	AuthenticateDevice(token, requiredScope string) (registry.Device, error)

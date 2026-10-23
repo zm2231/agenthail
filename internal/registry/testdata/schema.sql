@@ -1,4 +1,4 @@
--- schemaVersion 38
+-- schemaVersion 39
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -98,6 +98,15 @@ CREATE TABLE attention_items (
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
 	resolved_at TEXT NOT NULL DEFAULT '',
 	resolution TEXT NOT NULL DEFAULT ''
+);
+
+-- table browser_push_subscriptions
+CREATE TABLE browser_push_subscriptions (
+	device_id TEXT PRIMARY KEY REFERENCES paired_devices(id) ON DELETE CASCADE,
+	endpoint TEXT NOT NULL,
+	p256dh TEXT NOT NULL,
+	auth TEXT NOT NULL,
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- table catalog_events
