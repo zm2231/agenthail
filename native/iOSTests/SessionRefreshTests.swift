@@ -88,6 +88,32 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testSnapshotStateReachesOpenSessionLoadedBeforeIt() async {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        let model = makeModel()
+        model.selectedSessionID = "computer::demo"
+        await model.refreshSession("computer::demo")
+        XCTAssertEqual(model.selectedDetail?.capabilities.respond, false)
+
+        SessionRefreshProtocol.state.set(snapshotFields: #"{"alias":"renamed","name":"Renamed","cwd":"/moved","transport":"uds","runtimeKind":"claude-cli","lastActive":"2026-10-22T03:00:00Z","readOnly":true,"readOnlyReason":"Opened elsewhere","runtime":{"launcher":"cmux"},"waitingOn":{"kind":"question","id":"demo:question:held:r-1","answerable":true},"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false,"respond":true}}"#)
+        await model.refresh()
+
+        let detail = model.selectedDetail
+        XCTAssertEqual(detail?.capabilities.respond, true)
+        XCTAssertEqual(detail?.capabilities.goal, false)
+        XCTAssertEqual(detail?.readOnly, true)
+        XCTAssertEqual(detail?.readOnlyReason, "Opened elsewhere")
+        XCTAssertEqual(detail?.alias, "renamed")
+        XCTAssertEqual(detail?.session.name, "Renamed")
+        XCTAssertEqual(detail?.session.cwd, "/moved")
+        XCTAssertEqual(detail?.session.transport, "uds")
+        XCTAssertEqual(detail?.session.runtimeKind, "claude-cli")
+        XCTAssertEqual(detail?.session.runtime?.launcher, "cmux")
+        XCTAssertEqual(detail?.session.lastActive, "2026-10-22T03:00:00Z")
+        XCTAssertEqual(detail?.session.waitingOn?.id, "demo:question:held:r-1")
+    }
+
+    @MainActor
     func testOlderSnapshotDoesNotOverwriteNewerDetail() async throws {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
@@ -273,6 +299,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         private var unsupported = false
         private var detail = "busy"
         private var snapshot = "busy"
+        private var fields = "{}"
         private var holdingSnapshot = false
         private var holdingDetail = false
         private var snapshotWaiting = false
@@ -289,12 +316,13 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
             condition.withLock {
                 fetches = 0; unsupported = streamUnsupported; detail = "busy"; snapshot = "busy"
                 holdingSnapshot = false; holdingDetail = false; snapshotWaiting = false; detailWaiting = false; passing = 0; seq = nil
-                canStream = true; streams = 0
+                canStream = true; streams = 0; fields = "{}"
                 condition.broadcast()
             }
         }
         func set(detailStatus: String) { condition.withLock { detail = detailStatus } }
         func set(snapshotStatus: String) { condition.withLock { snapshot = snapshotStatus } }
+        func set(snapshotFields: String) { condition.withLock { fields = snapshotFields } }
         private var passing = 0
         private var canStream = true
         private var streams = 0
@@ -324,7 +352,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
 
         func snapshotResponse() -> String {
             condition.lock(); defer { condition.unlock() }
-            let status = snapshot
+            let status = snapshot, overrides = fields
             if passing > 0 {
                 passing -= 1
             } else if holdingSnapshot {
@@ -332,7 +360,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
                 while holdingSnapshot { condition.wait() }
                 snapshotWaiting = false
             }
-            return SessionRefreshProtocol.snapshot(status: status, canStream: canStream)
+            return SessionRefreshProtocol.snapshot(status: status, canStream: canStream, fields: overrides)
         }
     }
 
@@ -346,11 +374,13 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         object["session"] = session
         return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
     }
-    static func snapshot(status: String, canStream: Bool) -> String {
+    static func snapshot(status: String, canStream: Bool, fields: String) -> String {
         var object = try! JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as! [String: Any]
         var sessions = object["sessions"] as! [[String: Any]]
         if let index = sessions.firstIndex(where: { $0["id"] as? String == "demo" }) {
             sessions[index]["status"] = status
+            let overrides = try! JSONSerialization.jsonObject(with: Data(fields.utf8)) as! [String: Any]
+            sessions[index].merge(overrides) { _, new in new }
             var capabilities = sessions[index]["capabilities"] as! [String: Any]
             capabilities["stream"] = canStream
             sessions[index]["capabilities"] = capabilities

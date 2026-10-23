@@ -1209,11 +1209,11 @@ struct ClaudeSubagentLink: Decodable, Identifiable, Equatable {
 struct SessionDetail: Decodable {
     var session: RawSession
     let journalSeq: UInt64?
-    let alias: String?
+    var alias: String?
     let exchanges: [ExchangeState]
-    let capabilities: Capabilities
-    let readOnly: Bool
-    let readOnlyReason: String
+    var capabilities: Capabilities
+    var readOnly: Bool
+    var readOnlyReason: String
     var context: ContextState?
     var goal: GoalState?
     var model: String?
@@ -1233,19 +1233,65 @@ struct SessionDetail: Decodable {
     var waitingPlace: WaitingPlace? {
         session.waitingOn.map { WaitingPlace($0, runtimeKind: session.runtimeKind, lifecycle: readOnly ? SessionLifecycle() : capabilities.lifecycle) }
     }
+
+    var liveState: SessionLiveState {
+        get {
+            SessionLiveState(name: session.name, alias: alias, status: session.status, lastActive: session.lastActive, cwd: session.cwd, transport: session.transport,
+                             runtime: session.runtime, runtimeKind: session.runtimeKind, capabilities: capabilities, readOnly: readOnly, readOnlyReason: readOnlyReason,
+                             waitingOn: session.waitingOn, backgroundTasks: session.backgroundTasks, usageLimit: session.usageLimit)
+        }
+        set {
+            (session.name, alias, session.status, session.lastActive, session.cwd, session.transport) = (newValue.name, newValue.alias, newValue.status, newValue.lastActive, newValue.cwd, newValue.transport)
+            (session.runtime, session.runtimeKind, capabilities, readOnly, readOnlyReason) = (newValue.runtime, newValue.runtimeKind, newValue.capabilities, newValue.readOnly, newValue.readOnlyReason)
+            (session.waitingOn, session.backgroundTasks, session.usageLimit) = (newValue.waitingOn, newValue.backgroundTasks, newValue.usageLimit)
+        }
+    }
+}
+
+/// What a session detail shares with the catalog snapshot and can change
+/// while the session is open. The rest of the detail is its history.
+struct SessionLiveState: Equatable {
+    var name: String
+    var alias: String?
+    var status: String
+    var lastActive: String
+    var cwd: String?
+    var transport: String?
+    var runtime: SessionRuntime?
+    var runtimeKind: String?
+    var capabilities: Capabilities
+    var readOnly: Bool
+    var readOnlyReason: String
+    var waitingOn: WaitingState?
+    var backgroundTasks: BackgroundTasks?
+    var usageLimit: UsageLimitState?
+
+    init(name: String, alias: String?, status: String, lastActive: String, cwd: String?, transport: String?, runtime: SessionRuntime?, runtimeKind: String?,
+         capabilities: Capabilities, readOnly: Bool, readOnlyReason: String, waitingOn: WaitingState?, backgroundTasks: BackgroundTasks?, usageLimit: UsageLimitState?) {
+        (self.name, self.alias, self.status, self.lastActive, self.cwd, self.transport, self.runtime) = (name, alias, status, lastActive, cwd, transport, runtime)
+        (self.runtimeKind, self.capabilities, self.readOnly, self.readOnlyReason) = (runtimeKind, capabilities, readOnly, readOnlyReason)
+        (self.waitingOn, self.backgroundTasks, self.usageLimit) = (waitingOn, backgroundTasks, usageLimit)
+    }
+
+    /// The snapshot's state. A snapshot without lastActive keeps the one loaded.
+    init(_ live: SessionState, lastActive loaded: String) {
+        self.init(name: live.name, alias: live.alias, status: live.status, lastActive: live.lastActive ?? loaded, cwd: live.cwd, transport: live.transport,
+                  runtime: live.runtime, runtimeKind: live.runtimeKind, capabilities: live.capabilities, readOnly: live.isReadOnly, readOnlyReason: live.readOnlyReason ?? "",
+                  waitingOn: live.waitingOn, backgroundTasks: live.backgroundTasks, usageLimit: live.usageLimit)
+    }
 }
 
 struct RawSession: Decodable {
     var id: String
     let surface: String
-    let name: String
+    var name: String
     var status: String
-    let lastActive: String
+    var lastActive: String
     let source: String?
-    let transport: String?
-    let cwd: String?
+    var transport: String?
+    var cwd: String?
     var pendingModel: String? = nil
-    let runtime: SessionRuntime?
+    var runtime: SessionRuntime?
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
     var usageLimit: UsageLimitState? = nil

@@ -1464,11 +1464,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard seq > selectedSessionStateSeq, var detail = selectedDetail,
               let live = snapshot.sessions.first(where: { $0.id == detail.session.id }) else { return }
         selectedSessionStateSeq = seq
-        guard detail.session.status != live.status || detail.session.waitingOn != live.waitingOn || detail.session.backgroundTasks != live.backgroundTasks || detail.session.usageLimit != live.usageLimit else { return }
-        detail.session.status = live.status
-        detail.session.waitingOn = live.waitingOn
-        detail.session.backgroundTasks = live.backgroundTasks
-        detail.session.usageLimit = live.usageLimit
+        let state = SessionLiveState(live, lastActive: detail.session.lastActive)
+        guard detail.liveState != state else { return }
+        detail.liveState = state
         selectedDetail = detail
     }
 
