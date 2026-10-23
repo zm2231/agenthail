@@ -97,7 +97,7 @@ func TestAManagedCallCarriesItsEventsAndAnswersToolCallsWithTheirOriginalIDs(t *
 	if resumes := daemon.Calls("thread/resume"); len(resumes) != 1 || resumes[0]["threadId"] != session.ID {
 		t.Fatalf("thread/resume=%v", resumes)
 	}
-	if err := v.Request(ctx, session, "thread/realtime/start", voice.StartParams(session.ID, "call-a", "v=0 offer", false)); err != nil {
+	if err := v.Request(ctx, session, "thread/realtime/start", voice.StartParams(session.ID, "call-a", "v=0 offer", false, "")); err != nil {
 		t.Fatal(err)
 	}
 	if starts := daemon.Calls("thread/realtime/start"); len(starts) != 1 {
@@ -198,7 +198,7 @@ func TestAManagedCallStartRefusalSaysWhatFixesTheLogin(t *testing.T) {
 			if _, err := v.Cursor(context.Background(), session); err != nil {
 				t.Fatal(err)
 			}
-			err := v.Request(context.Background(), session, "thread/realtime/start", voice.StartParams(session.ID, "call-a", "v=0 offer", false))
+			err := v.Request(context.Background(), session, "thread/realtime/start", voice.StartParams(session.ID, "call-a", "v=0 offer", false, ""))
 			var rejected *voice.RejectedError
 			if !errors.As(err, &rejected) {
 				t.Fatalf("err=%v", err)

@@ -118,8 +118,13 @@ func askLine(card Card) string {
 		return ""
 	}
 	phone := ""
-	if ask.Phone {
+	switch {
+	case ask.Phone && ask.Browser:
+		phone = " and on their phone and browser"
+	case ask.Phone:
 		phone = " and on their phone"
+	case ask.Browser:
+		phone = " and in their browser"
 	}
 	forbidden := " If your own instructions forbid it, they win: put the question in your reply."
 	if ask.Answerable {

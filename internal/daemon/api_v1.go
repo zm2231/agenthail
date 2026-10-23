@@ -85,6 +85,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	d.registerHostAPI(mux, dashboard)
 	d.registerSigninAPI(mux, dashboard)
 	d.registerPermissionsAPI(mux, dashboard)
+	d.registerWebPushAPI(mux, dashboard)
 	d.registerMoveAPI(mux, dashboard)
 	d.registerUIAPI(mux, dashboard)
 	mux.HandleFunc("/api/v1/version", d.apiV1Guard(dashboard, "read", d.apiVersionHandler))

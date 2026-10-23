@@ -39,6 +39,7 @@ func (d *Daemon) registerVoiceAPI(mux *http.ServeMux, dashboard *dashboardServer
 	}, daemonVoiceStreamProvider{daemon: d})
 	s.SetProjects(voiceProjects{d: d})
 	s.SetLog(d.log.Printf)
+	s.SetBriefer(voiceBriefs{d: d})
 	if dashboard.voice != nil {
 		dashboard.voice.Close()
 	}

@@ -129,6 +129,8 @@ type State struct {
 	// muted, or held by the system. InputRevision orders those reports.
 	InputMuted    bool  `json:"inputMuted"`
 	InputRevision int64 `json:"inputRevision,omitempty"`
+	// Brief is what the call was told about its selected session.
+	Brief *BriefInfo `json:"brief,omitempty"`
 }
 
 type Action struct {
@@ -205,6 +207,7 @@ type Service struct {
 	closed                  bool
 	speechTimeout           time.Duration
 	logf                    func(format string, args ...any)
+	briefer                 Briefer
 }
 
 // snapshot is the state as of the last release of s.mu, so View never waits
@@ -658,7 +661,14 @@ func (s *Service) start(ctx context.Context, owner string, a Action) error {
 		return errors.New("end the previous call before starting a new audio connection")
 	}
 	session := *v.Session
+	var target *surface.Session
+	if v.Target != nil {
+		selected := *v.Target
+		target = &selected
+	}
+	briefer := s.briefer
 	s.unlock()
+	brief, briefInfo := buildBrief(ctx, briefer, target)
 	cursor, err := s.provider.Cursor(ctx, &session)
 	if err != nil {
 		return err
@@ -684,6 +694,7 @@ func (s *Service) start(ctx context.Context, owner string, a Action) error {
 	s.state.NativeHeartbeatEnrolled = false
 	v.AudioProvider = "openai-realtime-via-codex"
 	sessionBound := v.Target != nil
+	v.Brief = briefInfo
 	callCtx, cancel := s.callContext(ctx)
 	defer cancel()
 	if err := s.commit(); err != nil {
@@ -692,7 +703,7 @@ func (s *Service) start(ctx context.Context, owner string, a Action) error {
 		s.unlock()
 		return err
 	}
-	err = s.provider.Request(callCtx, &session, "thread/realtime/start", StartParams(session.ID, a.AttemptID, a.SDP, sessionBound))
+	err = s.provider.Request(callCtx, &session, "thread/realtime/start", StartParams(session.ID, a.AttemptID, a.SDP, sessionBound, brief))
 	s.mu.Lock()
 	if v.AttemptID != a.AttemptID {
 		s.unlock()
@@ -863,6 +874,7 @@ func (s *Service) selectTarget(ctx context.Context, requested string, change tar
 	if v.Session != nil {
 		session = *v.Session
 	}
+	briefer := s.briefer
 	callCtx, cancel := s.callContext(ctx)
 	defer cancel()
 	s.unlock()
@@ -894,10 +906,15 @@ func (s *Service) selectTarget(ctx context.Context, requested string, change tar
 			return "", err
 		}
 	}
+	var briefInfo *BriefInfo
 	if transfer {
 		text := "Voice has returned to the Agenthail orchestrator. Resume the normal Agenthail operations workflow and respond directly to the user."
 		if target != nil {
 			text = "Voice has transferred to the selected Agenthail session. Do not do the work yourself. The host will deliver completed user requests to that session and provide its correlated updates as developer messages. Speak those supplied updates concisely."
+			var brief string
+			if brief, briefInfo = buildBrief(callCtx, briefer, target.Session); brief != "" {
+				text += "\n\n" + brief
+			}
 		}
 		if err := s.provider.Request(callCtx, &session, "thread/realtime/appendText", map[string]any{"threadId": session.ID, "text": text, "role": "developer"}); err != nil {
 			if target == nil {
@@ -917,11 +934,14 @@ func (s *Service) selectTarget(ctx context.Context, requested string, change tar
 	}
 	v.AudioProvider = "openai-realtime-via-codex"
 	if target == nil {
-		v.Target, v.CodingProvider = nil, ""
+		v.Target, v.CodingProvider, v.Brief = nil, "", nil
 		v.Message = "Voice is with the Agenthail orchestrator."
 		return "", s.commit()
 	}
 	v.Target = target.Session
+	if transfer {
+		v.Brief = briefInfo
+	}
 	v.CodingProvider = string(target.Adapter.Name())
 	if transfer {
 		v.Message = "Voice transferred to " + target.Session.Name + "."
@@ -1431,7 +1451,9 @@ Agenthail gives you the session's updates as developer messages. Speak them brie
 
 Keep your own turns short. Ask a clarifying question only when a request is too unclear to send. If the person asks to talk to the Agenthail orchestrator instead, use the return-to-orchestrator tool.`
 
-func StartParams(threadID, attemptID, sdp string, sessionBound bool) map[string]any {
+// StartParams is the request that starts a realtime call. A brief, given only
+// for a session-bound call, is the call's first item.
+func StartParams(threadID, attemptID, sdp string, sessionBound bool, brief string) map[string]any {
 	params := map[string]any{
 		"threadId": threadID, "realtimeSessionId": attemptID,
 		"transport": map[string]any{"type": "webrtc", "sdp": sdp},
@@ -1442,6 +1464,9 @@ func StartParams(threadID, attemptID, sdp string, sessionBound bool) map[string]
 		// The operator thread's startup context describes the orchestrator's
 		// workspace, not the session's.
 		params["prompt"], params["includeStartupContext"] = sessionBoundPrompt, false
+		if brief != "" {
+			params["initialItems"] = []map[string]any{{"role": "developer", "text": brief}}
+		}
 		return params
 	}
 	params["includeStartupContext"] = true

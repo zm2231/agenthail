@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -42,8 +43,13 @@ var dashboardJS []byte
 //go:embed dashboard/tokens.css
 var dashboardCSS []byte
 
-//go:embed dashboard/js/*.js
+//go:embed dashboard/js/*.js dashboard/js/*.webmanifest
 var dashboardModules embed.FS
+
+var dashboardModuleTypes = map[string]string{
+	".js":          "application/javascript; charset=utf-8",
+	".webmanifest": "application/manifest+json",
+}
 
 //go:embed dashboard/logo.png
 var dashboardLogo []byte
@@ -753,11 +759,12 @@ func dashboardModuleHandler() http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if !strings.HasSuffix(r.URL.Path, ".js") {
+		contentType, ok := dashboardModuleTypes[path.Ext(r.URL.Path)]
+		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Cache-Control", "no-store")
 		files.ServeHTTP(w, r)
 	})

@@ -74,6 +74,10 @@ const context = {
 };
 vm.runInNewContext(`${source.slice(markdownStart, markdownEnd)}${source.slice(messageStart, messageEnd)}${source.slice(rendererStart, rendererEnd)}
 globalThis.renderTimeline = renderTimeline;
+globalThis.toolRows = toolRows;
+globalThis.showToolOutput = showToolOutput;
+globalThis.collapseToolRow = collapseToolRow;
+globalThis.rememberToolRow = rememberToolRow;
 globalThis.timelineSignature = timelineSignature;
 globalThis.renderClaudeMetadata = renderClaudeMetadata;
 ${source.slice(metadataStart, metadataEnd)}
@@ -123,7 +127,73 @@ for (const item of [
 }
 assert(html.includes("<details"), "tool and reasoning items should be collapsible");
 assert(html.includes('data-copy-text="report contents"'), "tool results should offer their raw text for copying");
-assert.equal((html.match(/class="soft-button copy-output"/g) || []).length, 1, "only tool results with text offer Copy output");
+assert.equal((html.match(/data-copy-text="[^"]*">Copy output</g) || []).length, 1, "only tool results with text offer Copy output");
+
+// Rows the reader opens or closes, and output they page, survive a re-render.
+const failedRun = [
+  { id: "f-call", kind: "toolCall", title: "Bash", text: '{"command":"make"}', callId: "f", status: "failed" },
+  { id: "f-result", kind: "toolResult", title: "Bash", text: "boom", callId: "f", status: "failed" },
+];
+const openOf = (rendered, id) => new RegExp(`data-timeline-item="${id}"[^>]*data-row="[^"]*"( open)?>`).exec(rendered)?.[1] === " open";
+assert(openOf(context.renderTimeline(failedRun, session), "f-call"), "a failed call opens on its own");
+context.toolRows.set("session-1 f-call", false);
+assert(!openOf(context.renderTimeline(failedRun, session), "f-call"), "a failed call the reader closed stays closed");
+assert(openOf(context.renderTimeline(failedRun, { ...session, id: "session-2" }), "f-call"), "another session's rows are its own");
+context.toolRows.set("session-1 call-1", true);
+assert(openOf(context.renderTimeline(items, session), "call-1"), "a call the reader opened stays open");
+assert(context.renderTimeline(items, session).includes(">Collapse tool</button></div></details>"), "an open call ends with Collapse tool");
+const longRun = Array.from({ length: 8 }, (_, index) => ({ id: `run-${index}`, kind: "toolCall", title: "Bash", text: `{"command":"step ${index}"}` }));
+const foldOpen = (rendered) => /<details class="tool-line tool-fold" data-row="session-1 run:run-0"( open)?>/.exec(rendered)?.[1] === " open";
+assert(!foldOpen(context.renderTimeline(longRun, session)), "a long run starts folded");
+assert(context.renderTimeline(longRun, session).includes(">Collapse activity</button></div></details>"), "an open run ends with Collapse activity");
+context.rememberToolRow({ target: { matches: () => true, dataset: { row: "session-1 run:run-0" }, open: true } });
+assert(foldOpen(context.renderTimeline(longRun, session)), "the toggle the reader made is kept for the next render");
+
+const longOutput = Array.from({ length: 1200 }, (_, index) => `line ${index + 1}`).join("\n");
+const outputRun = [
+  { id: "o-call", kind: "toolCall", title: "Bash", text: '{"command":"seq"}', callId: "o" },
+  { id: "o-result", kind: "toolResult", title: "Bash", text: longOutput, callId: "o" },
+];
+const shownOutput = (rendered) => /<pre class="tool-output[^"]*">([^<]*)<\/pre>/.exec(rendered)?.[1].split("\n") || [];
+let outputHTML = context.renderTimeline(outputRun, session);
+assert(outputHTML.includes(">Show all 1200 lines<"), "long output offers all of its lines");
+assert.deepEqual(shownOutput(outputHTML).at(-1), "line 24", "long output starts as a 24-line preview");
+assert(!outputHTML.includes(">Show less<"), "a preview offers no Show less");
+context.toolRows.set("session-1 output:o-result", 500);
+outputHTML = context.renderTimeline(outputRun, session);
+assert.equal(shownOutput(outputHTML).length, 500, "a page shows 500 lines");
+assert.equal((outputHTML.match(/>Show 500 more lines</g) || []).length, 2, "the next page is offered above and below the output");
+assert(outputHTML.includes('data-output-show="0" data-reveal>Show less'), "Show less follows the output");
+context.toolRows.set("session-1 output:o-result", 1000);
+assert(context.renderTimeline(outputRun, session).includes(">Show 200 more lines<"), "the last page offers what is left");
+context.toolRows.set("session-1 output:o-result", 1500);
+outputHTML = context.renderTimeline(outputRun, session);
+assert(shownOutput(outputHTML).length === 1200 && !outputHTML.includes("more lines<"), "the whole output offers no more");
+context.toolRows.set("session-1 output:result-1", 500);
+assert(!context.renderTimeline(items, session).includes(">Show less<"), "output shorter than its preview never pages");
+
+// Paging replaces only the output block, and Show less at the bottom brings the output's top back.
+const revealed = [];
+const pagedBlock = { dataset: { row: "session-1 output:o-result", timelineItem: "o-result" }, outerHTML: "" };
+context.CSS = { escape: (value) => value };
+elements["#chat-body"].querySelector = (selector) => (selector.includes("output:o-result") ? { scrollIntoView: (options) => revealed.push(options) } : null);
+context.app.history = { timeline: { items: outputRun } };
+context.app.selected = session;
+const button = (data, attributes = {}) => ({ dataset: data, closest: () => pagedBlock, hasAttribute: (name) => name in attributes });
+context.showToolOutput(button({ outputShow: "1000" }));
+assert.equal(context.toolRows.get("session-1 output:o-result"), 1000);
+assert(pagedBlock.outerHTML.startsWith('<div class="tool-result"') && shownOutput(pagedBlock.outerHTML).length === 1000, "the block is re-rendered in place");
+assert.equal(revealed.length, 0, "paging forward keeps the reader's place");
+context.showToolOutput(button({ outputShow: "0" }, { "data-reveal": "" }));
+assert.equal(context.toolRows.get("session-1 output:o-result"), 0);
+assert.equal(JSON.stringify(revealed), JSON.stringify([{ block: "nearest" }]), "Show less from the bottom scrolls the output into view");
+
+// Collapse from the bottom closes the row and scrolls its header into view.
+const summaryRevealed = [];
+const row = { open: true, dataset: { row: "session-1 run:run-0" }, querySelector: () => ({ scrollIntoView: (options) => summaryRevealed.push(options) }) };
+context.collapseToolRow({ closest: () => row });
+assert(!row.open && context.toolRows.get("session-1 run:run-0") === false, "Collapse closes the row and remembers it");
+assert.equal(JSON.stringify(summaryRevealed), JSON.stringify([{ block: "nearest" }]), "Collapse scrolls the row's header into view");
 const longReply = Array.from({ length: 40 }, (_, index) => `- synthetic line ${index + 1} of a long reply`).join("\n");
 const conversation = context.renderTimeline([
   { id: "m-user", kind: "message", role: "user", text: "Synthetic **request**" },

@@ -47,13 +47,21 @@ type mobileNotification struct {
 	Title, Message, SessionID, TurnID, EventType, CollapseID, RequestID string
 }
 
+// notifyPairedDevices sends one notification to every paired phone, through
+// the relay, and to every subscribed browser, directly.
 func (d *Daemon) notifyPairedDevices(ctx context.Context, notification mobileNotification) {
+	var wait sync.WaitGroup
+	wait.Add(1)
+	go func() {
+		defer wait.Done()
+		d.notifyBrowsers(ctx, notification)
+	}()
+	defer wait.Wait()
 	targets, err := d.Registry.DevicePushTargets()
 	if err != nil {
 		d.log.Printf("load device push targets: %s", err)
 		return
 	}
-	var wait sync.WaitGroup
 	concurrency := make(chan struct{}, 4)
 	for _, target := range targets {
 		target := target
@@ -76,7 +84,6 @@ func (d *Daemon) notifyPairedDevices(ctx context.Context, notification mobileNot
 			}
 		}()
 	}
-	wait.Wait()
 }
 
 func sendDevicePushWithRetry(ctx context.Context, target registry.DevicePushTarget, notification mobileNotification) error {
@@ -147,10 +154,19 @@ func sendDevicePush(ctx context.Context, target registry.DevicePushTarget, notif
 	return &pushRelayError{status: response.StatusCode, detail: strings.TrimSpace(string(detail))}
 }
 
-// withdrawFromPairedDevices asks every paired device to remove the
-// notification it showed under collapseID. A relay that cannot withdraw is
-// not a reason to stop notifying a device, so no failure here removes one.
+// withdrawFromPairedDevices asks every paired phone and subscribed browser to
+// remove the notification it showed under collapseID. A relay that cannot
+// withdraw is not a reason to stop notifying a phone, so no relay failure
+// here removes one; a browser is removed only when its push service says the
+// subscription is gone, as on a send.
 func (d *Daemon) withdrawFromPairedDevices(ctx context.Context, collapseID string) {
+	var wait sync.WaitGroup
+	wait.Add(1)
+	go func() {
+		defer wait.Done()
+		d.withdrawFromBrowsers(ctx, collapseID)
+	}()
+	defer wait.Wait()
 	targets, err := d.Registry.DevicePushTargets()
 	if err != nil {
 		d.log.Printf("load device push targets: %s", err)

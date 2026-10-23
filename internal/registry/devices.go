@@ -353,6 +353,7 @@ func (r *Registry) ListDevices(includeRevoked bool) ([]Device, error) {
 	}
 	query := `SELECT d.id,d.name,d.scopes,d.host_id,d.created_at,d.last_seen_at,d.revoked_at,d.browser,
 		EXISTS(SELECT 1 FROM device_push_targets p WHERE p.device_id=d.id AND p.enabled=1)
+			OR EXISTS(SELECT 1 FROM browser_push_subscriptions b WHERE b.device_id=d.id)
 		FROM paired_devices d`
 	if !includeRevoked {
 		query += ` WHERE d.revoked_at=''`
@@ -373,15 +374,26 @@ func (r *Registry) ListDevices(includeRevoked bool) ([]Device, error) {
 	})
 }
 
+// RevokeDevice signs a device out. The row stays for the devices list; a
+// browser's push subscription, a capability to reach it, goes at once.
 func (r *Registry) RevokeDevice(id string) error {
-	result, err := r.db.Exec(`UPDATE paired_devices SET revoked_at=? WHERE id=? AND revoked_at=''`, time.Now().UTC().Format(time.RFC3339Nano), strings.TrimSpace(id))
+	id = strings.TrimSpace(id)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`UPDATE paired_devices SET revoked_at=? WHERE id=? AND revoked_at=''`, time.Now().UTC().Format(time.RFC3339Nano), id)
 	if err != nil {
 		return err
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return fmt.Errorf("active device not found")
 	}
-	return nil
+	if _, err := tx.Exec(`DELETE FROM browser_push_subscriptions WHERE device_id=?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Registry) SaveDevicePushTarget(deviceID, installationID, credential string) error {

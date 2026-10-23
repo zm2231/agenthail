@@ -244,7 +244,7 @@ caller variable naming a session of another Agenthail is refused as for `send`.
 `agenthail whoami --json` returns the calling session's card: alias, project,
 coordinator (`lead`, with `self` for the coordinator itself), `startedBy`,
 `reportTo` and `ask` (the question tool, whether Agenthail can answer it, and
-whether a paired phone is notified). `agenthail help agent` renders it as a
+whether a paired phone or a browser is notified). `agenthail help agent` renders it as a
 brief. Read it instead of guessing who you report to; send results to
 `reportTo`.
 
@@ -521,8 +521,9 @@ AgentHail has four distinct completion behaviors:
 2. `stream` or `send --stream` watches one live Claude or Codex turn.
 3. A relay durably subscribes to successful completions. Choose `--when turn_finished` (default) for each matching turn, or `--when goal_completed` for the latest pending result after an explicit completed goal and finished final turn. Goal handoffs require source goal support. A handoff to a closed Claude Code target resumes it. Active routes remain until removed; queued messages wait until the target can take them.
 4. Daemon notifications alert the human through the AgentHail Mac app on
-   macOS and, when paired, the optional iPhone app. A Linux host has no
-   desktop notifications; only a paired iPhone is alerted.
+   macOS, the optional iPhone app when paired, and any browser that turned on
+   notifications in the dashboard. A Linux host has no desktop notifications;
+   only a paired iPhone and such browsers are alerted.
 
 Persistent agent-to-agent subscription:
 
@@ -560,6 +561,8 @@ agenthail daemon notify off
 them as unsupported. Mac notifications require System Settings authorization.
 iPhone notifications, from a macOS or Linux host,
 require pairing the phone from Operations and allowing notifications on iOS.
+Browser notifications are turned on per browser in the dashboard's Settings, at
+a localhost or `agenthail dashboard remote` address; they need no Mac or phone.
 They are not agent-to-agent relays. When a host session waits on an approval or
 a single question, its notification offers buttons that answer it, and a
 **Reply** that answers in the person's words or denies with a reason; the human
