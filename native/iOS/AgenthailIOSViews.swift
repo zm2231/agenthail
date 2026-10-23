@@ -480,6 +480,7 @@ struct SessionScreen: View {
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
+                .environment(\.revealRow) { id in Task { @MainActor in proxy.scrollTo(id, anchor: .top) } }
                 .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)

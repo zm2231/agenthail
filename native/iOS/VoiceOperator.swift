@@ -100,6 +100,7 @@ struct AgenthailVoiceOperatorSheet: View {
                     }
                     Color.clear.frame(height: 1).id("voice-bottom")
                 }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: .infinity)
+                .environment(\.revealRow) { id in Task { @MainActor in proxy.scrollTo(id, anchor: .top) } }
                 }
                 .defaultScrollAnchor(.bottom, for: .initialOffset)
                 .defaultScrollAnchor(.top, for: .alignment)
