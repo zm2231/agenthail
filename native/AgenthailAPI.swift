@@ -344,6 +344,18 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await get(path)
     }
 
+    func prompts(sessionID: String? = nil, query: String = "", before: String? = nil, limit: Int = 50, host: String? = nil) async throws -> PromptsPage {
+        var components = URLComponents()
+        components.path = "/api/v1/prompts"
+        components.queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+            + (sessionID.map { [URLQueryItem(name: "sessionId", value: $0)] } ?? [])
+            + (query.isEmpty ? [] : [URLQueryItem(name: "q", value: query)])
+            + (before.map { [URLQueryItem(name: "before", value: $0)] } ?? [])
+            + (host.map { [URLQueryItem(name: "host", value: $0)] } ?? [])
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await get(path)
+    }
+
     func devices() async throws -> [DeviceState] {
         let response: DeviceListResponse = try await get("/api/v1/devices")
         return response.devices

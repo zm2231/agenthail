@@ -14,6 +14,9 @@ var codexContextFragments = []struct{ open, close string }{
 	{"<user_shell_command>", "</user_shell_command>"},
 	{"<subagent_notification>", "</subagent_notification>"},
 	{"<image_resize_notice>", "</image_resize_notice>"},
+	{"<codex_internal_context", "</codex_internal_context>"},
+	{"<external_codex_apps_open_page>", "</external_codex_apps_open_page>"},
+	{"<recommended_plugins>", "</recommended_plugins>"},
 }
 
 // codexRequestMarker is how Codex appends a person's request to the

@@ -847,12 +847,11 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func removeQueued(_ item: QueueState, restoreToComposer: Bool = false) {
+    func removeQueued(_ item: QueueState) {
         guard let api else { return }
         Task {
             do {
                 try await api.action("queue-cancel", queueID: item.id)
-                if restoreToComposer { self.restoreToComposer(item.message, sessionID: item.sessionId) }
                 operationError = nil
             } catch {
                 operationError = AgenthailAPIError.userMessage(error)
@@ -861,8 +860,77 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
+    /// Cancels queued messages oldest first and puts each one that was still
+    /// waiting back ahead of the draft; a message already on its way stays queued.
+    func takeBackQueued(_ items: [QueueState], sessionID: String) {
+        guard let api else { return }
+        Task {
+            var taken: [String] = []
+            operationError = nil
+            for item in items.sorted(by: { $0.id < $1.id }) {
+                do {
+                    try await api.action("queue-cancel", queueID: item.id)
+                    taken.append(item.message)
+                } catch {
+                    operationError = AgenthailAPIError.userMessage(error)
+                    break
+                }
+            }
+            if !taken.isEmpty { draft(for: sessionID).takeBack(taken) }
+            _ = await refresh(fresh: true)
+        }
+    }
+
     func deliveryProblems(for sessionID: String) -> [DeliveryProblem] {
         deliveryProblems.filter { $0.sessionId == sessionID || $0.sourceSessionId == sessionID }
+    }
+
+    func sessionTitle(for sessionID: String) -> String {
+        knownSessions.first { $0.id == sessionID }?.title ?? "Another session"
+    }
+
+    func loadPrompts(for sessionID: String) async {
+        guard let api, let page = try? await api.prompts(sessionID: sessionID, limit: 100) else { return }
+        draft(for: sessionID).recordSent(page.prompts)
+    }
+
+    /// Searches what was typed into one session or, without one, into every
+    /// session on this computer and each connected paired host. A host that
+    /// cannot answer is reported by name and leaves the others' results.
+    func searchPrompts(_ query: String, sessionID: String?) async -> (prompts: [PromptItem], problems: [String]) {
+        guard let api else { return ([], ["Agenthail isn't connected."]) }
+        if let sessionID {
+            do {
+                return (try await api.prompts(sessionID: sessionID, query: query, limit: 100).prompts, [])
+            } catch {
+                return ([], [AgenthailAPIError.userMessage(error)])
+            }
+        }
+        let hosts = (snapshot?.daemon.hosts ?? []).filter { $0.state == "connected" }
+        let results = await withTaskGroup(of: (prompts: [PromptItem], problem: String?).self) { group in
+            group.addTask {
+                do { return (try await api.prompts(query: query, limit: 100).prompts, nil) } catch { return ([], AgenthailAPIError.userMessage(error)) }
+            }
+            for host in hosts {
+                group.addTask {
+                    do {
+                        let prompts = try await api.prompts(query: query, limit: 100, host: host.id).prompts.map { prompt in
+                            var prompt = prompt
+                            prompt.sessionId = host.id + "::" + prompt.sessionId
+                            return prompt
+                        }
+                        return (prompts, nil)
+                    } catch {
+                        return ([], "\(host.name): \(AgenthailAPIError.userMessage(error))")
+                    }
+                }
+            }
+            var collected: [(prompts: [PromptItem], problem: String?)] = []
+            for await result in group { collected.append(result) }
+            return collected
+        }
+        let prompts = results.flatMap(\.prompts).sorted { ($0.sentAt ?? .distantPast) > ($1.sentAt ?? .distantPast) }
+        return (prompts, results.compactMap(\.problem))
     }
 
     func dismissDeliveryProblem(_ problem: DeliveryProblem) {
@@ -1092,13 +1160,89 @@ enum FollowUpAction: String {
 final class ComposerDraft: ObservableObject {
     @Published var text = ""
     @Published var attachments: [ComposerAttachment] = []
+    @Published private(set) var stash: ComposerStash?
+    @Published private(set) var sent: [PromptItem] = []
+    private(set) var cleared: [String] = []
+    private var lastEscape: Date?
+    var history = PromptHistory()
 
     var isEmpty: Bool { ComposerAttachments.isEmpty(text: text, attachments: attachments) }
+
+    /// Stashes the draft, or brings the stash back into an empty composer.
+    /// Stashing while a stash is held swaps the two, so neither is lost.
+    @discardableResult
+    func toggleStash() -> Bool {
+        if !isEmpty {
+            let current = ComposerStash(text: text, attachments: attachments)
+            text = stash?.text ?? ""
+            attachments = stash?.attachments ?? []
+            stash = current
+            return true
+        }
+        guard let held = stash else { return false }
+        text = held.text
+        attachments = held.attachments
+        stash = nil
+        return true
+    }
+
+    func restoreStashAfterSend() {
+        guard isEmpty, let held = stash else { return }
+        text = held.text
+        attachments = held.attachments
+        stash = nil
+    }
+
+    /// True on the second Esc within the system double-click interval.
+    func escapePressed(at now: Date = Date(), within interval: TimeInterval = NSEvent.doubleClickInterval) -> Bool {
+        if let lastEscape, now.timeIntervalSince(lastEscape) < interval {
+            self.lastEscape = nil
+            return true
+        }
+        lastEscape = now
+        return false
+    }
+
+    func escapeHandled() { lastEscape = nil }
+
+    @discardableResult
+    func clearIntoHistory() -> Bool {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        cleared.insert(text, at: 0)
+        text = ""
+        history.stopBrowsing()
+        rebuildHistory()
+        return true
+    }
+
+    /// Takes the host's record of what was sent, keeping prompts sent from
+    /// here that the host has not recorded yet.
+    func recordSent(_ prompts: [PromptItem]) {
+        let recorded = Set(prompts.map(\.text))
+        sent = sent.filter { $0.sessionId.isEmpty && !recorded.contains($0.text) } + prompts
+        rebuildHistory()
+    }
+
+    func recordSending(_ text: String) {
+        history.stopBrowsing()
+        cleared.removeAll { $0 == text }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        sent.insert(PromptItem(sessionId: "", itemId: UUID().uuidString, turnId: nil, ts: "", text: text), at: 0)
+        rebuildHistory()
+    }
+
+    private func rebuildHistory() {
+        history.replace(cleared + sent.map(\.text))
+    }
 
     func restore(_ restored: String, attachments restoredAttachments: [ComposerAttachment] = []) {
         if !restored.isEmpty {
             text = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? restored : "\(text)\n\n\(restored)"
         }
         attachments = ComposerAttachments.adding(restoredAttachments, to: attachments).attachments
+    }
+
+    func takeBack(_ queued: [String]) {
+        text = QueueTakeBack.text(queued: queued, draft: text)
     }
 }

@@ -258,7 +258,7 @@ agenthail thread fork codex:<source-id> --alias experiment --json
 agenthail thread fork @builder --last-turn <turn-id> --json
 ```
 
-Optional `--model` and `--last-turn` pass to the owning app-server; `--last-turn` keeps history through that turn. The fork stays in the source folder. A fork retains the source transport, uses the returned identity, and is registered for subsequent sends. Goal continuation is deferred until explicit input; forking alone does not launch an automatic goal continuation. A fork does not create a Git worktree.
+Optional `--model` and `--last-turn` pass to the owning app-server; `--last-turn` keeps history through that turn. Over the API, `beforeTurnId` instead forks from just before a turn: the daemon finds the turn the journal recorded before it and passes that as `lastTurnId`, which is how a client offers Fork from here on a sent prompt. Sending both is `400 fork_point_conflict`; a turn the journal does not hold is `409 fork_turn_unknown`, and the first turn is `409 fork_first_turn`. The fork stays in the source folder. A fork retains the source transport, uses the returned identity, and is registered for subsequent sends. Goal continuation is deferred until explicit input; forking alone does not launch an automatic goal continuation. A fork does not create a Git worktree.
 
 ## Codex native input queue
 
@@ -297,7 +297,7 @@ Turn settings survive the durable Agenthail queue, retries and daemon replay eve
 
 - `session-create`: `surface`, `message`, `cwd`, `alias`, `model`, plus creation and turn fields.
 - `send`: `sessionId`, `message`, `effort`, `mode`, `serviceTier`, `outputSchema`.
-- `session-fork`: `sessionId`, `fork: {model, lastTurnId}`.
+- `session-fork`: `sessionId`, `fork: {model, lastTurnId, beforeTurnId}`.
 - `native-queue`: `sessionId`, `nativeQueue: {queueAction, message, queuedSubmissionId, clientUserMessageId, queuedSubmissionIds, cursor}`.
 - `session-lifecycle-status`, `session-lifecycle-logs`, `session-lifecycle-stop`, `session-lifecycle-resume`: `sessionId`.
 - `session-adopt`: `sessionId`, `stopTerminal`. A busy session returns HTTP `409` with `busy`, a terminal session without `stopTerminal` returns `409` with `needsConsent: true`.

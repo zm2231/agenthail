@@ -5,21 +5,15 @@ struct NewSessionView: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject var draft: NewSessionDraft
     @ObservedObject private var shortcuts = ShortcutStore.shared
-    @FocusState private var focused: Bool
+    @State private var focused = false
 
     var body: some View {
         VStack(spacing: DesktopSpace.s) {
             VStack(alignment: .leading, spacing: 0) {
-                TextField("What should the agent do?", text: $draft.form.message, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: DesktopType.prose))
-                    .lineLimit(4...14)
-                    .focused($focused)
-                    .onSubmit { draft.start() }
+                ComposerTextView(text: $draft.form.message, focused: $focused, placeholder: "What should the agent do?", accessibilityLabel: "First message", lines: 4...14) { draft.start() }
                     .padding(.horizontal, 16)
                     .padding(.top, 15)
                     .padding(.bottom, DesktopSpace.s)
-                    .accessibilityLabel("First message")
                 HStack(alignment: .bottom, spacing: DesktopSpace.xs) {
                     ChipFlow(spacing: DesktopSpace.xs) { options }
                         .frame(maxWidth: .infinity, alignment: .leading)

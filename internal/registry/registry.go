@@ -259,6 +259,9 @@ func migrateTx(tx *sql.Tx) error {
 			return err
 		}
 	}
+	if err := ensureJournalPromptIndexes(tx); err != nil {
+		return err
+	}
 	// The catalog lists sessions most recent first; reading them in index order
 	// spares sorting every row's projection on each snapshot.
 	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS sessions_recent ON sessions(last_active_ms DESC, updated_at DESC, id)`); err != nil {
@@ -575,16 +578,16 @@ func upgradeReleasedProjectsTable(tx *sql.Tx) error {
 }
 
 func columnExists(tx *sql.Tx, table, name string) (bool, error) {
-	rows, err := tx.Query(`PRAGMA table_info(` + table + `)`)
+	rows, err := tx.Query(`PRAGMA table_xinfo(` + table + `)`)
 	if err != nil {
 		return false, err
 	}
 	found := false
 	for rows.Next() {
-		var cid, notNull, pk int
+		var cid, notNull, pk, hidden int
 		var columnName, columnType string
 		var defaultValue any
-		if err := rows.Scan(&cid, &columnName, &columnType, &notNull, &defaultValue, &pk); err != nil {
+		if err := rows.Scan(&cid, &columnName, &columnType, &notNull, &defaultValue, &pk, &hidden); err != nil {
 			rows.Close()
 			return false, err
 		}

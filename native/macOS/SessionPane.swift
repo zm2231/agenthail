@@ -512,6 +512,8 @@ final class SessionPane: ObservableObject, Identifiable {
         composerDraft.attachments = []
         tabs.keep(sessionID)
         send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery)
+        composerDraft.recordSending(text)
+        composerDraft.restoreStashAfterSend()
     }
 
     func resend(_ text: String, attachments: [ComposerAttachment] = []) {
@@ -554,13 +556,13 @@ final class SessionPane: ObservableObject, Identifiable {
         fork(session)
     }
 
-    func fork(_ session: SessionState) {
+    func fork(_ session: SessionState, before prompt: PromptItem? = nil) {
         guard !forking, removedSession == nil, SessionOperationAvailability.fork(session) else { return }
         forking = true
-        Task { await forkNow(session) }
+        Task { await forkNow(session, before: prompt) }
     }
 
-    func forkNow(_ session: SessionState) async {
+    func forkNow(_ session: SessionState, before prompt: PromptItem? = nil) async {
         defer { forking = false }
         guard let api = model.api else {
             model.operationError = "Agenthail isn't connected."
@@ -568,8 +570,9 @@ final class SessionPane: ObservableObject, Identifiable {
         }
         model.pendingForks.remove(session.id)
         do {
-            let forked = try await api.forkSession(id: session.id, keys: model.actionKeys)
+            let forked = try await api.forkSession(id: session.id, before: prompt?.turnId, keys: model.actionKeys)
             model.operationError = nil
+            if let prompt { model.draft(for: forked.id).restore(prompt.text) }
             await model.openCreatedSession(forked.id, in: closed ? nil : self)
         } catch AgenthailAPIError.outcomeUnknown {
             model.operationError = nil

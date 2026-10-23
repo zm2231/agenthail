@@ -119,3 +119,28 @@ Optional `limit` (1–200) returns `nextCursor`; pass it as `cursor` with the sa
 filters. A changed catalog or snapshot returns `409 catalog_changed` rather
 than silently skipping or repeating rows. Cache entries are invalidated by
 catalog changes and state-relevant events, not transcript output.
+
+## Sent prompts
+
+`GET /api/v1/prompts` (scope `read`) lists what a person typed into this host's
+sessions, newest first, for composer history and prompt search. It takes
+`sessionId` (omit it for every session), `q` (a literal substring, at most 200
+characters), `limit` (1 to 200, default 50) and `before` (the `nextBefore` of
+the previous page). The response is `{"prompts":[{sessionId, itemId, turnId,
+ts, text}], "nextBefore"}`; an empty `nextBefore` is the end. `?host=` and
+`host::id` session ids are routed like other per-session reads, and each daemon
+answers only for its own sessions, so a client searching every computer asks
+each host and merges by `ts`.
+
+A prompt is a user message the journal recorded from a person: messages from
+peers, task notifications, injected context and continuation summaries are
+left out, and so are subagents, delegated sessions, sessions an agent started
+and sessions mirrored from another host. A request scans at most 2000 journal
+rows; when it stops short of `limit` it returns the cursor it reached, so a
+rare `q` match may take several pages.
+
+The prompts come only from the journal, and the journal records a session
+only once something reads it: a session page read, a session stream, a
+voice call, or a watch or relay that holds it. A session nothing has read
+since the journal was added, such as a closed terminal Claude session or an
+older Codex thread, has no sent prompts until then.

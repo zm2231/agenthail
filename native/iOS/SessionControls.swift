@@ -176,6 +176,10 @@ struct QueueListView: View {
                 if item.status == "dead" {
                     Button("Send again") { retryCandidate = item }.buttonStyle(.bordered)
                 }
+                if item.status == "pending" && !item.isHistorical {
+                    Button("Edit") { takeBack(item) }.buttonStyle(.bordered)
+                        .accessibilityHint("Cancels this delivery and puts the message back in the composer")
+                }
                 if item.status == "pending" || (item.status == "dead" && !item.isHistorical) {
                     Button(item.status == "dead" ? "Dismiss" : "Cancel delivery", role: .destructive) { update(item, retry: false) }.buttonStyle(.bordered)
                 }
@@ -183,6 +187,23 @@ struct QueueListView: View {
             .controlSize(.large)
             .disabled(model.pendingControls.contains("queue:\(item.listID)"))
         }.padding(.vertical, 6)
+        .swipeActions(edge: .leading) {
+            if item.status == "pending" && !item.isHistorical {
+                Button("Edit") { takeBack(item) }.tint(.accentColor)
+            }
+        }
+    }
+
+    private func takeBack(_ item: QueueState) {
+        Task {
+            do {
+                try await model.takeBack(item)
+                error = nil
+                if let onOpenSession { onOpenSession(item.sessionId) } else { dismiss(); model.openSession(item.sessionId) }
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
     }
 
     private func deliveryProblemRow(_ problem: DeliveryProblem) -> some View {
