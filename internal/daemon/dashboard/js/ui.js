@@ -117,15 +117,28 @@ function browserColour(document) {
   };
 }
 
-async function loadImage(url) {
-  const image = new Image();
-  image.src = url;
-  try {
-    await image.decode();
-    return image;
-  } catch {
-    return null;
-  }
+export function workerMeasure(worker) {
+  const waiting = new Map();
+  let next = 0;
+  let broken = false;
+  const fail = () => {
+    broken = true;
+    for (const resolve of waiting.values()) resolve(null);
+    waiting.clear();
+  };
+  worker.addEventListener("message", ({ data }) => {
+    waiting.get(data.id)?.(data.alpha);
+    waiting.delete(data.id);
+  });
+  worker.addEventListener("error", fail);
+  worker.addEventListener("messageerror", fail);
+  return (look) =>
+    new Promise((resolve) => {
+      if (broken) return resolve(null);
+      const id = ++next;
+      waiting.set(id, resolve);
+      worker.postMessage({ id, look });
+    });
 }
 
 export function start({ document, fetch, EventSource, matchMedia, storage, colourOf, backdrop, viewport, MutationObserver, addEventListener, debounce = 150 }) {
@@ -196,7 +209,7 @@ if (typeof window !== "undefined" && window.document) {
     matchMedia: window.matchMedia.bind(window),
     storage: window.localStorage,
     colourOf: browserColour(window.document),
-    backdrop: createBackdrop({ document: window.document, loadImage }),
+    backdrop: createBackdrop({ document: window.document, measure: workerMeasure(new Worker("/js/ui-sampler-worker.js", { type: "module" })) }),
     viewport: () => ({ width: window.innerWidth, height: window.innerHeight, scale: window.devicePixelRatio || 1 }),
     MutationObserver: window.MutationObserver,
     addEventListener: window.addEventListener.bind(window),
