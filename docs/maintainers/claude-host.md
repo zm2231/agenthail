@@ -282,17 +282,20 @@ replaced by `-`. The transcript only shows the calls: a `TaskCreate` result
 names the task's id and subject, a `TaskUpdate` result its id. The daemon
 reads the directory named for the session id, and only on an observation that
 follows a new task result, never on a scan that brings none. It counts the
-list as the session's own only when the newest task result agrees with it: the
-created task is there with the same subject, or the deleted one is gone. A
-list kept under another id, as with `CLAUDE_CODE_TASK_LIST_ID` or a team,
-fails that check and the session shows no plan rather than someone else's.
+list as the session's own only when it agrees with every task the transcript
+shows the session creating: each one it still has is there under the same
+subject (following any rename by `TaskUpdate`), each one it deleted is gone,
+and it created at least one. A list kept under another id, as with
+`CLAUDE_CODE_TASK_LIST_ID` or a team, fails that check and the session shows
+no plan rather than someone else's.
 A `TodoWrite` call carries the whole list and sets the plan directly.
 
 Codex sends its plan with `update_plan`, as a function call or, in code mode,
 as `tools.update_plan({plan: [...]})` inside an `exec` call. The daemon reads
 the newest one from the rollout's last 4 MB on first sight and then only what
 was appended. A plan built from a variable cannot be read, and shows none
-rather than the previous one.
+rather than the previous one. A complete listing forgets the plans of rollouts it no
+longer reads.
 
 The status pass republishes a row for its plan only when `done`, `total` or
 `current` changed. The plan stays on the row once the session closes; clients

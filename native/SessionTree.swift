@@ -71,7 +71,9 @@ struct SessionTree: Equatable {
         var pinned: Set<String> = []
 
         var sessionCount: Int { checkouts.reduce(0) { $0 + $1.families.count } }
-        var sessionCountLabel: String { SessionTree.sessionCountLabel(sessionCount) }
+        /// Every session the project lists, subagents included, as its header counts them.
+        var listedSessionCount: Int { checkouts.reduce(0) { $0 + $1.families.reduce(0) { $0 + $1.sessions.count } } }
+        var sessionCountLabel: String { SessionTree.sessionCountLabel(listedSessionCount) }
         var archived: Bool { identity?.archived == true }
 
         func limited(to limit: Int, keeping selectedID: String?) -> Project {

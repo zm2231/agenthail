@@ -272,7 +272,7 @@ struct ConversationListView: View {
                                 IOSHostBadge(name: host)
                             }
                             Spacer(minLength: 0)
-                            Text("\(project.sessionCount)")
+                            Text("\(project.listedSessionCount)")
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(.secondary)
                             Image(systemName: collapsed ? "chevron.right" : "chevron.down")

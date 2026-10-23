@@ -352,6 +352,9 @@ func (c *Codex) list(ctx context.Context, sweep bool) ([]surface.Session, bool, 
 		applyCodexPendingModel(&session)
 		out = append(out, session)
 	}
+	if complete {
+		c.forgetUnreadPlans()
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].LastActive.After(out[j].LastActive) })
 	return out, complete, nil
 }

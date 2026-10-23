@@ -66,3 +66,34 @@ func TestJSLiteralJSONAcceptsOnlyPlainLiterals(t *testing.T) {
 		t.Fatalf("converted=%s ok=%v value=%v", converted, ok, value)
 	}
 }
+
+func TestCodexPlanForgetsRolloutsNoListingReads(t *testing.T) {
+	dir := t.TempDir()
+	codex := NewCodex("")
+	paths := []string{filepath.Join(dir, "kept.jsonl"), filepath.Join(dir, "gone.jsonl")}
+	for _, path := range paths {
+		if err := os.WriteFile(path, []byte(codexExecLine(t, `await tools.update_plan({plan:[{step:"Ship",status:"pending"}]});`)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if plan := codex.plan(context.Background(), path, info); plan == nil {
+			t.Fatalf("no plan for %s", path)
+		}
+	}
+	codex.forgetUnreadPlans()
+	if len(codex.planState) != 2 {
+		t.Fatalf("a listing that read both rollouts dropped a plan: %d left", len(codex.planState))
+	}
+	info, err := os.Stat(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	codex.plan(context.Background(), paths[0], info)
+	codex.forgetUnreadPlans()
+	if _, kept := codex.planState[paths[0]]; !kept || len(codex.planState) != 1 {
+		t.Fatalf("after a listing that read one rollout the cache holds %d plans", len(codex.planState))
+	}
+}

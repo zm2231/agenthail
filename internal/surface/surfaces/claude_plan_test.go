@@ -138,10 +138,33 @@ func TestClaudePlanIsNotShownForAListItCannotAttribute(t *testing.T) {
 		t.Fatalf("a list missing the task this session created showed plan=%+v", plan)
 	}
 
+	root, path = planTranscript(t, `{"type":"user","uuid":"u0","timestamp":"2026-10-23T09:59:00Z","message":{"role":"user","content":"tidy"}}`+"\n"+planUpdate("7", "toolu_d7", "deleted"))
+	writeTasks(t, root, planConversation, task("1", "Someone else's", "in_progress"))
+	if plan := observePlan(t, NewClaude(nil, t.TempDir()), path); plan != nil {
+		t.Fatalf("a deletion alone proves nothing about the list, yet showed plan=%+v", plan)
+	}
+
+	root, path = planTranscript(t, planCreates+planUpdate("2", "toolu_d2", "deleted"))
+	writeTasks(t, root, planConversation, task("1", "Parse", "pending"), task("2", "Render", "pending"))
+	if plan := observePlan(t, NewClaude(nil, t.TempDir()), path); plan != nil {
+		t.Fatalf("a list still holding a task this session deleted showed plan=%+v", plan)
+	}
+
 	root, path = planTranscript(t, `{"type":"user","uuid":"u1","timestamp":"2026-10-23T10:00:00Z","message":{"role":"user","content":"hi"}}`)
 	writeTasks(t, root, planConversation, task("1", "Parse", "pending"))
 	if plan := observePlan(t, NewClaude(nil, t.TempDir()), path); plan != nil {
 		t.Fatalf("a transcript with no task calls showed plan=%+v", plan)
+	}
+}
+
+func TestClaudePlanFollowsATaskRenamedByAnUpdate(t *testing.T) {
+	rename := `{"type":"assistant","uuid":"a-r","timestamp":"2026-10-23T10:01:00Z","message":{"id":"m-r","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_r","name":"TaskUpdate","input":{"taskId":"2","subject":"Render the badge"}}]}}
+{"type":"user","uuid":"r-r","timestamp":"2026-10-23T10:01:01Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_r","content":"Updated task #2"}]},"toolUseResult":{"success":true,"taskId":"2","updatedFields":["subject"]}}
+`
+	root, path := planTranscript(t, planCreates+rename)
+	writeTasks(t, root, planConversation, task("1", "Parse", "completed"), task("2", "Render the badge", "pending"))
+	if plan := observePlan(t, NewClaude(nil, t.TempDir()), path); plan == nil || *plan != (surface.Plan{Done: 1, Total: 2}) {
+		t.Fatalf("after a rename plan=%+v", plan)
 	}
 }
 

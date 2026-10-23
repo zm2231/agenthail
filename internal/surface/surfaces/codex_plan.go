@@ -15,6 +15,7 @@ type codexPlanState struct {
 	identity string
 	offset   int64
 	plan     *surface.Plan
+	read     bool
 }
 
 type codexPlanRecord struct {
@@ -38,6 +39,7 @@ func (c *Codex) plan(ctx context.Context, path string, info os.FileInfo) *surfac
 	identity := transcriptFileIdentity(info)
 	state := c.planState[path]
 	if state != nil && identity != "" && state.identity == identity && info.Size() == state.offset {
+		state.read = true
 		return state.plan
 	}
 	if state == nil || identity == "" || state.identity != identity || info.Size() < state.offset {
@@ -60,7 +62,22 @@ func (c *Codex) plan(ctx context.Context, path string, info os.FileInfo) *surfac
 	if err == nil {
 		state.offset = offset
 	}
+	state.read = true
 	return state.plan
+}
+
+// forgetUnreadPlans drops the plans no read has asked for since the last
+// complete listing, which reads every rollout it lists.
+func (c *Codex) forgetUnreadPlans() {
+	c.planMu.Lock()
+	defer c.planMu.Unlock()
+	for path, state := range c.planState {
+		if !state.read {
+			delete(c.planState, path)
+			continue
+		}
+		state.read = false
+	}
 }
 
 func (s *codexPlanState) apply(line []byte) {

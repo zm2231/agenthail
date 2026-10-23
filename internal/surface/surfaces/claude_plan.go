@@ -10,10 +10,10 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-type claudeTaskEvidence struct {
-	ID      string
-	Subject string
-	Deleted bool
+// claudeTask is what a transcript shows of one task its session made.
+type claudeTask struct {
+	subject string
+	deleted bool
 }
 
 type claudeTaskCall struct {
@@ -26,12 +26,13 @@ type claudeTaskCall struct {
 // claudePlanState follows a transcript's task calls. Claude keeps the list
 // itself in <config root>/tasks/<list id>/, so a new task result marks the
 // list for one read on the next observation, and scans that bring none reuse
-// it.
+// it. tasks is every task the transcript shows this session creating, which
+// the list must agree with to count as the session's own.
 type claudePlanState struct {
-	calls    map[string]claudeTaskCall
-	evidence *claudeTaskEvidence
-	stale    bool
-	plan     *surface.Plan
+	calls map[string]claudeTaskCall
+	tasks map[string]claudeTask
+	stale bool
+	plan  *surface.Plan
 }
 
 func (s *claudePlanState) apply(record claudeRecord, line []byte) {
@@ -51,7 +52,7 @@ func (s *claudePlanState) apply(record claudeRecord, line []byte) {
 				}
 				s.calls[str(block, "id")] = claudeTaskCall{name: name, subject: str(input, "subject"), taskID: str(input, "taskId"), status: str(input, "status")}
 			case "TodoWrite":
-				s.evidence, s.stale = nil, false
+				s.tasks, s.stale = nil, false
 				s.plan = claudeTodoPlan(input)
 			}
 		}
@@ -75,17 +76,16 @@ func (s *claudePlanState) apply(record claudeRecord, line []byte) {
 				continue
 			}
 			delete(s.calls, id)
-			evidence := claudeTaskResult(call, line)
-			if evidence == nil {
-				continue
+			if s.record(call, line) {
+				s.stale = true
 			}
-			s.evidence = evidence
-			s.stale = true
 		}
 	}
 }
 
-func claudeTaskResult(call claudeTaskCall, line []byte) *claudeTaskEvidence {
+// record applies one task result to what the transcript shows, and reports
+// whether it was one.
+func (s *claudePlanState) record(call claudeTaskCall, line []byte) bool {
 	var result struct {
 		ToolUseResult struct {
 			Task *struct {
@@ -97,19 +97,34 @@ func claudeTaskResult(call claudeTaskCall, line []byte) *claudeTaskEvidence {
 		} `json:"toolUseResult"`
 	}
 	if json.Unmarshal(line, &result) != nil {
-		return nil
+		return false
+	}
+	if s.tasks == nil {
+		s.tasks = map[string]claudeTask{}
 	}
 	switch call.name {
 	case "TaskCreate":
 		if task := result.ToolUseResult.Task; task != nil && task.ID != "" {
-			return &claudeTaskEvidence{ID: task.ID, Subject: task.Subject}
+			s.tasks[task.ID] = claudeTask{subject: task.Subject}
+			return true
 		}
 	case "TaskUpdate":
-		if result.ToolUseResult.Success != nil && *result.ToolUseResult.Success && result.ToolUseResult.TaskID != "" {
-			return &claudeTaskEvidence{ID: result.ToolUseResult.TaskID, Deleted: call.status == "deleted"}
+		id := result.ToolUseResult.TaskID
+		if result.ToolUseResult.Success == nil || !*result.ToolUseResult.Success || id == "" {
+			return false
 		}
+		task, known := s.tasks[id]
+		if !known {
+			return true
+		}
+		if call.subject != "" {
+			task.subject = call.subject
+		}
+		task.deleted = call.status == "deleted"
+		s.tasks[id] = task
+		return true
 	}
-	return nil
+	return false
 }
 
 func claudeTodoPlan(input map[string]any) *surface.Plan {
@@ -134,23 +149,31 @@ func claudeTodoPlan(input map[string]any) *surface.Plan {
 }
 
 // resolve reads the task list when a task result since the last read asks
-// for it. The list is the session's own only when the newest task call this
-// transcript shows agrees with it; a session whose list lives elsewhere, as
-// with CLAUDE_CODE_TASK_LIST_ID or an agent team, shows no plan.
+// for it. The list in the directory named for the session is its own only
+// when it agrees with the transcript: every task the session created and
+// still has is there under the same subject, every one it deleted is gone,
+// and it created at least one. A session whose list lives elsewhere, as with
+// CLAUDE_CODE_TASK_LIST_ID or an agent team, shows no plan.
 func (s *claudePlanState) resolve(transcript string) {
 	if !s.stale {
 		return
 	}
 	s.stale = false
-	s.plan = readClaudeTaskPlan(transcript, s.evidence)
+	s.plan = readClaudeTaskPlan(transcript, s.tasks)
 }
 
 var claudeTaskListName = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 
 var readClaudeTaskPlanFiles func(dir string)
 
-func readClaudeTaskPlan(transcript string, evidence *claudeTaskEvidence) *surface.Plan {
-	if evidence == nil {
+func readClaudeTaskPlan(transcript string, known map[string]claudeTask) *surface.Plan {
+	live := 0
+	for _, task := range known {
+		if !task.deleted {
+			live++
+		}
+	}
+	if live == 0 {
 		return nil
 	}
 	session := strings.TrimSuffix(filepath.Base(transcript), ".jsonl")
@@ -163,7 +186,7 @@ func readClaudeTaskPlan(transcript string, evidence *claudeTaskEvidence) *surfac
 		return nil
 	}
 	plan := &surface.Plan{}
-	attributed := evidence.Deleted
+	found := 0
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".json") || strings.HasPrefix(name, ".") {
@@ -182,11 +205,11 @@ func readClaudeTaskPlan(transcript string, evidence *claudeTaskEvidence) *surfac
 		if json.Unmarshal(data, &task) != nil {
 			continue
 		}
-		if task.ID == evidence.ID {
-			if evidence.Deleted || evidence.Subject != "" && task.Subject != evidence.Subject {
+		if mine, ok := known[task.ID]; ok {
+			if mine.deleted || task.Subject != mine.subject {
 				return nil
 			}
-			attributed = true
+			found++
 		}
 		if task.Status == "deleted" {
 			continue
@@ -201,7 +224,7 @@ func readClaudeTaskPlan(transcript string, evidence *claudeTaskEvidence) *surfac
 			}
 		}
 	}
-	if !attributed || plan.Total == 0 {
+	if found != live || plan.Total == 0 {
 		return nil
 	}
 	return plan
