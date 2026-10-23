@@ -36,6 +36,9 @@ func (c *Codex) readCompletions(ctx context.Context, conn codexClient, threadID,
 			params["cursor"] = pageCursor
 		}
 		response, err := conn.Request(ctx, "thread/turns/list", params, 5*time.Second)
+		if codexTurnsNotListedYet(err) {
+			break
+		}
 		if err != nil {
 			return surface.CompletionBatch{}, err
 		}
