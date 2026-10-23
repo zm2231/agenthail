@@ -83,15 +83,24 @@ func (d *Daemon) settleArchiveActivity(rows []dashboardSession, view catalogView
 // applyCatalogView sets the row's archive flags. Presence (current) stays as
 // the surface computed it.
 func applyCatalogView(row *dashboardSession, view catalogViewState) {
-	_, sessionArchived := view.archive.Sessions[row.ID]
-	projectArchived := false
+	archived, projectArchived := catalogViewArchive(row, view)
 	if row.Project != nil {
 		project := *row.Project
-		_, projectArchived = view.archive.Projects[project.LocalID]
 		project.Archived = projectArchived
 		row.Project = &project
 	}
-	row.Archived = sessionArchived || projectArchived
+	row.Archived = archived
+}
+
+// catalogViewArchive reports whether the view archives the row, and whether
+// it archives the row's project.
+func catalogViewArchive(row *dashboardSession, view catalogViewState) (bool, bool) {
+	_, sessionArchived := view.archive.Sessions[row.ID]
+	projectArchived := false
+	if row.Project != nil {
+		_, projectArchived = view.archive.Projects[row.Project.LocalID]
+	}
+	return sessionArchived || projectArchived, projectArchived
 }
 
 // dashboardProject is one project across every host: each checkout is one
