@@ -550,6 +550,12 @@ struct SessionScreen: View {
                             Label(detail.readOnlyReason.isEmpty ? "This session does not support messages." : detail.readOnlyReason, systemImage: "lock")
                                 .font(.footnote).foregroundStyle(.secondary).padding().frame(maxWidth: .infinity)
                         } else {
+                            if !detail.capabilities.turnNotice.isEmpty {
+                                Label(detail.capabilities.turnNotice, systemImage: "terminal")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                                    .padding(.horizontal).padding(.top, 6)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                             IOSComposer(model: model, draft: model.draft, session: session, detail: detail)
                         }
                     }

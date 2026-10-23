@@ -372,6 +372,7 @@ function syncComposerAction() {
   const busy = app.selected?.status === "busy";
   const hasMessage = Boolean(input.value.trim());
   const readOnly = Boolean(app.history?.readOnly || app.selected?.readOnly);
+  const turnNotice = (app.history ? capabilities.turnNotice : app.selected?.capabilities?.turnNotice) || "";
   const stopping = busy && capabilities.interrupt && !hasMessage && !readOnly;
   sendButton.dataset.mode = stopping ? "interrupt" : "send";
   sendButton.querySelector("span:first-child").textContent = stopping ? "Stop" : "Send";
@@ -385,6 +386,8 @@ function syncComposerAction() {
   if (readOnly) return;
   $("#composer-note").textContent = app.selected?.waitingOn
     ? "This agent is waiting on you. Messages queue until you answer it."
+    : turnNotice
+    ? turnNotice
     : busy
     ? hasMessage
       ? "Send queues this for next. Steer now changes the turn in progress."
