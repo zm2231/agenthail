@@ -407,8 +407,22 @@ func TestAClosingTurnClearsWhenItsTranscriptIsRewrittenAtTheSameSizeAndTime(t *t
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
-		t.Fatal(err)
+	// The stream sees a rewrite at the same size and time only through the
+	// inode change time, which Linux stamps from a coarse clock: a rewrite in
+	// the same tick as the stream's last look keeps it. Restoring the time
+	// again until the change time moves makes the rewrite visible without
+	// guessing how long a tick is.
+	for {
+		if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+			t.Fatal(err)
+		}
+		rewritten, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if transcriptChangeTime(rewritten) != transcriptChangeTime(info) {
+			break
+		}
 	}
 	resume <- struct{}{}
 	nextPass()
