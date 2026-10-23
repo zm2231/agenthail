@@ -48,7 +48,7 @@
       </header>
 
       <section class="view" id="overview-view" data-view-panel="overview">
-        <header class="page-heading">
+        <header class="page-heading" data-readable>
           <div>
             <h1>Your agents, in one place.</h1>
             <p class="lede" id="daemon-detail">
@@ -59,7 +59,7 @@
             Open inbox <span>→</span>
           </button>
         </header>
-        <section class="attention-panel" id="attention-panel" hidden>
+        <section class="attention-panel" id="attention-panel" data-readable hidden>
           <div class="section-heading">
             <div>
               <h2>Needs attention</h2>
@@ -68,12 +68,12 @@
           </div>
           <div class="attention-list" id="attention-list"></div>
         </section>
-        <section class="attention-panel" id="delivery-problems-panel" hidden>
+        <section class="attention-panel" id="delivery-problems-panel" data-readable hidden>
           <div class="section-heading"><div><h2>Delivery problems</h2><p>Messages that could not be sent.</p></div></div>
           <div class="attention-list" id="delivery-problems-list"></div>
         </section>
         <section class="overview-grid">
-          <section>
+          <section data-readable>
             <div class="section-heading">
               <div>
                 <h2>Current conversations</h2>
@@ -81,7 +81,7 @@
             </div>
             <div class="activity-list" id="recent-activity"></div>
           </section>
-          <section>
+          <section data-readable>
             <div class="section-heading">
               <div>
                 <h2>Your surfaces</h2>
@@ -310,7 +310,7 @@
         id="operations-view"
         data-view-panel="operations"
       >
-        <header class="page-heading">
+        <header class="page-heading" data-readable>
           <div>
             <h1>Delivery and handoffs.</h1>
             <p class="lede">
@@ -318,7 +318,7 @@
             </p>
           </div>
         </header>
-        <div class="operation-tabs" aria-label="Operations sections">
+        <div class="operation-tabs" aria-label="Operations sections" data-readable>
           <button
             class="active"
             aria-pressed="true"
@@ -348,7 +348,7 @@
           </button>
         </div>
         <section class="operation-panel delivery-grid" data-operations-panel="queue">
-          <section>
+          <section data-readable>
             <div class="panel-heading">
               <div>
                 <h2>Messages waiting to move</h2>
@@ -357,7 +357,7 @@
             </div>
             <div id="queue-list" class="operation-list"></div>
           </section>
-          <aside class="delivery-recent">
+          <aside class="delivery-recent" data-readable>
             <div class="panel-heading">
               <div>
                 <h2>Recent outcomes</h2>
@@ -460,6 +460,7 @@
         <section
           class="operation-panel audit-panel hidden"
           data-operations-panel="audit"
+          data-readable
         >
           <div class="panel-heading">
             <div>

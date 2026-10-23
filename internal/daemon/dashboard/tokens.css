@@ -2595,20 +2595,20 @@ html[data-panes] :is(.topbar, .conversation-rail, .notebook, .settings-card, .co
   border-color: rgb(var(--glass-edge) / var(--glass-border));
 }
 html[data-panes] .topbar {
-  background: rgb(var(--glass-tint) / var(--glass-chrome));
+  background: rgb(var(--glass-tint) / var(--glass-alpha, var(--glass-chrome)));
 }
 html[data-panes] .conversation-rail {
   padding-left: 24px;
-  background: rgb(var(--glass-tint) / var(--glass-sidebar));
+  background: rgb(var(--glass-tint) / var(--glass-alpha, var(--glass-sidebar)));
 }
 html[data-panes] :is(.notebook, .settings-card) {
-  background: rgb(var(--glass-tint) / var(--glass-content));
+  background: rgb(var(--glass-tint) / var(--glass-alpha, var(--glass-content)));
 }
 html[data-panes] .notebook {
   padding-right: 32px;
 }
 html[data-panes] :is(.composer form, .slash-menu, .voice-dialog, .toast, .project-menu-items, .host-picker-menu) {
-  background: rgb(var(--glass-tint) / var(--glass-float));
+  background: rgb(var(--glass-tint) / var(--glass-alpha, var(--glass-float)));
 }
 html[data-panes][data-glass-gap] .conversation-layout {
   gap: var(--glass-gutter);
@@ -2617,4 +2617,23 @@ html[data-panes][data-glass-gap] .conversation-layout {
 html[data-panes][data-glass-gap] :is(.conversation-rail, .notebook) {
   border: 1px solid rgb(var(--glass-edge) / var(--glass-border));
   border-radius: var(--radius);
+}
+html[data-readable-on] .shell {
+  position: relative;
+  isolation: isolate;
+}
+html[data-readable-on] [data-readable] {
+  position: relative;
+}
+html[data-readable-on] [data-readable]::before {
+  content: "";
+  position: absolute;
+  inset: calc(-1 * var(--scrim-feather));
+  z-index: -1;
+  pointer-events: none;
+  background: rgb(var(--scrim-tint, 0 0 0) / var(--scrim-alpha, 0));
+  -webkit-mask: linear-gradient(to right, transparent, #000 var(--scrim-feather), #000 calc(100% - var(--scrim-feather)), transparent), linear-gradient(to bottom, transparent, #000 var(--scrim-feather), #000 calc(100% - var(--scrim-feather)), transparent);
+  -webkit-mask-composite: source-in;
+  mask: linear-gradient(to right, transparent, #000 var(--scrim-feather), #000 calc(100% - var(--scrim-feather)), transparent), linear-gradient(to bottom, transparent, #000 var(--scrim-feather), #000 calc(100% - var(--scrim-feather)), transparent);
+  mask-composite: intersect;
 }

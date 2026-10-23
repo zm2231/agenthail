@@ -1,10 +1,19 @@
-import { backgroundURL, distinctColours, gradientLine, hex, imageRect, meshPixels, meshSize, paneAlphas, scrimForColours } from "./ui-backdrop.js";
+import { backgroundURL, gradientLine, hex, imageRect, meshPixels, meshSize, regionColours, solveRegions } from "./ui-backdrop.js";
 
 export function sampleSize({ width, height, scale }) {
   return { width: Math.max(Math.round(width * (scale || 1)), 1), height: Math.max(Math.round(height * (scale || 1)), 1) };
 }
 
+export function deviceRect([x, y, w, h], scale, width, height) {
+  const left = Math.min(Math.max(Math.round(x * scale), 0), width);
+  const top = Math.min(Math.max(Math.round(y * scale), 0), height);
+  const right = Math.min(Math.max(Math.round((x + w) * scale), left), width);
+  const bottom = Math.min(Math.max(Math.round((y + h) * scale), top), height);
+  return [left, top, right - left, bottom - top];
+}
+
 export function createSampler({ makeCanvas, loadImage }) {
+  const seen = new Uint8Array(1 << 21);
   let cached = null;
 
   const draw = async ({ spec, fit, position, width, height, scale, ground }) => {
@@ -43,7 +52,7 @@ export function createSampler({ makeCanvas, loadImage }) {
     } else {
       return null;
     }
-    return distinctColours(context.getImageData(0, 0, w, h).data);
+    return { data: context.getImageData(0, 0, w, h).data, width: w, height: h };
   };
 
   return {
@@ -51,12 +60,19 @@ export function createSampler({ makeCanvas, loadImage }) {
       const size = sampleSize(look);
       const key = JSON.stringify([look.spec, look.fit, look.position, size.width, size.height, look.ground]);
       if (cached?.key !== key) {
-        const colours = await draw(look);
-        if (!colours) return null;
-        cached = { key, colours };
+        const drawn = await draw(look);
+        if (!drawn) return null;
+        cached = { key, drawn, regions: new Map() };
       }
-      const page = scrimForColours(cached.colours, look);
-      return { page, panes: look.glass?.on ? paneAlphas(cached.colours, look, page) : {} };
+      const { drawn } = cached;
+      const scale = drawn.width / look.width;
+      const regions = look.regions.map((region) => {
+        const rect = deviceRect(region.rect, scale, drawn.width, drawn.height);
+        const rectKey = rect.join(",");
+        if (!cached.regions.has(rectKey)) cached.regions.set(rectKey, regionColours(drawn.data, drawn.width, rect, seen));
+        return { ...region, ...cached.regions.get(rectKey) };
+      });
+      return solveRegions(regions, look);
     },
   };
 }

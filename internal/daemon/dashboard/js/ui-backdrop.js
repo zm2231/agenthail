@@ -1,4 +1,4 @@
-import { blendFloor, boundary, gamma, linear, passes } from "./ui-contrast.js";
+import { blendFloor, boundary, gamma, linear, passes, reachable } from "./ui-contrast.js";
 
 const MESH_WIDTH = 192;
 
@@ -55,6 +55,7 @@ const FIT = {
 };
 const POSITION = { center: "center", top: "center top", bottom: "center bottom", left: "left center", right: "right center" };
 
+const REGION_PROPERTIES = ["--glass-alpha", "--scrim-tint", "--scrim-alpha"];
 const GLASS_PROPERTIES = ["--glass-tint", "--glass-edge", "--glass-blur", "--glass-border", "--glass-gutter", "--glass-content", "--glass-sidebar", "--glass-chrome", "--glass-float"];
 
 function channels(colour) {
@@ -152,27 +153,32 @@ function solveScrim(visit, roles, polarity, target, tint, start = 0) {
   return alpha;
 }
 
-export function pageScrim(samples, roles, polarity, target, ground) {
+export function scrimOver(samples, roles, polarity, target, tint, start = 0) {
   return solveScrim((check) => {
     for (const [r, g, b] of samples) if (!check(r, g, b)) return;
-  }, roles, polarity, target, ground);
+  }, roles, polarity, target, tint, start);
 }
 
-function visitShown(colours, { strength, dim, ground, polarity, texture, textureStrength }) {
+function shownChannel({ strength, dim, ground, polarity }) {
   const veil = polarity === "dark" ? 0 : 1;
-  const shown = (byte, i) => {
-    const over = ground[i] + (byte / 255 - ground[i]) * strength;
+  return (v, i) => {
+    const over = ground[i] + (v - ground[i]) * strength;
     return over + (veil - over) * dim;
   };
+}
+
+function visitShown(colours, look) {
+  const { polarity, texture, textureStrength } = look;
+  const shown = shownChannel(look);
   const grain = texture === "grain" && textureStrength > 0 ? textureStrength * 0.5 : 0;
   const lines = texture === "scanlines" && textureStrength > 0 && polarity === "light" ? textureStrength : 0;
   const lift = polarity === "light" ? (v) => v + (Math.max(2 * v - 1, 0) - v) * grain : (v) => v + (Math.min(2 * v, 1) - v) * grain;
   return (check) => {
     for (let k = 0; k < colours.length; k++) {
       const n = colours[k];
-      const r = shown((n >> 16) & 255, 0);
-      const g = shown((n >> 8) & 255, 1);
-      const b = shown(n & 255, 2);
+      const r = shown(((n >> 16) & 255) / 255, 0);
+      const g = shown(((n >> 8) & 255) / 255, 1);
+      const b = shown((n & 255) / 255, 2);
       if (!check(r, g, b)) return;
       if (grain && !check(lift(r), lift(g), lift(b))) return;
       if (lines && !check(r * (1 - lines), g * (1 - lines), b * (1 - lines))) return;
@@ -180,23 +186,43 @@ function visitShown(colours, { strength, dim, ground, polarity, texture, texture
   };
 }
 
-export function scrimForColours(colours, look) {
-  return solveScrim(visitShown(colours, look), look.roles, look.polarity, look.target, look.ground);
+export function regionColours(data, width, [x, y, w, h], seen) {
+  const out = new Uint32Array(Math.min(w * h, 1 << 24));
+  let count = 0;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  for (let row = y; row < y + h; row++) {
+    for (let i = (row * width + x) * 4, end = i + w * 4; i < end; i += 4) {
+      r += data[i];
+      g += data[i + 1];
+      b += data[i + 2];
+      const n = (data[i] << 16) | (data[i + 1] << 8) | data[i + 2];
+      const bit = 1 << (n & 7);
+      if (seen[n >> 3] & bit) continue;
+      seen[n >> 3] |= bit;
+      out[count++] = n;
+    }
+  }
+  for (let k = 0; k < count; k++) seen[out[k] >> 3] = 0;
+  const pixels = Math.max(w * h, 1) * 255;
+  return { colours: out.slice(0, count), mean: [r / pixels, g / pixels, b / pixels] };
 }
 
-export function paneAlphas(colours, look, page) {
-  const { ground, glass } = look;
-  const under = visitShown(colours, look);
+export function solveRegions(regions, look) {
+  const { roles, polarity, target, glass } = look;
+  const limit = boundary(roles, polarity, target);
+  const shown = shownChannel(look);
   const out = {};
-  for (const [pane, floor] of Object.entries(glass.panes)) {
-    out[pane] = solveScrim(
-      (check) => under((r, g, b) => check(r + (ground[0] - r) * page, g + (ground[1] - g) * page, b + (ground[2] - b) * page)),
-      look.roles,
-      look.polarity,
-      look.target,
-      glass.tint,
-      floor,
-    );
+  for (const region of regions) {
+    const visit = visitShown(region.colours, look);
+    if (region.kind === "pane") {
+      if (glass?.on) out[region.id] = { alpha: solveScrim(visit, roles, polarity, target, glass.tint, glass.panes[region.pane] ?? 0) };
+      continue;
+    }
+    const base = Array.isArray(look.scrimTint) ? look.scrimTint : region.mean.map(shown);
+    const tint = reachable(base, polarity, limit);
+    out[region.id] = { tint, alpha: solveScrim(visit, roles, polarity, target, tint) };
   }
   return out;
 }
@@ -220,20 +246,6 @@ export function gradientLine(angle, width, height) {
   return { x0: cx - (dx * length) / 2, y0: cy - (dy * length) / 2, x1: cx + (dx * length) / 2, y1: cy + (dy * length) / 2 };
 }
 
-export function distinctColours(data) {
-  const seen = new Uint8Array(1 << 21);
-  const out = new Uint32Array(Math.min(data.length >> 2, 1 << 24));
-  let count = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    const n = (data[i] << 16) | (data[i + 1] << 8) | data[i + 2];
-    const bit = 1 << (n & 7);
-    if (seen[n >> 3] & bit) continue;
-    seen[n >> 3] |= bit;
-    out[count++] = n;
-  }
-  return out.slice(0, count);
-}
-
 function canvas(document, width, height) {
   const element = document.createElement("canvas");
   element.width = width;
@@ -246,7 +258,7 @@ export function createBackdrop({ document, measure }) {
   root.className = "ui-backdrop";
   root.setAttribute("aria-hidden", "true");
   const layers = {};
-  for (const name of ["picture", "dim", "texture", "scrim"]) {
+  for (const name of ["picture", "dim", "texture"]) {
     layers[name] = document.createElement("div");
     layers[name].className = `ui-backdrop-${name}`;
     root.append(layers[name]);
@@ -277,11 +289,22 @@ export function createBackdrop({ document, measure }) {
   };
 
   const html = document.documentElement;
+  const styled = new Set();
+  const keepOnly = (keep) => {
+    for (const element of styled) {
+      if (keep.has(element)) continue;
+      for (const name of REGION_PROPERTIES) element.style.removeProperty(name);
+      styled.delete(element);
+    }
+  };
+  const fallback = (look) =>
+    Object.fromEntries(look.regions.filter((region) => region.kind === "text" || look.glass?.on).map((region) => [region.id, region.kind === "pane" ? { alpha: 1 } : { tint: look.ground, alpha: 1 }]));
+
   const setPanes = (panes) => {
     for (const [pane, alpha] of Object.entries(panes)) html.style.setProperty(`--glass-${pane}`, String(alpha));
   };
 
-  const render = async (look) => {
+  const render = async (look, elements = new Map()) => {
     const mine = ++generation;
     const { spec, fit, position, strength, dim, texture, textureStrength, textureSpacing, polarity, ground, readable, width, height } = look;
     const style = pictureStyle(spec, fit, position, spec?.kind === "mesh" ? meshURL(spec, width, height) : null);
@@ -305,9 +328,13 @@ export function createBackdrop({ document, measure }) {
       html.style.setProperty("--glass-gutter", `${glass.gutter}px`);
       setPanes(glass.panes);
     }
-    if (!style || !readable) {
-      layers.scrim.style.opacity = "0";
-      return { page: 0, panes: glass ? glass.panes : {} };
+    const reading = Boolean(style && readable);
+    html.toggleAttribute("data-readable-on", reading);
+    if (reading) html.style.setProperty("--scrim-feather", `${look.feather}px`);
+    else html.style.removeProperty("--scrim-feather");
+    if (!reading) {
+      keepOnly(new Set());
+      return { regions: {} };
     }
     let measured = null;
     try {
@@ -316,12 +343,23 @@ export function createBackdrop({ document, measure }) {
       measured = null;
     }
     if (mine !== generation) return null;
-    const page = measured?.page ?? 1;
-    const panes = (glass && measured?.panes) || (glass ? glass.panes : {});
-    layers.scrim.style.background = hex(ground);
-    layers.scrim.style.opacity = String(page);
-    if (glass) setPanes(panes);
-    return { page, panes };
+    const results = measured ?? fallback(look);
+    const keep = new Set();
+    for (const region of look.regions) {
+      const element = elements.get(region.id);
+      const result = results[region.id];
+      if (!element || !result) continue;
+      keep.add(element);
+      styled.add(element);
+      if (region.kind === "pane") {
+        element.style.setProperty("--glass-alpha", String(result.alpha));
+      } else {
+        element.style.setProperty("--scrim-tint", channels(result.tint));
+        element.style.setProperty("--scrim-alpha", String(result.alpha));
+      }
+    }
+    keepOnly(keep);
+    return { regions: results };
   };
 
   return { root, layers, render };
