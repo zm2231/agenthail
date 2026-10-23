@@ -353,9 +353,9 @@ func SendWithReplySocket(ctx context.Context, controlPath, senderID, targetSocke
 	request := controlRequest{TargetSocket: targetSocket, SenderID: senderID, Message: message, ReplySocket: replySocket, MsgID: surface.MessageUUID(ctx), PersonName: surface.PersonName(ctx)}
 	var response Response
 	if err := unixjson.Call(ctx, controlPath, readDeadline, maxLineBytes, request, &response); err != nil {
-		var dial *unixjson.DialError
-		if errors.As(err, &dial) {
-			return nil, surface.DeliveryUnavailable(fmt.Errorf("peer control socket: %w", dial.Err))
+		var notSent *unixjson.NotSentError
+		if errors.As(err, &notSent) {
+			return nil, surface.DeliveryUnavailable(fmt.Errorf("peer control socket: %w", notSent.Err))
 		}
 		return nil, surface.DeliveryOutcomeUnknown(err)
 	}

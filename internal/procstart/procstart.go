@@ -12,7 +12,6 @@ import (
 	"strings"
 )
 
-// Lstart is the start time ps reports for pid, in UTC.
 func Lstart(ctx context.Context, pid int) (string, error) {
 	command := exec.CommandContext(ctx, "ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
 	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
@@ -20,8 +19,6 @@ func Lstart(ctx context.Context, pid int) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
-// Ticks is the starttime field of /proc/<pid>/stat on Linux, in clock ticks
-// since boot.
 func Ticks(pid int) (string, error) {
 	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
 	if err != nil {

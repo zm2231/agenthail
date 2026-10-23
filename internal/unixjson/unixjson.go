@@ -10,19 +10,19 @@ import (
 	"time"
 )
 
-// DialError reports that nothing was sent: the socket could not be reached.
-type DialError struct{ Err error }
+// NotSentError reports a failure before any byte of the request was written.
+type NotSentError struct{ Err error }
 
-func (e *DialError) Error() string { return e.Err.Error() }
-func (e *DialError) Unwrap() error { return e.Err }
+func (e *NotSentError) Error() string { return e.Err.Error() }
+func (e *NotSentError) Unwrap() error { return e.Err }
 
 // Call gives up after timeout, or earlier at ctx's deadline. Any error other
-// than a DialError may come after the request was written.
+// than a NotSentError may come after the request was written.
 func Call(ctx context.Context, path string, timeout time.Duration, replyLimit int64, request, reply any) error {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "unix", path)
 	if err != nil {
-		return &DialError{Err: err}
+		return &NotSentError{Err: err}
 	}
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
@@ -31,7 +31,9 @@ func Call(ctx context.Context, path string, timeout time.Duration, replyLimit in
 	if value, ok := ctx.Deadline(); ok && value.Before(deadline) {
 		deadline = value
 	}
-	_ = conn.SetDeadline(deadline)
+	if err := conn.SetDeadline(deadline); err != nil {
+		return &NotSentError{Err: err}
+	}
 	if err := json.NewEncoder(conn).Encode(request); err != nil {
 		return err
 	}

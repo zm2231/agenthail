@@ -822,9 +822,9 @@ func Ensure(ctx context.Context, home, sourceID string) error {
 func requestManager(ctx context.Context, home string, request managerRequest) (*claudepeer.Response, error) {
 	var response claudepeer.Response
 	if err := unixjson.Call(ctx, managerPath(home), 15*time.Second, managerReplyBytes, request, &response); err != nil {
-		var dial *unixjson.DialError
-		if errors.As(err, &dial) {
-			return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude peer registration requires the daemon; start 'agenthail daemon start': %w", dial.Err))
+		var notSent *unixjson.NotSentError
+		if errors.As(err, &notSent) {
+			return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude peer registration requires the daemon; start 'agenthail daemon start': %w", notSent.Err))
 		}
 		return nil, managerRequestError(request, err)
 	}
