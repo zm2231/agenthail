@@ -121,7 +121,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		if err := d.Registry.DeadLetterUnknown(item.ID, unknownErr); err != nil {
 			d.log.Printf("dead-letter uncertain queue item %d: %s", item.ID, err)
 		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: unknownErr.Error()})
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Error: unknownErr.Error()})
 		return
 	}
 	if !result.Accepted {
@@ -129,7 +129,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		if _, err := d.Registry.DeferMessage(item.ID, busyErr, now); err != nil {
 			d.log.Printf("defer queue item %d: %s", item.ID, err)
 		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: busyErr.Error()})
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Error: busyErr.Error()})
 		return
 	}
 	if steered == nil && !peerTransport {
@@ -145,11 +145,11 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	}
 	if err := d.Registry.AckMessageWithEvidence(item.ID, session.ID, item.RelayHops, evidence, result.UUID); err != nil {
 		d.log.Printf("ack queue item %d: %s", item.ID, err)
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "ack-error", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Result: result.UUID, Error: err.Error()})
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "ack-error", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Result: result.UUID, Error: err.Error()})
 		return
 	}
 	d.log.Printf("delivered queue item %d to %s", item.ID, d.resolveDisplay(session.ID))
-	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: historyKind, SessionID: session.ID, QueueID: item.ID, Message: item.Message, Result: result.UUID})
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: historyKind, SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Result: result.UUID})
 	if result.Notice != "" {
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "model", SessionID: session.ID, QueueID: item.ID, Message: result.Notice, Result: result.UUID})
 	}
@@ -201,11 +201,11 @@ func (d *Daemon) runQueuedGoal(ctx context.Context, adapter surface.Surface, ses
 	}
 	if err := d.Registry.AckMessageWithEvidence(item.ID, session.ID, item.RelayHops, surface.EvidenceDelivered, ""); err != nil {
 		d.log.Printf("ack goal queue item %d: %s", item.ID, err)
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "ack-error", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: err.Error()})
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "ack-error", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Error: err.Error()})
 		return
 	}
 	d.log.Printf("ran goal queue item %d for %s", item.ID, d.resolveDisplay(session.ID))
-	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Evidence: surface.EvidenceDelivered})
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Evidence: surface.EvidenceDelivered})
 }
 
 // finishReachedHostOwned settles a queue item whose send resumed into a
@@ -215,7 +215,7 @@ func (d *Daemon) finishReachedHostOwned(item *registry.QueuedMessage, addressed 
 	if err := d.Registry.DeadLetterUnknown(item.ID, ownedErr); err != nil {
 		d.log.Printf("dead-letter queue item %d: %s", item.ID, err)
 	}
-	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: addressed.ID, QueueID: item.ID, Message: message, Error: ownedErr.Error(), Evidence: surface.EvidenceUnknown})
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: addressed.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: ownedErr.Error(), Evidence: surface.EvidenceUnknown})
 }
 
 func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surface.Session, sendErr error, now time.Time) {
@@ -235,14 +235,14 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 		if refusal != 0 {
 			d.announceRefusal(*session, item.ID, refusal, sendErr)
 		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "deferred", SessionID: session.ID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "deferred", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
 		return
 	}
 	if surface.IsDeliveryOutcomeUnknown(sendErr) {
 		if err := d.Registry.DeadLetterUnknown(item.ID, sendErr); err != nil {
 			d.log.Printf("dead-letter uncertain queue item %d: %s", item.ID, err)
 		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
 		return
 	}
 	if surface.IsDeliveryTerminal(sendErr) {
@@ -250,7 +250,7 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 		if err != nil {
 			d.log.Printf("dead-letter rejected queue item %d: %s", item.ID, err)
 		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
 		if notified {
 			if err := d.catalog.flushCommitted(); err != nil {
 				d.log.Printf("publish terminal delivery problem: %s", err)
@@ -262,7 +262,7 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 	if err := d.Registry.NackMessage(item.ID, sendErr, now, maxDeliveryAttempts); err != nil {
 		d.log.Printf("nack queue item %d: %s", item.ID, err)
 	}
-	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
 }
 
 // announceRefusal tells the user, on the desktop and on paired devices, that a

@@ -182,7 +182,7 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 		}
 		ctx = surface.WithMessageUUID(ctx, intent.UUID)
 	}
-	return d.steer(ctx, adapter, session, message, target, "", "steer", intent, false)
+	return d.steer(ctx, adapter, session, message, target, sourceID, "steer", intent, false)
 }
 
 // steer reports the evidence the surface proved: a Claude Remote Control steer

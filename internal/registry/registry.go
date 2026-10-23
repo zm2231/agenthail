@@ -1748,7 +1748,7 @@ func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, option
 	if err := tx.Commit(); err != nil {
 		return 0, 0, err
 	}
-	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: message, Result: options.Model})
+	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, SourceSessionID: options.SourceSessionID, QueueID: id, Message: message, Result: options.Model})
 	return id, deliveryID, nil
 }
 
