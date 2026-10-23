@@ -17,37 +17,46 @@ func reportReply(prose, line string) string {
 }
 
 type readApp struct {
-	name  string
-	build func(t *testing.T, exchanges []surface.Exchange) (*App, string)
+	name string
+	// open builds the app once; set changes the exchanges the session holds.
+	open func(t *testing.T) (app *App, target string, set func([]surface.Exchange))
+}
+
+func (r readApp) build(t *testing.T, exchanges []surface.Exchange) (*App, string) {
+	app, target, set := r.open(t)
+	set(exchanges)
+	return app, target
 }
 
 func readApps() []readApp {
 	offline := func(kind surface.SurfaceKind, runtime surface.RuntimeKind) readApp {
-		return readApp{name: string(kind), build: func(t *testing.T, exchanges []surface.Exchange) (*App, string) {
+		return readApp{name: string(kind), open: func(t *testing.T) (*App, string, func([]surface.Exchange)) {
 			session := surface.Session{ID: "s", Surface: kind, RuntimeKind: runtime, Status: surface.StatusIdle}
-			app, _ := cliFixture(t, &cliSurface{kind: kind, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}, tail: exchanges})
-			return app, string(kind) + ":s"
+			fake := &cliSurface{kind: kind, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}}
+			app, _ := cliFixture(t, fake)
+			return app, string(kind) + ":s", func(exchanges []surface.Exchange) { fake.tail = exchanges }
 		}}
+	}
+	journal := func(app *App) func([]surface.Exchange) {
+		var held []surface.Exchange
+		app.daemonSessionPageReader = func() (sessionPageReader, error) {
+			return sessionPageFixture{result: &surface.SessionReadResult{Source: "journal", Exchanges: held}}, nil
+		}
+		return func(exchanges []surface.Exchange) { held = exchanges }
 	}
 	return []readApp{
 		offline(surface.KindCodex, surface.RuntimeCodexDesktop),
 		offline(surface.KindClaude, surface.RuntimeClaudeCLI),
 		offline(surface.KindNotion, surface.RuntimeNotionWeb),
-		{name: "paired host", build: func(t *testing.T, exchanges []surface.Exchange) (*App, string) {
+		{name: "paired host", open: func(t *testing.T) (*App, string, func([]surface.Exchange)) {
 			app, _, _, _ := federatedCLIFixture(t, true)
-			app.daemonSessionPageReader = func() (sessionPageReader, error) {
-				return sessionPageFixture{result: &surface.SessionReadResult{Source: "journal", Exchanges: exchanges}}, nil
-			}
-			return app, "vps::@builder"
+			return app, "vps::@builder", journal(app)
 		}},
-		{name: "daemon page", build: func(t *testing.T, exchanges []surface.Exchange) (*App, string) {
+		{name: "daemon page", open: func(t *testing.T) (*App, string, func([]surface.Exchange)) {
 			session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
 			app, _ := cliFixture(t, &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}})
 			app.catalogDaemonRunning = func() bool { return true }
-			app.daemonSessionPageReader = func() (sessionPageReader, error) {
-				return sessionPageFixture{result: &surface.SessionReadResult{Source: "journal", Exchanges: exchanges}}, nil
-			}
-			return app, "codex:s"
+			return app, "codex:s", journal(app)
 		}},
 	}
 }
@@ -57,6 +66,7 @@ func TestMaxBytesCutsRepliesOnACharacterBoundaryAndSaysWhatWasCut(t *testing.T) 
 	emoji := strings.Index(text, "🙂")
 	for _, read := range readApps() {
 		t.Run(read.name, func(t *testing.T) {
+			app, target, set := read.open(t)
 			for _, limit := range []struct {
 				bytes int
 				want  string
@@ -67,8 +77,7 @@ func TestMaxBytesCutsRepliesOnACharacterBoundaryAndSaysWhatWasCut(t *testing.T) 
 				{emoji + 4, text[:emoji+4]},
 				{1, "R"},
 			} {
-				exchanges := []surface.Exchange{{User: "prompt " + text, Assistant: text, Timestamp: time.Unix(1_700_000_000, 0)}}
-				app, target := read.build(t, exchanges)
+				set([]surface.Exchange{{User: "prompt " + text, Assistant: text, Timestamp: time.Unix(1_700_000_000, 0)}})
 				cut := limit.want != text
 				output, err := captureStdout(t, func() error {
 					return app.Run([]string{"reply", target, "--json", "--max-bytes", itoa(limit.bytes)})
@@ -82,7 +91,6 @@ func TestMaxBytesCutsRepliesOnACharacterBoundaryAndSaysWhatWasCut(t *testing.T) 
 					t.Fatalf("reply --max-bytes %d: output=%s err=%v", limit.bytes, output, err)
 				}
 
-				app, target = read.build(t, exchanges)
 				output, err = captureStdout(t, func() error {
 					return app.Run([]string{"last", target, "--json", "--max-bytes", itoa(limit.bytes)})
 				})
@@ -104,7 +112,6 @@ func TestMaxBytesCutsRepliesOnACharacterBoundaryAndSaysWhatWasCut(t *testing.T) 
 					t.Fatalf("last --max-bytes %d: %+v", limit.bytes, got)
 				}
 
-				app, target = read.build(t, exchanges)
 				output, err = captureStdout(t, func() error {
 					return app.Run([]string{"reply", target, "--max-bytes", itoa(limit.bytes)})
 				})
@@ -120,8 +127,8 @@ func TestMaxBytesCutsRepliesOnACharacterBoundaryAndSaysWhatWasCut(t *testing.T) 
 func TestMaxBytesInsideTheFirstCharacterStillSaysTheFieldWasCut(t *testing.T) {
 	for _, read := range readApps() {
 		t.Run(read.name, func(t *testing.T) {
+			app, target := read.build(t, []surface.Exchange{{User: "🙂 prompt", Assistant: "🙂 a longer answer"}})
 			for limit := 1; limit < len("🙂"); limit++ {
-				app, target := read.build(t, []surface.Exchange{{User: "🙂 prompt", Assistant: "🙂 a longer answer"}})
 				output, err := captureStdout(t, func() error { return app.Run([]string{"last", target, "--max-bytes", itoa(limit)}) })
 				note := "[truncated: 0 of " + itoa(len("🙂 prompt")) + " bytes]"
 				if err != nil || !utf8.ValidString(output) || strings.Count(output, note) != 1 || !strings.Contains(output, "[truncated: 0 of "+itoa(len("🙂 a longer answer"))+" bytes]") {
@@ -148,6 +155,7 @@ func TestReportReadsOnlyTheCompletionReportAtTheEndOfTheReply(t *testing.T) {
 	valid := `{"v":1,"status":"blocked","stop":"needsInput","reason":"Which retry limit?","commits":["0d825e4d"],"next":"Choose a limit"}`
 	for _, read := range readApps() {
 		t.Run(read.name, func(t *testing.T) {
+			app, target, set := read.open(t)
 			for _, test := range []struct {
 				name, reply, want string
 			}{
@@ -172,7 +180,7 @@ func TestReportReadsOnlyTheCompletionReportAtTheEndOfTheReply(t *testing.T) {
 				{"too many commits", reportReply("Done.", `{"v":1,"status":"done","stop":"complete","commits":["a"`+strings.Repeat(`,"a"`, 20)+`]}`), "commits lists 21 entries; at most 20"},
 				{"empty path", reportReply("Done.", `{"v":1,"status":"done","stop":"complete","paths":[""]}`), "paths has an empty entry"},
 			} {
-				app, target := read.build(t, []surface.Exchange{{User: "work", Assistant: test.reply}})
+				set([]surface.Exchange{{User: "work", Assistant: test.reply}})
 				output, err := captureStdout(t, func() error { return app.Run([]string{"reply", target, "--report"}) })
 				if test.want != "" {
 					if err == nil || !strings.Contains(err.Error(), test.want) || output != "" {
@@ -201,7 +209,8 @@ func TestLastReportFailsOnlyWhenTheNewestExchangeHasNoReport(t *testing.T) {
 	done := reportReply("Shipped.", `{"v":1,"status":"done","stop":"complete"}`)
 	for _, read := range readApps() {
 		t.Run(read.name, func(t *testing.T) {
-			app, target := read.build(t, []surface.Exchange{{User: "status?", Assistant: "Still working."}, {User: "work", Assistant: done}})
+			app, target, set := read.open(t)
+			set([]surface.Exchange{{User: "status?", Assistant: "Still working."}, {User: "work", Assistant: done}})
 			output, err := captureStdout(t, func() error { return app.Run([]string{"last", target, "2", "--report"}) })
 			var document struct {
 				Exchanges []struct {
@@ -217,13 +226,13 @@ func TestLastReportFailsOnlyWhenTheNewestExchangeHasNoReport(t *testing.T) {
 				t.Fatalf("exchanges=%+v", document.Exchanges)
 			}
 
-			app, target = read.build(t, []surface.Exchange{{User: "work", Assistant: done}, {User: "status?", Assistant: "Still working."}})
+			set([]surface.Exchange{{User: "work", Assistant: done}, {User: "status?", Assistant: "Still working."}})
 			output, err = captureStdout(t, func() error { return app.Run([]string{"last", target, "2", "--report"}) })
 			if err == nil || !strings.Contains(err.Error(), "newest exchange: no completion report") || !strings.Contains(output, `"status":"done"`) {
 				t.Fatalf("newest without a report: output=%s err=%v", output, err)
 			}
 
-			app, target = read.build(t, nil)
+			set(nil)
 			output, err = captureStdout(t, func() error { return app.Run([]string{"last", target, "--report"}) })
 			if err == nil || !strings.Contains(err.Error(), "the session has no exchanges") || !strings.Contains(output, `"exchanges":[]`) {
 				t.Fatalf("empty: output=%s err=%v", output, err)

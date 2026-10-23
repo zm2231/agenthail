@@ -65,6 +65,7 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 		{name: "v11", wantVersion: schemaVersion, source: "sender", check: assertV11SeedCheckpointMigrated},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
+			t.Parallel()
 			r := openMigrationFixture(t, fixture.name)
 			var version int
 			if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != fixture.wantVersion {

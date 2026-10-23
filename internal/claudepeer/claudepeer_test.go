@@ -967,6 +967,17 @@ func TestPeerMessageForAHostsSessionIsHeldForThatHostWithItsSender(t *testing.T)
 		t.Fatal(err)
 	}
 	defer listener.Close()
+	// The reviewer's Claude reads each receipt and hangs up, as Claude does.
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			_, _ = io.Copy(io.Discard, conn)
+			_ = conn.Close()
+		}
+	}()
 	procStart := nativeRecordStart(t, stand.Process.Pid)
 	if err := os.MkdirAll(filepath.Join(surface.ClaudeConfigDir(home), "sessions"), 0700); err != nil {
 		t.Fatal(err)

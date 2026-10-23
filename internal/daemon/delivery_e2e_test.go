@@ -657,6 +657,8 @@ func TestUnavailableTargetKeepsQueuedMessageAndDeliversOnceAfterRecovery(t *test
 	agent := newScriptedAgent("target")
 	agent.setStatus("target", surface.StatusBusy)
 	h := startRunningDaemon(t, agent)
+	const backoff = 200 * time.Millisecond
+	h.store.SetRetryBackoff(backoff)
 	id := queueID(t, h.receipt(map[string]any{"action": "send", "sessionId": "target", "message": "survive the outage"}))
 	agent.failSends("target", surface.DeliveryUnavailable(errors.New("bridge restarting")))
 	agent.setStatus("target", surface.StatusIdle)
@@ -667,7 +669,7 @@ func TestUnavailableTargetKeepsQueuedMessageAndDeliversOnceAfterRecovery(t *test
 	agent.failSends("target", nil)
 	// Nothing retries an unavailable target early: the message is tried again
 	// once its backoff ends.
-	eventuallyWithin(t, "recovered delivery", registry.QueueRetryBackoff+5*time.Second, func() bool { return len(agent.deliveredTo("target")) > 0 })
+	eventuallyWithin(t, "recovered delivery", backoff+5*time.Second, func() bool { return len(agent.deliveredTo("target")) > 0 })
 	settle()
 	if got := agent.deliveredTo("target"); len(got) != 1 {
 		t.Fatalf("delivered=%+v", got)

@@ -63,11 +63,14 @@ func TestHelpVersionAndArgumentErrorsLeaveTheRegistryAlone(t *testing.T) {
 		{"list", "--no-such-flag"},
 		{"no-such-command"},
 	} {
-		home := t.TempDir()
-		output, _ := runAgenthail(t, home, args...)
-		if _, err := os.Stat(filepath.Join(home, ".agenthail", "registry.db")); !os.IsNotExist(err) {
-			t.Fatalf("agenthail %s created a registry (stat err %v); output:\n%s", strings.Join(args, " "), err, output)
-		}
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			output, _ := runAgenthail(t, home, args...)
+			if _, err := os.Stat(filepath.Join(home, ".agenthail", "registry.db")); !os.IsNotExist(err) {
+				t.Fatalf("agenthail %s created a registry (stat err %v); output:\n%s", strings.Join(args, " "), err, output)
+			}
+		})
 	}
 }
 

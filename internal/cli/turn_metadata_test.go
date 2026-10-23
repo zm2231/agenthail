@@ -31,7 +31,6 @@ func TestReadsReportEachTurnsMetadataAndNameWhatTheSurfaceDidNotRecord(t *testin
 			}
 
 			for _, args := range [][]string{{"reply", target, "--json"}, {"reply", target, "--report"}} {
-				app, _ := read.build(t, exchanges)
 				output, err := captureStdout(t, func() error { return app.Run(args) })
 				var reply struct {
 					Turn json.RawMessage `json:"turn"`
@@ -41,7 +40,6 @@ func TestReadsReportEachTurnsMetadataAndNameWhatTheSurfaceDidNotRecord(t *testin
 				}
 			}
 
-			app, _ = read.build(t, exchanges)
 			output, err = captureStdout(t, func() error { return app.Run([]string{"last", target, "2", "--report"}) })
 			var reports struct {
 				Exchanges []struct {

@@ -140,7 +140,10 @@ func TestCodexTimelineSkipsOversizedRecordAndAdvancesCursor(t *testing.T) {
 	message := func(text string) string {
 		return fmt.Sprintf(`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":%q}]}}`, text)
 	}
-	path := timelineFixture(t, message("before")+"\n"+message(strings.Repeat("x", 2*timelineReadBudget))+"\n"+message("after")+"\n")
+	previous := timelineReadBudget
+	timelineReadBudget = 64 << 10
+	t.Cleanup(func() { timelineReadBudget = previous })
+	path := timelineFixture(t, message("before")+"\n"+message(strings.Repeat("x", int(2*timelineReadBudget)))+"\n"+message("after")+"\n")
 
 	var cursor int64
 	var texts []string
