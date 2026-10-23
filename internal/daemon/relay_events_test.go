@@ -54,7 +54,8 @@ func (d *Daemon) fireRelays(from *surface.Session, id string, hops int, text str
 	if err != nil {
 		panic(err)
 	}
-	d.consumeRelays(context.Background(), d.adapters().ForSurface(from.Surface), from, routes, nil)
+	adapter := d.adapters().ForSurface(from.Surface)
+	d.consumeRelays(context.Background(), adapter, from, routes, nil, observeOnce(adapter, from, observeAdapter))
 }
 
 func TestDurableRelayClaudeBurstFailureRestartAndOutbox(t *testing.T) {
@@ -259,7 +260,7 @@ func TestGoalRelayRequiresCompletionWithinCurrentGoal(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		d.consumeRelays(context.Background(), fake, &from, routes, nil)
+		d.consumeRelays(context.Background(), fake, &from, routes, nil, observeOnce(fake, &from, observeAdapter))
 		want := 0
 		if i == 2 {
 			want = 1
@@ -523,16 +524,23 @@ func TestTurnFinishedRelayWaitsForBackgroundWork(t *testing.T) {
 		}
 	})
 
-	t.Run("reads background state only when a turn is pending", func(t *testing.T) {
-		d, _, fake, from, _ := setup(t, false)
+	t.Run("a scan observes the source once however many relays wait", func(t *testing.T) {
+		d, r, fake, from, to := setup(t, false)
+		if _, err := r.AddRelayRoute(from.ID, to.ID, ".*", false, registry.HandoffTurnFinished); err != nil {
+			t.Fatal(err)
+		}
 		fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
 		d.syncRelays(context.Background(), fake, &from)
 		if calls := fake.observeCalls.Load(); calls != 0 {
-			t.Fatalf("observed %d times with nothing pending", calls)
+			t.Fatalf("relays observed %d times with nothing pending", calls)
 		}
-		finish(d, fake, from, "done", surface.StatusIdle, nil)
+		fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "started", Reply: &surface.ReplyResult{Text: "started", Done: true}, BackgroundTasks: shell}
+		d.observeSession(context.Background(), fake, &from)
 		if calls := fake.observeCalls.Load(); calls != 1 {
-			t.Fatalf("observed %d times for one pending turn", calls)
+			t.Fatalf("one scan with two waiting relays observed %d times", calls)
+		}
+		if got := queued(t, r, to); len(got) != 0 {
+			t.Fatalf("delivered %v while background work ran", got)
 		}
 	})
 }

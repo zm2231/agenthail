@@ -43,32 +43,64 @@ func relayable(route registry.RouteRow, event registry.RelayEvent) bool {
 	return event.Message != "" && event.RelayHops < maxRelayHops && matchPattern(route.Pattern, event.Message)
 }
 
+// sessionObservation reads a session's turn state at most once and shares the
+// reading between its relays and the scan that observes it.
+type sessionObservation struct {
+	read        func(context.Context) (*surface.TurnObservation, error)
+	done        bool
+	observation *surface.TurnObservation
+	err         error
+}
+
+var errNoAdapter = errors.New("no adapter for this session")
+
+func observeOnce(adapter surface.Surface, session *surface.Session, read func(context.Context, surface.Surface, *surface.Session) (*surface.TurnObservation, error)) *sessionObservation {
+	return &sessionObservation{read: func(ctx context.Context) (*surface.TurnObservation, error) {
+		if adapter == nil {
+			return nil, errNoAdapter
+		}
+		return read(ctx, adapter, session)
+	}}
+}
+
+func observeAdapter(ctx context.Context, adapter surface.Surface, session *surface.Session) (*surface.TurnObservation, error) {
+	return adapter.Observe(ctx, session)
+}
+
+func (o *sessionObservation) get(ctx context.Context) (*surface.TurnObservation, error) {
+	if !o.done {
+		readCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+		o.observation, o.err = o.read(readCtx)
+		cancel()
+		o.done = true
+	}
+	return o.observation, o.err
+}
+
 // backgroundHold keeps a finished turn from relaying while the source still
 // runs background work it started; ambient tasks do not count. A source that
 // closed has no work left. When its state cannot be read, the last stored
 // state decides.
-func (d *Daemon) backgroundHold(ctx context.Context, adapter surface.Surface, from *surface.Session) error {
+func backgroundHold(ctx context.Context, observed *sessionObservation, from *surface.Session) error {
 	running := surface.BackgroundRunning(from.BackgroundTasks)
-	var unreadable error
-	if adapter != nil {
-		observeCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
-		observation, err := adapter.Observe(observeCtx, from)
-		cancel()
-		if err == nil {
-			running = observation != nil && observation.Status != surface.StatusOffline && surface.BackgroundRunning(observation.BackgroundTasks)
-		}
-		unreadable = err
+	observation, err := observed.get(ctx)
+	if err == nil {
+		running = observation != nil && observation.Status != surface.StatusOffline && surface.BackgroundRunning(observation.BackgroundTasks)
 	}
 	if !running {
 		return nil
 	}
-	if unreadable != nil {
-		return fmt.Errorf("waiting for background work to finish; its state is unavailable: %w", unreadable)
+	if err != nil {
+		return fmt.Errorf("waiting for background work to finish; its state is unavailable: %w", err)
 	}
 	return fmt.Errorf("waiting for background work to finish")
 }
 
 func (d *Daemon) syncRelays(ctx context.Context, adapter surface.Surface, session *surface.Session) {
+	d.syncRelaysObserved(ctx, adapter, session, observeOnce(adapter, session, observeAdapter))
+}
+
+func (d *Daemon) syncRelaysObserved(ctx context.Context, adapter surface.Surface, session *surface.Session, observed *sessionObservation) {
 	routes, err := d.Registry.ListRoutes()
 	if err != nil {
 		d.log.Printf("list relays: %s", err)
@@ -106,10 +138,10 @@ func (d *Daemon) syncRelays(ctx context.Context, adapter surface.Surface, sessio
 		}
 		captureErr = err
 	}
-	d.consumeRelays(ctx, adapter, session, active, captureErr)
+	d.consumeRelays(ctx, adapter, session, active, captureErr, observed)
 }
 
-func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, from *surface.Session, routes []registry.RouteRow, captureErr error) {
+func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, from *surface.Session, routes []registry.RouteRow, captureErr error, observed *sessionObservation) {
 	for _, route := range routes {
 		if !route.Active || route.FromSession != from.ID {
 			continue
@@ -130,9 +162,7 @@ func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, fro
 				} else if goal == nil || goal.Status != surface.GoalStatusComplete || goal.CreatedAt.IsZero() {
 					err = fmt.Errorf("waiting for explicit goal completion")
 				} else {
-					observeCtx, observeCancel := context.WithTimeout(ctx, surfaceOperationTimeout)
-					observation, observeErr := adapter.Observe(observeCtx, from)
-					observeCancel()
+					observation, observeErr := observed.get(ctx)
 					if observeErr != nil {
 						err = observeErr
 					} else if observation == nil || observation.ActiveTurnID != "" || observation.CompletedTurnID != events[len(events)-1].CompletionID {
@@ -154,7 +184,7 @@ func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, fro
 			}
 		}
 		if err == nil && route.Handoff == registry.HandoffTurnFinished && len(events) > 0 {
-			err = d.backgroundHold(ctx, adapter, from)
+			err = backgroundHold(ctx, observed, from)
 		}
 		if err == nil {
 			last := -1
