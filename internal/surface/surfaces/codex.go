@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -34,9 +35,17 @@ type Codex struct {
 	lastSweep    time.Time
 }
 
+// codexDesktopRunsHere is whether Codex Desktop can run on this machine;
+// Agenthail drives only its macOS app. Elsewhere nothing probes the default
+// debugging port unless one is configured, since another program may own it.
+var codexDesktopRunsHere = runtime.GOOS == "darwin"
+
 func NewCodex(remoteURL string) *Codex {
 	managed := remoteURL == "" || !strings.Contains(remoteURL, "://")
 	if remoteURL == "" {
+		if !codexDesktopRunsHere {
+			return &Codex{managed: managed}
+		}
 		remoteURL = "9231"
 	}
 	if !strings.Contains(remoteURL, "://") {
@@ -153,7 +162,12 @@ type cdpConn struct {
 }
 
 func (c *Codex) dial(ctx context.Context) (*cdpConn, error) {
-	targets, err := resolveCodexRendererEndpoint(ctx, c.desktopURL)
+	if c.desktopURL == "" {
+		return nil, fmt.Errorf("Codex Desktop does not run on %s; set AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT to reach one", runtime.GOOS)
+	}
+	targets, err := surface.ProbeOnce(ctx, codexDesktopProbe{c.desktopURL}, func() ([]codexCDPTarget, error) {
+		return resolveCodexRendererEndpoint(ctx, c.desktopURL)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -175,6 +189,8 @@ func (c *Codex) dial(ctx context.Context) (*cdpConn, error) {
 	}
 	return nil, fmt.Errorf("connect Codex Desktop renderer bridge: %s", strings.Join(failures, "; "))
 }
+
+type codexDesktopProbe struct{ endpoint string }
 
 type codexCDPTarget struct {
 	wsURL string

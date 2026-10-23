@@ -22,6 +22,14 @@ type Desktop struct {
 	mu          sync.Mutex
 	methods     []string
 	expressions []string
+	lookups     int
+}
+
+// Lookups counts the debug target listings fetched from the renderer.
+func (b *Desktop) Lookups() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.lookups
 }
 
 func (b *Desktop) Methods() []string {
@@ -48,6 +56,9 @@ func StartDesktop(t testing.TB, respond func(method string) string) *Desktop {
 	var server *httptest.Server
 	handler := http.NewServeMux()
 	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
+		bridge.mu.Lock()
+		bridge.lookups++
+		bridge.mu.Unlock()
 		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
 	})
 	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {

@@ -732,10 +732,11 @@ type HealthChecker interface {
 type RuntimeProblem string
 
 const (
-	RuntimeBridgeUnavailable RuntimeProblem = "bridge-unavailable"
-	RuntimeCodexMissing      RuntimeProblem = "codex-missing"
-	RuntimeStopped           RuntimeProblem = "runtime-stopped"
-	RuntimeUnsupervised      RuntimeProblem = "unsupervised"
+	RuntimeBridgeUnavailable  RuntimeProblem = "bridge-unavailable"
+	RuntimeDesktopUnreachable RuntimeProblem = "desktop-unreachable"
+	RuntimeCodexMissing       RuntimeProblem = "codex-missing"
+	RuntimeStopped            RuntimeProblem = "runtime-stopped"
+	RuntimeUnsupervised       RuntimeProblem = "unsupervised"
 )
 
 type RuntimeStatus struct {

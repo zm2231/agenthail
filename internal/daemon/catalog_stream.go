@@ -403,7 +403,8 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 			prior.stamps = catalogFileStamps(prior.files)
 			priorStamps[id] = prior
 		}
-		operationCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+		passCtx := surface.WithProbePass(ctx)
+		operationCtx, cancel := context.WithTimeout(passCtx, 12*time.Second)
 		complete := true
 		var sessions []surface.Session
 		var err error
@@ -413,7 +414,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 			sessions, err = adapter.List(operationCtx)
 		}
 		cancel()
-		health := d.recordSurfaceHealth(ctx, adapter, err)
+		health := d.recordSurfaceHealth(passCtx, adapter, err)
 		if err != nil {
 			d.forgetCatalogLive(adapter.Name(), nil)
 			observedAt := time.Now().UTC()
