@@ -87,6 +87,10 @@ final class VoiceTests: XCTestCase {
         XCTAssertEqual(attempt.terminalCause, "operator_prepare_failed")
         XCTAssertEqual(audio.starts, 0)
         XCTAssertTrue(model.canCall)
+        XCTAssertNil(model.callUnavailableReason)
+        model.ready = false
+        XCTAssertEqual(model.callUnavailableReason, "Call audio is not ready.")
+        XCTAssertFalse(model.canCall)
         model.close()
     }
 

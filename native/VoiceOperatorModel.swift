@@ -46,7 +46,22 @@ final class VoiceOperatorModel: ObservableObject {
     private var workID = 0
     var hasLocalCall: Bool { dialing || audioConnected || attemptID != nil }
     var committedRoute: String { state?.target?.name ?? "Agenthail orchestrator" }
-    var canCall: Bool { ready && !working && !dialing && !audioConnected && !hostHangupPending && !hostHangupUnconfirmed && !closed && state?.hasCall != true && state?.phase != "blocked" && connectionError == nil }
+    // Why Call is unavailable, shown in Voice details so a disabled button
+    // can be explained.
+    var callUnavailableReason: String? {
+        if closed { return "This screen is closed." }
+        if !ready { return "Call audio is not ready." }
+        if working { return "Another voice action is in progress." }
+        if dialing { return "A call is starting." }
+        if audioConnected { return "A call is connected." }
+        if hostHangupPending { return "The host has not yet confirmed the last hangup." }
+        if hostHangupUnconfirmed { return "The host did not confirm the last hangup." }
+        if state?.hasCall == true { return "The host still has a call." }
+        if state?.phase == "blocked" { return "The host blocked voice calls." }
+        if let connectionError { return connectionError }
+        return nil
+    }
+    var canCall: Bool { callUnavailableReason == nil }
     var canStartNewConversation: Bool {
         state != nil && !working && !dialing && !audioConnected && !hostHangupPending && !hostHangupUnconfirmed
             && !closed && state?.hasCall != true && state?.occupied != true

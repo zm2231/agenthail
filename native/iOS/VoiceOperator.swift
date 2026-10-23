@@ -292,6 +292,7 @@ struct AgenthailVoiceOperatorSheet: View {
                     }
                     if let provider = model.state?.audioProvider { LabeledContent("Audio provider", value: provider) }
                     LabeledContent("Audio", value: model.connectionTitle)
+                    if !model.hasLocalCall, let reason = model.callUnavailableReason { LabeledContent("Call unavailable", value: reason) }
                     Text("The microphone sends audio to Codex. No on-device speech recognition is used.")
                     Text("The call stays active when you close this screen, switch apps or lock your phone. Use Hang up or the system call controls to end audio. Force-quitting the app ends the call.")
                     if let state = model.state, let id = state.attemptId {

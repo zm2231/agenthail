@@ -198,7 +198,7 @@ keeps a local record of its last 20 call attempts (milestone times, the first
 terminal cause, and for a failed attempt the step that failed with its error
 domain and code, never the error's text) under Call lifecycle in Voice details.
 The record starts when Call is pressed, so a failure choosing the target or
-preparing the operator is kept too. An attempt the app never
+preparing the operator is kept too. When Call is unavailable, Voice details says why. An attempt the app never
 finished, because it was force-quit or terminated, is labeled
 `process_terminated_or_unknown` on the next launch.
 
