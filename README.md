@@ -112,6 +112,8 @@ agenthail send @notes "Make it shorter"
 
 The dashboard and the Mac app create conversations the same way. When a conversation needs the daemon and it is not running, Agenthail starts it with `codex app-server daemon start`. Codex 0.163 and later install what the daemon needs on first start; older versions ask for the standalone runtime (`curl -fsSL https://chatgpt.com/codex/install.sh | sh`), which Agenthail reports and never installs itself. Turns run inside Codex, so they keep going when Agenthail restarts.
 
+Codex runs slash commands only in its own composer, so Agenthail refuses a message such as `/status` or `/my-skill` instead of passing it to the model as plain text. Invoke a skill with `$my-skill`. A path such as `/tmp/build.log` at the start of a message is sent as written.
+
 A conversation created in Codex Desktop stays with Desktop. Start Desktop with `agenthail launch codex`; Agenthail then uses a loopback-only bridge to the app-server that already owns those conversations. If Codex is already open, quit it and run that command before using Desktop message controls. While Desktop is closed, its conversations are read only in Agenthail, and Agenthail never loads them into the daemon, because a loaded thread locks Desktop out for up to 30 minutes.
 
 For an interactive terminal on the daemon, run `agenthail codex` in a project folder.

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gorilla/websocket"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -829,6 +830,9 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 	if message == "" {
 		return nil, nil, fmt.Errorf("message is required")
 	}
+	if err := refuseCodexComposerCommand(options.Message); err != nil {
+		return nil, nil, err
+	}
 	params := map[string]any{"threadSource": "agenthail", "serviceName": "agenthail"}
 	if options.Cwd != "" {
 		params["cwd"] = options.Cwd
@@ -889,6 +893,9 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 	if err := options.TurnOptions.Validate(surface.KindCodex); err != nil {
 		return nil, surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
 	}
+	if err := refuseCodexComposerCommand(message); err != nil {
+		return nil, err
+	}
 	lock, err := acquireCodexWriteLock(ctx)
 	if err != nil {
 		return nil, surface.DeliveryUnavailable(err)
@@ -945,6 +952,26 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 // NativeImages is true on every route: each Codex transport speaks the
 // app-server protocol, whose turn input takes local image paths.
 func (c *Codex) NativeImages(*surface.Session, surface.Route) bool { return true }
+
+// refuseCodexComposerCommand refuses a message that reads as a Codex slash
+// command. Codex runs those only in its own composer; turn input passes the
+// text to the model as a prompt, so the command never runs. As in that
+// composer, text that starts with a space or whose first word holds another
+// slash, such as a path, is a prompt.
+func refuseCodexComposerCommand(message string) error {
+	rest, ok := strings.CutPrefix(message, "/")
+	if !ok {
+		return nil
+	}
+	name := rest
+	if end := strings.IndexFunc(rest, unicode.IsSpace); end >= 0 {
+		name = rest[:end]
+	}
+	if name == "" || strings.Contains(name, "/") {
+		return nil
+	}
+	return surface.DeliveryTerminal(fmt.Errorf("Codex runs /%s only in its own composer; sent here it would reach the model as plain text and nothing would run. To use a skill named %s, send $%s", name, name, name), surface.DeliveryInvalidRequest)
+}
 
 func codexUserInput(message string, images surface.Uploads) []map[string]any {
 	input := make([]map[string]any, 0, 1+len(images))
@@ -1436,6 +1463,9 @@ func (c *Codex) interruptActiveTurn(ctx context.Context, conn codexClient, threa
 }
 
 func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string) error {
+	if err := refuseCodexComposerCommand(message); err != nil {
+		return err
+	}
 	lock, err := acquireCodexWriteLock(ctx)
 	if err != nil {
 		return surface.DeliveryUnavailable(err)
