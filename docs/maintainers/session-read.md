@@ -161,3 +161,24 @@ only once something reads it: a session page read, a session stream, a
 voice call, or a watch or relay that holds it. A session nothing has read
 since the journal was added, such as a closed terminal Claude session or an
 older Codex thread, has no sent prompts until then.
+
+## Session files
+
+`GET /api/v1/session-files?id=<session>` (scope `read`) lists file and
+directory names under the session's working directory for `@` completion in
+the composers. It takes `q` (matched with fzf's scorer, case-insensitive) and
+`limit` (1 to 200, default 50); with no `q` the shallowest paths come first.
+The response is `{"files":[{path, dir}], "truncated"}` with paths relative to
+the working directory. `?host=` and `host::id` session ids are routed like
+other per-session reads, so the files of a session on a paired host are listed
+on that host.
+
+In a git checkout the list is what `git ls-files --cached --others
+--exclude-standard` prints, so the checkout's ignore rules apply, plus the
+directories those paths imply. Elsewhere it is a walk that skips hidden
+directories and `node_modules` and never follows a symbolic link. Either way
+the listing stops at 50,000 entries or after 2 seconds and then sets
+`truncated`. A listing is reused for 10 seconds unless the checkout's git index
+changes. Only names are returned, never file contents. A session with no
+working directory, or one that is not on this computer, answers `404` with
+`no_cwd`.
