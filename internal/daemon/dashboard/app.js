@@ -1186,7 +1186,8 @@ async function loadBrowserPush() {
     const key = pushKeyBytes(status.publicKey);
     if (status.subscribed && subscription && sameKey(subscription, key)) {
       await signinRequest("/api/v1/browser/push", { method: "PUT", body: JSON.stringify(subscription.toJSON()) });
-      return renderBrowserPush(true, "On. This browser is notified while it is signed in.");
+      registration.update().catch(() => {});
+      return renderBrowserPush(true, status.withdraw ? "On. This browser is notified while it is signed in." : "On. This browser is notified while it is signed in. Answered questions stay in Notification Center in this browser.");
     }
     if (status.subscribed) await signinRequest("/api/v1/browser/push", { method: "DELETE" });
     if (Notification.permission === "denied") return renderBrowserPush(false, "Notifications are blocked for this site in the browser's settings.");

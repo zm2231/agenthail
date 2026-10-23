@@ -135,7 +135,8 @@ func (d *Daemon) notifyBrowsers(ctx context.Context, notification mobileNotifica
 
 // withdrawFromBrowsers closes the notification each browser shows under
 // collapseID. A message with the same topic also replaces an undelivered
-// one, so a browser that was offline never shows the answered question.
+// one, so a browser that was offline never shows the answered question. A
+// browser whose worker found it cannot close notifications is left out.
 func (d *Daemon) withdrawFromBrowsers(ctx context.Context, collapseID string) {
 	d.sendToBrowsers(ctx, webPushMessage{Type: "withdraw", CollapseID: boundedNotificationText(collapseID, 64)}, webpush.UrgencyNormal, "withdraw browser notification")
 }
@@ -145,6 +146,15 @@ func (d *Daemon) sendToBrowsers(ctx context.Context, message webPushMessage, urg
 	if err != nil {
 		d.log.Printf("load browser push subscriptions: %s", err)
 		return
+	}
+	if message.Type == "withdraw" {
+		withdrawable := subscriptions[:0]
+		for _, subscription := range subscriptions {
+			if subscription.Withdraw {
+				withdrawable = append(withdrawable, subscription)
+			}
+		}
+		subscriptions = withdrawable
 	}
 	if len(subscriptions) == 0 {
 		return

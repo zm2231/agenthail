@@ -106,6 +106,7 @@ CREATE TABLE browser_push_subscriptions (
 	endpoint TEXT NOT NULL,
 	p256dh TEXT NOT NULL,
 	auth TEXT NOT NULL,
+	withdraw INTEGER NOT NULL DEFAULT 1,
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

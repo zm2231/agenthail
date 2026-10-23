@@ -102,3 +102,50 @@ func TestIdleBrowsersLoseTheirSubscription(t *testing.T) {
 		t.Fatalf("pruning the browser left %d subscription rows: %v", rows, err)
 	}
 }
+
+func TestABrowserThatCannotCloseKeepsThatUntilItsEndpointChanges(t *testing.T) {
+	r := openTestRegistry(t)
+	browser, _ := pairTestDevice(t, r, true)
+	withdraw := func() bool {
+		t.Helper()
+		found, withdraw, err := r.BrowserPushSubscriptionState(browser.ID)
+		if err != nil || !found {
+			t.Fatalf("found=%v err=%v", found, err)
+		}
+		subscriptions, err := r.BrowserPushSubscriptions()
+		if err != nil || len(subscriptions) != 1 || subscriptions[0].Withdraw != withdraw {
+			t.Fatalf("subscriptions=%+v err=%v, state withdraw=%v", subscriptions, err, withdraw)
+		}
+		return withdraw
+	}
+	if err := r.SaveBrowserPushSubscription(browserSubscription(browser.ID, "https://push.example/first")); err != nil {
+		t.Fatal(err)
+	}
+	if !withdraw() {
+		t.Fatal("a new subscription is not sent withdraws")
+	}
+	if err := r.StopBrowserPushWithdraws(browser.ID, "https://push.example/replaced"); err != nil {
+		t.Fatal(err)
+	}
+	if !withdraw() {
+		t.Fatal("a report from another endpoint stopped withdraws")
+	}
+	if err := r.StopBrowserPushWithdraws(browser.ID, "https://push.example/first"); err != nil {
+		t.Fatal(err)
+	}
+	if withdraw() {
+		t.Fatal("the report did not stop withdraws")
+	}
+	if err := r.SaveBrowserPushSubscription(browserSubscription(browser.ID, "https://push.example/first")); err != nil {
+		t.Fatal(err)
+	}
+	if withdraw() {
+		t.Fatal("re-subscribing with the same endpoint forgot the finding")
+	}
+	if err := r.SaveBrowserPushSubscription(browserSubscription(browser.ID, "https://push.example/second")); err != nil {
+		t.Fatal(err)
+	}
+	if !withdraw() {
+		t.Fatal("a new endpoint is not tried again")
+	}
+}

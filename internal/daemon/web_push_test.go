@@ -197,6 +197,24 @@ func TestBrowsersGetEncryptedNotificationsAndWithdrawals(t *testing.T) {
 	}
 }
 
+func TestABrowserThatCannotCloseGetsNotificationsButNoWithdraws(t *testing.T) {
+	browser := newTestPushBrowser(t)
+	service := newTestPushService(t, browser)
+	endpoint := service.server.URL + "/push/secret-capability"
+	reg, device := subscribedTestBrowser(t, endpoint, browser)
+	if err := reg.StopBrowserPushWithdraws(device.ID, endpoint); err != nil {
+		t.Fatal(err)
+	}
+	d := newTestDaemon(t, reg, nil)
+	key := waitingNotificationKey("session", "question")
+	d.notifyPairedDevices(context.Background(), mobileNotification{Title: "Agenthail", Message: "Claude asks you a question", SessionID: "session", TurnID: "question", EventType: "session.waiting", CollapseID: key})
+	d.withdrawFromPairedDevices(context.Background(), key)
+	pushes := service.received()
+	if len(pushes) != 1 || pushes[0].message.Type != "notify" {
+		t.Fatalf("pushes=%+v", pushes)
+	}
+}
+
 func TestOnlyAGoneSubscriptionIsRemovedAndItsEndpointIsNeverLogged(t *testing.T) {
 	for _, test := range []struct {
 		status int
