@@ -16,3 +16,20 @@ func TestSidecarAvailableNeedsAnOverrideOffMacOS(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyAReleaseBuildOrAnExplicitOptInUpgradesTheRegistry(t *testing.T) {
+	for _, tc := range []struct {
+		version, allow string
+		want           bool
+	}{
+		{"v0.2.66", "", true},
+		{"dev", "", false},
+		{"dev", "1", true},
+		{"dev", "yes", false},
+	} {
+		t.Setenv("AGENTHAIL_ALLOW_DEV_MIGRATION", tc.allow)
+		if got := mayUpgradeRegistry(tc.version); got != tc.want {
+			t.Fatalf("mayUpgradeRegistry(%q) with %q=%v, want %v", tc.version, tc.allow, got, tc.want)
+		}
+	}
+}

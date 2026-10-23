@@ -48,6 +48,8 @@ agenthail update --check
 agenthail update
 ```
 
+An update that changes the registry's schema first copies it to `~/.agenthail/registry-before-v<N>.db` (the last two are kept). If you go back to an older Agenthail, it refuses the newer registry and prints the steps to restore that copy; anything changed since the update is lost.
+
 To remove a package installation, run `sudo agenthail-uninstall`. Your local conversations, queue, and history are preserved unless you add `--purge-data`.
 
 ### Linux

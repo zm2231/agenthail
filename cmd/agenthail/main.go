@@ -43,7 +43,7 @@ func main() {
 	}
 	home, _ := os.UserHomeDir()
 	app := &cli.App{
-		OpenRegistry:        func() (*registry.Registry, error) { return registry.Open("") },
+		OpenRegistry:        func() (*registry.Registry, error) { return registry.OpenDefault(mayUpgradeRegistry(version)) },
 		OpenCurrentRegistry: func() (*registry.Registry, error) { return registry.OpenCurrent("") },
 		DefaultTimeout:      2 * time.Minute,
 		Version:             version,
@@ -83,6 +83,14 @@ func main() {
 // names one.
 func sidecarAvailable(goos, sidecar string) bool {
 	return goos == "darwin" || sidecar != ""
+}
+
+// mayUpgradeRegistry is whether this build migrates the registry in the
+// user's home: a release build does, a development build only when asked, so
+// running one from a checkout cannot leave the installed agenthail a schema it
+// refuses.
+func mayUpgradeRegistry(version string) bool {
+	return version != "dev" || os.Getenv("AGENTHAIL_ALLOW_DEV_MIGRATION") == "1"
 }
 
 func envOr(key, def string) string {

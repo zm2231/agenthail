@@ -227,7 +227,7 @@ func TestRelaySchemaUpgradePreservesRoutesAndIntents(t *testing.T) {
 	if _, err := r.db.Exec(`DROP TABLE relay_sources; DROP TABLE relay_events; DROP TABLE relay_provenance; PRAGMA user_version=12`); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.migrate(); err != nil {
+	if err := r.migrate(true); err != nil {
 		t.Fatal(err)
 	}
 	routes, err := r.ListRoutes()
@@ -281,7 +281,7 @@ func TestRelayMigrationMarksExistingQueuedRelayIntents(t *testing.T) {
 	if _, err := r.db.Exec(`UPDATE delivery_intents SET relayed=0; PRAGMA user_version=12`); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.migrate(); err != nil {
+	if err := r.migrate(true); err != nil {
 		t.Fatal(err)
 	}
 	id, err := queuedDeliveryIntentID(r.db, queueID)

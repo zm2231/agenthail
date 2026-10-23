@@ -488,14 +488,14 @@ func TestRuntimeKindStepDerivesEachRowsKindFromItsSurfaceAndTransport(t *testing
 			t.Fatal(err)
 		}
 	}
-	if err := r.migrate(); err != nil {
+	if err := r.migrate(true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.db.Exec(`INSERT INTO sessions(id,surface,name,transport,runtime_kind) VALUES('recorded','codex','recorded','managed','codex-desktop')`); err != nil {
 		t.Fatal(err)
 	}
 	want["recorded"] = surface.RuntimeCodexDesktop
-	if err := r.migrate(); err != nil {
+	if err := r.migrate(true); err != nil {
 		t.Fatal(err)
 	}
 	for id, kind := range want {
