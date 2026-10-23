@@ -434,6 +434,9 @@ func TestAManagedStreamWindowThatHasAlreadyRunOutStillReadsOnce(t *testing.T) {
 	startManagedCodex(t, managedThreadReads(managedTurn("turn-1", "inProgress", agentMessage("answer", "", "hello"))))
 	var texts []string
 	err := isolatedManagedRuntime(t).Stream(context.Background(), managedSession(), "", func(event surface.StreamEvent) {
+		if event.Kind == "commands" {
+			return
+		}
 		texts = append(texts, event.Text)
 	}, 0)
 	if !errors.Is(err, surface.ErrStreamWindow) || len(texts) != 1 || texts[0] != "hello" {
