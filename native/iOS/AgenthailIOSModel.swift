@@ -73,7 +73,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published var loadingSession = false
     @Published var sendingSessionIDs: Set<String> = []
     private static let signposter = OSSignposter(subsystem: "com.agenthail.ios", category: "SessionOpen")
-    private var openInterval: (id: OSSignpostID, state: OSSignpostIntervalState, session: String, painted: Bool)?
+    private var openInterval: (id: OSSignpostID, state: OSSignpostIntervalState, session: String, painted: Bool, resumes: Bool)?
     private var attachmentCache: [String: Data] = [:]
     private var attachmentCacheBytes = 0
     private let attachmentCacheLimit = 20 * 1024 * 1024
@@ -956,7 +956,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             }
         }
         selectedSessionID = id
-        if switching { beginOpenInterval(id) }
+        if switching { beginOpenInterval(id, resumes: resumes) }
         sessionError = nil
         loadingSession = selectedDetail == nil
         loadCommands(id)
@@ -972,13 +972,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     /// Marks a session open in Instruments, from the switch until the
-    /// daemon's first page for it is shown (`loaded`) or the selection moves
-    /// off it (`left`). `Session painted` marks the first frame drawn after
-    /// its rows are shown.
-    private func beginOpenInterval(_ id: String) {
+    /// daemon's first page for it is shown (`loaded`), its stream resumes from
+    /// the cached position (`resumed`), or the selection moves off it
+    /// (`left`). `Session painted` marks the first frame drawn after its rows
+    /// are shown.
+    private func beginOpenInterval(_ id: String, resumes: Bool) {
         let signpost = Self.signposter.makeSignpostID()
         let cached = selectedDetail?.session.id == id
-        openInterval = (signpost, Self.signposter.beginInterval("Session open", id: signpost, "cached \(cached)"), id, false)
+        openInterval = (signpost, Self.signposter.beginInterval("Session open", id: signpost, "cached \(cached)"), id, false, resumes)
         paintOpeningSession()
     }
 
@@ -1012,6 +1013,13 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
     }
 
+    /// A stream resumed from a cached position brings the shown rows current
+    /// without a page read.
+    private func streamConnected(_ id: String) {
+        guard selectedSessionID == id, pageReadsInFlight == 0, let open = openInterval, open.session == id, open.resumes else { return }
+        endOpenInterval("resumed")
+    }
+
     private func keepSelectedSession() {
         guard let id = selectedSessionID, let detail = selectedDetail, detail.session.id == id else { return }
         let cursor = sessionStreamCursor > 0 && !streamOutranPage && detail.timeline != nil ? sessionStreamCursor : nil
@@ -1020,6 +1028,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     func refreshSession(_ id: String) async {
         guard sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
+        if openInterval?.session == id { openInterval?.resumes = false }
         let requestID = UUID()
         sessionRequestID = requestID
         let seq = nextStateRequest()
@@ -1643,7 +1652,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             let backoff = EventRetryBackoff()
             while !Task.isCancelled, selectedSessionID == id, server(for: id) === connection {
                 do {
-                    try await connection.api.streamSession(id: route.sessionID, after: sessionStreamCursor, onConnected: {}, onEvent: { [weak self] event in
+                    try await connection.api.streamSession(id: route.sessionID, after: sessionStreamCursor, onConnected: { [weak self] in await self?.streamConnected(id) }, onEvent: { [weak self] event in
                         backoff.reset()
                         await self?.applySessionStreamEvent(event, route: route, server: connection)
                     })
