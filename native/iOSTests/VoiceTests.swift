@@ -74,6 +74,23 @@ final class VoiceTests: XCTestCase {
     }
 
     @MainActor
+    func testAFailedPreparationIsRecordedWithItsStage() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let diagnostics = VoiceCallDiagnostics(file: nil)
+        let model = VoiceOperatorModel(api: api, audio: audio, diagnostics: diagnostics); model.ready = true
+        api.prepareError = NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet)
+        await model.call()
+        let attempt = try XCTUnwrap(diagnostics.attempts.last)
+        XCTAssertEqual(attempt.failureStage, "operator_prepare")
+        XCTAssertEqual(attempt.failureDomain, NSURLErrorDomain)
+        XCTAssertEqual(attempt.failureCode, NSURLErrorNotConnectedToInternet)
+        XCTAssertEqual(attempt.terminalCause, "operator_prepare_failed")
+        XCTAssertEqual(audio.starts, 0)
+        XCTAssertTrue(model.canCall)
+        model.close()
+    }
+
+    @MainActor
     func testHeartbeatUsesAcceptedAttemptAndStopsOnHangup() async throws {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
         let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
@@ -504,6 +521,7 @@ private final class VoiceFixtureAPI: VoiceServiceClient {
     var snapshot: VoiceState?
     var stopError: Error?
     var inputStateError: Error?
+    var prepareError: Error?
     private var ready: VoiceState { try! JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"ready","events":[],"occupied":false,"truncated":false}"#.utf8)) }
     func request(path: String) -> URLRequest { URLRequest(url: URL(string: "https://mac.test/\(path)")!) }
     var stateCalls = 0
@@ -512,6 +530,7 @@ private final class VoiceFixtureAPI: VoiceServiceClient {
         actions.append(action)
         if action.action == "stop", let stopError { throw stopError }
         if action.action == "input-state", let inputStateError { throw inputStateError }
+        if action.action == "prepare", let prepareError { throw prepareError }
         if (action.action == "prepare" && holdPrepare) || (action.action == "start" && holdStart) || (action.action == "stop" && holdStop) || (action.action == "text" && holdText) {
             return await withCheckedContinuation { pending = $0 }
         }

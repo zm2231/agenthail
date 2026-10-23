@@ -7,6 +7,11 @@ final class VoiceCallDiagnostics {
         let startedAt: Date
         var milestones: [String: Double]
         var terminalCause: String?
+        // The step that failed and its error's domain and code. The error's
+        // text is not kept, since it can quote what the person said.
+        var failureStage: String?
+        var failureDomain: String?
+        var failureCode: Int?
     }
     private(set) var attempts: [Attempt] = []
     private var clocks: [String: ContinuousClock.Instant] = [:]
@@ -36,6 +41,15 @@ final class VoiceCallDiagnostics {
         guard let index = attempts.firstIndex(where: { $0.id == id }), attempts[index].milestones[name] == nil, let started = clocks[id] else { return }
         let elapsed = started.duration(to: .now).components
         attempts[index].milestones[name] = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+        save()
+    }
+
+    func failure(_ error: Error, stage: String, id: String) {
+        guard let index = attempts.firstIndex(where: { $0.id == id }), attempts[index].failureStage == nil else { return }
+        let error = error as NSError
+        attempts[index].failureStage = stage
+        attempts[index].failureDomain = error.domain
+        attempts[index].failureCode = error.code
         save()
     }
 

@@ -248,16 +248,19 @@ final class VoiceOperatorModel: ObservableObject {
         let current = generation
         defer { endWork(work) }
         open()
+        let callID = UUID()
+        attemptID = callID.uuidString
+        diagnostics?.begin(id: callID.uuidString)
+        var stage = "target_select"
         do {
             let selected = try await api.action(VoiceAction(action: "select", targetId: targetID.trimmingCharacters(in: .whitespacesAndNewlines)))
             guard !closed, generation == current else { return }
             state = selected
+            stage = "operator_prepare"
             let next = try await api.action(VoiceAction(action: "prepare"))
             guard !closed, generation == current else { return }
             state = next
-            let callID = UUID()
-            attemptID = callID.uuidString
-            diagnostics?.begin(id: callID.uuidString)
+            stage = "native_audio_start"
             appliedSDP = nil; channelOpen = false; connectedReported = false; startSubmitted = false; muted = false
             held = false; hostHasCall = false; reportedInputMuted = false; inputRevision = 0
             audio.configureCall(id: callID, name: committedRoute)
@@ -266,7 +269,8 @@ final class VoiceOperatorModel: ObservableObject {
             guard !closed, generation == current else { return }
             if !(error is CancellationError) { self.error = error.localizedDescription }
             microphoneDenied = error is VoiceMicrophoneDenied
-            if let attemptID { diagnostics?.end(microphoneDenied ? "microphone_denied" : "local_start_failed", id: attemptID) }
+            diagnostics?.failure(error, stage: stage, id: callID.uuidString)
+            diagnostics?.end(microphoneDenied ? "microphone_denied" : "\(stage)_failed", id: callID.uuidString)
             dialing = false; attemptID = nil; audio.end()
         }
     }
@@ -299,6 +303,7 @@ final class VoiceOperatorModel: ObservableObject {
                         _ = try? await api.action(VoiceAction(action: "stop", attemptId: id)); return
                     }
                     self.error = error.localizedDescription
+                    diagnostics?.failure(error, stage: "host_start", id: id)
                     diagnostics?.end("host_start_rejected", id: id)
                     dialing = false
                     audio.end()

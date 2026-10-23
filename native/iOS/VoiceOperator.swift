@@ -308,6 +308,12 @@ struct AgenthailVoiceOperatorSheet: View {
                     Section("Call lifecycle") {
                         LabeledContent("Attempt") { Text(attempt.id).font(.caption.monospaced()).textSelection(.enabled) }
                         if let cause = attempt.terminalCause { LabeledContent("Ended because", value: cause) }
+                        if let stage = attempt.failureStage {
+                            LabeledContent("Failed at", value: stage)
+                            LabeledContent("Error") {
+                                Text("\(attempt.failureDomain ?? "unknown") · \(attempt.failureCode ?? 0)").font(.caption.monospaced()).textSelection(.enabled)
+                            }
+                        }
                         ForEach(attempt.milestones.sorted { $0.value < $1.value }, id: \.key) { name, seconds in
                             LabeledContent(name, value: String(format: "%.2fs", seconds)).font(.caption.monospaced())
                         }
