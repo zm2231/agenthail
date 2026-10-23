@@ -39,6 +39,35 @@ func matchPattern(pattern, text string) bool {
 	return err == nil && match.MatchString(text)
 }
 
+func relayable(route registry.RouteRow, event registry.RelayEvent) bool {
+	return event.Message != "" && event.RelayHops < maxRelayHops && matchPattern(route.Pattern, event.Message)
+}
+
+// backgroundHold keeps a finished turn from relaying while the source still
+// runs background work it started; ambient tasks do not count. A source that
+// closed has no work left. When its state cannot be read, the last stored
+// state decides.
+func (d *Daemon) backgroundHold(ctx context.Context, adapter surface.Surface, from *surface.Session) error {
+	running := surface.BackgroundRunning(from.BackgroundTasks)
+	var unreadable error
+	if adapter != nil {
+		observeCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+		observation, err := adapter.Observe(observeCtx, from)
+		cancel()
+		if err == nil {
+			running = observation != nil && observation.Status != surface.StatusOffline && surface.BackgroundRunning(observation.BackgroundTasks)
+		}
+		unreadable = err
+	}
+	if !running {
+		return nil
+	}
+	if unreadable != nil {
+		return fmt.Errorf("waiting for background work to finish; its state is unavailable: %w", unreadable)
+	}
+	return fmt.Errorf("waiting for background work to finish")
+}
+
 func (d *Daemon) syncRelays(ctx context.Context, adapter surface.Surface, session *surface.Session) {
 	routes, err := d.Registry.ListRoutes()
 	if err != nil {
@@ -124,10 +153,19 @@ func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, fro
 				}
 			}
 		}
+		if err == nil && route.Handoff == registry.HandoffTurnFinished && len(events) > 0 {
+			err = d.backgroundHold(ctx, adapter, from)
+		}
 		if err == nil {
-			for _, event := range events {
+			last := -1
+			for index, event := range events {
+				if relayable(route, event) {
+					last = index
+				}
+			}
+			for index, event := range events {
 				payload, busy := "", ""
-				if event.Message != "" && event.RelayHops < maxRelayHops && matchPattern(route.Pattern, event.Message) {
+				if relayable(route, event) && (!route.Once || index == last) {
 					target, targetErr := d.Registry.Session(route.ToSession)
 					if targetErr != nil {
 						err = targetErr

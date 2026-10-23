@@ -2,9 +2,9 @@
 
 Create a relay with `agenthail relay add <from> <to> [regex] [--once] [--when turn_finished|goal_completed]`. The same `handoff` values are accepted by the `relay-add` dashboard/API action and exposed in native controls.
 
-- `turn_finished` evaluates every captured successful completion in source order.
+- `turn_finished` evaluates every captured successful completion in source order. A turn that ends with background work still running (a shell, a subagent or a non-ambient monitor) waits, with the route showing `waiting for background work to finish`, and is released with the turns after it once that work clears. Ambient tasks, such as a monitor waiting for events, do not hold it. A source that closes has no work left, so its held turns are released. When the source's state cannot be read, its last recorded state decides.
 - `goal_completed` waits for an explicit provider goal with status `complete`, a creation time, and a finished final turn whose provider completion timestamp is at or after goal creation. Missing completion timestamps keep the route waiting. It evaluates the latest pending completion and consumes earlier intermediate results with it. Missing, active, paused, blocked, limited, or unreadable goal state keeps the route waiting. The completed goal's creation time and objective identify the handoff; repeated observations do not fire it again.
-- Regex filtering applies after the handoff condition. A one-shot route becomes inactive only when its matching handoff is durably queued.
+- Regex filtering applies after the handoff condition. A one-shot route delivers the latest matching pending completion, consuming the earlier ones with it, and becomes inactive only when that handoff is durably queued.
 
 Route creation first checkpoints the source and excludes existing history. Upgraded routes establish their first checkpoint on the first daemon scan. Claude resumes from a durable JSONL byte offset and partial-turn state; Codex walks turn and item pages back to its saved provider turn; Notion retains ordered inference-message identities. Capture commits all returned events and the next provider cursor together. A failed capture retries the previous position.
 

@@ -429,3 +429,110 @@ func TestDurableRelayClaudeRelaysReplyTextOnceAfterItsLastContentBlock(t *testin
 		t.Fatalf("queue=%+v err=%v", items, err)
 	}
 }
+
+func TestTurnFinishedRelayWaitsForBackgroundWork(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	shell := &surface.BackgroundTasks{Running: true, Source: surface.BackgroundSourceHost, Tasks: []surface.BackgroundTask{{ID: "b1", Kind: surface.BackgroundShell}}}
+	monitor := &surface.BackgroundTasks{Source: surface.BackgroundSourceHost, Tasks: []surface.BackgroundTask{{ID: "m1", Kind: surface.BackgroundMonitor, Ambient: true}}}
+	setup := func(t *testing.T, once bool) (*Daemon, *registry.Registry, *daemonSurface, surface.Session, surface.Session) {
+		d, r, fake, from, to := daemonFixture(t)
+		if err := r.PrepareRelaySource(context.Background(), fake, &from, registry.HandoffTurnFinished); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.AddRelayRoute(from.ID, to.ID, ".*", once, registry.HandoffTurnFinished); err != nil {
+			t.Fatal(err)
+		}
+		return d, r, fake, from, to
+	}
+	finish := func(d *Daemon, fake *daemonSurface, from surface.Session, id string, status surface.SessionStatus, background *surface.BackgroundTasks) {
+		fake.observations[from.ID] = &surface.TurnObservation{Status: status, CompletedTurnID: id, Reply: &surface.ReplyResult{Text: id, Done: true}, BackgroundTasks: background}
+		d.syncRelays(context.Background(), fake, &from)
+	}
+	queued := func(t *testing.T, r *registry.Registry, to surface.Session) []string {
+		t.Helper()
+		var messages []string
+		for id := int64(1); id <= int64(r.QueueCount(to.ID)); id++ {
+			item, err := r.QueueItem(id, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			messages = append(messages, item.Message[strings.LastIndex(item.Message, "] ")+2:])
+		}
+		return messages
+	}
+
+	t.Run("held while a shell runs, then every turn delivers", func(t *testing.T) {
+		d, r, fake, from, to := setup(t, false)
+		finish(d, fake, from, "started", surface.StatusIdle, shell)
+		finish(d, fake, from, "checked", surface.StatusIdle, shell)
+		if got := queued(t, r, to); len(got) != 0 {
+			t.Fatalf("delivered %v while background work ran", got)
+		}
+		if routes, _ := r.ListRoutes(); routes[0].PendingCount != 2 || !strings.Contains(routes[0].LastError, "background") {
+			t.Fatalf("route=%+v", routes[0])
+		}
+		finish(d, fake, from, "done", surface.StatusIdle, monitor)
+		if got := queued(t, r, to); strings.Join(got, ",") != "started,checked,done" {
+			t.Fatalf("delivered %v", got)
+		}
+		if routes, _ := r.ListRoutes(); routes[0].LastError != "" {
+			t.Fatalf("route=%+v", routes[0])
+		}
+	})
+
+	t.Run("an ambient monitor alone does not hold", func(t *testing.T) {
+		d, r, fake, from, to := setup(t, false)
+		finish(d, fake, from, "watching", surface.StatusIdle, monitor)
+		if got := queued(t, r, to); strings.Join(got, ",") != "watching" {
+			t.Fatalf("delivered %v", got)
+		}
+	})
+
+	t.Run("a session that closes with work pending delivers", func(t *testing.T) {
+		d, r, fake, from, to := setup(t, false)
+		finish(d, fake, from, "started", surface.StatusIdle, shell)
+		finish(d, fake, from, "started", surface.StatusOffline, shell)
+		if got := queued(t, r, to); strings.Join(got, ",") != "started" {
+			t.Fatalf("delivered %v", got)
+		}
+	})
+
+	t.Run("once delivers the turn that finished the work", func(t *testing.T) {
+		d, r, fake, from, to := setup(t, true)
+		finish(d, fake, from, "started", surface.StatusIdle, shell)
+		finish(d, fake, from, "done", surface.StatusIdle, nil)
+		finish(d, fake, from, "later", surface.StatusIdle, nil)
+		if got := queued(t, r, to); strings.Join(got, ",") != "done" {
+			t.Fatalf("delivered %v", got)
+		}
+	})
+
+	t.Run("unreadable state falls back to the last stored state", func(t *testing.T) {
+		d, r, fake, from, to := setup(t, false)
+		finish(d, fake, from, "started", surface.StatusIdle, shell)
+		fake.observeErr = fmt.Errorf("source unreachable")
+		from.BackgroundTasks = shell
+		d.syncRelays(context.Background(), fake, &from)
+		if got := queued(t, r, to); len(got) != 0 {
+			t.Fatalf("delivered %v while the stored state shows background work", got)
+		}
+		from.BackgroundTasks = nil
+		d.syncRelays(context.Background(), fake, &from)
+		if got := queued(t, r, to); strings.Join(got, ",") != "started" {
+			t.Fatalf("delivered %v", got)
+		}
+	})
+
+	t.Run("reads background state only when a turn is pending", func(t *testing.T) {
+		d, _, fake, from, _ := setup(t, false)
+		fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
+		d.syncRelays(context.Background(), fake, &from)
+		if calls := fake.observeCalls.Load(); calls != 0 {
+			t.Fatalf("observed %d times with nothing pending", calls)
+		}
+		finish(d, fake, from, "done", surface.StatusIdle, nil)
+		if calls := fake.observeCalls.Load(); calls != 1 {
+			t.Fatalf("observed %d times for one pending turn", calls)
+		}
+	})
+}
