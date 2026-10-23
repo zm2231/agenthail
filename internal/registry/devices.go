@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -214,12 +215,58 @@ func (r *Registry) AuthenticateDevice(token, requiredScope string) (Device, erro
 	if lastSeen, err := time.Parse(time.RFC3339Nano, device.LastSeenAt); err == nil && now.Sub(lastSeen) < deviceLastSeenResolution {
 		return device, nil
 	}
-	stamp := now.Format(time.RFC3339Nano)
-	if _, err := r.db.Exec(`UPDATE paired_devices SET last_seen_at=? WHERE id=? AND revoked_at=''`, stamp, device.ID); err != nil {
-		return Device{}, err
-	}
-	device.LastSeenAt = stamp
+	device.LastSeenAt = now.Format(time.RFC3339Nano)
+	r.stampLastSeen(device.ID, device.LastSeenAt)
 	return device, nil
+}
+
+// deviceSeen holds the last-seen stamps waiting to be written. Authenticating
+// a request only reads, so a phone's request is never held up by a write that
+// waits on the registry's busy timeout; the stamps are written after it, at
+// most one writer at a time.
+type deviceSeen struct {
+	mu      sync.Mutex
+	pending map[string]string
+	writing bool
+	closed  bool
+	writes  sync.WaitGroup
+}
+
+func (r *Registry) stampLastSeen(deviceID, stamp string) {
+	r.seen.mu.Lock()
+	defer r.seen.mu.Unlock()
+	if r.seen.closed {
+		return
+	}
+	if r.seen.pending == nil {
+		r.seen.pending = map[string]string{}
+	}
+	r.seen.pending[deviceID] = stamp
+	if r.seen.writing {
+		return
+	}
+	r.seen.writing = true
+	r.seen.writes.Add(1)
+	go r.writeLastSeen()
+}
+
+func (r *Registry) writeLastSeen() {
+	defer r.seen.writes.Done()
+	for {
+		r.seen.mu.Lock()
+		pending := r.seen.pending
+		r.seen.pending = nil
+		if len(pending) == 0 {
+			r.seen.writing = false
+			r.seen.mu.Unlock()
+			return
+		}
+		r.seen.mu.Unlock()
+		for deviceID, stamp := range pending {
+			// A failed stamp is dropped: the next request stamps again.
+			_, _ = r.db.Exec(`UPDATE paired_devices SET last_seen_at=? WHERE id=? AND revoked_at=''`, stamp, deviceID)
+		}
+	}
 }
 
 func (r *Registry) ListDevices(includeRevoked bool) ([]Device, error) {

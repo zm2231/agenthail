@@ -25,6 +25,7 @@ type Registry struct {
 	path       string
 	now        func() time.Time
 	busyPolicy func() (deliverypolicy.Mode, error)
+	seen       deviceSeen
 }
 
 // SetBusyPolicy sets the live busy-delivery policy. A queued message records
@@ -186,7 +187,15 @@ func connect(path string) (*Registry, error) {
 
 func (r *Registry) Path() string { return r.path }
 
-func (r *Registry) Close() error { return errors.Join(r.read.Close(), r.db.Close()) }
+// Close writes the device last-seen stamps still pending, then closes the
+// database.
+func (r *Registry) Close() error {
+	r.seen.mu.Lock()
+	r.seen.closed = true
+	r.seen.mu.Unlock()
+	r.seen.writes.Wait()
+	return errors.Join(r.read.Close(), r.db.Close())
+}
 
 // migrate brings the database to the current schema in one transaction, so an
 // interrupted upgrade leaves the previous schema intact.
