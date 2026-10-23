@@ -126,9 +126,11 @@ that are not a task notification envelope, are user messages. The others carry
 
 A notification or peer message queued into a running turn is also recorded as
 a `queued_command` attachment. Both copies share the item ID above, so the
-journal and timeline pages show it once. Queued human prompts are not rendered
-from the attachment. Turn and exchange boundaries are unchanged, so delivery
-reconciliation still sees every injected prompt as the turn's input.
+journal and timeline pages show it once. A person's prompt absorbed into a
+running turn is recorded only as the attachment, with no user record after it,
+so it renders from the attachment as a `user` message at the attachment's
+time. Turn and exchange boundaries are unchanged, so delivery reconciliation
+still sees every injected prompt as the turn's input.
 
 Body range reads use byte offsets with UTF-8 boundaries: `start` must begin at
 a code-point boundary, while `end` is reduced to the preceding boundary when
