@@ -85,6 +85,16 @@ final class HostCatalogTests: XCTestCase {
         XCTAssertEqual(Set(catalog.sessions.compactMap(\.project?.id)), ["repo:github.com/acme/widget"])
     }
 
+    func testARepositoryIDNamesNoComputer() {
+        XCTAssertEqual(HostCatalog.qualify("hlaptop", "repo:github.com/acme/widget"), "repo:github.com/acme/widget")
+        XCTAssertNil(HostCatalog.owner(of: "repo:github.com/acme/widget"))
+        XCTAssertEqual(HostCatalog.qualify("hlaptop", "s1"), "hlaptop::s1")
+        XCTAssertEqual(HostCatalog.owner(of: "hserver::folder:notes"), "hserver")
+        XCTAssertEqual(HostCatalog.qualify("", "s1"), "s1")
+        XCTAssertNil(HostCatalog.owner(of: "::s1"))
+        XCTAssertNil(HostCatalog.owner(of: "s1"))
+    }
+
     func testDeliveryProblemsAndAttentionNameTheirComputer() {
         var snapshot = Self.snapshot([local("s1")])
         snapshot.deliveryProblems = [DeliveryProblem(deliveryId: 7, sessionId: "s1", sourceSessionId: "s2", attentionSessionId: "s2", message: "m", reason: "r", status: nil, at: "now")]
