@@ -8,7 +8,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -167,15 +169,103 @@ func TestSessionFilesLimitsAndRefusals(t *testing.T) {
 	}
 }
 
-func TestSessionFilesWalkStopsAtTheEntryCap(t *testing.T) {
-	dir := t.TempDir()
-	for i := 0; i < 3; i++ {
-		writeTree(t, dir, filepath.Join("d", strings.Repeat("x", i+1)))
+func TestSessionFilesStopAtTheEntryCap(t *testing.T) {
+	saved := sessionFilesMaxEntries
+	sessionFilesMaxEntries = 5
+	t.Cleanup(func() { sessionFilesMaxEntries = saved })
+	plain := t.TempDir()
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	for i := 0; i < 8; i++ {
+		name := filepath.Join("d", strings.Repeat("x", i+1))
+		writeTree(t, plain, name)
+		writeTree(t, repo, name)
+	}
+	if list := walkSessionFiles(context.Background(), plain); !list.truncated || len(list.files) != 5 {
+		t.Fatalf("walk: truncated=%v entries=%d, want the cap", list.truncated, len(list.files))
+	}
+	list, ok := listGitFiles(context.Background(), repo)
+	if !ok || !list.truncated || len(list.files) != 5 {
+		t.Fatalf("git: ok=%v truncated=%v entries=%d, want the cap", ok, list != nil && list.truncated, len(list.files))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), -time.Second)
 	defer cancel()
-	if list := walkSessionFiles(ctx, dir); !list.truncated || len(list.files) != 0 {
+	if list := walkSessionFiles(ctx, plain); !list.truncated || len(list.files) != 0 {
 		t.Fatalf("an expired walk is truncated and empty: %+v", list)
+	}
+}
+
+func TestSessionFilesRankWithFzfsPathScoring(t *testing.T) {
+	files := []sessionFile{{Path: "xdash.go"}, {Path: "a/dashboard.go"}, {Path: "docs/plan.md"}}
+	if got := filePaths(matchSessionFiles(files, "dash", 10)); got != "a/dashboard.go|xdash.go" {
+		t.Fatalf("ranked %q, want the match at a path boundary first", got)
+	}
+}
+
+func TestSessionFilesBoundTheirCacheAndShareABuild(t *testing.T) {
+	saved := buildFileList
+	t.Cleanup(func() { buildFileList = saved })
+	var mu sync.Mutex
+	builds := map[string]int{}
+	release := make(chan struct{})
+	buildFileList = func(_ context.Context, cwd string, now time.Time) *sessionFileList {
+		mu.Lock()
+		builds[cwd]++
+		mu.Unlock()
+		<-release
+		return &sessionFileList{files: []sessionFile{{Path: cwd}}, built: now}
+	}
+	lists := sessionFileLists{}
+	now := time.Now()
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			lists.get(context.Background(), "/same", now)
+		}()
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	if builds["/same"] != 1 {
+		t.Fatalf("concurrent cold requests built %d listings, want 1", builds["/same"])
+	}
+	for i := 0; i < 3*sessionFilesCachedLists; i++ {
+		lists.get(context.Background(), "/cwd"+strconv.Itoa(i), now)
+	}
+	if len(lists.lists) != sessionFilesCachedLists || len(lists.recent) != sessionFilesCachedLists {
+		t.Fatalf("cache holds %d lists (%d recent), want %d", len(lists.lists), len(lists.recent), sessionFilesCachedLists)
+	}
+}
+
+func TestSessionFilesAStalledGitCannotHoldTheRequest(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\nexec /bin/sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	dir := t.TempDir()
+	writeTree(t, dir, "a.txt")
+	start := time.Now()
+	list := (&sessionFileLists{}).get(context.Background(), dir, start)
+	if elapsed := time.Since(start); elapsed > sessionFilesListDeadline+time.Second {
+		t.Fatalf("a stalled git held the listing for %v", elapsed)
+	}
+	if !list.truncated {
+		t.Fatalf("a listing cut short by the deadline is truncated: %+v", list)
+	}
+}
+
+func TestSessionFilesInANestedRepositoryStayInsideIt(t *testing.T) {
+	outer := t.TempDir()
+	runGit(t, outer, "init", "-q")
+	writeTree(t, outer, "outer.txt", "inner/child.txt")
+	inner := filepath.Join(outer, "inner")
+	runGit(t, inner, "init", "-q")
+	list, ok := listGitFiles(context.Background(), inner)
+	if !ok || filePaths(list.files) != "child.txt" {
+		t.Fatalf("nested repository listed %q", filePaths(list.files))
 	}
 }
 

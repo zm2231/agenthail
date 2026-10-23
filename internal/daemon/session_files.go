@@ -22,12 +22,16 @@ import (
 )
 
 const (
-	sessionFilesMaxEntries   = 50000
 	sessionFilesListDeadline = 2 * time.Second
 	sessionFilesFresh        = 10 * time.Second
 	sessionFilesDefaultLimit = 50
 	sessionFilesMaxLimit     = 200
+	sessionFilesCachedLists  = 8
 )
+
+var sessionFilesMaxEntries = 50000
+
+var initFileScoring = sync.OnceFunc(func() { algo.Init("path") })
 
 type sessionFile struct {
 	Path string `json:"path"`
@@ -42,28 +46,80 @@ type sessionFileList struct {
 	index     time.Time
 }
 
+// Only the most recently used checkouts are kept, and concurrent requests for
+// one checkout share a single listing.
 type sessionFileLists struct {
-	mu    sync.Mutex
-	lists map[string]*sessionFileList
+	mu       sync.Mutex
+	lists    map[string]*sessionFileList
+	recent   []string
+	building map[string]chan struct{}
 }
 
 func (l *sessionFileLists) get(ctx context.Context, cwd string, now time.Time) *sessionFileList {
-	l.mu.Lock()
-	cached := l.lists[cwd]
-	l.mu.Unlock()
-	if cached != nil && now.Sub(cached.built) < sessionFilesFresh && modTime(cached.indexPath).Equal(cached.index) {
-		return cached
+	for {
+		l.mu.Lock()
+		cached := l.lists[cwd]
+		if cached != nil && now.Sub(cached.built) < sessionFilesFresh && modTime(cached.indexPath).Equal(cached.index) {
+			l.touch(cwd)
+			l.mu.Unlock()
+			return cached
+		}
+		if wait, ok := l.building[cwd]; ok {
+			l.mu.Unlock()
+			select {
+			case <-wait:
+				continue
+			case <-ctx.Done():
+				return &sessionFileList{truncated: true}
+			}
+		}
+		if l.building == nil {
+			l.building = map[string]chan struct{}{}
+		}
+		done := make(chan struct{})
+		l.building[cwd] = done
+		l.mu.Unlock()
+
+		list := buildFileList(ctx, cwd, now)
+		l.mu.Lock()
+		delete(l.building, cwd)
+		close(done)
+		if l.lists == nil {
+			l.lists = map[string]*sessionFileList{}
+		}
+		l.lists[cwd] = list
+		l.touch(cwd)
+		for len(l.recent) > sessionFilesCachedLists {
+			delete(l.lists, l.recent[0])
+			l.recent = l.recent[1:]
+		}
+		l.mu.Unlock()
+		return list
 	}
+}
+
+func (l *sessionFileLists) touch(cwd string) {
+	for i, recent := range l.recent {
+		if recent == cwd {
+			l.recent = append(l.recent[:i], l.recent[i+1:]...)
+			break
+		}
+	}
+	l.recent = append(l.recent, cwd)
+}
+
+var buildFileList = buildSessionFileList
+
+func buildSessionFileList(ctx context.Context, cwd string, now time.Time) *sessionFileList {
+	ctx, cancel := context.WithTimeout(ctx, sessionFilesListDeadline)
+	defer cancel()
 	indexPath := gitIndexPath(ctx, cwd)
 	index := modTime(indexPath)
-	list := listSessionFiles(ctx, cwd)
-	list.built, list.indexPath, list.index = now, indexPath, index
-	l.mu.Lock()
-	if l.lists == nil {
-		l.lists = map[string]*sessionFileList{}
+	list, ok := listGitFiles(ctx, cwd)
+	if !ok {
+		list = walkSessionFiles(ctx, cwd)
 	}
-	l.lists[cwd] = list
-	l.mu.Unlock()
+	list.built, list.indexPath, list.index = now, indexPath, index
 	return list
 }
 
@@ -88,15 +144,6 @@ func modTime(name string) time.Time {
 		return time.Time{}
 	}
 	return info.ModTime()
-}
-
-func listSessionFiles(ctx context.Context, cwd string) *sessionFileList {
-	ctx, cancel := context.WithTimeout(ctx, sessionFilesListDeadline)
-	defer cancel()
-	if list, ok := listGitFiles(ctx, cwd); ok {
-		return list
-	}
-	return walkSessionFiles(ctx, cwd)
 }
 
 func listGitFiles(ctx context.Context, cwd string) (*sessionFileList, bool) {
@@ -203,6 +250,7 @@ func matchSessionFiles(files []sessionFile, query string, limit int) []sessionFi
 			scored = append(scored, scoredFile{file: file, score: -strings.Count(file.Path, "/")})
 		}
 	} else {
+		initFileScoring()
 		pattern := []rune(strings.ToLower(query))
 		slab := util.MakeSlab(100*1024, 2048)
 		for _, file := range files {

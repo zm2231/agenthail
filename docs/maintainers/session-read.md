@@ -179,6 +179,7 @@ directories those paths imply. Elsewhere it is a walk that skips hidden
 directories and `node_modules` and never follows a symbolic link. Either way
 the listing stops at 50,000 entries or after 2 seconds and then sets
 `truncated`. A listing is reused for 10 seconds unless the checkout's git index
-changes. Only names are returned, never file contents. A session with no
+changes, concurrent requests for one checkout share a single listing, and only
+the 8 most recently used checkouts are kept. Only names are returned, never file contents. A session with no
 working directory, or one that is not on this computer, answers `404` with
 `no_cwd`.
