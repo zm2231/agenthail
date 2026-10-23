@@ -266,7 +266,7 @@ func TestARefusedReplaceRestoresTheLocalCoordinatorOrKeepsTheNewOne(t *testing.T
 				answered <- laptop.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "laptop-other", "name": "new-lead", "replace": true})
 			}()
 			awaitFederation(t, "the clear reaching vps", func() bool { return hold.waiting.Load() == 1 })
-			if response := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "vps-a", "name": "peer-lead", "replace": true}); response.Code != http.StatusOK {
+			if response := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "vps-a", "name": "peer-lead-now", "replace": true}); response.Code != http.StatusOK {
 				t.Fatalf("vps changes its coordinator: %d %s", response.Code, response.Body)
 			}
 			var aliasErr registry.CoordinatorAliasError
