@@ -1198,11 +1198,17 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         let servers = Set((snapshot?.sessions ?? []).filter { $0.project?.id == projectID }.compactMap { catalog.server(of: $0.id) })
         let reachable = hostOrder.filter { servers.contains($0) && connections[$0]?.reachable == true }
         guard !reachable.isEmpty else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
+        var failures: [String] = []
         for hostID in reachable {
             guard let connection = connections[hostID] else { continue }
-            _ = try await connection.api.projectAction(action, projectID: projectID)
+            do {
+                _ = try await connection.api.projectAction(action, projectID: projectID)
+            } catch {
+                failures.append("\(connection.name): \(AgenthailAPIError.userMessage(error))")
+            }
             await refresh(host: hostID)
         }
+        if !failures.isEmpty { throw AgenthailAPIError.unavailable(failures.joined(separator: "\n")) }
     }
 
     func removeHost(_ hostID: String) {

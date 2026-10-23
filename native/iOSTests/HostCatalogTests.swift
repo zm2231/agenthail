@@ -158,6 +158,60 @@ final class HostCatalogTests: XCTestCase {
     }
 }
 
+final class RepositoryArchiveTests: XCTestCase {
+    @MainActor
+    func testArchivingARepositoryReachesEveryComputerEvenWhenOneRefuses() async throws {
+        KeychainStore.removeAll()
+        RepositoryArchiveProtocol.state.reset(refusing: "laptop.tailnet.ts.net")
+        try AgenthailIOSTests.pair("hlaptop", "https://laptop.tailnet.ts.net", name: "laptop")
+        try AgenthailIOSTests.pair("hserver", "https://server.tailnet.ts.net", name: "server")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RepositoryArchiveProtocol.self]
+        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        defer { KeychainStore.removeAll() }
+        await model.setProjectArchived("repo:github.com/acme/widget", true)
+        XCTAssertEqual(model.operationError, "Connect to your computer first.")
+        XCTAssertTrue(RepositoryArchiveProtocol.state.actions.isEmpty)
+
+        for (hostID, session) in [("hlaptop", "s1"), ("hserver", "s2")] {
+            model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"\#(session)","surface":"codex","name":"task","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true},"project":{"id":"repo:github.com/acme/widget","displayName":"widget","rootPath":"/w","kind":"git"}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24}"#.utf8)), host: hostID)
+        }
+        await model.setProjectArchived("repo:github.com/acme/widget", true)
+        let actions = RepositoryArchiveProtocol.state.actions
+        XCTAssertEqual(Set(actions.map(\.host)), ["laptop.tailnet.ts.net", "server.tailnet.ts.net"])
+        XCTAssertEqual(Set(actions.map(\.projectID)), ["repo:github.com/acme/widget"])
+        XCTAssertEqual(model.operationError, "laptop: busy")
+    }
+}
+
+private final class RepositoryArchiveProtocol: URLProtocol, @unchecked Sendable {
+    final class State: @unchecked Sendable {
+        private let lock = NSLock()
+        private var refusing = ""
+        private var records: [(host: String, projectID: String)] = []
+        var actions: [(host: String, projectID: String)] { lock.withLock { records } }
+        func reset(refusing host: String) { lock.withLock { refusing = host; records = [] } }
+        func act(host: String, projectID: String) -> Bool { lock.withLock { records.append((host, projectID)); return host != refusing } }
+    }
+    static let state = State()
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        var status = 503
+        var text = #"{"error":{"message":"unavailable"}}"#
+        if request.url?.path == "/api/v1/actions" {
+            var data = request.httpBody ?? Data()
+            if let stream = request.httpBodyStream { stream.open(); defer { stream.close() }; var buffer = [UInt8](repeating: 0, count: 4096); while stream.hasBytesAvailable { let n = stream.read(&buffer, maxLength: buffer.count); if n <= 0 { break }; data.append(contentsOf: buffer.prefix(n)) } }
+            let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+            if Self.state.act(host: request.url?.host ?? "", projectID: body["projectId"] as? String ?? "") { (status, text) = (200, #"{"ok":true}"#) } else { (status, text) = (409, #"{"error":{"message":"busy"}}"#) }
+        }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(text.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 private extension DashboardSnapshot {
     mutating func daemonHosts(_ hosts: [HostHealth]) {
         self = DashboardSnapshot(updatedAt: updatedAt, eventCursor: eventCursor, hostEpoch: hostEpoch, catalogSeq: catalogSeq, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil, hosts: hosts), surfaces: surfaces, sessions: sessions, totalSessions: totalSessions, queue: queue, channels: channels, relays: relays, history: history, attention: attention, deliveryProblems: deliveryProblems, codexRecentHours: codexRecentHours, busyDelivery: busyDelivery)
