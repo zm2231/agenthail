@@ -186,28 +186,23 @@ func (r *Registry) ListDeliveryProblems() ([]DeliveryProblem, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	problems := make([]DeliveryProblem, 0, 50)
-	for rows.Next() {
+	return appendRows(make([]DeliveryProblem, 0, 50), rows, func(row rowScanner) (DeliveryProblem, error) {
 		var problem DeliveryProblem
 		var status, updatedAt string
 		var notified bool
-		if err := rows.Scan(&problem.DeliveryID, &problem.SessionID, &problem.SourceSessionID, &problem.Message, &problem.Reason, &status, &updatedAt, &notified); err != nil {
-			return nil, err
+		if err := row.Scan(&problem.DeliveryID, &problem.SessionID, &problem.SourceSessionID, &problem.Message, &problem.Reason, &status, &updatedAt, &notified); err != nil {
+			return problem, err
 		}
 		problem.AttentionSessionID = deliveryAttentionSession(problem.SourceSessionID, notified)
 		problem.Message = boundedIntentMessage(problem.Message)
 		problem.Status = DeliveryIntentStatus(status)
-		problem.At, err = time.ParseInLocation("2006-01-02 15:04:05", updatedAt, time.UTC)
+		at, err := time.ParseInLocation("2006-01-02 15:04:05", updatedAt, time.UTC)
 		if err != nil {
-			return nil, fmt.Errorf("parse delivery problem timestamp: %w", err)
+			return problem, fmt.Errorf("parse delivery problem timestamp: %w", err)
 		}
-		problems = append(problems, problem)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return problems, nil
+		problem.At = at
+		return problem, nil
+	})
 }
 
 // deliveryAttentionSession flags the sender of a failed message, never its

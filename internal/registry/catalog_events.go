@@ -152,21 +152,11 @@ func (r *Registry) CatalogEventsAfter(after uint64, limit int) (CatalogEventWind
 		}
 		return window, nil
 	}
-	rows, err := tx.Query(`SELECT seq,dedupe_key,type,entity_id,payload,created_at FROM catalog_events WHERE seq>? ORDER BY seq LIMIT ?`, after, limit)
+	events, err := queryRows(tx, window.Events, scanCatalogEvent, `SELECT seq,dedupe_key,type,entity_id,payload,created_at FROM catalog_events WHERE seq>? ORDER BY seq LIMIT ?`, after, limit)
 	if err != nil {
 		return CatalogEventWindow{}, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		entry, err := scanCatalogEvent(rows)
-		if err != nil {
-			return CatalogEventWindow{}, err
-		}
-		window.Events = append(window.Events, entry)
-	}
-	if err := rows.Err(); err != nil {
-		return CatalogEventWindow{}, err
-	}
+	window.Events = events
 	if err := tx.Commit(); err != nil {
 		return CatalogEventWindow{}, err
 	}
@@ -233,7 +223,7 @@ func catalogEventByDedupeKey(q interface{ QueryRow(string, ...any) *sql.Row }, k
 	return scanCatalogEvent(q.QueryRow(`SELECT seq,dedupe_key,type,entity_id,payload,created_at FROM catalog_events WHERE dedupe_key=?`, key))
 }
 
-func scanCatalogEvent(row interface{ Scan(...any) error }) (CatalogEvent, error) {
+func scanCatalogEvent(row rowScanner) (CatalogEvent, error) {
 	var event CatalogEvent
 	var sequence int64
 	var createdAt string

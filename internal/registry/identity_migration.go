@@ -102,16 +102,12 @@ func sessionReferencedTx(tx *sql.Tx, id string) (bool, error) {
 		return false, err
 	}
 	type reference struct{ table, column string }
-	var references []reference
-	for rows.Next() {
+	references, err := appendRows(nil, rows, func(row rowScanner) (reference, error) {
 		var ref reference
-		if err := rows.Scan(&ref.table, &ref.column); err != nil {
-			rows.Close()
-			return false, err
-		}
-		references = append(references, ref)
-	}
-	if err := rows.Close(); err != nil {
+		err := row.Scan(&ref.table, &ref.column)
+		return ref, err
+	})
+	if err != nil {
 		return false, err
 	}
 	for _, ref := range references {
@@ -247,20 +243,7 @@ var routeMoves = []string{
 }
 
 func tableColumns(tx *sql.Tx, table string) ([]string, error) {
-	rows, err := tx.Query(`SELECT name FROM pragma_table_info(?)`, table)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var columns []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		columns = append(columns, name)
-	}
-	return columns, rows.Err()
+	return queryRows(tx, nil, scanString, `SELECT name FROM pragma_table_info(?)`, table)
 }
 
 func rewriteSerializedTx(tx *sql.Tx, table string, wanted []string, replacer *strings.Replacer) error {

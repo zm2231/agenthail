@@ -48,31 +48,21 @@ func (r *Registry) RecordPendingLaunch(launcher string, agent surface.SurfaceKin
 }
 
 func (r *Registry) PendingLaunches() ([]PendingLaunch, error) {
-	rows, err := r.read.Query(`SELECT id,launcher,agent,cwd,name,alias,token,expires_at_ms,location,created_at FROM launcher_pending ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	result := []PendingLaunch{}
-	for rows.Next() {
+	return queryRows(r.read, []PendingLaunch{}, func(row rowScanner) (PendingLaunch, error) {
 		var item PendingLaunch
 		var launcher, agent, launched string
 		var expires int64
 		var location []byte
-		if err := rows.Scan(&item.ID, &launcher, &agent, &item.Cwd, &item.Name, &item.Alias.Name, &item.Alias.Token, &expires, &location, &launched); err != nil {
-			return nil, err
+		if err := row.Scan(&item.ID, &launcher, &agent, &item.Cwd, &item.Name, &item.Alias.Name, &item.Alias.Token, &expires, &location, &launched); err != nil {
+			return item, err
 		}
 		item.Launcher = launcher
 		item.Agent = surface.SurfaceKind(agent)
 		item.ExpiresAt = time.UnixMilli(expires)
 		item.Alias.Until = item.ExpiresAt
 		item.LaunchedAt, _ = time.ParseInLocation(time.DateTime, launched, time.UTC)
-		if err := json.Unmarshal(location, &item.Location); err != nil {
-			return nil, err
-		}
-		result = append(result, item)
-	}
-	return result, rows.Err()
+		return item, json.Unmarshal(location, &item.Location)
+	}, `SELECT id,launcher,agent,cwd,name,alias,token,expires_at_ms,location,created_at FROM launcher_pending ORDER BY id`)
 }
 
 func (r *Registry) DropPendingLaunch(item PendingLaunch) error {

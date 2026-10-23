@@ -51,7 +51,7 @@ func (e MoveConflictError) Error() string {
 	return fmt.Sprintf("move %s is %s, not %s", e.ID, e.State, e.Want)
 }
 
-func scanSessionMove(row interface{ Scan(...any) error }) (SessionMove, error) {
+func scanSessionMove(row rowScanner) (SessionMove, error) {
 	var move SessionMove
 	var manifest []byte
 	var created, updated string
@@ -83,20 +83,7 @@ func (r *Registry) SessionMoves(unfinished bool) ([]SessionMove, error) {
 	if unfinished {
 		query += ` WHERE role='out' AND state IN ('preparing','sent')`
 	}
-	rows, err := r.read.Query(query + ` ORDER BY created_at DESC, id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	moves := []SessionMove{}
-	for rows.Next() {
-		move, err := scanSessionMove(rows)
-		if err != nil {
-			return nil, err
-		}
-		moves = append(moves, move)
-	}
-	return moves, rows.Err()
+	return queryRows(r.read, []SessionMove{}, scanSessionMove, query+` ORDER BY created_at DESC, id`)
 }
 
 // SessionMoveRefusal names what keeps a local session from moving: another
@@ -381,23 +368,12 @@ type MovedQueueItem struct {
 	Uploads         string
 }
 
-func (r *Registry) pendingMoveQueue(tx interface {
-	Query(string, ...any) (*sql.Rows, error)
-}, conversation string) ([]MovedQueueItem, error) {
-	rows, err := tx.Query(`SELECT id,message,delivery_key,source_session_id,busy_delivery,relay_hops,operation,uploads FROM message_queue WHERE session_id=? AND host_request='' AND status='pending' ORDER BY id`, conversation)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []MovedQueueItem{}
-	for rows.Next() {
+func (r *Registry) pendingMoveQueue(tx rowQuerier, conversation string) ([]MovedQueueItem, error) {
+	return queryRows(tx, []MovedQueueItem{}, func(row rowScanner) (MovedQueueItem, error) {
 		var item MovedQueueItem
-		if err := rows.Scan(&item.ID, &item.Message, &item.Key, &item.SourceSessionID, &item.BusyDelivery, &item.RelayHops, &item.Operation, &item.Uploads); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+		err := row.Scan(&item.ID, &item.Message, &item.Key, &item.SourceSessionID, &item.BusyDelivery, &item.RelayHops, &item.Operation, &item.Uploads)
+		return item, err
+	}, `SELECT id,message,delivery_key,source_session_id,busy_delivery,relay_hops,operation,uploads FROM message_queue WHERE session_id=? AND host_request='' AND status='pending' ORDER BY id`, conversation)
 }
 
 // CompleteMoveOut hands a conversation the target resumed to the target, in

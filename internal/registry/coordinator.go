@@ -126,7 +126,7 @@ const coordinatorColumns = `c.project_id,c.host_id,c.project_root,c.name,c.surfa
 	CASE WHEN c.host_id='' THEN COALESCE((SELECT a.session_id FROM aliases a WHERE a.name=c.name),'') ELSE c.session_id END,
 	c.changed_by,c.changed_at_ms`
 
-func scanCoordinator(row interface{ Scan(...any) error }) (CoordinatorSpec, error) {
+func scanCoordinator(row rowScanner) (CoordinatorSpec, error) {
 	var spec CoordinatorSpec
 	var changedAt int64
 	if err := row.Scan(&spec.ProjectID, &spec.HostID, &spec.ProjectRoot, &spec.Name, &spec.Surface, &spec.Cwd, &spec.Model, &spec.PermissionMode, &spec.Instructions, &spec.SessionID, &spec.ChangedBy, &changedAt); err != nil {
@@ -139,23 +139,8 @@ func scanCoordinator(row interface{ Scan(...any) error }) (CoordinatorSpec, erro
 	return spec, nil
 }
 
-func (r *Registry) queryCoordinators(q interface {
-	Query(query string, args ...any) (*sql.Rows, error)
-}, where string, args ...any) ([]CoordinatorSpec, error) {
-	rows, err := q.Query(`SELECT `+coordinatorColumns+` FROM coordinators c WHERE `+where+` ORDER BY c.name,c.host_id`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	specs := []CoordinatorSpec{}
-	for rows.Next() {
-		spec, err := scanCoordinator(rows)
-		if err != nil {
-			return nil, err
-		}
-		specs = append(specs, spec)
-	}
-	return specs, rows.Err()
+func (r *Registry) queryCoordinators(q rowQuerier, where string, args ...any) ([]CoordinatorSpec, error) {
+	return queryRows(q, []CoordinatorSpec{}, scanCoordinator, `SELECT `+coordinatorColumns+` FROM coordinators c WHERE `+where+` ORDER BY c.name,c.host_id`, args...)
 }
 
 // Coordinator returns this host's coordinator of a project.
@@ -466,18 +451,13 @@ func (r *Registry) CoordinatorHistory(projectID string) ([]CoordinatorHistoryEnt
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	entries := []CoordinatorHistoryEntry{}
-	for rows.Next() {
+	return appendRows([]CoordinatorHistoryEntry{}, rows, func(row rowScanner) (CoordinatorHistoryEntry, error) {
 		var entry CoordinatorHistoryEntry
 		var at int64
-		if err := rows.Scan(&entry.ProjectID, &entry.Action, &entry.Name, &entry.SessionID, &entry.PreviousName, &entry.PreviousSessionID, &entry.ChangedBy, &at); err != nil {
-			return nil, err
-		}
+		err := row.Scan(&entry.ProjectID, &entry.Action, &entry.Name, &entry.SessionID, &entry.PreviousName, &entry.PreviousSessionID, &entry.ChangedBy, &at)
 		entry.At = time.UnixMilli(at).UTC()
-		entries = append(entries, entry)
-	}
-	return entries, rows.Err()
+		return entry, err
+	})
 }
 
 func recordCoordinatorHistoryTx(tx *sql.Tx, projectID, action, name, sessionID, previousName, previousSession, changedBy string, at time.Time) error {

@@ -138,17 +138,12 @@ func (r *Registry) JournalPrompts(query JournalPromptQuery) ([]JournalPrompt, er
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var prompts []JournalPrompt
-	for rows.Next() {
+	return appendRows(nil, rows, func(row rowScanner) (JournalPrompt, error) {
 		var prompt JournalPrompt
-		if err := rows.Scan(&prompt.SessionID, &prompt.Seq, &prompt.Body, &prompt.ItemID, &prompt.TurnID, &prompt.TS, &prompt.Truncated, &prompt.BodyRef, &prompt.Cursor.At); err != nil {
-			return nil, err
-		}
+		err := row.Scan(&prompt.SessionID, &prompt.Seq, &prompt.Body, &prompt.ItemID, &prompt.TurnID, &prompt.TS, &prompt.Truncated, &prompt.BodyRef, &prompt.Cursor.At)
 		prompt.Cursor.SessionID, prompt.Cursor.Seq = prompt.SessionID, prompt.Seq
-		prompts = append(prompts, prompt)
-	}
-	return prompts, rows.Err()
+		return prompt, err
+	})
 }
 
 // JournalTurnBefore names the turn the journal records just before turnID
