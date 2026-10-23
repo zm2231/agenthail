@@ -6,10 +6,13 @@ base_image="${BASE_IMAGE:-ghcr.io/cirruslabs/macos-tahoe-base:latest}"
 xcode_app="${XCODE_APP:-/Applications/Xcode-27.app}"
 runner_version=2.338.0
 runner_sha256=df4cebda25c86a886ed204e49fee63f5c2e7cec5f447b5c98440a826bbdf9df2
-scripts="$(cd "$(dirname "$0")/../../scripts" && pwd)"
+hooks="${AGENTHAIL_CI_HOOKS_DIR:-$HOME/actions-runner-agenthail-hooks}"
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 free_gb() { df -g "$HOME" | awk 'NR == 2 { print $4 }'; }
+
+hook_sha="$(shasum -a 256 "$hooks/job-started.sh" | cut -d' ' -f1)"
+[ -n "$hook_sha" ] || { echo "No job-started hook at $hooks/job-started.sh." >&2; exit 1; }
 
 if [ "$(free_gb)" -lt "$min_free_gb" ]; then
 	echo "Refusing to build: $(free_gb) GB free, need $min_free_gb." >&2
@@ -46,7 +49,7 @@ trap cleanup EXIT
 tart pull "$base_image"
 tart clone "$base_image" "$build"
 tart set "$build" --cpu 5 --memory 12288 --disk-size 80
-boot --dir="xcode:$xcode_app:ro" --dir="scripts:$scripts:ro" "$build"
+boot --dir="xcode:$xcode_app:ro" "$build"
 
 tart exec "$build" /bin/bash -euo pipefail -c "
 shared='/Volumes/My Shared Files'
@@ -59,12 +62,12 @@ sudo xcodebuild -runFirstLaunch
 sudo pmset -a sleep 0 disksleep 0 displaysleep 0 powernap 0
 sudo mdutil -a -i off >/dev/null
 networksetup -listallnetworkservices | tail -n +2 | while read -r service; do sudo networksetup -setdnsservers \"\$service\" 1.1.1.1 8.8.8.8; done
-mkdir -p ~/actions-runner ~/actions-runner-hooks
+mkdir -p ~/actions-runner
 curl -fsSL -o /tmp/runner.tgz https://github.com/actions/runner/releases/download/v$runner_version/actions-runner-osx-arm64-$runner_version.tar.gz
 echo '$runner_sha256  /tmp/runner.tgz' | shasum -a 256 -c
 tar xzf /tmp/runner.tgz -C ~/actions-runner
 rm /tmp/runner.tgz
-install -m 755 \"\$shared/scripts/ci-runner-job-started.sh\" ~/actions-runner-hooks/job-started.sh
+ln -s \"\$shared/hooks\" ~/actions-runner-hooks
 printf 'LANG=en_US.UTF-8\nACTIONS_RUNNER_HOOK_JOB_STARTED=%s\n' ~/actions-runner-hooks/job-started.sh > ~/actions-runner/.env
 echo /opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin > ~/actions-runner/.path
 test \"\$(defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser)\" = admin
@@ -75,12 +78,13 @@ sync
 tart stop "$build"
 
 tart clone "$build" "$check"
-boot "$check"
+boot --dir="hooks:$hooks:ro" "$check"
 if ! tart exec "$check" /bin/bash -uo pipefail -c "
 fail() { echo \"image check failed: \$1\" >&2; exit 1; }
 test -s ~/actions-runner/.path || fail 'runner PATH file'
 grep -qx \"ACTIONS_RUNNER_HOOK_JOB_STARTED=\$HOME/actions-runner-hooks/job-started.sh\" ~/actions-runner/.env || fail 'runner .env hook setting'
-test -x ~/actions-runner-hooks/job-started.sh || fail 'job-started hook'
+test \"\$(readlink ~/actions-runner-hooks)\" = '/Volumes/My Shared Files/hooks' || fail 'hooks link to the shared hooks directory'
+test \"\$(shasum -a 256 ~/actions-runner-hooks/job-started.sh | cut -d' ' -f1)\" = $hook_sha || fail 'job-started hook in the guest matching the host copy'
 test -x ~/actions-runner/run.sh || fail 'runner'
 export PATH=\"\$(cat ~/actions-runner/.path)\"
 test \"\$(~/actions-runner/config.sh --version)\" = $runner_version || fail 'runner version'

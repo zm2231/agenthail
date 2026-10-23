@@ -138,8 +138,8 @@ func (v *CodexVoice) Request(ctx context.Context, s *surface.Session, method str
 	return err
 }
 
-func (v *CodexVoice) Release(threadID string) {
-	if link := v.link(threadID); link != nil {
+func (v *CodexVoice) Release(threadID string, cursor voice.Cursor) {
+	if link := v.link(threadID); link != nil && link.source == cursor.Source {
 		v.dropLink(threadID, link)
 	}
 }
@@ -190,9 +190,9 @@ func (v *CodexVoice) desktopCursor(ctx context.Context) (voice.Cursor, error) {
 	return voice.Cursor{Source: conn.target, Position: int64(position)}, nil
 }
 
-func (v *CodexVoice) Poll(ctx context.Context, after voice.Cursor, threadID string) (voice.Batch, error) {
+func (v *CodexVoice) Poll(ctx context.Context, after voice.Cursor, threadID string, wait time.Duration) (voice.Batch, error) {
 	if link := v.link(threadID); link != nil {
-		batch, err := link.poll(after)
+		batch, err := link.poll(ctx, after, wait)
 		if err != nil {
 			return batch, err
 		}
@@ -213,7 +213,9 @@ func (v *CodexVoice) Poll(ctx context.Context, after voice.Cursor, threadID stri
 		return voice.Batch{}, err
 	}
 	defer conn.close()
-	value, err := conn.evaluate(ctx, codexVoiceEventsJS(after.Position, threadID), 3*time.Second)
+	stop := context.AfterFunc(ctx, func() { _ = conn.close() })
+	defer stop()
+	value, err := conn.evaluate(ctx, codexVoiceEventsJS(after.Position, threadID, wait), wait+3*time.Second)
 	if err != nil {
 		return voice.Batch{}, err
 	}
@@ -251,6 +253,6 @@ func (v *CodexVoice) RespondDynamicToolCall(ctx context.Context, requestID, thre
 	return nil
 }
 
-func codexVoiceEventsJS(after int64, threadID string) string {
-	return fmt.Sprintf(`(()=>{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b)throw Error('Codex event bridge unavailable');const after=%d;return JSON.stringify({cursor:b.sequence,lost:after>b.sequence||(b.events.length>0&&b.events[0].sequence>after+1),events:b.events.filter(e=>e.sequence>after&&e.params.threadId===%s&&((e.method.startsWith('thread/realtime/')&&e.method!=='thread/realtime/outputAudio/delta')||(e.method==='item/tool/call'&&b.toolRequests instanceof Map&&b.toolRequests.has(String(e.params.requestId)))||e.method==='turn/started'||(e.method==='item/completed'&&e.params.item?.type==='agentMessage'&&e.params.item?.phase==='final_answer')))})})()`, after, strconvQuote(threadID))
+func codexVoiceEventsJS(after int64, threadID string, wait time.Duration) string {
+	return fmt.Sprintf(`(async()=>{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b||typeof b.voiceEvents!=='function')throw Error('Codex event bridge unavailable');return JSON.stringify(await b.voiceEvents(%d,%s,%d))})()`, after, strconvQuote(threadID), wait.Milliseconds())
 }

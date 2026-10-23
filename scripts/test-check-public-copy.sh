@@ -42,7 +42,7 @@ check() {
 
 check 0
 
-for planted in '/Users/someone/project' '/Volumes/Backup/cache' '/home/someone/.config' 'zains-mac.tail1234.ts.net' "Zain's MacBook" "Zain$(printf '\xe2\x80\x99')s iPhone" 'session_0123456789abcdef'; do
+for planted in '/Users/someone/project' '/Volumes/Backup/cache' '/home/someone/.config' 'zains-mac.tail1234.ts.net' "Zain's MacBook" "Zain$(printf '\xe2\x80\x99')s iPhone" 'session_0123456789abcdef' 'ssh forge-agents' 'the mini2 runner' 'agenthail-mini-2-1' 'vps2' 'zains-mac-mini'; do
   printf 'first line\nsee %s\n' "$planted" >"$REPO/docs/planted.md"
   check 1
   grep -qx "docs/planted.md:2:see $planted" "$WORK/out" || fail "the planted $planted was not named: $(cat "$WORK/out")"
@@ -50,6 +50,10 @@ done
 echo "case \"\$path\" in /Volumes/*) ;; esac /Volumes/*/x" >"$REPO/docs/planted.md"
 check 1
 rm "$REPO/docs/planted.md"
+
+printf 'forge a release\nthe gemini2 model\nmini2x and vps20\n' >"$REPO/docs/words.md"
+check 0
+rm "$REPO/docs/words.md"
 
 echo "see /Users/someone/project" >"$REPO/docs/untracked.md"
 check 1

@@ -1318,6 +1318,23 @@ struct ContextState: Decodable {
 	}
 }
 
+extension ContextState {
+    enum Level { case normal, high, full }
+
+    /// How full the window is, for the composer's ring: high from 80 percent,
+    /// full from 95 or once an estimated window is overrun.
+    var level: Level {
+        guard let fraction else { return exceedsEstimatedWindow ? .full : .normal }
+        return fraction >= 0.95 ? .full : fraction >= 0.8 ? .high : .normal
+    }
+
+    var spokenLabel: String {
+        if compacting { return "Compacting context" }
+        if let fraction { return "Context \(Int((fraction * 100).rounded())) percent used" }
+        return "\(usedTokens.formatted(.number.notation(.compactName))) tokens of context used"
+    }
+}
+
 struct ModelOption: Decodable, Identifiable {
     let id: String
     let displayName: String
@@ -1825,6 +1842,24 @@ struct SessionStreamItem: Decodable {
     let reason: String?
     let attachment: SessionAttachment?
     let files: [AttachedFile]?
+    var commands: [RuntimeCommand]? = nil
+    var unavailable: String? = nil
+}
+
+/// A command the session's runtime runs, as the composer offers it. `insert`
+/// is the text it puts in the prompt, so clients never branch on the runtime.
+struct RuntimeCommand: Decodable, Equatable, Sendable {
+    var name: String
+    var description: String
+    var argumentHint: String
+    var insert: String
+}
+
+/// The runtime commands a session can run now; `unavailable` says why there
+/// are none when its route cannot run them.
+struct RuntimeCommands: Decodable, Equatable, Sendable {
+    var commands: [RuntimeCommand]
+    var unavailable: String
 }
 
 struct SessionStreamBody: Decodable {

@@ -1,4 +1,5 @@
 import Foundation
+import os
 import UIKit
 import UserNotifications
 
@@ -32,6 +33,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     @Published private(set) var snapshot: DashboardSnapshot? {
         didSet {
+            sessionFamilies = SessionFamilies.build(snapshot?.sessions ?? [])
+            sessionAttention = SessionAttention.build(sessions: snapshot?.sessions ?? [], attention: snapshot?.attention ?? [], deliveryProblems: snapshot?.deliveryProblems ?? [])
+            listedTree = nil
             if let snapshot {
                 HolderPins.shared.prune(to: snapshot.sessions)
                 let picks = HolderPins.shared.all
@@ -45,12 +49,21 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published private(set) var creationHosts: [CreationHost] = []
     @Published private(set) var projects: [String: ListedProject] = [:]
     @Published private(set) var holderPicks: [String: HolderPin] = [:]
-    @Published var selectedDetail: SessionDetail?
+    private(set) var sessionFamilies: [SessionFamily] = []
+    private(set) var sessionAttention: [String: SessionAttention] = [:]
+    private var listedTree: (scope: SessionFilter, search: String, tree: SessionTree)?
+    @Published var selectedDetail: SessionDetail? {
+        didSet { paintOpeningSession() }
+    }
     @Published var sessionRequests: SessionRequests?
     @Published var answeringRequest: String?
     private var sessionRequestsKey: String?
     @Published var selectedSessionID: String? {
-        didSet { if selectedSessionID != oldValue { sessionServer = selectedSessionID.flatMap(server(for:)) } }
+        didSet {
+            guard selectedSessionID != oldValue else { return }
+            sessionServer = selectedSessionID.flatMap(server(for:))
+            endOpenInterval("left")
+        }
     }
     @Published private(set) var connectionError: String?
     @Published private(set) var reconnecting = false
@@ -58,6 +71,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published var pairing = false
     @Published private(set) var completedPairings = 0
     let draft = ComposerDraft()
+    let appearance = PhoneAppearance()
     var composer: String {
         get { draft.text }
         set { draft.text = newValue }
@@ -65,6 +79,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published var sessionError: String?
     @Published var loadingSession = false
     @Published var sendingSessionIDs: Set<String> = []
+    private static let signposter = OSSignposter(subsystem: "com.agenthail.ios", category: "SessionOpen")
+    private var openInterval: (id: OSSignpostID, state: OSSignpostIntervalState, session: String, painted: Bool, resumes: Bool)?
     private var attachmentCache: [String: Data] = [:]
     private var attachmentCacheBytes = 0
     private let attachmentCacheLimit = 20 * 1024 * 1024
@@ -140,6 +156,15 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     /// Rows streamed while a page read is in flight, so a page read before
     /// some of them arrived can be brought up to date.
     private var rowsDuringPageRead: [SessionStreamEvent] = []
+    /// Set when the stream changed what a page would show in a way the shown
+    /// detail does not hold, so its position cannot be cached until a page read.
+    private var streamOutranPage = false
+    private(set) lazy var store: SessionStore = {
+        let store = SessionStore(limits: .phone)
+        store.pinned = { [unowned self] id in id == selectedSessionID || drafts[id]?.isEmpty == false }
+        store.working = { [unowned self] id in snapshot?.sessions.first { $0.id == id }?.isWorking == true }
+        return store
+    }()
     private var sessionMetadata = MetadataOverlay()
     private var stateRequests: UInt64 = 0
     private var selectedSessionStateSeq: UInt64 = 0
@@ -219,6 +244,10 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 codexRecentHours: loaded.first?.codexRecentHours ?? 24, busyDelivery: nil)
             if snapshot?.hasSamePresentation(as: merged) != true { snapshot = merged }
         }
+        let listedSessions = Set(catalog.sessions.map(\.id))
+        let loadedHosts = ordered.filter { $0.snapshot != nil }.map { $0.id + HostCatalog.separator }
+        store.carry(rekeys)
+        store.prune { id in !listedSessions.contains(id) && loadedHosts.contains { id.hasPrefix($0) } }
         hosts = ordered.map { connection in
             PairedHostStatus(id: connection.id, name: connection.name, address: connection.credential.endpoint.host ?? "",
                              reachable: connection.reachable, reconnecting: connection.reconnecting, error: connection.connectionError,
@@ -267,6 +296,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         cancelSessionReload()
         unsupportedRefreshTask?.cancel()
         sessionMetadataTask?.cancel()
+        store.rereadCommands(id)
         sessionStreamCursor = 0
         sessionStreamUnsupported = false
         sessionRequests = nil
@@ -280,6 +310,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         Task { [weak self] in
             await self?.reloadSelectedSession()
             guard let self, self.selectedSessionID == id else { return }
+            self.loadCommands(id)
             self.startSessionMetadata(id)
             if let session = self.snapshot?.sessions.first(where: { $0.id == id }) { await self.syncRequests(for: session) }
         }
@@ -839,6 +870,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                     }
                     previous.stop()
                     clearStoredPush(hostID)
+                    store.prune { $0.hasPrefix(hostID + HostCatalog.separator) }
                 }
                 let credential = PairedHostCredential(hostID: hostID, hostName: response.host.name, endpoint: pendingPairing.endpoint, token: response.token, pairedAt: previous == nil ? Date() : PairedCredential.all().first { $0.hostID == hostID }?.pairedAt ?? Date())
                 try PairedCredential.save(credential)
@@ -896,40 +928,136 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         _ = await connections[hostID]?.refresh(fresh: true)
     }
 
+    /// The session list for a scope and search, built once per catalog change
+    /// rather than on every view update.
+    func sessionTree(scope: SessionFilter, search: String) -> SessionTree {
+        if let listed = listedTree, listed.scope == scope, listed.search == search { return listed.tree }
+        let families = sessionFamilies.filter { family in
+            search.isEmpty || family.sessions.contains { session in
+                session.displayName.localizedCaseInsensitiveContains(search) || SessionFamilies.label(session).localizedCaseInsensitiveContains(search) || session.surface.localizedCaseInsensitiveContains(search) || (session.project?.displayName.localizedCaseInsensitiveContains(search) ?? false) || (session.cwd?.localizedCaseInsensitiveContains(search) ?? false)
+            }
+        }
+        let tree = SessionTree.build(families.flatMap(\.sessions), families: families, filter: scope, attention: sessionAttention)
+        listedTree = (scope, search, tree)
+        return tree
+    }
+
     func loadSession(_ id: String) async {
         let id = rekeys.resolve(id)
+        let switching = selectedSessionID != id
         if let previous = selectedSessionID, previous != id {
             drafts[previous] = composer
             attachmentDrafts[previous] = composerAttachments
+            keepSelectedSession()
         }
+        var resumes = false
         if selectedSessionID != id {
             sessionStreamTask?.cancel()
             cancelSessionReload()
             unsupportedRefreshTask?.cancel()
             sessionMetadataTask?.cancel()
             sessionStreamCursor = 0
-            sessionMetadata = MetadataOverlay()
+            streamOutranPage = false
             sessionStreamUnsupported = false
             composer = drafts[id] ?? ""
             composerAttachments = attachmentDrafts[id] ?? []
             attachmentProblem = nil
-            selectedDetail = nil
+            let warm = store.open(id)
+            sessionMetadata = MetadataOverlay(allClaudeSubagents: warm?.allClaudeSubagents ?? false)
+            let live = snapshot?.sessions.first { $0.id == id }
+            selectedDetail = warm.map { SessionStore.live($0.detail, live) }
             sessionRequests = nil
             sessionRequestsKey = nil
-            olderActivity = []
-            activityCursor = nil
+            olderActivity = warm?.older ?? []
+            activityCursor = warm?.olderCursor
             olderActivityError = nil
+            if let cursor = warm?.cursor, live?.capabilities.stream == true {
+                sessionStreamCursor = cursor
+                resumes = true
+            }
         }
         selectedSessionID = id
+        if switching { beginOpenInterval(id, resumes: resumes) }
         sessionError = nil
         loadingSession = selectedDetail == nil
-        await reloadSelectedSession()
+        loadCommands(id)
+        if resumes {
+            sessionServer = server(for: id)
+            startSessionStream(id)
+            await refreshDeliveries()
+        } else {
+            await reloadSelectedSession()
+        }
         if selectedSessionID == id { startSessionMetadata(id) }
         if selectedSessionID == id { loadingSession = false }
     }
 
+    /// Marks a session open in Instruments, from the switch until the
+    /// daemon's first page for it is shown (`loaded`), its stream resumes from
+    /// the cached position (`resumed`), or the selection moves off it
+    /// (`left`). `Session painted` marks the first frame drawn after its rows
+    /// are shown.
+    private func beginOpenInterval(_ id: String, resumes: Bool) {
+        let signpost = Self.signposter.makeSignpostID()
+        let cached = selectedDetail?.session.id == id
+        openInterval = (signpost, Self.signposter.beginInterval("Session open", id: signpost, "cached \(cached)"), id, false, resumes)
+        paintOpeningSession()
+    }
+
+    private func endOpenInterval(_ outcome: String) {
+        guard let openInterval else { return }
+        Self.signposter.endInterval("Session open", openInterval.state, "\(outcome, privacy: .public)")
+        self.openInterval = nil
+    }
+
+    private func paintOpeningSession() {
+        guard let open = openInterval, !open.painted, selectedDetail?.session.id == open.session else { return }
+        openInterval?.painted = true
+        _ = NextFrame { Self.signposter.emitEvent("Session painted", id: open.id) }
+    }
+
+    /// Files an `@` in this session's draft can name, from the computer that
+    /// runs it; nil when that computer can't be asked.
+    func sessionFiles(_ id: String, query: String) async -> [SessionFile]? {
+        guard case let (connection, route)? = try? resolveServer(id) else { return nil }
+        let files = try? await connection.api.sessionFiles(id: route.sessionID, query: query).files
+        return server(for: id) === connection ? files : nil
+    }
+
+    private func loadCommands(_ id: String) {
+        guard case let (connection, route)? = try? resolveServer(id), let read = store.beginCommandsRead(id) else { return }
+        Task { [weak self, store] in
+            do {
+                let commands = try await connection.api.sessionCommands(id: route.sessionID)
+                guard self?.server(for: id) === connection else {
+                    store.commandsRead(nil, for: id, read: read, retry: true)
+                    return
+                }
+                store.commandsRead(commands, for: id, read: read)
+            } catch {
+                var olderHost = false
+                if case AgenthailAPIError.olderHost = error { olderHost = true }
+                store.commandsRead(nil, for: id, read: read, retry: !olderHost && !(error is CancellationError))
+            }
+        }
+    }
+
+    /// A stream resumed from a cached position brings the shown rows current
+    /// without a page read.
+    private func streamConnected(_ id: String) {
+        guard selectedSessionID == id, pageReadsInFlight == 0, let open = openInterval, open.session == id, open.resumes else { return }
+        endOpenInterval("resumed")
+    }
+
+    private func keepSelectedSession() {
+        guard let id = selectedSessionID, let detail = selectedDetail, detail.session.id == id else { return }
+        let cursor = sessionStreamCursor > 0 && !streamOutranPage && detail.timeline != nil ? sessionStreamCursor : nil
+        store.keep(WarmSession(detail: detail, older: olderActivity, olderCursor: activityCursor, cursor: cursor, allClaudeSubagents: sessionMetadata.allClaudeSubagents), for: id)
+    }
+
     func refreshSession(_ id: String) async {
         guard sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
+        if openInterval?.session == id { openInterval?.resumes = false }
         let requestID = UUID()
         sessionRequestID = requestID
         let seq = nextStateRequest()
@@ -960,6 +1088,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 selectedSessionStateSeq = seq
             }
             selectedDetail = merged
+            streamOutranPage = false
             if let journalSeq = detail.journalSeq {
                 sessionStreamCursor = journalSeq
                 for row in rowsDuringPageRead where row.seq > journalSeq {
@@ -968,9 +1097,11 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             }
             if olderActivity.isEmpty { activityCursor = detail.timeline?.nextBefore }
             sessionError = nil
+            if openInterval?.session == id { endOpenInterval("loaded") }
         } catch {
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID, server(for: id) === requestServer else { return }
             sessionError = error.localizedDescription
+            if let openInterval, openInterval.session == id { Self.signposter.emitEvent("Session open failed", id: openInterval.id) }
         }
         await refreshDeliveries()
     }
@@ -1081,6 +1212,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     func showAllClaudeSubagents() {
         guard let id = selectedSessionID else { return }
         sessionMetadata.showAllClaudeSubagents()
+        store.update(id) { $0.allClaudeSubagents = true }
         startSessionMetadata(id)
     }
 
@@ -1164,6 +1296,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard !rekeys.isEmpty else { return }
         _ = rekeys.carry(&drafts)
         _ = rekeys.carry(&attachmentDrafts)
+        store.carry(rekeys)
         var held = stashes
         if rekeys.carry(&held) { stashes = held }
         _ = rekeys.carry(&pendingSendRequests)
@@ -1373,7 +1506,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     private func clearHost(_ hostID: String) {
         connections[hostID]?.stop()
         connections.removeValue(forKey: hostID)
+        let wasAppearanceHost = hostOrder.first == hostID
         hostOrder.removeAll { $0 == hostID }
+        if wasAppearanceHost, let next = hostOrder.first.flatMap({ connections[$0] }), next.reachable { appearance.load(from: next.api) }
         KeychainStore.remove(PairedCredential.account(for: hostID))
         KeychainStore.remove(HostConnection.relayAccount(hostID))
         clearStoredPush(hostID)
@@ -1392,6 +1527,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
         drafts = drafts.filter { !owned($0.key) }
         attachmentDrafts = attachmentDrafts.filter { !owned($0.key) }
+        store.prune(removing: owned)
         stashes = stashes.filter { !owned($0.key) }
         pendingSendRequests = pendingSendRequests.filter { !owned($0.key) }
         deliveryStatus = deliveryStatus.filter { !owned($0.key) }
@@ -1548,7 +1684,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             let backoff = EventRetryBackoff()
             while !Task.isCancelled, selectedSessionID == id, server(for: id) === connection {
                 do {
-                    try await connection.api.streamSession(id: route.sessionID, after: sessionStreamCursor, onConnected: {}, onEvent: { [weak self] event in
+                    try await connection.api.streamSession(id: route.sessionID, after: sessionStreamCursor, onConnected: { [weak self] in await self?.streamConnected(id) }, onEvent: { [weak self] event in
                         backoff.reset()
                         await self?.applySessionStreamEvent(event, route: route, server: connection)
                     })
@@ -1634,6 +1770,10 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
               var detail = selectedDetail, detail.session.id == selected else { return }
         if pageReadsInFlight > 0, !replaying { rowsDuringPageRead.append(event) }
         sessionStreamCursor = max(sessionStreamCursor, event.seq)
+        if event.data.kind == "commands" {
+            store.commandsStreamed(RuntimeCommands(commands: event.data.commands ?? [], unavailable: event.data.unavailable ?? ""), for: selected)
+            return
+        }
         if event.data.kind == "context" {
             sessionMetadata.stream(context: event.data.context)
             detail.context = event.data.context
@@ -1647,21 +1787,20 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
         if event.data.op == "reset", event.data.kind == "source-error" {
             sessionError = event.data.reason ?? "The session source restarted."
+            streamOutranPage = true
             return
         }
         guard var timeline = detail.timeline else { return }
         guard !event.data.itemId.isEmpty else { return }
         let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? (event.data.kind == "attachment" ? "Image" : event.data.kind), text: event.data.body ?? (event.data.kind == "attachment" ? "Image attachment" : ""), timestamp: event.data.ts, callId: event.data.callId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.truncationReason, bodyRef: event.data.bodyRef, attachment: event.data.attachment, sender: event.data.sender, files: event.data.files, resetsAt: event.data.resetsAt)
+        var older = olderActivity
         if event.data.op == "remove" {
             timeline.items.removeAll { $0.id == event.data.itemId }
-            if olderActivity.contains(where: { $0.id == event.data.itemId }) { olderActivity.removeAll { $0.id == event.data.itemId } }
-        } else if let index = timeline.items.firstIndex(where: { $0.id == event.data.itemId }) {
-            timeline.items[index] = item
-        } else if let index = olderActivity.firstIndex(where: { $0.id == event.data.itemId }) {
-            olderActivity[index] = item
+            older.removeAll { $0.id == event.data.itemId }
         } else {
-            timeline.items.append(item)
+            SessionStore.place(item, in: &timeline, older: &older)
         }
+        if older != olderActivity { olderActivity = older }
         detail.timeline = timeline
         selectedDetail = detail
         sessionError = nil
@@ -1717,8 +1856,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     func hostConnected(_ host: HostConnection) {
         guard connections[host.id] === host else { return }
+        if host.id == hostOrder.first { appearance.load(from: host.api) }
         if let pushDeviceToken { registerPush(host, deviceToken: pushDeviceToken) }
         else { refreshNotificationRegistration() }
+    }
+
+    func hostAppearanceChanged(_ host: HostConnection) {
+        guard connections[host.id] === host, host.id == hostOrder.first else { return }
+        appearance.load(from: host.api)
     }
 
     func hostEventStreamConnected(_ host: HostConnection) async {
@@ -1776,4 +1921,24 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
 final class ComposerDraft: ObservableObject {
     @Published var text = ""
+}
+
+/// Runs once on the next display frame, which starts after the current
+/// run loop pass has committed its view updates.
+private final class NextFrame: NSObject {
+    private let action: () -> Void
+    private var link: CADisplayLink?
+
+    init(_ action: @escaping () -> Void) {
+        self.action = action
+        super.init()
+        link = CADisplayLink(target: self, selector: #selector(fire))
+        link?.add(to: .main, forMode: .common)
+    }
+
+    @objc private func fire() {
+        link?.invalidate()
+        link = nil
+        action()
+    }
 }

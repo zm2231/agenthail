@@ -34,11 +34,34 @@ final class VoiceOperatorModel: ObservableObject {
     private var channelOpen = false
     private var connectedReported = false
     private var startSubmitted = false
+    // The host refuses voice-requested actions while the microphone is muted
+    // or held, so the phone reports each change in order once the host has
+    // the call.
+    private var held = false
+    private var hostHasCall = false
+    private var reportedInputMuted = false
+    private var inputRevision = 0
     private var hostHangupAttemptID: String?
     private var closed = false
+    private var workID = 0
     var hasLocalCall: Bool { dialing || audioConnected || attemptID != nil }
     var committedRoute: String { state?.target?.name ?? "Agenthail orchestrator" }
-    var canCall: Bool { ready && !working && !dialing && !audioConnected && !hostHangupPending && !hostHangupUnconfirmed && !closed && state?.hasCall != true && state?.phase != "blocked" && connectionError == nil }
+    // Why Call is unavailable, shown in Voice details so a disabled button
+    // can be explained.
+    var callUnavailableReason: String? {
+        if closed { return "This screen is closed." }
+        if !ready { return "Call audio is not ready." }
+        if working { return "Another voice action is in progress." }
+        if dialing { return "A call is starting." }
+        if audioConnected { return "A call is connected." }
+        if hostHangupPending { return "The host has not yet confirmed the last hangup." }
+        if hostHangupUnconfirmed { return "The host did not confirm the last hangup." }
+        if state?.hasCall == true { return "The host still has a call." }
+        if state?.phase == "blocked" { return "The host blocked voice calls." }
+        if let connectionError { return connectionError }
+        return nil
+    }
+    var canCall: Bool { callUnavailableReason == nil }
     var canStartNewConversation: Bool {
         state != nil && !working && !dialing && !audioConnected && !hostHangupPending && !hostHangupUnconfirmed
             && !closed && state?.hasCall != true && state?.occupied != true
@@ -57,6 +80,9 @@ final class VoiceOperatorModel: ObservableObject {
 #if DEBUG
         if preview {
             state = try? JSONDecoder().decode(VoiceState.self, from: Data(Self.previewState.utf8))
+#if os(iOS)
+            detail = try? JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.previewDetailJSON.utf8))
+#endif
             ready = true
             return
         }
@@ -140,6 +166,7 @@ final class VoiceOperatorModel: ObservableObject {
                 hostHangupPending = false
                 hostHangupUnconfirmed = false
                 hostHangupAttemptID = nil
+                stopPollingIfIdle()
             }
             if let sdp = next.sdp, sdp != appliedSDP, let attemptID, next.attemptId == attemptID {
                 appliedSDP = sdp
@@ -162,9 +189,27 @@ final class VoiceOperatorModel: ObservableObject {
         visibleScreens = visible
         guard visible == 0 else { return }
         activityRefresh?.cancel(); activityRefresh = nil
-        if !hasLocalCall && !hostHangupPending && !hostHangupUnconfirmed {
-            polling?.cancel(); polling = nil
-        }
+        stopPollingIfIdle()
+    }
+
+    private func stopPollingIfIdle() {
+        guard visibleScreens == 0, !hasLocalCall, !hostHangupPending, !hostHangupUnconfirmed else { return }
+        polling?.cancel(); polling = nil
+    }
+
+    // Only new words follow the latest activity; call events such as a
+    // heartbeat or mute change nothing on screen.
+    var latestContentMarker: String {
+        let transcript = state?.transcripts.last
+        let item = detail?.timeline?.items.last
+        return "\(transcript?.id ?? ""):\(transcript?.text ?? ""):\(item?.id ?? ""):\(item?.text ?? "")"
+    }
+
+    func activityAttachment(_ item: TimelineItem) async -> Data? {
+        guard let timelineAPI, let id = detail?.session.id, let attachment = item.attachment else { return nil }
+        let data = try? await timelineAPI.sessionAttachment(sessionID: id, id: attachment.id)
+        guard !Task.isCancelled, !closed, detail?.session.id == id else { return nil }
+        return data
     }
 
     // Timeline reads run beside the state poll, so a slow read never delays
@@ -222,27 +267,33 @@ final class VoiceOperatorModel: ObservableObject {
 
     func call() async {
         guard let api, canCall else { return }
-        working = true; dialing = true; error = nil; microphoneDenied = false; generation += 1
+        let work = beginWork(); dialing = true; error = nil; microphoneDenied = false; generation += 1
         let current = generation
-        defer { working = false }
+        defer { endWork(work) }
+        open()
+        let callID = UUID()
+        attemptID = callID.uuidString
+        diagnostics?.begin(id: callID.uuidString)
+        var stage = "target_select"
         do {
             let selected = try await api.action(VoiceAction(action: "select", targetId: targetID.trimmingCharacters(in: .whitespacesAndNewlines)))
             guard !closed, generation == current else { return }
             state = selected
+            stage = "operator_prepare"
             let next = try await api.action(VoiceAction(action: "prepare"))
             guard !closed, generation == current else { return }
             state = next
-            let callID = UUID()
-            attemptID = callID.uuidString
-            diagnostics?.begin(id: callID.uuidString)
+            stage = "native_audio_start"
             appliedSDP = nil; channelOpen = false; connectedReported = false; startSubmitted = false; muted = false
+            held = false; hostHasCall = false; reportedInputMuted = false; inputRevision = 0
             audio.configureCall(id: callID, name: committedRoute)
             try await audio.start()
         } catch {
             guard !closed, generation == current else { return }
             if !(error is CancellationError) { self.error = error.localizedDescription }
             microphoneDenied = error is VoiceMicrophoneDenied
-            if let attemptID { diagnostics?.end(microphoneDenied ? "microphone_denied" : "local_start_failed", id: attemptID) }
+            diagnostics?.failure(error, stage: stage, id: callID.uuidString)
+            diagnostics?.end(microphoneDenied ? "microphone_denied" : "\(stage)_failed", id: callID.uuidString)
             dialing = false; attemptID = nil; audio.end()
         }
     }
@@ -267,12 +318,15 @@ final class VoiceOperatorModel: ObservableObject {
                     }
                     state = next
                     diagnostics?.mark("host_start_accepted", id: id)
+                    hostHasCall = true
+                    reportInput()
                     startHeartbeat(attempt: id, generation: current)
                 } catch {
                     guard !closed, generation == current else {
                         _ = try? await api.action(VoiceAction(action: "stop", attemptId: id)); return
                     }
                     self.error = error.localizedDescription
+                    diagnostics?.failure(error, stage: "host_start", id: id)
                     diagnostics?.end("host_start_rejected", id: id)
                     dialing = false
                     audio.end()
@@ -305,7 +359,11 @@ final class VoiceOperatorModel: ObservableObject {
             channelOpen = value == "open"
             if channelOpen, let attemptID { diagnostics?.mark("data_channel_open", id: attemptID) }
             reportConnected()
-        case "mute": muted = value == "true"
+        case "mute": muted = value == "true"; reportInput()
+        case "held":
+            held = value == "true"
+            if let attemptID { diagnostics?.mark("held_\(value)", id: attemptID) }
+            reportInput()
         case "ended":
             if let attemptID { diagnostics?.end(value.isEmpty ? "system_ended" : value, id: attemptID) }
             hangup()
@@ -314,7 +372,7 @@ final class VoiceOperatorModel: ObservableObject {
             error = error ?? value
             hangup()
         default:
-            if let attemptID, ["permission", "activation", "suspended", "held"].contains(type) {
+            if let attemptID, ["permission", "activation", "suspended"].contains(type) {
                 diagnostics?.mark(value.isEmpty ? type : "\(type)_\(value)", id: attemptID)
             }
         }
@@ -335,10 +393,29 @@ final class VoiceOperatorModel: ObservableObject {
         }
     }
 
-    func toggleMute() { muted.toggle(); audio.mute(muted) }
+    func toggleMute() { muted.toggle(); audio.mute(muted); reportInput() }
+
+    private func reportInput() {
+        let inputMuted = muted || held
+        guard hostHasCall, inputMuted != reportedInputMuted, let api, let id = attemptID else { return }
+        reportedInputMuted = inputMuted
+        inputRevision += 1
+        let revision = inputRevision, current = generation
+        Task {
+            do {
+                let next = try await api.action(VoiceAction(action: "input-state", attemptId: id, muted: inputMuted, inputRevision: revision))
+                if !closed, current == generation, revision == inputRevision { state = next }
+            } catch {
+                guard !closed, current == generation else { return }
+                self.error = self.error ?? "Your computer could not record whether the microphone is muted, so the call ended."
+                hangup()
+            }
+        }
+    }
 
     func hangup() {
         generation += 1
+        workID += 1; working = false
         heartbeat?.cancel(); heartbeat = nil
         mediaRecovery?.cancel(); mediaRecovery = nil
         if let attemptID { diagnostics?.end("local_hangup", id: attemptID) }
@@ -350,7 +427,10 @@ final class VoiceOperatorModel: ObservableObject {
         let shouldStopHost = startSubmitted || hostHangupUnconfirmed || (localAttempt == nil && state?.hasCall == true)
         attemptID = nil
         startSubmitted = false
-        guard shouldStopHost, let api, let id, state?.occupied != true else { return }
+        guard shouldStopHost, let api, let id, state?.occupied != true else {
+            stopPollingIfIdle()
+            return
+        }
         hostHangupPending = true
         hostHangupUnconfirmed = false
         hostHangupAttemptID = id
@@ -371,9 +451,21 @@ final class VoiceOperatorModel: ObservableObject {
         }
     }
 
+    // An action owns `working` until it finishes or a hangup ends it, so an
+    // action that outlives a hangup cannot clear a newer action's state.
+    private func beginWork() -> Int {
+        workID += 1
+        working = true
+        return workID
+    }
+
+    private func endWork(_ id: Int) {
+        if workID == id { working = false }
+    }
+
     func sendText() async {
         guard let api, !closed, !working, let id = attemptID, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        working = true; defer { working = false }
+        let work = beginWork(); defer { endWork(work) }
         let current = generation
         let messageID = UUID().uuidString
         let submitted = text; text = ""
@@ -386,8 +478,8 @@ final class VoiceOperatorModel: ObservableObject {
 
     func transfer() async {
         guard let api, !closed, !working, state?.phase == "connected", state?.occupied != true else { return }
-        working = true
-        defer { working = false }
+        let work = beginWork()
+        defer { endWork(work) }
         let current = generation
         do {
             let next = try await api.action(VoiceAction(action: "transfer", targetId: targetID.trimmingCharacters(in: .whitespacesAndNewlines)))
@@ -409,8 +501,8 @@ final class VoiceOperatorModel: ObservableObject {
 
     func interruptTarget() async {
         guard let api, !closed, !working, state?.phase == "connected", state?.occupied != true, state?.target != nil else { return }
-        working = true
-        defer { working = false }
+        let work = beginWork()
+        defer { endWork(work) }
         let current = generation
         do {
             let next = try await api.action(VoiceAction(action: "target-interrupt", attemptId: state?.attemptId))
@@ -422,9 +514,9 @@ final class VoiceOperatorModel: ObservableObject {
 
     func startNewConversation() async {
         guard let api, canStartNewConversation else { return }
-        working = true; error = nil; generation += 1
+        let work = beginWork(); error = nil; generation += 1
         let current = generation
-        defer { working = false }
+        defer { endWork(work) }
         do {
             let next = try await api.action(VoiceAction(action: "new"))
             guard !closed, generation == current else { return }

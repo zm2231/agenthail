@@ -114,8 +114,8 @@ struct SessionTree: Equatable {
 
     static let noProjectID = ""
 
-    static func build(_ sessions: [SessionState], filter: SessionFilter, refinement: SessionRefinement = SessionRefinement(), attention: [String: SessionAttention]) -> SessionTree {
-        let families = SessionFamilies.build(sessions).filter(refinement.matches)
+    static func build(_ sessions: [SessionState], families built: [SessionFamily]? = nil, filter: SessionFilter, refinement: SessionRefinement = SessionRefinement(), attention: [String: SessionAttention]) -> SessionTree {
+        let families = (built ?? SessionFamilies.build(sessions)).filter(refinement.matches)
         var counts: [SessionFilter: Int] = [:]
         for candidate in SessionFilter.allCases {
             counts[candidate] = families.filter { includes($0, in: candidate) }.count

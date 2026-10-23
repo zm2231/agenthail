@@ -1479,7 +1479,8 @@ struct ComposerView: View {
     let session: SessionState
     @State private var focused = false
     @State private var dropTargeted = false
-    @State private var dismissedSlash: String?
+    @State private var completionState = CompletionState(session: "", caret: 0)
+    @State private var editor = ComposerEditor()
     @State private var modeChanged = false
     @State private var showingSent = false
     @State private var searchingSent = false
@@ -1487,12 +1488,14 @@ struct ComposerView: View {
 
     private var followUp: FollowUpAction { model.busyDelivery }
     @ObservedObject private var draft: ComposerDraft
+    @ObservedObject private var store: SessionStore
 
     init(model: AgenthailModel, pane: SessionPane, session: SessionState) {
         self.model = model
         self.pane = pane
         self.session = session
         self.draft = pane.composerDraft
+        self.store = model.store
     }
 
     private var hasText: Bool { !draft.isEmpty }
@@ -1549,15 +1552,12 @@ struct ComposerView: View {
                     }
                 }
                 .scrimText("dock-notices")
-                if !slashSuggestions.isEmpty {
-                    SlashCommandMenu(suggestions: slashSuggestions, roundedTop: queued.isEmpty) { choice in
-                        draft.text = choice
-                        focused = true
-                    }
-                    .padding(.horizontal, 10)
+                if completionOpen {
+                    CompletionMenu(suggestions: completion.items, notice: completion.notice, highlighted: scopedCompletion.highlighted, roundedTop: queued.isEmpty, choose: accept)
+                        .padding(.horizontal, 10)
                 }
                 VStack(spacing: 0) {
-                    ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt) { submit(alternate: false) }
+                    ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt, editor: editor, onCaret: { caret in updateCompletion { $0.caret = caret } }, completionKey: completionKey) { submit(alternate: false) }
                         .id(session.id)
                         .padding(.horizontal, 15)
                         .padding(.top, 13)
@@ -1619,6 +1619,7 @@ struct ComposerView: View {
                                 .foregroundStyle(DesktopPalette.text2)
                                 .padding(.trailing, DesktopSpace.xs)
                         }
+                        ComposerContextRing(pane: pane, session: session)
                         if showsSteerNow {
                             Button("Steer now") { pane.submit(busyDelivery: FollowUpAction.steer.rawValue) }
                                 .controlSize(.small)
@@ -1703,26 +1704,93 @@ struct ComposerView: View {
         }
         .onAppear { focused = true }
         .task(id: session.id) { await model.loadPrompts(for: session.id) }
+        .task(id: mentionRequest) { await loadMentionFiles(mentionRequest) }
+        .onChange(of: completion.items.map(\.id)) { updateCompletion { $0.highlighted = 0 } }
     }
 
     private var primaryIsStop: Bool { SessionPane.stopAvailable(session, removed: false, draftEmpty: draft.isEmpty) }
     private var draftIsCommand: Bool {
-        draft.attachments.isEmpty && (SlashInput(draft.text, available: SlashCommand.allCases) != .message || !slashSuggestions.isEmpty)
+        draft.attachments.isEmpty && (SlashInput(draft.text, available: SlashCommand.allCases) != .message || completesAppCommand)
     }
     private var showsSteerNow: Bool { session.isWorking && canSteer && hasText && !draftIsCommand && resolvedAction(alternate: false) == .queue }
-    private var slashSuggestions: [SlashCommandMenu.Suggestion] {
-        guard draft.attachments.isEmpty, dismissedSlash != draft.text else { return [] }
-        if let query = SlashCommand.modelQuery(for: draft.text), session.capabilities.model {
-            let options = pane.detail?.models ?? []
-            if options.contains(where: { $0.id == query }) { return [] }
-            return options
-                .filter { query.isEmpty || $0.id.localizedCaseInsensitiveContains(query) || $0.displayName.localizedCaseInsensitiveContains(query) }
-                .map { SlashCommandMenu.Suggestion(id: "model:" + $0.id, title: $0.displayName, detail: $0.id == pane.detail?.model ? "Current" : $0.id == pane.detail?.nextTurnModel ? "From next turn" : ($0.description ?? $0.id), insertion: "/model " + $0.id) }
+    private var modelSuggestions: [CompletionItem]? {
+        guard draft.attachments.isEmpty, scopedCompletion.dismissed != draft.text, let query = SlashCommand.modelQuery(for: draft.text), session.capabilities.model else { return nil }
+        let options = pane.detail?.models ?? []
+        if options.contains(where: { $0.id == query }) { return [] }
+        return options
+            .filter { query.isEmpty || $0.id.localizedCaseInsensitiveContains(query) || $0.displayName.localizedCaseInsensitiveContains(query) }
+            .map { CompletionItem(id: "model:" + $0.id, title: $0.displayName, detail: $0.id == pane.detail?.model ? "Current" : $0.id == pane.detail?.nextTurnModel ? "From next turn" : ($0.description ?? $0.id), insertion: "/model " + $0.id) }
+    }
+
+    private var completionToken: CompletionToken? {
+        guard scopedCompletion.dismissed != draft.text, modelSuggestions == nil else { return nil }
+        return CompletionToken.at(draft.text, caret: min(scopedCompletion.caret, (draft.text as NSString).length))
+    }
+
+    private var mentionRequest: MentionRequest? {
+        completionToken.flatMap { $0.trigger == .mention ? MentionRequest(session: session.id, query: $0.query) : nil }
+    }
+
+    private var completion: (items: [CompletionItem], notice: String?) {
+        if let models = modelSuggestions { return (models, nil) }
+        guard let token = completionToken else { return ([], nil) }
+        let appCommands = draft.attachments.isEmpty ? SlashCommand.available(capabilities: session.capabilities, working: session.isWorking, waitingOnYou: session.isWaitingOnYou).map {
+            CompletionItem(id: $0.token, title: $0.token, detail: $0.summary, insertion: $0.token + ($0.needsArgument ? " " : ""))
+        } : []
+        let runtime = store.commands[session.id]
+        let mentioning = token.trigger == .mention
+        let items = ComposerCompletion.items(for: token, appCommands: appCommands, runtime: runtime, sessions: mentioning ? ComposerCompletion.sessions(model.knownSessions, from: session) : [], files: mentioning && scopedCompletion.files?.query == token.query ? scopedCompletion.files?.files ?? [] : [])
+        return (items, ComposerCompletion.notice(for: token, runtime: runtime))
+    }
+
+    private var completionOpen: Bool { !completion.items.isEmpty || completion.notice != nil }
+
+    private var completesAppCommand: Bool {
+        guard !completion.items.isEmpty else { return false }
+        return modelSuggestions != nil || (completionToken?.trigger == .command && completionToken?.atStart == true)
+    }
+
+    private func completionKey(_ key: CompletionKey) -> Bool {
+        let items = completion.items
+        guard !items.isEmpty else { return false }
+        let highlighted = scopedCompletion.highlighted
+        switch key {
+        case .up: updateCompletion { $0.highlighted = (min(highlighted, items.count - 1) - 1 + items.count) % items.count }
+        case .down: updateCompletion { $0.highlighted = (min(highlighted, items.count - 1) + 1) % items.count }
+        case .accept:
+            let item = items[min(highlighted, items.count - 1)]
+            if let token = completionToken, ComposerCompletion.completes(item, in: draft.text, at: token) { return false }
+            accept(item)
         }
-        let available = SlashCommand.available(capabilities: session.capabilities, working: session.isWorking, waitingOnYou: session.isWaitingOnYou)
-        return SlashCommand.suggestions(for: draft.text, available: available).map {
-            SlashCommandMenu.Suggestion(id: $0.token, title: $0.token, detail: $0.summary, insertion: $0.token + ($0.needsArgument ? " " : ""))
+        return true
+    }
+
+    private var scopedCompletion: CompletionState { completionState.scoped(to: session.id, draft: draft.text) }
+
+    private func updateCompletion(_ change: (inout CompletionState) -> Void) {
+        var state = scopedCompletion
+        change(&state)
+        completionState = state
+    }
+
+    private func loadMentionFiles(_ request: MentionRequest?) async {
+        guard let request, let api = model.api else { return }
+        try? await Task.sleep(for: .milliseconds(120))
+        guard !Task.isCancelled else { return }
+        let found = try? await api.sessionFiles(id: request.session, query: request.query)
+        guard !Task.isCancelled else { return }
+        updateCompletion { $0.files = (request.query, found?.files ?? []) }
+    }
+
+    private func accept(_ item: CompletionItem) {
+        if modelSuggestions != nil {
+            draft.text = item.insertion
+        } else if let token = completionToken {
+            let change = ComposerCompletion.edit(item, in: draft.text, at: token)
+            editor.replace(change.range, with: change.replacement, caret: change.caret)
         }
+        updateCompletion { $0.highlighted = 0 }
+        focused = true
     }
 
     private var permissionMode: String? {
@@ -1744,8 +1812,9 @@ struct ComposerView: View {
             }
             return false
         case .interrupt:
-            if !slashSuggestions.isEmpty {
-                dismissedSlash = draft.text
+            if completionOpen {
+                let text = draft.text
+                updateCompletion { $0.dismissed = text }
                 draft.escapeHandled()
                 return true
             }
@@ -1862,10 +1931,7 @@ struct ComposerView: View {
 
     private func submit(alternate: Bool) {
         guard hasText else { return }
-        if let first = slashSuggestions.first, String(draft.text.drop { $0.isWhitespace }) != first.insertion {
-            draft.text = first.insertion
-            return
-        }
+        if completionKey(.accept) { return }
         let explicit = session.isWorking && alternate && canSteer ? resolvedAction(alternate: true).rawValue : nil
         pane.submit(busyDelivery: explicit)
     }
@@ -2096,6 +2162,36 @@ struct SessionInspector: View {
             }
         }
         .glassPane("inspector", .sidebar, fallback: DesktopPalette.side)
+    }
+}
+
+/// How full the session's context is, beside Send. Its menu says how much is
+/// used and offers to compact.
+struct ComposerContextRing: View {
+    @ObservedObject var pane: SessionPane
+    let session: SessionState
+
+    var body: some View {
+        if let context = pane.detail?.context, context.usedTokens > 0 {
+            Menu {
+                Text("Context · " + ContextBreakdown.usage(context))
+                if context.compacting {
+                    Text("Compacting context")
+                } else if session.capabilities.compact && !session.isReadOnly && pane.removedSession == nil {
+                    Button("Compact context") { pane.compactContext() }
+                        .disabled(pane.controlPending)
+                }
+            } label: {
+                ContextRingGauge(context: context)
+                    .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(context.spokenLabel)
+            .accessibilityLabel(context.spokenLabel)
+        }
     }
 }
 

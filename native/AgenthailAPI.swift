@@ -177,6 +177,22 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await get(path)
     }
 
+    func sessionCommands(id: String) async throws -> RuntimeCommands {
+        var components = URLComponents()
+        components.path = "/api/v1/session-commands"
+        components.queryItems = [URLQueryItem(name: "id", value: id)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await get(path)
+    }
+
+    func sessionFiles(id: String, query: String, limit: Int = 50) async throws -> SessionFiles {
+        var components = URLComponents()
+        components.path = "/api/v1/session-files"
+        components.queryItems = [URLQueryItem(name: "id", value: id), URLQueryItem(name: "q", value: query), URLQueryItem(name: "limit", value: String(limit))]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await get(path)
+    }
+
     func sessionAttachment(sessionID: String, id: String) async throws -> Data {
         var components = URLComponents()
         components.path = "/api/v1/session-attachment"
@@ -201,10 +217,10 @@ final class AgenthailAPI: @unchecked Sendable {
         return data
     }
 
-    func uiConfig(device: String) async throws -> UIConfig {
+    func uiConfig(device: String, kind: String) async throws -> UIConfig {
         var components = URLComponents()
         components.path = "/api/v1/ui"
-        components.queryItems = [URLQueryItem(name: "class", value: "mac"), URLQueryItem(name: "device", value: device)]
+        components.queryItems = [URLQueryItem(name: "class", value: kind), URLQueryItem(name: "device", value: device)]
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
         return try await get(path)
     }

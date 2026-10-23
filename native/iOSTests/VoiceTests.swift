@@ -24,6 +24,188 @@ final class VoiceTests: XCTestCase {
     }
 
     @MainActor
+    func testHangupDuringPreparationLetsANewCallStartThatTheOldCallCannotClear() async {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        api.holdPrepare = true
+        let oldCall = Task { await model.call() }
+        for _ in 0..<1000 where api.pending == nil { await Task.yield() }
+        XCTAssertNotNil(api.pending)
+        model.hangup()
+        XCTAssertFalse(model.working)
+        XCTAssertTrue(model.canCall)
+        api.holdPrepare = false
+        audio.holdStart = true
+        let newCall = Task { await model.call() }
+        for _ in 0..<1000 where audio.pending == nil { await Task.yield() }
+        XCTAssertNotNil(audio.pending)
+        XCTAssertTrue(model.working)
+        api.release()
+        await oldCall.value
+        XCTAssertTrue(model.working)
+        audio.release()
+        await newCall.value
+        XCTAssertFalse(model.working)
+        model.close()
+    }
+
+    @MainActor
+    func testAnEndedCallStopsPollingOnceNoScreenShowsIt() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        model.screenAppeared()
+        await model.call()
+        audio.onMessage?("offer", "v=0 fixture")
+        for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "start" }) { await Task.yield() }
+        let start = try XCTUnwrap(api.actions.first { $0.action == "start" })
+        model.screenDisappeared()
+        let polled = api.stateCalls
+        api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"ended","attemptId":"\#(start.attemptId ?? "")","events":[],"occupied":false,"truncated":false}"#.utf8))
+        for _ in 0..<300 where model.state?.phase != "ended" { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(model.state?.phase, "ended")
+        XCTAssertGreaterThan(api.stateCalls, polled)
+        let ended = api.stateCalls
+        try await Task.sleep(for: .milliseconds(1500))
+        XCTAssertEqual(api.stateCalls, ended)
+        model.screenAppeared()
+        for _ in 0..<1000 where api.stateCalls == ended { await Task.yield() }
+        XCTAssertGreaterThan(api.stateCalls, ended)
+        model.close()
+    }
+
+    @MainActor
+    func testAFailedPreparationIsRecordedWithItsStage() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let diagnostics = VoiceCallDiagnostics(file: nil)
+        let model = VoiceOperatorModel(api: api, audio: audio, diagnostics: diagnostics); model.ready = true
+        api.prepareError = NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet)
+        await model.call()
+        let attempt = try XCTUnwrap(diagnostics.attempts.last)
+        XCTAssertEqual(attempt.failureStage, "operator_prepare")
+        XCTAssertEqual(attempt.failureDomain, NSURLErrorDomain)
+        XCTAssertEqual(attempt.failureCode, NSURLErrorNotConnectedToInternet)
+        XCTAssertEqual(attempt.terminalCause, "operator_prepare_failed")
+        XCTAssertEqual(audio.starts, 0)
+        XCTAssertTrue(model.canCall)
+        XCTAssertNil(model.callUnavailableReason)
+        model.ready = false
+        XCTAssertEqual(model.callUnavailableReason, "Call audio is not ready.")
+        XCTAssertFalse(model.canCall)
+        model.close()
+    }
+
+    @MainActor
+    func testEachFailedCallStepIsRecordedWithItsStage() async throws {
+        let failure = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)
+        for (stage, cause) in [("target_select", "target_select_failed"), ("native_audio_start", "native_audio_start_failed"), ("host_start", "host_start_rejected")] {
+            let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+            let diagnostics = VoiceCallDiagnostics(file: nil)
+            let model = VoiceOperatorModel(api: api, audio: audio, diagnostics: diagnostics); model.ready = true
+            switch stage {
+            case "target_select": api.selectError = failure
+            case "native_audio_start": audio.startError = failure
+            default: api.startError = failure
+            }
+            await model.call()
+            if stage == "host_start" {
+                audio.onMessage?("offer", "v=0 fixture")
+                for _ in 0..<1000 where diagnostics.attempts.last?.terminalCause == nil { await Task.yield() }
+            }
+            let attempt = try XCTUnwrap(diagnostics.attempts.last)
+            XCTAssertEqual(attempt.failureStage, stage)
+            XCTAssertEqual(attempt.failureDomain, NSURLErrorDomain)
+            XCTAssertEqual(attempt.failureCode, NSURLErrorTimedOut)
+            XCTAssertEqual(attempt.terminalCause, cause)
+            model.close()
+        }
+    }
+
+    @MainActor
+    func testAHangupOrCloseWhileTheCallIsStartingEndsItsRecord() async throws {
+        for closing in [false, true] {
+            let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+            let diagnostics = VoiceCallDiagnostics(file: nil)
+            let model = VoiceOperatorModel(api: api, audio: audio, diagnostics: diagnostics); model.ready = true
+            if closing { api.holdPrepare = true } else { api.holdSelect = true }
+            let call = Task { await model.call() }
+            for _ in 0..<1000 where api.pending == nil { await Task.yield() }
+            XCTAssertNotNil(api.pending)
+            if closing { model.close() } else { model.hangup() }
+            api.release()
+            await call.value
+            let attempt = try XCTUnwrap(diagnostics.attempts.last)
+            XCTAssertEqual(attempt.terminalCause, "local_hangup")
+            XCTAssertNil(attempt.failureStage)
+            XCTAssertEqual(audio.starts, 0)
+            model.close()
+        }
+    }
+
+    @MainActor
+    func testAHangupWithNothingForTheHostToStopEndsPollingOnceNoScreenShowsIt() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        model.screenAppeared()
+        audio.holdStart = true
+        let call = Task { await model.call() }
+        for _ in 0..<1000 where audio.pending == nil { await Task.yield() }
+        model.screenDisappeared()
+        let during = api.stateCalls
+        try await Task.sleep(for: .milliseconds(1200))
+        XCTAssertGreaterThan(api.stateCalls, during)
+        model.hangup()
+        audio.release()
+        await call.value
+        try await Task.sleep(for: .milliseconds(100))
+        let ended = api.stateCalls
+        try await Task.sleep(for: .milliseconds(1500))
+        XCTAssertEqual(api.stateCalls, ended)
+        XCTAssertFalse(api.actions.contains { $0.action == "stop" })
+        model.close()
+    }
+
+    @MainActor
+    func testFollowingTheLatestActivityMovesOnlyForNewWords() throws {
+        let model = VoiceOperatorModel(api: VoiceFixtureAPI(), audio: VoiceFixtureAudio())
+        func state(_ events: String) throws -> VoiceState {
+            try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"connected","attemptId":"a","events":[\#(events)],"occupied":false,"truncated":false}"#.utf8))
+        }
+        let spoken = #"{"sequence":1,"method":"thread/realtime/transcript/done","params":{"role":"user","text":"Check the build."}}"#
+        model.state = try state(spoken)
+        let first = model.latestContentMarker
+        model.state = try state(spoken + #",{"sequence":2,"method":"voice/input-state","params":{"muted":"true"}}"#)
+        XCTAssertEqual(model.latestContentMarker, first)
+        model.state = try state(spoken + #",{"sequence":3,"method":"thread/realtime/transcript/done","params":{"role":"assistant","text":"Checking it now."}}"#)
+        XCTAssertNotEqual(model.latestContentMarker, first)
+        model.close()
+    }
+
+    @MainActor
+    func testAnActivityAttachmentLoadsOnlyForTheSessionStillShown() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [VoiceAttachmentURLProtocol.self]
+        let timeline = AgenthailAPI(baseURL: URL(string: "https://attach.test")!, token: "token", session: URLSession(configuration: configuration))
+        let model = VoiceOperatorModel(api: VoiceFixtureAPI(), timelineAPI: timeline, audio: VoiceFixtureAudio())
+        let shown = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        let other = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.replacingOccurrences(of: #""id":"demo""#, with: #""id":"other""#).utf8))
+        let item = try JSONDecoder().decode(TimelineItem.self, from: Data(#"{"id":"r","kind":"toolResult","title":"Result","text":"","truncated":false,"attachment":{"id":"image-1","mediaType":"image/png"}}"#.utf8))
+        model.detail = shown
+        let loaded = await model.activityAttachment(item)
+        XCTAssertEqual(loaded, Data("image-bytes".utf8))
+        XCTAssertEqual(VoiceAttachmentURLProtocol.gate.lastSession, "demo")
+
+        VoiceAttachmentURLProtocol.gate.hold()
+        let switched = Task { await model.activityAttachment(item) }
+        for _ in 0..<500 where !VoiceAttachmentURLProtocol.gate.isWaiting { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(VoiceAttachmentURLProtocol.gate.isWaiting)
+        model.detail = other
+        VoiceAttachmentURLProtocol.gate.release()
+        let result = await switched.value
+        XCTAssertNil(result)
+        model.close()
+    }
+
+    @MainActor
     func testHeartbeatUsesAcceptedAttemptAndStopsOnHangup() async throws {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
         let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
@@ -51,6 +233,41 @@ final class VoiceTests: XCTestCase {
         audio.onMessage?("ended", "user_hangup")
         XCTAssertFalse(model.dialing)
         XCTAssertEqual(audio.ends, 1)
+    }
+
+    @MainActor
+    func testMuteAndHoldAreReportedInOrderOnceTheHostHasTheCall() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        await model.call()
+        model.toggleMute()
+        XCTAssertFalse(api.actions.contains { $0.action == "input-state" })
+        audio.onMessage?("offer", "v=0 fixture")
+        for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "input-state" }) { await Task.yield() }
+        audio.onMessage?("held", "true")
+        model.toggleMute()
+        audio.onMessage?("held", "false")
+        for _ in 0..<1000 where api.actions.filter({ $0.action == "input-state" }).count < 2 { await Task.yield() }
+        let start = try XCTUnwrap(api.actions.first { $0.action == "start" })
+        let reports = api.actions.filter { $0.action == "input-state" }
+        XCTAssertEqual(reports.map(\.muted), [true, false])
+        XCTAssertEqual(reports.map(\.inputRevision), [1, 2])
+        XCTAssertTrue(reports.allSatisfy { $0.attemptId == start.attemptId })
+        model.close()
+    }
+
+    @MainActor
+    func testAMuteTheHostCannotRecordEndsTheCall() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        await model.call()
+        audio.onMessage?("offer", "v=0 fixture")
+        for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "heartbeat" }) { await Task.yield() }
+        api.inputStateError = AgenthailAPIError.request(409, "input state requires the current call")
+        model.toggleMute()
+        for _ in 0..<1000 where audio.ends == 0 { await Task.yield() }
+        XCTAssertEqual(audio.ends, 1)
+        XCTAssertEqual(model.error, "Your computer could not record whether the microphone is muted, so the call ended.")
     }
 
     @MainActor
@@ -418,12 +635,23 @@ private final class VoiceFixtureAPI: VoiceServiceClient {
     var actions: [VoiceAction] = []
     var snapshot: VoiceState?
     var stopError: Error?
+    var inputStateError: Error?
+    var prepareError: Error?
+    var selectError: Error?
+    var startError: Error?
+    var holdSelect = false
     private var ready: VoiceState { try! JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"ready","events":[],"occupied":false,"truncated":false}"#.utf8)) }
     func request(path: String) -> URLRequest { URLRequest(url: URL(string: "https://mac.test/\(path)")!) }
-    func state() async throws -> VoiceState { snapshot ?? ready }
+    var stateCalls = 0
+    func state() async throws -> VoiceState { stateCalls += 1; return snapshot ?? ready }
     func action(_ action: VoiceAction) async throws -> VoiceState {
         actions.append(action)
         if action.action == "stop", let stopError { throw stopError }
+        if action.action == "input-state", let inputStateError { throw inputStateError }
+        if action.action == "prepare", let prepareError { throw prepareError }
+        if action.action == "select", let selectError { throw selectError }
+        if action.action == "start", let startError { throw startError }
+        if action.action == "select" && holdSelect { return await withCheckedContinuation { pending = $0 } }
         if (action.action == "prepare" && holdPrepare) || (action.action == "start" && holdStart) || (action.action == "stop" && holdStop) || (action.action == "text" && holdText) {
             return await withCheckedContinuation { pending = $0 }
         }
@@ -438,10 +666,12 @@ private final class VoiceFixtureAudio: VoiceAudioClient {
     var starts = 0
     var ends = 0
     var holdStart = false
+    var startError: Error?
     var pending: CheckedContinuation<Void, Never>?
     func load(_ request: URLRequest) {}
     func start() async throws {
         starts += 1
+        if let startError { throw startError }
         if holdStart { await withCheckedContinuation { pending = $0 } }
     }
     func release() { let continuation = pending; pending = nil; continuation?.resume() }
@@ -469,6 +699,42 @@ private final class VoiceURLProtocol: URLProtocol, @unchecked Sendable {
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type":"application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(Self.state.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private final class VoiceAttachmentGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var held: DispatchSemaphore?
+    private var waiting = false
+    private var session: String?
+    var isWaiting: Bool { lock.withLock { waiting } }
+    var lastSession: String? { lock.withLock { session } }
+    func hold() { lock.withLock { held = DispatchSemaphore(value: 0) } }
+    func release() { lock.withLock { held }?.signal() }
+    func pass(session id: String?) {
+        let semaphore = lock.withLock { () -> DispatchSemaphore? in
+            session = id
+            waiting = held != nil
+            return held
+        }
+        semaphore?.wait()
+        lock.withLock { waiting = false; held = nil }
+    }
+}
+
+private final class VoiceAttachmentURLProtocol: URLProtocol, @unchecked Sendable {
+    static let gate = VoiceAttachmentGate()
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "attach.test" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let session = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "sessionId" }?.value
+        Self.gate.pass(session: session)
+        let body = Data("image-bytes".utf8)
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "image/png", "Content-Length": "\(body.count)"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}

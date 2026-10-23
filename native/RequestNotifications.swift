@@ -36,7 +36,7 @@ enum RequestNotifications {
         identifier.hasPrefix(categoryPrefix) ? String(identifier.dropFirst(categoryPrefix.count)) : nil
     }
 
-    /// The request a waiting notification names, as this Mac describes it
+    /// The request a waiting notification names, as the paired computer describes it
     /// now: the line to show and the buttons that answer it, none when it is
     /// answered only in the app. Nil when the request is no longer open.
     static func notice(from data: Data, requestID: String) -> RequestNotice? {
@@ -49,7 +49,7 @@ enum RequestNotifications {
         return RequestNotice(prompt: prompt, actions: actions)
     }
 
-    /// Reads a request from the paired Mac within fetchTimeout, well inside
+    /// Reads a request from the paired computer within fetchTimeout, well inside
     /// the time a notification service has before iOS shows the notification
     /// as it arrived.
     static func fetchNotice(endpoint: URL, token: String, sessionID: String, requestID: String, session: URLSession = fetchSession) async -> RequestNotice? {

@@ -38,7 +38,7 @@ distinction between automated checks, real Codex evaluation, and phone testing.
    delivery evidence, and the actual reply.
 
 Only audio and WebRTC negotiation go to Codex's realtime service. The phone sends
-control requests to the paired Mac over HTTPS. Codex's existing authenticated
+control requests to the paired computer over HTTPS. Codex's existing authenticated
 client creates the realtime call. On iPhone the media peer is native WebRTC
 running under CallKit; it never receives the paired token or Codex credentials.
 The Mac and the web dashboard run the same peer program in WebKit or the
@@ -119,7 +119,7 @@ existing transport; the voice layer does not emulate them.
 | Identity | One saved operator per Agenthail registry at a time. Calling again reuses its thread, work, and history; it creates a new audio connection, not a new operator. The explicit **New conversation** action deliberately creates a distinct new operator thread and makes it the saved operator; the previous operator stays discoverable in the normal Sessions timeline. It is refused while a call is active or while a creation outcome is still unknown. |
 | Phone visibility | Live transcript deltas and completed utterances; expandable normal agent tool activity; full session timeline; connection, occupancy, truncation, and error states. Native recorded voice segments also appear in the normal timeline. |
 | Text during a call | **Type** sends the request to the selected session through the same correlation path. Message IDs prevent automatic replay after an uncertain response. |
-| Mute | Stops sending microphone content without stopping the call or agent work. |
+| Mute | Stops sending microphone content without stopping the call or agent work. The phone reports mute and system hold to the host in order. While input is muted, the host refuses `voice_transfer`, `voice_return_to_orchestrator` and `voice_send_to_lead` and does not deliver spoken requests; read-only tools still answer. Each of those actions checks the mute again just before it sends anything, so a mute that arrives while one is being prepared stops it; one already sending is not recalled. If the host cannot record a mute, the phone ends the call. |
 | Hang up / leave app | Hang up, in the app or with the system call controls, stops local microphone, playback, and peer immediately, then requests native realtime stop. The phone shows local audio as ended while it waits for the native close receipt; an unconfirmed request stays visible and can be retried. It does not interrupt an agent turn. Closing the Voice screen, switching apps or locking the phone does not hang up; **Return to call** reopens it. Force-quitting the app or OS termination ends the call. |
 | Interrupt | **Interrupt orchestrator turn** only stops the operator. **Stop selected session** asks for confirmation, then checks the selected session's exact identity, writability, interrupt capability, and confirmed active turn before requesting that exact turn's interruption. It keeps audio connected and does not parse an ambiguous spoken "stop" as a worker cancellation. |
 | Approvals | Existing native approval policy remains in effect. The phone can display recorded activity but does not implement approval/question replies. A blocked native approval needs attention on the Mac. |
@@ -158,7 +158,9 @@ cursor instead. If Codex's login cannot do realtime, the call ends with the
 reason and what fixes it (sign in with `codex login`, or a key with Realtime API
 access); a start Codex definitely refused ends the call instead of leaving it
 unknown. Each call starts with no events from the previous one, and events from
-another realtime session are ignored.
+another realtime session are ignored. The host waits on the call's events rather
+than checking for them on a timer, so a tool call reaches its handler as soon as
+Codex sends it.
 The peer submits the offer after `setLocalDescription`; ICE gathering may continue
 while signaling proceeds. A network that does not report `complete` gathering is
 not treated as a failed call before the host receives the offer.
@@ -205,8 +207,11 @@ up local audio once per call, not on every refresh. Voice details shows the call
 ID and last host-close reason/event number for a completed call. These messages
 identify the teardown path, not the cause of an earlier host-side `closed` event.
 Capture those details before attributing an instant disconnect. The iPhone also
-keeps a local record of its last 20 call attempts (milestone times and the first
-terminal cause) under Call lifecycle in Voice details. An attempt the app never
+keeps a local record of its last 20 call attempts (milestone times, the first
+terminal cause, and for a failed attempt the step that failed with its error
+domain and code, never the error's text) under Call lifecycle in Voice details.
+The record starts when Call is pressed, so a failure choosing the target or
+preparing the operator is kept too. When Call is unavailable, Voice details says why. An attempt the app never
 finished, because it was force-quit or terminated, is labeled
 `process_terminated_or_unknown` on the next launch.
 

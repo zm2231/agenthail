@@ -51,7 +51,7 @@ Despite the `NOTARY` names, these credentials are also used for App Store Connec
 
 The iOS archive additionally needs `APPLE_TEAM_ID`, `APPLE_IOS_SIGNING_IDENTITIES_P12_BASE64`, `APPLE_IOS_SIGNING_IDENTITIES_P12_PASSWORD`, `APPLE_IOS_PROVISIONING_PROFILE_BASE64`, and `APPLE_IOS_NOTIFICATION_SERVICE_PROVISIONING_PROFILE_BASE64`. The combined release also needs its Mac signing and relay configuration; the [release workflow](../../.github/workflows/release.yml) is the authoritative list. After rotating credentials, run a read-only management status check. Signing/profile changes also require archive validation; a status check cannot validate signing assets.
 
-The app embeds a notification service, `<bundle ID>.NotificationService`. The app and the service share the keychain group `<team ID>.<bundle ID>.shared`, which holds only the paired Mac's address and token.
+The app embeds a notification service, `<bundle ID>.NotificationService`. The app and the service share the keychain group `<team ID>.<bundle ID>.shared`, which holds only the paired computer's address and token.
 
 The archive is signed automatically for development. The App Store export signs manually with two App Store distribution profiles, one per bundle, because the App Store Connect key cannot create distribution profiles through cloud signing:
 

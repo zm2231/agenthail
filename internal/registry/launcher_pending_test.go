@@ -15,11 +15,14 @@ func TestALaunchFoundAfterItsNameWasTakenIsRegisteredWithoutIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	name, err := r.ReserveAlias("builder", time.Now().Add(50*time.Millisecond))
+	launchedAt := time.Now()
+	expires := launchedAt.Add(time.Minute)
+	r.now = func() time.Time { return launchedAt }
+	name, err := r.ReserveAlias("builder", expires)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Build", name, surface.Location{Workspace: "workspace-1"}, time.Now(), time.Now().Add(50*time.Millisecond)); err != nil {
+	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Build", name, surface.Location{Workspace: "workspace-1"}, launchedAt, expires); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.RegisterSession(surface.Session{ID: "owner", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
@@ -29,7 +32,7 @@ func TestALaunchFoundAfterItsNameWasTakenIsRegisteredWithoutIt(t *testing.T) {
 	if err := r.SetAlias("builder", "owner"); !errors.As(err, &reserved) {
 		t.Fatalf("SetAlias while the launch holds the name: err=%v", err)
 	}
-	time.Sleep(100 * time.Millisecond)
+	r.now = func() time.Time { return expires }
 	if err := r.SetAlias("builder", "owner"); err != nil {
 		t.Fatalf("SetAlias after the launch's name lapsed: %v", err)
 	}
