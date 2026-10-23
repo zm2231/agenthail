@@ -1212,7 +1212,9 @@ func (s *Service) spawn(task func()) bool {
 // write lock, so a busy Codex delays the update rather than the call.
 const delegatedSpeechTimeout = 15 * time.Second
 
-func (s *Service) speakDelegation(attemptID, messageID string, target *surface.Session, turnID, text, stage string) {
+// speakDelegation hands an update of the target's turn to the call. ctx is the
+// follower's, so a target change cancels an update not yet handed over.
+func (s *Service) speakDelegation(ctx context.Context, attemptID, messageID string, target *surface.Session, turnID, text, stage string) {
 	s.mu.Lock()
 	v := &s.state.State
 	if v.AttemptID != attemptID || v.Phase != "connected" || v.Target == nil || v.Target.ID != target.ID || v.Session == nil {
@@ -1220,9 +1222,7 @@ func (s *Service) speakDelegation(attemptID, messageID string, target *surface.S
 		return
 	}
 	session := *v.Session
-	ctx, cancel := s.callContext(s.background)
 	s.unlock()
-	defer cancel()
 	ctx, done := context.WithTimeout(ctx, s.speechTimeout)
 	defer done()
 	err := s.provider.Request(ctx, &session, "thread/realtime/appendText", map[string]any{"threadId": session.ID, "text": text, "role": "developer"})

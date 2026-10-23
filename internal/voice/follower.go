@@ -37,7 +37,10 @@ const (
 type follower struct {
 	attemptID string
 	target    surface.Session
-	cancel    context.CancelFunc
+	// ctx ends when voice leaves the target or the call ends; everything
+	// said about the target runs under it.
+	ctx    context.Context
+	cancel context.CancelFunc
 	// ready is closed once the subscription is prepared or failed; err is
 	// why it failed.
 	ready chan struct{}
@@ -52,6 +55,9 @@ type follower struct {
 	// their turn is not taken for the person's own.
 	unplaced []string
 	typed    map[string]*typedTurn
+	// retired holds the turns whose delegations the source failed, so their
+	// later events are neither spoken nor taken for typed turns.
+	retired map[string]bool
 }
 
 // typedTurn is a turn voice did not start.
@@ -63,6 +69,7 @@ type typedTurn struct {
 
 // queuedReply is a reply to typed input waiting for a pause in the call.
 type queuedReply struct {
+	f                         *follower
 	attemptID, targetID, text string
 }
 
@@ -74,7 +81,7 @@ func (s *Service) followTarget(target *surface.Session) {
 		return
 	}
 	ctx, cancel := s.callContext(s.background)
-	f := &follower{attemptID: s.state.State.AttemptID, target: *target, cancel: cancel, ready: make(chan struct{}), voice: map[string][]string{}, settled: make(chan struct{}), typed: map[string]*typedTurn{}}
+	f := &follower{attemptID: s.state.State.AttemptID, target: *target, ctx: ctx, cancel: cancel, ready: make(chan struct{}), voice: map[string][]string{}, settled: make(chan struct{}), typed: map[string]*typedTurn{}, retired: map[string]bool{}}
 	if !s.spawn(func() { s.runFollower(ctx, f) }) {
 		cancel()
 		return
@@ -143,6 +150,12 @@ func (s *Service) runFollower(ctx context.Context, f *follower) {
 		if !ok {
 			return
 		}
+		if messages == nil && typed == nil {
+			if event.Terminal() {
+				s.endTurn(f, event.TurnID)
+			}
+			continue
+		}
 		previous := lastBody[event.ItemID]
 		lastBody[event.ItemID] = event.Body
 		if typed != nil {
@@ -157,7 +170,7 @@ func (s *Service) runFollower(ctx context.Context, f *follower) {
 				if event.Final {
 					stage = "final"
 				}
-				s.speakDelegation(f.attemptID, messages[0], &f.target, event.TurnID, delta, stage)
+				s.speakDelegation(ctx, f.attemptID, messages[0], &f.target, event.TurnID, delta, stage)
 			}
 		}
 		if event.Terminal() {
@@ -173,7 +186,8 @@ func (s *Service) runFollower(ctx context.Context, f *follower) {
 }
 
 // place says whose turn an event belongs to: the messages voice sent that
-// started it, or else the typed turn it is part of. A turn it cannot place
+// started it, or else the typed turn it is part of, or neither for a retired
+// turn. A turn it cannot place
 // while a delegation's turn is not known waits for that delegation to settle,
 // at most unattributedWait. It reports false once the follower ends.
 func (s *Service) place(ctx context.Context, f *follower, event sessionstream.Event) ([]string, *typedTurn, bool) {
@@ -189,10 +203,17 @@ func (s *Service) place(ctx context.Context, f *follower, event sessionstream.Ev
 			s.unlock()
 			return nil, turn, true
 		}
+		if f.retired[event.TurnID] {
+			s.unlock()
+			return nil, nil, true
+		}
 		if f.pending == 0 || (!deadline.IsZero() && !s.clock.now().Before(deadline)) {
 			if f.pending > 0 && s.follow == f {
 				if logf := s.logf; logf != nil {
-					logf("voice: turn %s of %s taken as typed after waiting %s for %d delegation(s) to settle", event.TurnID, f.target.ID, unattributedWait, f.pending)
+					turnID, targetID, pending := event.TurnID, f.target.ID, f.pending
+					s.later(func() {
+						logf("voice: turn %s of %s taken as typed after waiting %s for %d delegation(s) to settle", turnID, targetID, unattributedWait, pending)
+					})
 				}
 				s.appendEvent(Event{Method: "voice/target/turn-unattributed", Params: map[string]any{"targetId": f.target.ID, "turnId": event.TurnID}})
 				s.stage()
@@ -267,7 +288,7 @@ func (s *Service) followTyped(f *follower, event sessionstream.Event, turn *type
 		text = "The session replied to what the person typed there: " + firstSentences(turn.reply, typedReplyBytes) + " The full reply is in the session."
 	}
 	if text != "" {
-		s.queueReply(queuedReply{attemptID: f.attemptID, targetID: f.target.ID, text: text})
+		s.queueReply(queuedReply{f: f, attemptID: f.attemptID, targetID: f.target.ID, text: text})
 	}
 	s.unlock()
 }
@@ -278,11 +299,7 @@ func (s *Service) note(f *follower, session *surface.Session, text string) {
 	if session == nil {
 		return
 	}
-	s.mu.Lock()
-	ctx, cancel := s.callContext(s.background)
-	s.unlock()
-	defer cancel()
-	ctx, done := context.WithTimeout(ctx, s.speechTimeout)
+	ctx, done := context.WithTimeout(f.ctx, s.speechTimeout)
 	defer done()
 	_ = s.provider.Request(ctx, session, "thread/realtime/appendText", map[string]any{"threadId": session.ID, "text": text, "role": "developer"})
 }
@@ -292,16 +309,19 @@ func (s *Service) endTurn(f *follower, turnID string) {
 	s.mu.Lock()
 	delete(f.voice, turnID)
 	delete(f.typed, turnID)
+	delete(f.retired, turnID)
 	s.unlock()
 }
 
-// followerFailed fails the delegations the follower was speaking for.
+// followerFailed fails the delegations the follower was speaking for, as a
+// source error ends them, and retires their turns.
 func (s *Service) followerFailed(f *follower, err error) {
 	s.mu.Lock()
 	var messages []string
 	for turnID, ids := range f.voice {
 		messages = append(messages, ids...)
 		delete(f.voice, turnID)
+		f.retired[turnID] = true
 	}
 	s.unlock()
 	for _, messageID := range messages {
@@ -401,18 +421,16 @@ func (s *Service) speakQueued() {
 	}
 	next := s.replies[0]
 	v := &s.state.State
-	if next.attemptID != v.AttemptID || v.Phase != "connected" || v.Session == nil || v.Target == nil || v.Target.ID != next.targetID {
+	if s.follow != next.f || next.attemptID != v.AttemptID || v.Phase != "connected" || v.Session == nil || v.Target == nil || v.Target.ID != next.targetID {
 		s.replies = s.replies[1:]
 		s.speakQueued()
 		return
 	}
 	s.replies = s.replies[1:]
 	session := *v.Session
-	ctx, cancel := s.callContext(s.background)
+	ctx, cancel := context.WithTimeout(next.f.ctx, s.speechTimeout)
 	s.replying = s.spawn(func() {
 		defer cancel()
-		ctx, done := context.WithTimeout(ctx, s.speechTimeout)
-		defer done()
 		err := s.provider.Request(ctx, &session, "thread/realtime/appendText", map[string]any{"threadId": session.ID, "text": next.text, "role": "developer"})
 		s.mu.Lock()
 		s.replying = false

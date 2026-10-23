@@ -133,6 +133,12 @@ about it is spoken:
   for that request to settle, at most 30 seconds. Past that it is taken as typed,
   recorded in the call as `voice/target/turn-unattributed` and written to the
   daemon log.
+- A journal source error ends the requests whose turns voice was following;
+  their turns are not followed again, even if the source recovers.
+
+Everything said about the session runs under its follower, so moving voice to
+another session or back to the orchestrator cancels an update or reply still
+being handed to the call.
 
 After each turn the host reads the session's brief again. When the session's
 compaction count rose since the brief voice holds, voice is told the session

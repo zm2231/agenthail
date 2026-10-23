@@ -34,9 +34,11 @@ type fixtureProvider struct {
 	interrupts   int
 	speaking     chan struct{}
 	speakingText string
-	respondErr   error
-	releases     []string
-	gate         *gate
+	// unspoken counts held speech whose request was cancelled.
+	unspoken   int
+	respondErr error
+	releases   []string
+	gate       *gate
 	// ticks releases one Poll each, as its wait running out would; arrived
 	// releases one as Codex sending an event would.
 	ticks   <-chan time.Time
@@ -312,6 +314,9 @@ func (p *fixtureProvider) Request(ctx context.Context, _ *surface.Session, metho
 	if speaking != nil && method == "thread/realtime/appendText" && params["text"] == speakingText {
 		close(speaking)
 		<-ctx.Done()
+		p.mu.Lock()
+		p.unspoken++
+		p.mu.Unlock()
 		return ctx.Err()
 	}
 	p.mu.Lock()

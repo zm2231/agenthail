@@ -215,6 +215,11 @@ func TestASpeechDeltaWithoutItsDoneHoldsATypedReplyOnlyBriefly(t *testing.T) {
 
 func TestATurnVoiceCannotPlaceWhileADelegationIsUnsettledIsTakenAsTypedAfterItsBound(t *testing.T) {
 	f, target := followedTarget(t, nil)
+	logged, release := make(chan string, 1), make(chan struct{})
+	f.service.SetLog(func(format string, args ...any) {
+		logged <- fmt.Sprintf(format, args...)
+		<-release
+	})
 	f.gate.hold("Send")
 	sent := make(chan error, 1)
 	go func() {
@@ -235,6 +240,16 @@ func TestATurnVoiceCannotPlaceWhileADelegationIsUnsettledIsTakenAsTypedAfterItsB
 		}
 		return hasEventWith(f.View(), "voice/target/turn-unattributed", "turnId", "typed-1") && spokenWith(f, "The linter passed.") == 1
 	})
+	select {
+	case line := <-logged:
+		if !strings.Contains(line, "turn typed-1 of target-a taken as typed") {
+			t.Fatalf("log=%q", line)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the unplaced turn was not logged")
+	}
+	within(t, "a heartbeat while the log is slow", 100*time.Millisecond, func() { _, _ = f.Apply(Action{Action: "heartbeat", AttemptID: "call-a"}) })
+	close(release)
 	f.gate.release("Send")
 	if err := <-sent; err != nil {
 		t.Fatal(err)
@@ -286,5 +301,77 @@ func TestACompactionDuringTheCallSendsTheFreshBrief(t *testing.T) {
 	})
 	if b := f.View().Brief; b == nil || b.Compactions == nil || *b.Compactions != 2 || !hasEventWith(f.View(), "voice/target/compacted", "targetId", "target-a") {
 		t.Fatalf("brief=%+v", b)
+	}
+}
+
+func (p *fixtureProvider) cancelledSpeech() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.unspoken
+}
+
+func TestSpeechAboutASessionStillBeingHandedOverIsCancelledWhenVoiceLeavesIt(t *testing.T) {
+	for _, test := range []struct {
+		name, held string
+		run        func(f *voiceFixture, target *targetFixture)
+	}{
+		{name: "delegated reply", held: "The old reply.", run: func(f *voiceFixture, target *targetFixture) {
+			apply(t, f, Action{Action: "delegate", AttemptID: "call-a", MessageID: "m", Text: "Do work"})
+			target.journal.emit(sessionstream.Event{ItemID: "reply", Version: 1, Kind: "text", Role: "assistant", TurnID: "target-turn", Body: "The old reply."})
+		}},
+		{name: "typed reply", held: "The session replied to what the person typed there: The old reply. The full reply is in the session.", run: func(f *voiceFixture, target *targetFixture) {
+			typeTurn(target.journal, "typed-1", "Run the linter", "The old reply.")
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Fieldnotes build", Transport: "desktop", Status: surface.StatusIdle}, streaming: make(chan struct{})}
+			f := newFixture(t, fixtureOptions{target: target})
+			f.target = target
+			speaking := make(chan struct{})
+			f.provider.speaking, f.provider.speakingText = speaking, test.held
+			selectAndConnect(t, f, target)
+			testkit.Eventually(t, "the call to follow its session", 5*time.Second, func() bool {
+				prepared, _ := target.journal.subscriptions()
+				return prepared == 1
+			})
+			test.run(f, target)
+			select {
+			case <-speaking:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the update never reached the operator")
+			}
+			apply(t, f, Action{Action: "transfer", AttemptID: "call-a", TargetID: ""})
+			testkit.Eventually(t, "the held update to be cancelled with the move", 2*time.Second, func() bool { return f.provider.cancelledSpeech() == 1 })
+			testkit.Eventually(t, "the old subscription to end", 2*time.Second, func() bool {
+				_, cancelled := target.journal.subscriptions()
+				return cancelled == 1
+			})
+			if spokenWith(f, "The old reply.") != 0 {
+				t.Fatalf("old session text reached voice: %q", f.provider.spoken())
+			}
+		})
+	}
+}
+
+func TestASourceErrorEndsItsDelegationsAndTheirTurnsStayWithThem(t *testing.T) {
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Fieldnotes build", Transport: "desktop", Status: surface.StatusIdle}, streaming: make(chan struct{})}
+	f := newFixture(t, fixtureOptions{target: target})
+	f.target = target
+	selectAndConnect(t, f, target)
+	testkit.Eventually(t, "the call to follow its session", 5*time.Second, func() bool {
+		prepared, _ := target.journal.subscriptions()
+		return prepared == 1
+	})
+	apply(t, f, Action{Action: "delegate", AttemptID: "call-a", MessageID: "m", Text: "Do work"})
+	target.journal.emit(sessionstream.Event{Kind: "source-error", Reason: "transcript read failed"})
+	testkit.Eventually(t, "the source error to end the delegation", 5*time.Second, func() bool {
+		return hasEventWith(f.View(), "voice/delegation/failed", "error", "transcript read failed")
+	})
+	target.journal.emit(sessionstream.Event{ItemID: "reply", Version: 1, Kind: "text", Role: "assistant", TurnID: "target-turn", Body: "Resumed reply.", Final: true})
+	target.journal.emit(sessionstream.Event{ItemID: "done", Version: 1, Kind: "done", TurnID: "target-turn", Status: "failed", Body: "late failure"})
+	typeTurn(target.journal, "typed-1", "Run the linter", "The linter passed.")
+	testkit.Eventually(t, "a later typed turn to be spoken", 5*time.Second, func() bool { return spokenWith(f, "The linter passed.") == 1 })
+	if spokenWith(f, "Resumed reply.") != 0 || hasEventWith(f.View(), "voice/target/typed", "turnId", "target-turn") || hasEventWith(f.View(), "voice/delegation/failed", "error", "late failure") {
+		t.Fatalf("a retired turn was followed again: spoken=%q events=%+v", f.provider.spoken(), f.View().Events)
 	}
 }
