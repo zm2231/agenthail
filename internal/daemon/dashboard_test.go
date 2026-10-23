@@ -358,6 +358,33 @@ func TestDashboardRequiresTokenAndRejectsCrossOriginActions(t *testing.T) {
 	}
 }
 
+func TestARouteTheDaemonDoesNotHaveIsNotFoundNotUnauthorized(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	for _, path := range []string{"/api/v1/not-yet", "/api/not-yet"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		var body struct {
+			Error struct{ Code string } `json:"error"`
+		}
+		if response.Code != http.StatusNotFound || json.Unmarshal(response.Body.Bytes(), &body) != nil || body.Error.Code != "unknown_route" {
+			t.Fatalf("%s: status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+	other := httptest.NewRecorder()
+	handler.ServeHTTP(other, httptest.NewRequest(http.MethodGet, "/not-a-page", nil))
+	if other.Code != http.StatusNotFound {
+		t.Fatalf("unknown page status=%d", other.Code)
+	}
+	page := httptest.NewRecorder()
+	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/", nil))
+	if page.Code != http.StatusUnauthorized {
+		t.Fatalf("the dashboard page still needs its cookie: status=%d", page.Code)
+	}
+}
+
 func TestDashboardExposesCookieAuthenticatedDesktopVoiceControls(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})

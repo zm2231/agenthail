@@ -689,6 +689,14 @@ func (dashboard *dashboardServer) asset(contentType string, body []byte) http.Ha
 }
 
 func (dashboard *dashboardServer) page(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			writeAPIError(w, http.StatusNotFound, "unknown_route", "This Agenthail has no "+r.URL.Path+"; it runs an older version.")
+			return
+		}
+		http.NotFound(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

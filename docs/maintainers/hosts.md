@@ -46,7 +46,10 @@ A paired host that later reports a range without this daemon's is
 `incompatible` (shown as needing an update), and nothing is forwarded to it
 until it is updated. Each connection starts with that version check, and no
 read, stream, action or held send goes to the host until the latest check has
-passed; a send made while it is pending is held. Without `--address` it
+passed; a send made while it is pending is held. Within a compatible range a host can
+still lack a newer client route. A daemon answers any `/api/` path it does not
+serve with `404` and `error.code` `unknown_route`, never the dashboard sign-in
+response, and the apps show that as the computer running an older Agenthail. Without `--address` it
 asks `tailscale status --json` for the peer's IPv4 address. No new port is
 opened: the remote is reached through the Tailscale Serve route it already
 has. Device tokens stay in the registry and never appear in API responses,
