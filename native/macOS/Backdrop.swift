@@ -95,7 +95,7 @@ enum BackdropRenderer {
     /// Points over which a pane's tint falls from what its text needs to the
     /// pane's minimum. Short, so margins and gaps inside a pane show the
     /// background.
-    static let paneFeather: Float = 24
+    static let paneFeather: Float = 72
     private static let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
 
     static func render(_ spec: BackdropSpec) -> BackdropImage? {
