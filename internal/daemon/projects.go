@@ -369,87 +369,125 @@ func (d *Daemon) projectAction(r *http.Request, w http.ResponseWriter, request p
 	ctx := r.Context()
 	switch request.Action {
 	case "project-add":
-		project, err := d.addProject(ctx, request.Path, request.Title)
-		var taken *registry.WorkspaceTakenError
-		if errors.As(err, &taken) {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
+		project, created, err := d.addProject(ctx, request.Path, request.Title)
+		var missing *folderNotFoundError
+		switch {
+		case errors.As(err, &missing):
+			writeAPIError(w, http.StatusBadRequest, "folder_not_found", err.Error())
+		case err != nil:
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		default:
+			writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "project": project, "created": created})
 		}
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "project": project})
 		return
-	case "project-remove", "project-archive", "project-unarchive":
+	case "project-remove", "project-archive", "project-unarchive", "project-rename":
 	default:
-		http.Error(w, "unknown project action", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "unknown project action")
 		return
 	}
 	if request.ProjectID == "" {
-		http.Error(w, "projectId is required", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "projectId is required")
+		return
+	}
+	title := strings.TrimSpace(request.Title)
+	if request.Action == "project-rename" && (title == "" || len(title) > projectTitleLimit) {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("a project name is 1 to %d characters", projectTitleLimit))
 		return
 	}
 	targets, err := d.localProjectCheckouts(request.ProjectID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "registry_error", err.Error())
 		return
 	}
 	if request.Action == "project-remove" {
 		d.removeProject(w, request.ProjectID, targets)
 		return
 	}
-	archive := request.Action == "project-archive"
 	var checkouts []map[string]any
-	failed := false
+	failed, changed := false, false
 	for _, target := range targets {
 		result := map[string]any{"host": d.localHost().Name, "projectId": target.ID, "rootPath": target.WorkspaceRoot, "ok": true}
-		if err := d.archiveLocalProject(target, archive); err != nil {
+		if request.Action == "project-rename" {
+			if !target.Added {
+				continue
+			}
+			if err := d.Registry.SetProjectTitle(target.ID, title); err != nil {
+				result["ok"], result["error"] = false, err.Error()
+				failed = true
+			}
+		} else if err := d.archiveLocalProject(target, request.Action == "project-archive"); err != nil {
 			result["ok"], result["error"] = false, err.Error()
 			failed = true
 		}
+		changed = changed || result["ok"] == true
 		checkouts = append(checkouts, result)
 	}
-	if len(targets) > 0 {
+	if len(checkouts) > 0 {
 		d.publishCatalogPresence()
-		// A catalog pass that read the archive state before this change may
+		// A catalog pass that read the project state before this change may
 		// still publish its rows; the pass this requests runs after it and
 		// settles them.
 		d.requestCatalogDiscovery()
 	}
-	// A paired host forwarding this action archives only its own checkouts,
+	// A paired host forwarding this action changes only its own checkouts,
 	// so the action never travels back.
+	listed := len(targets) > 0
 	if _, fromHost := requestingHost(ctx); !fromHost {
 		hostIDs, err := d.Registry.CatalogProjectHosts(request.ProjectID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeAPIError(w, http.StatusInternalServerError, "registry_error", err.Error())
 			return
 		}
 		for _, hostID := range hostIDs {
+			listed = true
 			result := map[string]any{"host": hostID, "ok": true}
-			if host, found := d.pairedHost(hostID); found {
-				result["host"] = host.record.Name
-				if err := d.forwardProjectArchive(r, host, request.Action, request.ProjectID); err != nil {
-					result["ok"], result["error"] = false, err.Error()
-					failed = true
-				}
-			} else {
+			host, found := d.pairedHost(hostID)
+			if !found {
 				result["ok"], result["error"] = false, "host is no longer paired"
 				failed = true
+				checkouts = append(checkouts, result)
+				continue
+			}
+			result["host"] = host.record.Name
+			body := map[string]string{"action": request.Action, "projectId": request.ProjectID}
+			if request.Action == "project-rename" {
+				body["title"] = title
+			}
+			status, code, err := d.forwardProjectAction(r, host, body)
+			switch {
+			case err != nil:
+				result["ok"], result["error"] = false, err.Error()
+				failed = true
+			case request.Action == "project-rename" && status == http.StatusConflict && code == "project_not_added":
+				continue
+			default:
+				changed = true
 			}
 			checkouts = append(checkouts, result)
 		}
 	}
-	if len(checkouts) == 0 {
-		http.Error(w, d.projectNotListed(request.ProjectID), http.StatusNotFound)
+	switch {
+	case !listed:
+		writeAPIError(w, http.StatusNotFound, "project_not_found", d.projectNotListed(request.ProjectID))
+		return
+	case !changed && !failed:
+		writeAPIError(w, http.StatusConflict, "project_not_added", "project "+request.ProjectID+" was not added on any host, so it has no name of its own; add its folder as a project to name it")
 		return
 	}
 	status := http.StatusOK
 	if failed {
 		status = http.StatusBadGateway
 	}
-	writeDashboardJSON(w, status, map[string]any{"ok": !failed, "projectId": request.ProjectID, "archived": archive, "checkouts": checkouts})
+	answer := map[string]any{"ok": !failed, "projectId": request.ProjectID, "checkouts": checkouts}
+	if request.Action == "project-rename" {
+		answer["title"] = title
+	} else {
+		answer["archived"] = request.Action == "project-archive"
+	}
+	writeDashboardJSON(w, status, answer)
 }
+
+const projectTitleLimit = 120
 
 type projectRequest struct {
 	Action    string
@@ -545,10 +583,10 @@ func (d *Daemon) removeProject(w http.ResponseWriter, projectID string, targets 
 	switch len(added) {
 	case 0:
 		if len(targets) > 0 {
-			http.Error(w, "project "+projectID+" was not added, so it cannot be removed; archive it to hide it", http.StatusConflict)
+			writeAPIError(w, http.StatusConflict, "project_not_added", "project "+projectID+" was not added, so it cannot be removed; archive it to hide it")
 			return
 		}
-		http.Error(w, d.projectNotListed(projectID), http.StatusNotFound)
+		writeAPIError(w, http.StatusNotFound, "project_not_found", d.projectNotListed(projectID))
 		return
 	case 1:
 	default:
@@ -556,21 +594,24 @@ func (d *Daemon) removeProject(w http.ResponseWriter, projectID string, targets 
 		for _, target := range added {
 			roots = append(roots, target.ID+" ("+target.WorkspaceRoot+")")
 		}
-		http.Error(w, "project "+projectID+" names several added folders on this host: "+strings.Join(roots, ", ")+"; remove one by its id", http.StatusConflict)
+		writeAPIError(w, http.StatusConflict, "project_ambiguous", "project "+projectID+" names several added folders on this host: "+strings.Join(roots, ", ")+"; remove one by its id")
 		return
 	}
 	if err := d.Registry.RemoveProject(added[0].ID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "registry_error", err.Error())
 		return
 	}
 	d.requestCatalogDiscovery()
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "projectId": added[0].ID, "rootPath": added[0].WorkspaceRoot})
 }
 
-func (d *Daemon) forwardProjectArchive(r *http.Request, host *pairedHost, action, projectID string) error {
-	body, err := json.Marshal(map[string]string{"action": action, "projectId": projectID})
+// forwardProjectAction runs a project action on a paired host. A refusal is
+// returned as its status and error code; only a host that cannot answer is
+// an error.
+func (d *Daemon) forwardProjectAction(r *http.Request, host *pairedHost, request map[string]string) (int, string, error) {
+	body, err := json.Marshal(request)
 	if err != nil {
-		return err
+		return 0, "", err
 	}
 	key := r.Header.Get(actionIdempotencyHeader)
 	if key == "" {
@@ -579,16 +620,25 @@ func (d *Daemon) forwardProjectArchive(r *http.Request, host *pairedHost, action
 	header := http.Header{actionIdempotencyHeader: []string{key + ":" + host.record.ID}}
 	response, err := host.client.Do(r.Context(), http.MethodPost, "/api/v1/actions", nil, body, header)
 	if err != nil {
-		return err
+		return 0, "", err
 	}
 	answer, err := readHostAnswer(host, response)
 	if err != nil {
-		return err
+		return 0, "", err
 	}
-	if answer.status != http.StatusOK {
-		return fmt.Errorf("%s answered %d: %s", host.record.Name, answer.status, strings.TrimSpace(string(answer.payload)))
+	if answer.status == http.StatusOK {
+		return answer.status, "", nil
 	}
-	return nil
+	var envelope struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(answer.payload, &envelope)
+	if answer.status == http.StatusConflict && envelope.Error.Code == "project_not_added" {
+		return answer.status, envelope.Error.Code, nil
+	}
+	return answer.status, envelope.Error.Code, fmt.Errorf("%s answered %d: %s", host.record.Name, answer.status, strings.TrimSpace(string(answer.payload)))
 }
 
 func (d *Daemon) sessionArchiveAction(w http.ResponseWriter, action, sessionID string) {
@@ -615,19 +665,23 @@ func (d *Daemon) sessionArchiveAction(w http.ResponseWriter, action, sessionID s
 
 // addProject adds a folder as a project of this host. A folder in a linked
 // worktree is added at the same place in the main checkout, so the project
-// holds that folder in every worktree.
-func (d *Daemon) addProject(ctx context.Context, path, title string) (CatalogProject, error) {
+// holds that folder in every worktree. A folder already added answers with
+// its project, unchanged, and created false.
+func (d *Daemon) addProject(ctx context.Context, path, title string) (CatalogProject, bool, error) {
 	path, err := workspace.NormalizeCWD(path)
 	if err != nil || path == "" {
-		return CatalogProject{}, fmt.Errorf("a folder path is required")
+		return CatalogProject{}, false, fmt.Errorf("a folder path is required")
 	}
 	if info, err := os.Stat(path); err != nil || !info.IsDir() {
-		return CatalogProject{}, fmt.Errorf("%s is not a folder", path)
+		return CatalogProject{}, false, &folderNotFoundError{path: path, host: d.hostIdentity().Name}
 	}
 	if path, err = canonicalCatalogPath(path); err != nil {
-		return CatalogProject{}, err
+		return CatalogProject{}, false, err
 	}
 	record := registry.ProjectRecord{ID: "p-" + uuid.NewString(), WorkspaceRoot: path, Title: strings.TrimSpace(title), CreatedAt: time.Now().UTC()}
+	if len(record.Title) > projectTitleLimit {
+		return CatalogProject{}, false, fmt.Errorf("a project name is 1 to %d characters", projectTitleLimit)
+	}
 	repository, notRepository, err := resolveCatalogRepository(ctx, path, nil)
 	inRepository := err == nil
 	switch {
@@ -637,16 +691,40 @@ func (d *Daemon) addProject(ctx context.Context, path, title string) (CatalogPro
 			record.Repository, _ = json.Marshal(repository.repository)
 		}
 	case !notRepository:
-		return CatalogProject{}, fmt.Errorf("read repository for %s: %w", path, err)
+		return CatalogProject{}, false, fmt.Errorf("read repository for %s: %w", path, err)
 	}
 	if record.Title == "" {
 		record.Title = filepath.Base(record.WorkspaceRoot)
 	}
-	if err := d.Registry.AddProject(record); err != nil {
-		return CatalogProject{}, err
+	err = d.Registry.AddProject(record)
+	var taken *registry.WorkspaceTakenError
+	if errors.As(err, &taken) {
+		records, err := d.Registry.ListProjects()
+		if err != nil {
+			return CatalogProject{}, false, err
+		}
+		for _, existing := range records {
+			if existing.ID == taken.ProjectID {
+				return *addedCatalogProject(existing, inRepository), false, nil
+			}
+		}
+		return CatalogProject{}, false, taken
+	}
+	if err != nil {
+		return CatalogProject{}, false, err
 	}
 	d.requestCatalogDiscovery()
-	return *addedCatalogProject(record, inRepository), nil
+	return *addedCatalogProject(record, inRepository), true, nil
+}
+
+// folderNotFoundError refuses to add a folder its host does not have.
+type folderNotFoundError struct {
+	path string
+	host string
+}
+
+func (e *folderNotFoundError) Error() string {
+	return fmt.Sprintf("%s is not a folder on %s", e.path, e.host)
 }
 
 // ResolvePathProject finds the project a session working in path belongs

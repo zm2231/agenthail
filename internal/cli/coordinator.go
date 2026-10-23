@@ -320,14 +320,14 @@ func (a *App) coordinatorPayload(action string, args []string) (map[string]any, 
 type coordinatorAnswer struct {
 	Coordinator registry.CoordinatorSpec   `json:"coordinator"`
 	Replaced    []registry.CoordinatorSpec `json:"replaced"`
-	Cleared     registry.CoordinatorSpec   `json:"cleared"`
+	Cleared     *registry.CoordinatorSpec  `json:"cleared"`
 }
 
 func coordinatorAction(ctx context.Context, client *daemonAPIClient, payload map[string]any) (coordinatorAnswer, error) {
 	var answer coordinatorAnswer
 	data, status, err := client.action(ctx, payload)
 	if err != nil {
-		return answer, err
+		return answer, withFlagHint(err)
 	}
 	if status != http.StatusOK {
 		return answer, actionError(data)
@@ -345,6 +345,24 @@ func actionError(data []byte) error {
 		return errors.New(envelope.Error.Message)
 	}
 	return errors.New(strings.TrimSpace(string(data)))
+}
+
+// withFlagHint adds to a refused action the flag that resolves it, when
+// there is one.
+func withFlagHint(err error) error {
+	var refused hosts.StatusError
+	if !errors.As(err, &refused) {
+		return err
+	}
+	switch refused.Code {
+	case "coordinator_exists", "coordinator_conflict":
+		return errors.New(refused.Message + " (rerun with --replace)")
+	case "name_taken":
+		return errors.New(refused.Message + " (pass another --name)")
+	case "no_coordinator":
+		return errors.New(refused.Message + "; use 'agenthail coordinator new' or 'agenthail coordinator set'")
+	}
+	return err
 }
 
 // coordinatorSet makes a conversation its project's coordinator. The host
@@ -446,7 +464,11 @@ func (a *App) coordinatorClear(path string, jsonOut bool) error {
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(answer)
 	}
-	fmt.Printf("cleared coordinator %s of %s; its session and name are unchanged\n", a.coordinator().Ref(answer.Cleared), found.RootPath)
+	if answer.Cleared == nil {
+		fmt.Printf("%s has no coordinator\n", found.RootPath)
+		return nil
+	}
+	fmt.Printf("cleared coordinator %s of %s; its session and name are unchanged\n", a.coordinator().Ref(*answer.Cleared), found.RootPath)
 	return nil
 }
 

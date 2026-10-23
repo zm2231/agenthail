@@ -55,7 +55,7 @@ func TestProjectArchiveResolvesByIdAndRejectsAmbiguousNames(t *testing.T) {
 func TestProjectAddSendsAnAbsolutePathAndTitle(t *testing.T) {
 	app, _, _, api := federatedCLIFixture(t, true)
 	folder := t.TempDir()
-	api.response = `{"ok":true,"project":{"id":"p-x","localId":"p-x","displayName":"Web app","rootPath":"` + folder + `","kind":"folder","added":true}}`
+	api.response = `{"ok":true,"project":{"id":"p-x","localId":"p-x","displayName":"Web app","rootPath":"` + folder + `","kind":"folder","added":true},"created":true}`
 	output, err := captureStdout(t, func() error { return app.Run([]string{"project", "add", folder, "--name", "Web app"}) })
 	if err != nil || !strings.Contains(output, "added project Web app") {
 		t.Fatalf("output=%q err=%v", output, err)

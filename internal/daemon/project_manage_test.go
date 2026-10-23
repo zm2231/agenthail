@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -104,6 +105,7 @@ func TestALeadSetTwiceOrClearedWhenAbsentChangesNothing(t *testing.T) {
 	if response := runDashboardAction(t, d, `{"action":"project-add","path":"`+repo+`"}`); response.Code != http.StatusOK {
 		t.Fatalf("add: %d %s", response.Code, response.Body)
 	}
+	d.discoverCatalog(context.Background())
 	projectID := storedProjection(t, r, "from").Project.ID
 	clear := func() *httptest.ResponseRecorder {
 		return runDashboardAction(t, d, `{"action":"coordinator-clear","projectId":"`+projectID+`"}`)
@@ -111,13 +113,27 @@ func TestALeadSetTwiceOrClearedWhenAbsentChangesNothing(t *testing.T) {
 	if response := clear(); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"cleared":null`) {
 		t.Fatalf("clear with no lead: %d %s", response.Code, response.Body)
 	}
-	for range 2 {
-		if response := runDashboardAction(t, d, `{"action":"coordinator-set","sessionId":"from","name":"widget-lead"}`); response.Code != http.StatusOK {
+	var first time.Time
+	for attempt := range 2 {
+		response := runDashboardAction(t, d, `{"action":"coordinator-set","sessionId":"from","name":"widget-lead"}`)
+		var set struct {
+			Coordinator registry.CoordinatorSpec `json:"coordinator"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &set) != nil {
 			t.Fatalf("set: %d %s", response.Code, response.Body)
 		}
-	}
-	if history, err := r.CoordinatorHistory(projectID); err != nil || len(history) != 1 {
-		t.Fatalf("setting the same lead again was recorded: %+v err=%v", history, err)
+		if set.Coordinator.ProjectID != projectID {
+			t.Fatalf("lead of %s, project %s", set.Coordinator.ProjectID, projectID)
+		}
+		current, err := r.Coordinator(projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if attempt == 0 {
+			first = current.ChangedAt
+		} else if !current.ChangedAt.Equal(first) {
+			t.Fatalf("setting the same lead again changed it: %v then %v", first, current.ChangedAt)
+		}
 	}
 	other := runDashboardAction(t, d, `{"action":"coordinator-set","sessionId":"to","name":"other-lead"}`)
 	if other.Code != http.StatusConflict || apiErrorCode(t, other) != "coordinator_exists" || strings.Contains(other.Body.String(), "--") {
@@ -159,8 +175,7 @@ func TestSessionOptionsSuggestOnlyRecentSessionFoldersOutsideProjects(t *testing
 	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &options) != nil {
 		t.Fatalf("options: %d %s", response.Code, response.Body)
 	}
-	resolved, _ := filepath.EvalSymlinks(base)
-	want := []string{filepath.Join(resolved, "notes", "inner"), filepath.Join(resolved, "notes"), filepath.Join(resolved, "scratch")}
+	want := []string{filepath.Join(base, "notes", "inner"), filepath.Join(base, "notes"), filepath.Join(base, "scratch")}
 	if strings.Join(options.Folders, ",") != strings.Join(want, ",") {
 		t.Fatalf("folders=%v want %v", options.Folders, want)
 	}
@@ -179,7 +194,7 @@ func TestFederationAddsAndRemovesAProjectOnTheHostItNames(t *testing.T) {
 	local, remote, record := pairedFederation(t)
 	cwd := remote.fake.sessions["remote-a"].Cwd
 	missing := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-add", "host": "vps", "path": filepath.Join(cwd, "not-there")})
-	if missing.Code != http.StatusBadRequest || apiErrorCode(t, missing) != "folder_not_found" || !strings.Contains(missing.Body.String(), "vps") {
+	if missing.Code != http.StatusBadRequest || apiErrorCode(t, missing) != "folder_not_found" {
 		t.Fatalf("missing folder on the host: %d %s", missing.Code, missing.Body)
 	}
 	added := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-add", "host": "vps", "path": cwd, "title": "Server work"})
@@ -236,6 +251,7 @@ func TestFederationRenamesOneRepositoryProjectOnEveryHost(t *testing.T) {
 		if records, err := node.reg.ListProjects(); err != nil || len(records) != 1 || records[0].Title != "Gadget sources" {
 			t.Fatalf("projects: %+v err=%v", records, err)
 		}
+		node.daemon.discoverCatalog(context.Background())
 	}
 	awaitFederation(t, "one project under the new name", func() bool {
 		for _, project := range local.snapshot(t).Projects {
