@@ -9,6 +9,11 @@ enum AuditFacts {
         return words.prefix(1).uppercased() + words.dropFirst()
     }
 
+    static func heading(_ entry: HistoryState) -> String {
+        guard let operation = nonEmpty(entry.operation), operation != "message" else { return kindLabel(entry.kind) }
+        return "\(kindLabel(entry.kind)) · \(kindLabel(operation))"
+    }
+
     static func target(_ entry: HistoryState) -> String {
         nonEmpty(entry.target) ?? nonEmpty(entry.sessionId) ?? "Agenthail"
     }

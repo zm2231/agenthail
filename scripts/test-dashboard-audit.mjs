@@ -7,7 +7,7 @@ const start = source.indexOf("function auditKindLabel");
 const end = source.indexOf("function signinOffHint", start);
 assert(start >= 0 && end > start);
 const context = { escape: (value) => String(value).replaceAll("<", "&lt;") };
-vm.runInNewContext(source.slice(start, end) + "\nthis.label = auditKindLabel; this.route = auditRoute;", context);
+vm.runInNewContext(source.slice(start, end) + "\nthis.label = auditKindLabel; this.heading = auditHeading; this.route = auditRoute;", context);
 
 assert.equal(context.label("peer_send"), "Peer send");
 assert.equal(context.label("transport-accepted"), "Transport accepted");
@@ -15,4 +15,7 @@ assert.equal(context.label(""), "Event");
 assert.equal(context.route({ source: "claude/builder", target: "claude/builder" }), "claude/builder");
 assert.equal(context.route({ source: "codex/lead", target: "claude/builder" }), 'codex/lead <span class="route-arrow">→</span> claude/builder');
 assert.equal(context.route({}), "Agenthail");
+assert.equal(context.heading({ kind: "delivered", operation: "compact" }), "Delivered · Compact");
+assert.equal(context.heading({ kind: "delivered", operation: "message" }), "Delivered");
+assert.equal(context.heading({ kind: "peer_send" }), "Peer send");
 console.log("dashboard audit tests passed");

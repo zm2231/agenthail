@@ -1074,6 +1074,7 @@ struct HistoryState: Decodable, Identifiable, Equatable {
     let result: String?
     let error: String?
     var evidence: String? = nil
+    var operation: String? = nil
 }
 
 struct DaemonState: Decodable, Equatable {

@@ -1395,3 +1395,24 @@ func TestRevokingABrowserSignsOutThatBrowserAlone(t *testing.T) {
 		}
 	}
 }
+
+func TestDashboardHistoryNamesTheQueuedOperation(t *testing.T) {
+	d, registry, _, _, to := daemonFixture(t)
+	if _, err := registry.QueueCompact(to.ID); err != nil {
+		t.Fatal(err)
+	}
+	handler := dashboardRouter(d)
+	request := httptest.NewRequest(http.MethodGet, "/api/history?limit=5", nil)
+	request.AddCookie(browserCookie(t, d.Registry))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	var page struct {
+		Items []dashboardHistory `json:"items"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s err=%v", response.Code, response.Body.String(), err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Kind != "queued" || page.Items[0].Operation != registrypkg.QueueOperationCompact {
+		t.Fatalf("history=%+v", page.Items)
+	}
+}

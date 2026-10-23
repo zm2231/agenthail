@@ -240,6 +240,7 @@ type dashboardHistory struct {
 	Result          string                   `json:"result,omitempty"`
 	Error           string                   `json:"error,omitempty"`
 	Evidence        surface.DeliveryEvidence `json:"evidence,omitempty"`
+	Operation       registry.QueueOperation  `json:"operation,omitempty"`
 }
 
 func (d *Daemon) startDashboard() (*dashboardServer, error) {
@@ -517,7 +518,7 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (d *Daemon) dashboardHistoryEntry(entry registry.HistoryEntry) dashboardHistory {
-	return dashboardHistory{ID: entry.ID, CreatedAt: entry.CreatedAt, Kind: entry.Kind, SessionID: d.publicSessionID(entry.SessionID), SourceSessionID: d.publicSessionID(entry.SourceSessionID), Target: d.resolveDisplay(entry.SessionID), Source: d.resolveDisplay(entry.SourceSessionID), QueueID: entry.QueueID, Message: entry.Message, Result: entry.Result, Error: entry.Error, Evidence: entry.Evidence}
+	return dashboardHistory{ID: entry.ID, CreatedAt: entry.CreatedAt, Kind: entry.Kind, SessionID: d.publicSessionID(entry.SessionID), SourceSessionID: d.publicSessionID(entry.SourceSessionID), Target: d.resolveDisplay(entry.SessionID), Source: d.resolveDisplay(entry.SourceSessionID), QueueID: entry.QueueID, Message: entry.Message, Result: entry.Result, Error: entry.Error, Evidence: entry.Evidence, Operation: entry.Operation}
 }
 
 func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.ResponseWriter, r *http.Request) {

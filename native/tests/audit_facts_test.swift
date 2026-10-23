@@ -30,6 +30,10 @@ struct AuditFactsTest {
         expect(AuditFacts.kindLabel("transport-accepted") == "Transport accepted", "hyphenated kinds read as words")
         let selfRoute = event(#"{"id":6,"createdAt":"","kind":"peer_send","sessionId":"s3","source":"claude/builder","target":"claude/builder","message":"m"}"#)
         expect(AuditFacts.source(selfRoute) == nil && AuditFacts.target(selfRoute) == "claude/builder", "a route to itself names the session once")
+        let compacted = event(#"{"id":7,"createdAt":"","kind":"delivered","queueId":3,"operation":"compact"}"#)
+        let message = event(#"{"id":8,"createdAt":"","kind":"delivered","queueId":4,"operation":"message"}"#)
+        expect(AuditFacts.heading(compacted) == "Delivered · Compact", "a queued operation is named on its history row")
+        expect(AuditFacts.heading(message) == "Delivered" && AuditFacts.heading(routed) == "Peer send", "a message or an older row reads as its kind")
         print("audit facts tests passed")
     }
 

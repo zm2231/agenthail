@@ -1658,3 +1658,54 @@ func TestControlOperationsWaitForIdleAndAreNeverSteered(t *testing.T) {
 		t.Fatal("a goal command that is still waiting on its outcome was reclaimed")
 	}
 }
+
+func TestHistoryRowsNameTheirQueueOperation(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	compactID, err := r.QueueCompact("session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	goalID, err := r.QueueGoal("session", "/goal tests pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	messageID, err := r.QueueMessageWithOptions("session", "hello", "", surface.SendOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int64{compactID, goalID, messageID} {
+		if err := r.RecordHistory(HistoryEntry{Kind: "delivered", SessionID: "session", QueueID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.RecordHistory(HistoryEntry{Kind: "session-operation", SessionID: "session", Result: "adopt"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`DELETE FROM sessions WHERE id='session'`); err != nil {
+		t.Fatal(err)
+	}
+	var queued int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM message_queue`).Scan(&queued); err != nil || queued != 0 {
+		t.Fatalf("queue rows after the session was deleted=%d err=%v", queued, err)
+	}
+	want := map[int64]QueueOperation{compactID: QueueOperationCompact, goalID: QueueOperationGoal, messageID: QueueOperationMessage, 0: ""}
+	byList, err := r.ListHistory(50, "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPage, _, err := r.ListHistoryPage(50, 0, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, entries := range map[string][]HistoryEntry{"session history": byList, "history page": byPage} {
+		if len(entries) < 4 {
+			t.Fatalf("%s: entries=%+v", name, entries)
+		}
+		for _, entry := range entries {
+			if entry.Operation != want[entry.QueueID] {
+				t.Fatalf("%s: entry %+v has operation %q, want %q", name, entry, entry.Operation, want[entry.QueueID])
+			}
+		}
+	}
+}
