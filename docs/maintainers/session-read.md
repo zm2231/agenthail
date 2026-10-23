@@ -48,11 +48,16 @@ transaction as the page. Open `/api/v1/session-stream?id=<session>&after=<journa
 to receive subsequent changes rather than replaying the entire retained journal.
 An older-page request does not change the active stream cursor.
 
-Every newest-page read goes through the shared session source and waits at
-most two seconds for its first pass. A cold journal is seeded by that pass. A
-seeded journal backed by a transcript (Claude, and Codex with a local
-transcript) catches up by reading the transcript newest-first until it meets
-the journal, so turns written while no source ran appear on the next read.
+Every newest-page read starts the shared session source. A streamable session
+whose journal was seeded before is served from the journal at once; what the
+source then catches up gets later seqs and reaches the client on the session
+stream it opens after the page's `journalSeq`. A journal written by an earlier
+item derivation is not: the source's first pass rebuilds it, dropping rows the
+stream has no removal for, so its page waits for that pass. Any other newest-page read waits
+at most two seconds for the source's first pass, and a cold journal is seeded
+by that pass. A seeded journal backed by a transcript (Claude, and Codex with a
+local transcript) catches up by reading the transcript newest-first until it
+meets the journal, so turns written while no source ran appear after it.
 A Claude journal also keeps a transcript checkpoint in
 `session_journal_state.transcript_checkpoint`: the byte offset and file
 identity up to which it holds the transcript's items. The seed, each catch-up,
