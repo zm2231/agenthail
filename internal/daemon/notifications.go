@@ -57,7 +57,10 @@ func SaveNotificationConfig(config NotificationConfig) error {
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return fmt.Errorf("create notification config directory: %w", err)
 	}
-	return atomicfile.WriteSynced(NotificationConfigPath(), append(data, '\n'), 0600)
+	if err := atomicfile.WriteSynced(NotificationConfigPath(), append(data, '\n'), 0600); err != nil {
+		return fmt.Errorf("write notification config: %w", err)
+	}
+	return nil
 }
 
 func GetNotificationStatus() NotificationStatus {
