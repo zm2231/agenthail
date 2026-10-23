@@ -84,5 +84,12 @@ func claudeRecordPredatesProcess(record map[string]any, pid int) bool {
 		return true
 	}
 	started, err := processStartedAt(pid)
-	return err == nil && !started.After(time.UnixMilli(int64(at)))
+	return err == nil && claudeProcessStartedBy(started, int64(at))
+}
+
+// claudeProcessStartedBy reports whether a process that started at started
+// was running by startedAt, which is whole milliseconds, so the process start
+// is compared to the millisecond.
+func claudeProcessStartedBy(started time.Time, startedAt int64) bool {
+	return !started.Truncate(time.Millisecond).After(time.UnixMilli(startedAt))
 }

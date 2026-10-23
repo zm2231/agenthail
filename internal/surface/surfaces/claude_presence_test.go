@@ -141,3 +141,13 @@ func TestARecordWithoutProcStartIsLiveOnlyForTheProcessThatWroteIt(t *testing.T)
 		t.Fatal("a record with no start time to compare is not live")
 	}
 }
+
+func TestARecordWrittenInTheMillisecondItsProcessStartedIsLive(t *testing.T) {
+	started := time.UnixMilli(1_792_000_000_123).Add(456 * time.Microsecond)
+	if !claudeProcessStartedBy(started, started.UnixMilli()) {
+		t.Fatalf("a record written in the millisecond its process started (%s) predates it", started.Format(time.StampMicro))
+	}
+	if claudeProcessStartedBy(started, started.UnixMilli()-1) {
+		t.Fatal("a record written the millisecond before its process started is live, so a reused pid would pass")
+	}
+}
