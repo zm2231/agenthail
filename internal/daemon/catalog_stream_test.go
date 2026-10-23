@@ -120,6 +120,43 @@ func TestActiveCatalogSubscriberReceivesTerminalDeliveryProblemOnce(t *testing.T
 	ensureNoCatalogEvent(t, events)
 }
 
+func TestActiveCatalogSubscriberDropsADeliveryProblemALaterDeliverySettled(t *testing.T) {
+	d, store, _, sender, target := daemonFixture(t)
+	queueID, _, err := store.QueueDeliveryWithIntent(target.ID, "deliver later", "settled", surface.SendOptions{SourceSessionID: sender.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.ClaimNextMessage(target.ID, time.Now())
+	if err != nil || item == nil || item.ID != queueID {
+		t.Fatalf("claim=%+v err=%v", item, err)
+	}
+	if _, err := store.DeadLetterMessage(item.ID, errors.New("target rejected input")); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.catalog.flushCommitted(); err != nil {
+		t.Fatal(err)
+	}
+	_, latest, err := store.CatalogState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, follower, err := d.catalog.subscribe(latest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := followCatalog(t, follower)
+	defer follower.Cancel()
+	if _, err := store.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: sender.ID, TargetSessionID: target.ID, Status: registry.DeliveryIntentSent, Evidence: surface.EvidenceTransportAccepted}); err != nil {
+		t.Fatal(err)
+	}
+	d.settleDeliveryProblems()
+	if event := receiveCatalogEvent(t, events); event.Type != "delivery.dismissed" {
+		t.Fatalf("event=%+v", event)
+	}
+	d.settleDeliveryProblems()
+	ensureNoCatalogEvent(t, events)
+}
+
 func TestCatalogScanFlushesCommittedDeliveryProblemBeforeObserving(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	store, err := registry.Open(path)

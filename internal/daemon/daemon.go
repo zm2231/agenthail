@@ -338,10 +338,23 @@ func (d *Daemon) runCatalogStatus(ctx context.Context) {
 		case <-statusTicker.C:
 			d.refreshCatalogStatus(ctx)
 		case <-problemTicker.C:
-			if _, err := d.Registry.SettleDeliveryProblems(); err != nil {
-				d.log.Printf("settle delivery problems: %s", err)
-			}
+			d.settleDeliveryProblems()
 		}
+	}
+}
+
+// settleDeliveryProblems dismisses the delivery failures that no longer need
+// anyone and tells live clients.
+func (d *Daemon) settleDeliveryProblems() {
+	settled, err := d.Registry.SettleDeliveryProblems()
+	if err != nil {
+		d.log.Printf("settle delivery problems: %s", err)
+	}
+	if settled == 0 {
+		return
+	}
+	if err := d.catalog.flushCommitted(); err != nil {
+		d.log.Printf("publish settled delivery problems: %s", err)
 	}
 }
 
