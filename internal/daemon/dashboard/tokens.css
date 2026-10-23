@@ -2569,3 +2569,19 @@ select {
   border-left: 3px solid var(--warn);
   color: var(--muted);
 }
+html[data-backdrop] body {
+  background: transparent;
+}
+.ui-backdrop,
+.ui-backdrop > div {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+.ui-backdrop {
+  z-index: -1;
+  display: none;
+}
+html[data-backdrop] .ui-backdrop {
+  display: block;
+}

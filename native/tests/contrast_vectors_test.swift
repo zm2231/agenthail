@@ -1,4 +1,5 @@
 @testable import AgenthailHelpers
+import CoreGraphics
 import Foundation
 
 @main
@@ -6,6 +7,36 @@ struct ContrastVectorsTest {
     static let fixture = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("scripts/fixtures/contrast-vectors.json")
+
+    static func bytes(_ image: CGImage) -> [UInt8] {
+        let w = image.width, h = image.height
+        var out = [UInt8](repeating: 0, count: w * h * 4)
+        let ctx = CGContext(data: &out, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return out
+    }
+
+    static func backdrop() -> [String: Any] {
+        let colours: [[Float]] = [[0.1, 0.2, 0.5], [0.9, 0.3, 0.2], [0.2, 0.8, 0.4], [0.05, 0.05, 0.1], [1, 1, 1], [0.5, 0.1, 0.6], [0.3, 0.3, 0.3], [0.95, 0.85, 0.2], [0, 0.4, 0.9]]
+        let mesh = BackdropRenderer.mesh(columns: 3, rows: 3, colors: colours.map { BackdropRGB($0[0], $0[1], $0[2]) }, aspect: 1.6)!
+        let pixels = bytes(mesh)
+        let points = [(0, 0), (191, 0), (0, mesh.height - 1), (191, mesh.height - 1), (96, mesh.height / 2), (40, 17), (150, 90), (77, 101)]
+        let grain = bytes(BackdropRenderer.grain()!)
+        return [
+            "mesh": [
+                "columns": 3, "rows": 3, "aspect": 1.6, "colours": colours, "width": mesh.width, "height": mesh.height,
+                "samples": points.map { p -> [String: Any] in
+                    let i = (p.1 * mesh.width + p.0) * 4
+                    return ["x": p.0, "y": p.1, "rgb": [pixels[i], pixels[i + 1], pixels[i + 2]]]
+                },
+            ],
+            "grain": [
+                "size": 256,
+                "first": (0..<32).map { grain[$0 * 4] },
+                "sum": (0..<(256 * 256)).reduce(0) { $0 + Int(grain[$1 * 4]) },
+            ],
+        ]
+    }
 
     static func vectors() -> [String: Any] {
         let channels: [Float] = [0, 0.02, 0.04045, 0.1, 0.25, 0.5, 0.75, 0.9, 1]
@@ -49,6 +80,7 @@ struct ContrastVectorsTest {
         }
         return [
             "accent": accents,
+            "backdrop": backdrop(),
             "margin": ScrimField.margin,
             "tintDepth": ScrimField.tintDepth,
             "linear": channels.map { ["in": $0, "out": ScrimField.linear($0)] },

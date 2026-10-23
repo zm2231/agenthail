@@ -1,9 +1,11 @@
-import { foregroundOn, readableOnTint } from "./ui-contrast.js";
+import { createBackdrop, parseBackground } from "./ui-backdrop.js";
+import { foregroundOn, luminance, readableOnTint } from "./ui-contrast.js";
 
 const ACCENT_TOKENS = ["--accent", "--accent-soft", "--on-accent"];
 const SURFACES = ["--paper", "--panel", "--raised", "--hover"];
 const STORED = "agenthail.ui";
 const SOFT = 0.12;
+const ROLES = ["--ink", "--muted", "--quiet"];
 
 export function resolveTheme(theme, prefersDark) {
   if (theme === "dark" || theme === "light") return theme;
@@ -40,6 +42,28 @@ export function applyTheme(document, values, prefersDark, colourOf) {
   return theme;
 }
 
+export function backdropLook(values, theme, { sessionOpen, highContrast, colourOf, width, height }) {
+  const number = (key, fallback) => (Number.isFinite(values[key]) ? values[key] : fallback);
+  const ground = colourOf("var(--paper)");
+  return {
+    spec: parseBackground(theme === "light" ? values["background.light"] : values.background),
+    fit: values["background.fit"],
+    position: values["background.position"],
+    strength: number(sessionOpen ? "background.session-opacity" : "background.opacity", 1),
+    dim: number("background.dim", 0),
+    texture: values.texture,
+    textureStrength: number("texture.strength", 0),
+    textureSpacing: number("texture.spacing", 3),
+    polarity: theme,
+    ground: ground || (theme === "dark" ? [0, 0, 0] : [1, 1, 1]),
+    roles: ROLES.map((token) => colourOf(`var(${token})`)).filter(Boolean).map(luminance),
+    target: highContrast ? 7 : number("contrast.target", 4.5),
+    readable: highContrast || values["glass.readability"] !== "off",
+    width,
+    height,
+  };
+}
+
 function browserColour(document) {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 1;
@@ -59,15 +83,39 @@ function browserColour(document) {
   };
 }
 
-export function start({ document, fetch, EventSource, matchMedia, storage, colourOf, debounce = 150 }) {
+async function loadImage(url) {
+  const image = new Image();
+  image.src = url;
+  try {
+    await image.decode();
+    return image;
+  } catch {
+    return null;
+  }
+}
+
+export function start({ document, fetch, EventSource, matchMedia, storage, colourOf, backdrop, viewport, MutationObserver, addEventListener, debounce = 150 }) {
   const scheme = matchMedia("(prefers-color-scheme: dark)");
+  const contrast = matchMedia("(prefers-contrast: more)");
   let values = {};
   try {
     values = JSON.parse(storage?.getItem(STORED) || "{}");
   } catch {
     values = {};
   }
-  const apply = () => applyTheme(document, values, scheme.matches, colourOf);
+  let painting = Promise.resolve();
+  const apply = () => {
+    const theme = applyTheme(document, values, scheme.matches, colourOf);
+    if (!backdrop) return;
+    const size = viewport();
+    const look = backdropLook(values, theme, {
+      sessionOpen: document.documentElement.hasAttribute("data-session-open"),
+      highContrast: contrast.matches,
+      colourOf,
+      ...size,
+    });
+    painting = backdrop.render(look);
+  };
   apply();
 
   let generation = 0;
@@ -89,12 +137,21 @@ export function start({ document, fetch, EventSource, matchMedia, storage, colou
     clearTimeout(timer);
     timer = setTimeout(load, debounce);
   };
+  let resizeTimer = null;
   scheme.addEventListener?.("change", apply);
+  contrast.addEventListener?.("change", apply);
+  if (backdrop) {
+    if (MutationObserver) new MutationObserver(apply).observe(document.documentElement, { attributes: true, attributeFilter: ["data-session-open"] });
+    addEventListener?.("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(apply, debounce);
+    });
+  }
   const events = new EventSource("/api/v1/events");
   events.addEventListener("ui.changed", reload);
   events.addEventListener("stream.reset", reload);
   const ready = load();
-  return { ready, reload, events, current: () => values };
+  return { ready, reload, events, current: () => values, painted: () => painting };
 }
 
 if (typeof window !== "undefined" && window.document) {
@@ -105,5 +162,9 @@ if (typeof window !== "undefined" && window.document) {
     matchMedia: window.matchMedia.bind(window),
     storage: window.localStorage,
     colourOf: browserColour(window.document),
+    backdrop: createBackdrop({ document: window.document, loadImage }),
+    viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+    MutationObserver: window.MutationObserver,
+    addEventListener: window.addEventListener.bind(window),
   });
 }

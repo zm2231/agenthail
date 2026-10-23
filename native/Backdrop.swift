@@ -231,7 +231,7 @@ enum BackdropRenderer {
         return ctx.makeImage()
     }
 
-    private static func mesh(columns: Int, rows: Int, colors: [BackdropRGB], aspect: CGFloat) -> CGImage? {
+    static func mesh(columns: Int, rows: Int, colors: [BackdropRGB], aspect: CGFloat) -> CGImage? {
         let mw = 192, mh = max(Int(192 / max(aspect, 0.1)), 2)
         guard let ctx = CGContext(data: nil, width: mw, height: mh, bitsPerComponent: 8, bytesPerRow: mw * 4, space: srgb, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
               let data = ctx.data else { return nil }
@@ -335,7 +335,7 @@ enum BackdropRenderer {
         return ctx.makeImage()!
     }
 
-    private static func grain() -> CGImage? {
+    static func grain() -> CGImage? {
         let size = 256
         guard let ctx = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue),
               let data = ctx.data else { return nil }

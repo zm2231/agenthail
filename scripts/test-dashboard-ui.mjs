@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as contrast from "../internal/daemon/dashboard/js/ui-contrast.js";
-import { applyTheme, parseHex, resolveTheme, start } from "../internal/daemon/dashboard/js/ui.js";
+import * as backdrop from "../internal/daemon/dashboard/js/ui-backdrop.js";
+import { applyTheme, backdropLook, parseHex, resolveTheme, start } from "../internal/daemon/dashboard/js/ui.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const vectors = JSON.parse(fs.readFileSync(path.join(root, "scripts/fixtures/contrast-vectors.json"), "utf8"));
@@ -208,6 +209,168 @@ const colourOf = (doc) => (value) => surfaces[doc.documentElement.dataset.theme]
   const view = start({ document: doc, fetch: async () => { throw new Error("offline"); }, EventSource: Silent, matchMedia: () => ({ matches: true }), storage: null, colourOf: colourOf(doc) });
   await view.ready;
   assert.equal(doc.documentElement.dataset.theme, "dark", "an unreachable daemon leaves the system appearance");
+}
+
+{
+  const grain = backdrop.grainPixels();
+  assert.deepEqual([...grain.slice(0, 32)], vectors.backdrop.grain.first, "grain is the Mac's tile, byte for byte");
+  assert.equal(grain.reduce((a, b) => a + b, 0), vectors.backdrop.grain.sum);
+
+  const mesh = vectors.backdrop.mesh;
+  assert.deepEqual(backdrop.meshSize(mesh.aspect), { width: mesh.width, height: mesh.height });
+  const pixels = backdrop.meshPixels({ columns: mesh.columns, rows: mesh.rows, colours: mesh.colours }, mesh.width, mesh.height);
+  for (const { x, y, rgb } of mesh.samples) {
+    const i = (y * mesh.width + x) * 4;
+    rgb.forEach((v, k) => assert.ok(Math.abs(pixels[i + k] - v) <= 1, `mesh pixel ${x},${y} matches the Mac: ${[...pixels.slice(i, i + 3)]} vs ${rgb}`));
+  }
+}
+
+{
+  assert.deepEqual(backdrop.parseBackground("none"), { kind: "none" });
+  assert.deepEqual(backdrop.parseBackground("image: art/tide-dark.jpg"), { kind: "image", path: "art/tide-dark.jpg" });
+  assert.deepEqual(backdrop.parseBackground("gradient: 90deg, #000000 0%, #ffffff 100%"), {
+    kind: "linear",
+    angle: 90,
+    stops: [{ colour: [0, 0, 0], location: 0 }, { colour: [1, 1, 1], location: 1 }],
+  });
+  assert.equal(backdrop.parseBackground("mesh: 2x2, #000000, #ffffff, #000000"), null, "a mesh with too few colours is refused");
+  assert.equal(backdrop.parseBackground("gradient: sunrise"), null, "the daemon expands presets; the page only draws what it resolved");
+  assert.equal(backdrop.parseBackground(undefined), null);
+
+  assert.equal(backdrop.pictureStyle({ kind: "none" }), null);
+  assert.equal(backdrop.pictureStyle({ kind: "desktop" }), null, "a browser cannot show the desktop");
+  const image = backdrop.pictureStyle({ kind: "image", path: "art/tide dark.jpg" }, "center", "top");
+  assert.equal(image.backgroundImage, 'url("/api/v1/ui/background?path=art%2Ftide%20dark.jpg")', "pictures load from the daemon");
+  assert.deepEqual([image.backgroundSize, image.backgroundRepeat, image.backgroundPosition], ["auto", "no-repeat", "center top"], "center keeps natural size; top pins it to the top, centred, as the Mac draws it");
+  assert.deepEqual(
+    Object.fromEntries(["cover", "contain", "tile"].map((fit) => [fit, backdrop.pictureStyle({ kind: "image", path: "a.png" }, fit, "left")]).map(([fit, s]) => [fit, [s.backgroundSize, s.backgroundRepeat, s.backgroundPosition]])),
+    { cover: ["cover", "no-repeat", "left center"], contain: ["contain", "no-repeat", "left center"], tile: ["auto", "repeat", "left top"] },
+  );
+  assert.equal(
+    backdrop.pictureStyle({ kind: "linear", angle: 90, stops: [{ colour: [1, 0, 0], location: 0 }, { colour: [0, 0, 1], location: 0.5 }] }).backgroundImage,
+    "linear-gradient(90deg, #ff0000 0%, #0000ff 50%)",
+    "ui.conf angles are CSS angles: 0deg starts at the bottom, 90deg on the left, as the Mac draws them",
+  );
+  assert.deepEqual(backdrop.imageRect(400, 300, 1000, 800, "center", "top"), { x: 300, y: 0, width: 400, height: 300 });
+  const cover = backdrop.imageRect(400, 300, 1000, 800, "cover", "bottom");
+  closeAll([cover.x, cover.y, cover.width, cover.height], [-100 / 3, 0, 3200 / 3, 800], "cover fills the window, centred across it");
+  const ninety = backdrop.gradientLine(90, 200, 100);
+  closeAll([ninety.x0, ninety.y0, ninety.x1, ninety.y1], [0, 50, 200, 50], "90deg runs left to right");
+  const zero = backdrop.gradientLine(0, 200, 100);
+  close(zero.y0, 100, "0deg starts at the bottom");
+  close(zero.y1, 0, "and ends at the top");
+
+  assert.equal(backdrop.textureStyle("scanlines", 0), null);
+  assert.match(backdrop.textureStyle("scanlines", 0.2, 4).backgroundImage, /rgb\(0 0 0 \/ 0\.2\) 0 1px, transparent 1px 4px/);
+  assert.deepEqual(backdrop.textureStyle("grain", 0.4), { opacity: "0.2", mixBlendMode: "overlay" });
+}
+
+{
+  const ink = contrast.luminance([0.93, 0.92, 0.9]);
+  const quiet = contrast.luminance([0.6, 0.58, 0.56]);
+  const ground = [0.09, 0.094, 0.102];
+  const shown = backdrop.composite([1, 1, 1], 0.5, ground, 0.25, "dark");
+  closeAll(shown, ground.map((g) => (g + (1 - g) * 0.5) * 0.75), "strength blends over the ground, then dim darkens");
+  closeAll(backdrop.composite([0, 0, 0], 1, [1, 1, 1], 0.5, "light"), [0.5, 0.5, 0.5], "dim lightens in light");
+
+  for (const [polarity, roles, base, samples] of [
+    ["dark", [ink, quiet], ground, [[0.05, 0.05, 0.05], [0.3, 0.6, 0.9], [0.95, 0.9, 0.8]]],
+    ["dark", [ink], ground, [[0.3, 0.6, 0.9], [0.95, 0.9, 0.8]]],
+    ["light", [contrast.luminance([0.2, 0.2, 0.2]), contrast.luminance([0.42, 0.41, 0.4])], [0.97, 0.96, 0.95], [[0.8, 0.2, 0.2], [0.1, 0.1, 0.3]]],
+  ]) {
+    for (const target of [4.5, 7]) {
+      const alpha = backdrop.pageScrim(samples, roles, polarity, target, base);
+      const under = (a) => samples.map((c) => c.map((v, i) => v + (base[i] - v) * a));
+      const worst = (a) => Math.min(...under(a).flatMap((c) => roles.map((role) => contrast.ratio(role, contrast.luminance(c)))));
+      if (worst(1) < target) {
+        assert.equal(alpha, 1, `when even the ground misses ${target}:1, the scrim is solid ground (${polarity})`);
+        continue;
+      }
+      assert.ok(worst(alpha) >= target, `the scrim brings every text role to ${target}:1 over every sample (${polarity}: ${worst(alpha)})`);
+      assert.ok(alpha === 0 || worst(alpha - 1 / 255) < target + contrast.MARGIN, `and is the least that does (${polarity} ${target})`);
+    }
+  }
+  assert.equal(backdrop.pageScrim([[0.02, 0.02, 0.02]], [ink], "dark", 4.5, ground), 0, "a dark enough picture needs no scrim");
+
+  const [bright] = backdrop.textureExtremes([0.2, 0.6, 0.8], "grain", 0.4, "dark");
+  closeAll(bright, [0.2 + 0.2 * 0.2, 0.6 + 0.4 * 0.2, 0.8 + 0.2 * 0.2], "grain's brightest overlay pixel is measured for light text");
+  const [darkest] = backdrop.textureExtremes([0.2, 0.6, 0.8], "grain", 0.4, "light");
+  closeAll(darkest, [0.2 - 0.2 * 0.2, 0.6 - 0.4 * 0.2, 0.8 - 0.2 * 0.2], "and its darkest for dark text");
+  assert.deepEqual(backdrop.textureExtremes([0.5, 0.5, 0.5], "scanlines", 0.2, "dark"), [], "scanlines only darken, which never hurts light text");
+  closeAll(backdrop.textureExtremes([0.5, 0.5, 0.5], "scanlines", 0.2, "light")[0], [0.4, 0.4, 0.4], "but they are measured for dark text");
+}
+
+{
+  const colours = { "var(--paper)": [0.09, 0.094, 0.102], "var(--ink)": [0.93, 0.92, 0.9], "var(--muted)": [0.75, 0.73, 0.7], "var(--quiet)": [0.6, 0.58, 0.56] };
+  const values = {
+    background: "image: art/tide-dark.jpg",
+    "background.light": "image: art/tide-light.jpg",
+    "background.opacity": 1,
+    "background.session-opacity": 0.4,
+    "background.dim": 0.2,
+    "background.fit": "cover",
+    "background.position": "center",
+    texture: "grain",
+    "texture.strength": 0.3,
+    "texture.spacing": 3,
+    "contrast.target": 4.5,
+    "glass.readability": "auto",
+  };
+  const base = { sessionOpen: false, highContrast: false, colourOf: (v) => colours[v], width: 1440, height: 900 };
+  const look = backdropLook(values, "dark", base);
+  assert.deepEqual(look.spec, { kind: "image", path: "art/tide-dark.jpg" });
+  assert.equal(look.strength, 1, "empty views use background.opacity");
+  assert.equal(look.roles.length, 3, "every text role is measured");
+  assert.equal(backdropLook(values, "dark", { ...base, sessionOpen: true }).strength, 0.4, "an open session uses background.session-opacity");
+  assert.equal(backdropLook(values, "light", base).spec.path, "art/tide-light.jpg", "light draws background.light");
+  assert.equal(backdropLook({ ...values, "glass.readability": "off" }, "dark", base).readable, false, "readability off uses the settings exactly");
+  const more = backdropLook({ ...values, "glass.readability": "off" }, "dark", { ...base, highContrast: true });
+  assert.deepEqual([more.readable, more.target], [true, 7], "increased contrast forces readability at 7:1");
+}
+
+{
+  const doc = fakeDocument();
+  const attributes = new Set();
+  doc.documentElement.hasAttribute = (name) => attributes.has(name);
+  doc.documentElement.dataset = {};
+  const renders = [];
+  let observer = null;
+  class FakeObserver {
+    constructor(callback) {
+      this.callback = callback;
+      observer = this;
+    }
+    observe(target, options) {
+      this.options = options;
+    }
+  }
+  const resizes = [];
+  class Silent {
+    addEventListener() {}
+  }
+  const values = { theme: "dark", "theme.accent": "system", background: "gradient: 90deg, #000000 0%, #ffffff 100%", "background.opacity": 1, "background.session-opacity": 0.3 };
+  const view = start({
+    document: doc,
+    fetch: async () => ({ ok: true, json: async () => ({ values }) }),
+    EventSource: Silent,
+    matchMedia: (query) => ({ matches: query.includes("dark") }),
+    storage: null,
+    colourOf: colourOf(doc),
+    backdrop: { render: async (look) => renders.push(look) },
+    viewport: () => ({ width: 800, height: 600 }),
+    MutationObserver: FakeObserver,
+    addEventListener: (type, handler) => resizes.push([type, handler]),
+    debounce: 1,
+  });
+  await view.ready;
+  const last = renders.at(-1);
+  assert.equal(last.spec.kind, "linear", "the page draws the background the daemon resolved");
+  assert.deepEqual([last.width, last.height, last.strength, last.target], [800, 600, 1, 4.5]);
+  assert.deepEqual(observer.options.attributeFilter, ["data-session-open"], "opening a session redraws");
+  attributes.add("data-session-open");
+  observer.callback();
+  assert.equal(renders.at(-1).strength, 0.3, "at the session strength");
+  assert.equal(resizes[0][0], "resize", "and resizing the window remeasures");
 }
 
 console.log("dashboard ui ok");
