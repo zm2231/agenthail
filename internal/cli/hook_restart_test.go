@@ -166,3 +166,33 @@ func TestAPromptSettledWhileNoDaemonHeldItIsNotShownForTheSessionsNextPrompt(t *
 		t.Fatalf("requests status=%d err=%v body=%s", status, err, body)
 	}
 }
+
+func TestAPromptAnsweredInTheTerminalWhileNoDaemonHeldItIsNotShownByTheNextDaemon(t *testing.T) {
+	h, stop := newPromptRestart(t)
+	h.heldRequest()
+	stop()
+	h.stillHeld()
+	h.claude.RecordStatus(restartConversation, h.claude.Home, "session_question", "busy", "", time.Now().Add(time.Second))
+
+	t.Cleanup(h.serve())
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		select {
+		case decision := <-h.decided:
+			if decision != nil {
+				t.Fatalf("a prompt answered in the terminal got decision %+v", decision)
+			}
+			if waiting, err := h.store.SessionWaiting(restartConversation); err != nil || waiting != nil {
+				t.Fatalf("the session still waits on %+v err=%v", waiting, err)
+			}
+			return
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the hook never ended")
+		}
+		body, status, err := h.client.call(context.Background(), http.MethodGet, "/api/v1/requests", url.Values{"sessionId": {restartConversation}}, nil, nil)
+		if err == nil && status == http.StatusOK && strings.Contains(string(body), "Which branch?") {
+			t.Fatalf("the next daemon showed a prompt answered in the terminal: %s", body)
+		}
+	}
+}
