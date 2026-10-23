@@ -138,6 +138,23 @@ func SameActivity(left, right *Activity) bool {
 	return moved < ActivityProgressStep && moved > -ActivityProgressStep
 }
 
+// Plan is how far a session is through the task list its agent keeps:
+// TaskCreate and TaskUpdate (or TodoWrite) for Claude, update_plan for Codex.
+// Current is the step in progress, when one is.
+type Plan struct {
+	Done    int    `json:"done"`
+	Total   int    `json:"total"`
+	Current string `json:"current,omitempty"`
+}
+
+// SamePlan reports whether two readings show the same progress.
+func SamePlan(left, right *Plan) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
+}
+
 // SameUsageLimit reports whether two readings name the same limit.
 func SameUsageLimit(left, right *UsageLimit) bool {
 	if left == nil || right == nil {
@@ -188,6 +205,7 @@ type Session struct {
 	BackgroundTasks       *BackgroundTasks  `json:"backgroundTasks,omitempty"`
 	UsageLimit            *UsageLimit       `json:"usageLimit,omitempty"`
 	Activity              *Activity         `json:"activity,omitempty"`
+	Plan                  *Plan             `json:"plan,omitempty"`
 	Transcript            string            `json:"transcript"`
 	HasLocal              bool              `json:"hasLocal"`
 	Source                string            `json:"source,omitempty"`
@@ -774,6 +792,7 @@ type TurnObservation struct {
 	BackgroundTasks *BackgroundTasks `json:"backgroundTasks,omitempty"`
 	UsageLimit      *UsageLimit      `json:"usageLimit,omitempty"`
 	Activity        *Activity        `json:"activity,omitempty"`
+	Plan            *Plan            `json:"plan,omitempty"`
 	// LimitStop is a last turn a usage limit refused, kept after the limit
 	// resets since nothing has run in the session since.
 	LimitStop *LimitStop `json:"limitStop,omitempty"`

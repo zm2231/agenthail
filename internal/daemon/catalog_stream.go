@@ -585,7 +585,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 			d.requestCatalogDiscovery()
 			continue
 		}
-		if refreshed.Status == entry.session.Status && surface.SameWaiting(refreshed.WaitingOn, entry.session.WaitingOn) && surface.SameBackground(refreshed.BackgroundTasks, entry.session.BackgroundTasks) && surface.SameUsageLimit(refreshed.UsageLimit, entry.session.UsageLimit) && surface.SameActivity(refreshed.Activity, entry.session.Activity) && refreshed.PendingModel == entry.session.PendingModel {
+		if refreshed.Status == entry.session.Status && surface.SameWaiting(refreshed.WaitingOn, entry.session.WaitingOn) && surface.SameBackground(refreshed.BackgroundTasks, entry.session.BackgroundTasks) && surface.SameUsageLimit(refreshed.UsageLimit, entry.session.UsageLimit) && surface.SameActivity(refreshed.Activity, entry.session.Activity) && surface.SamePlan(refreshed.Plan, entry.session.Plan) && refreshed.PendingModel == entry.session.PendingModel {
 			continue
 		}
 		if config == nil {
@@ -1023,7 +1023,7 @@ func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surfa
 	if session.Surface == surface.KindClaude {
 		configRoot = surface.ClaudeSessionConfigRoot(d.claudeConfigRoots(), session.Transcript)
 	}
-	return dashboardSession{ID: session.ID, Surface: session.Surface, RuntimeKind: session.RuntimeKind, ConfiguredModel: session.ConfiguredModel, PendingModel: session.PendingModel, ClaudeConfigRoot: configRoot, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, BackgroundTasks: session.BackgroundTasks, UsageLimit: session.UsageLimit, LimitResume: limitResume, Activity: session.Activity, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, Project: identity.Project, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Delegated: session.Delegated(), Subagents: session.Subagents, Holders: session.Holders, ObservedSubagents: session.Subagents, Host: &host}
+	return dashboardSession{ID: session.ID, Surface: session.Surface, RuntimeKind: session.RuntimeKind, ConfiguredModel: session.ConfiguredModel, PendingModel: session.PendingModel, ClaudeConfigRoot: configRoot, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, BackgroundTasks: session.BackgroundTasks, UsageLimit: session.UsageLimit, LimitResume: limitResume, Activity: session.Activity, Plan: session.Plan, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, Project: identity.Project, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Delegated: session.Delegated(), Subagents: session.Subagents, Holders: session.Holders, ObservedSubagents: session.Subagents, Host: &host}
 }
 
 type catalogStoredListing struct {

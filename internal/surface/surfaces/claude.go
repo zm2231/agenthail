@@ -716,6 +716,7 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 	sess.BackgroundTasks = nil
 	sess.UsageLimit = nil
 	sess.Activity = nil
+	sess.Plan = nil
 	if sess.HasLocal {
 		if observation, observeErr := c.Observe(ctx, sess); observeErr == nil && observation.Status != surface.StatusUnknown {
 			sess.Status = observation.Status
@@ -723,6 +724,7 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 			sess.BackgroundTasks = observation.BackgroundTasks
 			sess.UsageLimit = observation.UsageLimit
 			sess.Activity = observation.Activity
+			sess.Plan = observation.Plan
 		}
 	}
 	if sess.Activity != nil && sess.Activity.LastProgressAt.After(sess.LastActive) {
@@ -1034,6 +1036,7 @@ func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surfa
 	if err != nil {
 		return nil, err
 	}
+	observation.Plan = state.tasks.plan
 	compactPending := state.compactPending()
 	if !state.hasCurrent {
 		transcriptCanSetReady := observation.Status != surface.StatusOffline || claudeProcessAlive(sess.PID)

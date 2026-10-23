@@ -782,6 +782,7 @@ type quietStatusSurface struct {
 	*localStatusSurface
 	mu       sync.Mutex
 	activity *surface.Activity
+	plan     *surface.Plan
 }
 
 func (s *quietStatusSurface) set(activity *surface.Activity) {
@@ -790,14 +791,24 @@ func (s *quietStatusSurface) set(activity *surface.Activity) {
 	s.activity = activity
 }
 
+func (s *quietStatusSurface) setPlan(plan *surface.Plan) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.plan = plan
+}
+
 func (s *quietStatusSurface) LocalStatus(ctx context.Context, session surface.Session) (surface.Session, error) {
 	session, err := s.localStatusSurface.LocalStatus(ctx, session)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	session.Activity = nil
+	session.Activity, session.Plan = nil, nil
 	if session.ID == "from" && s.activity != nil {
 		copied := *s.activity
 		session.Activity = &copied
+	}
+	if session.ID == "from" && s.plan != nil {
+		copied := *s.plan
+		session.Plan = &copied
 	}
 	return session, err
 }
@@ -860,6 +871,59 @@ func TestAWorkingRowCarriesItsActivityAndRepublishesOnlyWhenItSaysSomethingNew(t
 	d.refreshCatalogStatus(context.Background())
 	if got := activity(); got != nil {
 		t.Fatalf("an idle row still carries activity %+v", got)
+	}
+}
+
+func TestARowCarriesItsPlanAndRepublishesOnlyWhenItMoves(t *testing.T) {
+	d, store, local := localStatusFixture(t)
+	source := &quietStatusSurface{localStatusSurface: local}
+	d.Surfaces = []surface.Surface{source}
+	source.setPlan(&surface.Plan{Done: 1, Total: 3, Current: "Tracing callers"})
+	local.writeStatus(t, "from", surface.StatusBusy)
+	d.discoverCatalog(context.Background())
+	d.refreshCatalogStatus(context.Background())
+	plan := func() *surface.Plan {
+		t.Helper()
+		state, err := d.dashboardState(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, session := range state.Sessions {
+			if session.ID == "from" {
+				return session.Plan
+			}
+		}
+		t.Fatal("no row for the session")
+		return nil
+	}
+	if got := plan(); got == nil || *got != (surface.Plan{Done: 1, Total: 3, Current: "Tracing callers"}) {
+		t.Fatalf("snapshot plan=%+v", got)
+	}
+
+	after := latestCatalogSeq(t, store)
+	local.writeStatus(t, "from", surface.StatusBusy)
+	d.refreshCatalogStatus(context.Background())
+	if events := catalogStatusEvents(t, store, after, "from"); len(events) != 0 {
+		t.Fatalf("an unchanged plan republished the row %d times", len(events))
+	}
+
+	for index, next := range []surface.Plan{{Done: 2, Total: 3, Current: "Tracing callers"}, {Done: 2, Total: 4, Current: "Tracing callers"}, {Done: 2, Total: 4, Current: "Running gates"}} {
+		source.setPlan(&next)
+		local.writeStatus(t, "from", surface.StatusBusy)
+		d.refreshCatalogStatus(context.Background())
+		if events := catalogStatusEvents(t, store, after, "from"); len(events) != index+1 {
+			t.Fatalf("plan %+v published %d events, want %d", next, len(events), index+1)
+		}
+		if got := plan(); got == nil || *got != next {
+			t.Fatalf("snapshot plan=%+v, want %+v", got, next)
+		}
+	}
+
+	source.setPlan(nil)
+	local.writeStatus(t, "from", surface.StatusIdle)
+	d.refreshCatalogStatus(context.Background())
+	if got := plan(); got != nil {
+		t.Fatalf("a row whose plan went away still carries %+v", got)
 	}
 }
 

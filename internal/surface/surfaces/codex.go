@@ -35,6 +35,8 @@ type Codex struct {
 	lastSweep    time.Time
 	usageMu      sync.Mutex
 	usageReads   map[string]*codexUsageRead
+	planMu       sync.Mutex
+	planState    map[string]*codexPlanState
 }
 
 // codexDesktopRunsHere is whether Codex Desktop can run on this machine;
@@ -346,7 +348,7 @@ func (c *Codex) list(ctx context.Context, sweep bool) ([]surface.Session, bool, 
 	}
 	out := make([]surface.Session, 0, len(byID))
 	for _, session := range byID {
-		c.reconcileLocalStatus(&session)
+		c.reconcileLocalStatus(ctx, &session)
 		applyCodexPendingModel(&session)
 		out = append(out, session)
 	}
@@ -771,6 +773,11 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 		value, _ := result["thread"].(map[string]any)
 		thread.Waiting = codexWaitingKind(value["status"])
 		observation = codexObservation(thread)
+	}
+	if path := codexTranscriptPath(sess); path != "" {
+		if info, err := os.Stat(path); err == nil {
+			observation.Plan = c.plan(ctx, path, info)
+		}
 	}
 	return observation, nil
 }

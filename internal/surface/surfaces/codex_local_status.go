@@ -17,7 +17,7 @@ const (
 	codexBusyFreshness   = 15 * time.Minute
 )
 
-func (c *Codex) reconcileLocalStatus(session *surface.Session) {
+func (c *Codex) reconcileLocalStatus(ctx context.Context, session *surface.Session) {
 	path := codexTranscriptPath(session)
 	if path == "" {
 		return
@@ -29,7 +29,7 @@ func (c *Codex) reconcileLocalStatus(session *surface.Session) {
 	}
 	session.Transcript = path
 	session.HasLocal = true
-	applyCodexTranscriptStatus(session, info)
+	c.applyCodexTranscriptStatus(ctx, session, info)
 }
 
 // applyCodexTranscriptStatus lets the transcript's latest task lifecycle
@@ -38,7 +38,8 @@ func (c *Codex) reconcileLocalStatus(session *surface.Session) {
 // carries the open turn's activity even after the rollout has gone quiet
 // for longer than the transcript alone counts as busy, since the runtime
 // still reports the turn running.
-func applyCodexTranscriptStatus(session *surface.Session, info os.FileInfo) {
+func (c *Codex) applyCodexTranscriptStatus(ctx context.Context, session *surface.Session, info os.FileInfo) {
+	session.Plan = c.plan(ctx, session.Transcript, info)
 	status, activity := codexTranscriptTurn(session.Transcript, info.ModTime(), time.Now())
 	session.Activity = nil
 	if status != surface.StatusUnknown {
@@ -61,7 +62,7 @@ func (c *Codex) LocalStatusFiles(session surface.Session) []string {
 	return files
 }
 
-func (c *Codex) LocalStatus(_ context.Context, session surface.Session) (surface.Session, error) {
+func (c *Codex) LocalStatus(ctx context.Context, session surface.Session) (surface.Session, error) {
 	applyCodexPendingModel(&session)
 	if session.Transcript == "" {
 		return session, nil
@@ -70,7 +71,7 @@ func (c *Codex) LocalStatus(_ context.Context, session surface.Session) (surface
 	if err != nil {
 		return session, err
 	}
-	applyCodexTranscriptStatus(&session, info)
+	c.applyCodexTranscriptStatus(ctx, &session, info)
 	return session, nil
 }
 

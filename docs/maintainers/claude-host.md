@@ -268,6 +268,37 @@ that a session the runtime still reports busy keeps the turn's activity, so a
 hung Codex turn reads as quiet the same way. `noProcess` is never set for
 Codex: a turn the runtime does not report running is not working.
 
+## Task progress
+
+A session whose agent keeps a task list carries `plan{done, total, current}` on
+the session and the dashboard projection. `current` is the step in progress,
+as its active form when the agent gave one. Older clients ignore the field and
+clients treat its absence as no plan.
+
+Claude keeps the list itself in `<config root>/tasks/<list id>/<n>.json`, one
+file per task. The list id is `CLAUDE_CODE_TASK_LIST_ID`, else the agent
+team's name, else the session id, with anything outside `[a-zA-Z0-9_-]`
+replaced by `-`. The transcript only shows the calls: a `TaskCreate` result
+names the task's id and subject, a `TaskUpdate` result its id. The daemon
+reads the directory named for the session id, and only on an observation that
+follows a new task result, never on a scan that brings none. It counts the
+list as the session's own only when the newest task result agrees with it: the
+created task is there with the same subject, or the deleted one is gone. A
+list kept under another id, as with `CLAUDE_CODE_TASK_LIST_ID` or a team,
+fails that check and the session shows no plan rather than someone else's.
+A `TodoWrite` call carries the whole list and sets the plan directly.
+
+Codex sends its plan with `update_plan`, as a function call or, in code mode,
+as `tools.update_plan({plan: [...]})` inside an `exec` call. The daemon reads
+the newest one from the rollout's last 4 MB on first sight and then only what
+was appended. A plan built from a variable cannot be read, and shows none
+rather than the previous one.
+
+The status pass republishes a row for its plan only when `done`, `total` or
+`current` changed. The plan stays on the row once the session closes; clients
+show a `3/5` badge only while the session is open, not offline, and has steps
+left, so a session that stopped part way does not keep a badge.
+
 ## Background tasks
 
 A turn can end with work still running: a Bash call run in the background, an

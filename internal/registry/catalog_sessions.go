@@ -627,6 +627,7 @@ func (r *Registry) retireUnobservedSessionTx(tx *sql.Tx, sessionID string, now t
 	delete(session, "backgroundTasks")
 	delete(session, "usageLimit")
 	delete(session, "activity")
+	delete(session, "plan")
 	delete(session, "holders")
 	if reason != "" {
 		session["currentReason"] = reason

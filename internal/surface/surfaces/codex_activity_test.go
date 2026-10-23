@@ -42,7 +42,7 @@ func TestCodexLocalStatusReportsWhenAWorkingTurnLastProgressedAndTheToolItRuns(t
 		t.Fatalf("activity=%+v tool=%+v, want %+v tool=%+v", local.Activity, toolOf(local.Activity), want, want.Tool)
 	}
 	listed := codexWorkingSession(path, surface.StatusIdle)
-	codex.reconcileLocalStatus(&listed)
+	codex.reconcileLocalStatus(context.Background(), &listed)
 	if !surface.SameActivity(listed.Activity, local.Activity) {
 		t.Fatalf("discovery and the status pass disagree: listed=%+v local=%+v", listed.Activity, local.Activity)
 	}
@@ -72,14 +72,14 @@ func TestAHungCodexTurnTheRuntimeStillRunsReadsAsQuiet(t *testing.T) {
 	codex := &Codex{}
 
 	working := codexWorkingSession(path, surface.StatusBusy)
-	codex.reconcileLocalStatus(&working)
+	codex.reconcileLocalStatus(context.Background(), &working)
 	if working.Status != surface.StatusBusy || working.Activity == nil || !working.Activity.LastProgressAt.Equal(written) || working.Activity.Tool == nil || working.Activity.Tool.Name != "exec" {
 		t.Fatalf("a runtime-busy session with a quiet rollout: status=%s activity=%+v", working.Status, working.Activity)
 	}
 
 	idle := codexWorkingSession(path, surface.StatusIdle)
 	idle.Activity = &surface.Activity{BusySince: started}
-	codex.reconcileLocalStatus(&idle)
+	codex.reconcileLocalStatus(context.Background(), &idle)
 	if idle.Status != surface.StatusIdle || idle.Activity != nil {
 		t.Fatalf("a stale open turn the runtime is not running read as working: status=%s activity=%+v", idle.Status, idle.Activity)
 	}

@@ -110,14 +110,14 @@ func TestCodexListAndLocalStatusShareTranscriptPrecedence(t *testing.T) {
 	appendLine(t, path, `{"type":"event_msg","payload":{"type":"task_started"}}`)
 	codex := &Codex{}
 	listed := surface.Session{ID: "synthetic", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Transcript: path}
-	codex.reconcileLocalStatus(&listed)
+	codex.reconcileLocalStatus(context.Background(), &listed)
 	local, err := codex.LocalStatus(context.Background(), surface.Session{ID: "synthetic", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Transcript: path})
 	if err != nil || listed.Status != surface.StatusBusy || local.Status != listed.Status {
 		t.Fatalf("listed=%s local=%s err=%v", listed.Status, local.Status, err)
 	}
 	appendLine(t, path, `{"type":"event_msg","payload":{"type":"task_complete"}}`)
 	listed.Status = surface.StatusBusy
-	codex.reconcileLocalStatus(&listed)
+	codex.reconcileLocalStatus(context.Background(), &listed)
 	if listed.Status != surface.StatusIdle {
 		t.Fatalf("provider busy overrode completed transcript: %s", listed.Status)
 	}
