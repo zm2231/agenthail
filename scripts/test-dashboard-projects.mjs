@@ -108,6 +108,10 @@ const shared = { id: "repo:github.com/example/widget", displayName: "widget", ch
   { host: server, projectId: "h1::implicit:/srv/widget", rootPath: "/srv/widget" },
 ], coordinators: [{ host: laptop, name: "widget-lead", surface: "claude", sessionId: "lead" }] };
 const sharedMenu = menu(shared);
+context.app.state.projects = [shared];
+const sharedSection = vm.runInContext('renderProjects("")', context).html;
+assert.match(sharedSection, /<span class="host-badge" title="On server\.example\.ts\.net">server<\/span>/, "a remote checkout's badge names its host");
+assert.doesNotMatch(sharedSection, /\/srv\/widget|\/work\/widget/, "the projects list never shows a checkout's folder, not even in an attribute");
 assert.match(sharedMenu, /data-project-rename="repo:github\.com\/example\/widget">Rename…</, "a project added on some host can be renamed");
 assert.match(sharedMenu, /data-project-start="repo:github\.com\/example\/widget" data-checkout="0">New conversation on laptop<.*data-checkout="1">New conversation on server</s, "each checkout offers a new conversation, named by its host");
 assert.match(sharedMenu, />Change lead…<.*data-project-clear-lead="repo:github\.com\/example\/widget">Clear lead</s, "a project with a lead can change or clear it");

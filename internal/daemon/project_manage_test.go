@@ -197,6 +197,10 @@ func TestFederationAddsAndRemovesAProjectOnTheHostItNames(t *testing.T) {
 	if missing.Code != http.StatusBadRequest || apiErrorCode(t, missing) != "folder_not_found" {
 		t.Fatalf("missing folder on the host: %d %s", missing.Code, missing.Body)
 	}
+	unknown := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-add", "host": "nowhere", "path": cwd})
+	if unknown.Code != http.StatusBadRequest || apiErrorCode(t, unknown) != "invalid_request" || !strings.Contains(unknown.Body.String(), "nowhere") {
+		t.Fatalf("unknown host: %d %s", unknown.Code, unknown.Body)
+	}
 	added := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-add", "host": "vps", "path": cwd, "title": "Server work"})
 	var answer struct {
 		Project CatalogProject `json:"project"`
