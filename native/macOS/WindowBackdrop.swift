@@ -22,8 +22,10 @@ final class WindowBackdrop: ObservableObject {
     @Published private(set) var border: Double = 0
     @Published private(set) var composerOpacity: Double = 0.5
 
-    private var regions: [String: (rect: CGRect, region: Region)] = [:]
+    private(set) var regions: [String: (rect: CGRect, region: Region)] = [:]
     private var probes: [String: WeakProbe] = [:]
+    /// A reader can deliver a report it queued before its region went away.
+    private var removed: Set<String> = []
     private var scale: CGFloat = 2
     private var dark = true
     private var config = UIConfig.defaults
@@ -76,6 +78,7 @@ final class WindowBackdrop: ObservableObject {
     }
 
     func report(_ id: String, rect: CGRect, region: Region) {
+        guard !removed.contains(id) else { return }
         if let current = regions[id], current.rect == rect, current.region == region { return }
         regions[id] = (rect, region)
         schedule()
@@ -83,6 +86,7 @@ final class WindowBackdrop: ObservableObject {
 
     func remove(_ id: String) {
         probes[id] = nil
+        removed.insert(id)
         guard regions.removeValue(forKey: id) != nil else { return }
         schedule()
     }
@@ -91,6 +95,7 @@ final class WindowBackdrop: ObservableObject {
     /// a probe hears about its own moves, not its ancestors'.
     func attach(_ id: String, probe: WindowRectReader.RectProbe) {
         probes[id] = WeakProbe(probe: probe)
+        removed.remove(id)
     }
 
     private func remeasure() {

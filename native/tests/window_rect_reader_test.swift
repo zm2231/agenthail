@@ -35,7 +35,43 @@ struct WindowRectReaderTest {
             failures += 1
         }
 
+        let other = NSView(frame: CGRect(x: 500, y: 0, width: 200, height: 600))
+        window.contentView!.addSubview(other)
+        other.addSubview(row)
+        settle()
+        if reported?.minX != 520 {
+            print("FAIL: after the row moved to another column, the probe reports \(String(describing: reported)), want x 520")
+            failures += 1
+        }
+        other.setFrameOrigin(CGPoint(x: 550, y: 0))
+        settle()
+        if reported?.minX != 570 || probe.measure()?.minX != 570 {
+            print("FAIL: after the new column moved, the probe reports \(String(describing: reported)) and measures \(String(describing: probe.measure())), want x 570")
+            failures += 1
+        }
+        column.setFrameOrigin(CGPoint(x: 0, y: 0))
+        settle()
+        if reported?.minX != 570 {
+            print("FAIL: the old column moving reached the probe, which reports \(String(describing: reported)), want x 570")
+            failures += 1
+        }
+
+        let backdrop = WindowBackdrop()
+        backdrop.attach("late", probe: probe)
+        backdrop.remove("late")
+        backdrop.report("late", rect: CGRect(x: 0, y: 0, width: 10, height: 10), region: .text)
+        if backdrop.regions["late"] != nil {
+            print("FAIL: a report queued before its region was removed brought the region back")
+            failures += 1
+        }
+        backdrop.attach("late", probe: probe)
+        backdrop.report("late", rect: CGRect(x: 0, y: 0, width: 10, height: 10), region: .text)
+        if backdrop.regions["late"] == nil {
+            print("FAIL: a region that attached again after removal is ignored")
+            failures += 1
+        }
+
         if failures > 0 { exit(1) }
-        print("window rect reader: a probe follows its ancestors' moves")
+        print("window rect reader: a probe follows its ancestors' moves and a removed region stays removed")
     }
 }
