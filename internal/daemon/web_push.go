@@ -30,44 +30,67 @@ const webPushQuestionTTL = 15 * 60
 
 var webPushHTTPClient webpush.HTTPClient = &http.Client{Timeout: 12 * time.Second}
 
-// webPushCloseAge is how long after sending a question to browsers its
-// withdraw waits. Safari refuses to close a service worker's notification in
-// its first 30 seconds, so an earlier withdraw would leave it shown; the rest
-// covers the push service's delivery.
+// webPushCloseAge is how old a browser notification must be before a
+// withdraw closes it. Safari refuses to close a service worker's notification
+// in its first 30 seconds, so an earlier withdraw would leave it shown; the
+// rest covers the push service's delivery.
 var webPushCloseAge = 35 * time.Second
 
-// browserShownTimes is when each question was last sent to browsers, kept
-// only while it is younger than webPushCloseAge.
-type browserShownTimes struct {
-	mu    sync.Mutex
-	shown map[string]time.Time
+// browserWithdrawals spaces the withdraws sent to browsers so that each
+// closes only notifications Safari will close: the question, at least
+// webPushCloseAge after it was sent, and the Answered marker the previous
+// withdraw left, at least webPushCloseAge after that withdraw.
+type browserWithdrawals struct {
+	mu      sync.Mutex
+	shown   map[string]time.Time
+	pending map[string]bool
+	next    time.Time
 }
 
-func (s *browserShownTimes) record(collapseID string, now time.Time) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.shown == nil {
-		s.shown = map[string]time.Time{}
+// shownAt records that a question went to browsers. Questions sent longer
+// than webPushCloseAge ago are forgotten: they can be closed at any time.
+func (w *browserWithdrawals) shownAt(collapseID string, now time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.shown == nil {
+		w.shown = map[string]time.Time{}
 	}
-	for key, at := range s.shown {
+	for key, at := range w.shown {
 		if now.Sub(at) >= webPushCloseAge {
-			delete(s.shown, key)
+			delete(w.shown, key)
 		}
 	}
-	s.shown[collapseID] = now
+	w.shown[collapseID] = now
 }
 
-// closableIn is how long until the notification sent under collapseID can
-// be closed. One this daemon did not send is taken to be old enough.
-func (s *browserShownTimes) closableIn(collapseID string, now time.Time) time.Duration {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	at, ok := s.shown[collapseID]
-	if !ok {
-		return 0
+// reserve is when the withdraw for collapseID may be sent, holding that time
+// for it; ok is false when a withdraw for it is already waiting. A question
+// this daemon did not send is taken to be old enough.
+func (w *browserWithdrawals) reserve(collapseID string, now time.Time) (at time.Time, ok bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.pending[collapseID] {
+		return time.Time{}, false
 	}
-	delete(s.shown, collapseID)
-	return max(0, webPushCloseAge-now.Sub(at))
+	if w.pending == nil {
+		w.pending = map[string]bool{}
+	}
+	at = now
+	if shown, found := w.shown[collapseID]; found && shown.Add(webPushCloseAge).After(at) {
+		at = shown.Add(webPushCloseAge)
+	}
+	if w.next.After(at) {
+		at = w.next
+	}
+	w.next = at.Add(webPushCloseAge)
+	w.pending[collapseID] = true
+	return at, true
+}
+
+func (w *browserWithdrawals) sent(collapseID string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.pending, collapseID)
 }
 
 type webPushKeys struct {
@@ -167,7 +190,7 @@ func (d *Daemon) notifyBrowsers(ctx context.Context, notification mobileNotifica
 		RequestID:  boundedNotificationText(notification.RequestID, 240),
 	}
 	if message.CollapseID != "" {
-		d.browserShown.record(message.CollapseID, time.Now())
+		d.browserWithdrawals.shownAt(message.CollapseID, time.Now())
 	}
 	urgency := webpush.UrgencyNormal
 	if notification.EventType == "session.waiting" {
@@ -177,27 +200,32 @@ func (d *Daemon) notifyBrowsers(ctx context.Context, notification mobileNotifica
 }
 
 // withdrawFromBrowsers closes the notification each browser shows under
-// collapseID, once it is old enough for every browser to close it; until
-// then it waits in the background, so a phone's withdraw is not held up. A
-// message with the same topic also replaces an undelivered one, so a browser
-// that was offline never shows the answered question.
+// collapseID once browserWithdrawals allows; until then it waits in the
+// background, so a phone's withdraw is not held up. A message with the same
+// topic also replaces an undelivered one, so a browser that was offline never
+// shows the answered question.
 func (d *Daemon) withdrawFromBrowsers(collapseID string) {
 	collapseID = boundedNotificationText(collapseID, 64)
-	wait := d.browserShown.closableIn(collapseID, time.Now())
-	d.background.start(func(ctx context.Context) {
-		if wait > 0 {
-			timer := time.NewTimer(wait)
-			defer timer.Stop()
-			select {
-			case <-timer.C:
-			case <-ctx.Done():
-				return
-			}
+	at, ok := d.browserWithdrawals.reserve(collapseID, time.Now())
+	if !ok {
+		return
+	}
+	started := d.background.start(func(ctx context.Context) {
+		defer d.browserWithdrawals.sent(collapseID)
+		timer := time.NewTimer(time.Until(at))
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return
 		}
 		sendCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		d.sendToBrowsers(sendCtx, webPushMessage{Type: "withdraw", CollapseID: collapseID}, webpush.UrgencyNormal, "withdraw browser notification")
 	})
+	if !started {
+		d.browserWithdrawals.sent(collapseID)
+	}
 }
 
 func (d *Daemon) sendToBrowsers(ctx context.Context, message webPushMessage, urgency webpush.Urgency, what string) {

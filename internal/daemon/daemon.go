@@ -74,11 +74,11 @@ type Daemon struct {
 	notifyDesktop func(title, message, sessionID, identifier, requestID string, actions []surface.RequestAction) error
 	// withdrawDesktop removes a desktop notification; it is
 	// WithdrawNotification outside tests.
-	withdrawDesktop func(identifier string) error
-	background      *backgroundWork
-	browserShown    browserShownTimes
-	events          *eventHub
-	catalog         *catalogHub
+	withdrawDesktop    func(identifier string) error
+	background         *backgroundWork
+	browserWithdrawals browserWithdrawals
+	events             *eventHub
+	catalog            *catalogHub
 	// catalogLiveMu guards catalogLive, which discovery replaces and the
 	// status pass reads from its own goroutine. It is held only for map
 	// reads and writes; a session's waiting lock orders its row and entry.

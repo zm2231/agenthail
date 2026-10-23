@@ -166,6 +166,7 @@ func TestBrowsersGetEncryptedNotificationsAndWithdrawals(t *testing.T) {
 	d := newTestDaemon(t, reg, nil)
 	closeAge(t, 300*time.Millisecond)
 	key := waitingNotificationKey("session", "question")
+	start := time.Now()
 	d.notifyPairedDevices(context.Background(), mobileNotification{Title: "Agenthail", Message: "Claude asks you a question", SessionID: "session", TurnID: "question", EventType: "session.waiting", CollapseID: key, RequestID: "request"})
 	d.withdrawFromPairedDevices(context.Background(), key)
 	if pushes := service.received(); len(pushes) != 1 {
@@ -177,8 +178,8 @@ func TestBrowsersGetEncryptedNotificationsAndWithdrawals(t *testing.T) {
 		t.Fatalf("pushes=%+v", pushes)
 	}
 	shown, withdrawn := pushes[0], pushes[1]
-	if waited := withdrawn.at.Sub(shown.at); waited < 250*time.Millisecond {
-		t.Fatalf("the withdraw came %s after its question", waited)
+	if waited := withdrawn.at.Sub(start); waited < webPushCloseAge {
+		t.Fatalf("the withdraw came %s after its question was sent", waited)
 	}
 	if want := (webPushMessage{Type: "notify", Title: "Agenthail", Message: "Claude asks you a question", SessionID: "session", TurnID: "question", EventType: "session.waiting", CollapseID: key, RequestID: "request"}); shown.message != want {
 		t.Fatalf("shown=%+v", shown.message)
@@ -224,6 +225,37 @@ func TestAWithdrawForAQuestionThisDaemonDidNotSendGoesAtOnce(t *testing.T) {
 	d.background.wait()
 	if pushes := service.received(); len(pushes) != 1 || pushes[0].message != (webPushMessage{Type: "withdraw", CollapseID: key}) {
 		t.Fatalf("pushes=%+v", pushes)
+	}
+}
+
+func TestWithdrawsAreSentOnceAndSpacedSoEachCanCloseThePreviousMarker(t *testing.T) {
+	browser := newTestPushBrowser(t)
+	service := newTestPushService(t, browser)
+	reg, _ := subscribedTestBrowser(t, service.server.URL+"/push/secret-capability", browser)
+	d := newTestDaemon(t, reg, nil)
+	closeAge(t, 300*time.Millisecond)
+	shown := waitingNotificationKey("session", "shown")
+	other := waitingNotificationKey("session", "other")
+	start := time.Now()
+	d.notifyPairedDevices(context.Background(), mobileNotification{Title: "Agenthail", Message: "Question", EventType: "session.waiting", CollapseID: shown})
+	d.withdrawFromPairedDevices(context.Background(), shown)
+	d.withdrawFromPairedDevices(context.Background(), shown)
+	d.withdrawFromPairedDevices(context.Background(), other)
+	d.background.wait()
+	var withdrawn []receivedPush
+	for _, push := range service.received() {
+		if push.message.Type == "withdraw" {
+			withdrawn = append(withdrawn, push)
+		}
+	}
+	if len(withdrawn) != 2 || withdrawn[0].message.CollapseID != shown || withdrawn[1].message.CollapseID != other {
+		t.Fatalf("withdraws=%+v", withdrawn)
+	}
+	if waited := withdrawn[0].at.Sub(start); waited < webPushCloseAge {
+		t.Fatalf("a repeated withdraw went %s after its question was sent", waited)
+	}
+	if waited := withdrawn[1].at.Sub(start); waited < 2*webPushCloseAge {
+		t.Fatalf("the next withdraw went %s after the question, before the previous marker could be closed", waited)
 	}
 }
 
