@@ -99,3 +99,77 @@ assert(meta({ name: "work", root: "/w", signedInAs: "work@example.com" }).includ
 assert(meta({ name: "default", root: "/d", signedInAs: "me@example.com" }).includes("config folder default · currently signed in as me@example.com"), "the primary folder shows its login too");
 assert(meta({ name: "spare", root: "/s" }).endsWith("config folder spare"), "a folder with no login shows its name");
 assert(!meta({ name: "default", root: "/d" }).includes("config folder"), "the primary folder with no login adds nothing");
+
+const laptop = { id: "h0", name: "laptop", state: "local" };
+const server = { id: "h1", name: "server.example.ts.net", state: "connected" };
+const menu = (project) => vm.runInContext(`projectMenu(${JSON.stringify(project)})`, context);
+const shared = { id: "repo:github.com/example/widget", displayName: "widget", checkouts: [
+  { host: laptop, projectId: "p-laptop", rootPath: "/work/widget", added: true },
+  { host: server, projectId: "h1::implicit:/srv/widget", rootPath: "/srv/widget" },
+], coordinators: [{ host: laptop, name: "widget-lead", surface: "claude", sessionId: "lead" }] };
+const sharedMenu = menu(shared);
+context.app.state.projects = [shared];
+const sharedSection = vm.runInContext('renderProjects("")', context).html;
+assert.match(sharedSection, /<span class="host-badge" title="On server\.example\.ts\.net">server<\/span>/, "a remote checkout's badge names its host");
+assert.doesNotMatch(sharedSection, /\/srv\/widget|\/work\/widget/, "the projects list never shows a checkout's folder, not even in an attribute");
+assert.match(sharedMenu, /data-project-rename="repo:github\.com\/example\/widget">Rename…</, "a project added on some host can be renamed");
+assert.match(sharedMenu, /data-project-start="repo:github\.com\/example\/widget" data-checkout="0">New conversation on laptop<.*data-checkout="1">New conversation on server</s, "each checkout offers a new conversation, named by its host");
+assert.match(sharedMenu, />Change lead…<.*data-project-clear-lead="repo:github\.com\/example\/widget">Clear lead</s, "a project with a lead can change or clear it");
+assert.match(sharedMenu, /data-project-action="project-remove" data-project-id="p-laptop">Remove on laptop</, "an added checkout can be removed on its host");
+assert.doesNotMatch(sharedMenu, /h1::implicit|\/srv\/widget|\/work\/widget/, "the menu never shows a folder and offers no remove for an implicit checkout");
+const implicitMenu = menu({ id: "h1::implicit:/srv/api", displayName: "api", checkouts: [{ host: server, projectId: "h1::implicit:/srv/api", rootPath: "/srv/api" }], coordinators: [{ host: laptop, name: "a" }, { host: server, name: "b" }] });
+assert.doesNotMatch(implicitMenu, /Rename|Remove|Clear lead/, "a project added nowhere has no name of its own, nothing to remove, and a conflict is changed rather than cleared");
+assert.match(implicitMenu, /New conversation on server<.*>Change lead…</s, "a project only on a paired host names that host");
+assert.match(menu({ id: "p-notes", displayName: "notes", checkouts: [{ host: laptop, projectId: "p-notes", rootPath: "/work/notes", added: true }] }), /data-checkout="0">New conversation<.*>Set lead…</s, "a project only on this machine names no host");
+const archivedMenu = menu({ id: "p-old", displayName: "old", archived: true, checkouts: [{ host: laptop, projectId: "p-old", rootPath: "/work/old", added: true, archived: true }] });
+assert.doesNotMatch(archivedMenu, /New conversation|lead/, "an archived project starts nothing and changes no lead");
+assert.match(archivedMenu, />Rename…<.*>Remove</s);
+assert.match(vm.runInContext('renderProjects("")', context).html, /^<div class="projects-toolbar"><button[^>]*data-project-new>Add project…<\/button><\/div>/, "the projects view opens with Add project");
+
+const suggestions = vm.runInContext(`projectFolderSuggestions(${JSON.stringify({ projects: [{ rootPath: "/srv/api", added: false }, { rootPath: "/srv/notes", added: true }], folders: ["/srv/scratch", "/srv/api"] })})`, context);
+assert.deepEqual([...suggestions], ["/srv/api", "/srv/scratch"], "suggestions are repositories not yet added, then session folders, each once");
+assert.deepEqual([...vm.runInContext("projectFolderSuggestions(null)", context)], []);
+const lead = (checkout, values, replace) => vm.runInContext(`leadRequest(${JSON.stringify(checkout)}, ${JSON.stringify(values)}, ${replace})`, context);
+assert.deepEqual({ ...lead(shared.checkouts[1], { surface: "codex", name: "  " }, false) }, { surface: "codex", cwd: "/srv/widget", host: "h1" }, "a lead on a paired host names that host and leaves the name to it");
+assert.deepEqual({ ...lead(shared.checkouts[0], { surface: "claude", name: " widget-lead " }, true) }, { surface: "claude", cwd: "/work/widget", name: "widget-lead", replace: true }, "a lead on this machine names no host");
+
+const actionStart = source.indexOf("async function action(");
+const actionEnd = source.indexOf("function deliveryStatusLabel(", actionStart);
+assert(actionStart >= 0 && actionEnd > actionStart);
+const sent = [];
+let reply;
+const actions = {
+  app: { selected: null },
+  crypto: { randomUUID: () => "key" },
+  withHolder: () => assert.fail("a project or lead action carries no holder"),
+  fetch: async (_url, request) => {
+    sent.push(JSON.parse(request.body));
+    return reply;
+  },
+};
+vm.runInNewContext(source.slice(actionStart, actionEnd), actions);
+reply = { ok: false, status: 409, text: async () => '{"error":{"code":"coordinator_exists","message":"the project already has coordinator @widget-lead; replace it to take over"}}' };
+await assert.rejects(vm.runInContext('action("coordinator-new", { surface: "claude", cwd: "/work/widget" }, "key", "")', actions), (error) => error.code === "coordinator_exists" && error.message === "the project already has coordinator @widget-lead; replace it to take over", "a typed refusal keeps its code and shows its message");
+reply = { ok: false, status: 400, text: async () => "plain refusal" };
+await assert.rejects(vm.runInContext('action("project-rename", { projectId: "p", title: "x" }, "key", "")', actions), (error) => !error.code && error.message === "plain refusal");
+assert.equal(sent.length, 2, "project and lead actions run with no conversation selected");
+
+const leadStart = source.indexOf("async function changeLead(");
+const leadEnd = source.indexOf("const projectDialogFields", leadStart);
+assert(leadStart >= 0 && leadEnd > leadStart);
+const asked = [];
+let answer = true;
+const leadContext = { window: { confirm: (question) => { asked.push(question); return answer; } } };
+vm.runInNewContext(source.slice(leadStart, leadEnd), leadContext);
+const refusal = Object.assign(Error("the project already has coordinator @widget-lead; replace it to take over"), { code: "coordinator_exists" });
+const attempts = [];
+const send = async (replace) => { attempts.push(replace); if (!replace) throw refusal; return { coordinator: { name: "new-lead" } }; };
+assert.equal((await leadContext.changeLead(send)).coordinator.name, "new-lead");
+assert.deepEqual(attempts, [false, true], "a refused lead change is sent again as a replacement once the person agrees");
+assert.match(asked[0], /@widget-lead; replace it to take over\. Replace it\?$/);
+answer = false;
+attempts.length = 0;
+assert.equal(await leadContext.changeLead(send), null, "declining keeps the current lead");
+assert.deepEqual(attempts, [false]);
+await assert.rejects(leadContext.changeLead(async () => { throw Object.assign(Error("name taken"), { code: "name_taken" }); }), /name taken/, "other refusals are not offered as a replacement");
+console.log("dashboard project management tests passed");

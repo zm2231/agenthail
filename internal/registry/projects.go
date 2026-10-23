@@ -81,6 +81,21 @@ func (r *Registry) RemoveProject(id string) error {
 	return nil
 }
 
+// SetProjectTitle names an added project; an id of no added project is
+// sql.ErrNoRows.
+func (r *Registry) SetProjectTitle(id, title string) error {
+	result, err := r.db.Exec(`UPDATE projects SET title=? WHERE id=? AND added=1`, title, id)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (r *Registry) SetProjectRepository(id, key string, repository []byte) error {
 	_, err := r.db.Exec(`UPDATE projects SET project_key=?,repository=? WHERE id=? AND added=1`, key, append([]byte{}, repository...), id)
 	return err

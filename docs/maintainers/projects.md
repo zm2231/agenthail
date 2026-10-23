@@ -11,8 +11,12 @@ add <path> [--name <title>]`). Each host keeps its own list in its registry.
 The folder can be anywhere, including a folder inside a Git repository, such as
 `apps/web` in a monorepo.
 
-- A folder belongs to at most one project on a host. Adding it again is
-  refused with `409` and `Workspace <folder> already belongs to project <id>.`
+- `project-add` takes `path`, an optional `title`, and `host` to add the
+  folder on a paired host. A folder the host does not have is refused with
+  `400` and code `folder_not_found`.
+- A folder belongs to at most one project on a host. Adding it again changes
+  nothing and answers with its project and `created: false`; a different
+  title is not applied (rename it instead).
 - A folder in a linked worktree is added at the same place in the main
   checkout. The project then holds that folder in every worktree, and adding
   it from another worktree is the same folder.
@@ -20,6 +24,15 @@ The folder can be anywhere, including a folder inside a Git repository, such as
 - `project-remove` (`agenthail project remove <name|id|folder>`) removes an
   added project. Its sessions move to the next project that holds them; no
   session is stopped or changed.
+- `project-rename` (`agenthail project rename <name|id|folder> <new name>`)
+  takes `projectId` and `title` (1 to 120 characters) and sets the title of
+  every added checkout the id names, forwarded to paired hosts like archive,
+  so one project has one name on every host. A project with no added checkout
+  anywhere has no name of its own and is refused with `409`
+  `project_not_added`; a host with only an implicit checkout of it is skipped.
+- Project actions refuse with a typed error (`{"error":{"code","message"}}`):
+  `invalid_request`, `folder_not_found`, `project_not_found`,
+  `project_not_added`, `project_ambiguous`.
 
 ## Which project a session belongs to
 

@@ -187,9 +187,12 @@ both the CLI and the action.
 
 `GET /api/v1/session-options?host=<host>` is that host's launch catalog: the
 host it came from, the agents it can start and whether each is connected, its
-launchers, and its projects (`projects`: id, display name, root path and kind;
-the most recently active first, added projects without sessions after,
-archived projects left out).
+launchers, its projects (`projects`: id, display name, root path, kind and
+whether it was added; the most recently active first, added projects without
+sessions after, archived projects left out), and `folders`: the working
+folders of its recent sessions that no project holds, the most recent first,
+at most 12. A client offers those folders when adding a project on that host;
+the host reveals no other path.
 `GET /api/v1/models?surface=<agent>&host=<host>` lists that host's models
 with their reasoning efforts. `session-create` with `host` starts the
 session there. The web dashboard, the Mac app and the iPhone app show one

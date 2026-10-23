@@ -23,6 +23,7 @@ type fakeDaemonAPI struct {
 	keys      []string
 	response  string
 	responses map[string]string
+	statuses  map[string]int
 	gets      []string
 	snapshot  string
 }
@@ -49,6 +50,9 @@ func (f *fakeDaemonAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.actions = append(f.actions, action)
 		f.keys = append(f.keys, r.Header.Get("Idempotency-Key"))
 		if response, found := f.responses[action["action"].(string)]; found {
+			if status := f.statuses[action["action"].(string)]; status != 0 {
+				w.WriteHeader(status)
+			}
 			_, _ = io.WriteString(w, response)
 			return
 		}

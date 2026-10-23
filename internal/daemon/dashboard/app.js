@@ -682,11 +682,54 @@ function projectSection(project, sessions) {
   const ordered = [...sessions].sort((a, b) => Date.parse(b.lastActive || 0) - Date.parse(a.lastActive || 0));
   const shown = expanded ? ordered : ordered.filter((session, index) => index < collapsedProjectSessions || sessionNeedsYou(session));
   const hidden = ordered.length - shown.length;
-  const host = (project.checkouts || []).filter((checkout) => checkout.host.state !== "local").map((checkout) => `<span class="host-badge" title="${escape(`${checkout.rootPath} on ${checkout.host.name}${checkout.archived ? " (archived there)" : ""}`)}">${escape(shortHostName(checkout.host.name))}</span>`).join("");
+  const host = (project.checkouts || []).filter((checkout) => checkout.host.state !== "local").map((checkout) => `<span class="host-badge" title="${escape(`On ${checkout.host.name}${checkout.archived ? " (archived there)" : ""}`)}">${escape(shortHostName(checkout.host.name))}</span>`).join("");
   const toggle = project.archived ? "project-unarchive" : "project-archive";
-  const added = (project.checkouts || []).filter((checkout) => checkout.added && checkout.host.state === "local");
-  const remove = added.length === 1 ? `<button class="link-button" type="button" data-project-action="project-remove" data-project-id="${escape(added[0].projectId)}" title="${escape(`Stop treating ${added[0].rootPath} as a project`)}">Remove</button>` : "";
-  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}${coordinatorChip(project.coordinators || [])}${project.archived ? "" : `<button class="link-button" type="button" data-project-message="${escape(project.id)}" data-project-name="${escape(project.displayName)}" title="${escape(`Send one message to every active conversation in ${project.displayName}`)}">Message</button>`}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button>${remove}</header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
+  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}${coordinatorChip(project.coordinators || [])}${project.archived ? "" : `<button class="link-button" type="button" data-project-message="${escape(project.id)}" data-project-name="${escape(project.displayName)}" title="${escape(`Send one message to every active conversation in ${project.displayName}`)}">Message</button>`}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button>${projectMenu(project)}</header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
+}
+// projectMenu lists what a person can change about a project: its name once
+// it was added on some host, a new conversation and the lead in one of its
+// checkouts, and removing each added checkout. A checkout is named by its
+// host when the project is on several, never by its folder.
+function projectMenu(project) {
+  const checkouts = project.checkouts || [];
+  const several = new Set(checkouts.map((checkout) => checkout.host?.id)).size > 1;
+  const where = (checkout) => (several || checkout.host?.state !== "local" ? ` on ${shortHostName(checkout.host?.name)}` : "");
+  const id = escape(project.id);
+  const items = [];
+  if (checkouts.some((checkout) => checkout.added)) items.push(`<button type="button" data-project-rename="${id}">Rename…</button>`);
+  if (!project.archived) {
+    checkouts.forEach((checkout, index) => {
+      if (!checkout.archived) items.push(`<button type="button" data-project-start="${id}" data-checkout="${index}">New conversation${escape(where(checkout))}</button>`);
+    });
+    items.push(`<button type="button" data-project-lead="${id}">${(project.coordinators || []).length ? "Change lead…" : "Set lead…"}</button>`);
+    if ((project.coordinators || []).length === 1) items.push(`<button type="button" data-project-clear-lead="${id}">Clear lead</button>`);
+  }
+  checkouts.forEach((checkout) => {
+    if (checkout.added) items.push(`<button type="button" data-project-action="project-remove" data-project-id="${escape(checkout.projectId)}">Remove${escape(where(checkout))}</button>`);
+  });
+  return `<details class="project-menu"><summary class="link-button" aria-label="${escape(`More for ${project.displayName}`)}">…</summary><div class="project-menu-items" role="menu">${items.join("")}</div></details>`;
+}
+// checkoutHost is the host an action on a checkout names: empty for this
+// machine.
+function checkoutHost(checkout) {
+  return checkout?.host && checkout.host.state !== "local" ? checkout.host.id : "";
+}
+// projectFolderSuggestions are the folders a host offers for a new project:
+// its repositories that are not projects yet, then the folders its recent
+// sessions ran in.
+function projectFolderSuggestions(options) {
+  const roots = (options?.projects || []).filter((project) => !project.added).map((project) => project.rootPath);
+  return [...new Set([...roots, ...(options?.folders || [])])];
+}
+// leadRequest starts a new lead conversation in one of a project's
+// checkouts, on that checkout's host.
+function leadRequest(checkout, values, replace) {
+  const request = { surface: values.surface, cwd: checkout.rootPath };
+  const host = checkoutHost(checkout);
+  if (host) request.host = host;
+  if (values.name.trim()) request.name = values.name.trim();
+  if (replace) request.replace = true;
+  return request;
 }
 function coordinatorRef(coordinator) {
   const name = `@${coordinator.name}`;
@@ -696,7 +739,7 @@ function coordinatorChip(coordinators) {
   if (coordinators.length === 0) return "";
   if (coordinators.length > 1) {
     const refs = coordinators.map(coordinatorRef).join(", ");
-    return `<span class="lead-chip conflict" title="${escape(`Several hosts each have a coordinator: ${refs}. Run coordinator set --replace on one to resolve it.`)}">${coordinators.length} leads</span>`;
+    return `<span class="lead-chip conflict" title="${escape(`Several hosts each have a coordinator: ${refs}. Change the lead to keep one.`)}">${coordinators.length} leads</span>`;
   }
   const ref = coordinatorRef(coordinators[0]);
   if (!coordinators[0].sessionId) return `<span class="lead-chip idle" title="${escape(`${ref} starts on its first message`)}">${escape(ref)}</span>`;
@@ -720,7 +763,7 @@ function renderProjects(query) {
   const archivedSections = archived.length
     ? `<details class="archived-projects" ${app.openArchivedProjects ? "open" : ""}><summary>Archived (${archived.length})</summary>${archived.map((project) => projectSection(project, byProject.get(project.id) || [])).join("")}</details>`
     : "";
-  return { html: sections + archivedSections, count: active.length };
+  return { html: '<div class="projects-toolbar"><button class="link-button" type="button" data-project-new>Add project…</button></div>' + sections + archivedSections, count: active.length };
 }
 function remoteHostName(session) {
   return session?.host && session.host.state !== "local" ? session.host.name : "";
@@ -1525,8 +1568,10 @@ function renderChat() {
       '<button data-action="compact" type="button">Compact</button>',
     );
   controls.push(`<button data-archive-action="${session.archived ? "session-unarchive" : "session-archive"}" type="button">${session.archived ? "Unarchive" : "Archive"}</button>`);
-  if (session.cwd && !remoteHostName(session) && !(session.project?.added && session.project.rootPath === session.cwd))
-    controls.push(`<button data-project-add="${escape(session.cwd)}" type="button">Add folder as project</button>`);
+  if (session.cwd && !(session.project?.added && session.project.rootPath === session.cwd))
+    controls.push(`<button data-project-add="${escape(session.cwd)}" data-project-host="${escape(checkoutHost(session))}" type="button">Add folder as project</button>`);
+  if (session.project && !session.subagent && (session.surface === "claude" || session.surface === "codex") && !(app.state.projects || []).some((project) => project.id === session.project.id && (project.coordinators || []).some((lead) => lead.sessionId === session.id)))
+    controls.push('<button data-make-lead type="button">Make project lead</button>');
   $("#chat-actions").innerHTML = mobileConversationView()
     ? ""
     : controls.join("");
@@ -1913,7 +1958,8 @@ async function action(action, extra = {}, idempotencyKey = crypto.randomUUID(), 
     action === "queue-retry" ||
     action === "delivery-dismiss" ||
     action === "queue-cancel" ||
-    action.startsWith("project-");
+    action.startsWith("project-") ||
+    action.startsWith("coordinator-");
   if (!app.selected && !networkAction)
     throw Error("Choose a conversation first");
   if (!networkAction) extra = withHolder(sessionID, extra);
@@ -1937,7 +1983,15 @@ async function action(action, extra = {}, idempotencyKey = crypto.randomUUID(), 
       typed.httpFailure = true;
       throw typed;
     }
-    throw Error(detail);
+    const failure = Error(detail);
+    try {
+      const typed = JSON.parse(detail).error;
+      if (typed?.message) {
+        failure.message = typed.message;
+        failure.code = typed.code || "";
+      }
+    } catch {}
+    throw failure;
   }
   try {
     return await response.json();
@@ -2321,6 +2375,31 @@ document.addEventListener("click", async (event) => {
     }
     return;
   }
+  const projectControl = event.target.closest("[data-project-new], [data-project-rename], [data-project-start], [data-project-lead], [data-project-clear-lead], [data-make-lead]");
+  if (projectControl) {
+    projectControl.closest("details.project-menu")?.removeAttribute("open");
+    const project = (app.state.projects || []).find((item) => item.id === (projectControl.dataset.projectRename || projectControl.dataset.projectStart || projectControl.dataset.projectLead || projectControl.dataset.projectClearLead));
+    if (projectControl.dataset.projectNew !== undefined) openProjectDialog("add");
+    else if (projectControl.dataset.projectRename && project) openProjectDialog("rename", project);
+    else if (projectControl.dataset.projectLead && project) openProjectDialog("lead", project);
+    else if (projectControl.dataset.projectStart && project) {
+      const checkout = project.checkouts[Number(projectControl.dataset.checkout)];
+      if (checkout) toggleNewConversationForm(true, { host: checkoutHost(checkout), folder: checkout.rootPath });
+    } else if (projectControl.dataset.projectClearLead && project) {
+      if (!window.confirm(`Clear the lead of ${project.displayName}? Its conversation and name stay.`)) return;
+      await projectChange(projectControl, async () => {
+        await action("coordinator-clear", { projectId: project.id }, crypto.randomUUID(), "");
+        toast(`${project.displayName} has no lead now.`);
+      });
+    } else if (projectControl.dataset.makeLead !== undefined && app.selected) {
+      const sessionID = app.selected.id;
+      await projectChange(projectControl, async () => {
+        const result = await changeLead((replace) => action("coordinator-set", replace ? { replace: true } : {}, crypto.randomUUID(), sessionID));
+        if (result) toast(`@${result.coordinator.name} leads ${result.coordinator.projectRoot}.`);
+      });
+    }
+    return;
+  }
   const viewControl = event.target.closest("[data-archive-action], [data-project-action], [data-project-add]");
   if (viewControl) {
     viewControl.disabled = true;
@@ -2332,8 +2411,8 @@ document.addEventListener("click", async (event) => {
         await action(viewControl.dataset.projectAction, { projectId: viewControl.dataset.projectId }, crypto.randomUUID(), "");
         toast({ "project-archive": "Project archived.", "project-unarchive": "Project unarchived.", "project-remove": "Project removed." }[viewControl.dataset.projectAction]);
       } else {
-        const result = await action("project-add", { path: viewControl.dataset.projectAdd }, crypto.randomUUID(), "");
-        toast(`Added project ${result.project?.displayName || ""}.`);
+        const result = await action("project-add", { path: viewControl.dataset.projectAdd, ...(viewControl.dataset.projectHost ? { host: viewControl.dataset.projectHost } : {}) }, crypto.randomUUID(), "");
+        toast(result.created === false ? `${result.project?.displayName || "This folder"} is already a project.` : `Added project ${result.project?.displayName || ""}.`);
       }
     } catch (error) {
       toast(error.message);
@@ -2714,7 +2793,9 @@ async function loadStartModels() {
   ].join("");
   if (models.some((model) => model.id === current)) select.value = current;
 }
-function toggleNewConversationForm(show) {
+// toggleNewConversationForm opens the form on the selected session's host,
+// or on the host and in the folder place names.
+function toggleNewConversationForm(show, place) {
   const form = $("#new-conversation-form");
   form.hidden = !show;
   if (!show) {
@@ -2722,7 +2803,8 @@ function toggleNewConversationForm(show) {
     return;
   }
   clearLogicalRequest("session-create");
-  app.startHost = defaultStartHost();
+  app.startHost = place ? place.host : defaultStartHost();
+  if (place) form.querySelector('input[name="cwd"]').value = place.folder;
   $("#new-conversation-host-menu").hidden = true;
   reloadStartCatalog();
   form.querySelector('input[name="alias"]').focus();
@@ -3003,6 +3085,115 @@ setInterval(() => {
   if (document.visibilityState === "visible") load();
 }, 30000);
 
+// projectChange runs one change from a project control, then reloads.
+async function projectChange(control, change) {
+  control.disabled = true;
+  try {
+    await change();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    control.disabled = false;
+    await load();
+  }
+}
+// changeLead sends a lead change and, when the project already has a lead,
+// asks before sending it again as a replacement. It is null when the person
+// keeps the current lead.
+async function changeLead(send) {
+  try {
+    return await send(false);
+  } catch (error) {
+    if (error.code !== "coordinator_exists" && error.code !== "coordinator_conflict") throw error;
+    if (!window.confirm(`${error.message}. Replace it?`)) return null;
+    return await send(true);
+  }
+}
+const projectDialogFields = { add: ["host", "folder", "title"], rename: ["title"], lead: ["checkout", "surface", "name"] };
+function openProjectDialog(mode, project) {
+  const form = $("#project-form");
+  form.reset();
+  app.projectDialog = { mode, project };
+  $("#project-dialog-title").textContent = { add: "Add project", rename: `Rename ${project?.displayName}`, lead: `Lead of ${project?.displayName}` }[mode];
+  $("#project-dialog-error").hidden = true;
+  const help = $("#project-dialog-help");
+  help.hidden = true;
+  const hosts = startHosts();
+  const fields = projectDialogFields[mode].filter((field) => field !== "host" || hosts.length > 0);
+  form.querySelectorAll("[data-project-field]").forEach((field) => {
+    const shown = fields.includes(field.dataset.projectField);
+    field.hidden = !shown;
+    field.querySelectorAll("input,select").forEach((input) => (input.disabled = !shown));
+  });
+  form.elements.title.required = mode === "rename";
+  if (mode === "add") {
+    form.elements.host.innerHTML = hosts.map((host) => `<option value="${escape(host.id)}"${host.state === "connected" ? "" : " disabled"}>${escape(host.name)}${host.local ? " · this machine" : ""}</option>`).join("");
+    form.elements.host.value = defaultStartHost();
+    loadProjectFolders();
+  } else if (mode === "rename") {
+    form.elements.title.value = project.displayName;
+    if ((project.checkouts || []).some((checkout) => !checkout.added)) {
+      help.textContent = "The name applies on every host where this project was added.";
+      help.hidden = false;
+    }
+  } else {
+    const usable = (project.checkouts || []).map((checkout, index) => ({ checkout, index })).filter(({ checkout }) => !checkout.archived && ["local", "connected"].includes(checkout.host?.state));
+    form.elements.checkout.innerHTML = usable.map(({ checkout, index }) => `<option value="${index}">${escape(`${checkout.host?.name || "This machine"}: ${checkout.rootPath}`)}</option>`).join("");
+    const leads = project.coordinators || [];
+    if (leads.length) {
+      help.textContent = `Starts a new lead conversation in place of ${leads.map(coordinatorRef).join(" and ")}. To make an existing conversation the lead, open it and choose Make project lead.`;
+      help.hidden = false;
+    }
+  }
+  $("#project-dialog").showModal();
+}
+async function loadProjectFolders() {
+  const form = $("#project-form");
+  const host = form.elements.host.value;
+  const list = $("#project-folders");
+  list.innerHTML = "";
+  try {
+    const response = await fetch(`/api/v1/session-options${host ? `?host=${encodeURIComponent(host)}` : ""}`);
+    if (!response.ok || form.elements.host.value !== host) return;
+    list.innerHTML = projectFolderSuggestions(await response.json()).map((folder) => `<option value="${escape(folder)}"></option>`).join("");
+  } catch {}
+}
+$("#project-form").elements.host.addEventListener("change", loadProjectFolders);
+$("#project-dialog-close").addEventListener("click", () => $("#project-dialog").close());
+$("#project-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.target;
+  const { mode, project } = app.projectDialog || {};
+  const submit = form.querySelector('button[type="submit"]');
+  const failure = $("#project-dialog-error");
+  submit.disabled = true;
+  failure.hidden = true;
+  try {
+    const title = form.elements.title.value.trim();
+    if (mode === "add") {
+      const host = form.elements.host.disabled ? "" : form.elements.host.value;
+      const result = await action("project-add", { path: form.elements.path.value.trim(), ...(title ? { title } : {}), ...(host ? { host } : {}) }, crypto.randomUUID(), "");
+      toast(result.created === false ? `${result.project.displayName} is already a project.` : `Added project ${result.project.displayName}.`);
+    } else if (mode === "rename") {
+      await action("project-rename", { projectId: project.id, title }, crypto.randomUUID(), "");
+      toast(`Renamed to ${title}.`);
+    } else if (mode === "lead") {
+      const checkout = project.checkouts[Number(form.elements.checkout.value)];
+      if (!checkout) throw Error("No host of this project is connected.");
+      const values = { surface: form.elements.surface.value, name: form.elements.name.value };
+      const result = await changeLead((replace) => action("coordinator-new", leadRequest(checkout, values, replace), crypto.randomUUID(), ""));
+      if (!result) return;
+      toast(`@${result.coordinator.name} leads ${project.displayName}; its first message starts it.`);
+    }
+    $("#project-dialog").close();
+    await load();
+  } catch (error) {
+    failure.textContent = error.message;
+    failure.hidden = false;
+  } finally {
+    submit.disabled = false;
+  }
+});
 function selectedTurnOptions() {
   if (app.selected?.surface !== "codex") return {};
   const options = { effort: $("#turn-effort").value.trim(), mode: $("#turn-mode").value, serviceTier: $("#turn-tier").value };
