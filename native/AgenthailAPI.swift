@@ -325,12 +325,8 @@ final class AgenthailAPI: @unchecked Sendable {
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
         return try await get(path)
     }
-    func codexUsage(host: String? = nil) async throws -> CodexUsage {
-        var components = URLComponents()
-        components.path = "/api/v1/session-options/codex-usage"
-        if let host { components.queryItems = [URLQueryItem(name: "host", value: host)] }
-        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
-        return try await get(path)
+    func usage() async throws -> UsageReport {
+        try await get("/api/v1/usage")
     }
     /// Opens a Claude session that runs in a terminal or background job in
     /// Agenthail's host. A refusal the person can act on (busy, or a terminal

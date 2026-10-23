@@ -318,39 +318,3 @@ struct StatusStrip: View {
         }
     }
 }
-
-@MainActor
-final class UsageMonitor: ObservableObject {
-    @Published private(set) var claude: ProviderUsage?
-    @Published private(set) var codex: ProviderUsage?
-    @Published private(set) var problem: String?
-
-    func run(_ model: AgenthailModel) async {
-        while !Task.isCancelled {
-            await load(model)
-            try? await Task.sleep(for: .seconds(120))
-        }
-    }
-
-    private func load(_ model: AgenthailModel) async {
-        guard let api = model.api else { return }
-        if model.snapshot?.surfaces.contains(where: { $0.name == "codex" && $0.connected }) == true {
-            codex = try? await api.codexUsage().usage
-        } else {
-            codex = nil
-        }
-        do {
-            let options = try await api.sessionOptions()
-            guard let root = options.claudeConfigRoots?.first(where: \.primary) ?? options.claudeConfigRoots?.first else {
-                claude = nil
-                return
-            }
-            let fresh = try await api.claudeRootUsage(root: root.root)
-            claude = fresh.usage ?? root.usage
-            problem = fresh.usageProblem
-        } catch {
-            if error.isCancellation { return }
-            problem = AgenthailAPIError.userMessage(error)
-        }
-    }
-}

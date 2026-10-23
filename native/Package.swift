@@ -42,6 +42,8 @@ let package = Package(
                 "ComposerCompletion.swift",
                 "SessionSelection.swift",
                 "ProjectActions.swift",
+                "UsageMeterText.swift",
+                "UsageStrip.swift",
                 "SessionTree.swift",
                 "MetadataOverlay.swift",
                 "ClaudeSubagentList.swift",

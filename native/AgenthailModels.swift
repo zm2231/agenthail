@@ -144,9 +144,30 @@ struct ClaudeRootUsage: Decodable {
     var usageProblem: String? = nil
 }
 
-struct CodexUsage: Decodable {
-    var usage: ProviderUsage? = nil
-    var usageProblem: String? = nil
+struct UsageReport: Decodable, Hashable {
+    struct Meter: Decodable, Hashable {
+        let provider: String
+        let kind: String
+        let label: String
+        let percent: Double
+        var severity: String? = nil
+        var resetsAt: String? = nil
+        let asOf: String
+        let aged: Bool
+        var until: String? = nil
+    }
+    struct Set: Decodable, Hashable {
+        let host: String
+        let hostId: String
+        var local: Bool? = nil
+        var provider: String? = nil
+        var account: String? = nil
+        var root: String? = nil
+        var primary: Bool? = nil
+        var meters: [Meter]? = nil
+        var problem: String? = nil
+    }
+    var sets: [Set]? = nil
 }
 
 struct SessionCreationOptions: Decodable {

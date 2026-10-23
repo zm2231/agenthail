@@ -83,27 +83,43 @@ private struct UsageLimits: View {
 
     var body: some View {
         TimelineView(.everyMinute) { context in
-            let meters = UsageMeters.meters(provider: "Claude", usage: usage.claude, now: context.date) + UsageMeters.meters(provider: "Codex", usage: usage.codex, now: context.date)
+            let strip = usage.strip(now: context.date)
             HStack(spacing: DesktopSpace.l) {
-                if meters.isEmpty {
-                    Text(usage.problem ?? "Claude")
+                if let problem = strip.problem {
+                    Text(problem).help(problem)
                 }
-                ForEach(meters, id: \.label) { meter in
+                ForEach(strip.meters, id: \.self) { meter in
+                    let critical = meter.severity == "critical"
+                    let spoken = UsageMeterText.spokenLabel(meter, now: context.date)
                     HStack(spacing: 6) {
                         Text(meter.label)
                         if bars {
                             ProgressView(value: min(max(meter.percent / 100, 0), 1))
                                 .progressViewStyle(.linear)
                                 .frame(width: 44)
-                                .tint(meter.percent >= 90 ? DesktopPalette.failed : DesktopPalette.text2)
+                                .tint(critical ? DesktopPalette.failed : DesktopPalette.text2)
                         }
-                        Text(bars ? meter.text : meter.percentText)
+                        Text(bars ? UsageMeterText.text(meter, now: context.date) : UsageMeterText.percent(meter.percent))
                             .monospacedDigit()
-                            .foregroundStyle(!bars && meter.percent >= 90 ? DesktopPalette.failed : DesktopPalette.text2)
+                            .foregroundStyle(!bars && critical ? DesktopPalette.failed : DesktopPalette.text2)
                     }
-                    .help(meter.spokenLabel)
+                    .help(spoken)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(meter.spokenLabel)
+                    .accessibilityLabel(spoken)
+                }
+                if bars {
+                    ForEach(strip.others) { other in
+                        HStack(spacing: 4) {
+                            Text(other.title)
+                            Text(UsageMeterText.percent(other.percent))
+                                .monospacedDigit()
+                                .foregroundStyle(other.critical ? DesktopPalette.failed : DesktopPalette.muted)
+                        }
+                        .foregroundStyle(DesktopPalette.muted)
+                        .help(other.spoken)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(other.spoken)
+                    }
                 }
             }
         }
