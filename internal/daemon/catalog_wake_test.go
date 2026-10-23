@@ -156,7 +156,7 @@ func TestASessionStartedDuringTheFirstPassIsNotLeftForTheTicker(t *testing.T) {
 func TestASessionsFolderCreatedLaterIsWatchedFromItsParent(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	root := t.TempDir()
-	records := filepath.Join(root, "config", "sessions")
+	records := filepath.Join(root, "sessions")
 	claude := newWatchingSurface(surface.KindClaude, func() []string { return []string{records} })
 	d.Surfaces = []surface.Surface{claude}
 	runCatalogLoop(t, d)
@@ -210,5 +210,20 @@ func TestClosedCatalogWakesFollowNothingMore(t *testing.T) {
 	wakes.sync()
 	if follows != 1 {
 		t.Fatalf("followed %d times, want nothing followed after close", follows)
+	}
+}
+
+func TestAFolderWhoseParentIsMissingIsLeftToTheTicker(t *testing.T) {
+	root := t.TempDir()
+	claude := newWatchingSurface(surface.KindClaude, func() []string { return []string{filepath.Join(root, "config", "sessions")} })
+	followed := []string{}
+	wakes := newCatalogWakes([]surface.Surface{claude}, func(dir string) *filewake.Wake {
+		followed = append(followed, dir)
+		return filewake.FollowDir(dir)
+	})
+	defer wakes.close()
+	wakes.sync()
+	if len(followed) != 0 {
+		t.Fatalf("followed %v, want no ancestor above the missing folder's parent", followed)
 	}
 }

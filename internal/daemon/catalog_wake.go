@@ -27,8 +27,10 @@ type catalogWakes struct {
 }
 
 // catalogWake follows one folder. A folder a surface names is followed
-// itself; one that does not exist yet is waited for from its nearest
-// existing ancestor, which asks for a pass only once the folder appears.
+// itself; one that does not exist yet is waited for from its parent, which
+// asks for a pass only once the folder appears. A higher ancestor is left to
+// the ticker: on kqueue a followed folder costs a descriptor per entry, and
+// the nearest existing one may be the home folder.
 type catalogWake struct {
 	kinds  map[surface.SurfaceKind]bool
 	named  bool
@@ -64,11 +66,11 @@ func (c *catalogWakes) sync() {
 				watch.named = true
 				continue
 			}
-			ancestor := nearestExistingDir(dir)
-			if ancestor == "" {
+			parent := filepath.Dir(dir)
+			if parent == dir || !existingDir(parent) {
 				continue
 			}
-			watch := want(ancestor)
+			watch := want(parent)
 			watch.kinds[adapter.Name()] = true
 			watch.awaits = append(watch.awaits, dir)
 		}
@@ -179,17 +181,4 @@ func anyExistingDir(paths []string) bool {
 		}
 	}
 	return false
-}
-
-func nearestExistingDir(path string) string {
-	for {
-		parent := filepath.Dir(path)
-		if parent == path {
-			return ""
-		}
-		if existingDir(parent) {
-			return parent
-		}
-		path = parent
-	}
 }
