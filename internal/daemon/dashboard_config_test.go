@@ -18,7 +18,7 @@ func TestDashboardConfigDefaultsCodexRecency(t *testing.T) {
 	if config.BusyDelivery != "queue" {
 		t.Fatalf("busy delivery=%q, want queue", config.BusyDelivery)
 	}
-	if config.RemoteAccess.Provider != "tailscale" || config.RemoteAccess.Port != defaultRemoteAccessPort {
+	if config.RemoteAccess.Provider != "tailscale" || config.RemoteAccess.Port != DefaultRemoteAccessPort {
 		t.Fatalf("remote access=%+v", config.RemoteAccess)
 	}
 }
