@@ -420,7 +420,7 @@ func TestAClosingTurnClearsWhenItsTranscriptIsRewrittenAtTheSameSizeAndTime(t *t
 		if err != nil {
 			t.Fatal(err)
 		}
-		if transcriptChangeTime(rewritten) != transcriptChangeTime(info) {
+		if changed := transcriptChangeTime(rewritten); changed == "" || changed != transcriptChangeTime(info) {
 			break
 		}
 	}
