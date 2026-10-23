@@ -987,9 +987,6 @@ struct IOSTimelineRow: View {
                 if expanded {
                     if item.kind == "toolResult" { TranscriptCode(text: item.text) }
                     else { SessionMarkdown(text: item.text, readingStyle: item.kind == "reasoning") }
-                    if let id = item.callId {
-                        Text("Call \(id)").font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
-                    }
                     SessionTimestamp(value: item.timestamp)
                 }
                 if item.truncated { shortened }
@@ -1003,6 +1000,7 @@ struct IOSTimelineRow: View {
                 }
             }
             .padding(.vertical, 4)
+            .contextMenu { CopyCallID(item: item) }
         }
     }
 
@@ -1023,6 +1021,17 @@ struct IOSTimelineRow: View {
     }
 }
 
+/// Call ids are for debugging, so they are copied from a menu rather than shown.
+struct CopyCallID: View {
+    let item: TimelineItem
+
+    var body: some View {
+        if let id = item.callId, !id.isEmpty {
+            Button("Copy call ID", systemImage: "number") { UIPasteboard.general.string = id }
+        }
+    }
+}
+
 struct AttachmentRow: View {
     let item: TimelineItem
     let loader: (() async -> Data?)?
@@ -1038,10 +1047,10 @@ struct AttachmentRow: View {
                 Label(item.text.isEmpty ? "Image attachment" : item.text, systemImage: "photo").foregroundStyle(.secondary)
                 if attempted, loader != nil { Button("Try again") { retryCount += 1 }.font(.caption) }
             }
-            if let id = item.callId { Text("Call \(id)").font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled) }
             SessionTimestamp(value: item.timestamp)
         }
         .padding(.vertical, 4)
+        .contextMenu { CopyCallID(item: item) }
         .task(id: "\(item.id)-\(retryCount)") {
             guard let loader, data == nil else { return }
             attempted = true

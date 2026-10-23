@@ -896,7 +896,6 @@ struct TranscriptView: View {
                 }
                 ForEach(blocks) { block in
                     TranscriptBlockView(block: block, onEdit: canResend ? { resend($0) } : nil)
-                        .timelineDetails(block.source)
                 }
                 ForEach(sends) { send in
                     UserBubble(text: send.text, receipt: send.status, files: send.files, failure: send.failure, onEdit: canResend ? { text in
@@ -1329,6 +1328,11 @@ struct ToolRunView: View {
                     case .output(let result):
                         ToolOutputBlock(result: result)
                             .padding(.leading, 21)
+                            .contextMenu {
+                                if let id = result.callId, !id.isEmpty {
+                                    Button("Copy call ID") { copyToPasteboard(id) }
+                                }
+                            }
                     case .reasoning(let item):
                         ReasoningRow(item: item)
                     }
@@ -1403,7 +1407,7 @@ struct ToolCallRow: View {
                         .padding(DesktopSpace.s)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
-                    TimelineMetaLine(item: call)
+                    ShortenedNote(item: call)
                     if results.isEmpty {
                         Text("No result yet")
                             .font(.system(size: DesktopType.meta))
@@ -1420,6 +1424,9 @@ struct ToolCallRow: View {
             Button("Copy input") { copyToPasteboard(call.text) }
             if !results.isEmpty {
                 Button("Copy output") { copyToPasteboard(results.map(\.text).joined(separator: "\n\n")) }
+            }
+            if let id = call.callId, !id.isEmpty {
+                Button("Copy call ID") { copyToPasteboard(id) }
             }
         }
     }
@@ -1456,7 +1463,7 @@ struct ReasoningRow: View {
                         .font(.system(size: DesktopType.body))
                         .foregroundStyle(DesktopPalette.text2)
                         .textual.textSelection(.enabled)
-                    TimelineMetaLine(item: item)
+                    ShortenedNote(item: item)
                 }
                 .padding(.leading, 21)
             }
@@ -1492,33 +1499,19 @@ struct ToolOutputBlock: View {
                 .padding(DesktopSpace.s)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
-            TimelineMetaLine(item: result)
+            ShortenedNote(item: result)
         }
     }
 }
 
-extension View {
-    @ViewBuilder func timelineDetails(_ item: TimelineItem?) -> some View {
-        let fields = item.map(TimelineMetadata.fields) ?? []
-        if fields.isEmpty {
-            self
-        } else {
-            self.help(fields.joined(separator: " · "))
-                .accessibilityHint(fields.joined(separator: ", "))
-        }
-    }
-}
-
-struct TimelineMetaLine: View {
+struct ShortenedNote: View {
     let item: TimelineItem
 
     var body: some View {
-        let fields = TimelineMetadata.fields(item)
-        if !fields.isEmpty {
-            Text(fields.joined(separator: " · "))
+        if let note = TimelineMetadata.note(item) {
+            Text(note)
                 .font(.system(size: DesktopType.caption))
                 .foregroundStyle(DesktopPalette.muted)
-                .textSelection(.enabled)
         }
     }
 }

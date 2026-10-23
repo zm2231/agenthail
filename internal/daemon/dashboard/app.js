@@ -1429,18 +1429,10 @@ function timelineItemAttributes(item) {
   if (item.status) attributes.push(`data-status="${escape(item.status)}"`);
   return attributes.join(" ");
 }
+// Titles, call ids, statuses and raw timestamps stay in data attributes for
+// debugging; a reader only needs to know the host shortened a record.
 function renderTimelineMetadata(item) {
-  const fields = [];
-  if (item.title) fields.push(`<span>Title: ${escape(item.title)}</span>`);
-  if (item.callId) fields.push(`<span>Call: ${escape(item.callId)}</span>`);
-  if (item.status) fields.push(`<span>Status: ${escape(item.status)}</span>`);
-  if (item.timestamp) fields.push(`<time datetime="${escape(item.timestamp)}">${escape(item.timestamp)}</time>`);
-  if (item.truncated) {
-    const reason = item.truncationReason ? ` (${escape(item.truncationReason)})` : "";
-    fields.push(`<span>Content truncated${reason}</span>`);
-  }
-  if (item.bodyRef) fields.push(`<span>Body reference: <code>${escape(item.bodyRef)}</code></span>`);
-  return fields.length ? `<div class="timeline-meta">${fields.join(" · ")}</div>` : "";
+  return item.truncated ? '<div class="timeline-meta">Shortened by the host</div>' : "";
 }
 // isInstructions reports model input a provider injected, such as project
 // instructions or hook context, rather than conversation.

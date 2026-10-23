@@ -92,8 +92,11 @@ const items = [
   { id: "future-1", kind: "futureEvent", title: "Future event", text: "<script>alert('x')</script>", status: "unknown", timestamp: "2026-10-04T12:00:05Z", truncated: true, truncationReason: "bounded", bodyRef: "blob://body-1" },
 ];
 const html = context.renderTimeline(items, session);
-for (const expected of ["Read the report", "report.md", "report contents", "call-7", "running", "complete", "2026-10-04T12:00:03Z", "attachment-1", "Content truncated", "blob://body-1", "Future event", "futureEvent"]) {
+for (const expected of ["Read the report", "report.md", "report contents", 'data-call-id="call-7"', 'data-status="running"', 'data-status="complete"', "attachment-1", "Shortened by the host", "Future event", "futureEvent"]) {
   assert(html.includes(expected), `timeline omitted ${expected}`);
+}
+for (const debug of ["Title: ", "Call: ", "Status: ", "2026-10-04T12:00:03Z", "Body reference", "blob://body-1"]) {
+  assert(!html.includes(debug), `timeline shows debug metadata ${debug}`);
 }
 assert(html.includes("<details"), "tool and reasoning items should be collapsible");
 assert(html.includes('data-copy-text="report contents"'), "tool results should offer their raw text for copying");
