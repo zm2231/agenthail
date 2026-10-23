@@ -34,16 +34,16 @@ struct SnapshotBudgetTest {
         let (afterDeadline, afterSleeps) = counting(budget)
         await afterDeadline.wait { false }
         await afterDeadline.pause(.milliseconds(300))
-        let answered = ContinuousClock.now
         check(afterSleeps.count == 0, "a window that never loads and the settle get nothing once the budget is spent, slept \(afterSleeps.count) times")
-        check(answered < expiry, "the answer goes out before the daemon stops waiting, \(expiry - answered) to spare")
+        check(budget.deadline < expiry, "the answer goes out before the daemon stops waiting, \(expiry - budget.deadline) to spare")
 
         let skewed = try JSONDecoder().decode(AgenthailEvent.self, from: Data("""
         {"id":1,"type":"ui.snapshot.requested","timestamp":"2027-10-23T08:00:00Z","data":{"id":"a","deadlineMs":20000}}
         """.utf8))
+        let arriving = ContinuousClock.now
         let fromEvent = SnapshotBudget(deadlineMs: skewed.snapshot!.deadlineMs)
-        let left = fromEvent.remaining
-        check(left > .milliseconds(17_900) && left <= .seconds(18), "a request stamped by a clock a year ahead still gets its full budget from arrival, got \(left)")
+        let arrived = ContinuousClock.now
+        check(fromEvent.deadline >= arriving + .seconds(18) && fromEvent.deadline <= arrived + .seconds(18), "a request stamped by a clock a year ahead still gets its full budget from arrival, got \(fromEvent.deadline - arriving)")
 
         let (ready, readySleeps) = counting(SnapshotBudget(deadlineMs: 20_000))
         await ready.wait { true }
