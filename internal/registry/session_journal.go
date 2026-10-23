@@ -355,6 +355,7 @@ func (r *Registry) SessionJournalAfter(sessionID string, after uint64, limit int
 	}
 	window := SessionJournalWindow{Entries: []SessionJournalEntry{}}
 	if !earliest.Valid || !latest.Valid {
+		window.Gap = after > 0 && after < prunedSeq
 		return window, nil
 	}
 	window.EarliestSeq = uint64(earliest.Int64)

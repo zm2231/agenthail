@@ -416,3 +416,26 @@ func TestAReplacedJournalStreamsItsRowsToTheNewestCursorAndAGapToOlderOnes(t *te
 		t.Fatalf("after an older cursor = %+v err=%v, want a gap", window, err)
 	}
 }
+
+func TestAJournalReplacedWithNothingReportsAGapToCursorsBeforeItsNewest(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	retention := SessionJournalRetention{Count: 10, Bytes: 1 << 20}
+	for _, key := range []string{"a", "b", "c"} {
+		if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "s", Kind: "item", ProviderKey: key, Payload: []byte(`"` + key + `"`)}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := r.ReplaceSessionJournal("s", []SessionJournalEntry{}, retention, 1); err != nil {
+		t.Fatal(err)
+	}
+	if window, err := r.SessionJournalAfter("s", 3, 10); err != nil || window.Gap || len(window.Entries) != 0 {
+		t.Fatalf("after the newest cursor = %+v err=%v, want no rows and no gap", window, err)
+	}
+	if window, err := r.SessionJournalAfter("s", 2, 10); err != nil || !window.Gap {
+		t.Fatalf("after an older cursor = %+v err=%v, want a gap", window, err)
+	}
+	if window, err := r.SessionJournalAfter("s", 0, 10); err != nil || window.Gap {
+		t.Fatalf("from the start = %+v err=%v, want no gap", window, err)
+	}
+}
