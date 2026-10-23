@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/sse"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -49,7 +49,7 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusConflict, "stream_unsupported", "This session does not expose a live stream.")
 		return
 	}
-	after, err := parseSessionStreamCursor(r)
+	after, err := sse.Cursor(r)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_cursor", "The session stream cursor is invalid.")
 		return
@@ -73,10 +73,7 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flusher http.Flusher, sessionID string, after uint64, window registry.SessionJournalWindow, wake <-chan struct{}) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache, no-transform")
-	w.Header().Set("Connection", "keep-alive")
-	writeSSEOpen(w)
+	sse.Open(w)
 	toItem := d.journalItemReader(sessionID)
 	watermark := window.LatestSeq
 	if watermark < after {
@@ -103,35 +100,9 @@ func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flus
 	if !follow() {
 		return
 	}
-	keepalive := time.NewTicker(eventKeepalivePeriod)
-	defer keepalive.Stop()
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case _, open := <-wake:
-			if !follow() || !open {
-				return
-			}
-		case <-keepalive.C:
-			if !d.apiEventStreamAuthorized(r) {
-				return
-			}
-			fmt.Fprint(w, ": keepalive\n\n")
-			flusher.Flush()
-		}
-	}
-}
-
-func parseSessionStreamCursor(r *http.Request) (uint64, error) {
-	value := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
-	if value == "" {
-		value = strings.TrimSpace(r.URL.Query().Get("after"))
-	}
-	if value == "" {
-		return 0, nil
-	}
-	return strconv.ParseUint(value, 10, 64)
+	sse.Follow(r.Context(), w, flusher, wake, func(_ struct{}, open bool) bool {
+		return follow() && open
+	}, func() bool { return d.apiEventStreamAuthorized(r) })
 }
 
 func (d *Daemon) sessionStreamBodyHandler(w http.ResponseWriter, r *http.Request) {

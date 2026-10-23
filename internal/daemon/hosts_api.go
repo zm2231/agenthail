@@ -20,6 +20,7 @@ import (
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/sse"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/tailscale"
 	"github.com/zm2231/agenthail/internal/uploads"
@@ -601,9 +602,7 @@ func (d *Daemon) relayHostStream(w http.ResponseWriter, r *http.Request, host *p
 		return
 	}
 	defer response.Body.Close()
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache, no-transform")
-	w.Header().Set("Connection", "keep-alive")
+	sse.SetHeaders(w.Header())
 	w.WriteHeader(http.StatusOK)
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 64<<10), 8<<20)
