@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"os"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -114,5 +115,29 @@ func TestClaudeObserveTakesIdleFromTheSessionRecord(t *testing.T) {
 	}
 	if _, err := claude.LocalStatus(context.Background(), *session); err == nil {
 		t.Fatal("LocalStatus applied a record from a reused pid")
+	}
+}
+
+func TestARecordWithoutProcStartIsLiveOnlyForTheProcessThatWroteIt(t *testing.T) {
+	process := exec.Command("sleep", "30")
+	if err := process.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = process.Process.Kill(); _ = process.Wait() })
+	started, err := processStartedAt(process.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := func(startedAt time.Time) map[string]any {
+		return map[string]any{"pid": float64(process.Process.Pid), "sessionId": "conversation", "startedAt": float64(startedAt.UnixMilli())}
+	}
+	if !claudeRecordLive(record(started.Add(2 * time.Second))) {
+		t.Fatal("a record written after its process started is not live")
+	}
+	if claudeRecordLive(record(started.Add(-time.Hour))) {
+		t.Fatal("a record written an hour before its pid's process started is live")
+	}
+	if !claudeRecordLive(map[string]any{"pid": float64(process.Process.Pid)}) {
+		t.Fatal("a record with no start time to compare is not live")
 	}
 }

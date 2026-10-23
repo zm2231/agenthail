@@ -1,6 +1,10 @@
 package daemon
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -48,6 +52,42 @@ func TestALiveSessionNothingWatchesKeepsItsJournalFollowingItsTranscript(t *test
 			t.Fatal("the source still runs after its session's process ended")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestAStaleRecordWhosePidAnotherProcessReusedHoldsNoSource(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	d, _, _, _, _ := daemonFixture(t)
+	t.Cleanup(d.sources.shutdown)
+	fixture := claudetest.New(t)
+	const conversation = "exited-reused-pid"
+	fixture.Transcript(conversation, fixture.Home)
+	fixture.Listen()
+	fixture.Record(conversation, fixture.Home, "")
+	path := filepath.Join(fixture.Root, "sessions", fmt.Sprint(fixture.PID)+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(data, &record); err != nil {
+		t.Fatal(err)
+	}
+	record["startedAt"] = time.Now().Add(-time.Hour).UnixMilli()
+	data, _ = json.Marshal(record)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	d.Surfaces = []surface.Surface{surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
+	d.discoverCatalog(t.Context())
+	d.sources.mu.Lock()
+	_, running := d.sources.sources[conversation]
+	d.sources.mu.Unlock()
+	d.sourceHoldMu.Lock()
+	_, held := d.liveSources[conversation]
+	d.sourceHoldMu.Unlock()
+	if running || held {
+		t.Fatalf("a record written an hour before its pid's process started holds a source: running=%v held=%v", running, held)
 	}
 }
 
