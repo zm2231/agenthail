@@ -17,6 +17,7 @@ SUPERVISED_HOME="$TMP/supervised home"
 SUPERVISED_BIN="$SUPERVISED_HOME/custom tools"
 SUPERVISED_DATA_1="$SUPERVISED_HOME/data one"
 SUPERVISED_DATA_2="$SUPERVISED_HOME/data two"
+OTHER_HOME_DAEMON=""
 COLLISION_BIN="$TEST_HOME/unmanaged tools"
 SKILL_HOME="$TMP/skill home"
 SKILL_BIN="$SKILL_HOME/bin"
@@ -32,6 +33,7 @@ SOURCE_GO_BIN="$(dirname "$(command -v go)")"
 SOURCE_GOMODCACHE="$(go env GOMODCACHE)"
 
 cleanup() {
+	[ -z "$OTHER_HOME_DAEMON" ] || kill "$OTHER_HOME_DAEMON" 2>/dev/null || true
 	if [ -x "$NEW_BIN/agenthail" ]; then
 		HOME="$TEST_HOME" PATH="$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" "$NEW_BIN/agenthail" daemon uninstall >/dev/null 2>&1 || true
 	elif [ -x "$OLD_BIN/agenthail" ]; then
@@ -282,7 +284,12 @@ test "$(plutil -extract EnvironmentVariables.AGENTHAIL_PYTHON raw -o - "$SUPERVI
 test "$(plutil -extract EnvironmentVariables.AGENTHAIL_CLAUDE_BIN raw -o - "$SUPERVISED_PLIST")" = "$SUPERVISED_HOME/custom Claude & tools/claude"
 test "$(plutil -extract ProcessType raw -o - "$SUPERVISED_PLIST")" = Standard
 
+HOME="$SUPERVISED_HOME" "$FAKE_BIN/launchctl" bootout "gui/$UID/com.agenthail.daemon" >/dev/null 2>&1 || true
+sleep 600 &
+OTHER_HOME_DAEMON="$!"
+echo "$OTHER_HOME_DAEMON" >"$SUPERVISED_HOME/.fake-agenthail-launchd-last-pid"
 echo "/Users/another-user/Library/LaunchAgents/com.agenthail.daemon.plist" >"$SUPERVISED_HOME/.fake-agenthail-launchd-plist"
+touch "$SUPERVISED_HOME/.fake-agenthail-launchd-loaded"
 install_once "$SUPERVISED_HOME" "$SUPERVISED_BIN" "$SUPERVISED_DATA_1" >"$TMP/other-home-service.log"
 grep -Fq 'leaving the supervised daemon loaded from /Users/another-user/Library/LaunchAgents/com.agenthail.daemon.plist unchanged' "$TMP/other-home-service.log"
 if grep -Fq 'supervised daemon for upgrade' "$TMP/other-home-service.log" || grep -Fq 'reinstalling supervised daemon' "$TMP/other-home-service.log"; then
@@ -290,7 +297,9 @@ if grep -Fq 'supervised daemon for upgrade' "$TMP/other-home-service.log" || gre
 	exit 1
 fi
 test -f "$SUPERVISED_HOME/.fake-agenthail-launchd-loaded"
-echo "$SUPERVISED_PLIST" >"$SUPERVISED_HOME/.fake-agenthail-launchd-plist"
+kill -0 "$OTHER_HOME_DAEMON"
+kill "$OTHER_HOME_DAEMON"
+rm -f "$SUPERVISED_HOME/.fake-agenthail-launchd-loaded" "$SUPERVISED_HOME/.fake-agenthail-launchd-plist"
 
 install_from_source >"$TMP/source-install.log"
 strings "$SOURCE_DATA/agenthail" | grep -F 'https://relay.example.test' >/dev/null
