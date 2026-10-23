@@ -212,7 +212,7 @@ func (c *recordingPushClient) Do(request *http.Request) (*http.Response, error) 
 func TestSafariIsNotifiedButNeverSentAWithdraw(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	reg := registryTestRegistry(t)
-	for _, endpoint := range []string{"https://web.push.apple.com/safari", "https://fcm.googleapis.com/fcm/send/chrome"} {
+	for _, endpoint := range []string{"https://web.push.apple.com/safari", "https://WEB.PUSH.APPLE.COM:443/safari-ios", "https://fcm.googleapis.com/fcm/send/chrome"} {
 		pairing, err := reg.CreateDevicePairing("Browser", registry.BrowserScopes, time.Minute)
 		if err != nil {
 			t.Fatal(err)
@@ -235,7 +235,7 @@ func TestSafariIsNotifiedButNeverSentAWithdraw(t *testing.T) {
 	notified := len(client.hosts)
 	d.withdrawFromPairedDevices(context.Background(), key)
 	withdrawn := client.hosts[notified:]
-	if notified != 2 || len(withdrawn) != 1 || withdrawn[0] != "fcm.googleapis.com" {
+	if notified != 3 || len(withdrawn) != 1 || withdrawn[0] != "fcm.googleapis.com" {
 		t.Fatalf("notified %d browsers, withdrew from %v", notified, withdrawn)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -203,7 +204,7 @@ func (d *Daemon) sendToBrowsers(ctx context.Context, message webPushMessage, urg
 // withdraw there would only add an Answered notification beside it.
 func withdrawsClose(endpoint string) bool {
 	parsed, err := url.Parse(endpoint)
-	return err != nil || parsed.Hostname() != "web.push.apple.com"
+	return err != nil || !strings.EqualFold(parsed.Hostname(), "web.push.apple.com")
 }
 
 // webPushTopic is the Topic header for a collapse key. A topic is at most 32
