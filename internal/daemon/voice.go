@@ -38,6 +38,7 @@ func (d *Daemon) registerVoiceAPI(mux *http.ServeMux, dashboard *dashboardServer
 		d.setSessionSourceHold(session, active, "voice")
 	}, daemonVoiceStreamProvider{daemon: d})
 	s.SetProjects(voiceProjects{d: d})
+	s.SetLog(d.log.Printf)
 	if dashboard.voice != nil {
 		dashboard.voice.Close()
 	}

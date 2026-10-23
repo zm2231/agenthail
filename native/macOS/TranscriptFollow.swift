@@ -12,6 +12,7 @@ struct HoldTranscriptPlace: Equatable {
 
 extension EnvironmentValues {
     @Entry var holdTranscriptPlace = HoldTranscriptPlace()
+    @Entry var transcriptOverhang: CGFloat = 0
 }
 
 struct TranscriptFollow<ID: Equatable>: ViewModifier {
@@ -84,6 +85,10 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 }
             }
             .environment(\.holdTranscriptPlace, HoldTranscriptPlace(hold: holdPlace))
+            .environment(\.revealRow) { top in
+                following = false
+                position.scrollTo(y: top)
+            }
             .onChange(of: transcript) {
                 generation &+= 1
                 placedLeadingRow = leadingRow

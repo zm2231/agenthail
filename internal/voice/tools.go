@@ -180,6 +180,14 @@ func (s *Service) SetProjects(projects Projects) {
 	s.projects = projects
 }
 
+// SetLog gives the service the daemon's log. The daemon calls it once, before
+// the service handles events.
+func (s *Service) SetLog(logf func(format string, args ...any)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.logf = logf
+}
+
 func (s *Service) toolsOutdated() bool {
 	return s.state.State.Session != nil && s.state.State.ToolsDigest != ToolsDigest() && !s.state.ToolsNoticeShown
 }

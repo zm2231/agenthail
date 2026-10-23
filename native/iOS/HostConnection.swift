@@ -140,7 +140,7 @@ final class HostConnection {
             let loaded = try await api.snapshot(fresh: fresh)
             guard !stopped else { return false }
             if let retired = loaded.rekeyed, !retired.isEmpty { delegate?.host(self, rekeyed: retired) }
-            snapshot = loaded
+            snapshot = loaded.keepingCatalog(of: snapshot, appliedThrough: catalogStreamCursor)
             snapshotSeq = seq
             reachable = true
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)

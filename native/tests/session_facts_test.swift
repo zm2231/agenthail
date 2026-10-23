@@ -41,9 +41,8 @@ struct SessionFactsTest {
         local.host = SessionHost(id: "h00000000000a", name: "laptop", state: "local")
         expect(SessionFacts.rowDetail(local) == "Claude · Open", "a local session names no host")
 
-        expect(SessionFacts.headerFacts(session(queued: 3), age: "5m") == ["3 queued", "last active 5m ago"], "idle header shows queue and last active")
-        expect(SessionFacts.headerFacts(session(status: "busy"), age: "5m") == ["0 queued"], "busy header omits last active")
-        expect(SessionFacts.lastActive("now") == "last active just now" && SessionFacts.lastActive("") == "last active recently", "last active wording")
+        expect(SessionFacts.headerFacts(session(queued: 3)) == ["3 queued"], "the header shows a waiting queue")
+        expect(SessionFacts.headerFacts(session(status: "busy")).isEmpty, "an empty queue says nothing")
 
         expect(SessionFacts.exchangeLabel(1) == "1 recent exchange" && SessionFacts.exchangeLabel(0) == "0 recent exchanges", "exchange label pluralizes")
 

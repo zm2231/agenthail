@@ -8,8 +8,10 @@ struct ToolRunView: View {
     let id: String
     let items: [TimelineItem]
     @State private var opened: RowChoice<Bool>?
+    @State private var top: CGFloat = 0
     @Environment(\.transcriptRows) private var rows
     @Environment(\.holdTranscriptPlace) private var holdPlace
+    @Environment(\.revealRow) private var revealRow
 
     var body: some View {
         let entries = ToolRunSummary.entries(items)
@@ -28,6 +30,7 @@ struct ToolRunView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityValue(open ? "Expanded" : "Collapsed")
+                .contentTop($top)
             }
             if open {
                 ForEach(entries) { entry in
@@ -38,6 +41,14 @@ struct ToolRunView: View {
                         OutputLine(result: result)
                     case .reasoning(let item):
                         ReasoningLine(item: item)
+                    }
+                }
+                if folds {
+                    CollapseLine(title: "Collapse activity") {
+                        // Collapsing from the end removes the rows on screen; bring the run back rather than leave the offset past the content.
+                        opened = rows.choice(false)
+                        rows.set(id, open: false)
+                        revealRow(top)
                     }
                 }
             }
@@ -99,13 +110,32 @@ struct ToolLineLabel: View {
     }
 }
 
+/// The control at the end of an open run or tool that closes it and brings its first line back on screen.
+struct CollapseLine: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: "chevron.up")
+                .font(.system(size: DesktopType.secondary))
+                .foregroundStyle(DesktopPalette.muted)
+                .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct ToolLine: View {
     let call: TimelineItem
     let results: [TimelineItem]
     @State private var opened: RowChoice<Bool>?
+    @State private var top: CGFloat = 0
     @Environment(\.transcriptRows) private var rows
     @Environment(\.holdTranscriptPlace) private var holdPlace
     @Environment(\.toolCallStates) private var states
+    @Environment(\.revealRow) private var revealRow
 
     private var failed: Bool { results.contains(where: ToolRunSummary.isFailure) || ToolRunSummary.isFailure(call) }
 
@@ -124,6 +154,7 @@ struct ToolLine: View {
             }
             .buttonStyle(.plain)
             .accessibilityValue(open ? "Expanded" : "Collapsed")
+            .contentTop($top)
             if open {
                 VStack(alignment: .leading, spacing: 6) {
                     if !failed {
@@ -149,6 +180,11 @@ struct ToolLine: View {
                     }
                     ForEach(results) { result in
                         ToolOutputBlock(result: result)
+                    }
+                    CollapseLine(title: "Collapse tool") {
+                        opened = rows.choice(false)
+                        rows.set(call.id, open: false)
+                        revealRow(top)
                     }
                 }
                 .padding(.leading, ToolLineLabel.indent)
@@ -238,8 +274,10 @@ struct OutputLine: View {
 struct ToolOutputBlock: View {
     let result: TimelineItem
     @State private var shownLines: RowChoice<Int>?
+    @State private var top: CGFloat = 0
     @Environment(\.transcriptRows) private var rows
     @Environment(\.holdTranscriptPlace) private var holdPlace
+    @Environment(\.revealRow) private var revealRow
 
     /// Lines added per "Show more", so a long output is laid out a page at a time rather than as one text.
     static let page = 500
@@ -283,13 +321,30 @@ struct ToolOutputBlock: View {
                 .textSelection(.enabled)
                 .padding(DesktopSpace.s)
                 .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+                // The pages can run long, so the same controls follow them; Show less here brings the output's top back.
+                HStack(spacing: 10) {
+                    if shown < lines.count {
+                        Button("Show \(min(Self.page, lines.count - shown)) more lines") { show(shown + Self.page) }
+                    }
+                    Button("Show less") {
+                        set(0)
+                        revealRow(top)
+                    }
+                }
+                .font(.system(size: DesktopType.caption))
+                .buttonStyle(.link)
             }
             ShortenedNote(item: result)
         }
+        .contentTop($top)
     }
 
     private func show(_ count: Int) {
         holdPlace()
+        set(count)
+    }
+
+    private func set(_ count: Int) {
         shownLines = rows.choice(count)
         rows.set("output-" + result.id, count: count)
     }

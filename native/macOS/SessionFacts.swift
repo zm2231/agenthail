@@ -47,18 +47,8 @@ enum SessionFacts {
         return parts.joined(separator: " · ")
     }
 
-    static func headerFacts(_ session: SessionState, age: String) -> [String] {
-        var parts = [queuedLabel(session.queueCount)]
-        if session.status != "busy" { parts.append(lastActive(age)) }
-        return parts
-    }
-
-    static func lastActive(_ age: String) -> String {
-        switch age {
-        case "": return "last active recently"
-        case "now": return "last active just now"
-        default: return "last active \(age) ago"
-        }
+    static func headerFacts(_ session: SessionState) -> [String] {
+        session.queueCount > 0 ? [queuedLabel(session.queueCount)] : []
     }
 
     static func exchangeLabel(_ count: Int) -> String {

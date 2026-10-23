@@ -166,6 +166,7 @@ type Service struct {
 	written        uint64
 	unsaved        []byte
 	spoken         []spokenRequest
+	kept           map[string]bool // spoken transcripts the call held rather than delivered
 	spokenInFlight string
 	delivering     bool
 	cycled         func()
@@ -203,6 +204,7 @@ type Service struct {
 	tasks                   sync.WaitGroup
 	closed                  bool
 	speechTimeout           time.Duration
+	logf                    func(format string, args ...any)
 }
 
 // snapshot is the state as of the last release of s.mu, so View never waits
@@ -675,7 +677,7 @@ func (s *Service) start(ctx context.Context, owner string, a Action) error {
 	s.boundAttempt, s.eventGap, s.disconnectedAt = "", false, time.Time{}
 	s.state.Owner = owner
 	s.state.Messages = nil
-	s.spoken = nil
+	s.spoken, s.kept = nil, nil
 	v.Events, v.Truncated = []Event{}, false
 	v.AttemptID, v.Phase, v.SDP, v.Message, v.TerminalReason = a.AttemptID, "starting", "", "", ""
 	v.InputMuted, v.InputRevision = false, 0
@@ -1360,7 +1362,13 @@ func (s *Service) recordDelegationFailure(attemptID, messageID, targetID string,
 }
 
 func (s *Service) appendDelegationEvent(messageID string, target *surface.Session, receipt *delivery.Receipt, stage string) {
-	s.state.State.Events = append(s.state.State.Events, Event{Method: "voice/delegation/" + stage, Params: map[string]any{"messageId": messageID, "targetId": target.ID, "turnId": receipt.TurnID, "evidence": receipt.Evidence}})
+	s.appendEvent(Event{Method: "voice/delegation/" + stage, Params: map[string]any{"messageId": messageID, "targetId": target.ID, "turnId": receipt.TurnID, "evidence": receipt.Evidence}})
+}
+
+// appendEvent records an event of the call's own, keeping the latest 100.
+// The caller holds s.mu.
+func (s *Service) appendEvent(e Event) {
+	s.state.State.Events = append(s.state.State.Events, e)
 	if len(s.state.State.Events) > 100 {
 		s.state.State.Events = s.state.State.Events[len(s.state.State.Events)-100:]
 		s.state.State.Truncated = true
@@ -1741,8 +1749,7 @@ func (s *Service) queueSpokenTranscript(e Event) {
 		return
 	}
 	messageID := "voice-transcript:" + strconv.FormatInt(e.Sequence, 10)
-	if s.state.State.InputMuted {
-		s.holdSpoken(messageID, errSpokenWhileMuted)
+	if s.kept[messageID] || s.spokenInFlight == messageID {
 		return
 	}
 	for _, id := range s.state.Messages {
@@ -1750,13 +1757,20 @@ func (s *Service) queueSpokenTranscript(e Event) {
 			return
 		}
 	}
-	if s.spokenInFlight == messageID {
-		return
-	}
 	for _, queued := range s.spoken {
 		if queued.messageID == messageID {
 			return
 		}
+	}
+	if s.state.State.InputMuted {
+		s.keep(messageID)
+		s.holdSpoken(messageID, errSpokenWhileMuted)
+		return
+	}
+	if voiceOnly(text) {
+		s.keep(messageID)
+		s.holdVoiceOnly(messageID, text)
+		return
 	}
 	s.spoken = append(s.spoken, spokenRequest{attemptID: s.state.State.AttemptID, messageID: messageID, text: text})
 	if !s.delivering {
@@ -1808,9 +1822,26 @@ func (s *Service) holdSpoken(messageID string, err error) {
 	if target := s.state.State.Target; target != nil {
 		params["targetId"] = target.ID
 	}
-	s.state.State.Events = append(s.state.State.Events, Event{Method: "voice/delegation/held", Params: params})
-	if len(s.state.State.Events) > 100 {
-		s.state.State.Events = s.state.State.Events[len(s.state.State.Events)-100:]
-		s.state.State.Truncated = true
+	s.appendEvent(Event{Method: "voice/delegation/held", Params: params})
+}
+
+// keep records that the call held a spoken transcript. The caller holds s.mu.
+func (s *Service) keep(messageID string) {
+	if s.kept == nil {
+		s.kept = map[string]bool{}
+	}
+	s.kept[messageID] = true
+}
+
+// holdVoiceOnly keeps filler with voice instead of sending it to the selected
+// session, and logs it so a wrong hold can be found. The caller holds s.mu.
+func (s *Service) holdVoiceOnly(messageID, text string) {
+	target := s.state.State.Target
+	s.appendEvent(Event{Method: "voice/utterance/voice-only", Params: map[string]any{"messageId": messageID, "targetId": target.ID, "text": text}})
+	if logf := s.logf; logf != nil {
+		name, id := target.Name, target.ID
+		s.later(func() {
+			logf("voice: kept %q with voice instead of sending it to %s (%s, %s)", text, name, id, messageID)
+		})
 	}
 }

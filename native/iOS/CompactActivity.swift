@@ -1,29 +1,11 @@
 import SwiftUI
 
-extension EnvironmentValues {
-    /// Scrolls the transcript so this point of its content, measured in `TimelineGroup.contentSpace`, sits
-    /// at the top. Set by the view that owns the scroll view. A collapse from the end calls it in the same
-    /// transaction: it scrolls to an offset rather than to a row id, because once the offset is past the
-    /// shrunken content no row is laid out and an id lands on the stack's estimated heights.
-    @Entry var revealRow: (CGFloat) -> Void = { _ in }
-}
-
-extension View {
-    /// Keeps `top` at this view's top in the transcript's content, for `revealRow`.
-    func contentTop(_ top: Binding<CGFloat>) -> some View {
-        onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(TimelineGroup.contentSpace)).minY } action: { top.wrappedValue = $0 }
-    }
-}
-
 extension TimelineItem {
     /// Something said rather than done: Codex streams its replies as text records, other agents as messages.
     var isSaid: Bool { kind == "message" || kind == "text" }
 }
 
 struct TimelineGroup: Identifiable {
-    /// The coordinate space of a transcript's scroll content.
-    static let contentSpace = "timeline-content"
-
     let id: String
     var items: [TimelineItem]
     var callCount: Int { items.filter { $0.kind == "toolCall" }.count }
@@ -111,13 +93,14 @@ struct CompactActivityGroup: View {
                         }
                     }
                     if group.folds {
-                        Button("Collapse activity", systemImage: "chevron.up") {
+                        Button {
                             // Collapsing from the end removes the rows on screen; bring the run back rather than leave the offset past the content.
                             set(false)
                             revealRow(top)
+                        } label: {
+                            CollapseLabel(title: "Collapse activity")
                         }
-                        .font(.footnote.weight(.medium))
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .buttonStyle(.plain)
                         .accessibilityIdentifier("collapse-activity-" + group.id)
                     }
                 }
@@ -140,6 +123,18 @@ struct CompactActivityGroup: View {
     }
 }
 
+/// The control at the end of an open run or tool, the full row wide and at least 44 points tall to tap.
+struct CollapseLabel: View {
+    let title: String
+
+    var body: some View {
+        Label(title, systemImage: "chevron.up")
+            .font(.footnote.weight(.medium))
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+    }
+}
+
 /// "◆ Run swift test": the shape every tool, reasoning and output line shares.
 struct ToolLineLabel: View {
     let verb: String
@@ -149,15 +144,20 @@ struct ToolLineLabel: View {
     var failures = 0
     var trailing: String? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .subheadline) private var markWidth = Self.indent - 6
 
     static let indent: CGFloat = 18
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
+            // Set in the line's own font and scaled about its centre, the mark stays on the middle of the
+            // first line at every text size; a fixed small font would sit on the baseline.
             Text("◆")
-                .font(.system(size: 9))
+                .font(.subheadline)
+                .fixedSize()
+                .scaleEffect(0.6)
                 .foregroundStyle(failed ? .red : .secondary)
-                .frame(width: Self.indent - 6, alignment: .leading)
+                .frame(width: markWidth, alignment: .leading)
                 .accessibilityHidden(true)
             Text(verb)
                 .font(.subheadline)
@@ -241,10 +241,7 @@ struct ToolActivityRow: View {
                         set(false)
                         revealRow(top)
                     } label: {
-                        Label("Collapse tool", systemImage: "chevron.up")
-                            .font(.footnote.weight(.medium))
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .contentShape(Rectangle())
+                        CollapseLabel(title: "Collapse tool")
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("collapse-tool-" + call.id)

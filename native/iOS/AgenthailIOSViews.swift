@@ -220,6 +220,7 @@ struct ConversationListView: View {
     @State private var projectSheet: ProjectSheet?
     @State private var projectConfirmation: ProjectConfirmation?
     @State private var newSessionPlace: NewSessionPlace?
+    @ScaledMetric(relativeTo: .body) private var titleInset: CGFloat = 53
 
     private var tree: SessionTree { model.sessionTree(scope: scope, search: search) }
 
@@ -233,21 +234,15 @@ struct ConversationListView: View {
         let tree = tree
         let families = tree.projects.flatMap { $0.checkouts.flatMap(\.families) }
         List {
+            SessionScopeChips(scope: $scope, runningCount: tree.counts[.running] ?? 0)
+                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
             if let error = model.connectionError {
                 Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(.secondary)
-            }
-            Label(model.reconnecting ? "Reconnecting to your computer" : "Work on your computers", systemImage: "desktopcomputer")
-                .font(.subheadline).foregroundStyle(.secondary).listRowSeparator(.hidden)
-                .listRowBackground(GlassRowBackground(selected: false))
-            Picker("Sessions to show", selection: $scope) {
-                ForEach(SessionFilter.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .listRowSeparator(.hidden)
-            .listRowBackground(GlassRowBackground(selected: false))
-            if model.isPaired {
-                VoiceOperatorEntry(model: model)
-                    .listRowSeparator(.hidden)
+                    .listRowBackground(GlassRowBackground(selected: false))
+            } else if model.reconnecting {
+                Label("Reconnecting to your computer", systemImage: "desktopcomputer").font(.footnote).foregroundStyle(.secondary)
                     .listRowBackground(GlassRowBackground(selected: false))
             }
             if !tree.needsYou.isEmpty {
@@ -256,7 +251,13 @@ struct ConversationListView: View {
                         sessionButton(session, reason: tree.attention[session.id]?.reason, identifierPrefix: "needs-you-")
                     }
                 } header: {
-                    Text("Needs you").font(.subheadline.weight(.semibold)).foregroundStyle(.primary).textCase(nil).glassLabel()
+                    Label {
+                        Text("Needs you · \(tree.needsYou.count)")
+                    } icon: {
+                        Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(PhonePalette.attention)
+                    }
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(.primary).textCase(nil).glassLabel()
+                    .accessibilityLabel(tree.needsYou.count == 1 ? "Needs you, 1 session" : "Needs you, \(tree.needsYou.count) sessions")
                 }
             }
             ForEach(tree.projects) { project in
@@ -344,6 +345,9 @@ struct ConversationListView: View {
         .searchable(text: $search, prompt: "Search sessions")
         .task(id: search) { await model.searchSessions(search) }
         .toolbar {
+            if model.isPaired {
+                ToolbarItem(placement: .topBarLeading) { VoiceToolbarButton(model: model) }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button("New session", systemImage: "square.and.pencil") {
@@ -386,7 +390,7 @@ struct ConversationListView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.leading, 16)
+            .padding(.leading, titleInset)
             .listRowBackground(GlassRowBackground(selected: false))
             .accessibilityIdentifier("subagents-" + family.id)
         }
@@ -403,22 +407,24 @@ struct ConversationListView: View {
     }
 
     private func sessionButton(_ session: SessionState, title: String? = nil, family: SessionFamily? = nil, snippet: String? = nil, reason: String? = nil, identifierPrefix: String = "session-") -> some View {
-        Button { openSession(session.id) } label: {
-            HStack(spacing: 12) {
+        let ring = SessionRing.kind(session, needsYou: tree.attention[session.id] != nil)
+        return Button { openSession(session.id) } label: {
+            HStack(alignment: .top, spacing: 12) {
+                SessionAvatar(surface: session.surface, ring: ring)
                 VStack(alignment: .leading, spacing: 5) {
                     IOSSessionRow(session: session, title: title, family: family, showsHost: model.showsHostNames)
                     if let reason {
-                        Text(reason).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                        Text(reason).font(.subheadline).foregroundStyle(PhonePalette.attention).lineLimit(2)
                     }
                     if let snippet, !snippet.isEmpty {
                         Text(snippet).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                     }
                 }
-                Spacer(minLength: 0)
-                if session.isWorking { WorkingIndicator() }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }.contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityValue(ring.spoken ?? "")
         .listRowBackground(GlassRowBackground(selected: selectedID == session.id))
         .swipeActions(edge: .trailing) {
             if snippet == nil {
@@ -532,7 +538,7 @@ struct SessionScreen: View {
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
-                .coordinateSpace(.named(TimelineGroup.contentSpace))
+                .coordinateSpace(.named(TranscriptRows.contentSpace))
             }
             .scrollPosition($position)
             .accessibilityIdentifier("session-timeline")
@@ -1520,7 +1526,8 @@ struct IOSSessionRow: View {
             .lineLimit(1).fixedSize()
         if let host = session.shortRemoteHostName, showsHost || session.isUnavailable {
             IOSHostBadge(name: host, unavailable: session.isUnavailable)
-                .accessibilityLabel(session.isUnavailable ? "Unavailable on \(host)" : "On \(host)")
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("On \(host)")
         }
         if session.isWaitingOnYou {
             HStack(spacing: 4) {
@@ -1528,9 +1535,15 @@ struct IOSSessionRow: View {
                 Text(session.waitingPlace?.label ?? "Waiting on you")
             }
             .font(.caption)
-            .foregroundStyle(SessionStyle.accent)
+            .foregroundStyle(PhonePalette.attention)
             .lineLimit(1)
             .fixedSize()
+        } else if session.isUnavailable {
+            Text("Unavailable")
+                .font(.caption)
+                .foregroundStyle(PhonePalette.failed)
+                .lineLimit(1)
+                .fixedSize()
         } else if let limit = session.limitLabel, !session.isWorking {
             HStack(spacing: 4) {
                 Image(systemName: "gauge.with.dots.needle.100percent")
@@ -1546,7 +1559,7 @@ struct IOSSessionRow: View {
                 Text("Working")
             }
             .font(.caption)
-            .foregroundStyle(SessionStyle.accent)
+            .foregroundStyle(PhonePalette.working)
             .lineLimit(1)
             .fixedSize()
         } else if session.isWaitingOnBackground {
@@ -1555,7 +1568,7 @@ struct IOSSessionRow: View {
                 Text("Background work")
             }
             .font(.caption)
-            .foregroundStyle(SessionStyle.accent)
+            .foregroundStyle(PhonePalette.working)
             .lineLimit(1)
             .fixedSize()
             .accessibilityLabel("Waiting on background work")
@@ -1573,15 +1586,18 @@ struct IOSSessionRow: View {
             .accessibilityLabel(plan.detail)
         }
         if spaced { Spacer(minLength: 0) }
-        if let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
-            Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
-                .lineLimit(1).fixedSize()
-        }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(displayTitle).font(.body.weight(.medium)).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2).foregroundStyle(.primary)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(displayTitle).font(.body.weight(.semibold)).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2).foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
+                    Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).fixedSize()
+                }
+            }
             let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 4) { meta(spaced: false) }
@@ -1605,7 +1621,7 @@ struct IOSSessionRow: View {
                     if let family, family.workingSubagents > 0 {
                         Label(SessionFamilies.subagentSummary(family), systemImage: "person.2")
                             .font(.caption)
-                            .foregroundStyle(SessionStyle.accent)
+                            .foregroundStyle(PhonePalette.working)
                     }
                     if session.queueCount > 0 { Label("\(session.queueCount) waiting", systemImage: "tray").font(.caption) }
                     if !session.sharedHolders.isEmpty { Label("\(session.sharedHolders.count) terminals", systemImage: "terminal").font(.caption) }
@@ -1630,7 +1646,7 @@ struct IOSHostBadge: View {
             Text(name).lineLimit(1).truncationMode(.tail)
         }
         .font(.caption)
-        .foregroundStyle(unavailable ? Color.orange : Color.secondary)
+        .foregroundStyle(unavailable ? PhonePalette.failed : Color.secondary)
         .frame(maxWidth: 110, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
         .layoutPriority(-1)

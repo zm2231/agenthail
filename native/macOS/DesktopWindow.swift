@@ -736,7 +736,7 @@ struct ConversationPane: View {
             TranscriptView(model: model, pane: pane, session: session)
                 .task(id: SessionPane.requestSyncKey(session)) { await pane.syncRequests(for: session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.modelLabel, context: pane.detail?.context, inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: pane.sidebarDocks || chromeTop > 0 ? headerInset : TitleBarStrip.buttonsWidth + 32, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
+                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), context: pane.detail?.context, inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: pane.sidebarDocks || chromeTop > 0 ? headerInset : TitleBarStrip.buttonsWidth + 32, showsTitle: chromeTop == 0, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)
                         NSApplication.shared.activate()
                         openWindow(id: "voice")
@@ -755,8 +755,8 @@ struct ConversationPane: View {
                                                   restart: { model.stopAndResume(session.id) })
                                     .id(waiting.id)
                                     .scrimText("dock-wait")
-                                    .frame(maxWidth: 720)
-                                    .padding(.horizontal, DesktopSpace.l)
+                                    .frame(maxWidth: DesktopColumns.reading)
+                                    .padding(.horizontal, DesktopColumns.gutter)
                                     .padding(.top, DesktopSpace.s)
                             } else if let request = pane.requests?.requests.first, !session.isReadOnly {
                                 RequestCard(request: request, answering: pane.answeringRequest != nil, accent: DesktopPalette.accentText) { decision in
@@ -764,8 +764,8 @@ struct ConversationPane: View {
                                 }
                                 .id(request.id)
                                 .scrimText("dock-request")
-                                .frame(maxWidth: 720)
-                                .padding(.horizontal, DesktopSpace.l)
+                                .frame(maxWidth: DesktopColumns.reading)
+                                .padding(.horizontal, DesktopColumns.gutter)
                                 .padding(.top, DesktopSpace.s)
                             }
                             if let error = pane.requestError {
@@ -833,8 +833,8 @@ struct RemovedSessionBar: View {
         .padding(.vertical, DesktopSpace.m)
         .background(DesktopPalette.dock, in: RoundedRectangle(cornerRadius: DesktopRadius.card))
         .overlay(RoundedRectangle(cornerRadius: DesktopRadius.card).stroke(DesktopPalette.line))
-        .frame(maxWidth: 760)
-        .padding(.horizontal, DesktopSpace.xxl)
+        .frame(maxWidth: DesktopColumns.reading)
+        .padding(.horizontal, DesktopColumns.gutter)
         .padding(.bottom, DesktopSpace.l)
     }
 }
@@ -842,28 +842,33 @@ struct RemovedSessionBar: View {
 struct ConversationHeader: View {
     let session: SessionState
     let title: String
-    let model: String?
     let context: ContextState?
     @Binding var inspectorVisible: Bool
     var leadingInset: CGFloat = 22
+    /// A tab above already names the session, so the header leaves the
+    /// title to it.
+    var showsTitle = true
     @ObservedObject private var shortcuts = ShortcutStore.shared
     var onFocusTerminal: () -> Void = {}
     var onCall: (() -> Void)?
 
-    static let height: CGFloat = 52
+    static let height: CGFloat = 36
+    static let underTabsHeight: CGFloat = 32
 
     var body: some View {
         HStack(spacing: DesktopSpace.m) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(session.subagent != nil ? title : session.alias.map { _ in session.name.isEmpty ? session.title : session.name } ?? title)
-                    .font(.system(size: DesktopType.body, weight: .semibold))
-                if let alias = session.alias, !alias.isEmpty {
-                    Text("@\(alias)")
-                        .font(.system(size: DesktopType.secondary))
-                        .foregroundStyle(DesktopPalette.text2)
+            if showsTitle {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(session.subagent != nil ? title : session.alias.map { _ in session.name.isEmpty ? session.title : session.name } ?? title)
+                        .font(.system(size: DesktopType.body, weight: .semibold))
+                    if let alias = session.alias, !alias.isEmpty {
+                        Text("@\(alias)")
+                            .font(.system(size: DesktopType.secondary))
+                            .foregroundStyle(DesktopPalette.text2)
+                    }
                 }
+                .lineLimit(1)
             }
-            .lineLimit(1)
             Spacer()
             HStack(spacing: 6) {
                 StatusIndicator(session: session, needsYou: false)
@@ -873,13 +878,14 @@ struct ConversationHeader: View {
             }
             .font(.system(size: DesktopType.secondary))
             .foregroundStyle(DesktopPalette.text2)
-            let meta = ([session.surface.capitalized, model] + SessionFacts.headerFacts(session, age: relativeAge(session.lastActive)) + [context?.headerLabel]).compactMap { $0 }.joined(separator: " · ")
-            Text(meta)
-                .font(.system(size: DesktopType.secondary))
-                .foregroundStyle(DesktopPalette.text2)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .help(meta)
+            let live = (SessionFacts.headerFacts(session) + [context?.headerLabel]).compactMap { $0 }.joined(separator: " · ")
+            if !live.isEmpty {
+                Text(live)
+                    .font(.system(size: DesktopType.secondary).monospacedDigit())
+                    .foregroundStyle(DesktopPalette.text2)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
             if session.runtime?.focusable == true, let host = session.runtime?.hostName {
                 Button("Open in \(host)") { onFocusTerminal() }
                     .buttonStyle(.plain)
@@ -890,7 +896,7 @@ struct ConversationHeader: View {
             if let onCall {
                 Button(action: onCall) {
                     Image(systemName: "waveform")
-                        .frame(width: 30, height: 30)
+                        .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(DesktopPalette.text2)
@@ -901,7 +907,7 @@ struct ConversationHeader: View {
                 inspectorVisible.toggle()
             } label: {
                 Image(systemName: "sidebar.right")
-                    .frame(width: 30, height: 30)
+                    .frame(width: 28, height: 28)
                     .background(inspectorVisible ? DesktopPalette.selection : Color.clear, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
             }
             .buttonStyle(.plain)
@@ -912,7 +918,7 @@ struct ConversationHeader: View {
         }
         .padding(.leading, leadingInset)
         .padding(.trailing, 14)
-        .frame(height: Self.height)
+        .frame(height: showsTitle ? Self.height : Self.underTabsHeight)
         .overlay(alignment: .bottom) { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
     }
 }
@@ -925,6 +931,7 @@ struct TranscriptView: View {
     @State private var following = true
     @State private var underfilled = false
     @State private var textHeight: CGFloat = 0
+    @State private var paneWidth: CGFloat = 0
     private static let bottomPadding: CGFloat = 12
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
@@ -932,8 +939,9 @@ struct TranscriptView: View {
         let blocks = TranscriptBlock.build(pane.timelineItems)
         let sends = model.localSends[session.id] ?? []
         let canResend = pane.removedSession?.id != session.id && session.capabilities.send && !session.isReadOnly
+        let layout = DesktopColumns.transcript(pane: paneWidth)
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: DesktopSpace.xl) {
+            LazyVStack(alignment: .leading, spacing: 14) {
                 if (pane.olderCursor ?? 0) > 0 || pane.olderError != nil {
                     olderControl
                 }
@@ -962,16 +970,7 @@ struct TranscriptView: View {
                         resend(text, attachments: send.failure != nil ? send.attachments : [])
                     } : nil, onRetry: send.failure == nil || !canResend ? nil : { model.retrySend(send, in: session.id) })
                 }
-                if session.isWorking {
-                    HStack(spacing: DesktopSpace.s) {
-                        StatusIndicator(session: session, needsYou: false)
-                        TimelineView(.everyMinute) { context in
-                            Text(session.waitingPlace?.label ?? session.workingLabel(now: context.date))
-                        }
-                    }
-                    .font(.system(size: DesktopType.body))
-                    .foregroundStyle(DesktopPalette.text2)
-                } else if session.isWaitingOnBackground, let background = session.backgroundTasks {
+                if session.isWaitingOnBackground, let background = session.backgroundTasks {
                     HStack(spacing: DesktopSpace.s) {
                         StatusIndicator(session: session, needsYou: false)
                         Text("Waiting on background work · \(background.summary)")
@@ -980,20 +979,23 @@ struct TranscriptView: View {
                     .foregroundStyle(DesktopPalette.text2)
                 }
             }
-            .frame(maxWidth: 700)
-            .padding(.horizontal, DesktopSpace.xxl)
-            .padding(.top, 28)
+            .frame(maxWidth: DesktopColumns.reading)
+            .padding(.horizontal, DesktopColumns.gutter)
+            .padding(.top, DesktopSpace.l)
             .padding(.bottom, Self.bottomPadding)
             .frame(maxWidth: .infinity)
+            .coordinateSpace(.named(TranscriptRows.contentSpace))
             .environment(\.transcriptRows, TranscriptRows(memory: pane.rowMemory, session: session.id))
             .environment(\.toolCallStates, ToolCallStates(items: pane.timelineItems, active: session.isWorking || session.isWaitingOnYou))
+            .environment(\.transcriptOverhang, layout.overhang)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
         .background {
             Color.clear
-                .frame(maxWidth: 700)
-                .frame(height: textHeight)
+                .frame(width: layout.column + layout.overhang, height: textHeight)
+                .offset(x: layout.overhang / 2)
                 .scrimText("transcript-column")
-                .frame(maxHeight: .infinity, alignment: .top)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
             min(geometry.contentSize.height - Self.bottomPadding - max(geometry.contentOffset.y, 0), geometry.containerSize.height).rounded()
@@ -1108,6 +1110,7 @@ struct TranscriptBlockView: View {
     @State private var opened: RowChoice<Bool>?
     @Environment(\.transcriptRows) private var rows
     @Environment(\.holdTranscriptPlace) private var holdPlace
+    @Environment(\.transcriptOverhang) private var overhang
 
     private var note: String? { block.truncated ? TimelineMetadata.shortened : nil }
     private var expanded: Bool { rows.current(opened) ?? rows.isOpen(block.id) ?? false }
@@ -1127,6 +1130,7 @@ struct TranscriptBlockView: View {
             PeerMessage(sender: sender, text: text, time: TurnClock.time(block.timestamp), note: note)
         case .tools(let items):
             ToolRunView(id: block.id, items: items)
+                .padding(.trailing, -overhang)
         default:
             VStack(alignment: .leading, spacing: DesktopSpace.xs) {
                 record
@@ -1439,17 +1443,7 @@ struct AssistantReply: View {
     @State private var hovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DesktopSpace.s) {
-            HStack(spacing: DesktopSpace.s) {
-                Image(systemName: "sparkle")
-                    .font(.system(size: 10))
-                    .foregroundStyle(DesktopPalette.muted)
-                    .accessibilityHidden(true)
-                if footer == nil {
-                    MessageActions(text: text, revealed: hovering)
-                }
-            }
-            .frame(height: MessageActions.height)
+        VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             StructuredText(markdown: text)
                 .font(.system(size: DesktopType.prose))
                 .lineSpacing(DesktopType.proseLineSpacing)
@@ -1464,10 +1458,15 @@ struct AssistantReply: View {
                             .font(.system(size: DesktopType.caption))
                             .foregroundStyle(DesktopPalette.muted)
                     }
-                    if footer != nil {
-                        MessageActions(text: text, revealed: hovering)
-                    }
+                    MessageActions(text: text, revealed: hovering)
                 }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if footer == nil && note == nil {
+                MessageActions(text: text, revealed: hovering)
+                    .background(hovering ? DesktopPalette.bubble : .clear, in: RoundedRectangle(cornerRadius: DesktopRadius.card))
+                    .allowsHitTesting(hovering)
             }
         }
         .onHover { hovering = $0 }
@@ -1680,8 +1679,8 @@ struct ComposerView: View {
                 .padding(.top, 6)
             }
         }
-        .frame(maxWidth: 700)
-        .padding(.horizontal, DesktopSpace.xxl)
+        .frame(maxWidth: DesktopColumns.reading)
+        .padding(.horizontal, DesktopColumns.gutter)
         .padding(.top, 40)
         .padding(.bottom, DesktopSpace.xl)
         .frame(maxWidth: .infinity)

@@ -155,8 +155,11 @@ final class SessionRefreshTests: XCTestCase {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
         await model.refresh()
-        func running() -> [String] { model.sessionTree(scope: .running, search: "").projects.flatMap { $0.checkouts.flatMap { $0.families.map(\.root.id) } } }
+        func running(_ search: String = "") -> [String] { model.sessionTree(scope: .running, search: search).projects.flatMap { $0.checkouts.flatMap { $0.families.map(\.root.id) } } }
         XCTAssertTrue(running().contains("computer::demo"))
+        for search in ["", "demo", "zzz-no-match"] {
+            XCTAssertEqual(model.sessionTree(scope: .recent, search: search).counts[.running], running(search).count, "the Running chip counts what Running lists for \"\(search)\"")
+        }
 
         SessionRefreshProtocol.state.set(snapshotStatus: "idle")
         await model.refresh()

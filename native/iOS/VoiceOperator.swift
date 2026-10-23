@@ -108,7 +108,7 @@ struct AgenthailVoiceOperatorSheet: View {
                 Color.clear.frame(height: 1).id("voice-bottom")
             }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: .infinity)
             .environment(\.revealRow) { position.scrollTo(y: $0) }
-            .coordinateSpace(.named(TimelineGroup.contentSpace))
+            .coordinateSpace(.named(TranscriptRows.contentSpace))
             }
             .scrollPosition($position)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
@@ -365,36 +365,3 @@ private struct VoiceCallButtonStyle: ButtonStyle {
     }
 }
 
-struct VoiceOperatorEntry: View {
-    @ObservedObject var model: AgenthailIOSModel
-    @EnvironmentObject private var voiceCalls: VoiceCallCoordinator
-    @State private var presented = false
-    @State private var operatorID: String?
-
-    var body: some View {
-        Button(voiceCalls.model?.hasLocalCall == true ? "Return to call" : "Talk to orchestrator", systemImage: "waveform") {
-            voiceCalls.open()
-            presented = true
-        }
-            .font(.subheadline.weight(.semibold))
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(minHeight: 56)
-            .accessibilityIdentifier("voice-entry")
-            .sheet(isPresented: $presented) {
-                if let call = voiceCalls.model {
-                    AgenthailVoiceOperatorSheet(model: call, rowMemory: model.rowMemory) { id in operatorID = model.voiceSessionID(id) }
-                        .sheet(isPresented: Binding(get: { operatorID != nil }, set: { if !$0 { operatorID = nil } })) {
-                            if let id = operatorID {
-                                NavigationStack {
-                                    SessionRouteView(model: model, sessionID: id)
-                                        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Back to Voice") { operatorID = nil } } }
-                                }
-                            }
-                        }
-                }
-            }
-            .onChange(of: model.isPaired) { _, paired in if !paired { presented = false } }
-    }
-}
