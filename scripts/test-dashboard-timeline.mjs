@@ -286,4 +286,42 @@ assert(linkCard.includes('href="https://example.com/auth"') && linkCard.includes
 const scriptLink = context.renderRequestCard({ id: "e3", kind: "input", elicitation: { server: "docs", message: "Sign in", mode: "url", url: "javascript:alert(1)" } });
 assert(!scriptLink.includes("href="), "a link that is not http or https is shown, not linked");
 
+const call = (id, title, input, result = "ok", status = "completed") => [
+  { id, kind: "toolCall", title, text: JSON.stringify(input), callId: id },
+  { id: `${id}-r`, kind: "toolResult", title: `${title} result`, text: result, callId: id, status },
+];
+const run = context.renderTimeline([
+  ...call("t1", "Grep", { pattern: "Collapse activity", path: "/work/native" }),
+  ...call("t2", "Bash", { command: "swift test --filter H" }, "Test Case 'H' failed", "failed"),
+  ...call("t3", "Edit", { file_path: "/work/App.swift", old_string: "a\nb\nc", new_string: "a\nB\nc\nd\ne" }),
+  ...call("t4", "Edit", { file_path: "/work/App.swift", old_string: "x", new_string: "y" }),
+  { id: "m1", kind: "message", role: "assistant", text: "Fixed.", timestamp: "2026-10-23T10:09:00Z" },
+  { id: "d1", kind: "event", title: "Turn duration", text: "3m13s", timestamp: "2026-10-23T10:10:00Z" },
+], session);
+assert.equal((run.match(/class="timeline-item tool-line/g) || []).length, 4, "each call is one line, with its result inside it");
+assert(run.includes('<span class="tool-verb">Search</span><span class="tool-object code">Collapse activity</span>'), "a search line names its pattern");
+assert(/class="timeline-item tool-line failed"[^>]* open>/.test(run), "a failed call is marked and opens itself");
+assert(run.includes('<span class="tool-failed">failed</span>'), "a failed call says so");
+assert(run.includes('<span>App.swift</span><span class="added">+4</span><span class="removed">−2</span>'), `edits to one file merge into one chip with line counts: ${run.match(/file-chips.*?<\/div>/)?.[0]}`);
+assert(run.includes("Finished 3:13 · "), "the reply that ends a turn shows how long it took and when");
+assert(!run.includes("timeline-annotation"), "the duration joins the reply rather than standing alone");
+assert(/<footer class="turn-footer"><span class="turn-status">Finished 3:13[^<]*<\/span><span class="turn-actions"><button class="turn-action" type="button" data-copy-text="Fixed.">Copy<\/button>/.test(run), "Copy sits on the footer line beside the time");
+const written = context.renderTimeline(call("w1", "Write", { file_path: "/work/One.swift", content: "one\n" }), session);
+assert(written.includes('<span>One.swift</span><span class="added">+1</span>'), `a final newline does not count as another line: ${written.match(/file-chips.*?<\/div>/)?.[0]}`);
+const long = context.renderTimeline(Array.from({ length: 7 }, (_, index) => call(`b${index}`, "Bash", { command: `go test ./case${index}` })).flat(), session);
+assert(long.includes('class="tool-line tool-fold"') && long.includes("Ran 7 commands"), "a run of more than six calls folds into one summary line");
+const six = context.renderTimeline(Array.from({ length: 6 }, (_, index) => call(`s${index}`, "Bash", { command: `go test ./case${index}` })).flat(), session);
+assert(!six.includes("tool-fold"), "six calls stay as lines");
+const authors = context.renderTimeline([
+  { id: "h1", kind: "message", role: "user", text: "[from @builder] Branch is ready" },
+  { id: "h2", kind: "message", role: "user", text: "Ship it", timestamp: "2026-10-23T10:00:00Z" },
+  { id: "e1", kind: "event", title: "Context compacted", text: "38k tokens freed" },
+], session);
+assert(authors.includes('class="turn peer"') && authors.includes("From @builder"), "a handed-off message reads as another agent's");
+assert(authors.includes('class="turn user"'), "a typed message reads as yours");
+assert(authors.includes('class="timeline-item timeline-divider"') && authors.includes("Context compacted: 38k tokens freed"), "an event is a divider, not an unknown card");
+assert.equal(context.durationClock("1h2m3s"), "1:02:03");
+assert.equal(context.durationClock("12s"), "0:12");
+assert.equal(context.durationClock("about a minute"), "about a minute");
+
 console.log("dashboard timeline VM tests passed");
