@@ -514,6 +514,9 @@ func TestTheDaemonStopsOnlyAfterAnAnnouncementInFlightFinishes(t *testing.T) {
 		}
 	}, q.claude)
 	<-entered
+	// The phone is told alongside the desktop notification, so its push is
+	// out before the stop; nothing more is sent once the stop has begun.
+	eventually(t, "the phone to be told while the desktop notification is posted", func() bool { return q.pushes.count("session.waiting") == 1 })
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
@@ -530,9 +533,24 @@ func TestTheDaemonStopsOnlyAfterAnAnnouncementInFlightFinishes(t *testing.T) {
 	if _, announced, err := q.store.WaitingState(q.session.ID); err != nil || announced {
 		t.Fatalf("announced=%v err=%v; an announcement cut short by the stop must be made again after a restart", announced, err)
 	}
-	if got := q.pushes.count("session.waiting"); got != 0 {
-		t.Fatalf("a stopping daemon sent %d notifications", got)
+	if got := q.pushes.count("session.waiting"); got != 1 {
+		t.Fatalf("a stopping daemon sent %d notifications after the stop began", got-1)
 	}
+}
+
+// The desktop notification goes through a helper app that can take seconds
+// to start on a busy computer; the phone's notification must not wait for it.
+func TestAPhonesNotificationDoesNotWaitForTheDesktopOne(t *testing.T) {
+	q := newClaudeQuestion(t)
+	release := make(chan struct{})
+	defer close(release)
+	runDaemonWith(t, q.store, func(d *Daemon) {
+		d.notifyDesktop = func(_, _, _, _, _ string, _ []surface.RequestAction) error {
+			<-release
+			return nil
+		}
+	}, q.claude)
+	eventually(t, "the phone to be told while the desktop notification is still being posted", func() bool { return q.pushes.count("session.waiting") == 1 })
 }
 
 func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) {

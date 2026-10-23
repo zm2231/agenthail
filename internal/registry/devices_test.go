@@ -2,6 +2,8 @@ package registry
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -118,23 +120,41 @@ func TestDeviceAuthenticationRecordsLastSeenAtMostOncePerMinute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, token, err := r.CompleteDevicePairing(pairing.Secret, "", "")
+	device, token, err := r.CompleteDevicePairing(pairing.Secret, "", "")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`CREATE TABLE touches(at TEXT); CREATE TRIGGER count_touch AFTER UPDATE OF last_seen_at ON paired_devices BEGIN INSERT INTO touches VALUES (NEW.last_seen_at); END`); err != nil {
+		t.Fatal(err)
+	}
+	stored := func() string {
+		t.Helper()
+		var seen string
+		if err := r.read.QueryRow(`SELECT last_seen_at FROM paired_devices WHERE id=?`, device.ID).Scan(&seen); err != nil {
+			t.Fatal(err)
+		}
+		return seen
+	}
+	touches := func() int {
+		t.Helper()
+		var count int
+		if err := r.read.QueryRow(`SELECT count(*) FROM touches`).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
 	}
 	first, err := r.AuthenticateDevice(token, "read")
 	if err != nil || first.LastSeenAt == "" {
 		t.Fatalf("first=%+v err=%v", first, err)
 	}
-	if _, err := r.db.Exec(`CREATE TRIGGER reject_device_touch BEFORE UPDATE ON paired_devices BEGIN SELECT RAISE(ABORT, 'unexpected last-seen write'); END`); err != nil {
-		t.Fatal(err)
-	}
+	awaitCondition(t, "the first stamp to be written", func() bool { return stored() == first.LastSeenAt })
 	repeat, err := r.AuthenticateDevice(token, "read")
 	if err != nil || repeat.LastSeenAt != first.LastSeenAt {
 		t.Fatalf("repeat=%+v err=%v", repeat, err)
 	}
-	if _, err := r.db.Exec(`DROP TRIGGER reject_device_touch`); err != nil {
-		t.Fatal(err)
+	r.seen.writes.Wait()
+	if count := touches(); count != 1 {
+		t.Fatalf("a request within a minute wrote last-seen again: %d writes", count)
 	}
 	stale := time.Now().UTC().Add(-2 * deviceLastSeenResolution).Format(time.RFC3339Nano)
 	if _, err := r.db.Exec(`UPDATE paired_devices SET last_seen_at=?`, stale); err != nil {
@@ -144,6 +164,97 @@ func TestDeviceAuthenticationRecordsLastSeenAtMostOncePerMinute(t *testing.T) {
 	if err != nil || refreshed.LastSeenAt == stale {
 		t.Fatalf("refreshed=%+v err=%v", refreshed, err)
 	}
+	awaitCondition(t, "the refreshed stamp to be written", func() bool { return stored() == refreshed.LastSeenAt })
+}
+
+// A loaded Mac had other processes holding the registry's write lock while a
+// phone's notification service read a request; authenticating it must not
+// wait on that lock.
+func TestDeviceAuthenticationDoesNotWaitForTheWriteLock(t *testing.T) {
+	r := openTestRegistry(t)
+	pairing, err := r.CreateDevicePairing("Test iPhone", []string{"read"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, token, err := r.CompleteDevicePairing(pairing.Secret, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := sql.Open("sqlite", r.path+"?_pragma=busy_timeout(15000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	holder, err := other.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	if _, err := holder.ExecContext(context.Background(), `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	if _, err := r.AuthenticateDevice(token, "read"); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(started); took > time.Second {
+		t.Fatalf("authentication waited %s for another process's write", took)
+	}
+	if _, err := holder.ExecContext(context.Background(), `COMMIT`); err != nil {
+		t.Fatal(err)
+	}
+	awaitCondition(t, "the stamp to be written once the lock is free", func() bool {
+		var seen string
+		return r.read.QueryRow(`SELECT last_seen_at FROM paired_devices WHERE id=?`, device.ID).Scan(&seen) == nil && seen != ""
+	})
+}
+
+// A stamp whose write fails, as when another process holds the write lock
+// past the busy timeout, is kept and written before the registry closes,
+// without another request.
+func TestAFailedLastSeenStampIsWrittenBeforeTheRegistryCloses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairing, err := r.CreateDevicePairing("Test iPhone", []string{"read"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, token, err := r.CompleteDevicePairing(pairing.Secret, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`CREATE TRIGGER refuse_touch BEFORE UPDATE OF last_seen_at ON paired_devices BEGIN SELECT RAISE(ABORT, 'busy'); END`); err != nil {
+		t.Fatal(err)
+	}
+	seen, err := r.AuthenticateDevice(token, "read")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.seen.writes.Wait()
+	if _, err := r.db.Exec(`DROP TRIGGER refuse_touch`); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openRegistryAt(t, path)
+	var stored string
+	if err := reopened.read.QueryRow(`SELECT last_seen_at FROM paired_devices WHERE id=?`, device.ID).Scan(&stored); err != nil || stored != seen.LastSeenAt {
+		t.Fatalf("stored=%q err=%v, want the stamp %q that failed to write", stored, err, seen.LastSeenAt)
+	}
+}
+
+func openRegistryAt(t *testing.T, path string) *Registry {
+	t.Helper()
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	return r
 }
 
 func TestAHostTokenBelongsToTheHostThatPaired(t *testing.T) {
@@ -214,5 +325,16 @@ func TestPairingStatusNamesTheDeviceItsCodePaired(t *testing.T) {
 		if status.State != PairingPaired || status.Device == nil || status.Device.ID != deviceID {
 			t.Fatalf("pairing %s status=%+v, want device %s", pairingID, status, deviceID)
 		}
+	}
+}
+
+func awaitCondition(t *testing.T, what string, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !condition() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
