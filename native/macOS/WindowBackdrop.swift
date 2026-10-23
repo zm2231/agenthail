@@ -156,7 +156,8 @@ final class WindowBackdrop: ObservableObject {
             scale: scale,
             panes: panes,
             texts: texts,
-            solidPanes: !config.glass || workspace.accessibilityDisplayShouldReduceTransparency
+            solidPanes: !config.glass || workspace.accessibilityDisplayShouldReduceTransparency,
+            readability: config.readability || workspace.accessibilityDisplayShouldIncreaseContrast
         )
     }
 

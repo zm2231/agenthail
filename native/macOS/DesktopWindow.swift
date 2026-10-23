@@ -143,6 +143,7 @@ struct SessionSidebar: View {
             .padding(.horizontal, DesktopSpace.l)
             .padding(.top, DesktopSpace.xs)
             .padding(.bottom, DesktopSpace.s)
+            .scrimText("sidebar-filters")
 
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
@@ -173,12 +174,14 @@ struct SessionSidebar: View {
             .background(DesktopPalette.fill, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
             .padding(.horizontal, DesktopSpace.m)
             .padding(.bottom, 10)
+            .scrimText("sidebar-search")
             .background {
                 Button("") { searchFocused = true }
                     .keyboardShortcut(shortcuts.keyboardShortcut(.findSession))
                     .hidden()
             }
             SessionRefinementBar(model: model)
+                .scrimText("sidebar-refinement")
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
@@ -234,9 +237,11 @@ struct SessionSidebar: View {
                 }
                 .padding(.horizontal, DesktopSpace.s)
                 .padding(.bottom, DesktopSpace.l)
+                .scrimText("sidebar-rows")
             }
 
             ConnectionFooter(model: model)
+                .scrimText("sidebar-footer")
         }
         .glassPane("sidebar", .sidebar, fallback: DesktopPalette.side)
         .background {
@@ -690,6 +695,7 @@ struct ConversationPane: View {
                         NSApplication.shared.activate()
                         openWindow(id: "voice")
                     })
+                    .scrimText("conversation-header")
                     .backdropSurface(DesktopPalette.window, paneID: "content")
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -721,13 +727,13 @@ struct ConversationPane: View {
                             }
                             ComposerView(model: model, pane: pane, session: session)
                         }
+                        .scrimText("conversation-dock")
                     }
                 }
             .glassPane("content", .content, fallback: DesktopPalette.window)
             .environmentObject(pane)
         } else if let draft = pane.newSession {
             NewSessionView(model: model, draft: draft)
-                .glassPane("content", .content, fallback: DesktopPalette.window)
         } else {
             ContentUnavailableView {
                 if model.isConnected {
@@ -926,6 +932,7 @@ struct TranscriptView: View {
             .frame(maxWidth: .infinity)
             .environment(\.transcriptRows, TranscriptRows(memory: pane.rowMemory, session: session.id))
         }
+        .background { Color.clear.frame(maxWidth: 700).scrimText("transcript-column") }
         .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, hasRow: { id in pane.timelineItems.contains { $0.id == id } }, position: $position, following: $following)
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentSize.height < geometry.containerSize.height * 1.5

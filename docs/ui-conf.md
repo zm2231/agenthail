@@ -46,10 +46,11 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 | `glass` | `on` | `on` shows translucent panes over the background; `off` uses solid surfaces. |
 | `glass.blur` | `30` | 0 to 64. Blur radius in points behind panes. |
 | `glass.tint` | `ground` | Tint of panes: `ground`, `accent` or `#rrggbb`. |
-| `glass.opacity` | `0.18` | 0 to 1. Tint of the content pane. This is a minimum: it is raised where text needs it. |
+| `glass.opacity` | `0.18` | 0 to 1. Tint of the content pane. This is a minimum: it is raised around text where the text needs it, and margins and empty areas keep this tint. |
 | `glass.sidebar.opacity` | `0.45` | 0 to 1. Tint of the sidebar. |
 | `glass.chrome.opacity` | `0` | 0 to 1. Tint of the title bar and status strip. |
 | `glass.composer.opacity` | `0.5` | 0 to 1. Tint of floating glass: the message box, tab plates and popovers. |
+| `glass.readability` | `auto` | `auto` raises the tint of panes, and adds a layer on open areas, only where text needs it to reach `contrast.target`. `off` uses the glass opacities exactly, so text may be harder to read. With Increase Contrast on in Accessibility settings, the app always uses `auto`. |
 | `glass.border` | `0.08` | 0 to 0.3. Opacity of pane hairlines. |
 | `glass.gutter` | `8` | 0 to 16. Points between floating panes; 0 joins them edge to edge. |
 | `texture` | `scanlines` | Texture over the background, never over panes or text: `none`, `scanlines`, `grain`. |
@@ -63,7 +64,7 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 | `titlebar.tabs.preview` | `on` | `on`: a sidebar click opens a preview tab that the next click replaces. |
 | `statusbar` | `usage, working, needs-you, hosts, terminal` | Items in the bottom strip, in order, or `none`. |
 
-Whatever the background, panes and text keep at least `contrast.target` contrast: the app measures the background behind text and darkens or lightens it as much as needed.
+Whatever the background, text keeps at least `contrast.target` contrast: the app measures the background behind text and darkens or lightens it as much as needed, around the text only, so the background stays visible in margins, gaps and empty views. `glass.readability = off` turns this off.
 
 ## Backgrounds
 

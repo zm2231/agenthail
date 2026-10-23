@@ -68,6 +68,9 @@ struct BackdropSpec: Equatable, Sendable {
     var panes: [Pane] = []
     var texts: [CGRect] = []
     var solidPanes = false
+    /// False when the person turned the readability tint off: panes keep
+    /// their minimum tint and open areas get no scrim.
+    var readability = true
 }
 
 struct BackdropStop: Equatable, Sendable {
@@ -86,6 +89,10 @@ struct BackdropImage: @unchecked Sendable {
 
 enum BackdropRenderer {
     static let context = CIContext(options: [.cacheIntermediates: false])
+    /// Points over which a pane's tint falls from what its text needs to the
+    /// pane's minimum. Short, so margins and gaps inside a pane show the
+    /// background.
+    static let paneFeather: Float = 24
     private static let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
 
     static func render(_ spec: BackdropSpec) -> BackdropImage? {
@@ -132,7 +139,7 @@ enum BackdropRenderer {
 
         let texts = spec.texts.map { rect(outward: $0) }
         let openNeed = ScrimField.needs(image: analysis, tint: scrimTint, texts: texts, polarity: spec.polarity, boundary: boundary)
-        let openAlpha = texts.isEmpty ? [Float](repeating: 0, count: pw * ph)
+        let openAlpha = texts.isEmpty || !spec.readability ? [Float](repeating: 0, count: pw * ph)
             : ScrimField.openOpacity(need: openNeed, width: pw, height: ph, feather: spec.feather, minimum: 0)
 
         var paneAlpha = [Float](repeating: 0, count: pw * ph)
@@ -143,11 +150,19 @@ enum BackdropRenderer {
             var alpha: [Float]
             if spec.solidPanes {
                 alpha = [Float](repeating: 1, count: r.width * r.height)
+            } else if !spec.readability {
+                alpha = [Float](repeating: pane.minimum, count: r.width * r.height)
             } else {
                 let crop = crop(analysis, to: r)
                 let tint = ScrimField.Raster(width: r.width, height: r.height, fill: paneTint)
-                let need = ScrimField.needs(image: crop, tint: tint, texts: [ScrimField.Rect(x: 0, y: 0, width: r.width, height: r.height)], polarity: spec.polarity, boundary: boundary)
-                alpha = ScrimField.paneOpacity(need: need, width: r.width, height: r.height, minimum: pane.minimum)
+                let inside = texts.compactMap { $0.intersection(r)?.offset(dx: -r.x, dy: -r.y) }
+                if inside.isEmpty {
+                    let need = ScrimField.needs(image: crop, tint: tint, texts: [ScrimField.Rect(x: 0, y: 0, width: r.width, height: r.height)], polarity: spec.polarity, boundary: boundary)
+                    alpha = ScrimField.paneOpacity(need: need, width: r.width, height: r.height, minimum: pane.minimum)
+                } else {
+                    let need = ScrimField.needs(image: crop, tint: tint, texts: inside, polarity: spec.polarity, boundary: boundary)
+                    alpha = ScrimField.openOpacity(need: need, width: r.width, height: r.height, feather: paneFeather, minimum: pane.minimum)
+                }
             }
             for y in 0..<r.height {
                 for x in 0..<r.width {
