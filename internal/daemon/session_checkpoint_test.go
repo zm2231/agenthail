@@ -351,6 +351,17 @@ func TestAFailedMergeIntoAJournalRowKeepsTheSourceFromRecordingACheckpoint(t *te
 		t.Fatal("the item did not match its journal row")
 	}
 	allow()
+	window, err := f.registry.SessionJournalAfter(checkpointConversation, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reported := false
+	for _, entry := range window.Entries {
+		reported = reported || entry.Kind == "source-error"
+	}
+	if !reported {
+		t.Fatal("a failed merge left no source error on the journal")
+	}
 	if err := source.recordTranscriptCheckpoint(1, "transcript"); err != nil {
 		t.Fatal(err)
 	}

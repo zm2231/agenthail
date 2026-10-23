@@ -987,6 +987,7 @@ func (s *sessionSource) mergeSeedIntoAuthoritativeRow(providerKey, operation str
 		s.mu.Lock()
 		s.appendFailed = true
 		s.mu.Unlock()
+		s.appendSourceError(fmt.Errorf("session journal append failed: %w", err))
 	} else if changed {
 		s.wakeFollowers()
 	}
