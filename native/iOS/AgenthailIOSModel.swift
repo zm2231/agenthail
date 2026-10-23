@@ -1,4 +1,5 @@
 import Foundation
+import os
 import UIKit
 import UserNotifications
 
@@ -45,12 +46,18 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published private(set) var creationHosts: [CreationHost] = []
     @Published private(set) var projects: [String: ListedProject] = [:]
     @Published private(set) var holderPicks: [String: HolderPin] = [:]
-    @Published var selectedDetail: SessionDetail?
+    @Published var selectedDetail: SessionDetail? {
+        didSet { paintOpeningSession() }
+    }
     @Published var sessionRequests: SessionRequests?
     @Published var answeringRequest: String?
     private var sessionRequestsKey: String?
     @Published var selectedSessionID: String? {
-        didSet { if selectedSessionID != oldValue { sessionServer = selectedSessionID.flatMap(server(for:)) } }
+        didSet {
+            guard selectedSessionID != oldValue else { return }
+            sessionServer = selectedSessionID.flatMap(server(for:))
+            endOpenInterval("left")
+        }
     }
     @Published private(set) var connectionError: String?
     @Published private(set) var reconnecting = false
@@ -65,6 +72,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published var sessionError: String?
     @Published var loadingSession = false
     @Published var sendingSessionIDs: Set<String> = []
+    private static let signposter = OSSignposter(subsystem: "com.agenthail.ios", category: "SessionOpen")
+    private var openInterval: (id: OSSignpostID, state: OSSignpostIntervalState, session: String, painted: Bool)?
     private var attachmentCache: [String: Data] = [:]
     private var attachmentCacheBytes = 0
     private let attachmentCacheLimit = 20 * 1024 * 1024
@@ -898,6 +907,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     func loadSession(_ id: String) async {
         let id = rekeys.resolve(id)
+        let switching = selectedSessionID != id
         if let previous = selectedSessionID, previous != id {
             drafts[previous] = composer
             attachmentDrafts[previous] = composerAttachments
@@ -921,11 +931,35 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             olderActivityError = nil
         }
         selectedSessionID = id
+        if switching { beginOpenInterval(id) }
         sessionError = nil
         loadingSession = selectedDetail == nil
         await reloadSelectedSession()
         if selectedSessionID == id { startSessionMetadata(id) }
         if selectedSessionID == id { loadingSession = false }
+    }
+
+    /// Marks a session open in Instruments, from the switch until the
+    /// daemon's first page for it is shown (`loaded`) or the selection moves
+    /// off it (`left`). `Session painted` marks the first frame drawn after
+    /// its rows are shown.
+    private func beginOpenInterval(_ id: String) {
+        let signpost = Self.signposter.makeSignpostID()
+        let cached = selectedDetail?.session.id == id
+        openInterval = (signpost, Self.signposter.beginInterval("Session open", id: signpost, "cached \(cached)"), id, false)
+        paintOpeningSession()
+    }
+
+    private func endOpenInterval(_ outcome: String) {
+        guard let openInterval else { return }
+        Self.signposter.endInterval("Session open", openInterval.state, "\(outcome, privacy: .public)")
+        self.openInterval = nil
+    }
+
+    private func paintOpeningSession() {
+        guard let open = openInterval, !open.painted, selectedDetail?.session.id == open.session else { return }
+        openInterval?.painted = true
+        _ = NextFrame { Self.signposter.emitEvent("Session painted", id: open.id) }
     }
 
     func refreshSession(_ id: String) async {
@@ -968,9 +1002,11 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             }
             if olderActivity.isEmpty { activityCursor = detail.timeline?.nextBefore }
             sessionError = nil
+            if openInterval?.session == id { endOpenInterval("loaded") }
         } catch {
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID, server(for: id) === requestServer else { return }
             sessionError = error.localizedDescription
+            if let openInterval, openInterval.session == id { Self.signposter.emitEvent("Session open failed", id: openInterval.id) }
         }
         await refreshDeliveries()
     }
@@ -1776,4 +1812,24 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
 final class ComposerDraft: ObservableObject {
     @Published var text = ""
+}
+
+/// Runs once on the next display frame, which starts after the current
+/// run loop pass has committed its view updates.
+private final class NextFrame: NSObject {
+    private let action: () -> Void
+    private var link: CADisplayLink?
+
+    init(_ action: @escaping () -> Void) {
+        self.action = action
+        super.init()
+        link = CADisplayLink(target: self, selector: #selector(fire))
+        link?.add(to: .main, forMode: .common)
+    }
+
+    @objc private func fire() {
+        link?.invalidate()
+        link = nil
+        action()
+    }
 }
