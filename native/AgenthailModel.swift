@@ -1080,13 +1080,25 @@ final class AgenthailModel: ObservableObject {
         change(&localSends[sessionID]![index])
     }
 
-    private func startCatalogStream() {
+    /// After a stream gap or an overflowed inbox the stream resumes only once
+    /// a fresh snapshot has been adopted, retrying it until one is.
+    func startCatalogStream(afterFreshSnapshot: Bool = false) {
         catalogStreamTask?.cancel()
         catalogInbox = nil
         catalogStreamTask = Task {
             let backoff = EventRetryBackoff()
+            var resync = afterFreshSnapshot
             while !Task.isCancelled {
                 guard let api else { return }
+                if resync {
+                    let adopted = await refresh(fresh: true)
+                    if Task.isCancelled { return }
+                    guard adopted else {
+                        try? await Task.sleep(for: .seconds(backoff.nextDelay()))
+                        continue
+                    }
+                    resync = false
+                }
                 let inbox = openCatalogInbox()
                 do {
                     try await api.streamCatalog(after: catalogPosition.cursor, onConnected: {}, onEvent: { event in
@@ -1098,7 +1110,8 @@ final class AgenthailModel: ObservableObject {
                     if case AgenthailAPIError.streamGap = error {
                         catalogInbox = nil
                         catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
-                        _ = await refresh(fresh: true)
+                        resync = true
+                        continue
                     }
                     try? await Task.sleep(for: .seconds(backoff.nextDelay()))
                 }
@@ -1118,19 +1131,11 @@ final class AgenthailModel: ObservableObject {
         return inbox
     }
 
-    /// A stream that outruns the main actor past the inbox's bound is reloaded
-    /// from a fresh snapshot, and the stream resumes after it.
     private func drainCatalogInbox() {
         guard let inbox = catalogInbox else { return }
         switch inbox.take() {
         case .overflow:
-            catalogInbox = nil
-            catalogStreamTask?.cancel()
-            catalogStreamTask = nil
-            Task {
-                _ = await refresh(fresh: true)
-                startCatalogStream()
-            }
+            startCatalogStream(afterFreshSnapshot: true)
         case .events(let events):
             applyCatalogEvents(events)
         }
