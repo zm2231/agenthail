@@ -157,12 +157,12 @@ final class SessionRefreshTests: XCTestCase {
         await model.refresh()
         func running() -> [String] { model.sessionTree(scope: .running, search: "").projects.flatMap { $0.checkouts.flatMap { $0.families.map(\.root.id) } } }
         XCTAssertTrue(running().contains("computer::demo"))
-        XCTAssertEqual(model.sessionTree(scope: .running, search: "zzz-no-match").projects.count, 0)
 
         SessionRefreshProtocol.state.set(snapshotStatus: "idle")
         await model.refresh()
 
         XCTAssertFalse(running().contains("computer::demo"))
+        XCTAssertEqual(model.sessionTree(scope: .running, search: "zzz-no-match").projects.count, 0)
     }
 
     @MainActor

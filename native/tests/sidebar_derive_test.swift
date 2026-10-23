@@ -32,11 +32,21 @@ struct SidebarDeriveTest {
         model.snapshot = listing([session("a", status: "idle"), session("b", status: "busy")], attention: [question])
         check(model.sessionAttention["a"] != nil && model.sessionTree.needsYou.map(\.id) == ["a"], "attention and Needs you follow the catalog: \(model.sessionTree.needsYou.map(\.id))")
 
+        let undelivered = DeliveryProblem(deliveryId: 7, sessionId: "a", sourceSessionId: "b", attentionSessionId: "b", message: "hi", reason: "closed", status: nil, at: "2026-10-23T08:00:00Z")
+        model.snapshot?.deliveryProblems = [undelivered]
+        check(model.sessionAttention["b"]?.kind == .outgoing, "a delivery problem reaches attention")
+        model.snapshot?.deliveryProblems?.removeAll { $0.deliveryId == 7 }
+        check(model.sessionAttention["b"] == nil, "a dismissed delivery problem leaves attention")
+
+        model.sessionFilter = .recent
+        model.openSearchResult(session("unlisted", status: "idle"))
+        check(model.knownSessions.map(\.id).contains("unlisted") && shown(model).contains("unlisted"), "a pinned search result joins the tree: \(shown(model))")
+
         model.sessionRefinement = SessionRefinement(surface: "codex")
         check(shown(model).isEmpty, "the tree follows the refinement: \(shown(model))")
 
         model.snapshot = nil
-        check(model.knownSessions.isEmpty && model.sessionAttention.isEmpty && shown(model).isEmpty, "losing the catalog clears what the sidebar shows")
+        check(model.knownSessions.map(\.id) == ["unlisted"] && model.sessionAttention.isEmpty && shown(model).isEmpty, "losing the catalog keeps only pinned sessions: \(model.knownSessions.map(\.id))")
     }
 
     private static func check(_ condition: Bool, _ message: String) {
