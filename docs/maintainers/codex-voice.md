@@ -38,7 +38,7 @@ distinction between automated checks, real Codex evaluation, and phone testing.
    delivery evidence, and the actual reply.
 
 Only audio and WebRTC negotiation go to Codex's realtime service. The phone sends
-control requests to the paired Mac over HTTPS. Codex's existing authenticated
+control requests to the paired computer over HTTPS. Codex's existing authenticated
 client creates the realtime call. On iPhone the media peer is native WebRTC
 running under CallKit; it never receives the paired token or Codex credentials.
 The Mac and the web dashboard run the same peer program in WebKit or the
