@@ -526,6 +526,70 @@ struct SessionPaneTest {
         streamingModel.closePane(streamingPane)
         streamingServer.stop()
 
+        var warmRequests: [String] = []
+        var gapOnResume = false
+        let warmServer = try! StubServer { line, _ in
+            let request = line.components(separatedBy: "\r\n").first ?? line
+            warmRequests.append(request)
+            if request.contains("/api/v1/session-stream?") {
+                if gapOnResume, request.contains("after=100") {
+                    gapOnResume = false
+                    return StubServer.reply("409 Conflict", #"{"error":{"code":"stream_gap","message":"gone"}}"#)
+                }
+                return "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n: connected\n\n"
+            }
+            if request.contains("/api/v1/session?") {
+                let id = request.contains("id=W2") ? "W2" : "W1"
+                return StubServer.reply("200 OK", pageJSON.replacingOccurrences(of: #""id":"D","surface""#, with: #""id":"\#(id)","surface""#))
+            }
+            return StubServer.reply("404 Not Found", "{}")
+        }
+        let warmPort = await warmServer.ready()
+        let warmModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(warmPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
+        func streamed(_ id: String) -> SessionState {
+            var capabilities = Capabilities()
+            capabilities.stream = true
+            return SessionState(id: id, surface: "claude", name: id, alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: capabilities, readOnly: false, readOnlyReason: nil)
+        }
+        warmModel.snapshot = listing([streamed("W1"), streamed("W2")])
+        let warmPane = warmModel.openPane()
+        func waitForStream(_ id: String, from start: Int) async {
+            let deadline = Date().addingTimeInterval(5)
+            while !warmRequests[start...].contains(where: { $0.contains("/api/v1/session-stream?") && $0.contains("id=\(id)") }), Date() < deadline {
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        warmPane.select("W1")
+        await waitForStream("W1", from: 0)
+        warmPane.select("W2")
+        await waitForStream("W2", from: 0)
+        let beforeReturn = warmRequests.count
+        warmPane.select("W1")
+        await waitForStream("W1", from: beforeReturn)
+        let returned = Array(warmRequests[beforeReturn...])
+        check(!returned.contains { $0.contains("/api/v1/session?") }, "switching back to a cached session reads no page: \(returned)")
+        check(returned.filter { $0.contains("/api/v1/session-stream?") }.count == 1 && returned.contains { $0.contains("/api/v1/session-stream?") && $0.contains("after=100") }, "it resumes its stream once, from the cached journal position: \(returned)")
+        check(warmPane.timelineItems.map(\.id) == ["a", "b"], "the cached rows show at once: \(warmPane.timelineItems.map(\.id))")
+        let staleDeadline = Date().addingTimeInterval(5)
+        while warmPane.detailStale, Date() < staleDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        check(!warmPane.detailStale, "a resumed stream marks the cached rows current")
+
+        warmPane.select("W2")
+        await waitForStream("W2", from: beforeReturn)
+        gapOnResume = true
+        let beforeGap = warmRequests.count
+        warmPane.select("W1")
+        let gapDeadline = Date().addingTimeInterval(5)
+        while warmRequests[beforeGap...].filter({ $0.contains("/api/v1/session-stream?") && $0.contains("id=W1") }).count < 2, Date() < gapDeadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+        let gapped = Array(warmRequests[beforeGap...])
+        check(gapped.filter { $0.contains("/api/v1/session?") && $0.contains("id=W1") }.count == 1, "a cursor the journal no longer holds falls back to exactly one page read: \(gapped)")
+        check(gapped.last { $0.contains("/api/v1/session-stream?") }?.contains("after=100") == true, "the stream restarts from the page's journal position: \(gapped)")
+        warmModel.closePane(warmPane)
+        warmServer.stop()
+
         let delivered = await model.reply("  answer from a notification  ", to: "D", connectionTimeout: .milliseconds(50))
         check(!delivered && model.draft(for: "D").text == "answer from a notification", "an undeliverable reply waits in the session's draft")
     }

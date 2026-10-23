@@ -74,6 +74,28 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testSwitchingBackToACachedSessionResumesItsStreamWithoutReadingAPage() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(journalSeq: 10)
+        let model = makeModel()
+        await model.refresh()
+        await model.loadSession("computer::demo")
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.streamURLs.contains { $0.contains("id=demo") } }
+        await model.loadSession("computer::other")
+        let pages = SessionRefreshProtocol.state.detailFetches
+        let streams = SessionRefreshProtocol.state.streamURLs.count
+
+        await model.loadSession("computer::demo")
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.streamURLs.dropFirst(streams).contains { $0.contains("id=demo") } }
+
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, pages)
+        let resumed = try XCTUnwrap(SessionRefreshProtocol.state.streamURLs.dropFirst(streams).first { $0.contains("id=demo") })
+        XCTAssertTrue(resumed.contains("after=10"), resumed)
+        XCTAssertEqual(model.selectedDetail?.session.id, "computer::demo")
+        XCTAssertFalse(model.loadingSession)
+    }
+
+    @MainActor
     func testSnapshotStatusReachesOpenSession() async {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
@@ -325,7 +347,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
             condition.withLock {
                 fetches = 0; unsupported = streamUnsupported; detail = "busy"; snapshot = "busy"
                 holdingSnapshot = false; holdingDetail = false; snapshotWaiting = false; detailWaiting = false; passing = 0; seq = nil
-                canStream = true; streams = 0; fields = "{}"
+                canStream = true; streams = 0; fields = "{}"; streamPaths = []
                 condition.broadcast()
             }
         }
@@ -339,7 +361,9 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         var streamRequests: Int { condition.withLock { streams } }
         func set(snapshotCanStream value: Bool) { condition.withLock { canStream = value } }
         func set(streamUnsupported value: Bool) { condition.withLock { unsupported = value } }
-        func streamRequested() { condition.withLock { streams += 1 } }
+        private var streamPaths: [String] = []
+        var streamURLs: [String] { condition.withLock { streamPaths } }
+        func streamRequested(_ url: URL?) { condition.withLock { streams += 1; streamPaths.append(url?.absoluteString ?? "") } }
         func holdSnapshot() { condition.withLock { holdingSnapshot = true } }
         func passNextSnapshot() { condition.withLock { passing += 1 } }
         func holdDetail() { condition.withLock { holdingDetail = true } }
@@ -415,7 +439,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/session-metadata":
             body = Self.metadata
         case "/api/v1/session-stream":
-            Self.state.streamRequested()
+            Self.state.streamRequested(request.url)
             if Self.state.streamUnsupported {
                 status = 409
                 body = #"{"error":{"code":"stream_unsupported","message":"no stream"}}"#

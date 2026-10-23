@@ -149,6 +149,12 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     /// Rows streamed while a page read is in flight, so a page read before
     /// some of them arrived can be brought up to date.
     private var rowsDuringPageRead: [SessionStreamEvent] = []
+    private(set) lazy var store: SessionStore = {
+        let store = SessionStore(limits: .phone)
+        store.pinned = { [unowned self] id in id == selectedSessionID || drafts[id]?.isEmpty == false }
+        store.working = { [unowned self] id in snapshot?.sessions.first { $0.id == id }?.isWorking == true }
+        return store
+    }()
     private var sessionMetadata = MetadataOverlay()
     private var stateRequests: UInt64 = 0
     private var selectedSessionStateSeq: UInt64 = 0
@@ -911,7 +917,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         if let previous = selectedSessionID, previous != id {
             drafts[previous] = composer
             attachmentDrafts[previous] = composerAttachments
+            keepSelectedSession()
         }
+        var resumes = false
         if selectedSessionID != id {
             sessionStreamTask?.cancel()
             cancelSessionReload()
@@ -923,18 +931,30 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             composer = drafts[id] ?? ""
             composerAttachments = attachmentDrafts[id] ?? []
             attachmentProblem = nil
-            selectedDetail = nil
+            let warm = store.open(id)
+            let live = snapshot?.sessions.first { $0.id == id }
+            selectedDetail = warm.map { SessionStore.live($0.detail, live) }
             sessionRequests = nil
             sessionRequestsKey = nil
-            olderActivity = []
-            activityCursor = nil
+            olderActivity = warm?.older ?? []
+            activityCursor = warm?.olderCursor
             olderActivityError = nil
+            if let cursor = warm?.cursor, live?.capabilities.stream == true {
+                sessionStreamCursor = cursor
+                resumes = true
+            }
         }
         selectedSessionID = id
         if switching { beginOpenInterval(id) }
         sessionError = nil
         loadingSession = selectedDetail == nil
-        await reloadSelectedSession()
+        if resumes {
+            sessionServer = server(for: id)
+            startSessionStream(id)
+            await refreshDeliveries()
+        } else {
+            await reloadSelectedSession()
+        }
         if selectedSessionID == id { startSessionMetadata(id) }
         if selectedSessionID == id { loadingSession = false }
     }
@@ -960,6 +980,11 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard let open = openInterval, !open.painted, selectedDetail?.session.id == open.session else { return }
         openInterval?.painted = true
         _ = NextFrame { Self.signposter.emitEvent("Session painted", id: open.id) }
+    }
+
+    private func keepSelectedSession() {
+        guard let id = selectedSessionID, let detail = selectedDetail, detail.session.id == id else { return }
+        store.keep(WarmSession(detail: detail, older: olderActivity, olderCursor: activityCursor, cursor: sessionStreamCursor > 0 ? sessionStreamCursor : nil), for: id)
     }
 
     func refreshSession(_ id: String) async {
@@ -1200,6 +1225,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard !rekeys.isEmpty else { return }
         _ = rekeys.carry(&drafts)
         _ = rekeys.carry(&attachmentDrafts)
+        store.carry(rekeys)
         var held = stashes
         if rekeys.carry(&held) { stashes = held }
         _ = rekeys.carry(&pendingSendRequests)
@@ -1428,6 +1454,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
         drafts = drafts.filter { !owned($0.key) }
         attachmentDrafts = attachmentDrafts.filter { !owned($0.key) }
+        store.ids.filter(owned).forEach(store.forget)
         stashes = stashes.filter { !owned($0.key) }
         pendingSendRequests = pendingSendRequests.filter { !owned($0.key) }
         deliveryStatus = deliveryStatus.filter { !owned($0.key) }
@@ -1688,16 +1715,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard var timeline = detail.timeline else { return }
         guard !event.data.itemId.isEmpty else { return }
         let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? (event.data.kind == "attachment" ? "Image" : event.data.kind), text: event.data.body ?? (event.data.kind == "attachment" ? "Image attachment" : ""), timestamp: event.data.ts, callId: event.data.callId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.truncationReason, bodyRef: event.data.bodyRef, attachment: event.data.attachment, sender: event.data.sender, files: event.data.files, resetsAt: event.data.resetsAt)
+        var older = olderActivity
         if event.data.op == "remove" {
             timeline.items.removeAll { $0.id == event.data.itemId }
-            if olderActivity.contains(where: { $0.id == event.data.itemId }) { olderActivity.removeAll { $0.id == event.data.itemId } }
-        } else if let index = timeline.items.firstIndex(where: { $0.id == event.data.itemId }) {
-            timeline.items[index] = item
-        } else if let index = olderActivity.firstIndex(where: { $0.id == event.data.itemId }) {
-            olderActivity[index] = item
+            older.removeAll { $0.id == event.data.itemId }
         } else {
-            timeline.items.append(item)
+            SessionStore.place(item, in: &timeline, older: &older)
         }
+        if older != olderActivity { olderActivity = older }
         detail.timeline = timeline
         selectedDetail = detail
         sessionError = nil

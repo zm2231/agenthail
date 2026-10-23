@@ -40,6 +40,7 @@ let package = Package(
                 "SessionTree.swift",
                 "MetadataOverlay.swift",
                 "ClaudeSubagentList.swift",
+                "SessionStore.swift",
                 "EventRetryBackoff.swift",
                 "ToolPresentation.swift",
                 "TextDiff.swift",

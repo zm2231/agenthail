@@ -41,6 +41,7 @@ targets:
       - path: SessionTree.swift
       - path: MetadataOverlay.swift
       - path: ClaudeSubagentList.swift
+      - path: SessionStore.swift
       - path: EventRetryBackoff.swift
       - path: ToolPresentation.swift
       - path: TextDiff.swift

@@ -30,6 +30,7 @@ SOURCES=(
   SessionTree.swift
   MetadataOverlay.swift
   ClaudeSubagentList.swift
+  SessionStore.swift
   StatusRefreshPolicy.swift
   ToolPresentation.swift
   TextDiff.swift

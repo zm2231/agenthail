@@ -6,7 +6,7 @@ final class AgenthailModel: ObservableObject {
     @Published var snapshot: DashboardSnapshot? {
         didSet {
             trackFinishedSessions(from: oldValue)
-            pruneDetailCache()
+            pruneStore()
             if let snapshot {
                 HolderPins.shared.prune(to: snapshot.sessions)
                 let picks = HolderPins.shared.all
@@ -74,8 +74,7 @@ final class AgenthailModel: ObservableObject {
     private var lastEventID: UInt64 = 0
     private var catalogStreamTask: Task<Void, Never>?
     private var catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
-    private var detailCache: [String: SessionDetail] = [:]
-    private var detailCacheOrder: [String] = []
+    let store = SessionStore(limits: .desktop)
     private var drafts: [String: ComposerDraft] = [:]
     private var rekeys = SessionRekeys()
     private var pendingSessionReference: String?
@@ -105,6 +104,10 @@ final class AgenthailModel: ObservableObject {
         self.api = api
         mainPane = SessionPane(model: self, restoresSelection: true)
         panes = [mainPane]
+        store.pinned = { [unowned self] id in
+            panes.contains { $0.selectedSessionID == id } || drafts[id]?.isEmpty == false
+        }
+        store.working = { [unowned self] id in knownSessions.first { $0.id == id }?.isWorking == true }
         if connecting { connect() }
     }
 
@@ -237,22 +240,11 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func cachedDetail(_ id: String) -> SessionDetail? {
-        guard let cached = detailCache[id] else { return nil }
-        touchCachedDetail(id)
-        return cached
-    }
-
-    func detailLoaded(_ loaded: SessionDetail, for id: String) {
-        cacheDetail(loaded, for: id)
-        if let items = loaded.timeline?.items, let sends = localSends[id] {
+    func detailLoaded(_ loaded: WarmSession, for id: String) {
+        store.keep(loaded, for: id)
+        if let items = loaded.detail.timeline?.items, let sends = localSends[id] {
             localSends[id] = LocalSend.reconcile(sends, with: items)
         }
-    }
-
-    func refreshCachedDetail(_ detail: SessionDetail, for id: String) {
-        guard detailCache[id] != nil else { return }
-        detailCache[id] = detail
     }
 
     func openNewSession(message: String? = nil) {
@@ -279,24 +271,10 @@ final class AgenthailModel: ObservableObject {
         finishedUnseen.remove(id)
     }
 
-    private func cacheDetail(_ loaded: SessionDetail, for id: String) {
-        detailCache[id] = loaded
-        touchCachedDetail(id)
-        while detailCacheOrder.count > 16 {
-            detailCache.removeValue(forKey: detailCacheOrder.removeFirst())
-        }
-    }
-
-    private func touchCachedDetail(_ id: String) {
-        detailCacheOrder.removeAll { $0 == id }
-        detailCacheOrder.append(id)
-    }
-
-    private func pruneDetailCache() {
+    private func pruneStore() {
         guard snapshot != nil else { return }
-        let known = Set(knownSessions.map(\.id))
-        detailCacheOrder.removeAll { !known.contains($0) }
-        detailCache = detailCache.filter { known.contains($0.key) }
+        store.carry(rekeys)
+        store.prune(keeping: Set(knownSessions.map(\.id)))
     }
 
     private func trackFinishedSessions(from previous: DashboardSnapshot?) {
