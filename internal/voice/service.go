@@ -1442,16 +1442,16 @@ func (s *Service) observe() {
 	}
 	s.running = s.spawn(func() {
 		for {
-			more, failed := s.pollOnce()
-			if !more || failed && !s.pause() {
+			more, pause := s.pollOnce()
+			if !more || pause && !s.pause() {
 				return
 			}
 		}
 	})
 }
 
-// pause waits one clock tick after a failed poll, so a provider that keeps
-// failing is not asked again at once. It reports false once the service stops.
+// pause waits one clock tick after a poll that failed or lost events, so a
+// source that keeps failing or is gone is not asked again at once. It reports false once the service stops.
 func (s *Service) pause() bool {
 	ticks, stop := s.clock.ticker()
 	defer stop()
@@ -1487,8 +1487,9 @@ func (s *Service) stopObserving() {
 
 // pollOnce waits outside s.mu for the call's next events and applies them if
 // the call is still the one polled. It reports false once the poll has ended,
-// and whether the provider failed.
-func (s *Service) pollOnce() (more, failed bool) {
+// and whether the next poll should wait a tick because this one failed or
+// lost events.
+func (s *Service) pollOnce() (more, pause bool) {
 	s.mu.Lock()
 	v := &s.state.State
 	if !s.active() {
@@ -1534,7 +1535,7 @@ func (s *Service) pollOnce() (more, failed bool) {
 		for _, e := range tools {
 			s.runTool(e)
 		}
-		return false, err != nil
+		return false, err != nil || b.Lost
 	}
 	disconnected := s.active() && s.disconnectedAt.IsZero() && s.clock.now().Sub(time.Unix(0, s.lastSeen.Load())) > 40*time.Second
 	if disconnected {
@@ -1559,7 +1560,7 @@ func (s *Service) pollOnce() (more, failed bool) {
 		}
 		_ = s.commit()
 	}
-	return true, err != nil
+	return true, err != nil || b.Lost
 }
 
 // applyBatch applies polled events to the call and returns its tool calls.

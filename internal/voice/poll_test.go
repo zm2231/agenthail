@@ -27,3 +27,34 @@ func TestAToolCallReachesItsHandlerWithoutWaitingOutThePoll(t *testing.T) {
 		t.Fatalf("poll waited up to %v, bound %v", p.lastWait, pollWait)
 	}
 }
+
+func TestASourceThatLostItsEventsIsAskedAgainOnlyOnTheNextTick(t *testing.T) {
+	f, p := fixture(t)
+	connectFixture(t, f)
+	p.mu.Lock()
+	p.lost = true
+	before := p.polls
+	p.mu.Unlock()
+	f.ticks <- time.Time{}
+	waitFor(t, "the lost poll", func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.polls-before >= 1
+	})
+	time.Sleep(50 * time.Millisecond)
+	p.mu.Lock()
+	polls := p.polls - before
+	p.mu.Unlock()
+	if polls != 1 {
+		t.Fatalf("a lost source was polled %d times on one tick", polls)
+	}
+	if got := f.View(); !got.Truncated {
+		t.Fatalf("the lost events were not recorded: %+v", got)
+	}
+	f.ticks <- time.Time{}
+	waitFor(t, "the poll after the next tick", func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.polls-before == 2
+	})
+}

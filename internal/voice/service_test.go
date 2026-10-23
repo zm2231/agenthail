@@ -37,9 +37,12 @@ type fixtureProvider struct {
 	gate         *gate
 	// ticks releases one Poll each, as its wait running out would; arrived
 	// releases one as Codex sending an event would.
-	ticks     <-chan time.Time
-	arrived   chan struct{}
-	lastWait  time.Duration
+	ticks    <-chan time.Time
+	arrived  chan struct{}
+	lastWait time.Duration
+	// lost makes every Poll report its events lost, as a dropped source does.
+	lost      bool
+	polls     int
 	toolCalls []struct {
 		requestID string
 		success   bool
@@ -238,7 +241,12 @@ func (p *fixtureProvider) Poll(ctx context.Context, after Cursor, _ string, wait
 	p.mu.Lock()
 	arrived := p.arrived
 	p.lastWait = wait
+	p.polls++
+	lost := p.lost
 	p.mu.Unlock()
+	if lost {
+		return Batch{Cursor: after, Lost: true}, nil
+	}
 	if wait > 0 {
 		select {
 		case <-arrived:
