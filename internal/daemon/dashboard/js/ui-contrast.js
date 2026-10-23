@@ -83,3 +83,14 @@ export function readableAccent(accent, surfaces, dark) {
 export function foregroundOn(accent) {
   return accentContrast([1, 1, 1], accent) >= accentContrast([0, 0, 0], accent) ? [1, 1, 1] : [0, 0, 0];
 }
+
+export function readableOnTint(accent, surfaces, dark, alpha) {
+  let colour = readableAccent(accent, surfaces, dark);
+  for (let pass = 0; pass < 8; pass++) {
+    const tinted = surfaces.map((surface) => surface.map((v, i) => colour[i] * alpha + v * (1 - alpha)));
+    const next = readableAccent(accent, [...surfaces, ...tinted], dark);
+    if (next.every((v, i) => v === colour[i])) break;
+    colour = next;
+  }
+  return colour;
+}

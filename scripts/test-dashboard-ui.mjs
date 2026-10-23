@@ -54,23 +54,52 @@ function tokens(selector) {
   assert.ok(start >= 0, `${selector} block`);
   const block = css.slice(start, css.indexOf("}", start));
   const out = {};
-  for (const m of block.matchAll(/--([a-z-]+):\s*oklch\(([\d.]+)%\s+([\d.]+)\s+([\d.]+)\)/g)) out[m[1]] = oklch(+m[2] / 100, +m[3], +m[4]);
+  for (const m of block.matchAll(/--([a-z-]+):\s*oklch\(([\d.]+)%\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)/g)) {
+    out[m[1]] = { colour: oklch(+m[2] / 100, +m[3], +m[4]), alpha: m[5] === undefined ? 1 : +m[5] };
+  }
   return out;
 }
 const dark = tokens(":root");
 const light = tokens(':root[data-theme="light"]');
 assert.deepEqual(Object.keys(light).sort(), Object.keys(dark).sort(), "the light theme sets every colour the dark theme does");
 const textRatio = (a, b) => contrast.ratio(contrast.luminance(a), contrast.luminance(b));
+const over = (token, under) => token.colour.map((v, i) => v * token.alpha + under[i] * (1 - token.alpha));
 for (const [name, set] of [["dark", dark], ["light", light]]) {
+  const composer = over(set.composer, set.paper.colour);
+  const surfaces = {
+    paper: set.paper.colour,
+    panel: set.panel.colour,
+    raised: set.raised.colour,
+    hover: set.hover.colour,
+    code: set.code.colour,
+    "the composer": composer,
+    "the top bar": over(set.glass, set.paper.colour),
+    "a selected row": over(set["accent-soft"], set.paper.colour),
+    "a selected row on a panel": over(set["accent-soft"], set.panel.colour),
+    "a request card": over(set["accent-soft"], composer),
+  };
   for (const role of ["ink", "muted", "quiet", "accent", "good", "warn", "bad", "focus"]) {
-    for (const surface of ["paper", "panel", "raised", "hover"]) {
-      const r = textRatio(set[role], set[surface]);
+    for (const [surface, colour] of Object.entries(surfaces)) {
+      const r = textRatio(set[role].colour, colour);
       assert.ok(r >= 4.5, `${name} ${role} on ${surface} reads at ${r.toFixed(2)}`);
     }
   }
+  assert.ok(textRatio(set.paper.colour, set.accent.colour) >= 4.5, `${name} button text on the accent reads`);
 }
-assert.ok(textRatio(light.paper, light.accent) >= 4.5, "light button text on the accent reads");
-assert.ok(textRatio(dark.paper, dark.accent) >= 4.5, "dark button text on the accent reads");
+
+for (const [name, set] of [["dark", dark], ["light", light]]) {
+  const solids = ["paper", "panel", "raised", "hover"].map((token) => set[token].colour);
+  for (const hex of ["#0a84ff", "#1b2a6b", "#e9a23b", "#f2f2f2", "#3fb68b", "#101010", "#ff0000", "#808080", "#ffff00"]) {
+    const accent = contrast.readableOnTint(parseHex(hex), solids, name === "dark", 0.12);
+    for (const solid of solids) {
+      const tint = solid.map((v, i) => accent[i] * 0.12 + v * 0.88);
+      for (const [where, surface] of [["a surface", solid], ["its own tint", tint]]) {
+        const r = contrast.accentContrast(accent, surface);
+        assert.ok(r >= 4.5, `${name} accent ${hex} reads at ${r.toFixed(2)} on ${where}`);
+      }
+    }
+  }
+}
 
 assert.equal(resolveTheme("dark", false), "dark");
 assert.equal(resolveTheme("light", true), "light");

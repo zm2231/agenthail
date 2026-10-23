@@ -6,7 +6,7 @@
   --hover: oklch(23% 0.016 45);
   --ink: oklch(95% 0.008 70);
   --muted: oklch(73% 0.012 55);
-  --quiet: oklch(62% 0.012 55);
+  --quiet: oklch(64% 0.012 55);
   --rule: oklch(29% 0.014 45);
   --accent: oklch(72% 0.16 45);
   --accent-soft: oklch(72% 0.16 45/0.12);
@@ -37,8 +37,8 @@
   --muted: oklch(41% 0.012 50);
   --quiet: oklch(47% 0.012 50);
   --rule: oklch(87% 0.01 55);
-  --accent: oklch(53% 0.17 38);
-  --accent-soft: oklch(53% 0.17 38/0.12);
+  --accent: oklch(52% 0.17 38);
+  --accent-soft: oklch(52% 0.17 38/0.12);
   --good: oklch(48% 0.12 155);
   --warn: oklch(50% 0.11 80);
   --bad: oklch(50% 0.19 25);

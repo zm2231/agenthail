@@ -1,8 +1,9 @@
-import { foregroundOn, readableAccent } from "./ui-contrast.js";
+import { foregroundOn, readableOnTint } from "./ui-contrast.js";
 
 const ACCENT_TOKENS = ["--accent", "--accent-soft", "--on-accent"];
 const SURFACES = ["--paper", "--panel", "--raised", "--hover"];
 const STORED = "agenthail.ui";
+const SOFT = 0.12;
 
 export function resolveTheme(theme, prefersDark) {
   if (theme === "dark" || theme === "light") return theme;
@@ -31,9 +32,9 @@ export function applyTheme(document, values, prefersDark, colourOf) {
   const accent = parseHex(values["theme.accent"]);
   if (accent) {
     const surfaces = SURFACES.map((token) => colourOf(`var(${token})`)).filter(Boolean);
-    const readable = readableAccent(accent, surfaces, theme === "dark");
+    const readable = readableOnTint(accent, surfaces, theme === "dark", SOFT);
     root.style.setProperty("--accent", css(readable));
-    root.style.setProperty("--accent-soft", css(readable, 0.12));
+    root.style.setProperty("--accent-soft", css(readable, SOFT));
     root.style.setProperty("--on-accent", css(foregroundOn(readable)));
   }
   return theme;
