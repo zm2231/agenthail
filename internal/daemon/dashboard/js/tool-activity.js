@@ -72,7 +72,8 @@ function title(name) {
 
 const verbs = { Read: "Read", read_file: "Read", NotebookRead: "Read", view_image: "Read", Write: "Write", write_file: "Write", MultiEdit: "Edit", NotebookEdit: "Edit", apply_patch: "Edit", Grep: "Search", Glob: "Search", LS: "Search", ToolSearch: "Search", WebSearch: "Search the web", web_search: "Search the web", WebFetch: "Open", Agent: "Delegate", Task: "Delegate", spawn_agent: "Delegate" };
 
-export function toolLine(call) {
+// `diffs` takes the call's toolDiffs when the caller already has them.
+export function toolLine(call, diffs) {
   const name = call.title || call.kind || "Tool";
   const text = call.text || "";
   const shape = content(name, text);
@@ -84,7 +85,7 @@ export function toolLine(call) {
   if (shape.kind === "edit") return { verb: "Edit", object: baseName(shape.path), code: true };
   if (shape.kind === "plan") return { verb: "Update plan", object: "", code: false };
   const verb = verbs[name] ?? title(name);
-  if (name === "apply_patch") return { verb, object: toolChanges(call).map((change) => baseName(change.path)).join(", "), code: true };
+  if (name === "apply_patch") return { verb, object: (diffs ?? toolDiffs(call)).map((diff) => baseName(diff.path)).join(", "), code: true };
   if (string(input?.pattern) !== undefined) return { verb, object: input.pattern, code: true };
   const path = string(input?.file_path) ?? string(input?.path) ?? string(input?.notebook_path);
   if (path !== undefined) return { verb, object: baseName(path), code: true };

@@ -1860,22 +1860,22 @@ function renderToolRun(items, session, states = new Map()) {
       ? diffs.map((diff) => `${diffs.length > 1 ? `<div class="diff-file">${escape(tools.baseName(diff.path))}</div>` : ""}${renderDiff(toolRowKey(session, `diff:${item.id}:${diff.path}`), diff.hunks)}`).join("")
       : item.text ? `<pre class="tool-input">${escape(tools.readableInput(item.text))}</pre>` : '<p class="timeline-empty">No recorded input.</p>';
     const outputs = results.length ? results.map((result) => renderToolOutput(result, session)).join("") : `<p class="timeline-empty">${escape(tools.callStateLabels[states.get(item.id) || "unrecorded"])}</p>`;
-    return renderToolLine(tools.toolLine(item), failed, attributes, (failed ? "" : input + renderTimelineMetadata(item)) + outputs, toolRowKey(session, item.id), failed, "Collapse tool");
+    return renderToolLine(tools.toolLine(item, diffs), failed, attributes, (failed ? "" : input + renderTimelineMetadata(item)) + outputs, toolRowKey(session, item.id), failed, "Collapse tool");
   });
   const diffs = tools.mergedDiffs(entries.flatMap(({ item, results }) => (item.kind === "reasoning" || item.kind === "toolResult" || isFailedTool(item) || results.some(isFailedTool) ? [] : cachedToolDiffs(item, session))));
   const chips = diffs.length ? renderFileChips(toolRowKey(session, `chips:${entries[0].item.id}`), diffs) : "";
   const callCount = entries.filter(entry => entry.item.kind !== "reasoning" && entry.item.kind !== "toolResult").length;
   if (callCount <= foldToolsAfter) return `<section class="tool-run">${lines.join("")}${chips}</section>`;
   const failures = entries.filter(({ item, results }) => isFailedTool(item) || results.some(isFailedTool)).length;
-  const summary = `<summary><span class="tool-mark" aria-hidden="true">◆</span><span class="tool-verb">${escape(toolRunLabel(entries))}</span>${failures ? `<span class="tool-failed">${failures} failed</span>` : ""}</summary>`;
+  const summary = `<summary><span class="tool-mark" aria-hidden="true">◆</span><span class="tool-verb">${escape(toolRunLabel(entries, session))}</span>${failures ? `<span class="tool-failed">${failures} failed</span>` : ""}</summary>`;
   const key = toolRowKey(session, `run:${entries[0].item.id}`);
   return `<section class="tool-run"><details class="tool-line tool-fold" data-row="${escape(key)}"${toolRows.get(key) ? " open" : ""}>${summary}<div class="tool-fold-lines">${lines.join("")}${renderCollapse("Collapse activity")}</div></details>${chips}</section>`;
 }
-function toolRunLabel(entries) {
+function toolRunLabel(entries, session) {
   const counts = new Map();
   for (const { item } of entries) {
     if (item.kind === "reasoning" || item.kind === "toolResult") continue;
-    const verb = tools.toolLine(item).verb;
+    const verb = tools.toolLine(item, cachedToolDiffs(item, session)).verb;
     counts.set(verb, (counts.get(verb) || 0) + 1);
   }
   const phrases = { Run: ["ran 1 command", "ran %d commands"], Read: ["read 1 file", "read %d files"], Edit: ["edited 1 file", "edited %d files"], Write: ["wrote 1 file", "wrote %d files"], Search: ["searched once", "searched %d times"] };

@@ -217,6 +217,18 @@ context.showToolDiff({ dataset: { diffShow: "800" }, closest: () => diffBlock })
 assert.equal((diffBlock.outerHTML.match(/<div class="diff-line /g) || []).length, 800, "Show more adds a page in place");
 assert(diffBlock.outerHTML.includes(">Show 100 more lines<"), "the last page offers what is left");
 
+// An unchanged call's diffs are worked out once, however often the transcript renders.
+const patchText = `*** Begin Patch\n*** Update File: big.txt\n@@\n${Array.from({ length: 300 }, (_, index) => `-old ${index}\n+new ${index}`).join("\n")}\n*** End Patch`;
+const patchRun = Array.from({ length: 7 }, (_, index) => ({ id: `p-${index}`, kind: "toolCall", title: "apply_patch", text: index ? JSON.stringify({ command: `step ${index}` }) : patchText }));
+let derived = 0;
+const realTools = context.tools;
+context.tools = { ...realTools, toolDiffs: (call) => { derived += 1; return realTools.toolDiffs(call); }, toolLine: (call, diffs) => { if (call.title === "apply_patch") assert(diffs, "a patch's line reuses its cached diffs"); return realTools.toolLine(call, diffs); } };
+context.renderTimeline(patchRun, session);
+const firstRender = derived;
+context.renderTimeline(patchRun, session);
+context.tools = realTools;
+assert(firstRender > 0 && derived === firstRender, `a second render derives no diffs again (${firstRender} then ${derived - firstRender})`);
+
 // Collapse from the bottom closes the row and scrolls its header into view.
 const summaryRevealed = [];
 const row = { open: true, dataset: { row: "session-1 run:run-0" }, querySelector: () => ({ scrollIntoView: (options) => summaryRevealed.push(options) }) };
