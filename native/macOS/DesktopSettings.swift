@@ -71,10 +71,10 @@ struct GeneralSettings: View {
             if let person = model.snapshot?.person {
                 Section {
                     TextField("Your name", text: $personName, prompt: Text(person.name))
-                        .onSubmit { model.setPersonName(personName) }
+                        .onSubmit { savePersonName(person) }
                     HStack {
-                        Button("Save") { model.setPersonName(personName) }
-                            .disabled(personName.trimmingCharacters(in: .whitespaces).isEmpty || personName == person.name && person.set)
+                        Button("Save") { savePersonName(person) }
+                            .disabled(PersonNameDraft.submission(personName, current: person) == nil)
                         if person.set {
                             Button("Use This Account's Name") {
                                 personName = ""
@@ -89,7 +89,8 @@ struct GeneralSettings: View {
                         .font(.system(size: DesktopType.secondary))
                         .foregroundStyle(DesktopPalette.text2)
                 }
-                .onAppear { personName = person.set ? person.name : "" }
+                .onAppear { personName = PersonNameDraft.field(for: person) }
+                .onChange(of: person) { _, current in personName = PersonNameDraft.field(for: current) }
             }
             Section("Sending while an agent works") {
                 Picker(shortcuts.label(.send) ?? "Send", selection: Binding(get: { model.busyDelivery }, set: { model.setBusyDelivery($0) })) {
@@ -124,6 +125,10 @@ struct GeneralSettings: View {
             SettingsError(model: model)
         }
         .formStyle(.grouped)
+    }
+
+    private func savePersonName(_ person: PersonState) {
+        if let name = PersonNameDraft.submission(personName, current: person) { model.setPersonName(name) }
     }
 
     private var connectionLabel: String {

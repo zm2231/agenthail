@@ -1318,6 +1318,18 @@ struct PersonState: Decodable, Equatable {
     let set: Bool
 }
 
+/// The person-name field: it shows the name the person set, and saves only a
+/// non-empty change, so clearing it never resets the name by accident.
+enum PersonNameDraft {
+    static func field(for person: PersonState) -> String { person.set ? person.name : "" }
+
+    static func submission(_ draft: String, current: PersonState) -> String? {
+        let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !(current.set && name == current.name) else { return nil }
+        return name
+    }
+}
+
 struct DashboardSettingsState: Decodable {
     let dashboard: DashboardConfigState
     let remoteAccess: RemoteAccessState
