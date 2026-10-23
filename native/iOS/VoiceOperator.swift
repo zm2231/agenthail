@@ -87,7 +87,9 @@ struct AgenthailVoiceOperatorSheet: View {
                                 if detail.readOnly { Text(detail.readOnlyReason).foregroundStyle(.orange) }
                                 if let timeline = detail.timeline {
                                     if let unavailable = timeline.unavailableReason { Text(unavailable).foregroundStyle(.secondary) }
-                                    ForEach(TimelineGroup.newestFirst(timeline.items)) { CompactActivityGroup(group: $0) }
+                                    ForEach(TimelineGroup.make(timeline.items)) { group in
+                                        CompactActivityGroup(group: group, attachmentLoader: { item in await model.activityAttachment(item) }) { followingLatest = false }
+                                    }
                                     if timeline.truncated { Text("Earlier activity is in the full timeline.").font(.caption) }
                                 }
                                 Button("Open full timeline") { openSession(detail.session.id) }
@@ -95,8 +97,8 @@ struct AgenthailVoiceOperatorSheet: View {
                         } label: {
                             Label(detail.session.status == "busy" ? "Orchestrator is working" : "Agent activity", systemImage: "terminal")
                                 .font(.subheadline.weight(.medium)).frame(minHeight: 44)
+                                .accessibilityIdentifier("voice-activity")
                         }
-                        .accessibilityIdentifier("voice-activity")
                     }
                     Color.clear.frame(height: 1).id("voice-bottom")
                 }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: .infinity)
@@ -184,10 +186,12 @@ struct AgenthailVoiceOperatorSheet: View {
         }
     }
 
+    // Only new words follow the latest activity; call events such as a
+    // heartbeat or mute change nothing on screen.
     private var latestContentMarker: String {
-        let event = model.state?.events.last?.sequence ?? 0
-        let item = model.detail?.timeline?.items.last?.id ?? ""
-        return "\(event):\(item)"
+        let transcript = model.state?.transcripts.last
+        let item = model.detail?.timeline?.items.last
+        return "\(transcript?.id ?? ""):\(transcript?.text ?? ""):\(item?.id ?? ""):\(item?.text ?? "")"
     }
 
     private var controls: some View {

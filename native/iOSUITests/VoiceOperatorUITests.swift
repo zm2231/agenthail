@@ -54,4 +54,21 @@ final class VoiceOperatorUITests: XCTestCase {
             XCTAssertFalse(jump.exists)
         }
     }
+
+    func testAgentActivityReadsInOrderAndKeepsEachRowsIdentity() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-voice"]
+        app.launch()
+
+        let activity = app.buttons["voice-activity"]
+        XCTAssertTrue(activity.waitForExistence(timeout: 10))
+        activity.tapWhenReady()
+        let request = app.staticTexts["The build fails after reconnecting. Trace it, fix it, and keep a regression test."]
+        let tools = app.buttons["activity-3"]
+        XCTAssertTrue(tools.waitForExistence(timeout: 5))
+        XCTAssertTrue(request.exists)
+        XCTAssertLessThan(request.frame.minY, tools.frame.minY)
+        tools.tapWhenReady()
+        XCTAssertTrue(app.buttons["collapse-activity-3"].waitForExistence(timeout: 5))
+    }
 }
