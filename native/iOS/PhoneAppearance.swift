@@ -134,7 +134,6 @@ final class PhoneAppearance: ObservableObject {
             do {
                 let loaded = try await api.uiConfig(device: UIDevice.current.name, kind: Self.deviceKind)
                 if Task.isCancelled { return }
-                var problem: String?
                 var wallpaper = self.wallpaper
                 var wallpaperData: Data?
                 if case .image(let path) = loaded.background, wallpaper?.id != path {
@@ -142,7 +141,11 @@ final class PhoneAppearance: ObservableObject {
                     let maxPixels = Self.maxPixels
                     wallpaper = await Task.detached { WallpaperImage.decode(data, id: path, maxPixels: maxPixels) }.value
                     if Task.isCancelled { return }
-                    if wallpaper == nil { problem = "The background image \(path) can't be read." } else { wallpaperData = data }
+                    guard wallpaper != nil else {
+                        self.problem = "The background image \(path) can't be read."
+                        return
+                    }
+                    wallpaperData = data
                 }
                 if loaded != config || wallpaper != self.wallpaper {
                     config = loaded
@@ -152,7 +155,7 @@ final class PhoneAppearance: ObservableObject {
                     pending = []
                     save(loaded, wallpaper: wallpaperData)
                 }
-                self.problem = problem
+                problem = nil
             } catch {
                 if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled { return }
                 problem = AgenthailAPIError.userMessage(error)
@@ -170,10 +173,23 @@ final class PhoneAppearance: ObservableObject {
 
     private func save(_ config: UIConfig, wallpaper: Data?) {
         guard let cache else { return }
-        try? FileManager.default.removeItem(at: cache)
-        try? FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
-        try? JSONEncoder().encode(config).write(to: cache.appendingPathComponent("ui.json"))
-        if let wallpaper { try? wallpaper.write(to: cache.appendingPathComponent("wallpaper")) }
+        let files = FileManager.default
+        try? files.createDirectory(at: cache, withIntermediateDirectories: true)
+        for file in (try? files.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)) ?? [] where file.pathExtension == "png" {
+            try? files.removeItem(at: file)
+        }
+        let image = cache.appendingPathComponent("wallpaper")
+        if let wallpaper {
+            try? wallpaper.write(to: image, options: .atomic)
+        } else if wallpaperID(config) == nil {
+            try? files.removeItem(at: image)
+        }
+        try? JSONEncoder().encode(config).write(to: cache.appendingPathComponent("ui.json"), options: .atomic)
+    }
+
+    private func wallpaperID(_ config: UIConfig) -> String? {
+        if case .image(let path) = config.background { return path }
+        return nil
     }
 
     func file(_ key: Key) -> URL? {

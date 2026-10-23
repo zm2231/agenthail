@@ -25,14 +25,27 @@ final class PhoneAppearanceTests: XCTestCase {
         PhoneAppearance.Key(surface: surface, size: CGSize(width: 402, height: 874), scale: 3, dark: true, solid: false, target: target)
     }
 
-    func testLoadAsksForThisDeviceClassAndKeepsTheConfigForTheNextLaunch() async throws {
-        UIConfigURLProtocol.state.body = #"{"rev":"abc","values":{"background":"gradient: 135deg, #1b2230 0%, #4a2c8a 100%","glass.opacity":0.3},"problems":[]}"#
+    private var api: AgenthailAPI {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [UIConfigURLProtocol.self]
-        let api = AgenthailAPI(baseURL: URL(string: "https://host.invalid")!, token: "t", session: URLSession(configuration: configuration))
-        let appearance = PhoneAppearance(cache: cache)
+        return AgenthailAPI(baseURL: URL(string: "https://host.invalid")!, token: "t", session: URLSession(configuration: configuration))
+    }
+
+    private func load(_ appearance: PhoneAppearance, until done: () -> Bool) async throws {
         appearance.load(from: api)
-        for _ in 0..<100 where appearance.config.rev != "abc" { try await Task.sleep(for: .milliseconds(20)) }
+        for _ in 0..<200 where !done() { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(done())
+    }
+
+    private static let png: Data = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).pngData { context in
+        UIColor.systemTeal.setFill()
+        context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+    }
+
+    func testLoadAsksForThisDeviceClassAndKeepsTheConfigForTheNextLaunch() async throws {
+        UIConfigURLProtocol.state.body = #"{"rev":"abc","values":{"background":"gradient: 135deg, #1b2230 0%, #4a2c8a 100%","glass.opacity":0.3},"problems":[]}"#
+        let appearance = PhoneAppearance(cache: cache)
+        try await load(appearance) { appearance.config.rev == "abc" }
 
         XCTAssertEqual(appearance.config.rev, "abc")
         XCTAssertEqual(UIConfigURLProtocol.state.query["class"], PhoneAppearance.deviceKind)
@@ -42,6 +55,40 @@ final class PhoneAppearanceTests: XCTestCase {
         let relaunched = PhoneAppearance(cache: cache)
         XCTAssertEqual(relaunched.config, appearance.config)
         XCTAssertEqual(relaunched.config.contentOpacity, 0.3)
+    }
+
+    func testAnUnreadableBackgroundKeepsTheLastGoodLook() async throws {
+        UIConfigURLProtocol.state.body = #"{"rev":"one","values":{"background":"image: backgrounds/sea.png"},"problems":[]}"#
+        UIConfigURLProtocol.state.image = Self.png
+        let appearance = PhoneAppearance(cache: cache)
+        try await load(appearance) { appearance.config.rev == "one" && appearance.active }
+
+        UIConfigURLProtocol.state.body = #"{"rev":"two","values":{"background":"image: backgrounds/broken.png"},"problems":[]}"#
+        UIConfigURLProtocol.state.image = Data("not an image".utf8)
+        try await load(appearance) { appearance.problem != nil }
+
+        XCTAssertEqual(appearance.config.rev, "one")
+        XCTAssertEqual(appearance.wallpaper?.id, "backgrounds/sea.png")
+        XCTAssertTrue(appearance.active)
+        let relaunched = PhoneAppearance(cache: cache)
+        XCTAssertEqual(relaunched.config.rev, "one")
+        XCTAssertEqual(relaunched.wallpaper?.id, "backgrounds/sea.png")
+    }
+
+    func testAChangedConfigKeepsTheCachedBackgroundForTheNextLaunch() async throws {
+        UIConfigURLProtocol.state.body = #"{"rev":"one","values":{"background":"image: backgrounds/sea.png"},"problems":[]}"#
+        UIConfigURLProtocol.state.image = Self.png
+        let appearance = PhoneAppearance(cache: cache)
+        try await load(appearance) { appearance.config.rev == "one" && appearance.active }
+
+        UIConfigURLProtocol.state.body = #"{"rev":"two","values":{"background":"image: backgrounds/sea.png","glass.opacity":0.4},"problems":[]}"#
+        UIConfigURLProtocol.state.image = Data()
+        try await load(appearance) { appearance.config.rev == "two" }
+
+        let relaunched = PhoneAppearance(cache: cache)
+        XCTAssertEqual(relaunched.config.rev, "two")
+        XCTAssertEqual(relaunched.wallpaper?.id, "backgrounds/sea.png")
+        XCTAssertTrue(relaunched.active)
     }
 
     func testEachSurfaceUsesItsOwnPaneAndStrength() throws {
@@ -110,12 +157,20 @@ final class PhoneAppearanceTests: XCTestCase {
     }
 
     func testCardsKeepEveryTextColourReadableWithoutHidingTheBackground() throws {
+        for (dark, target) in [(true, Float(4.5)), (true, 7), (false, 4.5), (false, 7)] {
+            let (worst, spread) = try measureCards(dark: dark, target: target)
+            XCTAssertGreaterThanOrEqual(worst, target, "the dimmest text colour reads at every point a card can reach (dark \(dark), target \(target))")
+            XCTAssertGreaterThan(spread, 0.005, "cards are tinted locally, so the background still shows through them (dark \(dark), target \(target))")
+        }
+    }
+
+    private func measureCards(dark: Bool, target: Float) throws -> (worst: Float, spread: Float) {
         let appearance = PhoneAppearance(cache: nil)
         appearance.preview(try config([
             "background": "mesh: 3x3, #2e1972, #182c58, #0e5671, #2d1655, #c8d0e0, #2e3340, #591948, #8a3049, #682e2c",
             "glass.sidebar.opacity": 0.3,
         ]))
-        let small = PhoneAppearance.Key(surface: .cards, size: CGSize(width: 200, height: 400), scale: 1, dark: true, solid: false, target: 4.5)
+        let small = PhoneAppearance.Key(surface: .cards, size: CGSize(width: 200, height: 400), scale: 1, dark: dark, solid: false, target: target)
         let image = try XCTUnwrap(BackdropRenderer.render(appearance.spec(small))).image
         let width = image.width, height = image.height
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
@@ -123,18 +178,17 @@ final class PhoneAppearanceTests: XCTestCase {
                                               space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
 
-        let roles = PhonePalette.textRoles(dark: true).map { ScrimField.luminance($0.x, $0.y, $0.z) }
-        let dimmest = try XCTUnwrap(roles.min())
+        let roles = PhonePalette.textRoles(dark: dark).map { ScrimField.luminance($0.x, $0.y, $0.z) }
         var worst = Float.infinity
         var shown: [Float] = []
         for i in stride(from: 0, to: pixels.count, by: 4) {
             let background = ScrimField.luminance(Float(pixels[i]) / 255, Float(pixels[i + 1]) / 255, Float(pixels[i + 2]) / 255)
-            worst = min(worst, (dimmest + 0.05) / (background + 0.05))
+            for role in roles {
+                worst = min(worst, (max(role, background) + 0.05) / (min(role, background) + 0.05))
+            }
             shown.append(background)
         }
-        let spread = (shown.max() ?? 0) - (shown.min() ?? 0)
-        XCTAssertGreaterThanOrEqual(worst, 4.5, "the dimmest text colour reads at every point a card can reach")
-        XCTAssertGreaterThan(spread, 0.005, "cards are tinted locally, so the background still shows through them")
+        return (worst, (shown.max() ?? 0) - (shown.min() ?? 0))
     }
 
     func testStatusColoursAreTheMacsTokens() {
@@ -147,24 +201,32 @@ private final class UIConfigState: @unchecked Sendable {
     private let lock = NSLock()
     private var _query: [String: String] = [:]
     private var _body = ""
+    private var _image = Data()
     var query: [String: String] { lock.withLock { _query } }
     var body: String {
         get { lock.withLock { _body } }
         set { lock.withLock { _body = newValue } }
     }
+    var image: Data {
+        get { lock.withLock { _image } }
+        set { lock.withLock { _image = newValue } }
+    }
     func record(_ query: [String: String]) { lock.withLock { _query = query } }
-    func reset() { lock.withLock { _query = [:]; _body = "" } }
+    func reset() { lock.withLock { _query = [:]; _body = ""; _image = Data() } }
 }
 
 private final class UIConfigURLProtocol: URLProtocol, @unchecked Sendable {
     static let state = UIConfigState()
-    override class func canInit(with request: URLRequest) -> Bool { request.url?.path == "/api/v1/ui" }
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.path.hasPrefix("/api/v1/ui") == true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
-        Self.state.record(Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") }))
-        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(Self.state.body.utf8))
+        let background = components.path == "/api/v1/ui/background"
+        if !background {
+            Self.state.record(Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") }))
+        }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": background ? "image/png" : "application/json"])!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: background ? Self.state.image : Data(Self.state.body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
