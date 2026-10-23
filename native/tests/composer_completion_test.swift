@@ -17,11 +17,11 @@ struct ComposerCompletionTest {
         let mid = CompletionToken.at("please @src/ma now", caret: 14)
         check(mid?.trigger == .mention && mid?.query == "src/ma" && mid?.range == NSRange(location: 7, length: 7) && mid?.atStart == false, "an @ after a space completes the word under the caret")
         let inside = CompletionToken.at("@src/main.go", caret: 4)
-        check(inside?.query == "src" && inside?.range == NSRange(location: 0, length: 12), "the caret inside a word completes from its start and replaces the whole word")
+        check(inside?.query == "src" && inside?.range == NSRange(location: 0, length: 4), "the caret inside a word completes from its start up to the caret")
         check(CompletionToken.at("mail me@example.com", caret: 19) == nil, "an @ inside a word opens nothing")
         check(CompletionToken.at("/review ", caret: 8) == nil, "after the word's space the menu closes")
         check(CompletionToken.at("  $no", caret: 5)?.atStart == true, "leading spaces still count as the start")
-        check(CompletionToken.at("🙂 /x", caret: 4)?.range == NSRange(location: 3, length: 2), "ranges count UTF-16, as the text view does")
+        check(CompletionToken.at("🙂 /x", caret: 5)?.range == NSRange(location: 3, length: 2), "ranges count UTF-16, as the text view does")
         check(CompletionToken.at("", caret: 0) == nil && CompletionToken.at("x", caret: 9) == nil, "an empty text or a caret past the end opens nothing")
     }
 
@@ -71,6 +71,12 @@ struct ComposerCompletionTest {
         check(folder.text == "@src/" && folder.caret == 5, "a folder leaves the word open")
         let model = ComposerCompletion.apply(CompletionItem(id: "m", title: "", detail: "", insertion: "/model "), to: "/mo", at: CompletionToken.at("/mo", caret: 3)!)
         check(model.text == "/model ", "an insertion that ends in a space gets no second one")
+        let before = ComposerCompletion.apply(CompletionItem(id: "c", title: "", detail: "", insertion: "/review"), to: "/Keep the fix", at: CompletionToken.at("/Keep the fix", caret: 1)!)
+        check(before.text == "/review Keep the fix" && before.caret == 8, "a command typed in front of a word keeps the word after a space")
+        let rest = ComposerCompletion.apply(CompletionItem(id: "f", title: "", detail: "", insertion: "@src/app.go"), to: "@src/main.go", at: CompletionToken.at("@src/main.go", caret: 4)!)
+        check(rest.text == "@src/app.go /main.go" && rest.caret == 12, "the rest of the word under the caret stays")
+        let glued = ComposerCompletion.apply(CompletionItem(id: "d", title: "", detail: "", insertion: "@src/"), to: "@sKeep", at: CompletionToken.at("@sKeep", caret: 2)!)
+        check(glued.text == "@src/ Keep" && glued.caret == 5, "a folder in front of a word stays open with the word after a space")
     }
 
     static func scoping() {

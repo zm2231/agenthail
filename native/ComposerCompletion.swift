@@ -28,11 +28,9 @@ struct CompletionToken: Equatable {
         var start = caret
         while start > 0, !isSpace(string.character(at: start - 1)) { start -= 1 }
         guard start < caret, let trigger = Trigger(rawValue: string.character(at: start)) else { return nil }
-        var end = caret
-        while end < string.length, !isSpace(string.character(at: end)) { end += 1 }
         let query = string.substring(with: NSRange(location: start + 1, length: caret - start - 1))
         let atStart = string.substring(to: start).allSatisfy(\.isWhitespace)
-        return CompletionToken(trigger: trigger, query: query, range: NSRange(location: start, length: end - start), atStart: atStart)
+        return CompletionToken(trigger: trigger, query: query, range: NSRange(location: start, length: caret - start), atStart: atStart)
     }
 
     private static func isSpace(_ unit: unichar) -> Bool {
@@ -89,16 +87,18 @@ enum ComposerCompletion {
         return reason
     }
 
-    /// The token's replacement and where the caret goes after it: past one
-    /// space, the word's own when one follows. A folder keeps the word open so
-    /// its contents can be completed next.
+    /// The typed part of the word becomes the item and the rest of the word
+    /// stays, after a space, so accepting never deletes text. The caret goes
+    /// past one space, the word's own when one follows; a folder keeps the
+    /// caret after its slash so its contents can be completed next.
     static func edit(_ item: CompletionItem, in text: String, at token: CompletionToken) -> (range: NSRange, replacement: String, caret: Int) {
         let string = text as NSString
         let end = NSMaxRange(token.range)
-        let spaced = end < string.length && string.substring(with: NSRange(location: end, length: 1)).allSatisfy(\.isWhitespace)
+        let next = end < string.length ? string.substring(with: NSRange(location: end, length: 1)) : nil
+        let spaced = next?.allSatisfy(\.isWhitespace) == true
         let open = item.insertion.hasSuffix("/") || item.insertion.hasSuffix(" ")
-        let replacement = open || spaced ? item.insertion : item.insertion + " "
-        let caret = token.range.location + (replacement as NSString).length + (spaced && !open ? 1 : 0)
+        let replacement = spaced || (open && next == nil) || item.insertion.hasSuffix(" ") ? item.insertion : item.insertion + " "
+        let caret = token.range.location + (item.insertion as NSString).length + (open ? 0 : 1)
         return (token.range, replacement, caret)
     }
 
