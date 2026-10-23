@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 // openRequest starts a turn whose text makes the fake Claude ask the host,
@@ -28,7 +29,7 @@ func openRequest(t *testing.T, c *Claude, fixture *claudehosttest.Fixture, text 
 		t.Fatal(err)
 	}
 	var state surface.RequestState
-	claudehosttest.WaitFor(t, "the open request", func() bool {
+	testkit.Eventually(t, "the open request", 15*time.Second, func() bool {
 		var err error
 		state, err = c.Requests(ctx, sess)
 		if err != nil {
@@ -61,7 +62,7 @@ func TestAHostRequestIsWhatTheSessionWaitsOnUntilItIsAnswered(t *testing.T) {
 	if _, err := c.Respond(ctx, sess, request.ID, surface.Decision{Behavior: "allow"}); !errors.Is(err, surface.ErrRequestStale) {
 		t.Fatalf("second respond = %v, want stale", err)
 	}
-	claudehosttest.WaitFor(t, "the allowed turn", func() bool { return len(fixture.Turns(t, sess.ID)) == 1 })
+	testkit.Eventually(t, "the allowed turn", 15*time.Second, func() bool { return len(fixture.Turns(t, sess.ID)) == 1 })
 	if reply := fixture.Turns(t, sess.ID)[0].Reply; reply != "tool:allow:" {
 		t.Fatalf("reply = %q", reply)
 	}
@@ -91,7 +92,7 @@ func TestAHostQuestionIsAnsweredWithItsOptionsAndAWrongSessionIsStale(t *testing
 	if err != nil || outcome != "answered" {
 		t.Fatalf("respond = %q, %v", outcome, err)
 	}
-	claudehosttest.WaitFor(t, "the answered turn", func() bool { return len(fixture.Turns(t, sess.ID)) == 1 })
+	testkit.Eventually(t, "the answered turn", 15*time.Second, func() bool { return len(fixture.Turns(t, sess.ID)) == 1 })
 	if reply := fixture.Turns(t, sess.ID)[0].Reply; reply != `question:allow:{"Which color?":"Blue"}` {
 		t.Fatalf("reply = %q", reply)
 	}
@@ -126,7 +127,7 @@ func TestAHostMCPFormIsWhatTheSessionWaitsOnAndIsAnsweredWithItsFields(t *testin
 	if err != nil || outcome != "accepted" {
 		t.Fatalf("respond = %q, %v", outcome, err)
 	}
-	claudehosttest.WaitFor(t, "the accepted turn", func() bool { return len(fixture.Turns(t, sess.ID)) == 1 })
+	testkit.Eventually(t, "the accepted turn", 15*time.Second, func() bool { return len(fixture.Turns(t, sess.ID)) == 1 })
 	if reply := fixture.Turns(t, sess.ID)[0].Reply; reply != `elicit:accept:{"env":"prod","regions":["eu"]}` {
 		t.Fatalf("reply = %q", reply)
 	}

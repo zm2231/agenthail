@@ -9,10 +9,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func TestCoordinatorSetRefusesATakeoverAndNamesWhoChangedIt(t *testing.T) {
@@ -71,7 +73,7 @@ func TestCoordinatorSetRunsOnTheConversationsHostInBothDirections(t *testing.T) 
 	vps.start(t, roots)
 	vpsRecord := laptop.pair(t, vps, "vps")
 	laptopRecord := vps.pair(t, laptop, "laptop")
-	awaitFederation(t, "both mirrors", func() bool {
+	testkit.Eventually(t, "both mirrors", 10*time.Second, func() bool {
 		return len(sessionsOf(laptop.snapshot(t), vpsRecord.ID)) == 2 && len(sessionsOf(vps.snapshot(t), laptopRecord.ID)) == 1
 	})
 	const project = "repo:github.com/example/gadget"
@@ -87,7 +89,7 @@ func TestCoordinatorSetRunsOnTheConversationsHostInBothDirections(t *testing.T) 
 	if _, err := laptop.reg.Coordinator(project); err == nil {
 		t.Fatal("laptop wrote a coordinator for a vps conversation")
 	}
-	awaitFederation(t, "laptop mirrors vps's coordinator", func() bool {
+	testkit.Eventually(t, "laptop mirrors vps's coordinator", 10*time.Second, func() bool {
 		mirrored, _ := laptop.reg.ProjectCoordinators(project)
 		return len(mirrored) == 1 && mirrored[0].HostID == vpsRecord.ID && mirrored[0].SessionID == hosts.Qualify(vpsRecord.ID, "vps-a")
 	})
@@ -111,7 +113,7 @@ func TestCoordinatorSetRunsOnTheConversationsHostInBothDirections(t *testing.T) 
 	if err != nil || lead.SessionID != "laptop-a" || lead.Name != "laptop-lead" || lead.ChangedBy != hosts.Qualify(vpsRecord.ID, "vps-b") {
 		t.Fatalf("laptop coordinator=%+v err=%v", lead, err)
 	}
-	awaitFederation(t, "vps mirrors laptop's coordinator alone", func() bool {
+	testkit.Eventually(t, "vps mirrors laptop's coordinator alone", 10*time.Second, func() bool {
 		mirrored, _ := vps.reg.ProjectCoordinators(project)
 		return len(mirrored) == 1 && mirrored[0].HostID == laptopRecord.ID && mirrored[0].Name == "laptop-lead"
 	})
@@ -140,7 +142,7 @@ func TestReplacingAPeerCoordinatorIsRefusedWhileItsHostIsUnreachable(t *testing.
 	if response := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "vps-a", "name": "gadget-lead"}); response.Code != http.StatusOK {
 		t.Fatalf("set on vps: %d %s", response.Code, response.Body)
 	}
-	awaitFederation(t, "laptop mirrors vps's coordinator", func() bool {
+	testkit.Eventually(t, "laptop mirrors vps's coordinator", 10*time.Second, func() bool {
 		mirrored, _ := laptop.reg.ProjectCoordinators(project)
 		return len(mirrored) == 1 && mirrored[0].HostID == record.ID
 	})
@@ -190,7 +192,7 @@ func TestANameClaimedWhileAPeerClearsItsCoordinatorCannotStrandTheProject(t *tes
 	if response := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "vps-a", "name": "gadget-lead"}); response.Code != http.StatusOK {
 		t.Fatalf("set on vps: %d %s", response.Code, response.Body)
 	}
-	awaitFederation(t, "laptop mirrors vps's coordinator", func() bool {
+	testkit.Eventually(t, "laptop mirrors vps's coordinator", 10*time.Second, func() bool {
 		mirrored, _ := laptop.reg.ProjectCoordinators(project)
 		return len(mirrored) == 1 && mirrored[0].HostID == record.ID
 	})
@@ -209,7 +211,7 @@ func TestANameClaimedWhileAPeerClearsItsCoordinatorCannotStrandTheProject(t *tes
 	go func() {
 		answered <- laptop.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "laptop-a", "name": "race-lead", "replace": true})
 	}()
-	awaitFederation(t, "the clear reaching vps", func() bool { return hold.waiting.Load() == 1 })
+	testkit.Eventually(t, "the clear reaching vps", 10*time.Second, func() bool { return hold.waiting.Load() == 1 })
 	if err := laptop.reg.SetAlias("race-lead", "laptop-other"); err == nil {
 		t.Fatal("another session took the name while vps was clearing its coordinator")
 	}
@@ -242,7 +244,7 @@ func TestARefusedReplaceRestoresTheLocalCoordinatorOrKeepsTheNewOne(t *testing.T
 			if response := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "vps-a", "name": "peer-lead"}); response.Code != http.StatusOK {
 				t.Fatalf("set on vps: %d %s", response.Code, response.Body)
 			}
-			awaitFederation(t, "laptop mirrors vps's coordinator", func() bool {
+			testkit.Eventually(t, "laptop mirrors vps's coordinator", 10*time.Second, func() bool {
 				mirrored, _ := laptop.reg.ProjectCoordinators(project)
 				return len(mirrored) == 1 && mirrored[0].HostID == record.ID
 			})
@@ -265,7 +267,7 @@ func TestARefusedReplaceRestoresTheLocalCoordinatorOrKeepsTheNewOne(t *testing.T
 			go func() {
 				answered <- laptop.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "laptop-other", "name": "new-lead", "replace": true})
 			}()
-			awaitFederation(t, "the clear reaching vps", func() bool { return hold.waiting.Load() == 1 })
+			testkit.Eventually(t, "the clear reaching vps", 10*time.Second, func() bool { return hold.waiting.Load() == 1 })
 			if response := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "vps-a", "name": "peer-lead-now", "replace": true}); response.Code != http.StatusOK {
 				t.Fatalf("vps changes its coordinator: %d %s", response.Code, response.Body)
 			}

@@ -9,30 +9,21 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func installDaemonPackageCodex(t *testing.T, codexHome, script string) string {
 	t.Helper()
 	path := filepath.Join(codexHome, "packages", "app-server-daemon", "current", "bin", "codex")
-	writeExecutable(t, path, script)
+	testkit.WriteExecutable(t, path, script)
 	return path
 }
 
 func installStandaloneCodex(t *testing.T, codexHome, script string) string {
 	t.Helper()
 	path := filepath.Join(codexHome, "packages", "standalone", "current", "codex")
-	writeExecutable(t, path, script)
+	testkit.WriteExecutable(t, path, script)
 	return path
-}
-
-func writeExecutable(t *testing.T, path, script string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func isolateCodexInstalls(t *testing.T, desktop bool) {
@@ -42,7 +33,7 @@ func isolateCodexInstalls(t *testing.T, desktop bool) {
 	previousDesktop := CodexDesktopExecutables
 	CodexDesktopExecutables = []string{filepath.Join(root, "Codex.app", "Contents", "MacOS", "Codex")}
 	if desktop {
-		writeExecutable(t, CodexDesktopExecutables[0], "#!/bin/sh\n")
+		testkit.WriteExecutable(t, CodexDesktopExecutables[0], "#!/bin/sh\n")
 	}
 	t.Cleanup(func() { CodexDesktopExecutables = previousDesktop })
 }
@@ -55,10 +46,10 @@ func TestCodexDaemonCLIPrefersTheDaemonPackageThenPath(t *testing.T) {
 		t.Fatalf("err=%v, want the missing CLI with the install command", err)
 	}
 	bundleDir := filepath.Join(t.TempDir(), "ChatGPT.app", "Contents", "Resources")
-	writeExecutable(t, filepath.Join(bundleDir, "codex"), "#!/bin/sh\n")
+	testkit.WriteExecutable(t, filepath.Join(bundleDir, "codex"), "#!/bin/sh\n")
 	npmDir := t.TempDir()
 	npm := filepath.Join(npmDir, "codex")
-	writeExecutable(t, npm, "#!/bin/sh\n")
+	testkit.WriteExecutable(t, npm, "#!/bin/sh\n")
 	t.Setenv("PATH", bundleDir+string(os.PathListSeparator)+npmDir)
 	if path, err := CodexDaemonCLI(); err != nil || path != npm {
 		t.Fatalf("path=%q err=%v, want the PATH CLI and never the Desktop bundle", path, err)
@@ -103,7 +94,7 @@ func TestCodexRuntimeStatusNamesWhatEachInstallStateIsMissing(t *testing.T) {
 			isolateCodexInstalls(t, test.desktop)
 			if test.cli != "" {
 				npmDir := t.TempDir()
-				writeExecutable(t, filepath.Join(npmDir, "codex"), test.cli)
+				testkit.WriteExecutable(t, filepath.Join(npmDir, "codex"), test.cli)
 				t.Setenv("PATH", npmDir)
 			}
 			codex := isolatedManagedRuntime(t)
@@ -140,7 +131,7 @@ func TestDetectCodexInstallationFindsPerUserDesktop(t *testing.T) {
 	}
 	CodexDesktopExecutables = perUser
 	desktop := filepath.Join(home, "Applications", "Codex.app", "Contents", "MacOS", "Codex")
-	writeExecutable(t, desktop, "#!/bin/sh\n")
+	testkit.WriteExecutable(t, desktop, "#!/bin/sh\n")
 	if got := DetectCodexInstallation().Desktop; got != desktop {
 		t.Fatalf("desktop=%q, want the ~/Applications install", got)
 	}

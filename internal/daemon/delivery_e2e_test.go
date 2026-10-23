@@ -19,6 +19,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfacetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 const e2eToken = "e2e-token"
@@ -477,22 +478,6 @@ func waitForCatalogEvent(t *testing.T, reader *bufio.Reader, eventType string) m
 	}
 }
 
-func eventually(t *testing.T, what string, condition func() bool) {
-	t.Helper()
-	eventuallyWithin(t, what, 5*time.Second, condition)
-}
-
-func eventuallyWithin(t *testing.T, what string, wait time.Duration, condition func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(wait)
-	for !condition() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 func settle() { time.Sleep(150 * time.Millisecond) }
 
 func queueID(t *testing.T, receipt map[string]any) int64 {
@@ -531,7 +516,7 @@ func TestBusySessionQueuesThenRunLoopDeliversOnceWithOptions(t *testing.T) {
 		t.Fatalf("busy target received the queued message early: item=%+v", item)
 	}
 	agent.setStatus("target", surface.StatusIdle)
-	eventually(t, "queued delivery", func() bool { return len(agent.deliveredTo("target")) > 0 })
+	testkit.Eventually(t, "queued delivery", 5*time.Second, func() bool { return len(agent.deliveredTo("target")) > 0 })
 	settle()
 	got := agent.deliveredTo("target")
 	if len(got) != 1 || got[0].text != "after this turn" || got[0].model != "gpt-test" || got[0].source != "sender" {
@@ -555,7 +540,7 @@ func TestQueuedMessageToLongBusySessionStaysPendingThenDeliversOnce(t *testing.T
 		t.Fatalf("queuedAt=%q err=%v", item.QueuedAt, err)
 	}
 	agent.setStatus("target", surface.StatusIdle)
-	eventually(t, "held delivery", func() bool { return len(agent.deliveredTo("target")) > 0 })
+	testkit.Eventually(t, "held delivery", 5*time.Second, func() bool { return len(agent.deliveredTo("target")) > 0 })
 	settle()
 	if got := agent.deliveredTo("target"); len(got) != 1 || got[0].text != "report after a long turn" {
 		t.Fatalf("delivered=%+v", got)
@@ -577,7 +562,7 @@ func TestBusyRefusalNeverExhaustsTheQueuedMessage(t *testing.T) {
 		if attempt > 2 {
 			h.makeQueueItemAvailable(id)
 		}
-		eventually(t, fmt.Sprintf("refused attempt %d", attempt), func() bool { return agent.attemptsFor("target") >= attempt })
+		testkit.Eventually(t, fmt.Sprintf("refused attempt %d", attempt), 5*time.Second, func() bool { return agent.attemptsFor("target") >= attempt })
 	}
 	h.awaitQueueItem(id, "the refused item back in the queue", func(item dashboardQueue) bool {
 		return item.Status == "pending" && !item.Historical && item.Evidence == surface.EvidenceQueued && item.Attempts == 0
@@ -586,13 +571,13 @@ func TestBusyRefusalNeverExhaustsTheQueuedMessage(t *testing.T) {
 	agent.failSends("target", errors.New("transport closed"))
 	refused := agent.attemptsFor("target")
 	h.makeQueueItemAvailable(id)
-	eventually(t, "one real delivery error", func() bool { return agent.attemptsFor("target") > refused })
+	testkit.Eventually(t, "one real delivery error", 5*time.Second, func() bool { return agent.attemptsFor("target") > refused })
 	h.awaitQueueItem(id, "one counted attempt after the real error", func(item dashboardQueue) bool {
 		return item.Status == "pending" && item.Attempts == 1
 	})
 	agent.failSends("target", nil)
 	h.makeQueueItemAvailable(id)
-	eventually(t, "delivery after refusals", func() bool { return len(agent.deliveredTo("target")) > 0 })
+	testkit.Eventually(t, "delivery after refusals", 5*time.Second, func() bool { return len(agent.deliveredTo("target")) > 0 })
 	settle()
 	if got := agent.deliveredTo("target"); len(got) != 1 {
 		t.Fatalf("delivered=%+v", got)
@@ -615,7 +600,7 @@ func TestUnknownQueuedOutcomeIsDeadLetteredAndNeverResent(t *testing.T) {
 				agent.failSends("target", errEmptyResult)
 			}
 			agent.setStatus("target", surface.StatusIdle)
-			eventually(t, "dead-lettered queue item", func() bool { return h.queueItem(id).Status == "dead" })
+			testkit.Eventually(t, "dead-lettered queue item", 5*time.Second, func() bool { return h.queueItem(id).Status == "dead" })
 			settle()
 			if item := h.queueItem(id); item.Evidence != surface.EvidenceUnknown {
 				t.Fatalf("queue item=%+v", item)
@@ -641,7 +626,7 @@ func TestTerminalQueuedFailureNotifiesSenderOnceAndPublishesProblem(t *testing.T
 	if problem == nil {
 		t.Fatal("missing delivery.problem")
 	}
-	eventually(t, "sender notice", func() bool { return len(agent.deliveredTo("sender")) > 0 })
+	testkit.Eventually(t, "sender notice", 5*time.Second, func() bool { return len(agent.deliveredTo("sender")) > 0 })
 	h.awaitQueueItem(id, "the dead letter", func(item dashboardQueue) bool {
 		return item.Status == "dead" && item.Evidence == surface.EvidenceFailed
 	})
@@ -662,14 +647,14 @@ func TestUnavailableTargetKeepsQueuedMessageAndDeliversOnceAfterRecovery(t *test
 	id := queueID(t, h.receipt(map[string]any{"action": "send", "sessionId": "target", "message": "survive the outage"}))
 	agent.failSends("target", surface.DeliveryUnavailable(errors.New("bridge restarting")))
 	agent.setStatus("target", surface.StatusIdle)
-	eventually(t, "deferred attempt", func() bool { return agent.attemptsFor("target") >= 2 })
+	testkit.Eventually(t, "deferred attempt", 5*time.Second, func() bool { return agent.attemptsFor("target") >= 2 })
 	h.awaitQueueItem(id, "the unavailable delivery kept pending with its failure recorded", func(item dashboardQueue) bool {
 		return !item.Historical && item.Status == "pending" && item.Attempts == 0 && item.LastError != ""
 	})
 	agent.failSends("target", nil)
 	// Nothing retries an unavailable target early: the message is tried again
 	// once its backoff ends.
-	eventuallyWithin(t, "recovered delivery", backoff+5*time.Second, func() bool { return len(agent.deliveredTo("target")) > 0 })
+	testkit.Eventually(t, "recovered delivery", backoff+5*time.Second, func() bool { return len(agent.deliveredTo("target")) > 0 })
 	settle()
 	if got := agent.deliveredTo("target"); len(got) != 1 {
 		t.Fatalf("delivered=%+v", got)
@@ -689,7 +674,7 @@ func TestQueuedMessageWaitsThroughObservationOutageAndDeliversOnce(t *testing.T)
 		t.Fatalf("observation outage touched the queued message: item=%+v", item)
 	}
 	agent.failObservation("target", nil)
-	eventually(t, "delivery after recovery", func() bool { return h.queueItem(id).Historical })
+	testkit.Eventually(t, "delivery after recovery", 5*time.Second, func() bool { return h.queueItem(id).Historical })
 	settle()
 	if got := agent.deliveredTo("target"); len(got) != 1 {
 		t.Fatalf("delivered=%+v", got)
@@ -710,7 +695,7 @@ func TestQueuedMessageWaitsWhileTargetStatusIsUnknown(t *testing.T) {
 		t.Fatalf("delivered while status unknown: %+v", got)
 	}
 	agent.setStatus("target", surface.StatusIdle)
-	eventually(t, "delivery once idle", func() bool { return h.queueItem(id).Historical })
+	testkit.Eventually(t, "delivery once idle", 5*time.Second, func() bool { return h.queueItem(id).Historical })
 	if got := agent.deliveredTo("target"); len(got) != 1 {
 		t.Fatalf("delivered=%+v", got)
 	}
@@ -743,7 +728,7 @@ func TestRelayForwardsOnlyNewCompletionsOnce(t *testing.T) {
 		t.Fatalf("baseline completion was relayed: %+v", got)
 	}
 	agent.complete("worker", "turn-new", "the fix is ready for review")
-	eventually(t, "relayed completion", func() bool { return len(agent.deliveredTo("reviewer")) > 0 })
+	testkit.Eventually(t, "relayed completion", 5*time.Second, func() bool { return len(agent.deliveredTo("reviewer")) > 0 })
 	settle()
 	got := agent.deliveredTo("reviewer")
 	if len(got) != 1 || !strings.Contains(got[0].text, "the fix is ready for review") {
@@ -758,14 +743,14 @@ func TestOneShotRelayFiresForTheFirstCompletionOnly(t *testing.T) {
 	h.action(map[string]any{"action": "relay-add", "fromId": "worker", "toId": "reviewer", "once": true})
 	settle()
 	agent.complete("worker", "turn-1", "first result")
-	eventually(t, "first relay", func() bool { return len(agent.deliveredTo("reviewer")) > 0 })
+	testkit.Eventually(t, "first relay", 5*time.Second, func() bool { return len(agent.deliveredTo("reviewer")) > 0 })
 	agent.complete("worker", "turn-2", "second result")
 	settle()
 	got := agent.deliveredTo("reviewer")
 	if len(got) != 1 || !strings.Contains(got[0].text, "first result") {
 		t.Fatalf("relayed=%+v", got)
 	}
-	eventually(t, "spent one-shot relay", func() bool {
+	testkit.Eventually(t, "spent one-shot relay", 5*time.Second, func() bool {
 		relays := h.relays()
 		return len(relays) == 1 && !relays[0].Active && relays[0].FireCount == 1
 	})
@@ -779,14 +764,14 @@ func TestRelayToBusyTargetQueuesOnceThenDeliversOnce(t *testing.T) {
 	h.action(map[string]any{"action": "relay-add", "fromId": "worker", "toId": "reviewer"})
 	settle()
 	agent.complete("worker", "turn-new", "review this while you are busy")
-	eventually(t, "queued relay", func() bool { return len(h.queue()) > 0 })
+	testkit.Eventually(t, "queued relay", 5*time.Second, func() bool { return len(h.queue()) > 0 })
 	settle()
 	queued := h.queue()
 	if len(queued) != 1 || queued[0].SessionID != "reviewer" || queued[0].Historical || len(agent.deliveredTo("reviewer")) != 0 {
 		t.Fatalf("busy relay target: queue=%+v delivered=%+v", queued, agent.deliveredTo("reviewer"))
 	}
 	agent.setStatus("reviewer", surface.StatusIdle)
-	eventually(t, "delivered relay", func() bool { return h.queueItem(queued[0].ID).Historical })
+	testkit.Eventually(t, "delivered relay", 5*time.Second, func() bool { return h.queueItem(queued[0].ID).Historical })
 	settle()
 	if got := agent.deliveredTo("reviewer"); len(got) != 1 || !strings.Contains(got[0].text, "review this while you are busy") {
 		t.Fatalf("relayed=%+v", got)
@@ -848,5 +833,5 @@ func TestAnActionReachesTheSessionNamedInAPeerMessagesFromSession(t *testing.T) 
 	h := startRunningDaemon(t, agent)
 	settle()
 	h.action(map[string]any{"action": "send", "sessionId": surface.PeerUUID(surface.KindCodex, "target"), "message": "replying to your message"})
-	eventually(t, "the reply delivered", func() bool { return len(agent.deliveredTo("target")) == 1 })
+	testkit.Eventually(t, "the reply delivered", 5*time.Second, func() bool { return len(agent.deliveredTo("target")) == 1 })
 }

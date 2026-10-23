@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 // fakeLaunchd stands in for launchctl. bootstrap starts the fake daemon, as
@@ -34,8 +35,8 @@ func newFakeLaunchd(t *testing.T) *fakeLaunchd {
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	dir := t.TempDir()
 	f := &fakeLaunchd{t: t, dir: dir, calls: filepath.Join(dir, "calls")}
-	writeExecutable(t, filepath.Join(dir, "agenthail"), "#!/bin/sh\nmkdir -p \"$HOME/.agenthail\"\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\nwhile :; do sleep 0.05; done\n")
-	writeExecutable(t, filepath.Join(dir, "launchctl"), `#!/bin/sh
+	testkit.WriteExecutable(t, filepath.Join(dir, "agenthail"), "#!/bin/sh\nmkdir -p \"$HOME/.agenthail\"\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\nwhile :; do sleep 0.05; done\n")
+	testkit.WriteExecutable(t, filepath.Join(dir, "launchctl"), `#!/bin/sh
 dir="`+dir+`"
 printf '%s\n' "$*" >> "$dir/calls"
 start() {
@@ -71,6 +72,7 @@ kickstart)
 esac
 exit 0
 `)
+
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 	t.Cleanup(f.stop)
 	return f
@@ -132,13 +134,6 @@ func (f *fakeLaunchd) called(command string) bool {
 		f.t.Fatal(err)
 	}
 	return strings.Contains(string(calls), command)
-}
-
-func writeExecutable(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestLaunchdInstallLetsRunAtLoadStartTheDaemon(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func count(n int64) *int64 { return &n }
@@ -76,7 +77,7 @@ func TestCodexStreamResumedMidTurnCountsTheWholeTurn(t *testing.T) {
 			head := strings.ReplaceAll(codexTurnRecords, `"task_started"`, `"`+start+`"`)
 			path := timelineFixture(t, head)
 			offset := int64(len(head))
-			appendRecords(t, path, strings.ReplaceAll(codexTurnRest, `"task_started"`, `"`+start+`"`))
+			testkit.AppendFile(t, path, strings.ReplaceAll(codexTurnRest, `"task_started"`, `"`+start+`"`))
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			var turns []*surface.TurnMetadata
@@ -105,7 +106,7 @@ func TestCodexTurnWhoseStartIsOutOfReachHasNoUsage(t *testing.T) {
 	turnScanLimit = 1
 	t.Cleanup(func() { turnScanLimit = limit })
 	path := timelineFixture(t, codexTurnRecords)
-	appendRecords(t, path, codexTurnRest)
+	testkit.AppendFile(t, path, codexTurnRest)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	var first *surface.TurnMetadata
@@ -167,7 +168,7 @@ func TestClaudeTranscriptReportsEachTurnsModelUsageAndDuration(t *testing.T) {
 func TestClaudeStreamResumedMidTurnCountsTheWholeTurn(t *testing.T) {
 	path := writeTranscript(t, claudeTurnHead)
 	session := seededClaudeStreamSession(t, path, "")
-	appendRecords(t, path, claudeTurnTail)
+	testkit.AppendFile(t, path, claudeTurnTail)
 	turns := map[string]*surface.TurnMetadata{}
 	err := NewClaude(nil, t.TempDir()).Stream(context.Background(), session, "", func(event surface.StreamEvent) {
 		if event.Kind == "done" {
@@ -269,7 +270,7 @@ func streamedClaudeTurns(t *testing.T, head, rest, last string) map[string]*surf
 	t.Helper()
 	path := writeTranscript(t, head)
 	session := seededClaudeStreamSession(t, path, "")
-	appendRecords(t, path, rest)
+	testkit.AppendFile(t, path, rest)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	turns := map[string]*surface.TurnMetadata{}
@@ -309,7 +310,7 @@ func TestCodexCompactionInATurnJoinedMidwayIsNotTheNextTurns(t *testing.T) {
 	turnScanLimit = 1
 	t.Cleanup(func() { turnScanLimit = limit })
 	path := timelineFixture(t, codexTurnRecords)
-	appendRecords(t, path, `{"timestamp":"2026-10-19T10:00:02Z","type":"compacted","payload":{"message":"","window_number":1,"window_id":"window-1"}}`+"\n"+codexTurnRest)
+	testkit.AppendFile(t, path, `{"timestamp":"2026-10-19T10:00:02Z","type":"compacted","payload":{"message":"","window_number":1,"window_id":"window-1"}}`+"\n"+codexTurnRest)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	var turns []*surface.TurnMetadata
@@ -329,7 +330,7 @@ func TestCodexCompactionInATurnJoinedMidwayIsNotTheNextTurns(t *testing.T) {
 func streamedCodexTurns(t *testing.T, head, rest string, want int) []*surface.TurnMetadata {
 	t.Helper()
 	path := timelineFixture(t, head)
-	appendRecords(t, path, rest)
+	testkit.AppendFile(t, path, rest)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	var turns []*surface.TurnMetadata

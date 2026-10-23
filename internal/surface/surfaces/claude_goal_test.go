@@ -12,6 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 const (
@@ -192,13 +193,13 @@ func TestClaudeStreamSendsTheGoalWhenClaudeRecordsAVerdict(t *testing.T) {
 	if set.goal == nil || set.goal.Status != surface.GoalStatusActive {
 		t.Fatalf("first goal event = %+v", set.goal)
 	}
-	appendTestTranscript(t, path, `{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}]}}`)
-	appendTestTranscript(t, path, goalMetRecord)
+	testkit.AppendLines(t, path, `{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}]}}`)
+	testkit.AppendLines(t, path, goalMetRecord)
 	met := nextStreamedGoal(t, goals)
 	if met.goal == nil || met.goal.Status != surface.GoalStatusComplete || met.goal.Reason != "go test exited 0" || met.version <= set.version {
 		t.Fatalf("goal event = %+v version %d after %d", met.goal, met.version, set.version)
 	}
-	appendTestTranscript(t, path, `{"type":"user","uuid":"u2","message":{"content":"thanks"}}`)
+	testkit.AppendLines(t, path, `{"type":"user","uuid":"u2","message":{"content":"thanks"}}`)
 	select {
 	case again := <-goals:
 		t.Fatalf("a record without a goal change sent %+v", again.goal)
@@ -209,7 +210,7 @@ func TestClaudeStreamSendsTheGoalWhenClaudeRecordsAVerdict(t *testing.T) {
 func TestClaudeStreamSendsNoGoalForASessionWithoutOne(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","uuid":"u1","message":{"content":"hello"}}`)
 	goals, texts, _ := streamClaudeGoals(t, path)
-	appendTestTranscript(t, path, `{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"hi"}]}}`)
+	testkit.AppendLines(t, path, `{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"hi"}]}}`)
 	awaitStreamedText(t, texts, "hi")
 	select {
 	case goal := <-goals:

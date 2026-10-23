@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost"
@@ -12,6 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 // hostedClaudeApp runs a CLI whose Claude session is open in a running host.
@@ -25,7 +27,7 @@ func hostedClaudeApp(t *testing.T) (*App, *registry.Registry, *claudehosttest.Fi
 	claude := surfaces.NewClaude(nil, fixture.Home)
 	app, r := claudeCLIFixture(t, claude)
 	var session surface.Session
-	claudehosttest.WaitFor(t, "the host session", func() bool {
+	testkit.Eventually(t, "the host session", 15*time.Second, func() bool {
 		sessions, err := claude.List(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -53,7 +55,7 @@ func TestAnswerPicksAQuestionsOptionByNumberAndASecondAnswerIsStale(t *testing.T
 		t.Fatal(err)
 	}
 	var listing string
-	claudehosttest.WaitFor(t, "the question", func() bool {
+	testkit.Eventually(t, "the question", 15*time.Second, func() bool {
 		output, err := captureStdout(t, func() error { return app.Run([]string{"requests", "@worker"}) })
 		if err != nil {
 			t.Fatal(err)
@@ -71,7 +73,7 @@ func TestAnswerPicksAQuestionsOptionByNumberAndASecondAnswerIsStale(t *testing.T
 	if err != nil || !strings.Contains(output, "answered") {
 		t.Fatalf("answer = %q, %v", output, err)
 	}
-	claudehosttest.WaitFor(t, "the answered turn", func() bool {
+	testkit.Eventually(t, "the answered turn", 15*time.Second, func() bool {
 		turns := host.Turns(t, id)
 		return len(turns) == 1 && turns[0].Reply == `question:allow:{"Which color?":"Blue"}`
 	})

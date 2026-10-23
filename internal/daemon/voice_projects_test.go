@@ -12,6 +12,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 	"github.com/zm2231/agenthail/internal/voice"
 )
 
@@ -136,7 +137,7 @@ func connectToolVoice(t *testing.T, node *federationNode) (*voice.Service, *tool
 			t.Fatalf("%s: %v", action.Action, err)
 		}
 	}
-	awaitFederation(t, "the call negotiated", func() bool { return service.View("phone").SDP != "" })
+	testkit.Eventually(t, "the call negotiated", 10*time.Second, func() bool { return service.View("phone").SDP != "" })
 	if _, err := service.Apply(context.Background(), "phone", voice.Action{Action: "connected", AttemptID: "call-a"}); err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +171,7 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 	moveSession(t, remote, "remote-b", remoteSprocket, now)
 	setLead(t, remote, "repo:github.com/example/sprocket", remoteSprocket, "vps-sprocket", "remote-b", registry.CoordinatorChange{})
 	remote.daemon.discoverCatalog(context.Background())
-	awaitFederation(t, "the paired host's coordinators mirrored", func() bool {
+	testkit.Eventually(t, "the paired host's coordinators mirrored", 10*time.Second, func() bool {
 		mirrored, _ := local.reg.ProjectCoordinators("repo:github.com/example/sprocket")
 		gadgets, _ := local.reg.ProjectCoordinators("repo:github.com/example/gadget")
 		return len(mirrored) == 1 && len(gadgets) == 1
@@ -238,7 +239,7 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 	if transferred := call.call(t, "voice_transfer", map[string]any{"project": "widget"}); !transferred.success {
 		t.Fatalf("voice_transfer widget: %+v", transferred)
 	}
-	awaitFederation(t, "the call moved to the widget lead", func() bool {
+	testkit.Eventually(t, "the call moved to the widget lead", 10*time.Second, func() bool {
 		target := service.View("phone").Target
 		return target != nil && target.ID == "lead"
 	})
@@ -262,7 +263,7 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 	if !peer.success || json.Unmarshal([]byte(peer.text), &receipt) != nil || receipt.Ref != "vps::@gadget-lead" || receipt.Receipt == nil {
 		t.Fatalf("send to the paired host's lead: %+v", peer)
 	}
-	awaitFederation(t, "the paired host's lead received the message", func() bool {
+	testkit.Eventually(t, "the paired host's lead received the message", 10*time.Second, func() bool {
 		delivered := remote.fake.delivered()
 		return len(delivered) == remoteSent+1 && strings.HasSuffix(delivered[len(delivered)-1], "ship the gadget")
 	})
@@ -278,7 +279,7 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 	}
 	t.Cleanup(release)
 	held := call.ask("voice_send_to_lead", map[string]any{"project": "gadget", "message": "while held"})
-	awaitFederation(t, "the relay to the paired host is held", func() bool { return hold.waiting.Load() == 1 })
+	testkit.Eventually(t, "the relay to the paired host is held", 10*time.Second, func() bool { return hold.waiting.Load() == 1 })
 	if listed := call.call(t, "voice_projects", map[string]any{}); !listed.success {
 		t.Fatalf("voice_projects while a relay is held: %+v", listed)
 	}

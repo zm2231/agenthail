@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 const dashboardTestSecret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -70,7 +71,7 @@ func newDashboardLoginFixture(t *testing.T) *dashboardLoginFixture {
 
 	bin := t.TempDir()
 	fakeDaemon := filepath.Join(bin, "agenthail")
-	writeExecutable(t, fakeDaemon, "#!/bin/sh\nwhile :; do sleep 1; done\n")
+	testkit.WriteExecutable(t, fakeDaemon, "#!/bin/sh\nwhile :; do sleep 1; done\n")
 	process := exec.Command(fakeDaemon, "daemon-run")
 	if err := process.Start(); err != nil {
 		t.Fatal(err)
@@ -80,14 +81,14 @@ func newDashboardLoginFixture(t *testing.T) *dashboardLoginFixture {
 		t.Fatal(err)
 	}
 	fixture.opened = filepath.Join(bin, "opened")
-	writeExecutable(t, filepath.Join(bin, "open"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \""+fixture.opened+"\"\n")
-	writeExecutable(t, filepath.Join(bin, "pbcopy"), "#!/bin/sh\ncat >/dev/null\n")
+	testkit.WriteExecutable(t, filepath.Join(bin, "open"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \""+fixture.opened+"\"\n")
+	testkit.WriteExecutable(t, filepath.Join(bin, "pbcopy"), "#!/bin/sh\ncat >/dev/null\n")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	_, port, _ := net.SplitHostPort(listen)
 	target := "http://127.0.0.1:" + port
 	fixture.tailscale = filepath.Join(bin, "tailscale")
-	writeExecutable(t, fixture.tailscale, `#!/bin/sh
+	testkit.WriteExecutable(t, fixture.tailscale, `#!/bin/sh
 case "$*" in
 "status --json") echo '{"BackendState":"Running","Self":{"DNSName":"agent.tailnet.ts.net.","Online":true}}' ;;
 "serve status --json") echo '{"TCP":{"7412":{"HTTPS":true}},"Web":{"agent.tailnet.ts.net:7412":{"Handlers":{"/":{"Proxy":"`+target+`"}}}}}' ;;

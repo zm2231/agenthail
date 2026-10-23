@@ -9,6 +9,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func TestARefusalThatReturnsWhileTheFirstIsStillAnnouncedIsAnnouncedAgain(t *testing.T) {
@@ -93,14 +94,14 @@ func TestARefusalThatReturnsWhileTheFirstIsStillAnnouncedIsAnnouncedAgain(t *tes
 			}
 
 			attempt(refused)
-			eventually(t, "the first refusal's announcement", func() bool { return pushes.count("delivery.refused") == 1 })
+			testkit.Eventually(t, "the first refusal's announcement", 5*time.Second, func() bool { return pushes.count("delivery.refused") == 1 })
 			tc.between(t, store, id, attempt)
 			attempt(refused)
-			eventually(t, "the second refusal's announcement", func() bool { return pushes.count("delivery.refused") == 2 })
+			testkit.Eventually(t, "the second refusal's announcement", 5*time.Second, func() bool { return pushes.count("delivery.refused") == 2 })
 			release()
-			eventually(t, "both announcements to finish", settled)
+			testkit.Eventually(t, "both announcements to finish", 5*time.Second, settled)
 			attempt(refused)
-			eventually(t, "any further announcement to finish", settled)
+			testkit.Eventually(t, "any further announcement to finish", 5*time.Second, settled)
 			if got := pushes.count("delivery.refused"); got != 2 {
 				t.Fatalf("refusal announcements=%d, want one per refusal", got)
 			}

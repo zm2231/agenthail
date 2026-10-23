@@ -16,6 +16,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func TestMobileClaudeCreationOpensTheSessionInTheHostAndRegistersIt(t *testing.T) {
@@ -80,7 +81,7 @@ func createClaudeSessionInTheHost(t *testing.T, launcher string) {
 			t.Fatalf("missing %q in %s", want, argv)
 		}
 	}
-	claudehosttest.WaitFor(t, "the first turn", func() bool {
+	testkit.Eventually(t, "the first turn", 15*time.Second, func() bool {
 		turns := host.Turns(t, receipt.Session.ID)
 		return len(turns) == 1 && turns[0].Text == "--literal instruction" && turns[0].UUID == receipt.Result.UUID
 	})
@@ -120,7 +121,7 @@ func TestAClaudeCreationWhoseFirstTurnIsUnconfirmedRecordsThatTurnsUUID(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	claudehosttest.WaitFor(t, "the first turn", func() bool { return len(host.Turns(t, receipt.Session.ID)) == 1 })
+	testkit.Eventually(t, "the first turn", 15*time.Second, func() bool { return len(host.Turns(t, receipt.Session.ID)) == 1 })
 	time.Sleep(300 * time.Millisecond)
 	turns := host.Turns(t, receipt.Session.ID)
 	if len(turns) != 1 || turns[0].UUID != intent.UUID {

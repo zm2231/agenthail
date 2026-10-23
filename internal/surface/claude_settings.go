@@ -10,6 +10,7 @@ import (
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"github.com/zm2231/agenthail/internal/atomicfile"
 )
 
 func ClaudeSettingsPath(root string) string {
@@ -45,23 +46,7 @@ func WriteClaudeSettingsFile(path string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".settings-*.json")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(temporary.Name())
-	if err := temporary.Chmod(mode); err != nil {
-		temporary.Close()
-		return err
-	}
-	if _, err := temporary.Write(data); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporary.Name(), path)
+	return atomicfile.Write(path, data, mode)
 }
 
 // Claude accepts an autoCompactWindow of this many tokens, or "auto"; it

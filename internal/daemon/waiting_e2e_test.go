@@ -20,6 +20,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 // recordingClaude is the real Claude surface reading a synthetic transcript,
@@ -53,7 +54,7 @@ func (c *recordingClaude) awaitObservations(t *testing.T, n int) {
 	c.mu.Lock()
 	target := c.observed + n
 	c.mu.Unlock()
-	eventually(t, fmt.Sprintf("%d more observations", n), func() bool {
+	testkit.Eventually(t, fmt.Sprintf("%d more observations", n), 5*time.Second, func() bool {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		return c.observed >= target
@@ -282,7 +283,7 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 	q := newClaudeQuestion(t)
 	store, claude, pushes, session, transcript := q.store, q.claude, q.pushes, q.session, q.transcript
 	h, stop := runDaemon(t, store, claude)
-	eventually(t, "the session to show it is waiting on the user", func() bool {
+	testkit.Eventually(t, "the session to show it is waiting on the user", 5*time.Second, func() bool {
 		waiting := h.sessionWaiting(session.ID)
 		return waiting != nil && waiting.ID == questionID && waiting.Kind == surface.WaitingQuestion
 	})
@@ -303,11 +304,11 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 	if sent, steered := claude.delivered(); len(sent) != 0 || len(steered) != 0 {
 		t.Fatalf("delivered into an unanswered question: sent=%q steered=%q", sent, steered)
 	}
-	eventually(t, "the waiting notification", func() bool { return pushes.count("session.waiting") == 1 })
+	testkit.Eventually(t, "the waiting notification", 5*time.Second, func() bool { return pushes.count("session.waiting") == 1 })
 
 	stop()
 	h, _ = runDaemon(t, store, claude)
-	eventually(t, "the restarted daemon to see the question", func() bool { return h.sessionWaiting(session.ID) != nil })
+	testkit.Eventually(t, "the restarted daemon to see the question", 5*time.Second, func() bool { return h.sessionWaiting(session.ID) != nil })
 	claude.awaitObservations(t, 3)
 	if _, announced, err := store.WaitingState(session.ID); err != nil || !announced {
 		t.Fatalf("announced=%v err=%v", announced, err)
@@ -320,11 +321,11 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 	}
 
 	q.answer(t)
-	eventually(t, "the held steer to reach the answered turn", func() bool {
+	testkit.Eventually(t, "the held steer to reach the answered turn", 5*time.Second, func() bool {
 		_, steered := claude.delivered()
 		return len(steered) == 1
 	})
-	eventually(t, "the answered question to clear", func() bool { return h.sessionWaiting(session.ID) == nil })
+	testkit.Eventually(t, "the answered question to clear", 5*time.Second, func() bool { return h.sessionWaiting(session.ID) == nil })
 	if item := h.queueItem(queuedID); item.Status != "pending" || item.HeldBy != registry.QueueHeldBusy {
 		t.Fatalf("queued message left before the turn ended: %+v", item)
 	}
@@ -332,11 +333,11 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 	appendClaudeRecords(t, transcript, `{"type":"assistant","uuid":"done","timestamp":"2026-10-18T20:18:30Z","message":{"id":"msg-done","stop_reason":"end_turn","content":[{"type":"text","text":"Released from main."}]}}`,
 		`{"type":"system","subtype":"turn_duration","timestamp":"2026-10-18T20:18:31Z"}`)
 	q.process.RecordStatus("conversation-question", q.process.Home, "session_question", "idle", "", questionAsked.Add(2*time.Hour))
-	eventually(t, "the queued message after the turn ends", func() bool {
+	testkit.Eventually(t, "the queued message after the turn ends", 5*time.Second, func() bool {
 		sent, _ := claude.delivered()
 		return len(sent) == 1
 	})
-	eventually(t, "both held messages to finish", func() bool {
+	testkit.Eventually(t, "both held messages to finish", 5*time.Second, func() bool {
 		for _, id := range []int64{queuedID, steerID} {
 			if item, err := store.QueueItem(id, nil); err != nil || item.Status != "delivered" {
 				return false
@@ -376,7 +377,7 @@ func TestCodexPendingApprovalShowsWaitingAndHoldsSteerUntilApproved(t *testing.T
 	lifecycle.Daemon().SetActiveFlags(id, "waitingOnApproval")
 	stop()
 	h, _ = runDaemon(t, store, surfaces.NewCodex(unreachableDesktop))
-	eventually(t, "the thread to show it is waiting on an approval", func() bool {
+	testkit.Eventually(t, "the thread to show it is waiting on an approval", 5*time.Second, func() bool {
 		waiting := h.sessionWaiting(id)
 		return waiting != nil && waiting.Kind == surface.WaitingApproval
 	})
@@ -392,10 +393,10 @@ func TestCodexPendingApprovalShowsWaitingAndHoldsSteerUntilApproved(t *testing.T
 	if thread, _ := lifecycle.Daemon().Thread(id); thread.Turns[0].User != "Apply the migration" {
 		t.Fatalf("steered into a pending approval: %+v", thread.Turns)
 	}
-	eventually(t, "the waiting notification", func() bool { return pushes.count("session.waiting") == 1 })
+	testkit.Eventually(t, "the waiting notification", 5*time.Second, func() bool { return pushes.count("session.waiting") == 1 })
 
 	lifecycle.Daemon().SetActiveFlags(id)
-	eventually(t, "the held steer after approval", func() bool {
+	testkit.Eventually(t, "the held steer after approval", 5*time.Second, func() bool {
 		thread, _ := lifecycle.Daemon().Thread(id)
 		return thread.Turns[0].User == "Apply the migration\n"+surface.CLILabel+"also update the changelog"
 	})
@@ -417,7 +418,7 @@ func awaitThreadReads(t *testing.T, lifecycle *codextest.Lifecycle, n int) {
 		return len(fake.Calls("thread/read")) + len(fake.Calls("thread/turns/list"))
 	}
 	target := reads() + n
-	eventually(t, fmt.Sprintf("%d more thread reads", n), func() bool { return reads() >= target })
+	testkit.Eventually(t, fmt.Sprintf("%d more thread reads", n), 5*time.Second, func() bool { return reads() >= target })
 }
 
 func TestQuestionRecordedButNotAnnouncedIsAnnouncedAfterRestart(t *testing.T) {
@@ -429,8 +430,8 @@ func TestQuestionRecordedButNotAnnouncedIsAnnouncedAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	runDaemon(t, q.store, q.claude)
-	eventually(t, "the pending announcement", func() bool { return q.pushes.count("session.waiting") == 1 })
-	eventually(t, "the announcement to be recorded", func() bool {
+	testkit.Eventually(t, "the pending announcement", 5*time.Second, func() bool { return q.pushes.count("session.waiting") == 1 })
+	testkit.Eventually(t, "the announcement to be recorded", 5*time.Second, func() bool {
 		_, announced, err := q.store.WaitingState(q.session.ID)
 		return err == nil && announced
 	})
@@ -448,7 +449,7 @@ func TestACallerThatReadTheQuestionBeforeItsAnnouncementFinishedDoesNotAnnounceI
 	}
 	d := newTestDaemon(t, q.store, []surface.Surface{q.claude})
 	d.announceWaiting(q.session, waiting)
-	eventually(t, "the announcement to finish", func() bool {
+	testkit.Eventually(t, "the announcement to finish", 5*time.Second, func() bool {
 		_, announced, err := q.store.WaitingState(q.session.ID)
 		d.announceMu.Lock()
 		inFlight := d.announcing[q.session.ID]
@@ -475,7 +476,7 @@ func TestQuestionAnnouncedAgainAfterAStopMidDeliveryCollapsesIntoOne(t *testing.
 	q.pushes.mu.Unlock()
 	t.Cleanup(func() { close(stall) })
 	_, stop := runDaemon(t, q.store, q.claude)
-	eventually(t, "the first announcement", func() bool { return q.pushes.count("session.waiting") == 1 })
+	testkit.Eventually(t, "the first announcement", 5*time.Second, func() bool { return q.pushes.count("session.waiting") == 1 })
 	stopping := time.Now()
 	stop()
 	if waited := time.Since(stopping); waited > 5*time.Second {
@@ -488,7 +489,7 @@ func TestQuestionAnnouncedAgainAfterAStopMidDeliveryCollapsesIntoOne(t *testing.
 	q.pushes.stall = nil
 	q.pushes.mu.Unlock()
 	runDaemon(t, q.store, q.claude)
-	eventually(t, "the repeated announcement", func() bool { return q.pushes.count("session.waiting") == 2 })
+	testkit.Eventually(t, "the repeated announcement", 5*time.Second, func() bool { return q.pushes.count("session.waiting") == 2 })
 	key := waitingNotificationKey(q.session.ID, questionID)
 	for _, push := range q.pushes.all("session.waiting") {
 		if push["collapseId"] != key || push["turnId"] != questionID {
@@ -516,7 +517,7 @@ func TestTheDaemonStopsOnlyAfterAnAnnouncementInFlightFinishes(t *testing.T) {
 	<-entered
 	// The phone is told alongside the desktop notification, so its push is
 	// out before the stop; nothing more is sent once the stop has begun.
-	eventually(t, "the phone to be told while the desktop notification is posted", func() bool { return q.pushes.count("session.waiting") == 1 })
+	testkit.Eventually(t, "the phone to be told while the desktop notification is posted", 5*time.Second, func() bool { return q.pushes.count("session.waiting") == 1 })
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
@@ -550,7 +551,7 @@ func TestAPhonesNotificationDoesNotWaitForTheDesktopOne(t *testing.T) {
 			return nil
 		}
 	}, q.claude)
-	eventually(t, "the phone to be told while the desktop notification is still being posted", func() bool { return q.pushes.count("session.waiting") == 1 })
+	testkit.Eventually(t, "the phone to be told while the desktop notification is still being posted", 5*time.Second, func() bool { return q.pushes.count("session.waiting") == 1 })
 }
 
 func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) {
@@ -574,8 +575,8 @@ func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) 
 			}
 		}
 	}, q.claude)
-	eventually(t, "the session to show it is waiting on the user", func() bool { return h.sessionWaiting(q.session.ID) != nil })
-	eventually(t, "the question to be announced", func() bool {
+	testkit.Eventually(t, "the session to show it is waiting on the user", 5*time.Second, func() bool { return h.sessionWaiting(q.session.ID) != nil })
+	testkit.Eventually(t, "the question to be announced", 5*time.Second, func() bool {
 		_, announced, err := q.store.WaitingState(q.session.ID)
 		return err == nil && announced
 	})
@@ -628,7 +629,7 @@ func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) 
 		}
 		return false
 	}
-	eventually(t, "the answer to clear the record, the catalog and the API", cleared)
+	testkit.Eventually(t, "the answer to clear the record, the catalog and the API", 5*time.Second, cleared)
 	armed.Store(true)
 	h.daemon.catalogNudge <- struct{}{}
 	select {
@@ -639,7 +640,7 @@ func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) 
 	case <-time.After(5 * time.Second):
 		t.Fatal("no later catalog publication reached the session")
 	}
-	eventually(t, "the later publication to keep the session clear", cleared)
+	testkit.Eventually(t, "the later publication to keep the session clear", 5*time.Second, cleared)
 	if got := q.pushes.count("session.waiting"); got != 1 {
 		t.Fatalf("one question notified %d times", got)
 	}
@@ -697,8 +698,8 @@ func TestQueuedPeerMessageReachesARunningOrWaitingClaudeTurnOverItsSocket(t *tes
 			t.Fatalf("waiting=%v: item=%+v err=%v, want the peer message ready to send", waiting, item, err)
 		}
 		runDaemon(t, q.store, surfaces.NewClaude(nil, q.process.Home))
-		eventually(t, "the peer message over the socket", func() bool { return manager.Count("handoff") == 1 })
-		eventually(t, "the peer message acknowledged", func() bool {
+		testkit.Eventually(t, "the peer message over the socket", 5*time.Second, func() bool { return manager.Count("handoff") == 1 })
+		testkit.Eventually(t, "the peer message acknowledged", 5*time.Second, func() bool {
 			item, err := q.store.QueueItem(peerID, nil)
 			return err == nil && item.Status == "delivered"
 		})
@@ -709,7 +710,7 @@ func TestQueuedPeerMessageReachesARunningOrWaitingClaudeTurnOverItsSocket(t *tes
 			appendClaudeRecords(t, q.transcript, `{"type":"assistant","uuid":"done","timestamp":"2026-10-18T20:18:30Z","message":{"id":"msg-done","stop_reason":"end_turn","content":[{"type":"text","text":"Released from main."}]}}`,
 				`{"type":"system","subtype":"turn_duration","timestamp":"2026-10-18T20:18:31Z"}`)
 			q.process.RecordStatus("conversation-question", q.process.Home, "session_question", "idle", "", questionAsked.Add(2*time.Hour))
-			eventually(t, "the explicit queue once the turn ends", func() bool { return manager.Count("after the turn") == 1 })
+			testkit.Eventually(t, "the explicit queue once the turn ends", 5*time.Second, func() bool { return manager.Count("after the turn") == 1 })
 		}
 	}
 }
@@ -750,13 +751,13 @@ func (h *runningDaemon) detailWaiting(id string) *surface.Waiting {
 func TestSessionDetailShowsTheQuestionTheCatalogShows(t *testing.T) {
 	q := newClaudeQuestion(t)
 	h, _ := runDaemon(t, q.store, q.claude)
-	eventually(t, "the catalog to show the question", func() bool { return h.sessionWaiting(q.session.ID) != nil })
+	testkit.Eventually(t, "the catalog to show the question", 5*time.Second, func() bool { return h.sessionWaiting(q.session.ID) != nil })
 	waiting := h.detailWaiting(q.session.ID)
 	if waiting == nil || waiting.ID != questionID || waiting.Kind != surface.WaitingQuestion {
 		t.Fatalf("detail waiting=%+v, catalog waiting=%+v", waiting, h.sessionWaiting(q.session.ID))
 	}
 	q.answer(t)
-	eventually(t, "the answered question to leave the catalog", func() bool { return h.sessionWaiting(q.session.ID) == nil })
+	testkit.Eventually(t, "the answered question to leave the catalog", 5*time.Second, func() bool { return h.sessionWaiting(q.session.ID) == nil })
 	if waiting := h.detailWaiting(q.session.ID); waiting != nil {
 		t.Fatalf("detail still waiting on %+v after the catalog cleared it", waiting)
 	}
@@ -785,14 +786,14 @@ func TestCodexInputRequestIsNotifiedAsInputNotApproval(t *testing.T) {
 	lifecycle.Daemon().SetActiveFlags(id, "waitingOnUserInput")
 	stop()
 	h, _ = runDaemon(t, store, surfaces.NewCodex(unreachableDesktop))
-	eventually(t, "the thread to show it waits on input", func() bool {
+	testkit.Eventually(t, "the thread to show it waits on input", 5*time.Second, func() bool {
 		waiting := h.sessionWaiting(id)
 		return waiting != nil && waiting.Kind == surface.WaitingInput
 	})
 	if waiting := h.detailWaiting(id); waiting == nil || waiting.Kind != surface.WaitingInput {
 		t.Fatalf("detail waiting=%+v", waiting)
 	}
-	eventually(t, "the waiting notification", func() bool { return pushes.count("session.waiting") == 1 })
+	testkit.Eventually(t, "the waiting notification", 5*time.Second, func() bool { return pushes.count("session.waiting") == 1 })
 	if push := pushes.first("session.waiting"); push["message"] != notificationSurfaceName(surface.KindCodex)+" needs your input" {
 		t.Fatalf("push=%v", push)
 	}

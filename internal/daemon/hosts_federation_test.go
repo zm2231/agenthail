@@ -28,6 +28,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 type federatedSurface struct {
@@ -384,25 +385,13 @@ func (n *federationNode) snapshot(t *testing.T) dashboardState {
 	return state
 }
 
-func awaitFederation(t *testing.T, what string, check func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if check() {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
-}
-
 // awaitReplayed drains held sends until the remote applies one. A catalog
 // stream that opened while the proxy was down leaves the host unreachable
 // until the mirror loop reconnects, and a drain skips a host that is not
 // connected.
 func awaitReplayed(t *testing.T, local, remote *federationNode, host *pairedHost, message string) {
 	t.Helper()
-	awaitFederation(t, "held send replayed", func() bool {
+	testkit.Eventually(t, "held send replayed", 10*time.Second, func() bool {
 		local.daemon.drainHostDeliveries(context.Background(), host)
 		return len(remote.fake.delivered()) > 0
 	})
@@ -430,7 +419,7 @@ func pairedFederation(t *testing.T) (*federationNode, *federationNode, registry.
 	local := newFederationNode(t, "local-a")
 	local.start(t, testRoots(remote.server))
 	record := local.pair(t, remote, "vps")
-	awaitFederation(t, "remote sessions mirrored", func() bool {
+	testkit.Eventually(t, "remote sessions mirrored", 10*time.Second, func() bool {
 		return len(sessionsOf(local.snapshot(t), record.ID)) == 2
 	})
 	return local, remote, record
@@ -556,7 +545,7 @@ func TestFederationHostRowCollidingWithLocalSessionLeavesTheLocalRow(t *testing.
 	local := newFederationNode(t, "moved")
 	local.start(t, testRoots(remote.server))
 	record := local.pair(t, remote, "vps")
-	awaitFederation(t, "remote sessions mirrored", func() bool {
+	testkit.Eventually(t, "remote sessions mirrored", 10*time.Second, func() bool {
 		return len(sessionsOf(local.snapshot(t), record.ID)) == 1
 	})
 	if owner, err := local.reg.SessionHost("moved"); err != nil || owner != "" {
@@ -581,7 +570,7 @@ func TestFederationHostRowCollidingWithLocalSessionLeavesTheLocalRow(t *testing.
 		remote.fake.sessions[id] = session
 	}
 	remote.daemon.discoverCatalog(context.Background())
-	awaitFederation(t, "later upserts still mirrored", func() bool {
+	testkit.Eventually(t, "later upserts still mirrored", 10*time.Second, func() bool {
 		rows := sessionsOf(local.snapshot(t), record.ID)
 		return len(rows) == 1 && rows[0].Name == "renamed remote-a"
 	})
@@ -593,7 +582,7 @@ func TestFederationHostRowCollidingWithLocalSessionLeavesTheLocalRow(t *testing.
 		t.Fatalf("hosts notice=%q, want %q", notice, want)
 	}
 	delete(remote.fake.sessions, "moved")
-	awaitFederation(t, "notice cleared once the host stops serving the session", func() bool {
+	testkit.Eventually(t, "notice cleared once the host stops serving the session", 10*time.Second, func() bool {
 		remote.daemon.discoverCatalog(context.Background())
 		hostsNotice, snapshotNotice := hostNotices(t, local, record.ID)
 		return hostsNotice == "" && snapshotNotice == ""
@@ -656,7 +645,7 @@ func TestFederationPairedBothWaysShowsEachSessionOnce(t *testing.T) {
 	vps.start(t, roots)
 	vpsRecord := laptop.pair(t, vps, "vps")
 	laptopRecord := vps.pair(t, laptop, "laptop")
-	awaitFederation(t, "both mirrors", func() bool {
+	testkit.Eventually(t, "both mirrors", 10*time.Second, func() bool {
 		return len(sessionsOf(laptop.snapshot(t), vpsRecord.ID)) == 2 && len(sessionsOf(vps.snapshot(t), laptopRecord.ID)) == 1
 	})
 	time.Sleep(300 * time.Millisecond)
@@ -683,7 +672,7 @@ func TestFederationUnreachableHostKeepsRowsAndDeliversHeldSendOnce(t *testing.T)
 	local, remote, record := pairedFederation(t)
 	port := remote.server.Listener.Addr().(*net.TCPAddr).Port
 	remote.stop()
-	awaitFederation(t, "rows marked unavailable", func() bool {
+	testkit.Eventually(t, "rows marked unavailable", 10*time.Second, func() bool {
 		rows := sessionsOf(local.snapshot(t), record.ID)
 		return len(rows) == 2 && rows[0].Host.State == hostStateUnreachable && strings.Contains(rows[0].UnavailableReason, "host vps is unreachable") && rows[0].Freshness != nil && rows[0].Freshness.Stale
 	})
@@ -712,8 +701,8 @@ func TestFederationUnreachableHostKeepsRowsAndDeliversHeldSendOnce(t *testing.T)
 		t.Fatal(err)
 	}
 	remote.serve(t, listener)
-	awaitFederation(t, "held send delivered", func() bool { return len(remote.fake.delivered()) == 1 })
-	awaitFederation(t, "rows available again", func() bool {
+	testkit.Eventually(t, "held send delivered", 10*time.Second, func() bool { return len(remote.fake.delivered()) == 1 })
+	testkit.Eventually(t, "rows available again", 10*time.Second, func() bool {
 		rows := sessionsOf(local.snapshot(t), record.ID)
 		return len(rows) == 2 && rows[0].UnavailableReason == "" && rows[0].Host.State == hostStateConnected
 	})
@@ -745,9 +734,9 @@ func TestFederationQueueCountsCombineHostAndHeldWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	remote.daemon.publishCatalogPresence()
-	awaitFederation(t, "remote queue mirrored", func() bool { return mirroredQueueCount(t, local, qualified) == 1 })
+	testkit.Eventually(t, "remote queue mirrored", 10*time.Second, func() bool { return mirroredQueueCount(t, local, qualified) == 1 })
 	remote.stop()
-	awaitFederation(t, "rows marked unavailable", func() bool {
+	testkit.Eventually(t, "rows marked unavailable", 10*time.Second, func() bool {
 		rows := sessionsOf(local.snapshot(t), record.ID)
 		return len(rows) == 2 && rows[0].UnavailableReason != ""
 	})
@@ -905,7 +894,7 @@ func TestFederationRevokedTokenMarksHostUnauthorized(t *testing.T) {
 	if err := local.daemon.attachHost(record); err != nil {
 		t.Fatal(err)
 	}
-	awaitFederation(t, "unauthorized host", func() bool {
+	testkit.Eventually(t, "unauthorized host", 10*time.Second, func() bool {
 		rows := sessionsOf(local.snapshot(t), record.ID)
 		return len(rows) == 2 && rows[0].Host.State == hostStateUnauthorized && strings.Contains(rows[0].UnavailableReason, "pair it again")
 	})
@@ -918,7 +907,7 @@ func TestFederationRemoveWaitsForInFlightReconcile(t *testing.T) {
 	if err := local.daemon.attachHost(record); err != nil {
 		t.Fatal(err)
 	}
-	awaitFederation(t, "reconcile fetching a snapshot", func() bool { return hold.waiting.Load() > 0 })
+	testkit.Eventually(t, "reconcile fetching a snapshot", 10*time.Second, func() bool { return hold.waiting.Load() > 0 })
 	local.daemon.catalog.mu.Lock()
 	remote.gate.snapshots.Store(nil)
 	close(hold.release)
@@ -960,7 +949,7 @@ func TestFederationAppliesRemoteCatalogEventsIncrementally(t *testing.T) {
 	remote.daemon.discoverCatalog(context.Background())
 	remote.daemon.discoverCatalog(context.Background())
 	qualified := hosts.Qualify(record.ID, "remote-a")
-	awaitFederation(t, "busy status and removal mirrored", func() bool {
+	testkit.Eventually(t, "busy status and removal mirrored", 10*time.Second, func() bool {
 		rows := sessionsOf(local.snapshot(t), record.ID)
 		return len(rows) == 1 && rows[0].ID == qualified && rows[0].Status == surface.StatusBusy
 	})
@@ -1158,7 +1147,7 @@ func TestFederationShowsARemoteConversationsHoldersAndForwardsThePick(t *testing
 	remote.fake.mu.Unlock()
 	remote.daemon.discoverCatalog(context.Background())
 	qualified := hosts.Qualify(record.ID, "remote-a")
-	awaitFederation(t, "the remote holders mirrored", func() bool {
+	testkit.Eventually(t, "the remote holders mirrored", 10*time.Second, func() bool {
 		for _, session := range sessionsOf(local.snapshot(t), record.ID) {
 			if session.ID == qualified {
 				return len(session.Holders) == 2 && session.Holders[0].PID == 4101 && session.Holders[0].TTY == "pts/1" && session.Holders[1].PID == 4102
@@ -1174,7 +1163,7 @@ func TestFederationShowsARemoteConversationsHoldersAndForwardsThePick(t *testing
 	go func() {
 		answered <- local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "send", "sessionId": qualified, "message": "to one terminal", "pid": 4102, "pidStartedAt": 1})
 	}()
-	awaitFederation(t, "the pick to reach the paired host", func() bool { return hold.waiting.Load() == 1 })
+	testkit.Eventually(t, "the pick to reach the paired host", 10*time.Second, func() bool { return hold.waiting.Load() == 1 })
 	remote.gate.actions.Store(nil)
 	close(hold.release)
 	picked := <-answered
@@ -1194,7 +1183,7 @@ func TestAPairedHostReportsTheBuildItRuns(t *testing.T) {
 	local := newFederationNode(t, "local-a")
 	local.start(t, testRoots(remote.server))
 	record := local.pair(t, remote, "vps")
-	awaitFederation(t, "the host's build reported", func() bool {
+	testkit.Eventually(t, "the host's build reported", 10*time.Second, func() bool {
 		for _, host := range local.daemon.hostSummaries() {
 			if host.ID == record.ID && host.Build != nil {
 				return host.Build.Version == "v0.2.68" && host.Build.Revision == "e387b0d87b52f557"

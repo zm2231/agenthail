@@ -9,6 +9,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 type journalStreamFixture struct {
@@ -45,7 +46,7 @@ func TestVoiceUsesPreparedJournalAndFiltersTurnWithBodyDelta(t *testing.T) {
 	stream.events <- sessionstream.Event{ItemID: "later-answer", Version: 1, Kind: "message", Role: "assistant", TurnID: "turn-a", Body: "later"}
 	stream.events <- sessionstream.Event{ItemID: "done", Version: 1, Kind: "done", TurnID: "turn-a"}
 
-	waitFor(t, "journal reply reaching the voice operator", func() bool { return len(f.provider.spoken()) >= 3 })
+	testkit.Eventually(t, "journal reply reaching the voice operator", 5*time.Second, func() bool { return len(f.provider.spoken()) >= 3 })
 	if spoken := f.provider.spoken(); !reflect.DeepEqual(spoken, []string{"answer", " final", "later"}) {
 		t.Fatalf("spoken=%q", spoken)
 	}
@@ -71,5 +72,5 @@ func TestAJournalTurnRefusedByTheAPIFailsTheDelegationWithTheRefusal(t *testing.
 	}
 	refusal := "Claude is out of usage (You've hit your session limit)"
 	stream.events <- sessionstream.Event{ItemID: "done", Version: 1, Kind: "done", TurnID: "turn-a", Status: "failed", Body: refusal}
-	waitFor(t, "the refused delegation to fail", func() bool { return hasEventWith(f.View(), "voice/delegation/failed", "error", refusal) })
+	testkit.Eventually(t, "the refused delegation to fail", 5*time.Second, func() bool { return hasEventWith(f.View(), "voice/delegation/failed", "error", refusal) })
 }

@@ -164,7 +164,7 @@ func (r *Registry) AddHost(host PairedHost) (PairedHost, error) {
 
 const pairedHostColumns = `host_id,name,endpoint,address,token,state,last_error,last_contact_at,created_at,catalog_epoch,catalog_seq`
 
-func scanPairedHost(row interface{ Scan(...any) error }) (PairedHost, error) {
+func scanPairedHost(row rowScanner) (PairedHost, error) {
 	var host PairedHost
 	var seq int64
 	err := row.Scan(&host.ID, &host.Name, &host.Endpoint, &host.Address, &host.Token, &host.State, &host.LastError, &host.LastContactAt, &host.CreatedAt, &host.CatalogEpoch, &seq)
@@ -179,16 +179,7 @@ func (r *Registry) ListHosts() ([]PairedHost, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	hosts := []PairedHost{}
-	for rows.Next() {
-		host, err := scanPairedHost(rows)
-		if err != nil {
-			return nil, err
-		}
-		hosts = append(hosts, host)
-	}
-	return hosts, rows.Err()
+	return appendRows([]PairedHost{}, rows, scanPairedHost)
 }
 
 func (r *Registry) Host(ref string) (PairedHost, error) {
@@ -218,16 +209,12 @@ func (r *Registry) RemoveHost(hostID string) ([]CatalogEvent, error) {
 		return nil, err
 	}
 	type removed struct{ id, entity string }
-	var cataloged []removed
-	for rows.Next() {
+	cataloged, err := appendRows(nil, rows, func(row rowScanner) (removed, error) {
 		var id, fingerprint string
-		if err := rows.Scan(&id, &fingerprint); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		cataloged = append(cataloged, removed{id: id, entity: projectionID(fingerprint, id)})
-	}
-	if err := rows.Close(); err != nil {
+		err := row.Scan(&id, &fingerprint)
+		return removed{id: id, entity: projectionID(fingerprint, id)}, err
+	})
+	if err != nil {
 		return nil, err
 	}
 	events := []CatalogEvent{}
@@ -449,16 +436,12 @@ func (r *Registry) RefreshHostQueueCounts() (int, error) {
 		generation                               int64
 		hostCount                                int
 	}
-	var candidates []mirrored
-	for rows.Next() {
+	candidates, err := appendRows(nil, rows, func(scanner rowScanner) (mirrored, error) {
 		var row mirrored
-		if err := rows.Scan(&row.id, &row.fingerprint, &row.generation, &row.hostCount, &row.observedAt, &row.unavailable); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		candidates = append(candidates, row)
-	}
-	if err := rows.Close(); err != nil {
+		err := scanner.Scan(&row.id, &row.fingerprint, &row.generation, &row.hostCount, &row.observedAt, &row.unavailable)
+		return row, err
+	})
+	if err != nil {
 		return 0, err
 	}
 	changed := 0
@@ -541,16 +524,12 @@ func releaseUnservedHostRowTx(tx *sql.Tx, sessionID, hostID string) error {
 		id     int64
 		status string
 	}
-	var sends []held
-	for rows.Next() {
+	sends, err := appendRows(nil, rows, func(row rowScanner) (held, error) {
 		var item held
-		if err := rows.Scan(&item.id, &item.status); err != nil {
-			rows.Close()
-			return err
-		}
-		sends = append(sends, item)
-	}
-	if err := rows.Close(); err != nil {
+		err := row.Scan(&item.id, &item.status)
+		return item, err
+	})
+	if err != nil {
 		return err
 	}
 	now := time.Now().UnixMilli()
@@ -582,17 +561,15 @@ func (r *Registry) HostCatalogRows(hostID string) ([]CatalogSessionState, error)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	result := []CatalogSessionState{}
-	for rows.Next() {
+	return appendRows([]CatalogSessionState{}, rows, func(row rowScanner) (CatalogSessionState, error) {
 		var state CatalogSessionState
 		var kind, status, observedAt string
 		var lastActiveMS int64
 		var subagent subagentColumns
 		targets := append([]any{&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &status, &state.Session.Source, &state.Session.Transport, &state.Session.RuntimeKind, &state.Session.ConfiguredModel, &lastActiveMS}, subagent.targets()...)
 		targets = append(targets, &state.Project, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &state.HostQueueCount)
-		if err := rows.Scan(targets...); err != nil {
-			return nil, err
+		if err := row.Scan(targets...); err != nil {
+			return state, err
 		}
 		state.Session.Surface = surface.SurfaceKind(kind)
 		state.Session.Status = surface.SessionStatus(status)
@@ -604,9 +581,8 @@ func (r *Registry) HostCatalogRows(hostID string) ([]CatalogSessionState, error)
 		if parsed, err := time.Parse(time.RFC3339Nano, observedAt); err == nil {
 			state.ObservedAt = parsed
 		}
-		result = append(result, state)
-	}
-	return result, rows.Err()
+		return state, nil
+	})
 }
 
 type HostSessionMatch struct {
@@ -627,18 +603,13 @@ func (r *Registry) MatchHostSessions(hostID, target string) ([]HostSessionMatch,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	matches := []HostSessionMatch{}
-	for rows.Next() {
+	return appendRows([]HostSessionMatch{}, rows, func(row rowScanner) (HostSessionMatch, error) {
 		var match HostSessionMatch
 		var kind string
-		if err := rows.Scan(&match.HostID, &match.ID, &kind, &match.Name, &match.Alias); err != nil {
-			return nil, err
-		}
+		err := row.Scan(&match.HostID, &match.ID, &kind, &match.Name, &match.Alias)
 		match.Surface = surface.SurfaceKind(kind)
-		matches = append(matches, match)
-	}
-	return matches, rows.Err()
+		return match, err
+	})
 }
 
 // HostDelivery is a send to a paired host's session that this daemon holds:
@@ -778,16 +749,11 @@ func (r *Registry) HostDeliveries(hostID string) ([]HostDelivery, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	result := []HostDelivery{}
-	for rows.Next() {
+	return appendRows([]HostDelivery{}, rows, func(row rowScanner) (HostDelivery, error) {
 		var item HostDelivery
-		if err := rows.Scan(&item.ID, &item.SessionID, &item.Key, &item.Request, &item.Status); err != nil {
-			return nil, err
-		}
-		result = append(result, item)
-	}
-	return result, rows.Err()
+		err := row.Scan(&item.ID, &item.SessionID, &item.Key, &item.Request, &item.Status)
+		return item, err
+	})
 }
 
 // ClaimHostDelivery marks a held delivery inflight before it is replayed and

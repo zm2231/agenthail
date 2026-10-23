@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func storedUploads(t *testing.T) (surface.Upload, surface.Upload) {
@@ -226,7 +226,7 @@ func TestAPersonsImageToAHostSessionArrivesAsAnImageBlock(t *testing.T) {
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
-	claudehosttest.WaitFor(t, "the turn", func() bool { return len(fixture.Turns(t, id)) == 1 })
+	testkit.Eventually(t, "the turn", 15*time.Second, func() bool { return len(fixture.Turns(t, id)) == 1 })
 	data, _ := os.ReadFile(picture.Path)
 	want := []any{
 		map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": "image/png", "data": base64.StdEncoding.EncodeToString(data)}},

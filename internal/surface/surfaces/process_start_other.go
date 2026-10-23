@@ -6,25 +6,22 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/claudepeer"
+	"github.com/zm2231/agenthail/internal/procstart"
 )
 
 func processStartTime(pid int) (time.Time, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	command := exec.CommandContext(ctx, "ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
-	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
-	output, err := command.Output()
+	output, err := procstart.Lstart(ctx, pid)
 	if err != nil {
 		return time.Time{}, err
 	}
-	return time.ParseInLocation(claudeProcessStartLayout, strings.TrimSpace(string(output)), time.UTC)
+	return time.ParseInLocation(claudeProcessStartLayout, output, time.UTC)
 }
 
 // processIdentity names a running process by its start time, which tells it
@@ -32,7 +29,7 @@ func processStartTime(pid int) (time.Time, error) {
 // the second from ps elsewhere.
 func processIdentity(pid int) (string, error) {
 	if runtime.GOOS == "linux" {
-		return claudepeer.ProcStartTicks(pid)
+		return procstart.Ticks(pid)
 	}
 	started, err := processStartTime(pid)
 	if err != nil {
@@ -49,7 +46,7 @@ func processStartedAt(pid int) (time.Time, error) {
 	if runtime.GOOS != "linux" {
 		return processStartTime(pid)
 	}
-	raw, err := claudepeer.ProcStartTicks(pid)
+	raw, err := procstart.Ticks(pid)
 	if err != nil {
 		return time.Time{}, err
 	}

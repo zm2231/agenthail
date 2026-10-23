@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import * as tools from '../internal/daemon/dashboard/js/tool-activity.js';
 
 const source = fs.readFileSync(new URL('../internal/daemon/dashboard/app.js', import.meta.url), 'utf8');
 const problemElements = {panel: {}, list: {}};
 const problemApp = {state: {sessions: [{id: 'target', name: 'Worker'}], deliveryProblems: [{deliveryId: 19, sessionId: 'target', message: '<script>payload</script>', reason: 'Target gone', status: 'failed', at: '2026-10-04T00:00:00Z'}]}, selected: null};
-const problemContext = vm.createContext({app: problemApp, $: selector => selector.endsWith('panel') ? problemElements.panel : problemElements.list, displayName: session => session.name, escape: value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;'), timeAgo: () => 'just now'});
+const problemContext = vm.createContext({app: problemApp, tools, $: selector => selector.endsWith('panel') ? problemElements.panel : problemElements.list, displayName: session => session.name, escape: value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;'), timeAgo: () => 'just now'});
 const problemsStart = source.indexOf('function renderDeliveryProblems()');
 const problemsEnd = source.indexOf('function sessionIsCurrent(', problemsStart);
 vm.runInContext(source.slice(problemsStart, problemsEnd), problemContext);

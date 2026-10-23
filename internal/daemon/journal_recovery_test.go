@@ -14,6 +14,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func journalPayloads(t *testing.T, reg *registry.Registry, sessionID string) []sessionJournalPayload {
@@ -31,17 +32,6 @@ func journalPayloads(t *testing.T, reg *registry.Registry, sessionID string) []s
 		payloads = append(payloads, payload)
 	}
 	return payloads
-}
-
-func waitFor(t *testing.T, timeout time.Duration, condition func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for !condition() {
-		if time.Now().After(deadline) {
-			t.Fatal("condition was not reached")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 }
 
 func TestReadJournalPageClearsSourceErrorAfterNewerHealthyActivity(t *testing.T) {
@@ -152,7 +142,7 @@ func TestHeldSourceRecoversFromTransientSeedFailure(t *testing.T) {
 		t.Fatalf("failed seed not reported: page=%+v err=%v", page, err)
 	}
 	adapter.set(false, surface.TimelineItem{ID: "recovered", Kind: "message", Role: "assistant", Text: "recovered"})
-	waitFor(t, 2*time.Second, func() bool {
+	testkit.Eventually(t, "the condition", 2*time.Second, func() bool {
 		status, err := reg.SessionJournalSeedStatus(from.ID)
 		return err == nil && status == registry.SessionJournalSeeded
 	})
@@ -188,9 +178,9 @@ func TestNonStreamableSourceRefreshesThroughOneSharedProducer(t *testing.T) {
 			release()
 		}
 	}()
-	waitFor(t, 2*time.Second, func() bool { return len(journalPayloads(t, reg, from.ID)) == 1 })
+	testkit.Eventually(t, "the condition", 2*time.Second, func() bool { return len(journalPayloads(t, reg, from.ID)) == 1 })
 	adapter.set(false, surface.TimelineItem{ID: "first", Kind: "message", Role: "assistant", Text: "first"}, surface.TimelineItem{ID: "second", Kind: "message", Role: "assistant", Text: "second"})
-	waitFor(t, 2*time.Second, func() bool { return len(journalPayloads(t, reg, from.ID)) == 2 })
+	testkit.Eventually(t, "the condition", 2*time.Second, func() bool { return len(journalPayloads(t, reg, from.ID)) == 2 })
 	reads := adapter.reads.Load()
 	time.Sleep(100 * time.Millisecond)
 	if got := adapter.reads.Load() - reads; got > 5 {
@@ -320,7 +310,7 @@ func TestManagedStreamRestartsKeepOneAuthoritativeReplyBody(t *testing.T) {
 			}
 			defer subscription.Cancel()
 			var bodies []string
-			waitFor(t, 5*time.Second, func() bool {
+			testkit.Eventually(t, "the condition", 5*time.Second, func() bool {
 				bodies = bodies[:0]
 				for _, payload := range journalPayloads(t, reg, from.ID) {
 					if payload.Kind == "done" {

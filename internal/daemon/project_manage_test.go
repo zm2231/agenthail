@@ -14,6 +14,7 @@ import (
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func apiErrorCode(t *testing.T, response *httptest.ResponseRecorder) string {
@@ -249,7 +250,7 @@ func TestFederationRenamesOneRepositoryProjectOnEveryHost(t *testing.T) {
 	projectID := storedProjection(t, local.reg, "local-a").Project.ID
 	// A rename reaches the paired hosts this host lists the project on, so it
 	// waits for this host to mirror the server's checkout.
-	awaitFederation(t, "one project with both checkouts", func() bool {
+	testkit.Eventually(t, "one project with both checkouts", 10*time.Second, func() bool {
 		for _, project := range local.snapshot(t).Projects {
 			if project.ID == projectID {
 				return len(project.Checkouts) == 2
@@ -267,7 +268,7 @@ func TestFederationRenamesOneRepositoryProjectOnEveryHost(t *testing.T) {
 		}
 		node.daemon.discoverCatalog(context.Background())
 	}
-	awaitFederation(t, "one project under the new name", func() bool {
+	testkit.Eventually(t, "one project under the new name", 10*time.Second, func() bool {
 		for _, project := range local.snapshot(t).Projects {
 			if project.ID == projectID {
 				return project.DisplayName == "Gadget sources" && len(project.Checkouts) == 2

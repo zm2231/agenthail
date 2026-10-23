@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudehost"
+	"github.com/zm2231/agenthail/internal/testkit"
 
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -28,7 +29,7 @@ func TestAHostedClaudeSessionReportsTheWindowClaudeRunsItsModelWith(t *testing.T
 		t.Fatalf("session=%+v, want a hosted session", session)
 	}
 	var usage *surface.ContextUsage
-	claudehosttest.WaitFor(t, "the reported window", func() bool {
+	testkit.Eventually(t, "the reported window", 15*time.Second, func() bool {
 		usage, err = c.ContextUsage(ctx, session)
 		return err == nil && usage != nil && usage.ContextWindowSource == ClaudeContextWindowSourceProvider
 	})
@@ -46,16 +47,16 @@ func TestAHostedClaudeSessionReportsTheWindowClaudeRunsItsModelWith(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	appendTestTranscript(t, path, `{"type":"assistant","timestamp":"2099-01-01T00:00:00Z","message":{"id":"switched","model":"claude-sonnet-5-5","content":[{"type":"text","text":"from another model"}]}}`)
+	testkit.AppendLines(t, path, `{"type":"assistant","timestamp":"2099-01-01T00:00:00Z","message":{"id":"switched","model":"claude-sonnet-5-5","content":[{"type":"text","text":"from another model"}]}}`)
 	if usage, err := c.ContextUsage(ctx, session); err != nil || usage == nil || usage.UsedTokens != 1000 || usage.ContextWindow != 0 || usage.ContextWindowSource != ClaudeContextWindowSourceUnknown {
 		t.Fatalf("a window reported for another model was kept: usage=%+v err=%v", usage, err)
 	}
-	appendTestTranscript(t, path, `{"type":"assistant","timestamp":"2099-01-01T00:00:01Z","message":{"id":"modelless","content":[{"type":"text","text":"no model named"}]}}`)
-	appendTestTranscript(t, path, `{"type":"assistant","timestamp":"2099-01-01T00:00:02Z","message":{"id":"back","model":"claude-opus-5-5","content":[{"type":"text","text":"back"}]}}`)
+	testkit.AppendLines(t, path, `{"type":"assistant","timestamp":"2099-01-01T00:00:01Z","message":{"id":"modelless","content":[{"type":"text","text":"no model named"}]}}`)
+	testkit.AppendLines(t, path, `{"type":"assistant","timestamp":"2099-01-01T00:00:02Z","message":{"id":"back","model":"claude-opus-5-5","content":[{"type":"text","text":"back"}]}}`)
 	if usage, err := c.ContextUsage(ctx, session); err != nil || usage == nil || usage.ContextWindowSource != ClaudeContextWindowSourceProvider {
 		t.Fatalf("the window was not restored for the model it was reported for: usage=%+v err=%v", usage, err)
 	}
-	appendTestTranscript(t, path, `{"type":"assistant","timestamp":"2099-01-01T00:00:03Z","message":{"id":"modelless-2","content":[{"type":"text","text":"no model named"}]}}`)
+	testkit.AppendLines(t, path, `{"type":"assistant","timestamp":"2099-01-01T00:00:03Z","message":{"id":"modelless-2","content":[{"type":"text","text":"no model named"}]}}`)
 	if usage, err := c.ContextUsage(ctx, session); err != nil || usage == nil || usage.ContextWindowSource == ClaudeContextWindowSourceProvider {
 		t.Fatalf("a reply that names no model kept the window: usage=%+v err=%v", usage, err)
 	}
@@ -130,7 +131,7 @@ func TestAHostedClaudeSessionReportsWhenClaudeCompactsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	var usage *surface.ContextUsage
-	claudehosttest.WaitFor(t, "the reported autocompact", func() bool {
+	testkit.Eventually(t, "the reported autocompact", 15*time.Second, func() bool {
 		usage, err = c.ContextUsage(ctx, session)
 		return err == nil && usage != nil && usage.AutoCompact != nil
 	})

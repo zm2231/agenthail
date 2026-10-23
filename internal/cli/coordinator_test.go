@@ -16,6 +16,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 const (
@@ -132,7 +133,7 @@ func (c *coordinatorCLI) resumed(t *testing.T, conversation string) bool {
 
 func (c *coordinatorCLI) firstTurn(t *testing.T, conversation string) string {
 	t.Helper()
-	claudehosttest.WaitFor(t, "the first turn", func() bool { return len(c.host.Turns(t, conversation)) > 0 })
+	testkit.Eventually(t, "the first turn", 15*time.Second, func() bool { return len(c.host.Turns(t, conversation)) > 0 })
 	return c.host.Turns(t, conversation)[0].Text
 }
 
@@ -366,7 +367,7 @@ func TestLeadIsTheCoordinatorOfTheSendersProject(t *testing.T) {
 		t.Fatalf("a worker whose folder was removed could not reach its project's coordinator: %v", err)
 	}
 	betaLead := c.current(t, "beta-lead")
-	claudehosttest.WaitFor(t, "the report at beta's coordinator", func() bool {
+	testkit.Eventually(t, "the report at beta's coordinator", 15*time.Second, func() bool {
 		return len(c.host.Turns(t, betaLead)) == 2 || c.r.QueueCount(betaLead) == 1
 	})
 

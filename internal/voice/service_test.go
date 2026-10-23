@@ -11,12 +11,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfacetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 type fixtureProvider struct {
@@ -37,8 +39,11 @@ type fixtureProvider struct {
 	gate         *gate
 	// ticks releases one Poll each, as its wait running out would; arrived
 	// releases one as Codex sending an event would.
-	ticks    <-chan time.Time
-	arrived  chan struct{}
+	ticks   <-chan time.Time
+	arrived chan struct{}
+	// waiting counts observers waiting on ticks, in Poll or in the
+	// service's pause.
+	waiting  atomic.Int32
 	lastWait time.Duration
 	// lost makes every Poll report its events lost, as a dropped source does.
 	lost      bool
@@ -248,6 +253,8 @@ func (p *fixtureProvider) Poll(ctx context.Context, after Cursor, _ string, wait
 		return Batch{Cursor: after, Lost: true}, nil
 	}
 	if wait > 0 {
+		p.waiting.Add(1)
+		defer p.waiting.Add(-1)
 		select {
 		case <-arrived:
 		case _, open := <-p.ticks:
@@ -482,7 +489,10 @@ func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 			defer f.mu.Unlock()
 			return f.now
 		},
-		ticker: func() (<-chan time.Time, func()) { return f.ticks, func() {} },
+		ticker: func() (<-chan time.Time, func()) {
+			f.provider.waiting.Add(1)
+			return f.ticks, func() { f.provider.waiting.Add(-1) }
+		},
 	}
 	f.service = newService(f.path, f.provider, options.register, "/fixture/agenthail", resolver, delivery.Dispatcher{}, options.operatorSource, options.stream, manual)
 	f.cycles = make(chan struct{}, 16)
@@ -526,6 +536,21 @@ func (f *voiceFixture) tick() {
 	case <-time.After(5 * time.Second):
 		f.t.Fatal("call observer did not finish its cycle")
 	}
+	f.parked()
+}
+
+// parked waits until the observer has computed its next poll's wait and is
+// waiting on a tick, or has stopped. A clock advance before then would be
+// read by that wait, and a poll whose deadline has already passed does not
+// wait for a tick at all.
+func (f *voiceFixture) parked() {
+	f.t.Helper()
+	testkit.Eventually(f.t, "the call observer to wait for its next tick or stop", 5*time.Second, func() bool {
+		f.service.mu.Lock()
+		running := f.service.running
+		f.service.mu.Unlock()
+		return !running || f.provider.waiting.Load() > 0
+	})
 }
 
 func (f *voiceFixture) observe(events ...Event) {
@@ -575,17 +600,6 @@ func targetSelected(t *testing.T, target *targetFixture) *voiceFixture {
 	apply(t, f, Action{Action: "select", TargetID: target.session.ID})
 	connectFixture(t, f)
 	return f
-}
-
-func waitFor(t *testing.T, what string, condition func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for !condition() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
 }
 
 func hasEventWith(v State, method, key, value string) bool {
@@ -838,7 +852,7 @@ func TestDirectDelegationNormalizesClaudeMessagesPerItem(t *testing.T) {
 	}
 	f := targetSelected(t, target)
 	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the task"})
-	waitFor(t, "three spoken items", func() bool { return len(f.provider.spoken()) >= 3 })
+	testkit.Eventually(t, "three spoken items", 5*time.Second, func() bool { return len(f.provider.spoken()) >= 3 })
 	if spoken := f.provider.spoken(); !reflect.DeepEqual(spoken, []string{"part", " complete", "second answer"}) {
 		t.Fatalf("spoken=%q", spoken)
 	}
@@ -852,7 +866,7 @@ func TestDirectDelegationFailsOnCancelledTerminal(t *testing.T) {
 	}
 	f := targetSelected(t, target)
 	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the task"})
-	waitFor(t, "delegation failure", func() bool { return hasEvent(f.View(), "voice/delegation/failed") })
+	testkit.Eventually(t, "delegation failure", 5*time.Second, func() bool { return hasEvent(f.View(), "voice/delegation/failed") })
 }
 
 func TestADirectTurnRefusedByTheAPIFailsTheDelegationWithTheRefusal(t *testing.T) {
@@ -863,7 +877,7 @@ func TestADirectTurnRefusedByTheAPIFailsTheDelegationWithTheRefusal(t *testing.T
 	}
 	f := targetSelected(t, target)
 	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the task"})
-	waitFor(t, "the refused delegation to fail", func() bool {
+	testkit.Eventually(t, "the refused delegation to fail", 5*time.Second, func() bool {
 		for _, event := range f.View().Events {
 			if event.Method == "voice/delegation/failed" && strings.Contains(fmt.Sprint(event.Params["error"]), "out of usage") {
 				return true
@@ -891,7 +905,7 @@ func TestSpokenTranscriptDelegatesToSelectedTargetOnce(t *testing.T) {
 	spoken := Event{Sequence: 27, Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "user", "text": "Inspect this session"}}
 	f.observe(spoken)
 	f.observe(spoken)
-	waitFor(t, "the spoken request", func() bool { return len(target.sends()) > 0 })
+	testkit.Eventually(t, "the spoken request", 5*time.Second, func() bool { return len(target.sends()) > 0 })
 	f.service.Close()
 	if sends := target.sends(); !reflect.DeepEqual(sends, []string{"Inspect this session"}) {
 		t.Fatalf("spoken transcript was not delivered exactly once: %v", sends)
@@ -1020,7 +1034,7 @@ func TestDynamicVoiceToolsTransferAndReturnThroughSharedState(t *testing.T) {
 	p := f.provider
 	connectFixture(t, f)
 	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-a", "threadId": "operator", "namespace": "agenthail", "tool": "voice_transfer", "arguments": map[string]any{"targetId": "target-a"}}})
-	waitFor(t, "the transfer's answer", func() bool { return len(p.answers()) == 1 })
+	testkit.Eventually(t, "the transfer's answer", 5*time.Second, func() bool { return len(p.answers()) == 1 })
 	if got := f.View().Target; got == nil || got.ID != "target-a" {
 		t.Fatalf("transfer did not select target: %+v", got)
 	}
@@ -1030,7 +1044,7 @@ func TestDynamicVoiceToolsTransferAndReturnThroughSharedState(t *testing.T) {
 	}
 	p.mu.Unlock()
 	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-b", "threadId": "operator", "namespace": "agenthail", "tool": "voice_return_to_orchestrator", "arguments": map[string]any{}}})
-	waitFor(t, "the return's answer", func() bool { return len(p.answers()) == 2 })
+	testkit.Eventually(t, "the return's answer", 5*time.Second, func() bool { return len(p.answers()) == 2 })
 	if got := f.View().Target; got != nil {
 		t.Fatalf("return did not clear target: %+v", got)
 	}
@@ -1103,11 +1117,16 @@ func TestRealtimeSettingsUseAudioOnlyTargetUpdatesAndNoCredentials(t *testing.T)
 		}
 	}
 	initial := p["initialItems"].([]map[string]any)
-	boundInitial := StartParams("operator", "call", "offer", true)["initialItems"].([]map[string]any)
-	orchestrator, _ := initial[0]["text"].(string)
-	sessionBound, _ := boundInitial[0]["text"].(string)
-	if len(initial) != 1 || len(boundInitial) != 1 || initial[0]["role"] != "developer" || boundInitial[0]["role"] != "developer" || orchestrator == "" || sessionBound == "" || orchestrator == sessionBound {
-		t.Fatalf("session-bound calls need their own developer instructions: orchestrator=%v bound=%v", initial, boundInitial)
+	if text, _ := initial[0]["text"].(string); len(initial) != 1 || initial[0]["role"] != "developer" || !strings.Contains(text, "Agenthail orchestrator") {
+		t.Fatalf("orchestrator calls need their developer instructions: %v", initial)
+	}
+	if _, ok := p["prompt"]; ok || p["includeStartupContext"] != true {
+		t.Fatalf("an orchestrator call replaced Codex's realtime prompt: %v", p)
+	}
+	bound := StartParams("operator", "call", "offer", true)
+	prompt, _ := bound["prompt"].(string)
+	if !strings.Contains(prompt, "never do the work, hand it to anyone else") || bound["includeStartupContext"] != false || bound["initialItems"] != nil {
+		t.Fatalf("a session-bound call must replace Codex's delegating prompt: %v", bound)
 	}
 }
 

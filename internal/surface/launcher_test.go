@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func TestLauncherRuntimeJSONOmitsLocationOnlyWhenUnset(t *testing.T) {
@@ -34,7 +36,7 @@ func TestLauncherRuntimeJSONOmitsLocationOnlyWhenUnset(t *testing.T) {
 func TestCMUXLaunchUsesDirectArgvAndKeepsMessageOneArgument(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "args")
-	writeExecutable(t, filepath.Join(dir, "cmux"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CMUX_TEST_ARGS\"\nprintf '%s' '{\"workspace_ref\":\"workspace:1\"}'\n")
+	testkit.WriteExecutable(t, filepath.Join(dir, "cmux"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CMUX_TEST_ARGS\"\nprintf '%s' '{\"workspace_ref\":\"workspace:1\"}'\n")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("CMUX_TEST_ARGS", logPath)
 	launcher := newCMUX().(*processLauncher)
@@ -90,7 +92,7 @@ func TestCMUXLaunchUsesDirectArgvAndKeepsMessageOneArgument(t *testing.T) {
 
 func TestCMUXMalformedAcceptedOutputCleansIntentAndReturnsAcceptedError(t *testing.T) {
 	claude := filepath.Join(t.TempDir(), "claude")
-	writeExecutable(t, claude, "#!/bin/sh\nexit 0\n")
+	testkit.WriteExecutable(t, claude, "#!/bin/sh\nexit 0\n")
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", claude)
 	launcher := newCMUX().(*processLauncher)
 	var args []string
@@ -196,7 +198,7 @@ func TestCMUXLocatePreservesReceiptOnUnverifiableInventory(t *testing.T) {
 
 func TestTMUXLaunchPassesMessageAsDirectArgument(t *testing.T) {
 	claude := filepath.Join(t.TempDir(), "claude")
-	writeExecutable(t, claude, "#!/bin/sh\nexit 0\n")
+	testkit.WriteExecutable(t, claude, "#!/bin/sh\nexit 0\n")
 	t.Setenv("PATH", "/usr/bin:/bin")
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", claude)
 	launcher := newTMUX().(*processLauncher)
@@ -232,7 +234,7 @@ func TestTMUXLaunchPassesMessageAsDirectArgument(t *testing.T) {
 func TestTMUXLaunchClassifiesPostDispatchFailureAsAccepted(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	claude := filepath.Join(t.TempDir(), "claude")
-	writeExecutable(t, claude, "#!/bin/sh\nexit 0\n")
+	testkit.WriteExecutable(t, claude, "#!/bin/sh\nexit 0\n")
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", claude)
 	launchSession := func(args []string) string {
 		if index := slices.Index(args, "-s"); index >= 0 && index+1 < len(args) {
@@ -384,13 +386,6 @@ func TestTMUXLocateWaitsForCompleteReceiptAndRejectsTokenOrPaneMismatch(t *testi
 	want := map[string]Location{"codex-thread": {Session: "agenthail-review", Pane: "%2"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("locations=%#v want=%#v", got, want)
-	}
-}
-
-func writeExecutable(t *testing.T, path, body string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(body), 0700); err != nil {
-		t.Fatal(err)
 	}
 }
 

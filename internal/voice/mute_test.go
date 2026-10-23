@@ -3,8 +3,10 @@ package voice
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func muteCall(t *testing.T, f *voiceFixture, muted bool, revision int64) State {
@@ -24,7 +26,7 @@ func TestAMutedCallRefusesVoiceActionsAndAnOlderReportCannotUnmuteIt(t *testing.
 	for _, tool := range []string{"voice_transfer", "voice_return_to_orchestrator", "voice_send_to_lead"} {
 		f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": tool, "threadId": "operator", "namespace": "agenthail", "tool": tool, "arguments": map[string]any{"targetId": "target-a", "project": "p", "message": "m"}}})
 	}
-	waitFor(t, "the refusals", func() bool { return len(p.answers()) == 3 })
+	testkit.Eventually(t, "the refusals", 5*time.Second, func() bool { return len(p.answers()) == 3 })
 	p.mu.Lock()
 	for _, call := range p.toolCalls {
 		if call.success || !strings.Contains(call.text, "Microphone input is muted") {
@@ -37,7 +39,7 @@ func TestAMutedCallRefusesVoiceActionsAndAnOlderReportCannotUnmuteIt(t *testing.
 	}
 	muteCall(t, f, false, 3)
 	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "after", "threadId": "operator", "namespace": "agenthail", "tool": "voice_transfer", "arguments": map[string]any{"targetId": "target-a"}}})
-	waitFor(t, "the unmuted transfer", func() bool { return len(p.answers()) == 4 })
+	testkit.Eventually(t, "the unmuted transfer", 5*time.Second, func() bool { return len(p.answers()) == 4 })
 	if got := f.View().Target; got == nil || got.ID != "target-a" {
 		t.Fatalf("an unmuted call could not transfer: %+v", got)
 	}
@@ -49,7 +51,7 @@ func TestAMutedCallStillAnswersReadingTools(t *testing.T) {
 	connectFixture(t, f)
 	muteCall(t, f, true, 1)
 	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "read", "threadId": "operator", "namespace": "agenthail", "tool": "voice_projects", "arguments": map[string]any{}}})
-	waitFor(t, "the projects answer", func() bool { return len(p.answers()) == 1 })
+	testkit.Eventually(t, "the projects answer", 5*time.Second, func() bool { return len(p.answers()) == 1 })
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !p.toolCalls[0].success {
@@ -117,7 +119,7 @@ func TestAMuteDuringASpokenTransferStopsItBeforeVoiceMoves(t *testing.T) {
 			f.gate.reached(t, test.held)
 			muteCall(t, f, true, 1)
 			f.gate.release(test.held)
-			waitFor(t, "the refusal", func() bool { return len(p.answers()) == 1 })
+			testkit.Eventually(t, "the refusal", 5*time.Second, func() bool { return len(p.answers()) == 1 })
 			p.mu.Lock()
 			call := p.toolCalls[0]
 			p.mu.Unlock()
@@ -143,7 +145,7 @@ func TestAMuteDuringASpokenRequestHoldsItAndUnmutingDoesNotReplayIt(t *testing.T
 	f.gate.reached(t, "Resolve")
 	muteCall(t, f, true, 1)
 	f.gate.release("Resolve")
-	waitFor(t, "the held request", func() bool {
+	testkit.Eventually(t, "the held request", 5*time.Second, func() bool {
 		return hasEventWith(f.View(), "voice/delegation/held", "messageId", "voice-transcript:7")
 	})
 	muteCall(t, f, false, 2)

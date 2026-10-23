@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/codextest"
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/voice"
 )
@@ -476,5 +477,62 @@ func TestAStartWhoseStateCannotBeSavedClosesTheCallsConnection(t *testing.T) {
 			t.Fatalf("the call kept %d connections open", daemon.Connections())
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestASpokenRequestOnASessionBoundCallReachesOnlyTheSession(t *testing.T) {
+	daemon := startManagedCodex(t, signedIn(chatgptAccount))
+	codex := isolatedManagedRuntime(t)
+	const targetID = "019f004a-0000-7000-8000-00000000cafe"
+	daemon.AddThread(codextest.Thread{ID: targetID, Cwd: "/tmp/target", Originator: "agenthail", Source: "agenthail"})
+	resolve := func(ctx context.Context, id string) (*voice.Target, error) {
+		session, err := codex.Resolve(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		return &voice.Target{Session: session, Adapter: codex}, nil
+	}
+	service := voice.NewWithTargets(t.TempDir()+"/voice/operator.json", &CodexVoice{Codex: codex}, nil, "/fixture/agenthail", resolve, delivery.Dispatcher{})
+	t.Cleanup(service.Close)
+	ctx := context.Background()
+	for _, action := range []voice.Action{{Action: "prepare"}, {Action: "select", TargetID: targetID}, {Action: "start", AttemptID: "call-a", SDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"}} {
+		if _, err := service.Apply(ctx, "phone", action); err != nil {
+			t.Fatalf("%s: %v", action.Action, err)
+		}
+	}
+	operator := service.View("phone").Session
+	starts := daemon.Calls("thread/realtime/start")
+	if len(starts) != 1 || starts[0]["prompt"] == nil || starts[0]["includeStartupContext"] != false {
+		t.Fatalf("the session-bound call kept Codex's delegating prompt: %v", starts)
+	}
+	daemon.Notify("thread/realtime/started", map[string]any{"threadId": operator.ID, "realtimeSessionId": "call-a"})
+	daemon.Notify("thread/realtime/sdp", map[string]any{"threadId": operator.ID, "sdp": "v=0 answer"})
+	deadline := time.Now().Add(10 * time.Second)
+	for service.View("phone").Phase != "negotiating" {
+		if time.Now().After(deadline) {
+			t.Fatalf("the call never negotiated: %+v", service.View("phone"))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := service.Apply(ctx, "phone", voice.Action{Action: "connected", AttemptID: "call-a"}); err != nil {
+		t.Fatal(err)
+	}
+	daemon.Notify("thread/realtime/transcript/done", map[string]any{"threadId": operator.ID, "realtimeSessionId": "call-a", "role": "user", "text": "Run the tests"})
+	deadline = time.Now().Add(10 * time.Second)
+	for len(daemon.Calls("turn/start")) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("the spoken request never reached the session: %s", strings.Join(daemon.Methods(), " "))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	for _, turn := range daemon.Calls("turn/start") {
+		if turn["threadId"] != targetID {
+			t.Fatalf("a spoken request started a turn on %v, not the session", turn["threadId"])
+		}
+	}
+	for _, steer := range daemon.Calls("turn/steer") {
+		if steer["threadId"] == operator.ID {
+			t.Fatalf("a spoken request steered the operator: %v", steer)
+		}
 	}
 }

@@ -65,6 +65,17 @@ read-only, unavailable, and unknown outcomes remain visible in the call state an
 are not represented as a spoken reply. Audio/provider identity is therefore not
 a claim that Claude supplies native audio.
 
+Codex's own realtime prompt has the realtime model hand every request to the
+operator thread. A call that starts with a target selected replaces that prompt
+with its own and omits the operator's startup context: the host delivers each
+spoken request to the target, and the realtime model only speaks the target's
+updates, so one request is never worked by both the operator and the target. A
+call that starts with the orchestrator keeps Codex's prompt, with the
+orchestrator role added as a developer item. A prompt is fixed for the life of a
+realtime session, so a call transferred to a session after it started keeps the
+prompt it started with; the transfer tells the model in a developer message not
+to do the work.
+
 ## Conversation and work flow
 
 ```text
@@ -153,7 +164,7 @@ Codex sends it.
 The peer submits the offer after `setLocalDescription`; ICE gathering may continue
 while signaling proceeds. A network that does not report `complete` gathering is
 not treated as a failed call before the host receives the offer.
-The native start request uses realtime `v3`, audio output, and startup context.
+The native start request uses realtime `v3` and audio output; an orchestrator call includes startup context and a session-bound call does not.
 It does not enable the legacy Codex response-handoff route: the realtime session
 is the audio plane, while the selected session remains the only coding target. A
 matching native `started` notification binds the call;

@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"database/sql"
 	"fmt"
 	"time"
 )
@@ -45,31 +44,19 @@ func (r *Registry) RecentDaemonEvents(limit int) ([]DaemonEvent, error) {
 	if limit < 1 {
 		return []DaemonEvent{}, nil
 	}
-	rows, err := r.read.Query(`SELECT id,event_type,entity_id,payload,created_at FROM (SELECT id,event_type,entity_id,payload,created_at FROM daemon_events ORDER BY id DESC LIMIT ?) ORDER BY id`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	events := []DaemonEvent{}
-	for rows.Next() {
+	return queryRows(r.read, []DaemonEvent{}, func(row rowScanner) (DaemonEvent, error) {
 		var event DaemonEvent
 		var id int64
 		var createdAt string
-		if err := rows.Scan(&id, &event.Type, &event.EntityID, &event.Payload, &createdAt); err != nil {
-			return nil, err
+		if err := row.Scan(&id, &event.Type, &event.EntityID, &event.Payload, &createdAt); err != nil {
+			return event, err
 		}
 		if id < 0 {
-			return nil, fmt.Errorf("invalid daemon event id %d", id)
+			return event, fmt.Errorf("invalid daemon event id %d", id)
 		}
 		event.ID = uint64(id)
-		event.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
-		if err != nil {
-			return nil, err
-		}
-		events = append(events, event)
-	}
-	if err := rows.Err(); err != nil && err != sql.ErrNoRows {
-		return nil, err
-	}
-	return events, nil
+		createdAtTime, err := time.Parse(time.RFC3339Nano, createdAt)
+		event.CreatedAt = createdAtTime
+		return event, err
+	}, `SELECT id,event_type,entity_id,payload,created_at FROM (SELECT id,event_type,entity_id,payload,created_at FROM daemon_events ORDER BY id DESC LIMIT ?) ORDER BY id`, limit)
 }

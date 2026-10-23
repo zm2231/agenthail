@@ -4,10 +4,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/zm2231/agenthail/internal/claudetestenv"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func TestMain(m *testing.M) {
-	claudetestenv.Clear()
+	testkit.ClearAgentEnv()
 	os.Exit(m.Run())
 }

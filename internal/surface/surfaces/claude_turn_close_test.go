@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 const (
@@ -31,22 +32,10 @@ const (
 	nextRecord      = `{"type":"user","uuid":"u2","timestamp":"2026-10-18T22:08:00Z","message":{"content":"next"}}` + "\n"
 )
 
-func appendRecords(t *testing.T, path string, records ...string) {
-	t.Helper()
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	if _, err := file.WriteString(strings.Join(records, "")); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func baselineCompletions(t *testing.T) (string, *surface.Session, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "transcript.jsonl")
-	appendRecords(t, path, closedTurnRecords)
+	testkit.AppendFile(t, path, closedTurnRecords)
 	session := &surface.Session{ID: "source", Transcript: path}
 	baseline, err := NewClaude(nil, t.TempDir()).ReadCompletions(context.Background(), session, "")
 	if err != nil || len(baseline.Events) != 0 {
@@ -69,7 +58,7 @@ func TestClaudeCompletionClosesAfterLastContentBlock(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path, session, cursor := baselineCompletions(t)
-			appendRecords(t, path, test.records...)
+			testkit.AppendFile(t, path, test.records...)
 			batch, err := NewClaude(nil, t.TempDir()).ReadCompletions(context.Background(), session, cursor)
 			if err != nil || len(batch.Events) != 1 {
 				t.Fatalf("events=%+v err=%v", batch.Events, err)
@@ -87,17 +76,17 @@ func TestClaudeCompletionClosesAfterLastContentBlock(t *testing.T) {
 
 func TestClaudeCompletionSplitAcrossReadsEmitsFullTextOnceAfterRestart(t *testing.T) {
 	path, session, cursor := baselineCompletions(t)
-	appendRecords(t, path, promptRecord, thinkingRecord)
+	testkit.AppendFile(t, path, promptRecord, thinkingRecord)
 	pending, err := NewClaude(nil, t.TempDir()).ReadCompletions(context.Background(), session, cursor)
 	if err != nil || len(pending.Events) != 0 {
 		t.Fatalf("closing turn emitted early: %+v err=%v", pending.Events, err)
 	}
-	appendRecords(t, path, textRecord)
+	testkit.AppendFile(t, path, textRecord)
 	stillPending, err := NewClaude(nil, t.TempDir()).ReadCompletions(context.Background(), session, pending.Cursor)
 	if err != nil || len(stillPending.Events) != 0 {
 		t.Fatalf("turn emitted before its close record: %+v err=%v", stillPending.Events, err)
 	}
-	appendRecords(t, path, durationRecord)
+	testkit.AppendFile(t, path, durationRecord)
 	batch, err := NewClaude(nil, t.TempDir()).ReadCompletions(context.Background(), session, stillPending.Cursor)
 	if err != nil || len(batch.Events) != 1 || batch.Events[0].ID != "m1" || batch.Events[0].Text != "ONE" || batch.Events[0].InputID != "u1" {
 		t.Fatalf("events=%+v err=%v", batch.Events, err)
@@ -109,14 +98,14 @@ func TestClaudeCompletionSplitAcrossReadsEmitsFullTextOnceAfterRestart(t *testin
 
 func TestClaudeObservationKeepsClosingTurnBusyUntilItCloses(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "transcript.jsonl")
-	appendRecords(t, path, promptRecord, thinkingRecord, textRecord)
+	testkit.AppendFile(t, path, promptRecord, thinkingRecord, textRecord)
 	claude := NewClaude(nil, t.TempDir())
 	session := &surface.Session{ID: "source", Surface: surface.KindClaude, Transcript: path, Status: surface.StatusIdle}
 	observation, err := claude.observe(context.Background(), session)
 	if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "u1" || observation.CompletedTurnID != "" {
 		t.Fatalf("closing turn observation=%+v err=%v", observation, err)
 	}
-	appendRecords(t, path, hookRecord)
+	testkit.AppendFile(t, path, hookRecord)
 	observation, err = claude.observe(context.Background(), session)
 	if err != nil || observation.Status != surface.StatusIdle || observation.CompletedTurnID != "m1" || observation.Reply == nil || observation.Reply.Text != "ONE" || !observation.Reply.Done {
 		t.Fatalf("closed turn observation=%+v err=%v", observation, err)
@@ -129,7 +118,7 @@ func TestClaudeTimelineReplyWaitsForLastContentBlock(t *testing.T) {
 	if err != nil || read.Reply == nil || read.Reply.Text != "ONE" || read.Reply.Done {
 		t.Fatalf("closing reply=%+v err=%v", read.Reply, err)
 	}
-	appendRecords(t, path, hookRecord)
+	testkit.AppendFile(t, path, hookRecord)
 	read, err = readTimeline(context.Background(), path, "claude", 0, 20)
 	if err != nil || read.Reply == nil || read.Reply.Text != "ONE" || !read.Reply.Done {
 		t.Fatalf("closed reply=%+v err=%v", read.Reply, err)
@@ -163,7 +152,7 @@ func TestClaudeTargetedStreamWaitsForLastContentBlock(t *testing.T) {
 func TestClaudeSourceStreamCarriesClosingTurnAcrossWindows(t *testing.T) {
 	path := writeTranscript(t, closedTurnRecords)
 	session := seededClaudeStreamSession(t, path, "")
-	appendRecords(t, path, promptRecord, thinkingRecord, textRecord)
+	testkit.AppendFile(t, path, promptRecord, thinkingRecord, textRecord)
 	claude := NewClaude(nil, t.TempDir())
 	window := func() map[string]int {
 		done := map[string]int{}
@@ -180,7 +169,7 @@ func TestClaudeSourceStreamCarriesClosingTurnAcrossWindows(t *testing.T) {
 	if done := window(); len(done) != 0 || session.ClaudeClosingTurn.TurnID != "u1" || session.ClaudeClosingTurn.MessageID != "m1" {
 		t.Fatalf("closing turn finished early: done=%v closing=%+v", done, session.ClaudeClosingTurn)
 	}
-	appendRecords(t, path, durationRecord)
+	testkit.AppendFile(t, path, durationRecord)
 	if done := window(); len(done) != 1 || done["u1"] != 1 || session.ClaudeClosingTurn.TurnID != "" {
 		t.Fatalf("closing turn not finished once: done=%v closing=%+v", done, session.ClaudeClosingTurn)
 	}
@@ -188,7 +177,7 @@ func TestClaudeSourceStreamCarriesClosingTurnAcrossWindows(t *testing.T) {
 
 func TestClaudeInterruptAfterClosingBlockInterruptsTheTurn(t *testing.T) {
 	path, session, cursor := baselineCompletions(t)
-	appendRecords(t, path, promptRecord, thinkingRecord, textRecord, interruptRecord, durationRecord)
+	testkit.AppendFile(t, path, promptRecord, thinkingRecord, textRecord, interruptRecord, durationRecord)
 	batch, err := NewClaude(nil, t.TempDir()).ReadCompletions(context.Background(), session, cursor)
 	if err != nil || len(batch.Events) != 0 {
 		t.Fatalf("interrupted turn relayed: %+v err=%v", batch.Events, err)
@@ -205,7 +194,7 @@ func TestClaudeInterruptAfterClosingBlockInterruptsTheTurn(t *testing.T) {
 	}
 	source := writeTranscript(t, closedTurnRecords)
 	sourceSession := seededClaudeStreamSession(t, source, "")
-	appendRecords(t, source, promptRecord, thinkingRecord, textRecord, interruptRecord)
+	testkit.AppendFile(t, source, promptRecord, thinkingRecord, textRecord, interruptRecord)
 	var terminals []string
 	err = NewClaude(nil, t.TempDir()).Stream(context.Background(), sourceSession, "", func(event surface.StreamEvent) {
 		if event.Kind == "done" {
@@ -220,7 +209,7 @@ func TestClaudeInterruptAfterClosingBlockInterruptsTheTurn(t *testing.T) {
 func TestClaudeSourceStreamDropsClosingTurnWhenTranscriptIsRewritten(t *testing.T) {
 	path := writeTranscript(t, closedTurnRecords)
 	session := seededClaudeStreamSession(t, path, "")
-	appendRecords(t, path, promptRecord, thinkingRecord, textRecord)
+	testkit.AppendFile(t, path, promptRecord, thinkingRecord, textRecord)
 	claude := NewClaude(nil, t.TempDir())
 	if err := claude.Stream(context.Background(), session, "", func(surface.StreamEvent) {}, 150*time.Millisecond); !errors.Is(err, surface.ErrStreamWindow) || session.ClaudeClosingTurn.TurnID != "u1" {
 		t.Fatalf("stream err=%v closing=%+v", err, session.ClaudeClosingTurn)
@@ -251,7 +240,7 @@ func TestClaudeSourceStreamDropsClosingTurnWhenTranscriptIsRewritten(t *testing.
 func TestClaudeSourceStreamDropsClosingTurnWhenTranscriptIsRewrittenMidWindow(t *testing.T) {
 	path := writeTranscript(t, closedTurnRecords)
 	session := seededClaudeStreamSession(t, path, "")
-	appendRecords(t, path, promptRecord, thinkingRecord, textRecord)
+	testkit.AppendFile(t, path, promptRecord, thinkingRecord, textRecord)
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -318,7 +307,7 @@ func TestClaudeSDKTurnClosesWhenItsProcessRecordsIdle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	appendRecords(t, path, promptRecord, thinkingRecord, textRecord)
+	testkit.AppendFile(t, path, promptRecord, thinkingRecord, textRecord)
 	stale := *source
 	stale.PID = 0
 
@@ -347,7 +336,7 @@ func TestClaudeSDKTurnClosesWhenItsProcessRecordsIdle(t *testing.T) {
 	if err != nil || len(batch.Events) != 1 || batch.Events[0].ID != "m1" || batch.Events[0].Text != "ONE" || !batch.Events[0].CompletedAt.Equal(textAt) {
 		t.Fatalf("events=%+v err=%v", batch.Events, err)
 	}
-	appendRecords(t, path, nextRecord)
+	testkit.AppendFile(t, path, nextRecord)
 	if replay, err := claude.ReadCompletions(context.Background(), source, batch.Cursor); err != nil || len(replay.Events) != 0 {
 		t.Fatalf("settled turn completed again: %+v err=%v", replay, err)
 	}
@@ -369,7 +358,7 @@ func TestClaudeSDKTurnClosesWhenItsProcessRecordsIdle(t *testing.T) {
 func TestAClosingTurnClearsWhenItsTranscriptIsRewrittenAtTheSameSizeAndTime(t *testing.T) {
 	path := writeTranscript(t, closedTurnRecords)
 	session := seededClaudeStreamSession(t, path, "")
-	appendRecords(t, path, promptRecord, thinkingRecord, textRecord)
+	testkit.AppendFile(t, path, promptRecord, thinkingRecord, textRecord)
 	// The stream parks between passes, so the rewrite and the restored
 	// modification time land before it looks at the transcript again.
 	ctx, cancel := context.WithCancel(context.Background())

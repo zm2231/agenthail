@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func writeTranscript(t *testing.T, content string) string {
@@ -91,7 +92,7 @@ func TestClaudeObserveFindsTurnBeforeToolHeavyTail(t *testing.T) {
 	if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "human" {
 		t.Fatalf("inflight observation=%+v err=%v", observation, err)
 	}
-	appendTestTranscript(t, path, `{"type":"assistant","uuid":"assistant","timestamp":"2026-08-06T01:00:00Z","message":{"id":"done","stop_reason":"end_turn","content":"complete"}}`, `{"type":"system","subtype":"stop_hook_summary"}`)
+	testkit.AppendLines(t, path, `{"type":"assistant","uuid":"assistant","timestamp":"2026-08-06T01:00:00Z","message":{"id":"done","stop_reason":"end_turn","content":"complete"}}`, `{"type":"system","subtype":"stop_hook_summary"}`)
 	observation, err = claude.Observe(context.Background(), session)
 	if err != nil || observation.Status != surface.StatusIdle || observation.CompletedTurnID != "done" || observation.Reply == nil || observation.Reply.UserText != "do the work" {
 		t.Fatalf("completed observation=%+v err=%v", observation, err)
@@ -133,7 +134,7 @@ func TestClaudeObserveRejectsOversizedAppendedRecord(t *testing.T) {
 	if _, err := claude.Observe(context.Background(), session); err != nil {
 		t.Fatal(err)
 	}
-	appendTestTranscript(t, path, strings.Repeat("x", maxClaudeTranscriptRecordBytes+1))
+	testkit.AppendLines(t, path, strings.Repeat("x", maxClaudeTranscriptRecordBytes+1))
 	if _, err := claude.Observe(context.Background(), session); err == nil {
 		t.Fatal("oversized appended record was buffered instead of rejected")
 	}
@@ -236,7 +237,7 @@ func TestAClaudeWindowShorterThanItsTurnReplayStillReadsWhatWasAppended(t *testi
 	history.WriteString(`{"type":"user","uuid":"u2","message":{"content":"next turn"}}` + "\n")
 	path := writeTranscript(t, history.String())
 	session := seededClaudeStreamSession(t, path, "")
-	appendRecords(t, path, `{"type":"assistant","uuid":"after","message":{"id":"after","content":[{"type":"text","text":"written after the seed"}]}}`+"\n")
+	testkit.AppendFile(t, path, `{"type":"assistant","uuid":"after","message":{"id":"after","content":[{"type":"text","text":"written after the seed"}]}}`+"\n")
 	var texts []string
 	err := NewClaude(nil, t.TempDir()).Stream(context.Background(), session, "", func(event surface.StreamEvent) {
 		if event.Text != "" {
@@ -251,7 +252,7 @@ func TestAClaudeWindowShorterThanItsTurnReplayStillReadsWhatWasAppended(t *testi
 func TestAStreamWindowThatHasAlreadyRunOutStillReadsOnce(t *testing.T) {
 	claudePath := writeTranscript(t, `{"type":"user","uuid":"u1","message":{"content":"first"}}`+"\n")
 	claudeSession := seededClaudeStreamSession(t, claudePath, "")
-	appendRecords(t, claudePath, `{"type":"user","uuid":"u2","message":{"content":"appended"}}`+"\n")
+	testkit.AppendFile(t, claudePath, `{"type":"user","uuid":"u2","message":{"content":"appended"}}`+"\n")
 	codexRecord := fmt.Sprintf(`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","stdout":%q}}}`+"\n", "appended")
 	codexSession := &surface.Session{ID: "codex", Transcript: timelineFixture(t, codexRecord), TranscriptOffsetSet: true}
 	for name, stream := range map[string]func(func(surface.StreamEvent)) error{

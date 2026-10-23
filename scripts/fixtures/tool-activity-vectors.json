@@ -1,0 +1,1011 @@
+{
+  "calls" : [
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "$ swift test --filter ReconnectTests\ndescription: Run the reconnect tests",
+      "name" : "Bash",
+      "object" : "Run the reconnect tests",
+      "summary" : "swift test --filter ReconnectTests",
+      "text" : "{\"command\":\"swift test --filter ReconnectTests\",\"description\":\"Run the reconnect tests\"}",
+      "verb" : "Run"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : true,
+      "input" : "$ swift build\n--target Reconnect\ntimeout: 120000",
+      "name" : "Bash",
+      "object" : "swift build",
+      "summary" : "swift build\n--target Reconnect",
+      "text" : "{\"command\":\"swift build\\n--target Reconnect\",\"timeout\":120000}",
+      "verb" : "Run"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : true,
+      "input" : "$ ls\ndescription:    ",
+      "name" : "Bash",
+      "object" : "ls",
+      "summary" : "ls",
+      "text" : "{\"command\":\"ls\",\"description\":\"   \"}",
+      "verb" : "Run"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : true,
+      "input" : "$ go test .\/...\nworkdir: \/work",
+      "name" : "exec_command",
+      "object" : "go test .\/...",
+      "summary" : "go test .\/...",
+      "text" : "{\"cmd\":\"go test .\/...\",\"workdir\":\"\/work\"}",
+      "verb" : "Run"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : true,
+      "input" : "$ ls -la\ncommand: [\n  \"bash\",\n  \"-lc\",\n  \"ls\"\n]",
+      "name" : "functions.exec_command",
+      "object" : "ls -la",
+      "summary" : "ls -la",
+      "text" : "{\"command\":[\"bash\",\"-lc\",\"ls\"],\"cmd\":\"ls -la\"}",
+      "verb" : "Run"
+    },
+    {
+      "changes" : [
+        {
+          "added" : 2,
+          "path" : "\/work\/Sources\/App.swift",
+          "removed" : 1
+        }
+      ],
+      "code" : true,
+      "input" : "file_path: \/work\/Sources\/App.swift\nnew_string: a\nB\nc\nd\nold_string: a\nb\nc",
+      "name" : "Edit",
+      "object" : "App.swift",
+      "summary" : "\/work\/Sources\/App.swift",
+      "text" : "{\"file_path\":\"\/work\/Sources\/App.swift\",\"old_string\":\"a\\nb\\nc\",\"new_string\":\"a\\nB\\nc\\nd\"}",
+      "verb" : "Edit"
+    },
+    {
+      "changes" : [
+        {
+          "added" : 1,
+          "path" : "\/work\/notes.md",
+          "removed" : 1
+        }
+      ],
+      "code" : true,
+      "input" : "newText: two\noldText: one\npath: \/work\/notes.md",
+      "name" : "edit",
+      "object" : "notes.md",
+      "summary" : "\/work\/notes.md",
+      "text" : "{\"path\":\"\/work\/notes.md\",\"oldText\":\"one\",\"newText\":\"two\"}",
+      "verb" : "Edit"
+    },
+    {
+      "changes" : [
+        {
+          "added" : 2,
+          "path" : "\/work\/New.swift",
+          "removed" : 0
+        }
+      ],
+      "code" : true,
+      "input" : "content: one\ntwo\n\nfile_path: \/work\/New.swift",
+      "name" : "Write",
+      "object" : "New.swift",
+      "summary" : "\/work\/New.swift",
+      "text" : "{\"file_path\":\"\/work\/New.swift\",\"content\":\"one\\ntwo\\n\"}",
+      "verb" : "Write"
+    },
+    {
+      "changes" : [
+        {
+          "added" : 3,
+          "path" : "\/work\/M.swift",
+          "removed" : 1
+        }
+      ],
+      "code" : true,
+      "input" : "edits: [\n  {\n    \"new_string\": \"y\",\n    \"old_string\": \"x\"\n  },\n  {\n    \"new_string\": \"z\\nw\",\n    \"old_string\": \"\"\n  }\n]\nfile_path: \/work\/M.swift",
+      "name" : "MultiEdit",
+      "object" : "M.swift",
+      "summary" : "\/work\/M.swift",
+      "text" : "{\"file_path\":\"\/work\/M.swift\",\"edits\":[{\"old_string\":\"x\",\"new_string\":\"y\"},{\"old_string\":\"\",\"new_string\":\"z\\nw\"}]}",
+      "verb" : "Edit"
+    },
+    {
+      "changes" : [
+        {
+          "added" : 2,
+          "path" : "a\/b.swift",
+          "removed" : 1
+        },
+        {
+          "added" : 1,
+          "path" : "c.md",
+          "removed" : 0
+        }
+      ],
+      "code" : true,
+      "input" : "input: *** Begin Patch\n*** Update File: a\/b.swift\n@@\n-old\n+new\n+more\n*** Add File: c.md\n+hello\n*** End Patch",
+      "name" : "apply_patch",
+      "object" : "b.swift, c.md",
+      "summary" : "*** Begin Patch\n*** Update File: a\/b.swift\n@@\n-old\n+new\n+more\n*** Add File: c.md\n+hello\n*** End Patch",
+      "text" : "{\"input\":\"*** Begin Patch\\n*** Update File: a\/b.swift\\n@@\\n-old\\n+new\\n+more\\n*** Add File: c.md\\n+hello\\n*** End Patch\"}",
+      "verb" : "Edit"
+    },
+    {
+      "changes" : [
+        {
+          "added" : 0,
+          "path" : "gone.txt",
+          "removed" : 0
+        }
+      ],
+      "code" : true,
+      "input" : "*** Begin Patch\n*** Delete File: gone.txt\n*** End Patch",
+      "name" : "apply_patch",
+      "object" : "gone.txt",
+      "summary" : "*** Begin Patch\n*** Delete File: gone.txt\n*** End Patch",
+      "text" : "*** Begin Patch\n*** Delete File: gone.txt\n*** End Patch",
+      "verb" : "Edit"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "todos: [\n  {\n    \"content\": \"Verify\",\n    \"status\": \"in_progress\"\n  }\n]",
+      "name" : "TodoWrite",
+      "object" : "",
+      "summary" : "Verify",
+      "text" : "{\"todos\":[{\"content\":\"Verify\",\"status\":\"in_progress\"}]}",
+      "verb" : "Update plan"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "plan: [\n  {\n    \"status\": \"pending\",\n    \"step\": \"Ship\"\n  }\n]",
+      "name" : "update_plan",
+      "object" : "",
+      "summary" : "Ship",
+      "text" : "{\"plan\":[{\"step\":\"Ship\",\"status\":\"pending\"}]}",
+      "verb" : "Update plan"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "note: no list",
+      "name" : "TodoWrite",
+      "object" : "no list",
+      "summary" : "no list",
+      "text" : "{\"note\":\"no list\"}",
+      "verb" : "TodoWrite"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : true,
+      "input" : "file_path: \/work\/README.md\nlimit: 40",
+      "name" : "Read",
+      "object" : "README.md",
+      "summary" : "\/work\/README.md",
+      "text" : "{\"file_path\":\"\/work\/README.md\",\"limit\":40}",
+      "verb" : "Read"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : true,
+      "input" : "path: \/work\/native\npattern: Collapse activity",
+      "name" : "Grep",
+      "object" : "Collapse activity",
+      "summary" : "\/work\/native",
+      "text" : "{\"pattern\":\"Collapse activity\",\"path\":\"\/work\/native\"}",
+      "verb" : "Search"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : true,
+      "input" : "pattern: **\/*.swift",
+      "name" : "Glob",
+      "object" : "**\/*.swift",
+      "summary" : "**\/*.swift",
+      "text" : "{\"pattern\":\"**\/*.swift\"}",
+      "verb" : "Search"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "prompt: Summarise\nurl: https:\/\/example.com\/docs",
+      "name" : "WebFetch",
+      "object" : "https:\/\/example.com\/docs",
+      "summary" : "https:\/\/example.com\/docs",
+      "text" : "{\"url\":\"https:\/\/example.com\/docs\",\"prompt\":\"Summarise\"}",
+      "verb" : "Open"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "query: swiftui scroll position",
+      "name" : "WebSearch",
+      "object" : "swiftui scroll position",
+      "summary" : "swiftui scroll position",
+      "text" : "{\"query\":\"swiftui scroll position\"}",
+      "verb" : "Search the web"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "description: Find the callers\nprompt: Look for every caller\nsubagent_type: Explore",
+      "name" : "Agent",
+      "object" : "Find the callers",
+      "summary" : "Find the callers",
+      "text" : "{\"description\":\"Find the callers\",\"prompt\":\"Look for every caller\",\"subagent_type\":\"Explore\"}",
+      "verb" : "Delegate"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "activeForm: Parsing\ndescription: A long description\nsubject: Parse the list",
+      "name" : "TaskCreate",
+      "object" : "Parse the list",
+      "summary" : "Parse the list",
+      "text" : "{\"subject\":\"Parse the list\",\"description\":\"A long description\",\"activeForm\":\"Parsing\"}",
+      "verb" : "Add task"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "status: in_progress\ntaskId: 2",
+      "name" : "TaskUpdate",
+      "object" : "Task 2 · in progress",
+      "summary" : "Task 2 · in progress",
+      "text" : "{\"taskId\":\"2\",\"status\":\"in_progress\"}",
+      "verb" : "Update task"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "taskId: 3",
+      "name" : "TaskUpdate",
+      "object" : "Task 3",
+      "summary" : "Task 3",
+      "text" : "{\"taskId\":\"3\"}",
+      "verb" : "Update task"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "message: Audit done\nDetails follow\nsummary: \nto: @collab",
+      "name" : "SendMessage",
+      "object" : "Audit done",
+      "summary" : "Audit done\nDetails follow",
+      "text" : "{\n  \"to\": \"@collab\",\n  \"summary\": \"\",\n  \"message\": \"Audit done\\nDetails follow\"\n}",
+      "verb" : "SendMessage"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "description: Weekly note\nsubject: Hi",
+      "name" : "send_email",
+      "object" : "Weekly note",
+      "summary" : "Weekly note",
+      "text" : "{\"subject\":\"Hi\",\"description\":\"Weekly note\"}",
+      "verb" : "send email"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "count: 3\nflag: true",
+      "name" : "mcp__xcode__build_sim",
+      "object" : "2 fields",
+      "summary" : "2 fields",
+      "text" : "{\"count\":3,\"flag\":true}",
+      "verb" : "xcode · build sim"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "{}",
+      "name" : "mcp__server__tool_name",
+      "object" : "",
+      "summary" : "No input parameters",
+      "text" : "{}",
+      "verb" : "server · tool name"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "big: 12345678901\nlist: []\nm: -0.25\nn: 1.5\nnested: {\n  \"a\": {},\n  \"b\": [\n    1,\n    \"x\",\n    null,\n    false\n  ]\n}",
+      "name" : "custom",
+      "object" : "5 fields",
+      "summary" : "5 fields",
+      "text" : "{\"nested\":{\"b\":[1,\"x\",null,false],\"a\":{}},\"list\":[],\"n\":1.5,\"m\":-0.25,\"big\":12345678901}",
+      "verb" : "custom"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "quote: {\n  \"s\": \"a\\\"b\\n\\u0001é\\t\"\n}",
+      "name" : "custom",
+      "object" : "1 field",
+      "summary" : "1 field",
+      "text" : "{\"quote\":{\"s\":\"a\\\"b\\n\\u0001é\\t\"}}",
+      "verb" : "custom"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "a custom payload\nsecond line",
+      "name" : "custom",
+      "object" : "a custom payload",
+      "summary" : "a custom payload\nsecond line",
+      "text" : "a custom payload\nsecond line",
+      "verb" : "custom"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "first\r\nsecond",
+      "name" : "custom",
+      "object" : "first",
+      "summary" : "first\r\nsecond",
+      "text" : "first\r\nsecond",
+      "verb" : "custom"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "",
+      "name" : "custom",
+      "object" : "",
+      "summary" : "No input parameters",
+      "text" : "",
+      "verb" : "custom"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "input" : "[1,2]",
+      "name" : "custom",
+      "object" : "[1,2]",
+      "summary" : "[1,2]",
+      "text" : "[1,2]",
+      "verb" : "custom"
+    }
+  ],
+  "labels" : {
+    "failed" : "The turn failed before a result",
+    "interrupted" : "Interrupted before a result",
+    "later" : "Result recorded further down",
+    "running" : "Running",
+    "unrecorded" : "No result recorded"
+  },
+  "states" : [
+    {
+      "active" : false,
+      "items" : [
+        {
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "d",
+          "kind" : "done",
+          "text" : "",
+          "title" : "done",
+          "truncated" : false,
+          "turnId" : "t1"
+        }
+      ],
+      "name" : "a turn that ended normally",
+      "states" : {
+        "c" : "unrecorded"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "d",
+          "kind" : "done",
+          "status" : "cancelled",
+          "text" : "",
+          "title" : "done",
+          "truncated" : false,
+          "turnId" : "t1"
+        }
+      ],
+      "name" : "a cancelled turn",
+      "states" : {
+        "c" : "interrupted"
+      }
+    },
+    {
+      "active" : false,
+      "items" : [
+        {
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "d",
+          "kind" : "done",
+          "status" : "turn_aborted",
+          "text" : "",
+          "title" : "done",
+          "truncated" : false,
+          "turnId" : "t1"
+        }
+      ],
+      "name" : "an aborted Codex turn",
+      "states" : {
+        "c" : "interrupted"
+      }
+    },
+    {
+      "active" : false,
+      "items" : [
+        {
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "d",
+          "kind" : "done",
+          "status" : "failed",
+          "text" : "",
+          "title" : "done",
+          "truncated" : false,
+          "turnId" : "t1"
+        }
+      ],
+      "name" : "a failed turn",
+      "states" : {
+        "c" : "failed"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "e",
+          "kind" : "event",
+          "text" : "",
+          "title" : "Turn interrupted",
+          "truncated" : false
+        }
+      ],
+      "name" : "an interruption notice",
+      "states" : {
+        "c" : "interrupted"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "r",
+          "kind" : "reasoning",
+          "text" : "",
+          "title" : "reasoning",
+          "truncated" : false,
+          "turnId" : "t1"
+        }
+      ],
+      "name" : "a call still going",
+      "states" : {
+        "c" : "running"
+      }
+    },
+    {
+      "active" : false,
+      "items" : [
+        {
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        }
+      ],
+      "name" : "a session gone quiet",
+      "states" : {
+        "c" : "unrecorded"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "m",
+          "kind" : "message",
+          "text" : "",
+          "title" : "message",
+          "truncated" : false,
+          "turnId" : "t2"
+        }
+      ],
+      "name" : "a later turn began",
+      "states" : {
+        "c" : "unrecorded"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "d",
+          "kind" : "done",
+          "status" : "cancelled",
+          "text" : "",
+          "title" : "done",
+          "truncated" : false,
+          "turnId" : "t0"
+        }
+      ],
+      "name" : "another turn's end",
+      "states" : {
+        "c" : "running"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
+          "id" : "c",
+          "kind" : "tool",
+          "text" : "",
+          "title" : "tool",
+          "truncated" : false
+        },
+        {
+          "id" : "d",
+          "kind" : "done",
+          "status" : "interrupted",
+          "text" : "",
+          "title" : "done",
+          "truncated" : false,
+          "turnId" : "t1"
+        }
+      ],
+      "name" : "a call with no turn",
+      "states" : {
+        "c" : "interrupted"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
+          "id" : "c",
+          "kind" : "command",
+          "text" : "",
+          "title" : "command",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "d",
+          "kind" : "done",
+          "text" : "",
+          "title" : "done",
+          "truncated" : false
+        }
+      ],
+      "name" : "an end with no turn",
+      "states" : {
+        "c" : "unrecorded"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "m",
+          "kind" : "message",
+          "text" : "",
+          "title" : "message",
+          "truncated" : false
+        }
+      ],
+      "name" : "an item with no turn",
+      "states" : {
+        "c" : "running"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
+          "callId" : "k",
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "m",
+          "kind" : "event",
+          "text" : "",
+          "title" : "Task notification",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "callId" : "k",
+          "id" : "r",
+          "kind" : "toolResult",
+          "text" : "",
+          "title" : "toolResult",
+          "truncated" : false,
+          "turnId" : "t1"
+        }
+      ],
+      "name" : "a result after an injected event",
+      "states" : {
+        "c" : "later"
+      }
+    },
+    {
+      "active" : false,
+      "items" : [
+        {
+          "callId" : "k",
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "m",
+          "kind" : "message",
+          "text" : "",
+          "title" : "message",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "callId" : "k",
+          "id" : "r",
+          "kind" : "toolResult",
+          "text" : "",
+          "title" : "toolResult",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "d",
+          "kind" : "done",
+          "status" : "cancelled",
+          "text" : "",
+          "title" : "done",
+          "truncated" : false,
+          "turnId" : "t1"
+        }
+      ],
+      "name" : "a result after an injected event, idle",
+      "states" : {
+        "c" : "later"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
+          "callId" : "k",
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "callId" : "j",
+          "id" : "r",
+          "kind" : "toolResult",
+          "text" : "",
+          "title" : "toolResult",
+          "truncated" : false,
+          "turnId" : "t1"
+        }
+      ],
+      "name" : "another call's result",
+      "states" : {
+        "c" : "running"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
+          "callId" : "a",
+          "id" : "a",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false
+        },
+        {
+          "callId" : "a",
+          "id" : "ar",
+          "kind" : "toolResult",
+          "text" : "",
+          "title" : "toolResult",
+          "truncated" : false
+        },
+        {
+          "callId" : "b",
+          "id" : "b",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false
+        },
+        {
+          "id" : "m",
+          "kind" : "message",
+          "text" : "",
+          "title" : "message",
+          "truncated" : false
+        }
+      ],
+      "name" : "a host without turn ids, working",
+      "states" : {
+        "a" : "later",
+        "b" : "running"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
+          "callId" : "a",
+          "id" : "a",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false
+        },
+        {
+          "id" : "d",
+          "kind" : "done",
+          "text" : "",
+          "title" : "done",
+          "truncated" : false
+        },
+        {
+          "id" : "m",
+          "kind" : "message",
+          "text" : "",
+          "title" : "message",
+          "truncated" : false
+        },
+        {
+          "callId" : "b",
+          "id" : "b",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false
+        }
+      ],
+      "name" : "a host without turn ids, a finished turn then a new one",
+      "states" : {
+        "a" : "unrecorded",
+        "b" : "running"
+      }
+    },
+    {
+      "active" : false,
+      "items" : [
+        {
+          "callId" : "a",
+          "id" : "a",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false
+        },
+        {
+          "id" : "d",
+          "kind" : "done",
+          "status" : "cancelled",
+          "text" : "",
+          "title" : "done",
+          "truncated" : false
+        }
+      ],
+      "name" : "a host without turn ids, interrupted",
+      "states" : {
+        "a" : "interrupted"
+      }
+    },
+    {
+      "active" : false,
+      "items" : [
+        {
+          "callId" : "a",
+          "id" : "a",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false
+        },
+        {
+          "id" : "m",
+          "kind" : "message",
+          "text" : "",
+          "title" : "message",
+          "truncated" : false
+        }
+      ],
+      "name" : "a host without turn ids, idle",
+      "states" : {
+        "a" : "unrecorded"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
+          "id" : "a",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "b",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "d",
+          "kind" : "done",
+          "status" : "cancelled",
+          "text" : "",
+          "title" : "done",
+          "truncated" : false,
+          "turnId" : "t1"
+        },
+        {
+          "id" : "c",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false,
+          "turnId" : "t2"
+        }
+      ],
+      "name" : "parallel calls",
+      "states" : {
+        "a" : "interrupted",
+        "b" : "interrupted",
+        "c" : "running"
+      }
+    }
+  ]
+}

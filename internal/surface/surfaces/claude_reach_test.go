@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/signin"
+	"github.com/zm2231/agenthail/internal/testkit"
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
@@ -88,7 +89,7 @@ func TestClaudeConcurrentTurnsToAnExitedSessionResumeItOnceInTheHost(t *testing.
 	if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 1 || !slices.Contains(spawns[0].Argv, "--resume") && !slices.Contains(spawns[0].Argv, "--resume="+fixtureConversation) {
 		t.Fatalf("spawns=%+v, want one resume", spawns)
 	}
-	claudehosttest.WaitFor(t, "both turns", func() bool { return len(host.Turns(t, fixtureConversation)) == 2 })
+	testkit.Eventually(t, "both turns", 15*time.Second, func() bool { return len(host.Turns(t, fixtureConversation)) == 2 })
 	for _, turn := range host.Turns(t, fixtureConversation) {
 		if !slices.Contains(ids, turn.UUID) || string(turn.Origin) != `{"kind":"human"}` {
 			t.Fatalf("turn=%+v, want a person's turn under its intent uuid", turn)
@@ -170,7 +171,7 @@ func TestClaudeSendResumesTerminalSessionInItsTranscriptCwd(t *testing.T) {
 	if len(spawns) != 1 || !samePath(t, spawns[0].Cwd, fixture.Home) {
 		t.Fatalf("spawns=%+v, want one resume in %s", spawns, fixture.Home)
 	}
-	claudehosttest.WaitFor(t, "the turn", func() bool {
+	testkit.Eventually(t, "the turn", 15*time.Second, func() bool {
 		turns := host.Turns(t, fixtureConversation)
 		return len(turns) == 1 && turns[0].Text == "hello" && turns[0].UUID == result.UUID
 	})

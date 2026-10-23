@@ -17,7 +17,7 @@ var ErrSigninProfileNotFound = errors.New("no sign-in profile matched")
 
 const signinProfileColumns = `id,label,browser,profile,created_at`
 
-func scanSigninProfile(row interface{ Scan(...any) error }) (signin.Profile, error) {
+func scanSigninProfile(row rowScanner) (signin.Profile, error) {
 	var profile signin.Profile
 	var browser string
 	err := row.Scan(&profile.ID, &profile.Label, &browser, &profile.Profile, &profile.CreatedAt)
@@ -26,20 +26,7 @@ func scanSigninProfile(row interface{ Scan(...any) error }) (signin.Profile, err
 }
 
 func (r *Registry) ListSigninProfiles() ([]signin.Profile, error) {
-	rows, err := r.read.Query(`SELECT ` + signinProfileColumns + ` FROM signin_profiles ORDER BY label`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	profiles := []signin.Profile{}
-	for rows.Next() {
-		profile, err := scanSigninProfile(rows)
-		if err != nil {
-			return nil, err
-		}
-		profiles = append(profiles, profile)
-	}
-	return profiles, rows.Err()
+	return queryRows(r.read, []signin.Profile{}, scanSigninProfile, `SELECT `+signinProfileColumns+` FROM signin_profiles ORDER BY label`)
 }
 
 func (r *Registry) SigninProfile(ref string) (signin.Profile, error) {

@@ -8,14 +8,14 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/procstart"
 )
 
 // Protocol is the host protocol this build speaks. A host that answers hello
@@ -433,7 +433,7 @@ func (c Client) closeOn(ctx context.Context, sessionID string, ifIdle bool) erro
 	}
 	listed := listing.Sessions[i]
 	pid := listed.PID
-	started, err := processStart(pid)
+	started, err := procstart.Lstart(context.Background(), pid)
 	if err != nil {
 		// Claude has already exited.
 		started = ""
@@ -458,7 +458,7 @@ func (c Client) closeOn(ctx context.Context, sessionID string, ifIdle bool) erro
 // exited; a later process given the same pid does not count.
 func waitExited(ctx context.Context, pid int, started string) error {
 	for started != "" {
-		if now, err := processStart(pid); err != nil || now != started {
+		if now, err := procstart.Lstart(context.Background(), pid); err != nil || now != started {
 			return nil
 		}
 		select {
@@ -468,15 +468,6 @@ func waitExited(ctx context.Context, pid int, started string) error {
 		}
 	}
 	return nil
-}
-
-// processStart is the process's start time as ps reports it in UTC. It is
-// claudepeer.ProcessStart, which this package cannot import.
-func processStart(pid int) (string, error) {
-	command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
-	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
-	out, err := command.Output()
-	return strings.TrimSpace(string(out)), err
 }
 
 // sessionCall runs a request for one session on the host that runs it. The

@@ -19,9 +19,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudepeer"
-	"github.com/zm2231/agenthail/internal/claudetestenv"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 var binary string
@@ -30,7 +30,7 @@ var binary string
 // inside a test's deadline; under a cold cache and a parallel race suite it
 // takes longer than those deadlines allow.
 func TestMain(m *testing.M) {
-	claudetestenv.Clear()
+	testkit.ClearAgentEnv()
 	buildDir, err := os.MkdirTemp("", "ah-bin-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -133,18 +133,7 @@ func killProcess(t *testing.T, pid int) {
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
-	waitUntil(t, fmt.Sprintf("process %d to exit", pid), func() bool { return syscall.Kill(pid, 0) != nil })
-}
-
-func waitUntil(t *testing.T, what string, condition func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for !condition() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	testkit.Eventually(t, fmt.Sprintf("process %d to exit", pid), 5*time.Second, func() bool { return syscall.Kill(pid, 0) != nil })
 }
 
 func sendPeerFrame(t *testing.T, socket string, frame map[string]any) {
@@ -274,7 +263,7 @@ func TestManagerOwnsOnePeerPerSessionAndHealsLostWorkers(t *testing.T) {
 	if err := f.reg.SetAlias("renamed", "older"); err != nil {
 		t.Fatal(err)
 	}
-	waitUntil(t, "heartbeat to publish the rename", func() bool {
+	testkit.Eventually(t, "heartbeat to publish the rename", 5*time.Second, func() bool {
 		var record peerRecord
 		data, err := os.ReadFile(f.recordPath(older.PID))
 		return err == nil && json.Unmarshal(data, &record) == nil && record.Name == "agenthail/notion: @renamed"

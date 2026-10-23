@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func TestDevicePairingIsScopedSingleUseAndRevocable(t *testing.T) {
@@ -147,7 +149,7 @@ func TestDeviceAuthenticationRecordsLastSeenAtMostOncePerMinute(t *testing.T) {
 	if err != nil || first.LastSeenAt == "" {
 		t.Fatalf("first=%+v err=%v", first, err)
 	}
-	awaitCondition(t, "the first stamp to be written", func() bool { return stored() == first.LastSeenAt })
+	testkit.Eventually(t, "the first stamp to be written", 5*time.Second, func() bool { return stored() == first.LastSeenAt })
 	repeat, err := r.AuthenticateDevice(token, "read")
 	if err != nil || repeat.LastSeenAt != first.LastSeenAt {
 		t.Fatalf("repeat=%+v err=%v", repeat, err)
@@ -164,7 +166,7 @@ func TestDeviceAuthenticationRecordsLastSeenAtMostOncePerMinute(t *testing.T) {
 	if err != nil || refreshed.LastSeenAt == stale {
 		t.Fatalf("refreshed=%+v err=%v", refreshed, err)
 	}
-	awaitCondition(t, "the refreshed stamp to be written", func() bool { return stored() == refreshed.LastSeenAt })
+	testkit.Eventually(t, "the refreshed stamp to be written", 5*time.Second, func() bool { return stored() == refreshed.LastSeenAt })
 }
 
 // A loaded Mac had other processes holding the registry's write lock while a
@@ -203,7 +205,7 @@ func TestDeviceAuthenticationDoesNotWaitForTheWriteLock(t *testing.T) {
 	if _, err := holder.ExecContext(context.Background(), `COMMIT`); err != nil {
 		t.Fatal(err)
 	}
-	awaitCondition(t, "the stamp to be written once the lock is free", func() bool {
+	testkit.Eventually(t, "the stamp to be written once the lock is free", 5*time.Second, func() bool {
 		var seen string
 		return r.read.QueryRow(`SELECT last_seen_at FROM paired_devices WHERE id=?`, device.ID).Scan(&seen) == nil && seen != ""
 	})
@@ -325,17 +327,6 @@ func TestPairingStatusNamesTheDeviceItsCodePaired(t *testing.T) {
 		if status.State != PairingPaired || status.Device == nil || status.Device.ID != deviceID {
 			t.Fatalf("pairing %s status=%+v, want device %s", pairingID, status, deviceID)
 		}
-	}
-}
-
-func awaitCondition(t *testing.T, what string, condition func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for !condition() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 

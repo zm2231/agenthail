@@ -106,23 +106,18 @@ func (r *Registry) ListProjects() ([]ProjectRecord, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	projects := []ProjectRecord{}
-	for rows.Next() {
+	return appendRows([]ProjectRecord{}, rows, func(row rowScanner) (ProjectRecord, error) {
 		var project ProjectRecord
 		var added int
 		var createdAt, archivedAt int64
-		if err := rows.Scan(&project.ID, &project.WorkspaceRoot, &project.Title, &added, &project.Key, &project.Repository, &createdAt, &archivedAt); err != nil {
-			return nil, err
-		}
+		err := row.Scan(&project.ID, &project.WorkspaceRoot, &project.Title, &added, &project.Key, &project.Repository, &createdAt, &archivedAt)
 		project.Added = added == 1
 		project.CreatedAt = time.UnixMilli(createdAt).UTC()
 		if archivedAt > 0 {
 			project.ArchivedAt = time.UnixMilli(archivedAt).UTC()
 		}
-		projects = append(projects, project)
-	}
-	return projects, rows.Err()
+		return project, err
+	})
 }
 
 // ArchiveProject archives an added project, or writes the archive row of an

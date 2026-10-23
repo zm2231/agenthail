@@ -7,11 +7,13 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func fakeBackgroundClaude(t *testing.T) (string, *Claude) {
@@ -74,7 +76,7 @@ func TestClaudeStartsASessionInTheHostWithItsFirstTurn(t *testing.T) {
 	if len(spawns) != 1 || !slices.Contains(spawns[0].Argv, "--permission-mode=acceptEdits") && !slices.Contains(spawns[0].Argv, "acceptEdits") {
 		t.Fatalf("spawns=%+v", spawns)
 	}
-	claudehosttest.WaitFor(t, "the first turn", func() bool {
+	testkit.Eventually(t, "the first turn", 15*time.Second, func() bool {
 		turns := host.Turns(t, session.ID)
 		return len(turns) == 1 && turns[0].UUID == turn && turns[0].Text == "build it" && string(turns[0].Origin) == `{"kind":"human"}`
 	})
@@ -144,7 +146,7 @@ func TestClaudeHostSessionLifecycle(t *testing.T) {
 	if _, err := c.SessionAction(context.Background(), session, "stop"); err != nil {
 		t.Fatal(err)
 	}
-	claudehosttest.WaitFor(t, "the session to close", func() bool { return !claudehosttest.Alive(session.PID) })
+	testkit.Eventually(t, "the session to close", 15*time.Second, func() bool { return !claudehosttest.Alive(session.PID) })
 	if status, err := c.SessionAction(context.Background(), session, "status"); err != nil || status["state"] != "closed" {
 		t.Fatalf("status after stop=%v err=%v", status, err)
 	}

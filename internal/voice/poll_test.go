@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func TestAToolCallReachesItsHandlerWithoutWaitingOutThePoll(t *testing.T) {
@@ -18,7 +20,7 @@ func TestAToolCallReachesItsHandlerWithoutWaitingOutThePoll(t *testing.T) {
 	p.mu.Unlock()
 	sent := time.Now()
 	p.arrived <- struct{}{}
-	waitFor(t, "the projects answer", func() bool { return len(p.answers()) == 1 })
+	testkit.Eventually(t, "the projects answer", 5*time.Second, func() bool { return len(p.answers()) == 1 })
 	if elapsed := time.Since(sent); elapsed >= 100*time.Millisecond {
 		t.Fatalf("the tool call took %v to reach its handler", elapsed)
 	}
@@ -37,7 +39,7 @@ func TestASourceThatLostItsEventsIsAskedAgainOnlyOnTheNextTick(t *testing.T) {
 	before := p.polls
 	p.mu.Unlock()
 	f.ticks <- time.Time{}
-	waitFor(t, "the lost poll", func() bool {
+	testkit.Eventually(t, "the lost poll", 5*time.Second, func() bool {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		return p.polls-before >= 1
@@ -53,7 +55,7 @@ func TestASourceThatLostItsEventsIsAskedAgainOnlyOnTheNextTick(t *testing.T) {
 		t.Fatalf("the lost events were not recorded: %+v", got)
 	}
 	f.ticks <- time.Time{}
-	waitFor(t, "the poll after the next tick", func() bool {
+	testkit.Eventually(t, "the poll after the next tick", 5*time.Second, func() bool {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		return p.polls-before == 2
@@ -66,7 +68,7 @@ func TestAPollWaitsNoLongerThanTheCallsNextDeadline(t *testing.T) {
 	apply(t, f, Action{Action: "heartbeat", AttemptID: "call-a"})
 	waitForWait := func(want time.Duration) {
 		t.Helper()
-		waitFor(t, fmt.Sprintf("a poll bounded at %v", want), func() bool {
+		testkit.Eventually(t, fmt.Sprintf("a poll bounded at %v", want), 5*time.Second, func() bool {
 			p.mu.Lock()
 			defer p.mu.Unlock()
 			return p.lastWait == want

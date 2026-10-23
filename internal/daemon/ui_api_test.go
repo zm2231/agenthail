@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/testkit"
 	"github.com/zm2231/agenthail/internal/uiconf"
 )
 
@@ -187,7 +188,7 @@ func TestWatchUICommitsHandEditsAndAnnouncesThem(t *testing.T) {
 		cancel()
 		<-done
 	}()
-	waitFor(t, 10*time.Second, func() bool {
+	testkit.Eventually(t, "the condition", 10*time.Second, func() bool {
 		d.ui.mu.Lock()
 		defer d.ui.mu.Unlock()
 		return d.ui.published != ""
@@ -195,7 +196,7 @@ func TestWatchUICommitsHandEditsAndAnnouncesThem(t *testing.T) {
 	if err := os.WriteFile(store.Path(), []byte("version = 1\ntheme = light\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, func() bool { return len(uiEvents(d)) == 1 })
+	testkit.Eventually(t, "the condition", 10*time.Second, func() bool { return len(uiEvents(d)) == 1 })
 	entries, err := store.Log(1)
 	if err != nil || len(entries) != 1 || entries[0].Author != uiconf.Person || entries[0].Message != "Edited by hand" {
 		t.Fatalf("latest commit = %+v, %v", entries, err)

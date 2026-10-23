@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/agentcard"
+	"github.com/zm2231/agenthail/internal/procstart"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -146,7 +147,7 @@ func claudeProcStart(t *testing.T, pid int) string {
 func nativeRecordStart(t *testing.T, pid int) string {
 	t.Helper()
 	if runtime.GOOS == "linux" {
-		ticks, err := ProcStartTicks(pid)
+		ticks, err := procstart.Ticks(pid)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1020,16 +1021,6 @@ func TestPeerMessageForAHostsSessionIsHeldForThatHostWithItsSender(t *testing.T)
 	}
 	if reg.QueueCount("remote-a") != 2 {
 		t.Fatalf("queue count=%d", reg.QueueCount("remote-a"))
-	}
-}
-
-func TestProcStatStartTimeSkipsCommandNamesWithSpaces(t *testing.T) {
-	stat := "13446 (claude (bg) x) S 13433 13433 13433 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 11 0 1562374 1000 50\n"
-	if got, err := procStatStartTime(stat); err != nil || got != "1562374" {
-		t.Fatalf("start=%q err=%v", got, err)
-	}
-	if _, err := procStatStartTime("13446 claude S"); err == nil {
-		t.Fatal("malformed stat accepted")
 	}
 }
 

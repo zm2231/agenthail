@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 	"github.com/zm2231/agenthail/internal/voice"
 )
 
@@ -159,7 +159,7 @@ func TestVoiceDelegationToAHostSessionIsAPersonsTurnAndSpeaksTheReply(t *testing
 	f.session = hosted
 	service, call := connectVoice(t, f, "orphan")
 	delegate(t, service, "hello")
-	claudehosttest.WaitFor(t, "the spoken reply", func() bool { return call.said("echo:hello") })
+	testkit.Eventually(t, "the spoken reply", 15*time.Second, func() bool { return call.said("echo:hello") })
 	turns := f.host.Turns(t, orphanConversation)
 	if f.resumes(t) != 1 || len(turns) != 1 || turnOrigin(t, turns[0]) != "human" || failed(service.View("phone")) {
 		t.Fatalf("resumes=%d turns=%+v message=%q", f.resumes(t), turns, service.View("phone").Message)
