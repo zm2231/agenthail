@@ -83,7 +83,8 @@ correlation. An omitted launcher preserves the existing creation path.
 ## Durable delivery problems
 
 Snapshot responses include `deliveryProblems`, the newest 50 undismissed
-durable problems. Each problem carries its numeric `deliveryId`, an RFC3339
+durable problems that are still unresolved and recent (see
+`delivery-problems.md`). Each problem carries its numeric `deliveryId`, an RFC3339
 timestamp, and the persisted status/evidence fields. `POST /api/action` with
 `{"action":"delivery-dismiss","deliveryId":123}` atomically marks that
 problem dismissed; the operation is idempotent and never resends the message.

@@ -1,7 +1,13 @@
 # Delivery problem snapshot and dismissal
 
 Snapshots expose at most the 50 newest undismissed delivery intents whose
-status is `failed` as `deliveryProblems`. Each item contains the
+status is `failed` or `held` as `deliveryProblems`. A failure leaves the list
+once a later message from the same sender reached the same target (`sent` or
+`delivered`), or once it is more than a day old; a held message stays until
+its target releases or drops it. Every 10 seconds the daemon dismisses the
+failures that left the list, with the same `delivery.dismissed` event a
+person's dismissal records, so live clients drop them. The failed intent and
+its queue row stay in delivery history and `agenthail queue list --all`. Each item contains the
 numeric `deliveryId`, target and sender session IDs, bounded message, failure
 reason, status, and the status update time in RFC3339 form.
 
