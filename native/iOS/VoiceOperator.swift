@@ -25,10 +25,12 @@ struct AgenthailVoiceOperatorSheet: View {
     @State private var atLatest = true
     @State private var userScrolling = false
     @State private var position = ScrollPosition()
+    let rowMemory: TranscriptRowMemory
     let openSession: (String) -> Void
 
-    init(model: VoiceOperatorModel, openSession: @escaping (String) -> Void) {
+    init(model: VoiceOperatorModel, rowMemory: TranscriptRowMemory, openSession: @escaping (String) -> Void) {
         self.model = model
+        self.rowMemory = rowMemory
         self.openSession = openSession
     }
 
@@ -93,6 +95,7 @@ struct AgenthailVoiceOperatorSheet: View {
                                 }
                                 Button("Open full timeline") { openSession(detail.session.id) }
                             }.padding(.top, 12)
+                            .environment(\.transcriptRows, TranscriptRows(memory: rowMemory, session: detail.session.id))
                         } label: {
                             Label(detail.session.status == "busy" ? "Orchestrator is working" : "Agent activity", systemImage: "terminal")
                                 .font(.subheadline.weight(.medium)).frame(minHeight: 44)
@@ -365,7 +368,7 @@ struct VoiceOperatorEntry: View {
             .accessibilityIdentifier("voice-entry")
             .sheet(isPresented: $presented) {
                 if let call = voiceCalls.model {
-                    AgenthailVoiceOperatorSheet(model: call) { id in operatorID = model.voiceSessionID(id) }
+                    AgenthailVoiceOperatorSheet(model: call, rowMemory: model.rowMemory) { id in operatorID = model.voiceSessionID(id) }
                         .sheet(isPresented: Binding(get: { operatorID != nil }, set: { if !$0 { operatorID = nil } })) {
                             if let id = operatorID {
                                 NavigationStack {

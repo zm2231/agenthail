@@ -526,6 +526,7 @@ struct SessionScreen: View {
                 }
                 .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
                 .environment(\.revealRow) { position.scrollTo(y: $0) }
+                .environment(\.transcriptRows, TranscriptRows(memory: model.rowMemory, session: session.id))
                 .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
@@ -648,7 +649,7 @@ struct SessionScreen: View {
             }
             .sheet(isPresented: $showingVoice) {
                 if let call = voiceCalls.model {
-                    AgenthailVoiceOperatorSheet(model: call) { _ in }
+                    AgenthailVoiceOperatorSheet(model: call, rowMemory: model.rowMemory) { _ in }
                 }
             }
             .task(id: session.id) {
@@ -890,6 +891,9 @@ struct IOSMessage: View {
     let color: Color
     var timestamp: String? = nil
     var files: [AttachedFile] = []
+    var peer = false
+    /// How long the turn this reply ended took, from the host.
+    var finished: String? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.editMessage) private var editMessage
     @State private var showingFullMessage = false
@@ -915,15 +919,19 @@ struct IOSMessage: View {
                         .font(.subheadline.weight(.medium))
                         .frame(minHeight: 44)
                 }
+            } else if peer {
+                Text(label).font(.footnote.weight(.semibold)).foregroundStyle(.blue)
+                SessionMarkdown(text: text, readingStyle: true)
             } else {
                 SessionMarkdown(text: text, readingStyle: true)
             }
-            HStack {
-                Spacer(minLength: 0)
-                SessionTimestamp(value: timestamp)
-            }
+            footer
         }
         .padding(isUser ? 14 : 0)
+        .padding(.leading, peer ? 12 : 0)
+        .overlay(alignment: .leading) {
+            if peer { Rectangle().fill(.blue).frame(width: 2) }
+        }
         .background(isUser ? SessionStyle.surface : .clear, in: RoundedRectangle(cornerRadius: 16))
         .padding(.leading, isUser && !dynamicTypeSize.isAccessibilitySize ? 16 : 0)
         .padding(.vertical, 4)
@@ -936,6 +944,25 @@ struct IOSMessage: View {
         }
         .sheet(isPresented: $showingFullMessage) {
             TranscriptDocument(title: "Your message", text: text, markdown: false)
+        }
+    }
+
+    @ViewBuilder private var footer: some View {
+        if isUser || peer {
+            HStack {
+                Spacer(minLength: 0)
+                SessionTimestamp(value: timestamp)
+            }
+        } else {
+            HStack(spacing: 6) {
+                Text("✦").font(.caption).foregroundStyle(SessionStyle.accent).accessibilityHidden(true)
+                if let finished {
+                    Text(TurnClock.footer(duration: finished, at: timestamp)).font(.caption).foregroundStyle(.secondary)
+                } else {
+                    SessionTimestamp(value: timestamp)
+                }
+                Spacer(minLength: 0)
+            }
         }
     }
 }
@@ -981,10 +1008,12 @@ struct AttachedFileChip: View {
 struct IOSTimelineRow: View {
     let item: TimelineItem
     var compactContext = true
+    var finished: String? = nil
 	var bodyLoader: ((TimelineItem) async -> RetainedBodyResult?)? = nil
     var attachmentLoader: ((TimelineItem) async -> Data?)? = nil
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var expanded = false
+    var onInspect: () -> Void = {}
+    @State private var opened: RowChoice<Bool>?
+    @Environment(\.transcriptRows) private var rows
 	@State private var retainedBody: RetainedBodyResult?
 
     var body: some View {
@@ -993,52 +1022,45 @@ struct IOSTimelineRow: View {
         } else if compactContext, let title = TranscriptContext.title(for: item) {
             ContextRecordRow(title: title, item: item)
         } else if item.kind == "notice" {
-            Label("\(item.title): \(item.noticeText)", systemImage: item.status == "usage_limit" ? "gauge.with.dots.needle.100percent" : "exclamationmark.triangle")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .padding(.vertical, 4)
-                .textSelection(.enabled)
-        } else if item.kind == "message" {
-            IOSMessage(label: messageLabel, text: item.text, color: .secondary, timestamp: item.timestamp, files: item.files ?? [])
-            if item.truncated { shortened }
+            TranscriptDivider(text: "\(item.title): \(item.noticeText)")
+        } else if item.isSaid {
+            IOSMessage(label: messageLabel, text: item.text, color: .secondary, timestamp: item.timestamp, files: item.files ?? [], peer: item.isPeerMessage, finished: finished)
+            if item.truncated { ShortenedNote() }
         } else if item.kind == "attachment" {
             AttachmentRow(item: item, loader: attachmentLoader.map { loader in { await loader(item) } })
         } else if item.kind == "toolCall" {
             ToolActivityRow(call: item, results: [], standaloneRecord: true)
+        } else if TimelineGroup.isTurnDuration(item) {
+            Text(TurnClock.footer(duration: item.text, at: item.timestamp))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 4)
         } else if item.kind == "event" {
-            let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
-            layout {
-                Label(eventLabel, systemImage: "clock").font(.footnote)
-                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
-                SessionTimestamp(value: item.timestamp)
-            }
-            .foregroundStyle(.secondary)
-            .padding(.vertical, 4)
-            .textSelection(.enabled)
-            if item.truncated { shortened }
+            TranscriptDivider(text: [eventLabel, TurnClock.time(item.timestamp)].compactMap { $0 }.joined(separator: " · "))
+            if item.truncated { ShortenedNote() }
         } else {
+            let open = rows.current(opened) ?? rows.isOpen(item.id) ?? (item.kind == "toolResult" && ToolRunSummary.isFailure(item))
             VStack(alignment: .leading, spacing: 8) {
-                Button { expanded.toggle() } label: {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: item.kind == "reasoning" ? "text.bubble" : item.kind == "attachment" ? "paperclip" : "text.alignleft")
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.kind == "reasoning" ? "Reasoning" : item.title).font(.subheadline.weight(.medium))
-                            if !expanded && !item.text.isEmpty {
-                                Text(item.text).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                        Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.caption)
-                    }
-                    .frame(minHeight: 44, alignment: .leading)
-                    .contentShape(Rectangle())
-                }.buttonStyle(.plain)
-                if expanded {
-                    if item.kind == "toolResult" { TranscriptCode(text: item.text) }
-                    else { SessionMarkdown(text: item.text, readingStyle: item.kind == "reasoning") }
-                    SessionTimestamp(value: item.timestamp)
+                Button {
+                    onInspect()
+                    opened = rows.choice(!open)
+                    rows.set(item.id, open: !open)
+                } label: {
+                    ToolLineLabel(verb: lineVerb, object: firstLine, isCode: item.kind == "toolResult", failed: item.kind == "toolResult" && ToolRunSummary.isFailure(item), trailing: open ? "chevron.down" : "chevron.right")
                 }
-                if item.truncated { shortened }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("record-" + item.id)
+                .accessibilityValue(open ? "Expanded" : "Collapsed")
+                if open {
+                    Group {
+                        if item.kind == "toolResult" { ToolOutput(result: item) }
+                        else {
+                            SessionMarkdown(text: item.text, readingStyle: item.kind == "reasoning")
+                            if item.truncated { ShortenedNote() }
+                        }
+                    }
+                    .padding(.leading, ToolLineLabel.indent)
+                } else if item.truncated { ShortenedNote().padding(.leading, ToolLineLabel.indent) }
 				if item.bodyRef != nil, retainedBody == nil, let bodyLoader {
 					Button("Load retained body") { Task { retainedBody = await bodyLoader(item) } }.font(.caption)
 				} else if let retainedBody {
@@ -1048,9 +1070,19 @@ struct IOSTimelineRow: View {
                     }
                 }
             }
-            .padding(.vertical, 4)
             .contextMenu { CopyCallID(item: item) }
         }
+    }
+
+    private var lineVerb: String {
+        switch item.kind {
+        case "reasoning": "Thought"
+        case "toolResult": "Output"
+        default: item.title
+        }
+    }
+    private var firstLine: String {
+        item.text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
     }
 
     private var messageLabel: String {
@@ -1064,9 +1096,6 @@ struct IOSTimelineRow: View {
     private var eventLabel: String {
         let title = [item.title.replacingOccurrences(of: "_", with: " ").capitalized, item.status ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
         return item.text.isEmpty ? title : "\(title) · \(item.text)"
-    }
-    private var shortened: some View {
-        Label("Content shortened by the host", systemImage: "text.badge.ellipsis").font(.caption).foregroundStyle(.secondary)
     }
 }
 
@@ -1287,18 +1316,30 @@ struct SessionInspector: View {
                     }
                 }
                 if let links = detail.claudeSubagents, !links.isEmpty {
-                    Section("Claude subagents") {
-                        ForEach(links) { link in
+                    let list = ClaudeSubagentList(links, total: detail.claudeSubagentsTotal, expanded: model.showsAllClaudeSubagents)
+                    Section {
+                        ForEach(list.shown) { link in
                             VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(link.agentType.flatMap { $0.isEmpty ? nil : $0 } ?? link.agentId).font(.body.weight(.medium)).textSelection(.enabled)
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(link.title).font(.body.weight(.medium)).lineLimit(2)
                                     Spacer(minLength: 0)
-                                    if link.working == true { Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(SessionStyle.accent) }
+                                    if link.working == true {
+                                        Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(SessionStyle.accent)
+                                    } else if let value = link.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
+                                        Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }
-                                if let description = link.description, !description.isEmpty { Text(description).font(.subheadline).foregroundStyle(.secondary) }
-                                if !link.transcriptPath.isEmpty { Text(link.transcriptPath).font(.footnote.monospaced()).foregroundStyle(.secondary).textSelection(.enabled) }
+                                if let kind = link.kindLabel { Text(kind).font(.caption).foregroundStyle(.secondary) }
                             }
+                            .accessibilityElement(children: .combine)
                         }
+                        if list.earlier > 0 {
+                            Button(list.earlierLabel) { model.showAllClaudeSubagents() }
+                        }
+                    } header: {
+                        Text("Claude subagents")
+                    } footer: {
+                        Text(list.summary)
                     }
                 }
                 if let errors = detail.metadataErrors, !errors.isEmpty {
@@ -1489,12 +1530,12 @@ struct IOSSessionRow: View {
                     }
                 }
             }
-            if session.queueCount > 0 || session.isReadOnly || (family?.subagentCount ?? 0) > 0 || !session.sharedHolders.isEmpty {
+            if session.queueCount > 0 || session.isReadOnly || (family?.workingSubagents ?? 0) > 0 || !session.sharedHolders.isEmpty {
                 layout {
-                    if let family, family.subagentCount > 0 {
+                    if let family, family.workingSubagents > 0 {
                         Label(SessionFamilies.subagentSummary(family), systemImage: "person.2")
                             .font(.caption)
-                            .foregroundStyle(family.workingSubagents > 0 ? SessionStyle.accent : .secondary)
+                            .foregroundStyle(SessionStyle.accent)
                     }
                     if session.queueCount > 0 { Label("\(session.queueCount) waiting", systemImage: "tray").font(.caption) }
                     if !session.sharedHolders.isEmpty { Label("\(session.sharedHolders.count) terminals", systemImage: "terminal").font(.caption) }

@@ -40,8 +40,15 @@ targets:
       - path: ProjectActions.swift
       - path: SessionTree.swift
       - path: MetadataOverlay.swift
+      - path: ClaudeSubagentList.swift
       - path: EventRetryBackoff.swift
       - path: ToolPresentation.swift
+      - path: TextDiff.swift
+      - path: DiffPresentation.swift
+      - path: ToolRunSummary.swift
+      - path: TranscriptRows.swift
+      - path: TurnClock.swift
+      - path: TimelineMetadata.swift
       - path: VoiceAPI.swift
       - path: VoiceAudioBridge.swift
       - path: VoiceCallDiagnostics.swift

@@ -40,6 +40,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
     }
     @Published private(set) var hosts: [PairedHostStatus] = []
+    /// Which transcript rows were opened in each session, kept while the app runs.
+    let rowMemory = TranscriptRowMemory()
     @Published private(set) var creationHosts: [CreationHost] = []
     @Published private(set) var projects: [String: ListedProject] = [:]
     @Published private(set) var holderPicks: [String: HolderPin] = [:]
@@ -1061,9 +1063,10 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         sessionMetadataTask?.cancel()
         guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), case let (connection, route)? = try? resolveServer(id) else { return }
         sessionMetadata.metadataRequested()
+        let allSubagents = sessionMetadata.allClaudeSubagents
         sessionMetadataTask = Task { [weak self, connection] in
             do {
-                let metadata = try await connection.api.sessionMetadata(id: route.sessionID)
+                let metadata = try await connection.api.sessionMetadata(id: route.sessionID, allSubagents: allSubagents)
                 guard !Task.isCancelled, self?.server(for: id) === connection else { return }
                 self?.updateSessionMetadata(for: id) { $0.absorb(metadata) }
             } catch {
@@ -1071,6 +1074,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 self?.updateSessionMetadata(for: id) { $0.metadataFailed() }
             }
         }
+    }
+
+    var showsAllClaudeSubagents: Bool { sessionMetadata.allClaudeSubagents }
+
+    func showAllClaudeSubagents() {
+        guard let id = selectedSessionID else { return }
+        sessionMetadata.showAllClaudeSubagents()
+        startSessionMetadata(id)
     }
 
     private func updateSessionMetadata(for id: String, _ change: (inout MetadataOverlay) -> Void) {

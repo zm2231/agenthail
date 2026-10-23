@@ -69,7 +69,11 @@ jobs:
           node scripts/test-dashboard-devices.mjs
           node scripts/test-session-controls.mjs
       - name: Public copy check
-        run: scripts/check-public-copy.sh
+        run: |
+          scripts/test-check-public-copy.sh
+          scripts/check-public-copy.sh
+      - name: Runner hook tests
+        run: scripts/test-ci-runner-job-started.sh
       - name: Push relay tests
         working-directory: push-relay
         run: |

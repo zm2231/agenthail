@@ -42,20 +42,20 @@ struct SubagentPagesTest {
         cache.sessionRemoved("p4", unlisted: false)
         check(cache.session("p4-child") == nil, "a removed parent drops its page")
 
-        var resting = session("child", parent: "root")
-        resting.listed = false
-        let family = SessionFamilies.build([session("root", hidden: 2), resting])[0]
-        check(family.members.map(\.id) == ["child"] && family.subagentCount == 2, "a pinned hidden subagent is shown but already counted by its parent: \(family.subagentCount)")
+        var pinned = session("child", parent: "root", status: "busy")
+        pinned.listed = false
+        let family = SessionFamilies.build([session("root", hidden: 2, hiddenWorking: 1), pinned])[0]
+        check(family.members.map(\.id) == ["child"] && family.workingSubagents == 1, "a pinned hidden subagent is shown but already counted by its parent: \(family.workingSubagents)")
         print("subagent pages tests passed")
     }
 
-    static func session(_ id: String, parent: String? = nil, hidden: Int = 0, status: String = "idle") -> SessionState {
+    static func session(_ id: String, parent: String? = nil, hidden: Int = 0, hiddenWorking: Int = 0, status: String = "idle") -> SessionState {
         var json: [String: Any] = ["id": id, "surface": "codex", "name": id, "status": status, "queueCount": 0, "open": false, "current": false,
                                    "capabilities": ["send": true, "stream": true, "reply": true, "goal": true, "compact": true, "model": true, "interrupt": true, "steer": true]]
         if let parent { json["subagent"] = ["parentId": parent, "rootId": parent, "depth": 1] }
         if hidden > 0 {
-            json["hiddenSubagents"] = ["count": hidden, "working": 0]
-            json["subagents"] = ["count": hidden, "working": 0]
+            json["hiddenSubagents"] = ["count": hidden, "working": hiddenWorking]
+            json["subagents"] = ["count": hidden, "working": hiddenWorking]
         }
         return try! JSONDecoder().decode(SessionState.self, from: JSONSerialization.data(withJSONObject: json))
     }

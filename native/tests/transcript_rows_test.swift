@@ -22,6 +22,10 @@ struct TranscriptRowsTest {
         check(first.isOpen("row-1") == true && second.isOpen("row-1") == false, "each session keeps its own choice for a shared id")
         check(TranscriptRows(memory: memory, session: "first").current(opened) == true, "switching back restores the row's choice")
         check(first == TranscriptRows(memory: memory, session: "first") && first != second, "rows are equal only for the same memory and session")
+
+        first.set("output-1", count: 1000)
+        check(first.count("output-1") == 1000, "a session remembers how much output was shown, not just that it was open")
+        check(second.count("output-1") == nil, "another session's output starts from its preview")
     }
 
     private static func check(_ condition: Bool, _ message: String) {

@@ -16,6 +16,8 @@ const chatStart = rendererEnd;
 const chatEnd = source.indexOf("function compactTokenCount", chatStart);
 const goalStart = chatEnd;
 const goalEnd = source.indexOf("function renderContextUsage", goalStart);
+const metadataStart = source.indexOf("function loadSessionMetadata");
+const metadataEnd = source.indexOf("function renderImageAttachment", metadataStart);
 const presenceStart = source.indexOf("function statusLabel");
 const presenceEnd = source.indexOf("function conversationMeta", presenceStart);
 assert(markdownStart >= 0 && markdownEnd > markdownStart, "markdown renderer boundary missing");
@@ -24,6 +26,7 @@ assert(rendererStart >= 0 && rendererEnd > rendererStart, "timeline renderer bou
 assert(chatEnd > chatStart, "chat renderer boundary missing");
 assert(goalEnd > goalStart, "goal renderer boundary missing");
 assert(presenceStart >= 0 && presenceEnd > presenceStart, "presence label boundary missing");
+assert(metadataStart >= 0 && metadataEnd > metadataStart, "metadata loader boundary missing");
 
 const elements = {
   "#chat-actions": { innerHTML: "" },
@@ -58,6 +61,7 @@ const context = {
   renderGoalAttention: () => "",
   renderLiveTurn: () => {},
   alignTranscriptTop: () => {},
+  timeAgo: (value) => `ago:${value}`,
   escape: (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
     "<": "&lt;",
@@ -70,6 +74,8 @@ vm.runInNewContext(`${source.slice(markdownStart, markdownEnd)}${source.slice(me
 globalThis.renderTimeline = renderTimeline;
 globalThis.timelineSignature = timelineSignature;
 globalThis.renderClaudeMetadata = renderClaudeMetadata;
+${source.slice(metadataStart, metadataEnd)}
+globalThis.loadSessionMetadata = loadSessionMetadata;
 ${source.slice(chatStart, chatEnd)}
 ${source.slice(goalStart, goalEnd)}
 ${source.slice(presenceStart, presenceEnd)}
@@ -147,9 +153,35 @@ const claudeMetadata = context.renderClaudeMetadata(
   [{ jobId: "job-1", runType: "background", providerState: "working", sessionId: "session-1", recordPath: "/records/job-1.json" }],
   [{ parentSessionId: "session-1", agentId: "agent-1", transcriptPath: "/transcripts/agent-1.jsonl" }],
 );
-for (const expected of ["job-1", "background", "working", "agent-1", "/transcripts/agent-1.jsonl"]) {
+for (const expected of ["job-1", "background", "working", "Subagent agent-1", "1 subagent in all"]) {
   assert(claudeMetadata.includes(expected), `Claude metadata omitted ${expected}`);
 }
+assert(!claudeMetadata.includes("/transcripts/agent-1.jsonl"), "a subagent row shows what it does, not its transcript path");
+
+const subagentLinks = Array.from({ length: 12 }, (_, index) => ({
+  parentSessionId: "session-1",
+  agentId: `agent-${String(index).padStart(2, "0")}`,
+  working: index >= 10,
+  lastActive: new Date(Date.UTC(2026, 9, 23, 12, 0) - index * 60000).toISOString(),
+  transcriptPath: `/transcripts/agent-${index}.jsonl`,
+  ...(index === 0 ? { description: "Review the parser", agentType: "general-purpose" } : {}),
+}));
+const rowsOf = (html) => [...html.matchAll(/<li><span>([^<]*)<\/span>/g)].map((match) => match[1]);
+const paged = context.renderClaudeMetadata([], subagentLinks, 30);
+assert.deepEqual(rowsOf(paged), ["Subagent agent-10", "Subagent agent-11", "Review the parser", ...[1, 2, 3, 4, 5, 6, 7].map((index) => `Subagent agent-0${index}`)], "working subagents come first, then the most recent");
+assert(paged.includes("2 working, 30 subagents in all") && paged.includes("data-subagents-all") && paged.includes("Show 20 earlier"), "the server total counts the earlier subagents");
+assert(paged.includes("· <span>general-purpose</span>") && !paged.includes("/transcripts/"), "a described subagent shows its type and no path");
+const older = context.renderClaudeMetadata([], subagentLinks);
+assert(rowsOf(older).length === 10 && older.includes("Show 2 earlier"), "a host without a total sent every subagent; the dashboard collapses them itself");
+const fetched = [];
+context.fetch = (url) => { fetched.push(url); return new Promise(() => {}); };
+context.app.allSubagents = false;
+context.loadSessionMetadata("session 1", {});
+context.app.allSubagents = true;
+context.loadSessionMetadata("session 1", {});
+assert.deepEqual(fetched, ["/api/session-metadata?id=session%201", "/api/session-metadata?id=session%201&subagents=all"], "only an expanded list asks for every subagent");
+const expanded = context.renderClaudeMetadata([], subagentLinks, 12, true);
+assert(rowsOf(expanded).length === 12 && !expanded.includes("data-subagents-all") && expanded.includes("<details class=\"session-details\" open>"), "an expanded list shows every subagent and stays open");
 assert(!claudeMetadata.includes("wake") && !claudeMetadata.includes("cancel"), "Claude metadata must not invent controls");
 
 context.app.selected = { id: "session-1", surface: "claude", runtime: {}, status: "idle" };
@@ -164,7 +196,7 @@ context.app.history = {
 context.renderChat();
 assert(elements["#chat-body"].innerHTML.includes("job-writable"), "writable Claude sessions should render supplied run observations");
 assert(elements["#request-panel"].hidden && elements["#request-panel"].innerHTML === "", "a session that takes no answers here shows no request panel");
-assert(elements["#chat-body"].innerHTML.includes("agent-writable"), "writable Claude sessions should render supplied subagent observations");
+assert(elements["#chat-body"].innerHTML.includes("Subagent agent-wr"), "writable Claude sessions should render supplied subagent observations");
 
 context.app.transcriptSignature = null;
 context.app.history = {

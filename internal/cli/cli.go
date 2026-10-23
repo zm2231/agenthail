@@ -1066,8 +1066,8 @@ func (a *App) cmdList(args []string) error {
 		if rows[index].depth > 0 {
 			name = strings.Repeat("  ", rows[index].depth-1) + "└ " + name
 		}
-		if s.Subagents != nil {
-			last += fmt.Sprintf("  %d subagents, %d working", s.Subagents.Count, s.Subagents.Working)
+		if label := workingSubagentsLabel(s.Subagents); label != "" {
+			last += "  " + label
 		}
 		if len(s.Holders) > 1 {
 			last += "  " + listHolders(s.Holders)

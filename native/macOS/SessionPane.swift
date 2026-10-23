@@ -705,12 +705,20 @@ final class SessionPane: ObservableObject, Identifiable {
         guard !closed, let api = model.api else { return }
         let selection = selectionGeneration
         metadataTask = Task {
-            let loaded = try? await api.sessionMetadata(id: id)
+            let loaded = try? await api.sessionMetadata(id: id, allSubagents: metadata.allClaudeSubagents)
             guard !Task.isCancelled, !closed, selectionGeneration == selection, selectedSessionID == id, removedSession == nil else { return }
             if let loaded { metadata.absorb(loaded) } else { metadata.metadataFailed() }
             modelCatalogNeeded = metadata.needsModelCatalog
             applyMetadata(to: id)
         }
+    }
+
+    var showsAllClaudeSubagents: Bool { metadata.allClaudeSubagents }
+
+    func showAllClaudeSubagents() {
+        guard let id = selectedSessionID else { return }
+        metadata.showAllClaudeSubagents()
+        startMetadataLoad(id)
     }
 
     private func applyMetadata(to id: String) {

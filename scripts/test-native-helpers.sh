@@ -29,8 +29,15 @@ SOURCES=(
   ProjectActions.swift
   SessionTree.swift
   MetadataOverlay.swift
+  ClaudeSubagentList.swift
   StatusRefreshPolicy.swift
   ToolPresentation.swift
+  TextDiff.swift
+  DiffPresentation.swift
+  ToolRunSummary.swift
+  TranscriptRows.swift
+  TurnClock.swift
+  TimelineMetadata.swift
   TurnSettings.swift
   UIConfig.swift
   PaletteTokens.swift
@@ -72,10 +79,8 @@ SOURCES=(
   macOS/SlashCommand.swift
   macOS/SnapshotBudget.swift
   macOS/SpotlightIndex.swift
-  macOS/ToolRunSummary.swift
   macOS/TranscriptBlock.swift
   macOS/TranscriptFollow.swift
-  macOS/TranscriptRows.swift
   macOS/VoiceController.swift
   macOS/WindowBackdrop.swift
   macOS/WindowImage.swift
@@ -96,7 +101,9 @@ swiftc -parse-as-library -emit-library -static -enable-testing \
 run_test() {
   local test="$1" name
   name="$(basename "$test" .swift)"
-  if swiftc -parse-as-library -I "$OUT" -L "$OUT" -lAgenthailHelpers "$test" -o "$OUT/$name" >"$OUT/logs/$name.log" 2>&1 &&
+  # Actor data-race checks trap when main-actor code runs off the main actor,
+  # so a race in a test fails every run instead of crashing now and then.
+  if swiftc -parse-as-library -Xfrontend -enable-actor-data-race-checks -I "$OUT" -L "$OUT" -lAgenthailHelpers "$test" -o "$OUT/$name" >"$OUT/logs/$name.log" 2>&1 &&
     "$OUT/$name" >>"$OUT/logs/$name.log" 2>&1; then
     echo "ok   $name"
   else

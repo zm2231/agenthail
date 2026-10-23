@@ -62,12 +62,12 @@ grep -q -- -collect-test-diagnostics <<<"$locked" && fail "a build was given a t
 run 0 xcrun xcodebuild test -scheme AgenthailIOS
 grep -qx -- -collect-test-diagnostics <<<"$locked" || fail "xcrun xcodebuild test does not turn off diagnostics: $locked"
 
-run 2 xcodebuild test -scheme AgenthailIOS -derivedDataPath /Volumes/disk/dd
+run 2 xcodebuild test -scheme AgenthailIOS -derivedDataPath /Volumes/work/dd
 [ -z "$locked" ] || fail "derived data under /Volumes took the simulator"
 
 (cd /Volumes && run 2 xcodebuild test -scheme AgenthailIOS -derivedDataPath dd && [ -z "$locked" ]) || fail "relative derived data under /Volumes took the simulator"
 
-XCODE_DERIVED_DATA=/Volumes/disk/DerivedData run 2 xcodebuild test -scheme AgenthailIOS
+XCODE_DERIVED_DATA=/Volumes/work/DerivedData run 2 xcodebuild test -scheme AgenthailIOS
 [ -z "$locked" ] || fail "Xcode's own derived data location under /Volumes was not refused"
 
 mkdir -p "$WORK/volume"

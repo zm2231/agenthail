@@ -118,6 +118,7 @@ func TestAPhoneAnswersAHostSessionsPermissionRequestOnceAndHistoryNamesIt(t *tes
 		turns := fixture.Turns(t, id)
 		return len(turns) == 1 && turns[0].Reply == "tool:allow:"
 	})
+	claudehosttest.WaitFor(t, "the answer in history", func() bool { return len(historyOf(t, r, id, "request-allowed")) > 0 })
 	answered := historyOf(t, r, id, "request-allowed")
 	if len(answered) != 1 || answered[0].Message != request.ID || answered[0].Result != "answered by device Phone" {
 		t.Fatalf("history = %+v", answered)
@@ -364,6 +365,7 @@ func TestAWaitingHostRequestPushNamesOnlyTheRequestAndTheButtonsComeFromTheMac(t
 	if response := choose(push["requestId"], "deny"); response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"outcome":"denied"`)) {
 		t.Fatalf("deny status=%d body=%s", response.Code, response.Body.String())
 	}
+	claudehosttest.WaitFor(t, "the denial in history", func() bool { return len(historyOf(t, r, id, "request-denied")) > 0 })
 	if denied := historyOf(t, r, id, "request-denied"); len(denied) != 1 || denied[0].Result != "answered by device Phone" {
 		t.Fatalf("history = %+v", denied)
 	}

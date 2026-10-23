@@ -137,7 +137,9 @@ struct SpotlightIndexTest {
     }
 
     /// Waits for the sync to reach a state, so a check does not depend on how
-    /// many scheduler turns it took to get there.
+    /// many scheduler turns it took to get there. It runs on the main actor,
+    /// where the sync and the store it reads live.
+    @MainActor
     private static func until(_ condition: () -> Bool) async {
         let deadline = Date().addingTimeInterval(5)
         while !condition(), Date() < deadline { await Task.yield() }

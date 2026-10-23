@@ -9,10 +9,11 @@ struct SubagentsSection: View {
         let sessions = model.knownSessions
         let parent = session.subagent.flatMap { identity in sessions.first { $0.id == identity.parentId } ?? model.fetchedSubagents.session(identity.parentId) }
         let children = SessionTree.newestFirst(model.subagents(of: session.id))
-        let observed = pane.detail?.session.id == session.id ? pane.detail?.claudeSubagents ?? [] : []
+        let current = pane.detail?.session.id == session.id ? pane.detail : nil
+        let observed = ClaudeSubagentList(current?.claudeSubagents ?? [], total: current?.claudeSubagentsTotal, expanded: pane.showsAllClaudeSubagents)
         let loading = model.fetchedSubagents.loading(session)
         let error = model.fetchedSubagents.errors[session.id]
-        if parent != nil || !children.isEmpty || !observed.isEmpty || loading || error != nil {
+        if parent != nil || !children.isEmpty || observed.total > 0 || loading || error != nil {
             VStack(alignment: .leading, spacing: 6) {
                 SidebarCaption("Subagents").padding(.horizontal, -8)
                 if let parent {
@@ -47,8 +48,18 @@ struct SubagentsSection: View {
                         .font(.system(size: DesktopType.meta))
                         .foregroundStyle(DesktopPalette.text2)
                 }
-                ForEach(observed) { link in
+                if observed.total > 0 {
+                    Text(observed.summary)
+                        .font(.system(size: DesktopType.meta))
+                        .foregroundStyle(DesktopPalette.text2)
+                }
+                ForEach(observed.shown) { link in
                     ClaudeSubagentRow(link: link)
+                }
+                if observed.earlier > 0 {
+                    Button(observed.earlierLabel) { pane.showAllClaudeSubagents() }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(DesktopPalette.accent)
                 }
             }
         }
@@ -66,8 +77,8 @@ private struct ClaudeSubagentRow: View {
                     .frame(width: 7, height: 7)
                     .frame(width: 12, height: 12)
                     .accessibilityHidden(true)
-                Text(link.agentType.flatMap { $0.isEmpty ? nil : $0 } ?? link.agentId)
-                    .lineLimit(1)
+                Text(link.title)
+                    .lineLimit(2)
                 Spacer(minLength: 4)
                 if let lastActive = link.lastActive {
                     Text(relativeAge(lastActive))
@@ -75,25 +86,12 @@ private struct ClaudeSubagentRow: View {
                         .foregroundStyle(DesktopPalette.text2)
                 }
             }
-            if let description = link.description, !description.isEmpty {
-                Text(description)
+            if let kind = link.kindLabel {
+                Text(kind)
                     .font(.system(size: DesktopType.meta))
                     .foregroundStyle(DesktopPalette.text2)
-                    .lineLimit(2)
                     .padding(.leading, DesktopSpace.xl)
             }
-            Button {
-                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: link.transcriptPath)])
-            } label: {
-                Text((link.transcriptPath as NSString).abbreviatingWithTildeInPath)
-                    .font(.system(size: DesktopType.caption, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(DesktopPalette.text2)
-            .padding(.leading, DesktopSpace.xl)
-            .help("Show transcript in Finder")
         }
         .accessibilityElement(children: .combine)
         .accessibilityValue(link.working == true ? "Working" : "Idle")

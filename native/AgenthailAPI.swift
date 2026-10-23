@@ -169,10 +169,10 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await get(path)
     }
 
-    func sessionMetadata(id: String) async throws -> SessionMetadata {
+    func sessionMetadata(id: String, allSubagents: Bool = false) async throws -> SessionMetadata {
         var components = URLComponents()
         components.path = "/api/v1/session-metadata"
-        components.queryItems = [URLQueryItem(name: "id", value: id)]
+        components.queryItems = [URLQueryItem(name: "id", value: id)] + (allSubagents ? [URLQueryItem(name: "subagents", value: "all")] : [])
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
         return try await get(path)
     }

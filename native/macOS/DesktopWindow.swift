@@ -575,13 +575,13 @@ struct SessionRowView: View {
                     .help(session.unavailableReason ?? "On \(session.remoteHostName ?? host)")
             }
             Spacer(minLength: 4)
-            if let family, family.subagentCount > 0 {
+            if let family, family.workingSubagents > 0 {
                 HStack(spacing: 3) {
                     Image(systemName: "person.2")
-                    Text(family.workingSubagents > 0 ? "\(family.workingSubagents)/\(family.subagentCount)" : "\(family.subagentCount)")
+                    Text("\(family.workingSubagents)")
                 }
                 .font(.system(size: DesktopType.caption))
-                .foregroundStyle(family.workingSubagents > 0 ? DesktopPalette.working : DesktopPalette.text2)
+                .foregroundStyle(DesktopPalette.working)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(SessionFamilies.subagentSummary(family))
             }
