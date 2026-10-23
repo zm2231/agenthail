@@ -98,7 +98,7 @@ jobs:
         run: scripts/ci-self-hosted.sh cleanup
 
   native:
-    if: ${{ !github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size }}
+    if: ${{ (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size) && (startsWith(github.head_ref, 'train/') || contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
     runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
     timeout-minutes: 20
     steps:
@@ -151,7 +151,7 @@ jobs:
           (cd "$root/claude-host" && "$root/runtime/node/bin/node" -e "import('@anthropic-ai/claude-agent-sdk').then(module => { if (!module.query) process.exit(1) })")
 
   installer:
-    if: ${{ !github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size }}
+    if: ${{ (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size) && (startsWith(github.head_ref, 'train/') || contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
     runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64","agenthail-vm"]') }}
     timeout-minutes: 30
     steps:
@@ -171,7 +171,7 @@ jobs:
           scripts/test-install-upgrade.sh
 
   package:
-    if: ${{ !github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size }}
+    if: ${{ (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size) && (startsWith(github.head_ref, 'train/') || contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
     runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail-vm"]') }}
     timeout-minutes: 45
     steps:
