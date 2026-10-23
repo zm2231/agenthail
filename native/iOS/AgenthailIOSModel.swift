@@ -827,11 +827,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 if !fellOff.isEmpty { olderActivity += fellOff }
             }
             var merged = sessionMetadata.apply(to: detail)
-            if seq < selectedSessionStateSeq, let current = selectedDetail?.session, current.id == id {
-                merged.session.status = current.status
-                merged.session.waitingOn = current.waitingOn
-                merged.session.backgroundTasks = current.backgroundTasks
-                merged.session.usageLimit = current.usageLimit
+            if seq < selectedSessionStateSeq, let current = selectedDetail, current.session.id == id {
+                merged.liveState = current.liveState
             } else {
                 selectedSessionStateSeq = seq
             }

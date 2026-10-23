@@ -95,22 +95,29 @@ final class SessionRefreshTests: XCTestCase {
         await model.refreshSession("computer::demo")
         XCTAssertEqual(model.selectedDetail?.capabilities.respond, false)
 
-        SessionRefreshProtocol.state.set(snapshotFields: #"{"alias":"renamed","name":"Renamed","cwd":"/moved","transport":"uds","runtimeKind":"claude-cli","lastActive":"2026-10-22T03:00:00Z","readOnly":true,"readOnlyReason":"Opened elsewhere","runtime":{"launcher":"cmux"},"waitingOn":{"kind":"question","id":"demo:question:held:r-1","answerable":true},"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false,"respond":true}}"#)
+        SessionRefreshProtocol.state.set(snapshotFields: Self.liveFields)
         await model.refresh()
 
-        let detail = model.selectedDetail
-        XCTAssertEqual(detail?.capabilities.respond, true)
-        XCTAssertEqual(detail?.capabilities.goal, false)
-        XCTAssertEqual(detail?.readOnly, true)
-        XCTAssertEqual(detail?.readOnlyReason, "Opened elsewhere")
-        XCTAssertEqual(detail?.alias, "renamed")
-        XCTAssertEqual(detail?.session.name, "Renamed")
-        XCTAssertEqual(detail?.session.cwd, "/moved")
-        XCTAssertEqual(detail?.session.transport, "uds")
-        XCTAssertEqual(detail?.session.runtimeKind, "claude-cli")
-        XCTAssertEqual(detail?.session.runtime?.launcher, "cmux")
-        XCTAssertEqual(detail?.session.lastActive, "2026-10-22T03:00:00Z")
-        XCTAssertEqual(detail?.session.waitingOn?.id, "demo:question:held:r-1")
+        assertLiveFields(model.selectedDetail)
+    }
+
+    private static let liveFields = #"{"alias":"renamed","name":"Renamed","cwd":"/moved","transport":"uds","runtimeKind":"claude-cli","lastActive":"2026-10-22T03:00:00Z","readOnly":true,"readOnlyReason":"Opened elsewhere","runtime":{"launcher":"cmux"},"waitingOn":{"kind":"question","id":"demo:question:held:r-1","answerable":true},"backgroundTasks":{"running":true,"source":"transcript"},"usageLimit":{"resetsAt":"2026-10-22T08:00:00Z"},"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false,"respond":true}}"#
+
+    private func assertLiveFields(_ detail: SessionDetail?, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(detail?.capabilities.respond, true, file: file, line: line)
+        XCTAssertEqual(detail?.capabilities.goal, false, file: file, line: line)
+        XCTAssertEqual(detail?.readOnly, true, file: file, line: line)
+        XCTAssertEqual(detail?.readOnlyReason, "Opened elsewhere", file: file, line: line)
+        XCTAssertEqual(detail?.alias, "renamed", file: file, line: line)
+        XCTAssertEqual(detail?.session.name, "Renamed", file: file, line: line)
+        XCTAssertEqual(detail?.session.cwd, "/moved", file: file, line: line)
+        XCTAssertEqual(detail?.session.transport, "uds", file: file, line: line)
+        XCTAssertEqual(detail?.session.runtimeKind, "claude-cli", file: file, line: line)
+        XCTAssertEqual(detail?.session.runtime?.launcher, "cmux", file: file, line: line)
+        XCTAssertEqual(detail?.session.lastActive, "2026-10-22T03:00:00Z", file: file, line: line)
+        XCTAssertEqual(detail?.session.waitingOn?.id, "demo:question:held:r-1", file: file, line: line)
+        XCTAssertNotNil(detail?.session.backgroundTasks, file: file, line: line)
+        XCTAssertNotNil(detail?.session.usageLimit, file: file, line: line)
     }
 
     @MainActor
@@ -162,11 +169,13 @@ final class SessionRefreshTests: XCTestCase {
         try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.detailHeld }
 
         SessionRefreshProtocol.state.set(snapshotStatus: "idle")
+        SessionRefreshProtocol.state.set(snapshotFields: Self.liveFields)
         await model.refresh()
         SessionRefreshProtocol.state.releaseDetail()
         await detail.value
 
         XCTAssertEqual(model.selectedDetail?.session.status, "idle")
+        assertLiveFields(model.selectedDetail)
     }
 
     @MainActor
