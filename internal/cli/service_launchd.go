@@ -104,7 +104,7 @@ func (launchdService) Stop() error {
 		fmt.Println("daemon not running")
 		return nil
 	}
-	if servicePID, loaded := launchdServicePID(daemonLaunchdLabel); loaded && servicePID == pid {
+	if job, loaded := launchdServiceJob(daemonLaunchdLabel); loaded && job.pid == pid {
 		return fmt.Errorf("daemon is supervised by launchd; use 'agenthail daemon uninstall' to stop and remove the service")
 	}
 	if err := daemon.Stop(); err != nil {
@@ -155,20 +155,27 @@ func daemonServicePlist(exe, envXML, logPath string) string {
 }
 
 func daemonServicePath() string {
+	return launchAgentPath(daemonLaunchdLabel)
+}
+
+func launchAgentPath(label string) string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "Library", "LaunchAgents", daemonLaunchdLabel+".plist")
+	return filepath.Join(home, "Library", "LaunchAgents", label+".plist")
 }
 
 func (launchdService) Install() error {
 	if homebrewDaemonManaged() {
 		return fmt.Errorf("daemon is managed by Homebrew; use 'brew services restart agenthail'")
 	}
+	if err := refuseOtherHomesService(daemonLaunchdLabel, "install"); err != nil {
+		return err
+	}
 	domain := fmt.Sprintf("gui/%d", os.Getuid())
 	_ = exec.Command("launchctl", "bootout", domain+"/"+daemonLaunchdLabel).Run()
 	// bootout returning does not mean launchd has released the label yet. Wait
 	// for that state before replacing the plist; otherwise an upgrade can race
 	// bootstrap and fail with a transient EIO.
-	for deadline := time.Now().Add(3 * time.Second); daemonServiceLoaded() && time.Now().Before(deadline); {
+	for deadline := time.Now().Add(3 * time.Second); launchdLabelLoaded(daemonLaunchdLabel) && time.Now().Before(deadline); {
 		time.Sleep(100 * time.Millisecond)
 	}
 	if _, running := daemon.IsRunning(); running {
@@ -223,6 +230,9 @@ func (launchdService) Uninstall() error {
 	if homebrewDaemonManaged() {
 		return fmt.Errorf("daemon is managed by Homebrew; use 'brew services stop agenthail'")
 	}
+	if err := refuseOtherHomesService(daemonLaunchdLabel, "uninstall"); err != nil {
+		return err
+	}
 	domain := fmt.Sprintf("gui/%d", os.Getuid())
 	_ = exec.Command("launchctl", "bootout", domain+"/"+daemonLaunchdLabel).Run()
 	if err := os.Remove(daemonServicePath()); err != nil && !os.IsNotExist(err) {
@@ -246,8 +256,8 @@ func restartLaunchdDaemon(label string) error {
 }
 
 func daemonServiceLoaded() bool {
-	target := fmt.Sprintf("gui/%d/%s", os.Getuid(), daemonLaunchdLabel)
-	return exec.Command("launchctl", "print", target).Run() == nil
+	_, loaded := launchdServiceJob(daemonLaunchdLabel)
+	return loaded
 }
 
 // waitForSupervisedDaemon waits for a daemon other than previous that launchd
@@ -258,7 +268,7 @@ func waitForSupervisedDaemon(label string, previous int, timeout time.Duration) 
 	for time.Now().Before(deadline) {
 		pid, running := daemon.IsRunning()
 		if running && pid != previous {
-			if servicePID, loaded := launchdServicePID(label); loaded && servicePID == pid {
+			if job, loaded := launchdServiceJob(label); loaded && job.pid == pid {
 				return pid, true
 			}
 		}
@@ -267,32 +277,80 @@ func waitForSupervisedDaemon(label string, previous int, timeout time.Duration) 
 	return 0, false
 }
 
-func launchdServicePID(label string) (int, bool) {
+// launchdJob is a job loaded in this user's launchd domain. Labels are per
+// user, not per HOME, so the job may run the daemon of another HOME.
+type launchdJob struct {
+	path string
+	pid  int
+}
+
+func printLaunchdJob(label string) (launchdJob, bool) {
 	target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
 	output, err := exec.Command("launchctl", "print", target).Output()
 	if err != nil {
-		return 0, false
+		return launchdJob{}, false
 	}
-	return parseDaemonServicePID(string(output)), true
+	return parseLaunchdJob(string(output)), true
 }
 
-func parseDaemonServicePID(output string) int {
+func launchdLabelLoaded(label string) bool {
+	_, loaded := printLaunchdJob(label)
+	return loaded
+}
+
+// launchdServiceJob reports label's job only when it was loaded from this
+// HOME's LaunchAgents, so a command run with another HOME manages that HOME's
+// unsupervised daemon and leaves the service alone.
+func launchdServiceJob(label string) (launchdJob, bool) {
+	job, loaded := printLaunchdJob(label)
+	if !loaded || !job.belongsToThisHome(label) {
+		return launchdJob{}, false
+	}
+	return job, true
+}
+
+func (job launchdJob) belongsToThisHome(label string) bool {
+	return job.path == "" || samePath(job.path, launchAgentPath(label))
+}
+
+// refuseOtherHomesService stops action from booting out a label another HOME
+// loaded; launchd holds one job per label for the user.
+func refuseOtherHomesService(label, action string) error {
+	job, loaded := printLaunchdJob(label)
+	if !loaded || job.belongsToThisHome(label) {
+		return nil
+	}
+	return fmt.Errorf("launchd service %s runs the daemon from %s, not this HOME's %s; refusing to %s it", label, job.path, launchAgentPath(label), action)
+}
+
+func samePath(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	resolvedA, errA := filepath.EvalSymlinks(a)
+	resolvedB, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && resolvedA == resolvedB
+}
+
+func parseLaunchdJob(output string) launchdJob {
+	var job launchdJob
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "pid = ") {
-			continue
+		if value, ok := strings.CutPrefix(line, "path = "); ok && job.path == "" {
+			job.path = strings.TrimSpace(value)
 		}
-		pid, parseErr := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "pid = ")))
-		if parseErr == nil && pid > 0 {
-			return pid
+		if value, ok := strings.CutPrefix(line, "pid = "); ok && job.pid == 0 {
+			if pid, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && pid > 0 {
+				job.pid = pid
+			}
 		}
 	}
-	return 0
+	return job
 }
 
 func homebrewDaemonServiceLoaded() bool {
-	target := fmt.Sprintf("gui/%d/%s", os.Getuid(), homebrewDaemonLaunchdLabel)
-	return exec.Command("launchctl", "print", target).Run() == nil
+	_, loaded := launchdServiceJob(homebrewDaemonLaunchdLabel)
+	return loaded
 }
 
 func homebrewDaemonManaged() bool {

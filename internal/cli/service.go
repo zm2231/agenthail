@@ -72,11 +72,13 @@ func serviceEnvironment() map[string]string {
 	}
 }
 
+var unsupervisedDaemonExecutable = os.Executable
+
 func startUnsupervisedDaemon() error {
 	if pid, ok := daemon.IsRunning(); ok {
 		return fmt.Errorf("daemon already running (pid %d)", pid)
 	}
-	exe, err := os.Executable()
+	exe, err := unsupervisedDaemonExecutable()
 	if err != nil {
 		return fmt.Errorf("locate agenthail binary: %w", err)
 	}
