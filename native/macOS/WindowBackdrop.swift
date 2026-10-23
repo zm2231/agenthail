@@ -29,7 +29,7 @@ final class WindowBackdrop: ObservableObject {
     private var scale: CGFloat = 2
     private var dark = true
     private var config = UIConfig.defaults
-    private var wallpaper: WallpaperImage?
+    private var wallpapers: [String: WallpaperImage] = [:]
     private var renderTask: Task<Void, Never>?
     private(set) var rendering = false
     private var pending = false
@@ -50,13 +50,18 @@ final class WindowBackdrop: ObservableObject {
 
     var paneRadius: CGFloat { gutter > 0 ? DesktopRadius.sheet : 0 }
 
-    func configure(_ config: UIConfig, wallpaper: WallpaperImage?) {
+    func configure(_ config: UIConfig, wallpapers: [String: WallpaperImage]) {
         self.config = config
-        self.wallpaper = wallpaper
+        self.wallpapers = wallpapers
+        refresh()
+    }
+
+    private func refresh() {
         generation += 1
-        let wanted = Self.wallpaper(config, image: wallpaper) != nil
+        let wanted = Self.wallpaper(config.background(dark: dark), images: wallpapers) != nil
         if active != wanted { active = wanted }
-        if desktop != (config.background == .desktop) { desktop = config.background == .desktop }
+        let desktop = config.background(dark: dark) == .desktop
+        if self.desktop != desktop { self.desktop = desktop }
         let gutter = wanted ? CGFloat(config.gutter) : 0
         if self.gutter != gutter { self.gutter = gutter }
         if border != config.border { border = config.border }
@@ -70,7 +75,11 @@ final class WindowBackdrop: ObservableObject {
         let size = window.contentView?.bounds.size ?? .zero
         if windowSize != size { windowSize = size }
         scale = window.backingScaleFactor
-        dark = DesktopPalette.isDark(window.effectiveAppearance)
+        let dark = DesktopPalette.isDark(window.effectiveAppearance)
+        if self.dark != dark {
+            self.dark = dark
+            refresh()
+        }
         if desktop {
             window.isOpaque = false
             window.backgroundColor = .clear
@@ -145,7 +154,7 @@ final class WindowBackdrop: ObservableObject {
 
     private func spec() -> BackdropSpec? {
         remeasure()
-        guard windowSize.width > 0, windowSize.height > 0, let wallpaper = Self.wallpaper(config, image: wallpaper) else { return nil }
+        guard windowSize.width > 0, windowSize.height > 0, let wallpaper = Self.wallpaper(config.background(dark: dark), images: wallpapers) else { return nil }
         let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
         let ground = DesktopPalette.ground(dark: dark)
         let roles = DesktopPalette.textRoles(dark: dark) + [DesktopPalette.readableAccent(in: appearance)]
@@ -215,11 +224,11 @@ final class WindowBackdrop: ObservableObject {
         BackdropRGB(Float(c.red), Float(c.green), Float(c.blue))
     }
 
-    private static func wallpaper(_ config: UIConfig, image: WallpaperImage?) -> BackdropSpec.Wallpaper? {
-        switch config.background {
+    private static func wallpaper(_ background: UIConfig.Background, images: [String: WallpaperImage]) -> BackdropSpec.Wallpaper? {
+        switch background {
         case .none: return nil
         case .desktop: return .desktop
-        case .image(let path): return image?.id == path ? .image(image!) : nil
+        case .image(let path): return images[path].map { .image($0) }
         case .linear(let angle, let stops): return .linear(angle: Float(angle), stops: stops.map { BackdropStop(color: rgb($0.color), location: Float($0.location)) })
         case .mesh(let columns, let rows, let colors): return .mesh(columns: columns, rows: rows, colors: colors.map(rgb))
         }
@@ -254,9 +263,9 @@ struct WindowBackdropHost: ViewModifier {
                 .ignoresSafeArea()
             }
             .environment(\.windowBackdrop, backdrop)
-            .onAppear { backdrop.configure(interface.config, wallpaper: interface.wallpaper) }
-            .onChange(of: interface.config) { backdrop.configure(interface.config, wallpaper: interface.wallpaper) }
-            .onChange(of: interface.wallpaper) { backdrop.configure(interface.config, wallpaper: interface.wallpaper) }
+            .onAppear { backdrop.configure(interface.config, wallpapers: interface.wallpapers) }
+            .onChange(of: interface.config) { backdrop.configure(interface.config, wallpapers: interface.wallpapers) }
+            .onChange(of: interface.wallpapers) { backdrop.configure(interface.config, wallpapers: interface.wallpapers) }
     }
 }
 

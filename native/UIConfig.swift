@@ -60,6 +60,10 @@ struct UIConfig: Decodable, Equatable {
 
     var rev: String = ""
     var values: [String: Value] = [:]
+    /// Each key as ui.conf writes it for this device, for settings screens.
+    var chosen: [String: String] = [:]
+    /// The device line, mac or device:<name>, that each overridden key comes from.
+    var overrides: [String: String] = [:]
     var problems: [Problem] = []
 
     static let defaults = UIConfig()
@@ -83,6 +87,15 @@ struct UIConfig: Decodable, Equatable {
     var accent: RGBColor? { RGBColor(hex: text("theme.accent", "system")) }
 
     var background: Background { Self.parseBackground(text("background", "none")) ?? .none }
+    var backgroundLight: Background { Self.parseBackground(text("background.light", text("background", "none"))) ?? .none }
+
+    func background(dark: Bool) -> Background { dark ? background : backgroundLight }
+
+    var imagePaths: [String] {
+        var paths: [String] = []
+        for case .image(let path) in [background, backgroundLight] where !paths.contains(path) { paths.append(path) }
+        return paths
+    }
     var backgroundFit: String { text("background.fit", "cover") }
     var backgroundPosition: String { text("background.position", "center") }
     var backgroundDim: Double { number("background.dim", 0) }
@@ -113,7 +126,7 @@ struct UIConfig: Decodable, Equatable {
     var tabPreview: Bool { text("titlebar.tabs.preview", "on") == "on" }
     var statusItems: [String] { list("statusbar", ["usage", "working", "needs-you", "hosts", "terminal"]) }
 
-    var hasBackdrop: Bool { glass && background != .none }
+    var hasBackdrop: Bool { glass && (background != .none || backgroundLight != .none) }
 
     static func parseBackground(_ value: String) -> Background? {
         if value == "none" { return Background.none }

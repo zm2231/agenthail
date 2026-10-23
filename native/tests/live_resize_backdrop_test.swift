@@ -27,7 +27,7 @@ struct LiveResizeBackdropTest {
         var config = UIConfig()
         config.values["background"] = .text("mesh: 2x2, #0000FF, #0000FF, #0000FF, #0000FF")
         let backdrop = WindowBackdrop()
-        backdrop.configure(config, wallpaper: nil)
+        backdrop.configure(config, wallpapers: [:])
         let window = ResizingWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 180), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         let scale = window.backingScaleFactor
 
@@ -69,8 +69,8 @@ struct LiveResizeBackdropTest {
         backdrop.windowChanged(window)
         wait { backdrop.rendering }
         check(backdrop.rendering, "the resize starts a render")
-        backdrop.configure(background("none"), wallpaper: nil)
-        backdrop.configure(background("mesh: 2x2, #FF0000, #FF0000, #FF0000, #FF0000"), wallpaper: nil)
+        backdrop.configure(background("none"), wallpapers: [:])
+        backdrop.configure(background("mesh: 2x2, #FF0000, #FF0000, #FF0000, #FF0000"), wallpapers: [:])
         wait { published.last == "red" }
         watch.cancel()
         let afterSwitch = published.drop { $0 != "none" }
