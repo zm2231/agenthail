@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import os
 
 @MainActor
 final class SessionPane: ObservableObject, Identifiable {
@@ -66,6 +67,8 @@ final class SessionPane: ObservableObject, Identifiable {
     private var streamUnsupported = false
     private var detailReloadTask: Task<Void, Never>?
     private var detailLoadTask: Task<Void, Never>?
+    private static let signposter = OSSignposter(subsystem: "com.agenthail.app", category: "SessionOpen")
+    private var openInterval: OSSignpostIntervalState?
     @Published private(set) var detailLoadError: String?
     private var olderTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
@@ -218,6 +221,20 @@ final class SessionPane: ObservableObject, Identifiable {
         detailStale = false
         composerDraft = ComposerDraft()
         selectedSessionID = nil
+        endOpenInterval("cleared")
+    }
+
+    /// Marks a session open in Instruments, from the switch to the first
+    /// page the daemon returns for it.
+    private func beginOpenInterval(cached: Bool) {
+        endOpenInterval("superseded")
+        openInterval = Self.signposter.beginInterval("Session open", id: Self.signposter.makeSignpostID(), "cached \(cached)")
+    }
+
+    private func endOpenInterval(_ outcome: String) {
+        guard let openInterval else { return }
+        Self.signposter.endInterval("Session open", openInterval, "\(outcome, privacy: .public)")
+        self.openInterval = nil
     }
 
     private func reconcileTabs(_ sessions: [SessionState]) {
@@ -254,6 +271,7 @@ final class SessionPane: ObservableObject, Identifiable {
         dropUnpublishedDetail()
         detail = model.cachedDetail(id)
         detailStale = detail != nil
+        beginOpenInterval(cached: detail != nil)
         detailRefreshFailed = false
         detailLoadError = nil
         detailReloadPending = false
@@ -267,6 +285,7 @@ final class SessionPane: ObservableObject, Identifiable {
 
     func close() {
         closed = true
+        endOpenInterval("closed")
         streamAwaitsCursor = false
         sessionStreamTask?.cancel()
         detailReloadTask?.cancel()
@@ -315,6 +334,7 @@ final class SessionPane: ObservableObject, Identifiable {
             if older != olderItems { olderItems = older }
             dropUnpublishedDetail()
             detail = merged
+            endOpenInterval("loaded")
             detailStale = false
             detailRefreshFailed = false
             model.detailLoaded(merged, for: id)
