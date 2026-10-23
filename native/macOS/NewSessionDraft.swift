@@ -9,7 +9,7 @@ final class NewSessionDraft: ObservableObject {
     private let origin: SessionState?
     @Published var form: SessionLaunchForm
     @Published var hosts: CreationHostPicker
-    @Published var modelError: String?
+    @Published var modelError: NewSessionNotice?
     @Published private(set) var starting = false
     @Published var error: String?
     @Published private(set) var submitted: String?
@@ -122,7 +122,7 @@ final class NewSessionDraft: ObservableObject {
             hosts.receive(models: options, agent: agent, for: generation)
         } catch is CancellationError {
         } catch {
-            if !error.isCancellation { modelError = "Models unavailable: \(error.localizedDescription)\nThe session uses the runtime default." }
+            if !error.isCancellation { modelError = NewSessionNotice(summary: "The model list isn't available, so the session uses the default model.", detail: error.localizedDescription) }
         }
     }
 
@@ -161,4 +161,11 @@ final class NewSessionDraft: ObservableObject {
         error = nil
         releaseHeld()
     }
+}
+
+/// A short sentence for New Session, with any technical detail kept behind
+/// a disclosure.
+struct NewSessionNotice: Hashable {
+    let summary: String
+    var detail: String? = nil
 }
