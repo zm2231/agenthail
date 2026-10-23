@@ -57,6 +57,31 @@ func ArtVariants(name string) (Variants, bool) {
 	return Variants{Dark: "image: " + artDir + "/" + name + "-dark.jpg", Light: "image: " + artDir + "/" + name + "-light.jpg"}, true
 }
 
+// Choice is one built-in background a settings screen can offer.
+type Choice struct {
+	Value string `json:"value"`
+	Name  string `json:"name"`
+	Dark  string `json:"dark"`
+	Light string `json:"light"`
+}
+
+// Choices lists the built-in pictures, then the gradient presets.
+func Choices() []Choice {
+	var choices []Choice
+	for _, name := range ArtNames {
+		art, _ := ArtVariants(name)
+		choices = append(choices, Choice{Value: "art: " + name, Name: title(name), Dark: art.Dark, Light: art.Light})
+	}
+	for _, name := range PresetNames {
+		choices = append(choices, Choice{Value: "gradient: " + name, Name: title(name), Dark: Presets[name].Dark, Light: Presets[name].Light})
+	}
+	return choices
+}
+
+func title(name string) string {
+	return strings.ToUpper(name[:1]) + name[1:]
+}
+
 var imageExtensions = []string{".png", ".jpg", ".jpeg", ".heic", ".webp"}
 
 func checkBackground(value string) (string, string) {

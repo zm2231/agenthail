@@ -136,6 +136,13 @@ func TestUIAPIScopesAndBackgroundPaths(t *testing.T) {
 		t.Fatalf("non-image upload status=%d %+v", code, refused)
 	}
 
+	var presets struct {
+		Presets []uiconf.Choice `json:"presets"`
+	}
+	if code := reader.do(http.MethodGet, "/api/v1/ui/presets", "", &presets); code != http.StatusOK || len(presets.Presets) != len(uiconf.ArtNames)+len(uiconf.PresetNames) || presets.Presets[0] != (uiconf.Choice{Value: "art: tide", Name: "Tide", Dark: "image: art/tide-dark.jpg", Light: "image: art/tide-light.jpg"}) {
+		t.Fatalf("presets status=%d %+v", code, presets.Presets)
+	}
+
 	art := httptest.NewRecorder()
 	request = httptest.NewRequest(http.MethodGet, "/api/v1/ui/background?path=art/tide-dark.jpg", nil)
 	request.Header.Set("Authorization", "Bearer secret")

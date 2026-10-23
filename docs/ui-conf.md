@@ -110,5 +110,6 @@ Apps read and change `ui.conf` through the daemon, with the same checks as `agen
 - `GET /api/v1/ui?class=<kind>&device=<name>` (`read` scope) returns `values`, every key resolved for that device with `background` and `background.light` ready to draw; `chosen`, each key as `ui.conf` writes it for that device; `overrides`, the device (`mac` or `device:<name>`) of each value that comes from a `key@<device>` line; and `problems`.
 - `POST /api/v1/ui` (`settings` scope) with `{"action": "set", "set": ["key = value", ...]}`, `{"action": "unset", "unset": ["key@device", ...]}`, `{"action": "write", "text": ...}` or `{"action": "undo", "rev": ...}`, each with an optional `message`.
 - `GET /api/v1/ui/log` (`read` scope) lists changes.
+- `GET /api/v1/ui/presets` (`read` scope) lists the built-in pictures and gradient presets, each with the `value` to write and what it draws in dark and light.
 - `GET /api/v1/ui/background?path=<path>` (`read` scope) returns an image from `background`, including the built-in pictures under `art/`.
 - `POST /api/v1/ui/background?name=<file name>` (`settings` scope) stores the request body as a background image and returns `{"path"}` to use as `image: <path>`.

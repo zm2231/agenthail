@@ -11,6 +11,8 @@ struct DesktopSettings: View {
                 .tabItem { Label("Overview", systemImage: "square.grid.2x2") }
             GeneralSettings(model: model)
                 .tabItem { Label("General", systemImage: "gearshape") }
+            AppearanceSettings(model: model)
+                .tabItem { Label("Appearance", systemImage: "paintpalette") }
             KeyboardSettings()
                 .tabItem { Label("Keyboard", systemImage: "keyboard") }
             DevicesSettings(model: model)

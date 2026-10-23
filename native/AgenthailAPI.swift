@@ -209,6 +209,38 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await get(path)
     }
 
+    func changeUI(_ change: UIChange, device: String) async throws -> UIConfig {
+        var components = URLComponents()
+        components.path = "/api/v1/ui"
+        components.queryItems = [URLQueryItem(name: "class", value: "mac"), URLQueryItem(name: "device", value: device)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await requestEncoded(path, method: "POST", body: change)
+    }
+
+    func uiLog(limit: Int) async throws -> [UIChangeEntry] {
+        let response: UIChangeLog = try await get("/api/v1/ui/log?limit=\(limit)")
+        return response.entries
+    }
+
+    func uiPresets() async throws -> [UIPreset] {
+        let response: UIPresetList = try await get("/api/v1/ui/presets")
+        return response.presets
+    }
+
+    func uploadBackground(_ data: Data, name: String) async throws -> String {
+        var components = URLComponents()
+        components.path = "/api/v1/ui/background"
+        components.queryItems = [URLQueryItem(name: "name", value: name)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        var request = authorizedRequest(path: path)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        let (body, response) = try await session.upload(for: request, from: data)
+        try validate(response: response, data: body)
+        return try JSONDecoder().decode(UploadedBackground.self, from: body).path
+    }
+
     func uiBackground(path rel: String) async throws -> Data {
         var components = URLComponents()
         components.path = "/api/v1/ui/background"

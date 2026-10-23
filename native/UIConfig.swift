@@ -159,3 +159,48 @@ struct UIConfig: Decodable, Equatable {
         }
     }
 }
+
+/// One change to ui.conf, checked by the daemon the same way agenthail ui is.
+struct UIChange: Encodable, Equatable {
+    var action: String
+    var set: [String]? = nil
+    var unset: [String]? = nil
+    var rev: String? = nil
+    var message: String? = nil
+}
+
+struct UIChangeEntry: Decodable, Equatable, Identifiable {
+    let rev: String
+    let author: String
+    let time: String
+    let message: String
+
+    var id: String { rev }
+    var date: Date? { ISO8601DateFormatter().date(from: time) }
+}
+
+struct UIChangeLog: Decodable {
+    let entries: [UIChangeEntry]
+}
+
+/// A built-in background: the value to write and what it draws in each appearance.
+struct UIPreset: Decodable, Equatable, Identifiable {
+    let value: String
+    let name: String
+    let dark: String
+    let light: String
+
+    var id: String { value }
+
+    func background(dark isDark: Bool) -> UIConfig.Background {
+        UIConfig.parseBackground(isDark ? dark : light) ?? .none
+    }
+}
+
+struct UIPresetList: Decodable {
+    let presets: [UIPreset]
+}
+
+struct UploadedBackground: Decodable {
+    let path: String
+}

@@ -83,6 +83,13 @@ func (d *Daemon) registerUIAPI(mux *http.ServeMux, dashboard *dashboardServer) {
 		d.apiV1Guard(dashboard, scope, d.apiUIHandler)(w, r)
 	})
 	mux.HandleFunc("/api/v1/ui/log", d.apiV1Guard(dashboard, "read", d.apiUILogHandler))
+	mux.HandleFunc("/api/v1/ui/presets", d.apiV1Guard(dashboard, "read", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"presets": uiconf.Choices()})
+	}))
 	mux.HandleFunc("/api/v1/ui/background", func(w http.ResponseWriter, r *http.Request) {
 		scope := "read"
 		if r.Method == http.MethodPost {
