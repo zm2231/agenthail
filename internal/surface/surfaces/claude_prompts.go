@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -92,8 +93,11 @@ type claudePrompts struct {
 	ended map[string][]*claudePrompt
 	// forgetAfter is how long an ended hold is remembered.
 	forgetAfter time.Duration
-	sequence    uint64
-	changed     func(ClaudePromptChange)
+	// run tells this daemon's holds from those of an earlier run, whose
+	// sequence started from the same number: clients cache requests by ID.
+	run      string
+	sequence uint64
+	changed  func(ClaudePromptChange)
 }
 
 type claudeAnswer struct {
@@ -129,7 +133,7 @@ type claudePrompt struct {
 }
 
 func newClaudePrompts() *claudePrompts {
-	return &claudePrompts{open: map[string][]*claudePrompt{}, answered: map[string]claudeAnswer{}, alive: sameProcessRunning, ended: map[string][]*claudePrompt{}, forgetAfter: claudePromptDuplicateWindow}
+	return &claudePrompts{open: map[string][]*claudePrompt{}, answered: map[string]claudeAnswer{}, alive: sameProcessRunning, ended: map[string][]*claudePrompt{}, forgetAfter: claudePromptDuplicateWindow, run: strings.ToLower(rand.Text()[:8])}
 }
 
 // OnPromptChange registers what runs after a session gains or loses a held
@@ -170,7 +174,7 @@ func (c *Claude) HoldPrompt(ctx context.Context, prompt ClaudePermissionPrompt) 
 	if prompt.ToolName == "AskUserQuestion" {
 		kind = surface.WaitingQuestion
 	}
-	id := fmt.Sprintf("%s:%s:held:%d", prompt.SessionID, kind, c.prompts.next())
+	id := fmt.Sprintf("%s:%s:held:%s-%d", prompt.SessionID, kind, c.prompts.run, c.prompts.next())
 	waiting := c.awaitRecordWaiting(ctx, session)
 	if waiting == nil {
 		// Claude shows a prompt in the record as it opens the dialog; one
