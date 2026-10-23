@@ -649,7 +649,7 @@ struct SessionScreen: View {
             }
             .sheet(isPresented: $showingVoice) {
                 if let call = voiceCalls.model {
-                    AgenthailVoiceOperatorSheet(model: call) { _ in }
+                    AgenthailVoiceOperatorSheet(model: call, rowMemory: model.rowMemory) { _ in }
                 }
             }
             .task(id: session.id) {

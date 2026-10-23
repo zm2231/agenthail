@@ -76,7 +76,7 @@ struct AgenthailIOSApp: App {
             Group {
 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("--preview-voice") {
-                    AgenthailVoiceOperatorSheet(model: VoiceOperatorModel(preview: true), openSession: { _ in })
+                    AgenthailVoiceOperatorSheet(model: VoiceOperatorModel(preview: true), rowMemory: TranscriptRowMemory(), openSession: { _ in })
                 } else if ProcessInfo.processInfo.arguments.contains("--preview-session") {
                     SessionPreview()
                 } else { connectedRoot }
