@@ -1,3 +1,4 @@
+import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 import XCTest
@@ -91,15 +92,47 @@ final class ComposerPasteTests: XCTestCase {
         XCTAssertEqual(view.text, "")
     }
 
-    func testOutsideTextWaitsWhileTheKeyboardIsComposing() {
+    private final class Draft {
+        var text = ""
+        var duringWrite: ((String) -> Void)?
+    }
+
+    private func composer(_ draft: Draft) -> (ComposerUITextView, IOSComposerTextView.Coordinator) {
         let view = makeTextView()
-        view.setMarkedText("ni", selectedRange: NSRange(location: 2, length: 0))
-        view.sync("cleared")
-        XCTAssertEqual(view.text, "ni")
-        view.unmarkText()
-        view.sync("cleared")
-        XCTAssertEqual(view.text, "cleared")
-        XCTAssertEqual(view.selectedRange, NSRange(location: 7, length: 0))
+        let coordinator = IOSComposerTextView.Coordinator(text: Binding(get: { draft.text }, set: { text in
+            draft.duringWrite?(text)
+            draft.text = text
+        }))
+        view.delegate = coordinator
+        return (view, coordinator)
+    }
+
+    func testAnUpdateBeforeTheBindingCatchesUpKeepsTheTypedText() {
+        let draft = Draft()
+        let (view, coordinator) = composer(draft)
+        view.insertText("@c")
+        draft.duringWrite = { _ in view.show(bound: draft.text, sync: coordinator.sync) }
+        view.insertText("o")
+        XCTAssertEqual(view.text, "@co")
+        XCTAssertEqual(draft.text, "@co")
+        view.show(bound: draft.text, sync: coordinator.sync)
+        XCTAssertEqual(view.text, "@co")
+    }
+
+    func testOutsideTextEndsTheKeyboardsComposition() {
+        let draft = Draft()
+        let (view, coordinator) = composer(draft)
+        view.insertText("draft ")
+        view.setMarkedText("ka", selectedRange: NSRange(location: 2, length: 0))
+        XCTAssertEqual(draft.text, "draft ka")
+        draft.text = "shared from another app"
+        view.show(bound: draft.text, sync: coordinator.sync)
+        XCTAssertNil(view.markedTextRange)
+        XCTAssertEqual(view.text, "shared from another app")
+        XCTAssertEqual(draft.text, "shared from another app")
+        XCTAssertEqual(view.selectedRange, NSRange(location: 23, length: 0))
+        view.insertText("!")
+        XCTAssertEqual(draft.text, "shared from another app!")
     }
 
     func testWithoutAttachSupportAnImagePasteIsNotOffered() {

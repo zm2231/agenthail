@@ -16,12 +16,14 @@ struct IOSComposerTextView: UIViewRepresentable {
         let view = ComposerUITextView.make()
         view.delegate = context.coordinator
         view.accessibilityIdentifier = "composer-input"
+        view.text = text
+        context.coordinator.sync = ComposerTextSync(text)
         return view
     }
 
     func updateUIView(_ view: ComposerUITextView, context: Context) {
         context.coordinator.text = $text
-        view.sync(text)
+        view.show(bound: text, sync: context.coordinator.sync)
         view.placeholder = placeholder
         view.accessibilityLabel = label
         view.pasteAttachments = pasteAttachments
@@ -32,13 +34,18 @@ struct IOSComposerTextView: UIViewRepresentable {
         return CGSize(width: width, height: view.fittingHeight(width: width, lines: lines))
     }
 
+    @MainActor
     final class Coordinator: NSObject, UITextViewDelegate {
         var text: Binding<String>
+        var sync: ComposerTextSync
 
-        init(text: Binding<String>) { self.text = text }
+        init(text: Binding<String>) {
+            self.text = text
+            sync = ComposerTextSync(text.wrappedValue)
+        }
 
         func textViewDidChange(_ view: UITextView) {
-            text.wrappedValue = view.text
+            sync.viewChanged(to: view.text) { if text.wrappedValue != $0 { text.wrappedValue = $0 } }
             (view as? ComposerUITextView)?.refreshPlaceholder()
         }
     }
@@ -97,12 +104,12 @@ final class ComposerUITextView: UITextView {
         return ceil(bounds.height)
     }
 
-    // Text set from outside waits while the keyboard is composing, so it never
-    // replaces marked text mid-word.
-    func sync(_ text: String) {
-        guard self.text != text, markedTextRange == nil else { return }
-        self.text = text
-        selectedRange = NSRange(location: (text as NSString).length, length: 0)
+    // Setting the text ends a composition without telling the delegate, where
+    // unmarkText would report the composed text and write it over the change.
+    func show(bound text: String, sync: ComposerTextSync) {
+        guard let shown = sync.textToShow(bound: text), self.text != shown else { return }
+        self.text = shown
+        selectedRange = NSRange(location: (shown as NSString).length, length: 0)
     }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
