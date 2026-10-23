@@ -19,6 +19,13 @@ type DeliveryIntentStatus string
 
 const OperatorSessionID = "agenthail-operator"
 
+// readsNotices reports whether a sender has a session that reads a delivery
+// notice. The operator and an unrepliable sender have none, so a notice queued
+// to them would stay pending forever.
+func readsNotices(senderSessionID string) bool {
+	return senderSessionID != "" && senderSessionID != OperatorSessionID && !surface.IsUnrepliableSender(senderSessionID)
+}
+
 func (r *Registry) EnsureOperatorSession() error {
 	if _, err := r.Session(OperatorSessionID); err == nil {
 		return nil
@@ -146,7 +153,7 @@ func (r *Registry) ListDeliveryProblems() ([]DeliveryProblem, error) {
 // target. A person's own send has no session to flag; it stays in the problem
 // list. An agent stops being flagged once its failure notice reached it.
 func deliveryAttentionSession(senderSessionID string, notified bool) string {
-	if senderSessionID == OperatorSessionID || surface.IsUnrepliableSender(senderSessionID) || notified {
+	if !readsNotices(senderSessionID) || notified {
 		return ""
 	}
 	return senderSessionID
@@ -544,10 +551,9 @@ func queueDeliveryFailureNotice(tx *sql.Tx, id int64) (int64, bool, error) {
 	if intent.NotificationQueueID != 0 {
 		return intent.NotificationQueueID, false, nil
 	}
-	if intent.Relayed || surface.IsUnrepliableSender(intent.SenderSessionID) {
+	if intent.Relayed || !readsNotices(intent.SenderSessionID) {
 		// A relay source never sent this message: a notice would start a turn
-		// whose completion the same relay forwards again. An unrepliable
-		// sender has no route back, so nothing would read it. Either way the
+		// whose completion the same relay forwards again. Either way the
 		// problem is listed.
 		appended, err := appendDeliveryProblemEvent(tx, intent)
 		return 0, appended, err
@@ -582,7 +588,7 @@ func queueDeliveryRefusalNotice(tx *sql.Tx, queueID, refusal int64, reason strin
 	if err != nil {
 		return err
 	}
-	if intent.Relayed || intent.SenderSessionID == "" || surface.IsUnrepliableSender(intent.SenderSessionID) {
+	if intent.Relayed || !readsNotices(intent.SenderSessionID) {
 		return nil
 	}
 	notice := fmt.Sprintf("[agenthail delivery held id=%d target=%s] %s. The message stays queued and is delivered once the target starts.", intent.ID, intent.TargetSessionID, reason)

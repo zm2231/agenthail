@@ -9,13 +9,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
 )
 
 func (a *App) cmdDebug(args []string) error {
-	if len(args) != 2 || args[0] != "heap" {
+	if len(args) != 2 || args[0] != "heap" || strings.HasPrefix(args[1], "-") {
 		return errors.New("usage: agenthail debug heap <dir>")
 	}
 	if !a.daemonIsRunning() {

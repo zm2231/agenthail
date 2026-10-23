@@ -130,7 +130,7 @@ const leadSendTimeout = 30 * time.Second
 
 // sendToLead answers voice_send_to_lead off the service lock: a relay to a
 // slow paired host must not stall the call's other events.
-func (s *Service) sendToLead(responder DynamicToolResponder, requestID string, arguments map[string]any) {
+func (s *Service) sendToLead(responder DynamicToolResponder, requestID, threadID string, arguments map[string]any) {
 	project, _ := arguments["project"].(string)
 	message, _ := arguments["message"].(string)
 	projects, source := s.projects, s.state.State.Session.ID
@@ -154,10 +154,10 @@ func (s *Service) sendToLead(responder DynamicToolResponder, requestID string, a
 		defer cancel()
 		answer, err := send(ctx)
 		if err != nil {
-			_ = responder.RespondDynamicToolCall(ctx, requestID, false, err.Error())
+			_ = responder.RespondDynamicToolCall(ctx, requestID, threadID, false, err.Error())
 			return
 		}
-		if err := responder.RespondDynamicToolCall(ctx, requestID, true, answer); err != nil {
+		if err := responder.RespondDynamicToolCall(ctx, requestID, threadID, true, answer); err != nil {
 			s.mu.Lock()
 			if s.state.State.Session == nil || s.state.State.Session.ID != source {
 				s.mu.Unlock()

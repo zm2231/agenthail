@@ -2,6 +2,7 @@ package signin
 
 import (
 	"errors"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -137,9 +138,31 @@ func TestLinuxDefaultBrowserComesFromXDGSettings(t *testing.T) {
 	if browser, _, err := DefaultBrowser(t.TempDir()); err != nil || browser != Chromium {
 		t.Fatalf("browser=%q err=%v", browser, err)
 	}
-	xdgDefaultBrowser = func() (string, error) { return "", errors.New("exit status 1") }
-	if _, _, err := DefaultBrowser(t.TempDir()); err == nil || !strings.Contains(err.Error(), "xdg-settings get default-web-browser") {
-		t.Fatalf("err=%v", err)
+	for name, missing := range map[string]func() (string, error){
+		"no xdg-settings":    func() (string, error) { return "", exec.ErrNotFound },
+		"no default named":   func() (string, error) { return "", nil },
+		"xdg-settings fails": func() (string, error) { return "", errors.New("exit status 1") },
+	} {
+		xdgDefaultBrowser = missing
+		if _, _, err := DefaultBrowser(t.TempDir()); !errors.Is(err, ErrNoDefaultBrowser) {
+			t.Fatalf("%s: err=%v", name, err)
+		}
+		selection, _, err := Select(t.TempDir(), Notion, Choice{Mode: Automatic})
+		status := NewStatus(ConsumerInfo{ID: Notion, Label: "Notion"}, selection, err)
+		if !IsUnavailable(err) || status.Problem != "" || !strings.Contains(status.Unavailable, "No browser on this computer") || !strings.Contains(status.Unavailable, "agenthail signin use notion") {
+			t.Fatalf("%s: err=%v status=%+v", name, err, status)
+		}
+	}
+}
+
+func TestANoBrowserComputerIsAStatedLimitNotAProblem(t *testing.T) {
+	err := UnavailableError{Consumer: Claude}
+	status := NewStatus(ConsumerInfo{ID: Claude, Label: "Claude Remote Control"}, Selection{Mode: Automatic}, err)
+	if status.Problem != "" || status.Unavailable != err.Reason() || IsOff(err) {
+		t.Fatalf("status=%+v", status)
+	}
+	if !strings.Contains(err.Reason(), "`agenthail signin use claude <profile>`") || strings.Contains(err.Error(), "xdg-settings") {
+		t.Fatalf("reason=%q", err.Reason())
 	}
 }
 

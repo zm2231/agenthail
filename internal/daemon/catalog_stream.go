@@ -22,14 +22,39 @@ const catalogStreamReplayLimit = 4096
 type catalogHub struct {
 	registry     *registry.Registry
 	mu           sync.Mutex
-	subscribers  map[uint64]*catalogSubscriber
+	followers    map[uint64]chan struct{}
 	nextID       uint64
 	publishedSeq uint64
 }
 
-type catalogSubscriber struct {
-	stream chan registry.CatalogEvent
-	seq    uint64
+// catalogFollower follows the catalog journal from its own cursor. Wake
+// receives a signal after the hub sees newly committed events; the follower
+// then reads them from the journal, so a burst it is slow to read waits in the
+// journal instead of ending the follower.
+type catalogFollower struct {
+	Wake   <-chan struct{}
+	Cancel func()
+	hub    *catalogHub
+	cursor uint64
+}
+
+var errCatalogFollowerGap = errors.New("the catalog journal no longer holds the events after this cursor")
+
+// read returns up to limit events after the follower's cursor and advances
+// it past them. It returns errCatalogFollowerGap once the journal no longer
+// retains the events after the cursor.
+func (f *catalogFollower) read(limit int) ([]registry.CatalogEvent, error) {
+	window, err := f.hub.registry.CatalogEventsAfter(f.cursor, limit)
+	if err != nil {
+		return nil, err
+	}
+	if window.Gap {
+		return nil, errCatalogFollowerGap
+	}
+	if len(window.Events) > 0 {
+		f.cursor = window.Events[len(window.Events)-1].Seq
+	}
+	return window.Events, nil
 }
 
 func newCatalogHub(store *registry.Registry) *catalogHub {
@@ -37,7 +62,7 @@ func newCatalogHub(store *registry.Registry) *catalogHub {
 	if err != nil {
 		latest = 0
 	}
-	return &catalogHub{registry: store, subscribers: map[uint64]*catalogSubscriber{}, publishedSeq: latest}
+	return &catalogHub{registry: store, followers: map[uint64]chan struct{}{}, publishedSeq: latest}
 }
 
 func (h *catalogHub) publish(event registry.CatalogEvent) (registry.CatalogEvent, bool, error) {
@@ -107,9 +132,8 @@ func (h *catalogHub) markDiscoveryFailure(kind surface.SurfaceKind, reason strin
 	return h.flushCommittedLocked()
 }
 
-// flushCommitted publishes journal rows only after their owning transaction
-// committed. It preserves sequence order across catalog writers that do not
-// route through the hub themselves.
+// flushCommitted wakes the followers once events are committed. Catalog
+// writers that do not route through the hub call it after their transaction.
 func (h *catalogHub) flushCommitted() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -117,75 +141,50 @@ func (h *catalogHub) flushCommitted() error {
 }
 
 func (h *catalogHub) flushCommittedLocked() error {
-	window, err := h.registry.CatalogEventsAfter(h.publishedSeq, catalogStreamReplayLimit)
+	_, latest, err := h.registry.CatalogState()
 	if err != nil {
 		return err
 	}
-	if window.Gap {
-		after := h.publishedSeq
-		h.closeSubscribersLocked()
-		h.publishedSeq = window.LatestSeq
-		return catalogJournalGapError{After: after, Earliest: window.EarliestSeq, Latest: window.LatestSeq}
+	if latest == h.publishedSeq {
+		return nil
 	}
-	for _, event := range window.Events {
-		h.broadcastLocked(event)
-		h.publishedSeq = event.Seq
+	h.publishedSeq = latest
+	for _, follower := range h.followers {
+		select {
+		case follower <- struct{}{}:
+		default:
+		}
 	}
 	return nil
 }
 
-type catalogJournalGapError struct {
-	After    uint64
-	Earliest uint64
-	Latest   uint64
-}
-
-func (e catalogJournalGapError) Error() string {
-	return fmt.Sprintf("catalog journal gap after sequence %d (retained %d through %d)", e.After, e.Earliest, e.Latest)
-}
-
-func (h *catalogHub) broadcastLocked(event registry.CatalogEvent) {
-	for id, subscriber := range h.subscribers {
-		if event.Seq <= subscriber.seq {
-			continue
-		}
-		select {
-		case subscriber.stream <- event:
-			subscriber.seq = event.Seq
-		default:
-			delete(h.subscribers, id)
-			close(subscriber.stream)
-		}
-	}
-}
-
-func (h *catalogHub) closeSubscribersLocked() {
-	for id, subscriber := range h.subscribers {
-		delete(h.subscribers, id)
-		close(subscriber.stream)
-	}
-}
-
-func (h *catalogHub) subscribe(after uint64) (registry.CatalogEventWindow, <-chan registry.CatalogEvent, func(), error) {
+// subscribe returns the events after after, up to catalogStreamReplayLimit,
+// and a follower whose cursor starts after the last of them.
+func (h *catalogHub) subscribe(after uint64) (registry.CatalogEventWindow, *catalogFollower, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	window, err := h.registry.CatalogEventsAfter(after, catalogStreamReplayLimit)
 	if err != nil {
-		return registry.CatalogEventWindow{}, nil, nil, err
+		return registry.CatalogEventWindow{}, nil, err
 	}
 	h.nextID++
 	id := h.nextID
-	stream := make(chan registry.CatalogEvent, 64)
-	h.subscribers[id] = &catalogSubscriber{stream: stream, seq: window.LatestSeq}
-	cancel := func() {
+	wake := make(chan struct{}, 1)
+	h.followers[id] = wake
+	cursor := after
+	if len(window.Events) > 0 {
+		cursor = window.Events[len(window.Events)-1].Seq
+	}
+	follower := &catalogFollower{Wake: wake, hub: h, cursor: cursor}
+	follower.Cancel = func() {
 		h.mu.Lock()
-		if existing, found := h.subscribers[id]; found {
-			delete(h.subscribers, id)
-			close(existing.stream)
+		if existing, found := h.followers[id]; found {
+			delete(h.followers, id)
+			close(existing)
 		}
 		h.mu.Unlock()
 	}
-	return window, stream, cancel, nil
+	return window, follower, nil
 }
 
 type catalogStreamEnvelope struct {
@@ -210,12 +209,12 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusBadRequest, "invalid_cursor", "The catalog stream cursor is invalid.")
 		return
 	}
-	window, events, cancel, err := d.catalog.subscribe(after)
+	window, follower, err := d.catalog.subscribe(after)
 	if err != nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "stream_unavailable", "The catalog journal could not be read.")
 		return
 	}
-	defer cancel()
+	defer follower.Cancel()
 	if window.Gap {
 		writeDashboardJSON(w, http.StatusConflict, map[string]any{"error": map[string]any{"code": "stream_gap", "message": "The catalog stream cursor is no longer retained."}, "hostEpoch": window.HostEpoch, "earliestSeq": window.EarliestSeq, "latestSeq": window.LatestSeq})
 		return
@@ -231,49 +230,47 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 		}
 		return d.listedCatalogEvents(batch)
 	}
-	backlog, err := view(window.Events)
-	if err != nil {
-		return
+	write := func(batch []registry.CatalogEvent) bool {
+		listed, err := view(batch)
+		if err != nil {
+			return false
+		}
+		for _, event := range listed {
+			if !d.apiEventStreamAuthorized(r) || writeCatalogStreamEntry(w, event) != nil {
+				return false
+			}
+		}
+		return true
 	}
-	for _, event := range backlog {
-		if !d.apiEventStreamAuthorized(r) || writeCatalogStreamEntry(w, event) != nil {
-			return
+	follow := func() bool {
+		for {
+			batch, err := follower.read(catalogStreamBatch)
+			if err != nil {
+				d.log.Printf("catalog stream ended: %s", err)
+				return false
+			}
+			if len(batch) > 0 && !write(batch) {
+				return false
+			}
+			if len(batch) < catalogStreamBatch {
+				flusher.Flush()
+				return true
+			}
 		}
 	}
-	flusher.Flush()
+	if !write(window.Events) || !follow() {
+		return
+	}
 	keepalive := time.NewTicker(eventKeepalivePeriod)
 	defer keepalive.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case event, open := <-events:
-			if !open {
+		case <-follower.Wake:
+			if !follow() {
 				return
 			}
-			batch := []registry.CatalogEvent{event}
-		drain:
-			for len(batch) < catalogStreamBatch {
-				select {
-				case next, more := <-events:
-					if !more {
-						break drain
-					}
-					batch = append(batch, next)
-				default:
-					break drain
-				}
-			}
-			listed, err := view(batch)
-			if err != nil {
-				return
-			}
-			for _, event := range listed {
-				if !d.apiEventStreamAuthorized(r) || writeCatalogStreamEntry(w, event) != nil {
-					return
-				}
-			}
-			flusher.Flush()
 		case <-keepalive.C:
 			if !d.apiEventStreamAuthorized(r) {
 				return
@@ -381,10 +378,16 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 	}
 	for _, adapter := range d.Surfaces {
 		priorStamps := map[string]catalogLiveSession{}
+		d.catalogLiveMu.Lock()
 		for id, live := range d.catalogLive {
 			if live.adapter.Name() == adapter.Name() {
-				priorStamps[id] = catalogLiveSession{files: live.files, stamps: catalogFileStamps(live.files)}
+				priorStamps[id] = catalogLiveSession{files: live.files}
 			}
+		}
+		d.catalogLiveMu.Unlock()
+		for id, prior := range priorStamps {
+			prior.stamps = catalogFileStamps(prior.files)
+			priorStamps[id] = prior
 		}
 		operationCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 		complete := true
@@ -438,21 +441,26 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			identityCancel()
 			open := openSessions[session.ID]
 			alias := aliasByID[session.ID]
-			if !d.publishCatalogSession(ctx, adapter, session, identity, alias, counts[session.ID], open, config, view, observedAt) {
-				delete(d.catalogLive, session.ID)
-				continue
+			var live *catalogLiveSession
+			if source != nil {
+				live = &catalogLiveSession{adapter: adapter, session: session, identity: identity, alias: alias, open: open, files: source.LocalStatusFiles(session)}
+				// Stamps taken before List date the evidence List used, so a
+				// file change during the pass still triggers a status refresh.
+				if prior, found := priorStamps[session.ID]; found && equalStrings(prior.files, live.files) {
+					live.stamps = prior.stamps
+				}
 			}
-			if source == nil {
-				delete(d.catalogLive, session.ID)
-				continue
-			}
-			live := &catalogLiveSession{adapter: adapter, session: session, identity: identity, alias: alias, open: open, files: source.LocalStatusFiles(session)}
-			// Stamps taken before List date the evidence List used, so a file
-			// change during the pass still triggers a status refresh.
-			if prior, found := priorStamps[session.ID]; found && equalStrings(prior.files, live.files) {
-				live.stamps = prior.stamps
-			}
-			d.catalogLive[session.ID] = live
+			// The entry changes with the row, under the session's waiting
+			// lock, so a status publish lands wholly before or after both.
+			d.publishCatalogSession(ctx, adapter, session, identity, alias, counts[session.ID], open, config, view, observedAt, nil, func(committed bool) {
+				d.catalogLiveMu.Lock()
+				defer d.catalogLiveMu.Unlock()
+				if committed && live != nil {
+					d.catalogLive[session.ID] = live
+				} else {
+					delete(d.catalogLive, session.ID)
+				}
+			})
 		}
 		d.forgetCatalogLive(adapter.Name(), seen)
 		if err := d.catalog.recordDiscovery(adapter.Name(), seen, observedAt, complete); err != nil {
@@ -467,8 +475,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 // publishUnarchivedProjects republishes the other rows of a project that a
 // session's activity unarchived during a catalog pass.
 func (d *Daemon) publishUnarchivedProjects() {
-	if d.catalogProjectUnarchived {
-		d.catalogProjectUnarchived = false
+	if d.catalogProjectUnarchived.CompareAndSwap(true, false) {
 		d.publishCatalogPresence()
 	}
 }
@@ -476,13 +483,24 @@ func (d *Daemon) publishUnarchivedProjects() {
 // forgetCatalogLive drops a surface's live sessions that are not in keep, so
 // the status pass follows only sessions the last successful pass listed.
 func (d *Daemon) forgetCatalogLive(kind surface.SurfaceKind, keep map[string]struct{}) {
+	d.catalogLiveMu.Lock()
+	forget := map[string]*catalogLiveSession{}
 	for id, live := range d.catalogLive {
-		if live.adapter.Name() != kind {
-			continue
+		if _, found := keep[id]; live.adapter.Name() == kind && !found {
+			forget[id] = live
 		}
-		if _, found := keep[id]; !found {
+	}
+	d.catalogLiveMu.Unlock()
+	// Each drop holds the session's waiting lock, which a status publish
+	// holds from its liveness check through its write.
+	for id, live := range forget {
+		unlock := d.lockWaiting(id)
+		d.catalogLiveMu.Lock()
+		if d.catalogLive[id] == live {
 			delete(d.catalogLive, id)
 		}
+		d.catalogLiveMu.Unlock()
+		unlock()
 	}
 }
 
@@ -501,18 +519,45 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 	var config *DashboardConfig
 	var counts map[string]int
 	var view catalogViewState
+	type followed struct {
+		id      string
+		live    *catalogLiveSession
+		session surface.Session
+		stamps  []string
+	}
+	d.catalogLiveMu.Lock()
+	sessions := make([]followed, 0, len(d.catalogLive))
 	for id, live := range d.catalogLive {
+		sessions = append(sessions, followed{id: id, live: live, session: live.session, stamps: live.stamps})
+	}
+	d.catalogLiveMu.Unlock()
+	// current applies change to a followed session unless discovery replaced
+	// or dropped it meanwhile; discovery's entry then carries the stamps its
+	// listing was read against, so the next pass rereads anything newer.
+	current := func(entry followed, change func(*catalogLiveSession)) bool {
+		d.catalogLiveMu.Lock()
+		defer d.catalogLiveMu.Unlock()
+		if d.catalogLive[entry.id] != entry.live {
+			return false
+		}
+		change(entry.live)
+		return true
+	}
+	for _, entry := range sessions {
+		live := entry.live
 		stamps := catalogFileStamps(live.files)
-		if live.stamps != nil && equalStrings(live.stamps, stamps) {
+		if entry.stamps != nil && equalStrings(entry.stamps, stamps) {
 			continue
 		}
-		live.stamps = stamps
+		if !current(entry, func(live *catalogLiveSession) { live.stamps = stamps }) {
+			continue
+		}
 		source, ok := live.adapter.(surface.LocalStatusSource)
 		if !ok {
 			continue
 		}
 		statusCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		refreshed, err := source.LocalStatus(statusCtx, live.session)
+		refreshed, err := source.LocalStatus(statusCtx, entry.session)
 		cancel()
 		if err != nil {
 			// The files changed but no longer describe this session, as when
@@ -521,7 +566,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 			d.requestCatalogDiscovery()
 			continue
 		}
-		if refreshed.Status == live.session.Status && surface.SameWaiting(refreshed.WaitingOn, live.session.WaitingOn) && surface.SameBackground(refreshed.BackgroundTasks, live.session.BackgroundTasks) && surface.SameUsageLimit(refreshed.UsageLimit, live.session.UsageLimit) && refreshed.PendingModel == live.session.PendingModel {
+		if refreshed.Status == entry.session.Status && surface.SameWaiting(refreshed.WaitingOn, entry.session.WaitingOn) && surface.SameBackground(refreshed.BackgroundTasks, entry.session.BackgroundTasks) && surface.SameUsageLimit(refreshed.UsageLimit, entry.session.UsageLimit) && refreshed.PendingModel == entry.session.PendingModel {
 			continue
 		}
 		if config == nil {
@@ -540,18 +585,36 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 				return
 			}
 		}
-		if d.publishCatalogSession(ctx, live.adapter, refreshed, live.identity, live.alias, counts[id], live.open, *config, view, time.Now().UTC()) {
-			live.session = refreshed
-			published = true
-		} else {
-			live.stamps = nil
-		}
+		// The check and the write share the session's waiting lock with
+		// discovery's change to the entry, so discovery cannot replace or
+		// drop the entry between them.
+		check := func() bool { return current(entry, func(*catalogLiveSession) {}) }
+		d.publishCatalogSession(ctx, live.adapter, refreshed, live.identity, live.alias, counts[entry.id], live.open, *config, view, time.Now().UTC(), check, func(committed bool) {
+			current(entry, func(live *catalogLiveSession) {
+				if committed {
+					live.session = refreshed
+					published = true
+				} else {
+					live.stamps = nil
+				}
+			})
+		})
 	}
 }
 
 // publishCatalogSession records one session row, rebuilding the projection
 // when the queue count changed under it. It reports whether the row committed.
-func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, identity catalogIdentity, alias string, queueCount int, open bool, config DashboardConfig, view catalogViewState, observedAt time.Time) bool {
+// Under the session's waiting lock, check, when set, runs before the row is
+// written and stops the write when it fails, and done, when set, runs last
+// with whether the row committed.
+func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, identity catalogIdentity, alias string, queueCount int, open bool, config DashboardConfig, view catalogViewState, observedAt time.Time, check func() bool, done func(committed bool)) (committed bool) {
+	defer d.lockWaiting(session.ID)()
+	if done != nil {
+		defer func() { done(committed) }()
+	}
+	if check != nil && !check() {
+		return false
+	}
 	project, err := json.Marshal(identity.Project)
 	if err != nil {
 		return false
@@ -560,7 +623,6 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 	if err != nil {
 		return false
 	}
-	defer d.lockWaiting(session.ID)()
 	session.WaitingOn = d.catalogWaiting(ctx, adapter, session)
 	if d.catalogSelected != nil {
 		d.catalogSelected(session.ID)
@@ -571,7 +633,7 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 		row.HiddenSubagents, row.Listed = stored.HiddenSubagents, stored.Listed
 		row.Subagents = addSubagentRollups(row.ObservedSubagents, stored.HiddenSubagents)
 		if d.settleArchiveActivity([]dashboardSession{row}, view) {
-			d.catalogProjectUnarchived = true
+			d.catalogProjectUnarchived.Store(true)
 		}
 		applyCatalogView(&row, view)
 		payload, err := json.Marshal(map[string]any{"session": row})

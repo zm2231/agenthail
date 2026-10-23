@@ -533,49 +533,71 @@ func TestRetriedFailedDeliveryIsANewAttempt(t *testing.T) {
 	}
 }
 
-func TestNoNoticeIsQueuedForAnUnrepliableSender(t *testing.T) {
-	r := openTestRegistry(t)
-	sender, err := r.EnsureUnrepliableSender("h0123456789ab", "worker-1", "vps/builder")
-	if err != nil {
-		t.Fatal(err)
+func TestNoNoticeIsQueuedForASenderNothingReads(t *testing.T) {
+	senders := map[string]func(*Registry) (string, error){
+		"unrepliable": func(r *Registry) (string, error) {
+			return r.EnsureUnrepliableSender("h0123456789ab", "worker-1", "vps/builder")
+		},
+		"operator": func(r *Registry) (string, error) { return OperatorSessionID, r.EnsureOperatorSession() },
 	}
-	if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.SaveRuntimeState("target", surface.TurnObservation{Status: surface.StatusIdle}); err != nil {
-		t.Fatal(err)
-	}
-	queueID, deliveryID, err := r.QueueDeliveryWithIntent("target", "please rerun the build", "unrepliable-sender", surface.SendOptions{SourceSessionID: sender})
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now().Add(time.Hour)
-	if item, err := r.ClaimNextMessage("target", now); err != nil || item == nil || item.ID != queueID {
-		t.Fatalf("claim=%+v err=%v want queue %d", item, err, queueID)
-	}
-	if _, err := r.DeferMessage(queueID, surface.DeliveryRefused(errors.New("Claude refused to resume target: Workspace not trusted")), now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.FailDeliveryIntent(deliveryID, "transport failed"); err != nil {
-		t.Fatal(err)
-	}
-	if noticeID, _, err := r.QueueDeliveryFailureNotice(deliveryID); err != nil || noticeID != 0 {
-		t.Fatalf("failure notice id=%d err=%v", noticeID, err)
-	}
-	if count := r.QueueCount(sender); count != 0 {
-		t.Fatalf("%d notices queued for a sender nothing reads", count)
-	}
-	problems, err := r.ListDeliveryProblems()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, problem := range problems {
-		if problem.DeliveryID == deliveryID {
-			if problem.AttentionSessionID != "" {
-				t.Fatalf("flagged %q for its failed send", problem.AttentionSessionID)
+	for name, ensure := range senders {
+		t.Run(name, func(t *testing.T) {
+			r := openTestRegistry(t)
+			sender, err := ensure(r)
+			if err != nil {
+				t.Fatal(err)
 			}
-			return
-		}
+			if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.SaveRuntimeState("target", surface.TurnObservation{Status: surface.StatusIdle}); err != nil {
+				t.Fatal(err)
+			}
+			queueID, deliveryID, err := r.QueueDeliveryWithIntent("target", "please rerun the build", "unrepliable-sender", surface.SendOptions{SourceSessionID: sender})
+			if err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now().Add(time.Hour)
+			if item, err := r.ClaimNextMessage("target", now); err != nil || item == nil || item.ID != queueID {
+				t.Fatalf("claim=%+v err=%v want queue %d", item, err, queueID)
+			}
+			if _, err := r.DeferMessage(queueID, surface.DeliveryRefused(errors.New("Claude refused to resume target: Workspace not trusted")), now); err != nil {
+				t.Fatal(err)
+			}
+			if count := r.QueueCount(sender); count != 0 {
+				t.Fatalf("%d refusal notices queued for a sender nothing reads", count)
+			}
+			if _, err := r.FailDeliveryIntent(deliveryID, "transport failed"); err != nil {
+				t.Fatal(err)
+			}
+			if noticeID, _, err := r.QueueDeliveryFailureNotice(deliveryID); err != nil || noticeID != 0 {
+				t.Fatalf("failure notice id=%d err=%v", noticeID, err)
+			}
+			if count := r.QueueCount(sender); count != 0 {
+				t.Fatalf("%d notices queued for a sender nothing reads", count)
+			}
+			watched, err := r.WatchedSessions()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, session := range watched {
+				if session.ID == sender {
+					t.Fatalf("the sender is watched: %+v", watched)
+				}
+			}
+			problems, err := r.ListDeliveryProblems()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, problem := range problems {
+				if problem.DeliveryID == deliveryID {
+					if problem.AttentionSessionID != "" {
+						t.Fatalf("flagged %q for its failed send", problem.AttentionSessionID)
+					}
+					return
+				}
+			}
+			t.Fatal("the failed send is not listed as a problem")
+		})
 	}
-	t.Fatal("the failed send is not listed as a problem")
 }

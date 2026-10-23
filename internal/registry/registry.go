@@ -325,6 +325,12 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureColumn(tx, "session_journal", "body_ref", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
+	if err := ensureColumn(tx, "catalog_state", "projection_clock", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE catalog_state SET projection_clock=(SELECT MAX(projection_generation) FROM catalog_sessions) WHERE projection_clock<(SELECT COALESCE(MAX(projection_generation),0) FROM catalog_sessions)`); err != nil {
+		return err
+	}
 	if err := ensureColumn(tx, "delivery_intents", "message", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
@@ -981,7 +987,8 @@ CREATE TABLE IF NOT EXISTS session_archive (
 );
 CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),
-	host_epoch TEXT NOT NULL
+	host_epoch TEXT NOT NULL,
+	projection_clock INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS signin_profiles (
 	id TEXT PRIMARY KEY,

@@ -376,7 +376,10 @@ struct SurfaceState: Decodable, Identifiable, Equatable {
     var repairAction: String? = nil
     var repairLabel: String? = nil
 
-    var needsAttention: Bool { health != "healthy" || !(runtime?.advice.isEmpty ?? true) }
+    /// Browser sign-in turned off, or a computer with no browser: states the
+    /// surface reports, not problems to act on.
+    var isStatedLimit: Bool { health == "signin_off" || health == "signin_unavailable" }
+    var needsAttention: Bool { (health != "healthy" && !isStatedLimit) || !(runtime?.advice.isEmpty ?? true) }
 }
 
 struct SurfaceRuntimeNote: Decodable, Equatable {
@@ -1348,6 +1351,7 @@ struct SigninConsumerState: Codable, Identifiable, Equatable {
     let profile: String?
     let profileName: String?
     let problem: String?
+    let unavailable: String?
 
     var choice: String {
         switch mode {

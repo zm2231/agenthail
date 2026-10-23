@@ -574,6 +574,8 @@ function renderOverview() {
           ? "Needs attention"
           : surface.health === "signin_off"
             ? "Sign-in off"
+            : surface.health === "signin_unavailable"
+            ? "No browser here"
             : surface.connected
             ? "Connected"
             : "Not connected";
@@ -993,8 +995,8 @@ function renderSignin() {
       ...profiles.map((profile) => `<option value="${escape(profile.id)}"${consumer.profileId === profile.id ? " selected" : ""}>${escape(profile.label)}</option>`),
       `<option value="none"${consumer.mode === "off" ? " selected" : ""}>Off</option>`,
     ].join("");
-    const state = consumer.mode === "off" ? '<span class="health-state signin_off">Off</span>' : consumer.problem ? '<span class="health-state unavailable">Cannot read</span>' : "";
-    const problem = consumer.problem ? `<p class="signin-problem">${escape(consumer.problem)}</p>` : "";
+    const state = consumer.mode === "off" ? '<span class="health-state signin_off">Off</span>' : consumer.unavailable ? '<span class="health-state signin_off">No browser here</span>' : consumer.problem ? '<span class="health-state unavailable">Cannot read</span>' : "";
+    const problem = consumer.unavailable ? `<p class="signin-resolved">${escape(consumer.unavailable)}</p>` : consumer.problem ? `<p class="signin-problem">${escape(consumer.problem)}</p>` : "";
     return `<div class="signin-consumer"><div><strong>${escape(consumer.label)}</strong>${state}<p>${escape(consumer.purpose)}</p><p class="signin-resolved">${escape(signinResolved(consumer))}</p>${problem}</div><label><span class="sr-only">Sign-in profile for ${escape(consumer.label)}</span><select data-signin-consumer="${escape(consumer.id)}">${options}</select></label></div>`;
   }).join("");
   $("#signin-profiles").innerHTML = profiles.map((profile) =>
@@ -1168,10 +1170,12 @@ function renderSurfaceHealth() {
   $("#surface-health-list").innerHTML = surfaces.map((surface) => {
     const name = labels[surface.name] || surface.name;
     const health = surface.health || (surface.connected ? "healthy" : "unavailable");
-    const state = health === "healthy" ? "Healthy" : health === "degraded" ? "Needs attention" : health === "signin_off" ? "Sign-in off" : "Unavailable";
+    const state = health === "healthy" ? "Healthy" : health === "degraded" ? "Needs attention" : health === "signin_off" ? "Sign-in off" : health === "signin_unavailable" ? "No browser here" : "Unavailable";
     const rawDetail = surface.healthDetail || surface.error || "Ready";
     const detail = health === "signin_off"
       ? signinOffHint(rawDetail)
+      : health === "signin_unavailable"
+      ? rawDetail.replace(/^[^:]*: /, "")
       : /cookie bridge/i.test(rawDetail)
       ? "Claude Code needs to reconnect to your signed-in account."
       : /notion.*(?:401|context)/i.test(rawDetail)

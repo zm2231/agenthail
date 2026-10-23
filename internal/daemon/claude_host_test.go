@@ -641,7 +641,7 @@ func writeFirstTurn(t *testing.T, path string) {
 }
 
 func detachedSource(manager *sessionSourceManager, session surface.Session, adapter surface.Surface) *sessionSource {
-	return &sessionSource{manager: manager, session: session, adapter: adapter, epoch: "seed", ctx: context.Background(), appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	return &sessionSource{manager: manager, session: session, adapter: adapter, epoch: "seed", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 }
 
 func TestAViewerThatReconnectsBeforeTheFirstTurnStillGetsTheFirstReply(t *testing.T) {
@@ -682,11 +682,12 @@ func TestAHostedTranscriptThatGoesMissingIsNotReadAsNewByTheNextSource(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	entries := followJournal(t, manager, session.ID, subscription)
 	writeFirstTurn(t, path)
 	deadline := time.After(10 * time.Second)
 	for streamed := false; !streamed; {
 		select {
-		case entry := <-subscription.Entries:
+		case entry := <-entries:
 			streamed = strings.Contains(string(entry.Payload), "the first reply")
 		case <-deadline:
 			t.Fatal("the source never streamed the new transcript")

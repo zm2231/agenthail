@@ -511,11 +511,15 @@ func (r *Registry) completeMoveOutTx(move SessionMove, items []MovedQueueItem, h
 		return nil, false, err
 	}
 	movedAt := r.now().UTC()
-	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,host_queue_count,waiting_on,background_tasks)
-		VALUES(?,?,?,?,?,?,1,0,0,?,?)`, move.Conversation, []byte(`null`), []byte(`{}`), placeholder.UnavailableReason, movedAt.Format(time.RFC3339Nano), string(encoded), []byte{}, []byte{}); err != nil {
+	generation, err := nextProjectionGenerationTx(tx)
+	if err != nil {
 		return nil, false, err
 	}
-	event, created, err := appendHostUpsertTx(tx, placeholder.EntityID, projection, 1, movedAt, placeholder.UnavailableReason)
+	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,host_queue_count,waiting_on,background_tasks)
+		VALUES(?,?,?,?,?,?,?,0,0,?,?)`, move.Conversation, []byte(`null`), []byte(`{}`), placeholder.UnavailableReason, movedAt.Format(time.RFC3339Nano), string(encoded), generation, []byte{}, []byte{}); err != nil {
+		return nil, false, err
+	}
+	event, created, err := appendHostUpsertTx(tx, placeholder.EntityID, projection, generation, movedAt, placeholder.UnavailableReason)
 	if err != nil {
 		return nil, false, err
 	}

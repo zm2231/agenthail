@@ -46,7 +46,7 @@ func waitFor(t *testing.T, timeout time.Duration, condition func() bool) {
 
 func TestReadJournalPageClearsSourceErrorAfterNewerHealthyActivity(t *testing.T) {
 	d, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "recovery", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "recovery", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	source.appendSourceError(errors.New("older failure"))
 	source.appendSourceError(errors.New("temporary"))
 	page, err := d.readJournalPage(from.ID, 0, 20)
@@ -62,7 +62,7 @@ func TestReadJournalPageClearsSourceErrorAfterNewerHealthyActivity(t *testing.T)
 
 func TestSeedPreviewDoesNotReplaceRetainedAuthoritativeBody(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "seed", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "seed", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	full := strings.Repeat("authoritative reply ", 2000)
 	source.append(surface.StreamEvent{ID: "reply", ProviderKey: "timeline:reply", Version: uint64(len(full)), Operation: "upsert", Final: true, Kind: "message", Role: "assistant", Text: full})
 	before := journalPayloads(t, reg, from.ID)
@@ -84,7 +84,7 @@ func TestSeedPreviewDoesNotReplaceRetainedAuthoritativeBody(t *testing.T) {
 
 func TestSeedDoneAndLivePhaseShareOneCompletionRow(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "done", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "done", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	const id = "codex:turn-1:done:turn-1"
 	source.appendSeedItems([]surface.TimelineItem{{ID: id, Kind: "done", Status: "turn_completed", TurnID: "turn-1"}})
 	source.append(surface.StreamEvent{ID: id, ProviderKey: id, Operation: "phase", Kind: "done", TurnID: "turn-1"})
@@ -256,21 +256,30 @@ func TestCatalogQueueChangesAdvanceWatermarkAndKeepStaleness(t *testing.T) {
 	t.Fatalf("catalog session %s missing", to.ID)
 }
 
-func TestSessionStreamDropsBufferedLiveEntryOlderThanReplayWindow(t *testing.T) {
-	d, _, _, from, _ := daemonFixture(t)
-	stale := registry.SessionJournalEntry{SessionID: from.ID, Seq: 10, Payload: []byte(`{"itemId":"reply","version":5,"op":"upsert","kind":"text","body":"stale"}`)}
-	fresh := registry.SessionJournalEntry{SessionID: from.ID, Seq: 11, Payload: []byte(`{"itemId":"reply","version":9,"op":"upsert","kind":"text","body":"fresh"}`)}
-	next := registry.SessionJournalEntry{SessionID: from.ID, Seq: 12, Payload: []byte(`{"itemId":"other","version":1,"op":"upsert","kind":"text","body":"next"}`)}
-	entries := make(chan registry.SessionJournalEntry, 3)
-	entries <- stale
-	entries <- fresh
-	entries <- next
-	close(entries)
+func TestSessionStreamSendsEachJournalRowOnceAfterItsReplayWindow(t *testing.T) {
+	d, reg, _, from, _ := daemonFixture(t)
+	journal := func(key, body string) {
+		t.Helper()
+		payload := []byte(`{"itemId":"` + key + `","op":"upsert","kind":"text","body":"` + body + `"}`)
+		if _, _, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: key, Payload: payload, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	journal("reply", "stale")
+	journal("reply", "fresh")
+	window, err := reg.SessionJournalAfter(from.ID, 0, sessionJournalRetentionCount)
+	if err != nil || len(window.Entries) != 1 {
+		t.Fatalf("window=%+v err=%v", window, err)
+	}
+	journal("other", "next")
+	wake := make(chan struct{}, 1)
+	wake <- struct{}{}
+	close(wake)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-stream?id="+from.ID, nil)
-	d.writeSessionStream(recorder, request, recorder, from.ID, 9, registry.SessionJournalWindow{EarliestSeq: 11, LatestSeq: 11, Entries: []registry.SessionJournalEntry{fresh}}, entries)
+	d.writeSessionStream(recorder, request, recorder, from.ID, 0, window, wake)
 	body := recorder.Body.String()
-	if strings.Contains(body, `"body":"stale"`) || strings.Count(body, `"body":"fresh"`) != 1 || !strings.Contains(body, `"body":"next"`) {
+	if strings.Contains(body, `"body":"stale"`) || strings.Count(body, `"body":"fresh"`) != 1 || strings.Count(body, `"body":"next"`) != 1 {
 		t.Fatalf("stream body=%s", body)
 	}
 }
@@ -329,7 +338,7 @@ func TestManagedStreamRestartsKeepOneAuthoritativeReplyBody(t *testing.T) {
 
 func TestSeedMergesMetadataChangesIntoAuthoritativeRow(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "merge", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "merge", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	source.append(surface.StreamEvent{ID: "done", ProviderKey: "timeline:done", Operation: "phase", Kind: "done", Status: "completed", TurnID: "turn-1"})
 	source.appendSeedItems([]surface.TimelineItem{{ID: "done", Kind: "done", Status: "cancelled", TurnID: "turn-1"}})
 	full := strings.Repeat("authoritative reply ", 2000)
@@ -355,9 +364,9 @@ func TestSeedMergesMetadataChangesIntoAuthoritativeRow(t *testing.T) {
 
 func TestSkippedSeedKeepsAuthoritativeAppendPrefix(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	writer := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "first", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	writer := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "first", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	writer.append(surface.StreamEvent{ID: "item", ProviderKey: "timeline:item", Version: 11, Operation: "upsert", Final: true, Kind: "message", Role: "assistant", Text: "hello world"})
-	restarted := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "second", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	restarted := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "second", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	restarted.appendSeedItems([]surface.TimelineItem{{ID: "item", Kind: "message", Role: "assistant", Text: "hello", Truncated: true}})
 	restarted.append(surface.StreamEvent{ID: "item", ProviderKey: "timeline:item", Operation: "append", Kind: "message", Role: "assistant", Text: "!"})
 	rows := journalPayloads(t, reg, from.ID)

@@ -85,6 +85,32 @@ func (s *switchableSignin) SigninCandidates(signin.Consumer) ([]signin.Source, e
 	return []signin.Source{s.source}, nil
 }
 
+type noBrowserSignin struct{}
+
+func (noBrowserSignin) ResolveSignin(target signin.Target) (signin.Source, error) {
+	return signin.Source{}, signin.UnavailableError{Consumer: target.Consumer}
+}
+
+func (noBrowserSignin) SigninCandidates(signin.Consumer) ([]signin.Source, error) { return nil, nil }
+
+func TestNotionOnAComputerWithNoBrowserStatesTheLimitAndEndsSendsWithIt(t *testing.T) {
+	fixture := newCookieFixture(t)
+	notion := NewNotion(noBrowserSignin{}, "", "")
+	notion.cookieBridge = fixture.bridge
+
+	_, err := notion.List(context.Background())
+	if !signin.IsUnavailable(err) || !strings.Contains(err.Error(), "No browser on this computer") || !strings.Contains(err.Error(), "agenthail signin use notion <profile>") {
+		t.Fatalf("list err=%v", err)
+	}
+	_, err = notion.Send(context.Background(), &surface.Session{ID: "thread-1"}, "hello")
+	if surface.DeliveryTerminalReason(err) != surface.DeliverySigninUnavailable || surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("send err=%v", err)
+	}
+	if lines := readLines(t, fixture.bridgeLog); lines != nil {
+		t.Fatalf("cookie bridge ran without a browser: %v", lines)
+	}
+}
+
 func TestNotionWithSigninOffReadsNoCookiesAndSaysHowToTurnItOn(t *testing.T) {
 	fixture := newCookieFixture(t)
 	notion := NewNotion(nil, "", "")

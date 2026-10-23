@@ -30,6 +30,12 @@ struct SigninSettings: View {
                                     .foregroundStyle(DesktopPalette.failed)
                                     .textSelection(.enabled)
                             }
+                            if let unavailable = consumer.unavailable {
+                                Text(unavailable)
+                                    .font(.system(size: DesktopType.secondary))
+                                    .foregroundStyle(DesktopPalette.text2)
+                                    .textSelection(.enabled)
+                            }
                             Text(consumer.purpose)
                                 .font(.system(size: DesktopType.secondary))
                                 .foregroundStyle(DesktopPalette.text2)
