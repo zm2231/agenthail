@@ -1103,8 +1103,8 @@ struct SessionSummary: View {
     }
     private var backgroundWaiting: Bool { detail.session.status != "busy" && detail.session.backgroundTasks?.running == true }
     private var status: some View {
-        Label(detail.waitingPlace?.label ?? (detail.session.status == "busy" ? "Working" : detail.session.usageLimit?.label ?? (backgroundWaiting ? "Waiting on background work" : detail.session.status.capitalized)),
-              systemImage: detail.session.waitingOn != nil ? "questionmark.bubble" : detail.session.status == "busy" ? "waveform" : detail.session.usageLimit != nil ? "gauge.with.dots.needle.100percent" : backgroundWaiting ? "hourglass" : "circle")
+        Label(detail.waitingPlace?.label ?? (detail.session.status == "busy" ? "Working" : detail.limitLabel ?? (backgroundWaiting ? "Waiting on background work" : detail.session.status.capitalized)),
+              systemImage: detail.session.waitingOn != nil ? "questionmark.bubble" : detail.session.status == "busy" ? "waveform" : detail.limitLabel != nil ? "gauge.with.dots.needle.100percent" : backgroundWaiting ? "hourglass" : "circle")
         .font(.subheadline)
         .foregroundStyle(detail.session.status == "busy" ? SessionStyle.accent : .secondary)
     }
@@ -1138,7 +1138,7 @@ struct SessionInspector: View {
             List {
                 Section {
                     LabeledContent("Agent", value: detail.session.surface.capitalized)
-                    LabeledContent("Status", value: detail.waitingPlace?.label ?? detail.session.usageLimit?.label ?? (liveSession.isWaitingOnBackground ? "Waiting on background work" : detail.session.status.capitalized))
+                    LabeledContent("Status", value: detail.waitingPlace?.label ?? detail.limitLabel ?? (liveSession.isWaitingOnBackground ? "Waiting on background work" : detail.session.status.capitalized))
                     if let value = detail.modelLabel { LabeledContent("Model", value: value) }
                     if let configRoot = liveSession.claudeConfigRoot { LabeledContent("Config folder", value: configRoot.summary) }
                     if liveSession.canAdopt { Button("Open in Agenthail", systemImage: "arrow.down.app") { adopting = true } }
@@ -1290,6 +1290,10 @@ struct SessionInspector: View {
                                 Button("Rename Claude session") { claudeName = session.name; renamingClaude = true }
                             }.disabled(model.pendingControls.contains(session.id))
                         }
+                        if let stop = detail.limitResume, !detail.readOnly {
+                            Button("Resume now", systemImage: "play.fill") { model.action("limit-resume", session: session); dismiss() }
+                            if stop.isWaiting { Button("Don't resume", systemImage: "pause.circle") { model.action("limit-resume-cancel", session: session) } }
+                        }
                         if detail.capabilities.compact { Button("Compact context", systemImage: "arrow.down.right.and.arrow.up.left") { model.action("compact", session: session); dismiss() } }
                         if detail.capabilities.interrupt && detail.session.status == "busy" { Button("Stop current turn", systemImage: "stop.fill", role: .destructive) { model.action("interrupt", session: session); dismiss() } }
                         LabeledContent("Send messages", value: detail.capabilities.send ? "Available" : "Unavailable")
@@ -1374,10 +1378,10 @@ struct IOSSessionRow: View {
                     .foregroundStyle(SessionStyle.accent)
                     .lineLimit(1)
                     .fixedSize()
-                } else if let limit = session.usageLimit, !session.isWorking {
+                } else if let limit = session.limitLabel, !session.isWorking {
                     HStack(spacing: 4) {
                         Image(systemName: "gauge.with.dots.needle.100percent")
-                        Text(limit.label)
+                        Text(limit)
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)

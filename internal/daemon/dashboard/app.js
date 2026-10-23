@@ -197,6 +197,7 @@ function exchangePrompt(exchange) {
   if (exchange.origin === "peer") return { ...message, label: exchange.sender ? `From ${exchange.sender}` : "From an agent" };
   if (exchange.origin === "task-notification") return { ...message, label: "Task notification" };
   if (exchange.origin === "auto-continuation") return { ...message, label: "Continued" };
+  if (exchange.origin === "agenthail-notice") return { ...message, label: "Agenthail" };
   if (exchange.origin) return { ...message, label: exchange.origin };
   return message;
 }
@@ -484,9 +485,21 @@ function usageLimitLabel(session) {
   const resets = Date.parse(session.usageLimit?.resetsAt || "");
   return resets ? `Usage limit, resets ${new Date(resets).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Usage limit reached";
 }
+function limitResumeLabel(session) {
+  const stop = session.limitResume;
+  if (stop.state !== "waiting") return "Stopped by usage limit";
+  const resets = Date.parse(stop.resetsAt || "");
+  if (!resets) return "Usage limit, resumes when it lifts";
+  const at = new Date(resets);
+  const sameDay = at.toDateString() === new Date().toDateString();
+  return `Usage limit, resumes ${at.toLocaleString([], sameDay ? { hour: "numeric", minute: "2-digit" } : { weekday: "short", hour: "numeric", minute: "2-digit" })}`;
+}
+function limitLabel(session) {
+  return session.limitResume ? limitResumeLabel(session) : session.usageLimit ? usageLimitLabel(session) : "";
+}
 function presenceLabel(session) {
   if (session.waitingOn) return waitingLabels[waitingPlace(session)];
-  if (session.usageLimit) return usageLimitLabel(session);
+  if (limitLabel(session)) return limitLabel(session);
   if (backgroundWaiting(session)) return "Waiting on background work";
   return (
     {
@@ -505,7 +518,7 @@ function presenceTone(session) {
   return session.status;
 }
 function conversationMeta(session, model = "", pendingModel = session.pendingModel || "") {
-  const parts = [session.waitingOn ? waitingLabels[waitingPlace(session)] : session.usageLimit ? usageLimitLabel(session) : backgroundWaiting(session) ? "Waiting on background work" : statusLabel(session.status), `${session.queueCount || 0} queued`];
+  const parts = [session.waitingOn ? waitingLabels[waitingPlace(session)] : session.limitResume || session.usageLimit ? limitLabel(session) : backgroundWaiting(session) ? "Waiting on background work" : statusLabel(session.status), `${session.queueCount || 0} queued`];
   if (session.status !== "busy") parts.push(`last active ${timeAgo(session.lastActive)}`);
   const label = modelLabel(model, pendingModel);
   if (label) parts.push(label);
@@ -1199,6 +1212,7 @@ function renderSettings() {
   const { dashboard, remoteAccess } = app.settings;
   $("#settings-codex-hours").value = String(dashboard.codexRecentHours);
   $("#settings-busy-delivery").value = String(dashboard.busyDelivery || "queue");
+  $("#settings-resume-after-limit").checked = dashboard.resumeAfterLimit !== false;
   $("#settings-listener").textContent = dashboard.listen;
   renderSurfaceHealth();
   const remoteQR = app.remoteQRVisible
@@ -1559,6 +1573,11 @@ function renderChat() {
     controls.push(
       '<button data-action="compact" type="button">Compact</button>',
     );
+  if (session.limitResume) {
+    controls.push('<button data-action="limit-resume" type="button">Resume now</button>');
+    if (session.limitResume.state === "waiting")
+      controls.push('<button data-action="limit-resume-cancel" type="button">Don\'t resume</button>');
+  }
   controls.push(`<button data-archive-action="${session.archived ? "session-unarchive" : "session-archive"}" type="button">${session.archived ? "Unarchive" : "Archive"}</button>`);
   if (session.cwd && !(session.project?.added && session.project.rootPath === session.cwd))
     controls.push(`<button data-project-add="${escape(session.cwd)}" data-project-host="${escape(checkoutHost(session))}" type="button">Add folder as project</button>`);
@@ -2966,6 +2985,15 @@ $("#dashboard-settings-form").addEventListener("submit", async (event) => {
     await load(true);
     toast("Settings saved.");
   } catch (error) {
+    toast(error.message);
+  }
+});
+$("#settings-resume-after-limit").addEventListener("change", async (event) => {
+  try {
+    await updateSettings({ action: "resume-after-limit", resumeAfterLimit: event.target.checked });
+    toast(event.target.checked ? "Stopped sessions resume after their usage limit resets." : "Stopped sessions are no longer resumed.");
+  } catch (error) {
+    event.target.checked = !event.target.checked;
     toast(error.message);
   }
 });

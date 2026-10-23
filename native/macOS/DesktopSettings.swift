@@ -116,6 +116,14 @@ struct GeneralSettings: View {
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
+            Section {
+                Toggle("Resume sessions after a usage limit resets", isOn: Binding(get: { model.resumesAfterLimit }, set: { model.setResumeAfterLimit($0) }))
+                    .disabled(model.settings == nil)
+            } footer: {
+                Text("A Claude session a usage limit stopped is sent its queued messages once the limit resets, or asked to continue when it has none. Turned off, queued messages still wait for the reset.")
+                    .font(.system(size: DesktopType.secondary))
+                    .foregroundStyle(DesktopPalette.text2)
+            }
             if let remoteControl = model.claudeRemoteControl, remoteControl.available, !remoteControl.roots.isEmpty {
                 Section {
                     ForEach(remoteControl.roots) { root in

@@ -812,7 +812,7 @@ struct ConversationHeader: View {
             Spacer()
             HStack(spacing: 6) {
                 StatusIndicator(session: session, needsYou: false)
-                Text(session.waitingPlace?.label ?? (session.isWorking ? "Working" : session.usageLimit?.label ?? (session.isWaitingOnBackground ? "Waiting on background work" : session.open ? "Idle" : "Closed")))
+                Text(session.waitingPlace?.label ?? (session.isWorking ? "Working" : session.limitLabel ?? (session.isWaitingOnBackground ? "Waiting on background work" : session.open ? "Idle" : "Closed")))
             }
             .font(.system(size: DesktopType.secondary))
             .foregroundStyle(DesktopPalette.text2)
@@ -2311,6 +2311,17 @@ struct DetailsTab: View {
                 Button("Compact context") { pane.compactContext() }
                     .disabled(pane.controlPending)
                     .help("Ask the agent to compact its context")
+            }
+            if canControl, let stop = session.limitResume {
+                HStack {
+                    Button("Resume now") { pane.resumeAfterLimit(true) }
+                        .help("Send the session its queued messages, or ask it to continue, now")
+                    if stop.isWaiting {
+                        Button("Don't resume") { pane.resumeAfterLimit(false) }
+                            .help("Keep the session stopped when its usage limit resets")
+                    }
+                }
+                .disabled(pane.controlPending)
             }
             GoalSection(model: model, pane: pane, session: session)
             SessionOperationsSection(model: model, pane: pane, session: session)

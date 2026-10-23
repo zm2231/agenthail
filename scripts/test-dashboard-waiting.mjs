@@ -40,6 +40,11 @@ const limitedLabel = context.presenceLabel({ name: "builder", status: "idle", us
 assert.match(limitedLabel, /^Usage limit, resets /);
 assert.ok(limitedLabel.endsWith(new Date(resetsAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })), limitedLabel);
 assert.equal(context.presenceLabel({ name: "builder", status: "idle", usageLimit: {} }), "Usage limit reached");
+const resuming = context.presenceLabel({ name: "builder", status: "idle", usageLimit: { resetsAt }, limitResume: { state: "waiting", resetsAt } });
+assert.match(resuming, /^Usage limit, resumes /);
+assert.equal(context.presenceLabel({ name: "builder", status: "idle", limitResume: { state: "waiting" } }), "Usage limit, resumes when it lifts");
+assert.equal(context.presenceLabel({ name: "builder", status: "idle", limitResume: { state: "canceled", resetsAt } }), "Stopped by usage limit");
+assert.equal(context.presenceLabel({ name: "builder", status: "idle", limitResume: { state: "lapsed" } }), "Stopped by usage limit");
 
 const hosted = context.renderElsewhereWait(session("claude-host", approval, restartable));
 assert.match(hosted, /builder is waiting on a prompt Agenthail can&#39;t reach|builder is waiting on a prompt Agenthail can't reach/);

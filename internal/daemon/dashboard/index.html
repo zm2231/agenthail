@@ -525,6 +525,7 @@
                 <label><span>Busy message delivery</span><select id="settings-busy-delivery" name="busyDelivery"><option value="queue">Queue until idle</option><option value="steer">Steer when supported, otherwise queue</option></select></label>
                 <button class="soft-button" type="submit">Save</button>
               </form>
+              <label class="setting-row"><div><strong>Resume after usage limits</strong><p>When a usage limit stops a Claude session, send its queued messages, or ask it to continue, once the limit resets.</p></div><input id="settings-resume-after-limit" type="checkbox"></label>
               <div class="setting-row"><div><strong>Local listener</strong><p id="settings-listener">127.0.0.1</p></div><span class="status-pill idle">Private</span></div>
             </section>
             <section class="settings-card">

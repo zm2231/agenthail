@@ -483,6 +483,12 @@ final class SessionPane: ObservableObject, Identifiable {
         runControl(action: "compact", sessionID: sessionID, modelID: nil)
     }
 
+    /// Resumes a session a usage limit stopped now, or keeps it stopped.
+    func resumeAfterLimit(_ resume: Bool) {
+        guard let sessionID = selectedSessionID else { return }
+        runControl(action: resume ? "limit-resume" : "limit-resume-cancel", sessionID: sessionID, modelID: nil)
+    }
+
     private func runControl(action: String, sessionID: String, modelID: String?) {
         guard !controlPending, removedSession == nil else { return }
         controlPending = true

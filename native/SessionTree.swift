@@ -252,8 +252,8 @@ struct SessionAttention: Equatable {
         for session in live.values {
             if let waiting = session.waitingOn {
                 result[session.id] = SessionAttention(kind: .request, reason: requestReason(waiting.kind, place: session.waitingPlace ?? .elsewhere))
-            } else if let limit = session.usageLimit, result[session.id] == nil {
-                result[session.id] = SessionAttention(kind: .usageLimit, reason: limit.label)
+            } else if let limit = session.limitLabel, result[session.id] == nil {
+                result[session.id] = SessionAttention(kind: .usageLimit, reason: limit)
             }
         }
         return result

@@ -826,6 +826,22 @@ final class AgenthailModel: ObservableObject {
         updateDashboardConfig(busyDelivery: busyDelivery.rawValue, codexRecentHours: hours)
     }
 
+    /// Whether this computer resumes sessions a usage limit stopped; on unless turned off.
+    var resumesAfterLimit: Bool { settings?.dashboard.resumeAfterLimit != false }
+
+    func setResumeAfterLimit(_ enabled: Bool) {
+        guard let api else { return }
+        Task {
+            do {
+                try await api.setResumeAfterLimit(enabled)
+                settings = try await api.settings()
+                operationError = nil
+            } catch {
+                operationError = AgenthailAPIError.userMessage(error)
+            }
+        }
+    }
+
     private func updateDashboardConfig(busyDelivery: String, codexRecentHours: Int) {
         guard let api else { return }
         Task {
