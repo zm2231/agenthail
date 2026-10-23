@@ -12,8 +12,12 @@ final class ComposerPasteUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session"]
         app.launch()
-        let paste = app.buttons["composer-paste"]
-        XCTAssertTrue(paste.waitForExistence(timeout: 10))
+        let composer = app.descendants(matching: .any).matching(identifier: "composer-input").firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 10))
+        composer.tap()
+        composer.press(forDuration: 1)
+        let paste = app.menuItems["Paste"]
+        XCTAssertTrue(paste.waitForExistence(timeout: 5))
         paste.tap()
         XCTAssertTrue(app.descendants(matching: .any)["composer-attachment"].waitForExistence(timeout: 5))
         let attachment = XCTAttachment(screenshot: app.screenshot())

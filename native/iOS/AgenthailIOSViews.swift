@@ -699,17 +699,18 @@ struct IOSComposer: View {
                     .disabled(!empty)
                     .accessibilityIdentifier("composer-stash")
                 }
-                TextField(steering ? "Steer this turn…" : "Message this agent…", text: $draft.text, axis: .vertical)
-                    .font(.body).lineLimit(1...6).textFieldStyle(.plain)
-                    .padding(.horizontal, 8).padding(.top, 8)
-                    .accessibilityLabel(steering ? "Instruction for the current turn" : "Message to this agent")
-                    .accessibilityIdentifier("composer-input")
+                IOSComposerTextView(
+                    text: $draft.text,
+                    placeholder: steering ? "Steer this turn…" : "Message this agent…",
+                    label: steering ? "Instruction for the current turn" : "Message to this agent",
+                    lines: 1 ... 6,
+                    pasteAttachments: detail.capabilities.attach && detail.capabilities.send && !sending ? { model.paste($0) } : nil
+                )
+                .padding(.horizontal, 8).padding(.top, 8)
                 let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
                 layout {
                     if detail.capabilities.attach && detail.capabilities.send {
                         ComposerAttachmentMenu(model: model)
-                            .disabled(sending)
-                        ComposerPasteButton(model: model)
                             .disabled(sending)
                     }
                     if detail.capabilities.model {
