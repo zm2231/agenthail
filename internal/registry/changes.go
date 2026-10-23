@@ -1,6 +1,8 @@
 package registry
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -37,8 +39,8 @@ func (r *Registry) changeSignalPath(reason ChangeReason) string {
 // called it.
 func (r *Registry) signalChange(reason ChangeReason) {
 	path := r.changeSignalPath(reason)
-	if os.MkdirAll(filepath.Dir(path), 0o700) != nil {
-		return
+	stamp := []byte(strconv.FormatInt(time.Now().UnixNano(), 10) + "\n")
+	if err := os.WriteFile(path, stamp, 0o600); errors.Is(err, fs.ErrNotExist) && os.MkdirAll(filepath.Dir(path), 0o700) == nil {
+		_ = os.WriteFile(path, stamp, 0o600)
 	}
-	_ = os.WriteFile(path, []byte(strconv.FormatInt(time.Now().UnixNano(), 10)+"\n"), 0o600)
 }
