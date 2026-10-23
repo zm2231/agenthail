@@ -517,7 +517,7 @@ func TestOpenStartsTheProjectionClockAboveEveryStoredGeneration(t *testing.T) {
 	recordCatalogProjection(t, r, "s", "Second")
 	recordCatalogProjection(t, r, "s", "Third")
 	stored := catalogGeneration(t, r, "s")
-	for _, statement := range []string{`ALTER TABLE catalog_state DROP COLUMN projection_clock`} {
+	for _, statement := range []string{`ALTER TABLE catalog_state DROP COLUMN projection_clock`, fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion-1)} {
 		if _, err := r.db.Exec(statement); err != nil {
 			t.Fatal(err)
 		}

@@ -57,7 +57,10 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 36
+	// schemaVersion names one schema: a registry at it is opened without
+	// migrating, so any change to the schema or migrateTx takes a new version
+	// (TestTheSchemaChangesOnlyWithItsVersion).
+	schemaVersion   = 37
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -125,6 +128,16 @@ func open(path string, private, allowUpgrade bool) (*Registry, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Every command opens the registry, so a current one must not wait for the
+	// write lock behind the daemon and every other command.
+	current, err := r.current()
+	if err != nil {
+		r.Close()
+		return nil, err
+	}
+	if current {
+		return r, nil
+	}
 	if err := r.migrate(allowUpgrade); err != nil {
 		r.Close()
 		return nil, err
@@ -164,6 +177,18 @@ func OpenCurrent(path string) (*Registry, error) {
 		return nil, fmt.Errorf("registry is schema %d; this agenthail uses %d", version, schemaVersion)
 	}
 	return r, nil
+}
+
+func (r *Registry) current() (bool, error) {
+	var version int
+	if err := r.read.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return false, err
+	}
+	var mode string
+	if err := r.read.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil {
+		return false, err
+	}
+	return version == schemaVersion && mode == "wal", nil
 }
 
 func connect(path string) (*Registry, error) {
@@ -220,6 +245,8 @@ func (r *Registry) migrate(allowUpgrade bool) error {
 		return err
 	}
 	switch {
+	case version == schemaVersion:
+		return nil
 	case version > schemaVersion:
 		return r.newerSchemaError(version)
 	case version > 0 && version < schemaVersion && !allowUpgrade:
