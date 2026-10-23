@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,7 +18,9 @@ import (
 	"time"
 
 	"github.com/tidwall/gjson"
+	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 const cmuxSettings = `{
@@ -210,13 +213,86 @@ func TestThePromptHookStopsWhenTheDaemonRefusesToHoldItsPrompt(t *testing.T) {
 	t.Cleanup(server.Close)
 	client := &daemonAPIClient{baseURL: server.URL, token: "dashboard-synthetic", httpClient: server.Client()}
 	prompt := `{"session_id":"terminal-1","tool_name":"Bash","tool_input":{"command":"ls"},"permission_suggestions":[]}`
-	if decision := holdClaudePrompt(context.Background(), client, strings.NewReader(prompt), 4242); decision != nil {
+	if decision := holdClaudePrompt(context.Background(), client, strings.NewReader(prompt), 4242, func() bool { return true }); decision != nil {
 		t.Fatalf("a refused prompt got decision %+v", decision)
 	}
 	mu.Lock()
 	defer mu.Unlock()
 	if calls != 1 {
 		t.Fatalf("a refusal was retried %d times", calls)
+	}
+}
+
+func stoppedDaemonClient(t *testing.T) *daemonAPIClient {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listen := listener.Addr().String()
+	listener.Close()
+	if err := daemon.SaveDashboardConfig(daemon.DashboardConfig{Enabled: true, Listen: listen}); err != nil {
+		t.Fatal(err)
+	}
+	if err := daemon.RotateDashboardToken(); err != nil {
+		t.Fatal(err)
+	}
+	client, err := newDaemonAPIClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
+
+func TestThePromptHookLeavesThePromptToClaudeAtOnceWhenNoDaemonServiceCouldRestartTheDaemon(t *testing.T) {
+	stoppedDaemonClient(t)
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+	stdin, err := os.CreateTemp(t.TempDir(), "hook-input")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stdin.WriteString(`{"session_id":"terminal-1","tool_name":"Bash","tool_input":{"command":"ls"},"permission_suggestions":[]}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stdin.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stdin
+	os.Stdin = stdin
+	t.Cleanup(func() { os.Stdin = previous })
+	app := &App{daemonService: &fakeService{}}
+	started := time.Now()
+	output, err := captureStdout(t, func() error { return app.Run([]string{"hook", "permission-request"}) })
+	if err != nil || output != "" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Fatalf("the hook held the prompt for %v with no daemon to answer it", elapsed)
+	}
+}
+
+func TestThePromptHookGivesUpWhenItsDaemonServiceNeverBringsADaemonBack(t *testing.T) {
+	client := stoppedDaemonClient(t)
+	previousRetry, previousLimit := claudePromptHookRetry, claudePromptHookUnheldLimit
+	claudePromptHookRetry, claudePromptHookUnheldLimit = 10*time.Millisecond, 200*time.Millisecond
+	t.Cleanup(func() { claudePromptHookRetry, claudePromptHookUnheldLimit = previousRetry, previousLimit })
+	prompt := `{"session_id":"terminal-1","tool_name":"Bash","tool_input":{"command":"ls"},"permission_suggestions":[]}`
+	decided := make(chan *surfaces.ClaudePromptDecision, 1)
+	started := time.Now()
+	go func() {
+		decided <- holdClaudePrompt(context.Background(), client, strings.NewReader(prompt), 4242, func() bool { return true })
+	}()
+	select {
+	case decision := <-decided:
+		if decision != nil {
+			t.Fatalf("decision=%+v", decision)
+		}
+		if elapsed := time.Since(started); elapsed < claudePromptHookUnheldLimit {
+			t.Fatalf("the hook gave up after %v, before the limit", elapsed)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the hook kept holding a prompt no daemon came back for")
 	}
 }
 

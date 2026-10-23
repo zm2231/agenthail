@@ -63,7 +63,9 @@ func newPromptRestart(t *testing.T) (*promptRestart, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	prompt := `{"session_id":"` + restartConversation + `","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which branch?","header":"Branch","options":[{"label":"main","description":""},{"label":"next","description":""}],"multiSelect":false}]}}`
-	go func() { h.decided <- holdClaudePrompt(ctx, h.client, strings.NewReader(prompt), claude.PID) }()
+	go func() {
+		h.decided <- holdClaudePrompt(ctx, h.client, strings.NewReader(prompt), claude.PID, func() bool { return true })
+	}()
 	return h, stop
 }
 

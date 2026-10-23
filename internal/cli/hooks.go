@@ -49,6 +49,11 @@ const claudeSessionContextLimit = 5 * time.Second
 // no daemon answers, as while one restarts for an update.
 var claudePromptHookRetry = 2 * time.Second
 
+// claudePromptHookUnheldLimit is how long the hook keeps posting while no
+// daemon holds its prompt even though the daemon's service is loaded, as when
+// the service crash-loops or runs a missing binary. A restart takes seconds.
+var claudePromptHookUnheldLimit = 2 * time.Minute
+
 func (a *App) cmdHook(args []string) error {
 	a.OpenRegistry = a.OpenCurrentRegistry
 	if len(args) > 0 && args[0] == "session-context" {
@@ -99,7 +104,7 @@ func (a *App) cmdHook(args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go cancelWhenOrphaned(ctx, parent, cancel)
-	decision := holdClaudePrompt(ctx, client, os.Stdin, parent)
+	decision := holdClaudePrompt(ctx, client, os.Stdin, parent, a.isDaemonServiceLoaded)
 	if decision != nil {
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "PermissionRequest", "decision": decision}})
 	}
@@ -107,11 +112,12 @@ func (a *App) cmdHook(args []string) error {
 }
 
 // holdClaudePrompt passes the prompt to the daemon and waits for a person's
-// decision. A dropped or refused connection is posted again until Claude
-// ends the hook or exits, so a prompt outlives a daemon restart; any answer
-// from the daemon without a decision returns none, which leaves the prompt
-// to Claude's own dialog.
-func holdClaudePrompt(ctx context.Context, client *daemonAPIClient, input io.Reader, parent int) *surfaces.ClaudePromptDecision {
+// decision; returning none leaves the prompt to Claude's own dialog. Only a
+// loaded daemon service brings a daemon back, so only then is a failed
+// connection posted again, until no daemon has held the prompt for
+// claudePromptHookUnheldLimit. A call that failed within claudePromptHookRetry
+// never counts as held, so a daemon that crashes as it starts cannot extend it.
+func holdClaudePrompt(ctx context.Context, client *daemonAPIClient, input io.Reader, parent int, serviceLoaded func() bool) *surfaces.ClaudePromptDecision {
 	var request daemon.ClaudePermissionRequest
 	if err := json.NewDecoder(io.LimitReader(input, claudeHookInputLimit)).Decode(&request.Prompt); err != nil {
 		return nil
@@ -119,14 +125,23 @@ func holdClaudePrompt(ctx context.Context, client *daemonAPIClient, input io.Rea
 	request.PID = parent
 	request.AskedAtMS = time.Now().UnixMilli()
 	var body []byte
+	var unheldSince time.Time
 	for {
 		var status int
 		var err error
+		asked := time.Now()
 		body, status, err = client.call(ctx, http.MethodPost, "/api/v1/claude/permission-request", nil, request, nil)
 		if err == nil && status == http.StatusOK {
 			break
 		}
-		if status != 0 || ctx.Err() != nil {
+		if status != 0 || ctx.Err() != nil || !serviceLoaded() {
+			return nil
+		}
+		now := time.Now()
+		if unheldSince.IsZero() || now.Sub(asked) > claudePromptHookRetry {
+			unheldSince = now
+		}
+		if now.Sub(unheldSince) >= claudePromptHookUnheldLimit {
 			return nil
 		}
 		select {
