@@ -340,8 +340,7 @@ struct AppearanceSettings: View {
         }
         Task {
             do {
-                let data = try Data(contentsOf: url)
-                let path = try await interface.upload(data, name: url.lastPathComponent, api: api)
+                let path = try await api.uploadBackground(file: url)
                 error = await interface.change(draft.set("background", "image: \(path)", label: "background to \(url.lastPathComponent)"), api: api)
             } catch {
                 self.error = AgenthailAPIError.userMessage(error)

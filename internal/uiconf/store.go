@@ -271,6 +271,20 @@ func (s *Store) ImportBackground(source string) (string, error) {
 	return s.ImportBackgroundData(filepath.Base(source), file)
 }
 
+var errImageTooLarge = errors.New("choose an image smaller than 30 MB")
+
+// CheckBackgroundUpload refuses an upload by its name and declared size
+// before any of it is read. A negative size is unknown and passes.
+func CheckBackgroundUpload(name string, size int64) error {
+	if err := checkImageName(name); err != nil {
+		return err
+	}
+	if size > maxImageBytes {
+		return errImageTooLarge
+	}
+	return nil
+}
+
 // ImportBackgroundData stores an image read from body under a name that only
 // supplies its extension, and returns the path to use in ui.conf.
 func (s *Store) ImportBackgroundData(name string, body io.Reader) (string, error) {
@@ -282,7 +296,7 @@ func (s *Store) ImportBackgroundData(name string, body io.Reader) (string, error
 		return "", err
 	}
 	if len(data) > maxImageBytes {
-		return "", errors.New("choose an image smaller than 30 MB")
+		return "", errImageTooLarge
 	}
 	if len(data) == 0 {
 		return "", errors.New("the image is empty")

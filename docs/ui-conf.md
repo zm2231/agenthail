@@ -112,4 +112,4 @@ Apps read and change `ui.conf` through the daemon, with the same checks as `agen
 - `GET /api/v1/ui/log` (`read` scope) lists changes.
 - `GET /api/v1/ui/presets` (`read` scope) lists the built-in pictures and gradient presets, each with the `value` to write and what it draws in dark and light.
 - `GET /api/v1/ui/background?path=<path>` (`read` scope) returns an image from `background`, including the built-in pictures under `art/`.
-- `POST /api/v1/ui/background?name=<file name>` (`settings` scope) stores the request body as a background image and returns `{"path"}` to use as `image: <path>`.
+- `POST /api/v1/ui/background?name=<file name>` (`settings` scope) stores the request body as a background image and returns `{"path"}` to use as `image: <path>`. A name that is not an image, or a `Content-Length` over 30 MB, is refused before the body is read.

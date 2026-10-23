@@ -267,7 +267,12 @@ func (d *Daemon) apiUIBackgroundHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if r.Method == http.MethodPost {
-		rel, err := store.ImportBackgroundData(r.URL.Query().Get("name"), r.Body)
+		name := r.URL.Query().Get("name")
+		if err := uiconf.CheckBackgroundUpload(name, r.ContentLength); err != nil {
+			writeAPIError(w, http.StatusUnprocessableEntity, "background_refused", err.Error())
+			return
+		}
+		rel, err := store.ImportBackgroundData(name, r.Body)
 		if err != nil {
 			writeAPIError(w, http.StatusUnprocessableEntity, "background_refused", err.Error())
 			return

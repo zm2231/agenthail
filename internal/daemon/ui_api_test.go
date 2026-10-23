@@ -135,6 +135,17 @@ func TestUIAPIScopesAndBackgroundPaths(t *testing.T) {
 	if code := owner.do(http.MethodPost, "/api/v1/ui/background?name=notes.txt", "text", &refused); code != http.StatusUnprocessableEntity || refused.Error.Code != "background_refused" {
 		t.Fatalf("non-image upload status=%d %+v", code, refused)
 	}
+	for _, name := range []string{"notes.txt", "wall.png"} {
+		body := &countingReader{}
+		oversized := httptest.NewRequest(http.MethodPost, "/api/v1/ui/background?name="+name, body)
+		oversized.ContentLength = 40 << 20
+		oversized.Header.Set("Authorization", "Bearer secret")
+		refusal := httptest.NewRecorder()
+		handler.ServeHTTP(refusal, oversized)
+		if refusal.Code != http.StatusUnprocessableEntity || body.read != 0 {
+			t.Fatalf("40 MB %s upload status=%d after reading %d bytes, want a refusal before reading", name, refusal.Code, body.read)
+		}
+	}
 
 	var presets struct {
 		Presets []uiconf.Choice `json:"presets"`
@@ -189,4 +200,11 @@ func TestWatchUICommitsHandEditsAndAnnouncesThem(t *testing.T) {
 	if err != nil || len(entries) != 1 || entries[0].Author != uiconf.Person || entries[0].Message != "Edited by hand" {
 		t.Fatalf("latest commit = %+v, %v", entries, err)
 	}
+}
+
+type countingReader struct{ read int }
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	c.read += len(p)
+	return len(p), nil
 }

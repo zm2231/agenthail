@@ -227,16 +227,18 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.presets
     }
 
-    func uploadBackground(_ data: Data, name: String) async throws -> String {
+    /// Streams the file, so the daemon can refuse it by name or size before it
+    /// is read.
+    func uploadBackground(file: URL) async throws -> String {
         var components = URLComponents()
         components.path = "/api/v1/ui/background"
-        components.queryItems = [URLQueryItem(name: "name", value: name)]
+        components.queryItems = [URLQueryItem(name: "name", value: file.lastPathComponent)]
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
         var request = authorizedRequest(path: path)
         request.httpMethod = "POST"
         request.timeoutInterval = 120
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-        let (body, response) = try await session.upload(for: request, from: data)
+        let (body, response) = try await session.upload(for: request, fromFile: file)
         try validate(response: response, data: body)
         return try JSONDecoder().decode(UploadedBackground.self, from: body).path
     }

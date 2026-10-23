@@ -59,10 +59,6 @@ final class InterfaceStore: ObservableObject {
         }
     }
 
-    func upload(_ data: Data, name: String, api: AgenthailAPI) async throws -> String {
-        try await api.uploadBackground(data, name: name)
-    }
-
     func loadHistory(api: AgenthailAPI) async {
         if let entries = try? await api.uiLog(limit: 20) { history = entries }
     }
