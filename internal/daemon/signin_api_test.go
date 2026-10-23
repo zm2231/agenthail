@@ -73,7 +73,7 @@ type signinAPIError struct {
 func TestSigninAPIAddListUseRemove(t *testing.T) {
 	home := signinFixtureHome(t)
 	d, r, _, _, _ := daemonFixture(t)
-	api := signinAPIClient{t: t, handler: d.dashboardHandler(&dashboardServer{token: "secret"}), token: "secret"}
+	api := signinAPIClient{t: t, handler: dashboardRouter(d), token: "secret"}
 	chromeRoot := filepath.Join(home, "Library", "Application Support", "Google", "Chrome")
 
 	var view signinView
@@ -181,7 +181,7 @@ func TestSigninAPIReportsAnUnreadableDefaultBrowserWithTheFix(t *testing.T) {
 		t.Skip("root reads files whatever their mode")
 	}
 	d, _, _, _, _ := daemonFixture(t)
-	api := signinAPIClient{t: t, handler: d.dashboardHandler(&dashboardServer{token: "secret"}), token: "secret"}
+	api := signinAPIClient{t: t, handler: dashboardRouter(d), token: "secret"}
 	cookies := filepath.Join(home, "Library", "Application Support", "Google", "Chrome", "Default", "Network", "Cookies")
 	if err := os.Chmod(cookies, 0); err != nil {
 		t.Fatal(err)
@@ -197,7 +197,7 @@ func TestSigninAPIReportsAnUnreadableDefaultBrowserWithTheFix(t *testing.T) {
 func TestSigninAPIRejectsProfilesThatAreNotOnThisComputer(t *testing.T) {
 	signinFixtureHome(t)
 	d, r, _, _, _ := daemonFixture(t)
-	api := signinAPIClient{t: t, handler: d.dashboardHandler(&dashboardServer{token: "secret"}), token: "secret"}
+	api := signinAPIClient{t: t, handler: dashboardRouter(d), token: "secret"}
 	for _, test := range []struct {
 		method, path, body string
 		status             int
@@ -242,7 +242,7 @@ func TestSigninAPINeedsTheSettingsScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := signinAPIClient{t: t, handler: d.dashboardHandler(&dashboardServer{token: "secret"}), token: token}
+	api := signinAPIClient{t: t, handler: dashboardRouter(d), token: token}
 	if code := api.do(http.MethodGet, "/api/v1/signin", "", nil); code != http.StatusUnauthorized {
 		t.Fatalf("a control-only device read sign-in settings: status=%d", code)
 	}

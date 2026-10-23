@@ -32,7 +32,7 @@ func createClaudeSessionInTheHost(t *testing.T, launcher string) {
 	host.Start(t)
 	home := host.Cwd
 	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewClaude(nil, host.Home)})
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-options", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
@@ -107,7 +107,7 @@ func TestAClaudeCreationWhoseFirstTurnIsUnconfirmedRecordsThatTurnsUUID(t *testi
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/actions", bytes.NewReader(body))
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
-	d.dashboardHandler(&dashboardServer{token: "secret"}).ServeHTTP(response, request)
+	dashboardRouter(d).ServeHTTP(response, request)
 	var receipt struct {
 		Status     string          `json:"status"`
 		DeliveryID int64           `json:"deliveryId"`
@@ -137,7 +137,7 @@ func TestMobileQueuePreservesIntegratedTurnSettings(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/queue", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
-	d.dashboardHandler(&dashboardServer{token: "secret"}).ServeHTTP(response, request)
+	dashboardRouter(d).ServeHTTP(response, request)
 	for _, want := range []string{`"effort":"high"`, `"mode":"plan"`, `"serviceTier":"fast"`, `"outputSchema":{"type":"object"}`} {
 		if !strings.Contains(response.Body.String(), want) {
 			t.Fatal(response.Body.String())

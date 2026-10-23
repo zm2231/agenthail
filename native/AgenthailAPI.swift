@@ -405,6 +405,10 @@ final class AgenthailAPI: @unchecked Sendable {
         try await post("/api/v1/pairings", body: ["name": name, "scopes": ["read", "control"]])
     }
 
+    func createLoginLink(remote: Bool) async throws -> LoginLinkResponse {
+        try await post("/api/v1/dashboard/login-links", body: ["remote": remote])
+    }
+
     static func completePairing(endpoint: URL, secret: String, name: String, session: URLSession = .shared) async throws -> PairedDeviceResponse {
         var request = URLRequest(url: URL(string: "/api/v1/pair", relativeTo: endpoint)!)
         request.httpMethod = "POST"

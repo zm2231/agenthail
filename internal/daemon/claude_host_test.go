@@ -574,7 +574,7 @@ func TestASessionStreamOpenedOnANewHostSessionDeliversItsFirstReply(t *testing.T
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})
 	t.Cleanup(d.sources.shutdown)
-	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	server := httptest.NewServer(dashboardRouter(d))
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

@@ -194,7 +194,7 @@ struct DevicesSettings: View {
                 }
             }
             if let remote = model.settings?.remoteAccess {
-                BrowserAccessSection(remote: remote)
+                BrowserAccessSection(remote: remote, createLink: model.createLoginLink)
             }
             Section("Pair an iPhone") {
                 Button("Show Pairing Code") { model.createPairing() }

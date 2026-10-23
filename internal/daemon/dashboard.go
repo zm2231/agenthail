@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"crypto/subtle"
 	"database/sql"
 	_ "embed"
 	"encoding/base64"
@@ -61,6 +60,7 @@ type dashboardServer struct {
 	cancel        context.CancelFunc
 	listen        string
 	token         string
+	devices       browserDevices
 	stateMu       sync.Mutex
 	stateAt       time.Time
 	stateVersion  atomic.Uint64
@@ -295,6 +295,7 @@ func (d *dashboardServer) shutdown() error {
 
 func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	d.dashboard = dashboard
+	dashboard.devices = d.Registry
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", dashboard.page)
 	mux.HandleFunc("/app.js", dashboard.asset("application/javascript; charset=utf-8", dashboardJS))
@@ -430,17 +431,16 @@ func (d *Daemon) dashboardRemoteQRHandler(w http.ResponseWriter, r *http.Request
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	config, err := LoadDashboardConfig()
+	link, err := d.createLoginLink(true)
+	if err == errRemoteAccessOff {
+		http.Error(w, "remote access is not enabled", http.StatusConflict)
+		return
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	status := RemoteAccessStatusForConfig(config)
-	if !status.Enabled || status.URL == "" {
-		http.Error(w, "remote access is not enabled", http.StatusConflict)
-		return
-	}
-	image, err := RemoteAccessQR(status.URL)
+	image, err := RemoteAccessQR(link.URL)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -747,13 +747,12 @@ func (dashboard *dashboardServer) page(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if supplied := r.URL.Query().Get("token"); supplied != "" && subtle.ConstantTimeCompare([]byte(supplied), []byte(dashboard.token)) == 1 {
-		http.SetCookie(w, &http.Cookie{Name: "agenthail_dashboard", Value: dashboard.token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: dashboardCookieMaxAge})
-		http.Redirect(w, r, "/", http.StatusFound)
+	if secret := r.URL.Query().Get("login"); secret != "" {
+		dashboard.login(w, r, secret)
 		return
 	}
 	if !dashboard.authorized(r) {
-		http.Error(w, "dashboard access token required; run 'agenthail dashboard'", http.StatusUnauthorized)
+		http.Error(w, "sign in with a link from 'agenthail dashboard'", http.StatusUnauthorized)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -773,11 +772,6 @@ func (dashboard *dashboardServer) guard(next http.HandlerFunc) http.HandlerFunc 
 		}
 		next(w, r)
 	}
-}
-
-func (dashboard *dashboardServer) authorized(r *http.Request) bool {
-	cookie, err := r.Cookie("agenthail_dashboard")
-	return err == nil && subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(dashboard.token)) == 1
 }
 
 func sameOrigin(r *http.Request) bool {

@@ -305,7 +305,7 @@ Turn on phone access with `agenthail dashboard remote`, then show a pairing code
 
 The iPhone app can then show current work, open conversations, send or steer messages, and notify you when an agent finishes or is waiting on you. `agenthail devices` lists the phones paired with the computer and `agenthail devices remove <device>` disconnects one. The computer is not opened to the public internet.
 
-`agenthail dashboard remote` also opens the web dashboard on the phone in the browser, over the same Tailscale connection.
+`agenthail dashboard remote` also prints a sign-in link and QR code for the web dashboard on the phone, over the same Tailscale connection. Each link signs in one browser, once, within 15 minutes; the browser then appears in `agenthail devices` and can be removed like a phone.
 
 Matching voice-enabled builds also offer **Talk to orchestrator**: a real Codex
 Voice conversation that can inspect agents, delegate work, and read replies through

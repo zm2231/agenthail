@@ -351,7 +351,7 @@ func TestAForwardedChangeIsRecordedOnTheOwningHostWithWhoMadeIt(t *testing.T) {
 		if bearer {
 			request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
 		}
-		request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: dashboardTestToken})
+		request.AddCookie(browserCookie(t, local.reg))
 		response := httptest.NewRecorder()
 		local.handler.ServeHTTP(response, request)
 		if response.Code != http.StatusOK {

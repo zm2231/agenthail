@@ -1270,6 +1270,11 @@ function revealRemoteQR() {
   app.remoteQRHideTimer = setTimeout(hideRemoteQR, 60000);
   renderSettings();
 }
+async function createLoginLink() {
+  const response = await fetch("/api/v1/dashboard/login-links", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ remote: true }) });
+  if (!response.ok) throw Error((await response.json().catch(() => ({}))).error?.message || "Could not create a phone link.");
+  return (await response.json()).url;
+}
 async function updateSettings(body) {
   const response = await fetch("/api/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   if (!response.ok) throw Error(await response.text());
@@ -3183,12 +3188,19 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (event.target.closest("[data-copy-remote]")) {
+    let link;
+    try {
+      link = await createLoginLink();
+    } catch (error) {
+      toast(error.message);
+      return;
+    }
     try {
       if (!navigator.clipboard) throw Error("Clipboard access is unavailable");
-      await navigator.clipboard.writeText(app.settings.remoteAccess.url);
-      toast("Phone link copied.");
+      await navigator.clipboard.writeText(link);
+      toast("Phone link copied. It works once, within 15 minutes.");
     } catch {
-      window.prompt("Copy this phone link", app.settings.remoteAccess.url);
+      window.prompt("Copy this phone link. It works once, within 15 minutes.", link);
     }
   }
 });

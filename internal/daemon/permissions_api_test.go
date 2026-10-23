@@ -33,7 +33,7 @@ echo '{"accessibility":"missing","screenRecording":"granted","automation":{"com.
 	t.Cleanup(func() { permissionsDaemon = previous })
 
 	d, _, _, _, _ := daemonFixture(t)
-	api := signinAPIClient{t: t, handler: d.dashboardHandler(&dashboardServer{token: "secret"}), token: "secret"}
+	api := signinAPIClient{t: t, handler: dashboardRouter(d), token: "secret"}
 	var report permissions.Report
 	if code := api.do(http.MethodGet, "/api/v1/permissions", "", &report); code != http.StatusOK {
 		t.Fatalf("status=%d", code)

@@ -33,7 +33,7 @@ func TestAPIV1MobileTimelinePreservesContractAndReadAuthorization(t *testing.T) 
 	_, registry, fake, _, _ := daemonFixture(t)
 	adapter := &timelineSurface{daemonSurface: fake}
 	d := newTestDaemon(t, registry, []surface.Surface{adapter})
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	turns := []struct{ id, role, turn string }{
 		{"item-1", "user", "turn-1"}, {"item-2", "assistant", "turn-1"},
 		{"item-3", "user", "turn-2"}, {"item-4", "assistant", "turn-2"},
@@ -89,7 +89,7 @@ func TestAPIV1MobileTimelinePreservesContractAndReadAuthorization(t *testing.T) 
 }
 func TestAPIV1SearchUsesGuardAndExistingHistorySearch(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/search?surface=codex&q=missing", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -144,7 +144,7 @@ func TestProviderHistoryOmitsInjectedPromptAlreadyJournaled(t *testing.T) {
 	adapter := &providerHistorySurface{daemonSurface: fake, shared: &shared}
 	d := newTestDaemon(t, registry, []surface.Surface{adapter})
 	defer d.sources.shutdown()
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	read := func(query string) surface.SessionTimeline {
 		t.Helper()
 		request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id=from&timeline=1&limit=40"+query, nil)
@@ -185,7 +185,7 @@ func TestSessionPageContinuesIntoProviderHistoryPastSeed(t *testing.T) {
 	adapter := &providerHistorySurface{daemonSurface: fake}
 	d := newTestDaemon(t, registry, []surface.Surface{adapter})
 	defer d.sources.shutdown()
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	read := func(query string) surface.SessionTimeline {
 		t.Helper()
 		request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id=from&timeline=1&limit=40"+query, nil)
@@ -235,7 +235,7 @@ func TestSessionPageWithPreexistingJournalReportsHistoryGapInsteadOfExhaustion(t
 	adapter := &providerHistorySurface{daemonSurface: fake}
 	d := newTestDaemon(t, registry, []surface.Surface{adapter})
 	defer d.sources.shutdown()
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	get := func(query string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id=from&timeline=1&limit=40"+query, nil)
 		request.Header.Set("Authorization", "Bearer secret")
@@ -267,7 +267,7 @@ func TestSessionPageWithPreexistingJournalReportsHistoryGapInsteadOfExhaustion(t
 
 func TestSessionPagesWalkOneExchangeAtATimeWithoutGapsOrOverlap(t *testing.T) {
 	d, registry, _, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	journal := []struct{ id, kind, role, turn, body string }{
 		{"p1", "message", "user", "turn-1", "first question"},
 		{"r1", "message", "assistant", "turn-1", "first answer"},
@@ -354,7 +354,7 @@ func TestOlderProviderHistoryPageStopsAtTheItemLimit(t *testing.T) {
 	_, registry, fake, _, _ := daemonFixture(t)
 	adapter := &toolHistorySurface{daemonSurface: fake}
 	d := newTestDaemon(t, registry, []surface.Surface{adapter})
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	read := func(cursor int64) surface.SessionTimeline {
 		target := "/api/v1/session?id=from&timeline=1&limit=5"
 		if cursor > 0 {

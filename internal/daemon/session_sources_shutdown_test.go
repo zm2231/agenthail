@@ -14,13 +14,13 @@ func TestConcurrentDashboardSessionAndShutdownLeavesNoAdmittedSource(t *testing.
 	_, r, fake, from, _ := daemonFixture(t)
 	for attempt := 0; attempt < 50; attempt++ {
 		d := newTestDaemon(t, r, []surface.Surface{fake})
-		server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+		server := httptest.NewServer(dashboardRouter(d))
 		request, err := http.NewRequest(http.MethodGet, server.URL+"/api/session?id="+from.ID+"&timeline=1", nil)
 		if err != nil {
 			server.Close()
 			t.Fatal(err)
 		}
-		request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+		request.AddCookie(browserCookie(t, d.Registry))
 		start := make(chan struct{})
 		var group sync.WaitGroup
 		group.Add(2)

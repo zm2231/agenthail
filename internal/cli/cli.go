@@ -399,13 +399,15 @@ Claude hooks (answer terminal Claude prompts from Agenthail; tell each session w
 Dashboard (optional):
   dashboard enable              Enable the local dashboard and open it
   dashboard disable             Disable the dashboard listener
-  dashboard status              Show dashboard state and URL
+  dashboard status              Show dashboard state and address
   dashboard config --codex-recent-hours <hours>
                                 Set the Codex current-session window
-  dashboard remote              Enable private phone access with Tailscale + QR
-  dashboard remote status       Show remote access state and phone URL
+  dashboard remote              Enable private phone access with Tailscale and
+                                print a one-time phone sign-in link + QR
+  dashboard remote status       Show remote access state and phone address
   dashboard remote off          Remove Agenthail's Tailscale Serve route
-  dashboard                     Open an enabled dashboard
+  dashboard                     Open the dashboard with a one-time sign-in link
+  dashboard token rotate        Replace the token the CLI and Mac app use
 
 Interface preferences (ui.conf, versioned; every change is a commit):
   ui get [--resolved] [--device <class>] [--json]

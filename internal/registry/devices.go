@@ -100,7 +100,21 @@ func (r *Registry) pruneDevicePairings(now time.Time) error {
 	return err
 }
 
+// BrowserScopes are the scopes of a dashboard login link: a browser signed in
+// with one can do everything the dashboard offers.
+var BrowserScopes = []string{"control", "read", "settings"}
+
 func (r *Registry) CompleteDevicePairing(secret, name, hostID string) (Device, string, error) {
+	return r.completeDevicePairing(secret, name, hostID, false)
+}
+
+// CompleteBrowserPairing redeems a dashboard login link for a browser token. It
+// refuses pairings made for anything else, such as another host.
+func (r *Registry) CompleteBrowserPairing(secret string) (Device, string, error) {
+	return r.completeDevicePairing(secret, "", "", true)
+}
+
+func (r *Registry) completeDevicePairing(secret, name, hostID string, browser bool) (Device, string, error) {
 	secret = strings.TrimSpace(secret)
 	if secret == "" {
 		return Device{}, "", ErrPairingInvalid
@@ -117,6 +131,9 @@ func (r *Registry) CompleteDevicePairing(secret, name, hostID string) (Device, s
 	}
 	if err != nil {
 		return Device{}, "", err
+	}
+	if browser && storedScopes != strings.Join(BrowserScopes, ",") {
+		return Device{}, "", ErrPairingInvalid
 	}
 	expires, err := time.Parse(time.RFC3339Nano, expiresAt)
 	if err != nil || !time.Now().UTC().Before(expires) {

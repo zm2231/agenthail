@@ -1563,6 +1563,11 @@ struct SigninProfileResponse: Decodable {
     let profile: SigninProfileState?
 }
 
+struct LoginLinkResponse: Decodable {
+    let url: String
+    let expiresAt: String
+}
+
 struct PairingResponse: Decodable {
     let id: String
     let expiresAt: String

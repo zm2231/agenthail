@@ -39,7 +39,7 @@ func TestClaudeRootsAPIReportsEachRootsSigninAndLiveUsage(t *testing.T) {
 		return 404, "{}", nil
 	})
 	d.Surfaces = []surface.Surface{claude}
-	api := signinAPIClient{t: t, handler: d.dashboardHandler(&dashboardServer{token: "secret"}), token: "secret"}
+	api := signinAPIClient{t: t, handler: dashboardRouter(d), token: "secret"}
 
 	var listing struct {
 		Claude []surface.ClaudeConfigRoot `json:"claude"`
@@ -91,7 +91,7 @@ func TestClaudeRootUsageSaysALoginHasNoProfileWithoutNamingTheProfiles(t *testin
 	d.Surfaces = []surface.Surface{surfaces.NewClaudeWithRequest(candidates(profiles), home, func(context.Context, string, string, map[string]string, string, surfaces.CookieSource, time.Duration) (int, string, error) {
 		return 200, `{"uuid":"acct-personal","email_address":"personal@example.com"}`, nil
 	})}
-	api := signinAPIClient{t: t, handler: d.dashboardHandler(&dashboardServer{token: "secret"}), token: "secret"}
+	api := signinAPIClient{t: t, handler: dashboardRouter(d), token: "secret"}
 	var usage struct {
 		Usage        *surface.ClaudeUsage `json:"usage"`
 		UsageProblem string               `json:"usageProblem"`
@@ -124,7 +124,7 @@ func TestClaudeRootUsageSaysClaudeAICouldNotBeAskedWhenTheAccountCheckFails(t *t
 	d.Surfaces = []surface.Surface{surfaces.NewClaudeWithRequest(candidates([]signin.Source{{ProfileID: "sp_work", Label: "work", Browser: signin.Chrome, Dir: "/work"}}), home, func(context.Context, string, string, map[string]string, string, surfaces.CookieSource, time.Duration) (int, string, error) {
 		return 503, `{"type":"error"}`, nil
 	})}
-	api := signinAPIClient{t: t, handler: d.dashboardHandler(&dashboardServer{token: "secret"}), token: "secret"}
+	api := signinAPIClient{t: t, handler: dashboardRouter(d), token: "secret"}
 	var usage struct {
 		UsageProblem string `json:"usageProblem"`
 	}

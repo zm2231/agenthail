@@ -114,6 +114,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/claude/remote-control", d.apiV1Guard(dashboard, "settings", apiV1JSONHandler(d.claudeRemoteControlHandler)))
 	mux.HandleFunc("/api/v1/pairings", d.apiV1Guard(dashboard, "settings", d.apiPairingsHandler))
 	mux.HandleFunc("/api/v1/devices", d.apiV1Guard(dashboard, "settings", d.apiDevicesHandler))
+	mux.HandleFunc("/api/v1/dashboard/login-links", d.apiV1Guard(dashboard, "settings", d.apiLoginLinksHandler))
 	mux.HandleFunc("/api/v1/device", d.apiDeviceSelfHandler)
 	mux.HandleFunc("/api/v1/device/push", d.apiDevicePushHandler)
 	mux.HandleFunc("/api/v1/pair", d.apiPairHandler)

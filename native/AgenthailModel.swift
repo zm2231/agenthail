@@ -592,6 +592,18 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
+    func createLoginLink() async -> String? {
+        guard let api else { return nil }
+        do {
+            let link = try await api.createLoginLink(remote: true)
+            operationError = nil
+            return link.url
+        } catch {
+            operationError = AgenthailAPIError.userMessage(error)
+            return nil
+        }
+    }
+
     func loadPermissions() async {
         guard let api else { return }
         do {

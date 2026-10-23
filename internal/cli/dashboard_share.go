@@ -47,10 +47,11 @@ func funnelEnabled(status tailscaleServeStatus, dnsName string, port int) bool {
 }
 
 type dashboardShareResult struct {
-	URL     string `json:"url"`
-	QRPath  string `json:"qrPath"`
-	DNSName string `json:"dnsName"`
-	Port    int    `json:"port"`
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	QRPath    string    `json:"qrPath"`
+	DNSName   string    `json:"dnsName"`
+	Port      int       `json:"port"`
 }
 
 func dashboardShareQRPath() string {
@@ -200,16 +201,8 @@ func configureDashboardShare(run dashboardShareRunner, dnsName, target string, p
 	return nil
 }
 
-func remoteDashboardURL(dnsName, localURL string, port int) (string, error) {
-	local, err := url.Parse(localURL)
-	if err != nil {
-		return "", fmt.Errorf("parse local dashboard URL: %w", err)
-	}
-	if local.Query().Get("token") == "" {
-		return "", fmt.Errorf("local dashboard URL is missing its access token")
-	}
-	remote := &url.URL{Scheme: "https", Host: net.JoinHostPort(dnsName, strconv.Itoa(port)), Path: "/", RawQuery: local.RawQuery, Fragment: "conversations"}
-	return remote.String(), nil
+func remoteDashboardURL(dnsName string, port int) string {
+	return (&url.URL{Scheme: "https", Host: net.JoinHostPort(dnsName, strconv.Itoa(port)), Path: "/"}).String()
 }
 
 func dashboardShareTarget(listen string) (string, error) {
@@ -243,6 +236,8 @@ func copyDashboardURL(value string) bool {
 	return command.Run() == nil
 }
 
+// openDashboardShare shows the QR code only: opening the login link here would
+// spend it on this computer's browser.
 func openDashboardShare(result dashboardShareResult) error {
 	if runtime.GOOS != "darwin" {
 		return nil
@@ -250,23 +245,20 @@ func openDashboardShare(result dashboardShareResult) error {
 	if err := exec.Command("open", result.QRPath).Run(); err != nil {
 		return fmt.Errorf("open dashboard QR: %w", err)
 	}
-	if err := exec.Command("open", result.URL).Run(); err != nil {
-		return fmt.Errorf("open shared dashboard: %w", err)
-	}
 	return nil
 }
 
 func printDashboardRemote(result dashboardShareResult, asJSON, copied bool) error {
 	if asJSON {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"url": result.URL, "qrPath": result.QRPath, "dnsName": result.DNSName, "port": result.Port, "copied": copied})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"url": result.URL, "expiresAt": result.ExpiresAt, "qrPath": result.QRPath, "dnsName": result.DNSName, "port": result.Port, "copied": copied})
 	}
 	fmt.Println("remote dashboard access enabled through Tailscale")
-	fmt.Printf("phone: %s\n", result.URL)
+	fmt.Printf("phone sign-in link (%s): %s\n", dashboardLoginLink{ExpiresAt: result.ExpiresAt}.validity(), result.URL)
 	fmt.Printf("QR: %s\n", result.QRPath)
 	if copied {
-		fmt.Println("copied the phone URL to the clipboard")
+		fmt.Println("copied the phone link to the clipboard")
 	}
-	fmt.Println("on iPhone: open the URL, tap Share, then tap Add to Home Screen")
+	fmt.Println("on iPhone: open the link, tap Share, then tap Add to Home Screen")
 	fmt.Println("disable: agenthail dashboard remote off")
 	return nil
 }
@@ -396,16 +388,8 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 			fmt.Println("remote dashboard access: off")
 			return nil
 		}
-		localURL, err := daemon.DashboardURL()
-		if err != nil {
-			return err
-		}
-		remoteURL, err := remoteDashboardURL(node.Self.DNSName, localURL, dashboardSharePort)
-		if err != nil {
-			return err
-		}
 		fmt.Println("remote dashboard access: on")
-		fmt.Printf("phone: %s\n", remoteURL)
+		fmt.Printf("phone: %s (sign in with a link from 'agenthail dashboard remote')\n", remoteDashboardURL(node.Self.DNSName, dashboardSharePort))
 		return nil
 	case "on":
 	default:
@@ -426,15 +410,11 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 	if err := daemon.SaveDashboardConfig(config); err != nil {
 		return err
 	}
-	localURL, err := daemon.DashboardURL()
+	link, err := a.createDashboardLoginLink(true)
 	if err != nil {
 		return err
 	}
-	remoteURL, err := remoteDashboardURL(node.Self.DNSName, localURL, dashboardSharePort)
-	if err != nil {
-		return err
-	}
-	result := dashboardShareResult{URL: remoteURL, QRPath: dashboardShareQRPath(), DNSName: node.Self.DNSName, Port: dashboardSharePort}
+	result := dashboardShareResult{URL: link.URL, ExpiresAt: link.ExpiresAt, QRPath: dashboardShareQRPath(), DNSName: node.Self.DNSName, Port: dashboardSharePort}
 	if err := writeDashboardQR(result.URL, result.QRPath); err != nil {
 		return err
 	}

@@ -75,7 +75,7 @@ func TestResumingABackgroundJobRegistersItsHostSession(t *testing.T) {
 	}
 	adapter := surfaces.NewClaude(nil, fixture.Home)
 	d := newTestDaemon(t, registry, []surface.Surface{adapter})
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	body, _ := json.Marshal(map[string]string{"action": "session-lifecycle-resume", "sessionId": conversation})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/actions", bytes.NewReader(body))
 	request.Header.Set("Authorization", "Bearer secret")

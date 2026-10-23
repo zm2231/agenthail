@@ -272,7 +272,7 @@ func TestALiveSourceLeavesItsCheckpointWhereItsStreamStopped(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Surfaces = []surface.Surface{surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	if got := readDashboardExchanges(t, handler, conversation, ""); len(got) != 2 {
 		t.Fatalf("first page exchanges=%+v", got)
 	}

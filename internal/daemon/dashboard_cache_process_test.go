@@ -15,9 +15,9 @@ import (
 func TestDashboardSnapshotCursorTracksFilterAndRejectsCatalogChanges(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
 	d.discoverCatalog(context.Background())
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	request := httptest.NewRequest(http.MethodGet, "/api/state?limit=1", nil)
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	request.AddCookie(browserCookie(t, d.Registry))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -32,7 +32,7 @@ func TestDashboardSnapshotCursorTracksFilterAndRejectsCatalogChanges(t *testing.
 	}
 
 	filtered := httptest.NewRequest(http.MethodGet, "/api/state?limit=1&cursor="+first.NextCursor+"&q=from", nil)
-	filtered.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	filtered.AddCookie(browserCookie(t, d.Registry))
 	filteredResponse := httptest.NewRecorder()
 	handler.ServeHTTP(filteredResponse, filtered)
 	if filteredResponse.Code != http.StatusBadRequest || !contains(filteredResponse.Body.String(), "invalid_cursor") {
@@ -42,7 +42,7 @@ func TestDashboardSnapshotCursorTracksFilterAndRejectsCatalogChanges(t *testing.
 	fake.sessions["third"] = surface.Session{ID: "third", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 	d.discoverCatalog(context.Background())
 	stale := httptest.NewRequest(http.MethodGet, "/api/state?limit=1&cursor="+first.NextCursor, nil)
-	stale.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	stale.AddCookie(browserCookie(t, d.Registry))
 	staleResponse := httptest.NewRecorder()
 	handler.ServeHTTP(staleResponse, stale)
 	if staleResponse.Code != http.StatusConflict || !contains(staleResponse.Body.String(), "catalog_changed") {
@@ -53,9 +53,9 @@ func TestDashboardSnapshotCursorTracksFilterAndRejectsCatalogChanges(t *testing.
 func TestDashboardCatalogPageUsesBoundedCatalogAndDoesNotPoisonFullCache(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	d.discoverCatalog(context.Background())
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	pageRequest := httptest.NewRequest(http.MethodGet, "/api/state?limit=1", nil)
-	pageRequest.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	pageRequest.AddCookie(browserCookie(t, d.Registry))
 	pageResponse := httptest.NewRecorder()
 	handler.ServeHTTP(pageResponse, pageRequest)
 	if pageResponse.Code != http.StatusOK {
@@ -69,7 +69,7 @@ func TestDashboardCatalogPageUsesBoundedCatalogAndDoesNotPoisonFullCache(t *test
 		t.Fatalf("page=%+v", page)
 	}
 	fullRequest := httptest.NewRequest(http.MethodGet, "/api/state", nil)
-	fullRequest.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	fullRequest.AddCookie(browserCookie(t, d.Registry))
 	fullResponse := httptest.NewRecorder()
 	handler.ServeHTTP(fullResponse, fullRequest)
 	if fullResponse.Code != http.StatusOK {
@@ -94,9 +94,9 @@ func TestDashboardEmptyCatalogPageDoesNotFallBackToSavedSessions(t *testing.T) {
 	}, registry.CatalogEvent{DedupeKey: "session:from:catalog", Type: "session.upserted", EntityID: from.ID, Payload: []byte(`{"session":{"id":"from"}}`)}); err != nil {
 		t.Fatal(err)
 	}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	request := httptest.NewRequest(http.MethodGet, "/api/state?limit=20&q=does-not-exist", nil)
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	request.AddCookie(browserCookie(t, d.Registry))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {

@@ -28,15 +28,32 @@ import (
 
 const dashboardTestToken = "secret"
 
+// signedInHandler is a dashboard with a browser already signed in to it, as
+// after redeeming a login link.
+type signedInHandler struct {
+	http.Handler
+	cookie *http.Cookie
+}
+
 func dashboardRouter(d *Daemon) http.Handler {
-	return d.dashboardHandler(&dashboardServer{token: dashboardTestToken})
+	cookie, err := signInBrowser(d.Registry)
+	if err != nil {
+		panic(err)
+	}
+	return signedInHandler{Handler: d.dashboardHandler(&dashboardServer{token: dashboardTestToken}), cookie: cookie}
+}
+
+func addBrowserCookie(handler http.Handler, request *http.Request) {
+	if signed, ok := handler.(signedInHandler); ok {
+		request.AddCookie(signed.cookie)
+	}
 }
 
 func serveDashboardRequest(handler http.Handler, method, target, body string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, target, strings.NewReader(body))
 	request.Host = "example.test"
 	request.Header.Set("Origin", "http://example.test")
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: dashboardTestToken})
+	addBrowserCookie(handler, request)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	return response
@@ -312,23 +329,16 @@ func TestSessionTranscriptIsBoundedWithoutDroppingAnExchange(t *testing.T) {
 }
 
 func TestDashboardRequiresTokenAndRejectsCrossOriginActions(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	d, _, _, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := d.dashboardHandler(&dashboardServer{token: dashboardTestToken})
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/state", nil))
 	if unauthorized.Code != http.StatusUnauthorized {
 		t.Fatalf("state status=%d", unauthorized.Code)
 	}
 
-	bootstrap := httptest.NewRecorder()
-	handler.ServeHTTP(bootstrap, httptest.NewRequest(http.MethodGet, "/?token=secret", nil))
-	if bootstrap.Code != http.StatusFound || len(bootstrap.Result().Cookies()) != 1 {
-		t.Fatalf("bootstrap status=%d cookies=%d", bootstrap.Code, len(bootstrap.Result().Cookies()))
-	}
-	cookie := bootstrap.Result().Cookies()[0]
-	if cookie.MaxAge != dashboardCookieMaxAge {
-		t.Fatalf("dashboard cookie max age=%d, want %d", cookie.MaxAge, dashboardCookieMaxAge)
-	}
+	cookie := signInWithLoginLink(t, handler)
 	state := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/state", nil)
 	request.AddCookie(cookie)
@@ -360,7 +370,7 @@ func TestDashboardRequiresTokenAndRejectsCrossOriginActions(t *testing.T) {
 
 func TestARouteTheDaemonDoesNotHaveIsNotFoundNotUnauthorized(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	for _, path := range []string{"/api/v1/not-yet", "/api/not-yet"} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		request.Header.Set("Authorization", "Bearer secret")
@@ -387,14 +397,14 @@ func TestARouteTheDaemonDoesNotHaveIsNotFoundNotUnauthorized(t *testing.T) {
 
 func TestDashboardExposesCookieAuthenticatedDesktopVoiceControls(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/voice", nil))
 	if unauthorized.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized voice status=%d", unauthorized.Code)
 	}
 	request := httptest.NewRequest(http.MethodGet, "/voice-peer.js", nil)
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	request.AddCookie(browserCookie(t, d.Registry))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "agenthailVoiceNotify") {
@@ -491,13 +501,13 @@ func TestDashboardSteerReturnsDeliveryEvidence(t *testing.T) {
 
 func TestDashboardAliasesAndRealiasesSession(t *testing.T) {
 	d, registry, _, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	setAlias := func(name string) *httptest.ResponseRecorder {
 		body, _ := json.Marshal(map[string]string{"action": "alias", "sessionId": "from", "alias": name})
 		request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
 		request.Header.Set("Origin", "http://example.test")
 		request.Host = "example.test"
-		request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+		request.AddCookie(browserCookie(t, d.Registry))
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
 		return response
@@ -526,14 +536,14 @@ func TestDashboardAliasesAndRealiasesSession(t *testing.T) {
 	}
 	state := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/state", nil)
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	request.AddCookie(browserCookie(t, d.Registry))
 	handler.ServeHTTP(state, request)
 	if state.Code != http.StatusOK || !strings.Contains(state.Body.String(), `"alias":"shipper"`) {
 		t.Fatalf("state=%d body=%s", state.Code, state.Body.String())
 	}
 	history := httptest.NewRecorder()
 	request = httptest.NewRequest(http.MethodGet, "/api/history?limit=10", nil)
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	request.AddCookie(browserCookie(t, d.Registry))
 	handler.ServeHTTP(history, request)
 	if history.Code != http.StatusOK || !strings.Contains(history.Body.String(), `"kind":"identified"`) || !strings.Contains(history.Body.String(), `"result":"@shipper"`) {
 		t.Fatalf("history=%d body=%s", history.Code, history.Body.String())
@@ -560,7 +570,7 @@ func TestDashboardSnapshotCarriesCodexRuntimeProblemAndRepair(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "/api/v1/snapshot", nil)
 			request.Header.Set("Authorization", "Bearer secret")
 			response := httptest.NewRecorder()
-			d.dashboardHandler(&dashboardServer{token: "secret"}).ServeHTTP(response, request)
+			dashboardRouter(d).ServeHTTP(response, request)
 			var snapshot dashboardState
 			if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &snapshot) != nil || len(snapshot.Surfaces) != 1 {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
@@ -622,12 +632,12 @@ func TestDashboardRepairsManagedRuntime(t *testing.T) {
 	base := &daemonSurface{kind: surface.KindCodex}
 	adapter := &runtimeDaemonSurface{daemonSurface: base}
 	d = newTestDaemon(t, registry, []surface.Surface{adapter})
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	body, _ := json.Marshal(map[string]string{"action": "runtime-ensure"})
 	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
 	request.Header.Set("Origin", "http://example.test")
 	request.Host = "example.test"
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	request.AddCookie(browserCookie(t, d.Registry))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || adapter.ensureCalls.Load() != 1 {
@@ -638,9 +648,9 @@ func TestDashboardRepairsManagedRuntime(t *testing.T) {
 func TestDashboardListsModelsForNewConversation(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
 	fake.modelOptions = []surface.ModelOption{{ID: "gpt-5.6-sol", DisplayName: "GPT-5.6 Sol", Default: true}}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	request := httptest.NewRequest(http.MethodGet, "/api/models?surface=codex", nil)
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	request.AddCookie(browserCookie(t, d.Registry))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"gpt-5.6-sol"`) {
@@ -650,7 +660,7 @@ func TestDashboardListsModelsForNewConversation(t *testing.T) {
 
 func TestDashboardStartsWritableCodexConversation(t *testing.T) {
 	d, registry, fake, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	cwd := t.TempDir()
 	body, _ := json.Marshal(map[string]string{
 		"action": "session-create", "surface": "codex", "message": "Build this", "cwd": cwd,
@@ -659,7 +669,7 @@ func TestDashboardStartsWritableCodexConversation(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
 	request.Header.Set("Origin", "http://example.test")
 	request.Host = "example.test"
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	request.AddCookie(browserCookie(t, d.Registry))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated {
@@ -684,12 +694,12 @@ func TestDashboardStartsWritableCodexConversation(t *testing.T) {
 func TestDashboardReturnsCreatedSessionWhenInitialDeliveryIsUnknown(t *testing.T) {
 	d, registry, fake, _, _ := daemonFixture(t)
 	fake.startErr = surface.DeliveryOutcomeUnknown(errors.New("turn outcome unknown"))
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "codex", "message": "Build this", "cwd": t.TempDir()})
 	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
 	request.Header.Set("Origin", "http://example.test")
 	request.Host = "example.test"
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	request.AddCookie(browserCookie(t, d.Registry))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"status":"submitted"`) || !strings.Contains(response.Body.String(), `"accepted":true`) || !strings.Contains(response.Body.String(), `"retryable":false`) || !strings.Contains(response.Body.String(), `"deliveryId":`) || !strings.Contains(response.Body.String(), `"id":"started"`) || !strings.Contains(response.Body.String(), `"detail":"Submitted to codex:started."`) || strings.Contains(strings.ToLower(response.Body.String()), "unresolved") || strings.Contains(strings.ToLower(response.Body.String()), "confirm") || strings.Contains(strings.ToLower(response.Body.String()), "inspect") || strings.Contains(strings.ToLower(response.Body.String()), "retrying") {
@@ -726,12 +736,12 @@ func TestDashboardRecordsDefinitiveInitialDeliveryFailure(t *testing.T) {
 	liveEvents := followCatalog(t, liveEventsFollower)
 	cancel := liveEventsFollower.Cancel
 	defer cancel()
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "codex", "message": "Build this", "cwd": t.TempDir()})
 	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
 	request.Header.Set("Origin", "http://example.test")
 	request.Host = "example.test"
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	request.AddCookie(browserCookie(t, d.Registry))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), `"status":"failed"`) || strings.Contains(response.Body.String(), `"accepted":true`) || !strings.Contains(response.Body.String(), `"deliveryId":`) {
@@ -812,7 +822,7 @@ func TestDashboardCreatesAndRegistersNotionThread(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
 	request.Header.Set("Origin", "http://example.test")
 	request.Host = "example.test"
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	request.AddCookie(browserCookie(t, registry))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), threadID) || len(fake.sent) != 1 || fake.sent[0] != "Research the launch" || len(fake.models) != 1 || fake.models[0] != "fast" {
@@ -836,7 +846,7 @@ func TestDashboardStreamsSelectedSessionOverSSE(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
 	fake.caps = surface.Capabilities{Stream: true}
 	fake.streamEvents = []surface.StreamEvent{{Kind: "context", Context: &surface.ContextUsage{UsedTokens: 90000, ContextWindow: 200000}}, {Kind: "text", Text: "hello"}, {Kind: "tool_use", Text: "tests"}, {Kind: "done"}}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	server := httptest.NewServer(handler)
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -845,7 +855,7 @@ func TestDashboardStreamsSelectedSessionOverSSE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	request.AddCookie(browserCookie(t, d.Registry))
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -1139,7 +1149,7 @@ func TestDashboardStateReadsCatalogWithoutProviderDiscovery(t *testing.T) {
 	handler := d.dashboardHandler(dashboard)
 	for i := 0; i < 2; i++ {
 		req := httptest.NewRequest(http.MethodGet, "/api/state", nil)
-		req.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+		req.AddCookie(browserCookie(t, d.Registry))
 		res := httptest.NewRecorder()
 		handler.ServeHTTP(res, req)
 		if res.Code != http.StatusOK {
@@ -1151,7 +1161,7 @@ func TestDashboardStateReadsCatalogWithoutProviderDiscovery(t *testing.T) {
 	}
 	d.publishEvent("session.updated", "from", nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/state", nil)
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	request.AddCookie(browserCookie(t, d.Registry))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -1169,14 +1179,14 @@ func TestDashboardHistoryIsAuthorizedAndPaginated(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/history?limit=2", nil))
 	if unauthorized.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized status=%d", unauthorized.Code)
 	}
 	request := httptest.NewRequest(http.MethodGet, "/api/history?limit=2", nil)
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	request.AddCookie(browserCookie(t, d.Registry))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -1194,14 +1204,14 @@ func TestDashboardHistoryIsAuthorizedAndPaginated(t *testing.T) {
 		t.Fatalf("first page=%+v", first)
 	}
 	nextRequest := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/history?limit=2&before=%d", first.NextBefore), nil)
-	nextRequest.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	nextRequest.AddCookie(browserCookie(t, d.Registry))
 	nextResponse := httptest.NewRecorder()
 	handler.ServeHTTP(nextResponse, nextRequest)
 	if nextResponse.Code != http.StatusOK || strings.Contains(nextResponse.Body.String(), fmt.Sprintf(`"id":%d`, first.Items[1].ID)) {
 		t.Fatalf("second page status=%d body=%s", nextResponse.Code, nextResponse.Body.String())
 	}
 	filteredRequest := httptest.NewRequest(http.MethodGet, "/api/history?limit=25&q=message+3&kind=sent", nil)
-	filteredRequest.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	filteredRequest.AddCookie(browserCookie(t, d.Registry))
 	filteredResponse := httptest.NewRecorder()
 	handler.ServeHTTP(filteredResponse, filteredRequest)
 	if filteredResponse.Code != http.StatusOK || !strings.Contains(filteredResponse.Body.String(), "message 3") || strings.Contains(filteredResponse.Body.String(), "message 2") {
@@ -1260,6 +1270,128 @@ func TestChangingTheCodexWindowRepublishesPresence(t *testing.T) {
 	for _, listed := range readDashboardState(t, handler).Sessions {
 		if listed.ID == session.ID && (listed.Current || listed.CurrentReason != "") {
 			t.Fatalf("snapshot still current after narrowing the window: %+v", listed)
+		}
+	}
+}
+
+func browserCookie(t testing.TB, store *registrypkg.Registry) *http.Cookie {
+	t.Helper()
+	cookie, err := signInBrowser(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cookie
+}
+
+func signInBrowser(store *registrypkg.Registry) (*http.Cookie, error) {
+	pairing, err := store.CreateDevicePairing("Test browser", registrypkg.BrowserScopes, time.Minute)
+	if err != nil {
+		return nil, err
+	}
+	_, token, err := store.CompleteBrowserPairing(pairing.Secret)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Cookie{Name: dashboardCookieName, Value: token}, nil
+}
+
+// signInWithLoginLink signs a browser in the way 'agenthail dashboard' does:
+// the CLI asks for a login link and the browser opens it.
+func signInWithLoginLink(t *testing.T, handler http.Handler) *http.Cookie {
+	t.Helper()
+	link := createTestLoginLink(t, handler)
+	login := httptest.NewRecorder()
+	handler.ServeHTTP(login, httptest.NewRequest(http.MethodGet, link.RequestURI(), nil))
+	if login.Code != http.StatusFound || login.Header().Get("Location") != "/" || len(login.Result().Cookies()) != 1 {
+		t.Fatalf("login status=%d location=%q cookies=%d", login.Code, login.Header().Get("Location"), len(login.Result().Cookies()))
+	}
+	cookie := login.Result().Cookies()[0]
+	if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode || cookie.MaxAge != dashboardCookieMaxAge || cookie.Value == dashboardTestToken {
+		t.Fatalf("browser cookie = %+v", cookie)
+	}
+	return cookie
+}
+
+func createTestLoginLink(t *testing.T, handler http.Handler) *url.URL {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/dashboard/login-links", strings.NewReader(`{}`))
+	request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	var link struct {
+		URL string `json:"url"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &link) != nil {
+		t.Fatalf("login link status=%d body=%s", response.Code, response.Body.String())
+	}
+	parsed, err := url.Parse(link.URL)
+	if err != nil || parsed.Query().Get("login") == "" || strings.Contains(link.URL, dashboardTestToken) {
+		t.Fatalf("login link = %q", link.URL)
+	}
+	return parsed
+}
+
+func TestALoginLinkSignsInOneBrowserOnce(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	d, store, _, _, _ := daemonFixture(t)
+	handler := d.dashboardHandler(&dashboardServer{token: dashboardTestToken})
+	link := createTestLoginLink(t, handler)
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodGet, link.RequestURI(), nil))
+	if first.Code != http.StatusFound || len(first.Result().Cookies()) != 1 {
+		t.Fatalf("first use status=%d cookies=%d", first.Code, len(first.Result().Cookies()))
+	}
+	again := httptest.NewRecorder()
+	handler.ServeHTTP(again, httptest.NewRequest(http.MethodGet, link.RequestURI(), nil))
+	if again.Code != http.StatusUnauthorized || len(again.Result().Cookies()) != 0 {
+		t.Fatalf("second use status=%d cookies=%d", again.Code, len(again.Result().Cookies()))
+	}
+	token := httptest.NewRecorder()
+	handler.ServeHTTP(token, httptest.NewRequest(http.MethodGet, "/?token="+dashboardTestToken, nil))
+	if token.Code != http.StatusUnauthorized || len(token.Result().Cookies()) != 0 {
+		t.Fatalf("dashboard token in the URL: status=%d cookies=%d", token.Code, len(token.Result().Cookies()))
+	}
+	hostPairing, err := store.CreateDevicePairing("peer", []string{"read", "control", registrypkg.HostScope}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := httptest.NewRecorder()
+	handler.ServeHTTP(host, httptest.NewRequest(http.MethodGet, "/?login="+url.QueryEscape(hostPairing.Secret), nil))
+	if host.Code != http.StatusUnauthorized || len(host.Result().Cookies()) != 0 {
+		t.Fatalf("host pairing signed a browser in: status=%d", host.Code)
+	}
+}
+
+func TestRevokingABrowserSignsOutThatBrowserAlone(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	d, store, _, _, _ := daemonFixture(t)
+	handler := d.dashboardHandler(&dashboardServer{token: dashboardTestToken})
+	phone, laptop := signInWithLoginLink(t, handler), signInWithLoginLink(t, handler)
+	devices, err := store.ListDevices(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(devices) != 2 {
+		t.Fatalf("devices = %+v, want one per browser", devices)
+	}
+	phoneDevice, err := store.AuthenticateDevice(phone.Value, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RevokeDevice(phoneDevice.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []struct {
+		browser string
+		cookie  *http.Cookie
+		want    int
+	}{{"revoked phone", phone, http.StatusUnauthorized}, {"laptop", laptop, http.StatusOK}} {
+		request := httptest.NewRequest(http.MethodGet, "/api/state", nil)
+		request.AddCookie(check.cookie)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != check.want {
+			t.Fatalf("state for the %s = %d, want %d", check.browser, response.Code, check.want)
 		}
 	}
 }

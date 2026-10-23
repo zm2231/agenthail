@@ -72,7 +72,7 @@ func TestSessionFilesFollowTheCheckoutsIgnoreRules(t *testing.T) {
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 
 	code, body, raw := getSessionFiles(t, handler, "id="+url.QueryEscape(session.ID)+"&q=dashgo")
 	if code != http.StatusOK {
@@ -119,7 +119,7 @@ func TestSessionFilesWalkAPlainDirectoryWithoutLeavingIt(t *testing.T) {
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	code, body, raw := getSessionFiles(t, handler, "id="+url.QueryEscape(session.ID))
 	if code != http.StatusOK {
 		t.Fatalf("%d %s", code, raw)
@@ -140,7 +140,7 @@ func TestSessionFilesLimitsAndRefusals(t *testing.T) {
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	if _, body, _ := getSessionFiles(t, handler, "id="+url.QueryEscape(session.ID)); len(body.Files) != sessionFilesDefaultLimit {
 		t.Fatalf("default limit returned %d", len(body.Files))
 	}

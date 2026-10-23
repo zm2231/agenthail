@@ -147,7 +147,7 @@ func TestAPIV1EventStreamResumesFromLastEventID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	server := httptest.NewServer(dashboardRouter(d))
 	defer server.Close()
 	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/events", nil)
 	request.Header.Set("Authorization", "Bearer secret")
@@ -180,7 +180,7 @@ func TestAPIV1RevocationClosesOpenDeviceEventStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	server := httptest.NewServer(handler)
 	defer server.Close()
 	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/events", nil)
@@ -219,7 +219,7 @@ func TestAPIV1SnapshotCursorClosesBootstrapGap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/snapshot?fresh=1", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
@@ -252,7 +252,7 @@ func TestEventHubReplaysAcrossDaemonRestart(t *testing.T) {
 	if response := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"alias","sessionId":"from","alias":"before"}`); response.Code != http.StatusOK {
 		t.Fatalf("alias status=%d body=%s", response.Code, response.Body.String())
 	}
-	first := snapshotEventCursor(t, d.dashboardHandler(&dashboardServer{token: "secret"}))
+	first := snapshotEventCursor(t, dashboardRouter(d))
 	if first == 0 {
 		t.Fatal("action did not publish an event")
 	}
@@ -287,7 +287,7 @@ func TestEventHubReplaysAcrossDaemonRestart(t *testing.T) {
 
 func TestAPIV1LegacyHandlerErrorsUseTypedJSON(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/session", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
@@ -314,7 +314,7 @@ func TestAPIV1LegacyHandlerErrorsUseTypedJSON(t *testing.T) {
 
 func TestAPIV1RoutesRejectUnauthorizedRequestsWithTypedJSON(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	cases := []struct {
 		method string
 		path   string
@@ -343,7 +343,7 @@ func TestAPIV1RoutesRejectUnauthorizedRequestsWithTypedJSON(t *testing.T) {
 
 func TestAPIV1SessionAttachmentAuthenticatedReadScopeReachesSessionLookup(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-attachment?sessionId=missing&id=attachment:0:0:"+strings.Repeat("0", 64), nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
@@ -378,7 +378,7 @@ func TestAPIV1SessionAttachmentServesReferencedBytesAndRejectsOversize(t *testin
 		t.Fatalf("read=%+v err=%v", read, err)
 	}
 	id := read.Items[1].Attachment.ID
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/session-attachment?sessionId=from&id="+id, nil))
 	assertAPIV1Error(t, unauthorized, http.StatusUnauthorized, "unauthorized")
@@ -433,7 +433,7 @@ func TestAPIV1DeliveryProblemsSnapshotAndDismiss(t *testing.T) {
 	if changed, err := r.FailDeliveryIntent(intent.ID, "delivery failed"); err != nil || !changed {
 		t.Fatalf("changed=%v err=%v", changed, err)
 	}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/snapshot", nil))
 	assertAPIV1Error(t, unauthorized, http.StatusUnauthorized, "unauthorized")
@@ -469,7 +469,7 @@ func TestAPIV1DeliveryProblemsSnapshotAndDismiss(t *testing.T) {
 
 func TestAPIV1RoutesRejectUnsupportedMethodsWithTypedJSON(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	paths := []string{
 		"/api/v1/version",
 		"/api/v1/snapshot",
@@ -503,7 +503,7 @@ func TestAPIV1RoutesRejectUnsupportedMethodsWithTypedJSON(t *testing.T) {
 
 func TestAPIV1MutationFailuresUseTypedJSON(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	cases := []struct {
 		name   string
 		method string
@@ -536,7 +536,7 @@ func TestAPIV1MutationFailuresUseTypedJSON(t *testing.T) {
 
 func TestAPIV1RejectsOversizedAndTrailingJSONBodies(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	cases := []struct {
 		name string
 		body string
@@ -592,7 +592,7 @@ func snapshotEventCursor(t *testing.T, handler http.Handler) uint64 {
 
 func TestAPIV1RejectsMutationWithoutPublishingChange(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	if _, err := d.events.publish("session.updated", "one", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -613,7 +613,7 @@ func TestAPIV1DeviceCanRevokeItself(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	request := httptest.NewRequest(http.MethodDelete, "/api/v1/device", nil)
 	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
@@ -644,7 +644,7 @@ esac
 	}
 	t.Setenv("AGENTHAIL_MAC_APP", helper)
 	d, _, _, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	settingsRequest := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
 	settingsRequest.Header.Set("Authorization", "Bearer secret")
 	settingsResponse := httptest.NewRecorder()

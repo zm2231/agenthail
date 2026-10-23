@@ -722,7 +722,7 @@ func (h *runningDaemon) detailWaiting(id string) *surface.Waiting {
 		h.t.Fatal(err)
 	}
 	request.Header.Set("Origin", h.server.URL)
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: e2eToken})
+	request.AddCookie(browserCookie(h.t, h.store))
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		h.t.Fatal(err)

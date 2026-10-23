@@ -303,7 +303,7 @@ func (n *federationNode) request(t *testing.T, method, target string, body any) 
 	}
 	request := httptest.NewRequest(method, target, reader)
 	request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: dashboardTestToken})
+	request.AddCookie(browserCookie(t, n.reg))
 	response := httptest.NewRecorder()
 	n.handler.ServeHTTP(response, request)
 	return response

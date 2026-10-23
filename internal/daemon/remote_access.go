@@ -154,12 +154,8 @@ func remoteTarget(listen string) (string, error) {
 	return "http://" + net.JoinHostPort("127.0.0.1", port), nil
 }
 
-func remoteURL(dnsName, localURL string, port int) (string, error) {
-	local, err := url.Parse(localURL)
-	if err != nil || local.Query().Get("token") == "" {
-		return "", fmt.Errorf("dashboard access token is unavailable")
-	}
-	return (&url.URL{Scheme: "https", Host: remoteHost(dnsName, port), Path: "/", RawQuery: local.RawQuery, Fragment: "overview"}).String(), nil
+func remoteURL(dnsName string, port int) string {
+	return (&url.URL{Scheme: "https", Host: remoteHost(dnsName, port), Path: "/"}).String()
 }
 
 func RemoteAccessStatusForConfig(config DashboardConfig) RemoteAccessStatus {
@@ -194,9 +190,7 @@ func RemoteAccessStatusForConfig(config DashboardConfig) RemoteAccessStatus {
 	}
 	result.Enabled = result.Proxy == target && httpsReady
 	if result.Enabled {
-		if local, urlErr := DashboardURL(); urlErr == nil {
-			result.URL, _ = remoteURL(node.Self.DNSName, local, remote.Port)
-		}
+		result.URL = remoteURL(node.Self.DNSName, remote.Port)
 	}
 	return result
 }

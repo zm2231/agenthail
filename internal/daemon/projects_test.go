@@ -497,7 +497,7 @@ func TestEveryProjectSurfaceNamesItsCoordinatorsOnEveryHost(t *testing.T) {
 		}
 	}
 	d.discoverCatalog(context.Background())
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	call := func(method, path, body string, into any) {
 		t.Helper()
 		request := httptest.NewRequest(method, path, strings.NewReader(body))

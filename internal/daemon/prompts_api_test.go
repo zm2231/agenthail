@@ -80,7 +80,7 @@ func TestPromptsAreWhatAPersonTypedNewestFirst(t *testing.T) {
 		journalUserMessage(t, r, session.ID, fmt.Sprintf("m%d", index), body, fmt.Sprintf("2026-10-20T10:00:0%dZ", index), nil)
 	}
 	journalUserMessage(t, r, session.ID, "long", long[:40], "2026-10-20T10:00:09Z", []byte(long))
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 
 	code, body, raw := getPrompts(t, handler, "sessionId="+url.QueryEscape(session.ID))
 	if code != http.StatusOK {
@@ -108,7 +108,7 @@ func TestPromptsBoundTheirQueryAndTheirScan(t *testing.T) {
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	for _, query := range []string{"limit=0", fmt.Sprintf("limit=%d", promptsMaxLimit+1), "limit=x", "q=" + strings.Repeat("é", promptsMaxQuery+1), "before=nope"} {
 		if code, _, raw := getPrompts(t, handler, query); code != http.StatusBadRequest {
 			t.Fatalf("%s: %d %s", query, code, raw)

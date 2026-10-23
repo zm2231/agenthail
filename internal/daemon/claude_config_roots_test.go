@@ -34,7 +34,7 @@ func TestClaudeConfigRootsReachSessionOptionsCreationAndTheSessionRow(t *testing
 		}
 	}
 	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewClaude(nil, host.Home)})
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	call := func(method, path string, body []byte) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, path, bytes.NewReader(body))
 		request.Header.Set("Authorization", "Bearer secret")

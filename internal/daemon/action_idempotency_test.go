@@ -202,10 +202,11 @@ func TestActionIdempotencyPendingAndRestartNeverRedispatches(t *testing.T) {
 func TestActionIdempotencyReplaysTextFailureContentType(t *testing.T) {
 	fake := idempotencyFake()
 	fake.sendErr = surface.DeliveryTerminal(errors.New("provider unavailable"), surface.DeliveryInvalidRequest)
-	_, handler := openIdempotencyFixture(t, filepath.Join(t.TempDir(), "registry.db"), fake)
+	store, handler := openIdempotencyFixture(t, filepath.Join(t.TempDir(), "registry.db"), fake)
+	cookie := browserCookie(t, store)
 	send := func() *httptest.ResponseRecorder {
 		request := dashboardActionRequestWithKey(`{"action":"send","sessionId":"from","message":"one"}`, "text-failure")
-		request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: dashboardTestToken})
+		request.AddCookie(cookie)
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
 		return response

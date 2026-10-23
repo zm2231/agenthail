@@ -55,7 +55,7 @@ func TestAPICatalogStreamReplaysPersistedEvent(t *testing.T) {
 	if _, created, err := d.catalog.publish(registry.CatalogEvent{DedupeKey: "session:from:1", Type: "session.upserted", EntityID: "from", Payload: []byte(`{"id":"from"}`)}); err != nil || !created {
 		t.Fatalf("created=%v err=%v", created, err)
 	}
-	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	server := httptest.NewServer(dashboardRouter(d))
 	defer server.Close()
 	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/api/v1/catalog-events?after=0", nil)
 	if err != nil {
@@ -395,7 +395,7 @@ func ensureNoCatalogEvent(t *testing.T, events <-chan registry.CatalogEvent) {
 
 func openAuthorizedCatalogStream(t *testing.T, d *Daemon) (*bufio.Reader, func()) {
 	t.Helper()
-	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	server := httptest.NewServer(dashboardRouter(d))
 	ctx, cancel := context.WithCancel(context.Background())
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/catalog-events?after=0", nil)
 	if err != nil {

@@ -204,8 +204,8 @@ func TestSessionCreateReportsAcceptedLaunchWithoutRetrySignal(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello"}`))
 			req.Header.Set("Origin", "http://example.test")
 			req.Host = "example.test"
-			req.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
-			d.dashboardHandler(&dashboardServer{token: "secret"}).ServeHTTP(w, req)
+			req.AddCookie(browserCookie(t, d.Registry))
+			dashboardRouter(d).ServeHTTP(w, req)
 			if w.Code != http.StatusAccepted || launcher.launches != 1 {
 				t.Fatalf("status=%d launches=%d body=%s", w.Code, launcher.launches, w.Body.String())
 			}

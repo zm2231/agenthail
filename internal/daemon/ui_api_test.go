@@ -25,7 +25,7 @@ func uiEvents(d *Daemon) []string {
 
 func TestUIAPIReadsChangesAndUndoes(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
-	api := signinAPIClient{t: t, handler: d.dashboardHandler(&dashboardServer{token: "secret"}), token: "secret"}
+	api := signinAPIClient{t: t, handler: dashboardRouter(d), token: "secret"}
 
 	var view uiView
 	if code := api.do(http.MethodGet, "/api/v1/ui?class=mac", "", &view); code != http.StatusOK {
@@ -83,7 +83,7 @@ func TestUIAPIReadsChangesAndUndoes(t *testing.T) {
 
 func TestUIAPIScopesAndBackgroundPaths(t *testing.T) {
 	d, r, _, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	pairing, err := r.CreateDevicePairing("Phone", []string{"read"}, time.Minute)
 	if err != nil {
 		t.Fatal(err)
