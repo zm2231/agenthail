@@ -126,6 +126,9 @@ final class PhoneAppearanceTests: XCTestCase {
         XCTAssertEqual(cards.texture, "none")
         XCTAssertEqual(cards.size, list.size)
         XCTAssertEqual(cards.blur, list.blur)
+        XCTAssertEqual(list.scale, 3, "the sharp background renders at the screen's scale")
+        XCTAssertEqual(cards.scale, 1, "blurred panes render at 1x; the blur hides the difference")
+        XCTAssertEqual(session.scale, 1)
     }
 
     func testIncreasedContrastAndReducedTransparencyReachTheRenderer() throws {

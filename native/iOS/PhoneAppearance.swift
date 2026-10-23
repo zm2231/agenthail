@@ -288,7 +288,7 @@ final class PhoneAppearance: ObservableObject {
             ground: ground,
             roles: roles,
             size: key.size,
-            scale: key.scale,
+            scale: key.surface == .list ? key.scale : 1,
             panes: panes,
             texts: texts,
             solidPanes: key.solid
