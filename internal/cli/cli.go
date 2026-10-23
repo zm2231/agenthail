@@ -198,6 +198,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdSteer(rest)
 	case "queue":
 		return a.cmdQueue(rest)
+	case "limit-resume":
+		return a.cmdLimitResume(rest)
 	case "history":
 		return a.cmdHistory(rest)
 	case "thread":
@@ -309,6 +311,10 @@ Session commands:
   queue rm <id>                 Cancel a pending queued message
   queue clear <target>          Cancel all pending messages for a target
   history [target] [count]       Show delivery history (default 50)
+  limit-resume [list] [--json]  Show sessions a usage limit stopped and when they resume
+  limit-resume resume <target>  Resume a stopped session now
+  limit-resume cancel <target>  Do not resume a stopped session for its current stop
+  limit-resume on|off           Resume stopped sessions once their limit resets (default on)
 
 Identity:
   identify <target> <name>      Name a session (henceforth @name resolves to it)
@@ -2283,6 +2289,8 @@ func promptLabel(exchange surface.Exchange) string {
 		return "task notification"
 	case "auto-continuation":
 		return "continued"
+	case "agenthail-notice":
+		return "agenthail"
 	}
 	return exchange.Origin
 }

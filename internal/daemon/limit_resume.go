@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"os"
 	"sort"
 	"sync"
@@ -133,13 +135,13 @@ func (d *Daemon) sweepLimitStops(ctx context.Context, now time.Time) {
 		d.limitResumes.noteSettled(observation.UsageAccount, observation.SettledAt)
 		if stop := observation.LimitStop; stop != nil {
 			if err := d.Registry.RecordLimitStop(*session, observation.UsageAccount, *stop); err != nil {
-				d.log.Printf("record usage-limit stop of %s: %s", session.ID, err)
+				d.log.Printf("record usage-limit stop of %s: %s", d.resolveDisplay(session.ID), err)
 			}
 			continue
 		}
 		if resume, stopped := recorded[session.ID]; stopped {
 			if err := d.Registry.ClearLimitStop(session.ID, resume.TurnID); err != nil {
-				d.log.Printf("clear usage-limit stop of %s: %s", session.ID, err)
+				d.log.Printf("clear usage-limit stop of %s: %s", d.resolveDisplay(session.ID), err)
 			}
 		}
 	}
@@ -165,7 +167,7 @@ func (d *Daemon) resumeAccount(account string, stops []registry.LimitResume, ena
 			continue
 		}
 		if !stop.ResetsAt.IsZero() && now.After(stop.ResetsAt.Add(limitResumeLapse)) || stop.ResetsAt.IsZero() && stop.Attempts >= limitProbeTries {
-			d.setLimitResume(stop, registry.LimitResumeLapsed, now)
+			d.logLimitResume(d.setLimitResume(stop, registry.LimitResumeLapsed, now))
 			continue
 		}
 		waiting = append(waiting, stop)
@@ -188,7 +190,7 @@ func (d *Daemon) resumeAccount(account string, stops []registry.LimitResume, ena
 	if !enabled {
 		if due || resetsAt.IsZero() {
 			for _, stop := range waiting {
-				d.setLimitResume(stop, registry.LimitResumeReleased, now)
+				d.logLimitResume(d.setLimitResume(stop, registry.LimitResumeReleased, now))
 			}
 		}
 		return
@@ -201,31 +203,38 @@ func (d *Daemon) resumeAccount(account string, stops []registry.LimitResume, ena
 	if last, ok := d.limitResumes.released(account); ok && now.Sub(last) < limitResumeSpacing {
 		return
 	}
-	d.releaseLimitStop(waiting[0], true, now)
+	d.logLimitResume(d.releaseLimitStop(waiting[0], now))
 }
 
 // releaseLimitStop lets a stopped session go. Its queued messages resume it
-// when it has any; otherwise, when notice is set, Agenthail's resume notice
-// does.
-func (d *Daemon) releaseLimitStop(stop registry.LimitResume, notice bool, now time.Time) {
-	if notice && d.Registry.QueueCount(stop.SessionID) == 0 {
+// when it has any; otherwise Agenthail's resume notice does.
+func (d *Daemon) releaseLimitStop(stop registry.LimitResume, now time.Time) error {
+	if d.Registry.QueueCount(stop.SessionID) == 0 {
 		if _, err := d.Registry.QueueMessageWithKey(stop.SessionID, surface.LimitResumeNotice(), "limit-resume:"+stop.SessionID+":"+stop.TurnID); err != nil {
-			d.log.Printf("queue resume of %s: %s", stop.SessionID, err)
-			return
+			return fmt.Errorf("queue resume of %s: %w", d.resolveDisplay(stop.SessionID), err)
 		}
 	}
-	d.setLimitResume(stop, registry.LimitResumeReleased, now)
+	if err := d.setLimitResume(stop, registry.LimitResumeReleased, now); err != nil {
+		return err
+	}
 	d.limitResumes.noteRelease(stop.AccountKey, now)
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "limit-resume", SessionID: stop.SessionID, Result: "resumed after usage limit"})
-	d.requestObservation()
+	return nil
 }
 
-func (d *Daemon) setLimitResume(stop registry.LimitResume, state registry.LimitResumeState, now time.Time) {
+func (d *Daemon) setLimitResume(stop registry.LimitResume, state registry.LimitResumeState, now time.Time) error {
 	if err := d.Registry.SetLimitResumeState(stop.SessionID, stop.TurnID, state, now); err != nil {
-		d.log.Printf("set usage-limit resume of %s: %s", stop.SessionID, err)
-		return
+		return fmt.Errorf("set usage-limit resume of %s: %w", d.resolveDisplay(stop.SessionID), err)
 	}
 	d.publishEvent("state.changed", stop.SessionID, map[string]string{"source": "limit-resume"})
+	d.requestObservation()
+	return nil
+}
+
+func (d *Daemon) logLimitResume(err error) {
+	if err != nil {
+		d.log.Printf("%s", err)
+	}
 }
 
 // transcriptChanged reports whether session's transcript changed since the
@@ -287,4 +296,66 @@ func (l *limitResumer) released(account string) (time.Time, bool) {
 	defer l.mu.Unlock()
 	at, ok := l.lastRelease[account]
 	return at, ok
+}
+
+// dashboardLimitResume is a session's usage-limit stop as clients show it.
+// A released stop is not shown: the session is running again.
+type dashboardLimitResume struct {
+	State     registry.LimitResumeState `json:"state"`
+	RefusedAt time.Time                 `json:"refusedAt"`
+	ResetsAt  time.Time                 `json:"resetsAt,omitzero"`
+}
+
+func sameLimitResume(a, b *dashboardLimitResume) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.State == b.State && a.RefusedAt.Equal(b.RefusedAt) && a.ResetsAt.Equal(b.ResetsAt)
+}
+
+func (d *Daemon) limitResumeRow(sessionID string) *dashboardLimitResume {
+	resume, found, err := d.Registry.LimitResumeFor(sessionID)
+	if err != nil || !found || resume.State == registry.LimitResumeReleased {
+		return nil
+	}
+	return &dashboardLimitResume{State: resume.State, RefusedAt: resume.RefusedAt, ResetsAt: resume.ResetsAt}
+}
+
+func (d *Daemon) limitResumeRows() (map[string]*dashboardLimitResume, error) {
+	resumes, err := d.Registry.LimitResumes()
+	if err != nil {
+		return nil, err
+	}
+	rows := map[string]*dashboardLimitResume{}
+	for _, resume := range resumes {
+		if resume.State == registry.LimitResumeReleased {
+			continue
+		}
+		rows[resume.SessionID] = &dashboardLimitResume{State: resume.State, RefusedAt: resume.RefusedAt, ResetsAt: resume.ResetsAt}
+	}
+	return rows, nil
+}
+
+// limitResumeAction resumes a stopped session now, whatever its reset, or
+// keeps it from being resumed for its current stop.
+func (d *Daemon) limitResumeAction(w http.ResponseWriter, sessionID string, resume bool) {
+	stop, found, err := d.Registry.LimitResumeFor(sessionID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !found || stop.State == registry.LimitResumeReleased {
+		http.Error(w, "this session is not stopped by a usage limit", http.StatusConflict)
+		return
+	}
+	if resume {
+		err = d.releaseLimitStop(stop, time.Now())
+	} else {
+		err = d.setLimitResume(stop, registry.LimitResumeCanceled, time.Now())
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

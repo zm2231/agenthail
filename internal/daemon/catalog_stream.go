@@ -731,6 +731,7 @@ type presenceOutputs struct {
 	listed          bool
 	archived        bool
 	projectArchived bool
+	limitResume     *dashboardLimitResume
 }
 
 type presencePending struct {
@@ -743,12 +744,14 @@ type presencePending struct {
 func (o presenceOutputs) same(other presenceOutputs) bool {
 	return o.queueCount == other.queueCount && o.current == other.current && o.currentReason == other.currentReason &&
 		sameSubagentRollup(o.hidden, other.hidden) && sameSubagentRollup(o.liveHidden, other.liveHidden) && sameSubagentRollup(o.subagents, other.subagents) &&
-		o.listed == other.listed && o.archived == other.archived && o.projectArchived == other.projectArchived
+		o.listed == other.listed && o.archived == other.archived && o.projectArchived == other.projectArchived &&
+		sameLimitResume(o.limitResume, other.limitResume)
 }
 
 func (o presenceOutputs) applyTo(row *dashboardSession) {
 	row.QueueCount, row.Current, row.CurrentReason = o.queueCount, o.current, o.currentReason
 	row.HiddenSubagents, row.LiveHiddenSubagents, row.Subagents, row.Listed = o.hidden, o.liveHidden, o.subagents, o.listed
+	row.LimitResume = o.limitResume
 }
 
 func (p *catalogPresence) known(id string, generation int64) bool {
@@ -774,6 +777,11 @@ func (d *Daemon) publishCatalogPresence() {
 	counts, err := d.Registry.QueueCounts()
 	if err != nil {
 		d.log.Printf("catalog queue counts: %s", err)
+		return
+	}
+	limitResumes, err := d.limitResumeRows()
+	if err != nil {
+		d.log.Printf("catalog usage-limit stops: %s", err)
 		return
 	}
 	read, err := d.Registry.CatalogPresenceRows(p.read, p.hostEpoch, p.clock, p.known)
@@ -813,7 +821,7 @@ func (d *Daemon) publishCatalogPresence() {
 		if err != nil {
 			continue
 		}
-		outputs := presenceOutputs{queueCount: counts[id], listed: read.Listing.Current(id), hidden: read.Listing.HiddenSubagents(id), liveHidden: read.Listing.LiveHiddenSubagents(id)}
+		outputs := presenceOutputs{queueCount: counts[id], listed: read.Listing.Current(id), hidden: read.Listing.HiddenSubagents(id), liveHidden: read.Listing.LiveHiddenSubagents(id), limitResume: limitResumes[id]}
 		outputs.current, outputs.currentReason = presence(adapter, record.Session, row.projection.Open, outputs.queueCount)
 		outputs.subagents = addSubagentRollups(row.projection.ObservedSubagents, outputs.liveHidden)
 		if archived, _ := catalogViewArchive(&row.projection, view); archived {
@@ -992,7 +1000,7 @@ func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surfa
 	if session.Surface == surface.KindClaude {
 		configRoot = surface.ClaudeSessionConfigRoot(d.claudeConfigRoots(), session.Transcript)
 	}
-	return dashboardSession{ID: session.ID, Surface: session.Surface, RuntimeKind: session.RuntimeKind, ConfiguredModel: session.ConfiguredModel, PendingModel: session.PendingModel, ClaudeConfigRoot: configRoot, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, BackgroundTasks: session.BackgroundTasks, UsageLimit: session.UsageLimit, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, Project: identity.Project, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Delegated: session.Delegated(), Subagents: session.Subagents, Holders: session.Holders, ObservedSubagents: session.Subagents, Host: &host}
+	return dashboardSession{ID: session.ID, Surface: session.Surface, RuntimeKind: session.RuntimeKind, ConfiguredModel: session.ConfiguredModel, PendingModel: session.PendingModel, ClaudeConfigRoot: configRoot, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, BackgroundTasks: session.BackgroundTasks, UsageLimit: session.UsageLimit, LimitResume: d.limitResumeRow(session.ID), LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, Project: identity.Project, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Delegated: session.Delegated(), Subagents: session.Subagents, Holders: session.Holders, ObservedSubagents: session.Subagents, Host: &host}
 }
 
 type catalogStoredListing struct {

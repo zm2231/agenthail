@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -285,5 +286,70 @@ func TestAnUnchangedTranscriptIsNotReadAgain(t *testing.T) {
 	f.pass(refusedAt.Add(2 * time.Second))
 	if calls := f.fake.observeCalls.Load(); calls != 1 {
 		t.Fatalf("observed %d times", calls)
+	}
+}
+
+func TestTheSessionShowsItsLimitStopAndItsActionsChangeIt(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	f := newLimitFixture(t, "worker")
+	projection := `{"id":"worker","surface":"claude","status":"idle"}`
+	if _, _, err := f.r.RecordCatalogSession(registry.CatalogSessionState{Session: f.fake.sessions["worker"], Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: projection}, registry.CatalogEvent{DedupeKey: "session.upserted:worker", Type: "session.upserted", EntityID: "worker", Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
+		t.Fatal(err)
+	}
+	refusedAt := time.Now().Add(-time.Minute).Truncate(time.Second)
+	resetsAt := refusedAt.Add(time.Hour)
+	f.refused("worker", "/roots/work", "u1", refusedAt, resetsAt)
+	f.pass(refusedAt.Add(time.Second))
+	handler := dashboardRouter(f.d)
+	row := func() *dashboardLimitResume {
+		t.Helper()
+		f.d.publishCatalogPresence()
+		for _, listed := range readDashboardState(t, handler).Sessions {
+			if listed.ID == "worker" {
+				return listed.LimitResume
+			}
+		}
+		t.Fatal("session missing from the dashboard state")
+		return nil
+	}
+	if stop := row(); stop == nil || stop.State != registry.LimitResumeWaiting || !stop.ResetsAt.Equal(resetsAt) || !stop.RefusedAt.Equal(refusedAt) {
+		t.Fatalf("limitResume=%+v", stop)
+	}
+	if response := serveDashboardRequest(handler, http.MethodPost, "/api/v1/actions", `{"action":"limit-resume-cancel","sessionId":"worker"}`); response.Code != http.StatusOK {
+		t.Fatalf("cancel status=%d body=%s", response.Code, response.Body.String())
+	}
+	if stop := row(); stop == nil || stop.State != registry.LimitResumeCanceled {
+		t.Fatalf("limitResume=%+v", stop)
+	}
+	if response := serveDashboardRequest(handler, http.MethodPost, "/api/v1/actions", `{"action":"limit-resume","sessionId":"worker"}`); response.Code != http.StatusOK {
+		t.Fatalf("resume status=%d body=%s", response.Code, response.Body.String())
+	}
+	if stop := row(); stop != nil {
+		t.Fatalf("a resumed session still shows its stop: %+v", stop)
+	}
+	if queued := f.queued("worker"); len(queued) != 1 || queued[0] != surface.LimitResumeNotice() {
+		t.Fatalf("queued=%q", queued)
+	}
+	if response := serveDashboardRequest(handler, http.MethodPost, "/api/v1/actions", `{"action":"limit-resume","sessionId":"worker"}`); response.Code != http.StatusConflict {
+		t.Fatalf("resuming a running session: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestTheResumeAfterLimitSettingIsSaved(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	f := newLimitFixture(t)
+	f.d.limitResumeEnabled = nil
+	handler := dashboardRouter(f.d)
+	if !f.d.resumeAfterLimitEnabled() {
+		t.Fatal("resuming after a limit is off by default")
+	}
+	if response := serveDashboardRequest(handler, http.MethodPost, "/api/settings", `{"action":"resume-after-limit","resumeAfterLimit":false}`); response.Code != http.StatusOK {
+		t.Fatalf("settings status=%d body=%s", response.Code, response.Body.String())
+	}
+	if f.d.resumeAfterLimitEnabled() {
+		t.Fatal("turning the setting off did not stick")
+	}
+	if response := serveDashboardRequest(handler, http.MethodPost, "/api/settings", `{"action":"resume-after-limit","resumeAfterLimit":true}`); response.Code != http.StatusOK || !f.d.resumeAfterLimitEnabled() {
+		t.Fatalf("settings status=%d body=%s", response.Code, response.Body.String())
 	}
 }

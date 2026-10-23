@@ -99,6 +99,7 @@ type dashboardSession struct {
 	WaitingOn         *surface.Waiting           `json:"waitingOn,omitempty"`
 	BackgroundTasks   *surface.BackgroundTasks   `json:"backgroundTasks,omitempty"`
 	UsageLimit        *surface.UsageLimit        `json:"usageLimit,omitempty"`
+	LimitResume       *dashboardLimitResume      `json:"limitResume,omitempty"`
 	LastActive        time.Time                  `json:"lastActive,omitempty"`
 	QueueCount        int                        `json:"queueCount"`
 	Open              bool                       `json:"open"`
@@ -377,6 +378,7 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		CodexRecentHours int    `json:"codexRecentHours"`
 		BusyDelivery     string `json:"busyDelivery"`
 		PersonName       string `json:"personName"`
+		ResumeAfterLimit bool   `json:"resumeAfterLimit"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid settings request", http.StatusBadRequest)
@@ -395,6 +397,9 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		if err = SaveDashboardConfig(config); err == nil {
 			d.publishCatalogPresence()
 		}
+	case "resume-after-limit":
+		config.ResumeAfterLimit = &request.ResumeAfterLimit
+		err = SaveDashboardConfig(config)
 	case "person-name":
 		err = d.Registry.SetPersonName(request.PersonName)
 	case "notifications-enable":
@@ -1725,6 +1730,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	session, err := d.Registry.Session(request.SessionID)
 	if err != nil {
 		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	if request.Action == "limit-resume" || request.Action == "limit-resume-cancel" {
+		d.limitResumeAction(w, session.ID, request.Action == "limit-resume")
 		return
 	}
 	if request.Action == "session-focus" {
