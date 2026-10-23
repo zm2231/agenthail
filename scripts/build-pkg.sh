@@ -107,6 +107,8 @@ AGENTHAIL_CLI_SOURCE="$daemon" \
 AGENTHAIL_CODESIGN_IDENTITY="$app_identity" \
 AGENTHAIL_APP_VERSION="$package_version" \
 AGENTHAIL_APP_BUILD="$(git rev-list --count HEAD)" \
+AGENTHAIL_REVISION="$revision" \
+AGENTHAIL_REVISION_MODIFIED="$([ "$dirty" -eq 1 ] && echo true || echo false)" \
 	"$ROOT/scripts/build-macos-app.sh" "$root/Applications/Agenthail.app" arm64 >/dev/null
 
 xattr -cr "$root"

@@ -42,6 +42,10 @@ final class AgenthailModel: ObservableObject {
     @Published var auditQuery = ""
     @Published var auditKind = ""
     @Published var connectionError: String?
+    /// The build of the daemon on this Mac, as it last named it.
+    @Published private(set) var daemonBuild: AgenthailBuild?
+    /// Set when that daemon is another build than this app.
+    var daemonBuildNotice: String? { AgenthailBuild.daemonNotice(app: .app(Bundle.main.infoDictionary), daemon: daemonBuild) }
     @Published private(set) var daemonSlow = false
     @Published var reconnecting = false
     @Published var operationError: String?
@@ -148,7 +152,7 @@ final class AgenthailModel: ObservableObject {
             while !Task.isCancelled {
                 do {
                     let api = try AgenthailAPI()
-                    _ = try await api.version()
+                    daemonBuild = try await api.version().build
                     self.api = api
                     clearConnectionError()
                     lastEventID = 0
@@ -1093,8 +1097,9 @@ final class AgenthailModel: ObservableObject {
                     reconnecting = true
                     do {
                         let reloadedAPI = try AgenthailAPI()
-                        _ = try await reloadedAPI.version()
+                        let build = try await reloadedAPI.version().build
                         if Task.isCancelled { return }
+                        daemonBuild = build
                         self.api = reloadedAPI
                         clearConnectionError()
                     } catch {

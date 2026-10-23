@@ -287,12 +287,53 @@ struct APIVersion: Decodable {
     let minimumProtocol: Int
     let maximumProtocol: Int
     let pushRelayUrl: String?
+    var version: String? = nil
+    var revision: String? = nil
+    var modified: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol"
         case minimumProtocol
         case maximumProtocol
         case pushRelayUrl
+        case version
+        case revision
+        case modified
+    }
+
+    /// The build the daemon runs; nil for a daemon too old to say.
+    var build: AgenthailBuild? {
+        version.map { AgenthailBuild(version: $0, revision: revision ?? "unknown", modified: modified ?? false) }
+    }
+}
+
+/// The build an Agenthail daemon or app came from.
+struct AgenthailBuild: Codable, Hashable {
+    let version: String
+    let revision: String
+    var modified = false
+
+    /// v0.2.68 (e387b0d8), as doctor names a build.
+    var label: String {
+        "\(version) (\(revision.prefix(8))\(modified ? ", modified" : ""))"
+    }
+
+    var revisionKnown: Bool { !revision.isEmpty && revision != "unknown" }
+
+    /// The build this app was packaged from, or nil when it was built without
+    /// naming its commit.
+    static func app(_ info: [String: Any]?) -> AgenthailBuild? {
+        guard let revision = info?["AgenthailRevision"] as? String, !revision.isEmpty else { return nil }
+        let version = info?["CFBundleShortVersionString"] as? String ?? "unknown"
+        return AgenthailBuild(version: version, revision: revision, modified: info?["AgenthailRevisionModified"] as? Bool ?? false)
+    }
+
+    /// What to tell the person when the daemon this app runs with is another
+    /// build. Builds that do not both name an unmodified commit are not compared.
+    static func daemonNotice(app: AgenthailBuild?, daemon: AgenthailBuild?) -> String? {
+        guard let app, let daemon, app.revisionKnown, daemon.revisionKnown, !app.modified, !daemon.modified,
+              app.revision != daemon.revision else { return nil }
+        return "The running daemon is \(daemon.label); this app is \(app.label). Restart Agenthail to use this version."
     }
 }
 
@@ -498,6 +539,7 @@ struct HostHealth: Decodable, Hashable, Identifiable {
     let state: String
     var detail: String? = nil
     var notice: String? = nil
+    var build: AgenthailBuild? = nil
 
     var stateLabel: String {
         switch state {

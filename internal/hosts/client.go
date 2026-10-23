@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/buildinfo"
 )
 
 const (
@@ -270,6 +272,7 @@ type Version struct {
 	MaximumFederation int    `json:"maximumFederation"`
 	HostID            string `json:"hostId"`
 	HostName          string `json:"hostName"`
+	buildinfo.Identity
 }
 
 // Version asks the host what it speaks and who it is. Only a host in this

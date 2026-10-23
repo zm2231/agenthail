@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -61,6 +62,7 @@ type pairedHost struct {
 	state  string
 	detail string
 	epoch  string
+	build  buildinfo.Identity
 	drain  sync.Mutex
 	wake   chan struct{}
 	// hidden holds rows the host serves whose id is already a local session,
@@ -76,6 +78,24 @@ func (h *pairedHost) status() (string, string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.state, h.detail
+}
+
+func (h *pairedHost) setBuild(build buildinfo.Identity) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.build = build
+}
+
+// reportedBuild is the build the host last named, or nil before it answered
+// or when it does not name one.
+func (h *pairedHost) reportedBuild() *buildinfo.Identity {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.build.Version == "" {
+		return nil
+	}
+	build := h.build
+	return &build
 }
 
 func (h *pairedHost) setHidden(id string, row *dashboardSession) {
@@ -421,9 +441,11 @@ type remoteSnapshot struct {
 }
 
 func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost) (bool, error) {
-	if _, err := host.client.Version(ctx); err != nil {
+	version, err := host.client.Version(ctx)
+	if err != nil {
 		return false, err
 	}
+	host.setBuild(version.Identity)
 	d.setHostState(host, hostStateConnected, "", true)
 	for ctx.Err() == nil {
 		seq, err := d.reconcileHost(ctx, host)
@@ -870,8 +892,9 @@ func (d *Daemon) publicSessionID(sessionID string) string {
 
 type dashboardHostHealth struct {
 	dashboardHost
-	Detail string `json:"detail,omitempty"`
-	Notice string `json:"notice,omitempty"`
+	Detail string              `json:"detail,omitempty"`
+	Notice string              `json:"notice,omitempty"`
+	Build  *buildinfo.Identity `json:"build,omitempty"`
 }
 
 func (d *Daemon) hostSummaries() []dashboardHostHealth {
@@ -879,7 +902,7 @@ func (d *Daemon) hostSummaries() []dashboardHostHealth {
 	result := make([]dashboardHostHealth, 0, len(paired))
 	for _, host := range paired {
 		state, detail := host.status()
-		result = append(result, dashboardHostHealth{dashboardHost: dashboardHost{ID: host.record.ID, Name: host.record.Name, State: state}, Detail: detail, Notice: host.notice()})
+		result = append(result, dashboardHostHealth{dashboardHost: dashboardHost{ID: host.record.ID, Name: host.record.Name, State: state}, Detail: detail, Notice: host.notice(), Build: host.reportedBuild()})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result

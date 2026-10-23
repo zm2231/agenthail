@@ -14,6 +14,15 @@ The default name is the short hostname. `agenthail hosts name <name>` renames
 it. `GET /api/v1/version` reports both, so a peer can tell it reached the host
 it paired with.
 
+`GET /api/v1/version` also names the build the daemon runs: `version`,
+`revision` (the commit) and `modified` (built from a tree with uncommitted
+changes). Release builds stamp all three. A daemon reports each paired host's
+build in its host list, and the apps show it as information only: hosts may run
+different builds as long as their protocol and federation ranges overlap.
+`agenthail doctor` and the Mac app compare the local daemon's build with their
+own and report a mismatch only when both name an unmodified commit and the
+commits differ; the fix is to restart the daemon.
+
 ## Pairing
 
 Pairing reuses the device-token model the phone uses.

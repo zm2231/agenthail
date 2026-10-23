@@ -12,6 +12,16 @@ APP_VERSION="${AGENTHAIL_APP_VERSION:-$(git -C "$ROOT" describe --tags --always 
 APP_VERSION="${APP_VERSION#v}"
 APP_VERSION="${APP_VERSION%%-*}"
 APP_BUILD="${AGENTHAIL_APP_BUILD:-$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 1)}"
+# The app names the commit it was built from, so it can tell when the daemon it
+# talks to is another build.
+APP_REVISION="${AGENTHAIL_REVISION:-$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)}"
+if [ -n "${AGENTHAIL_REVISION_MODIFIED:-}" ]; then
+	APP_MODIFIED="$AGENTHAIL_REVISION_MODIFIED"
+elif [ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]; then
+	APP_MODIFIED=true
+else
+	APP_MODIFIED=false
+fi
 if [ "${AGENTHAIL_CODESIGN_IDENTITY+x}" = "x" ]; then
 	IDENTITY="$AGENTHAIL_CODESIGN_IDENTITY"
 else
@@ -22,9 +32,11 @@ fi
 if [ -z "$CLI_SOURCE" ]; then
 	CLI_SOURCE="$(mktemp -d "${TMPDIR:-/tmp}/agenthail-cli-build.XXXXXX")/agenthail"
 	trap 'rm -rf "$(dirname "$CLI_SOURCE")"' EXIT
-	LDFLAGS=""
+	CLI_VERSION="${AGENTHAIL_VERSION:-$(git -C "$ROOT" describe --tags --always 2>/dev/null || echo source)}"
+	CLI_BUILT_AT="$(date -u -r "$(git -C "$ROOT" show -s --format=%ct HEAD 2>/dev/null || date +%s)" '+%Y-%m-%dT%H:%M:%SZ')"
+	LDFLAGS="-X main.version=$CLI_VERSION -X main.revision=$APP_REVISION -X main.builtAt=$CLI_BUILT_AT"
 	if [ -n "${AGENTHAIL_PUSH_RELAY_URL:-}" ]; then
-		LDFLAGS="-X github.com/zm2231/agenthail/internal/daemon.bundledPushRelayURL=$AGENTHAIL_PUSH_RELAY_URL"
+		LDFLAGS="$LDFLAGS -X github.com/zm2231/agenthail/internal/daemon.bundledPushRelayURL=$AGENTHAIL_PUSH_RELAY_URL"
 	fi
 	(cd "$ROOT" && CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" go build -trimpath -ldflags "$LDFLAGS" -o "$CLI_SOURCE" ./cmd/agenthail)
 fi
@@ -52,6 +64,8 @@ cat >"$OUTPUT/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>APP_VERSION</string>
   <key>CFBundleVersion</key><string>APP_BUILD</string>
+  <key>AgenthailRevision</key><string>APP_REVISION</string>
+  <key>AgenthailRevisionModified</key><false/>
   <key>NSServices</key><array><dict>
     <key>NSMenuItem</key><dict><key>default</key><string>Send to Agenthail</string></dict>
     <key>NSMessage</key><string>sendToAgenthail</string>
@@ -70,6 +84,8 @@ cat >"$OUTPUT/Contents/Info.plist" <<'PLIST'
 PLIST
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$OUTPUT/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_BUILD" "$OUTPUT/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :AgenthailRevision $APP_REVISION" "$OUTPUT/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :AgenthailRevisionModified $APP_MODIFIED" "$OUTPUT/Contents/Info.plist"
 
 ICON_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/agenthail-icons.XXXXXX")"
 ICONSET="$ICON_ROOT/Agenthail.iconset"
