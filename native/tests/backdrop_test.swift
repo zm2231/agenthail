@@ -151,6 +151,13 @@ struct BackdropTest {
                 print("FAIL: \(polarity) pane away from text reads \(shown), want the background under the minimum tint, \(expected)")
                 failures += 1
             }
+            let clipped = CGRect(x: 0, y: 120, width: 70, height: 30)
+            let edge = BackdropRenderer.render(spec(texts: [clipped], paneTexts: [clipped]))!
+            let edgeContrast = worst(edge.image, scale: scale, in: [clipped.intersection(pane)], roles: roles)
+            if edgeContrast < 4.5 {
+                print("FAIL: \(polarity) text clipped by the pane edge reads at \(edgeContrast):1 inside the pane")
+                failures += 1
+            }
             let chrome = BackdropRenderer.render(spec(texts: [text], paneTexts: []))!
             let chromeFar = worst(chrome.image, scale: scale, in: [far], roles: roles)
             if chromeFar < 4.5 {
