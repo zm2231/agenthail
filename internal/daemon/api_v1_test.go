@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
@@ -670,4 +671,18 @@ func mustCreatePairing(t *testing.T, d *Daemon) string {
 		t.Fatal(err)
 	}
 	return pairing.Secret
+}
+
+func TestTheVersionEndpointNamesTheDaemonBuild(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	d.SetBuild(buildinfo.Identity{Version: "v0.2.69", Revision: "abcd1234abcd1234", BuiltAt: "2026-10-23T12:00:00Z"})
+	response := httptest.NewRecorder()
+	d.apiVersionHandler(response, httptest.NewRequest(http.MethodGet, "/api/v1/version", nil))
+	var version apiVersionResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &version); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s err=%v", response.Code, response.Body.String(), err)
+	}
+	if version.Protocol != apiProtocolVersion || version.Version != "v0.2.69" || version.Revision != "abcd1234abcd1234" || version.Modified || version.BuiltAt != "2026-10-23T12:00:00Z" {
+		t.Fatalf("version=%+v", version)
+	}
 }

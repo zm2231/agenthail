@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/filewake"
@@ -93,6 +94,7 @@ type Daemon struct {
 	dashboard                *dashboardServer
 	transportResolver        *SessionTransportResolver
 	claudeHost               *claudehost.Manager
+	build                    buildinfo.Identity
 	identityMu               sync.RWMutex
 	identity                 registry.HostIdentity
 	federation               *federation

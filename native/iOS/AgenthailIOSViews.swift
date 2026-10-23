@@ -1479,6 +1479,9 @@ struct SettingsView: View {
                 Section {
                     Label(connectionLabel(host), systemImage: connectionIcon(host))
                     if let error = host.error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+                    if let build = host.build {
+                        LabeledContent("Agenthail", value: build.label).font(.footnote).textSelection(.enabled)
+                    }
                     ForEach(host.surfaces) { surface in
                         VStack(alignment: .leading, spacing: 4) {
                             LabeledContent(surface.name.capitalized, value: surface.connected ? "Needs attention" : "Unavailable")
@@ -1508,6 +1511,9 @@ struct SettingsView: View {
                     ForEach(host.peers) { peer in
                         VStack(alignment: .leading, spacing: 4) {
                             LabeledContent(peer.name, value: peer.stateLabel)
+                            if let build = peer.build {
+                                Text(build.label).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                            }
                             if let detail = peer.detail, !detail.isEmpty {
                                 Text(detail).font(.footnote).foregroundStyle(.secondary)
                             }

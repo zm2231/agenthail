@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -19,6 +20,12 @@ const (
 
 func (d *Daemon) SetClaudeHost(manager *claudehost.Manager) {
 	d.claudeHost = manager
+}
+
+// SetBuild names the build this daemon runs, for clients that compare it with
+// their own.
+func (d *Daemon) SetBuild(build buildinfo.Identity) {
+	d.build = build
 }
 
 // superviseClaudeHost keeps one host of this build running: it attaches to a

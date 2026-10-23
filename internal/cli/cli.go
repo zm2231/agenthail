@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/permissions"
 
@@ -604,44 +604,23 @@ func (a *App) cmdVersion(args []string) error {
 	if len(stripFlags(args)) != 0 {
 		return fmt.Errorf("usage: agenthail version [--json]")
 	}
-	result := map[string]any{"version": "dev", "revision": "unknown", "modified": false, "schemaVersion": registry.SchemaVersion()}
-	if a.Version != "" {
-		result["version"] = a.Version
-	}
-	if a.Revision != "" {
-		result["revision"] = a.Revision
-	}
-	if a.BuiltAt != "" {
-		result["builtAt"] = a.BuiltAt
-	}
-	if info, ok := debug.ReadBuildInfo(); ok {
-		if result["version"] == "dev" && info.Main.Version != "" && info.Main.Version != "(devel)" {
-			result["version"] = info.Main.Version
-		}
-		for _, setting := range info.Settings {
-			switch setting.Key {
-			case "vcs.revision":
-				if result["revision"] == "unknown" {
-					result["revision"] = setting.Value
-				}
-			case "vcs.time":
-				if _, set := result["builtAt"]; !set {
-					result["builtAt"] = setting.Value
-				}
-			case "vcs.modified":
-				result["modified"] = setting.Value == "true"
-			}
-		}
-	}
+	build := a.build()
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(result)
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			buildinfo.Identity
+			SchemaVersion int `json:"schemaVersion"`
+		}{build, registry.SchemaVersion()})
 	}
-	fmt.Printf("agenthail %s (%s", result["version"], result["revision"])
-	if result["modified"] == true {
+	fmt.Printf("agenthail %s (%s", build.Version, build.Revision)
+	if build.Modified {
 		fmt.Print(", modified")
 	}
 	fmt.Println(")")
 	return nil
+}
+
+func (a *App) build() buildinfo.Identity {
+	return buildinfo.Resolve(a.Version, a.Revision, a.BuiltAt)
 }
 
 func (a *App) allSurfaces() []surface.Surface {
@@ -3154,6 +3133,10 @@ func (a *App) cmdDoctor(args []string) error {
 	if serviceProblems == nil {
 		serviceProblems = []serviceProblem{}
 	}
+	build, buildProblem := a.checkDaemonBuild(ctx)
+	if buildProblem != nil {
+		serviceProblems = append(serviceProblems, *buildProblem)
+	}
 	var grants *permissions.Report
 	var grantsErr error
 	if runtime.GOOS == "darwin" {
@@ -3170,7 +3153,7 @@ func (a *App) cmdDoctor(args []string) error {
 		personSet = setting != ""
 	}
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins}
 		if claudeRootsErr != nil {
 			report["claudeConfigError"] = claudeRootsErr.Error()
 		}
@@ -3215,6 +3198,9 @@ func (a *App) cmdDoctor(args []string) error {
 			fmt.Printf("codex hooks: outdated; Codex sessions may not be told who they are until you run: agenthail hooks install codex\n")
 		case surfaces.CodexHooksUntrusted:
 			fmt.Printf("codex hooks: Codex hook not trusted yet: run agenthail hooks install codex or trust it in Codex\n")
+		}
+		if build != nil {
+			fmt.Printf("[daemon] build: %s\n", build.Detail)
 		}
 		if len(serviceProblems) > 0 {
 			fmt.Printf("[daemon] supervisor: %s\n", service.Name())

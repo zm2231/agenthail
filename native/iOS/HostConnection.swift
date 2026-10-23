@@ -23,6 +23,7 @@ final class HostConnection {
     private(set) var reconnecting = false
     private(set) var connectionError: String?
     private(set) var pushRelayURL: URL?
+    private(set) var build: AgenthailBuild?
     private(set) var catalogStreamCursor: UInt64 = 0
     private(set) var snapshotSeq: UInt64 = 0
     private var snapshotCoversEventStream = false
@@ -78,6 +79,7 @@ final class HostConnection {
                 do {
                     let version = try await api.version()
                     guard !Task.isCancelled, !stopped else { return }
+                    build = version.build
                     if let value = version.pushRelayUrl, let url = URL(string: value) {
                         pushRelayURL = url
                         try? KeychainStore.set(value, account: Self.relayAccount(id))
@@ -177,8 +179,9 @@ final class HostConnection {
                     if Task.isCancelled || stopped { return }
                     reconnecting = true
                     do {
-                        _ = try await api.version()
+                        let version = try await api.version()
                         guard !stopped else { return }
+                        build = version.build
                         recordStreamInterruption(probeError: nil)
                     } catch {
                         guard !stopped else { return }

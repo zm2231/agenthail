@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
@@ -1138,4 +1139,22 @@ func TestFederationShowsARemoteConversationsHoldersAndForwardsThePick(t *testing
 	if got := remote.fake.delivered(); len(got) != 0 {
 		t.Fatalf("a pick the paired host refused was delivered: %v", got)
 	}
+}
+
+func TestAPairedHostReportsTheBuildItRuns(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	remote := newFederationNode(t, "remote-a")
+	remote.daemon.SetBuild(buildinfo.Identity{Version: "v0.2.68", Revision: "e387b0d87b52f557"})
+	remote.serve(t, nil)
+	local := newFederationNode(t, "local-a")
+	local.start(t, testRoots(remote.server))
+	record := local.pair(t, remote, "vps")
+	awaitFederation(t, "the host's build reported", func() bool {
+		for _, host := range local.daemon.hostSummaries() {
+			if host.ID == record.ID && host.Build != nil {
+				return host.Build.Version == "v0.2.68" && host.Build.Revision == "e387b0d87b52f557"
+			}
+		}
+		return false
+	})
 }

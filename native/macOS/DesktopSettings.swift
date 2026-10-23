@@ -60,6 +60,17 @@ struct GeneralSettings: View {
                 if let pid = model.snapshot?.daemon.pid {
                     LabeledContent("Process", value: String(pid))
                 }
+                if let build = model.daemonBuild {
+                    LabeledContent("Daemon build") {
+                        Text(build.label).font(.system(size: DesktopType.secondary, design: .monospaced)).textSelection(.enabled)
+                    }
+                }
+                if let notice = model.daemonBuildNotice {
+                    Text(notice)
+                        .font(.system(size: DesktopType.secondary))
+                        .foregroundStyle(DesktopPalette.failed)
+                        .textSelection(.enabled)
+                }
                 if let listen = model.settings?.dashboard.listen {
                     LabeledContent("Local listener") {
                         Text(listen).font(.system(size: DesktopType.secondary, design: .monospaced)).textSelection(.enabled)
@@ -256,6 +267,12 @@ private struct HostsSection: View {
                     if let detail = host.detail, !detail.isEmpty {
                         Text(detail)
                             .font(.system(size: DesktopType.secondary))
+                            .foregroundStyle(DesktopPalette.text2)
+                            .textSelection(.enabled)
+                    }
+                    if let build = host.build {
+                        Text(build.label)
+                            .font(.system(size: DesktopType.secondary, design: .monospaced))
                             .foregroundStyle(DesktopPalette.text2)
                             .textSelection(.enabled)
                     }

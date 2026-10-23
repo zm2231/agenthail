@@ -627,6 +627,12 @@ struct ConnectionFooter: View {
                 .accessibilityHidden(true)
             Text(model.isConnected ? "Connected · this Mac" : model.reconnecting ? "Reconnecting…" : offlineLabel)
             Spacer()
+            if model.isConnected, let notice = model.daemonBuildNotice {
+                Button("Restart for this version") { model.restartDaemon() }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(DesktopPalette.failed)
+                    .help(notice)
+            }
             if !model.isConnected && !model.reconnecting && !model.daemonSlow {
                 Button("Start") { model.restartDaemon() }
                     .buttonStyle(.plain)

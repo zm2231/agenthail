@@ -76,6 +76,7 @@ func (a *App) daemonRun() error {
 	if err != nil {
 		return err
 	}
+	d.SetBuild(a.build())
 	hostVersion := a.Version + "+" + a.Revision
 	d.SetClaudeHost(&claudehost.Manager{Home: home, Launch: func() (claudehost.Launch, error) {
 		return surfaces.ClaudeHostLaunch(home, hostVersion)
