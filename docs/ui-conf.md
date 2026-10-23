@@ -11,7 +11,7 @@ One setting per line, `key = value`. Lines starting with `#` are comments, and `
 ```
 version = 1
 theme = dark
-background = gradient: dusk
+background = art: dawn
 glass.blur = 24
 statusbar = working, needs-you, hosts
 ```
@@ -19,7 +19,7 @@ statusbar = working, needs-you, hosts
 A setting can apply to one kind of device or to one named device:
 
 ```
-background = gradient: aurora
+background = art: tide
 background@phone = none
 glass@device:Studio = off
 ```
@@ -37,7 +37,7 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 | `version` | `1` | File format version. |
 | `theme` | `system` | `system`, `dark`, `light`. |
 | `theme.accent` | `system` | Accent for links, focus and working state: `system` or `#rrggbb`. |
-| `background` | `gradient: aurora` | What fills the window. See [Backgrounds](#backgrounds). |
+| `background` | `art: tide` | What fills the window. See [Backgrounds](#backgrounds). |
 | `background.fit` | `cover` | How an image fills the window: `cover`, `contain`, `center`, `tile`. |
 | `background.position` | `center` | Which part of an image stays in view: `center`, `top`, `bottom`, `left`, `right`. |
 | `background.dim` | `0` | 0 to 0.8. Darkens the background in dark appearance, lightens it in light, before anything else. |
@@ -53,8 +53,8 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 | `glass.readability` | `auto` | `auto` raises the tint of panes, and adds a layer on open areas, only where text needs it to reach `contrast.target`. `off` uses the glass opacities exactly, so text may be harder to read. With Increase Contrast on in Accessibility settings, the app always uses `auto`. |
 | `glass.border` | `0.08` | 0 to 0.3. Opacity of pane hairlines. |
 | `glass.gutter` | `8` | 0 to 16. Points between floating panes; 0 joins them edge to edge. |
-| `texture` | `scanlines` | Texture over the background, never over panes or text: `none`, `scanlines`, `grain`. |
-| `texture.strength` | `0.35` | 0 to 0.6. How strongly the texture darkens. |
+| `texture` | `none` | Texture over the background, never over panes or text: `none`, `scanlines`, `grain`. |
+| `texture.strength` | `0.2` | 0 to 0.6. How strongly the texture darkens. |
 | `texture.spacing` | `3` | 2 to 8. Points between scanlines. |
 | `scrim.tint` | `auto` | Colour of the layer that keeps text readable: `auto` takes the background's own hue, darkened; or `black` or `#rrggbb`. |
 | `scrim.feather` | `240` | 40 to 320. Points over which that layer fades out around text on open areas. |
@@ -70,10 +70,13 @@ Whatever the background, text keeps at least `contrast.target` contrast: the app
 
 - `none`: the plain window colour.
 - `desktop`: the desktop picture shows through.
-- `image: <path>`: a PNG, JPEG, HEIC or WebP image under 30 MB. `agenthail ui set` copies an image from anywhere into `~/.agenthail/ui/backgrounds/` and writes that path, so the image is versioned with the file.
-- `gradient: <preset>`: one of `aurora`, `dusk`, `slate`, `forest`, `ember`, `violet`, `mono`.
+- `art: <name>`: a built-in picture: `tide`, `aurora`, `dawn` or `field`. Each has a dark and a light version, and the app shows the one that matches its appearance.
+- `image: <path>`: a PNG, JPEG, HEIC or WebP image under 30 MB. `agenthail ui set` copies an image from anywhere into `~/.agenthail/ui/backgrounds/` and writes that path, so the image is versioned with the file. The Mac app's Appearance settings upload a chosen or dropped image the same way, also to a remote computer.
+- `gradient: <preset>`: one of `dusk`, `slate`, `forest`, `ember`, `violet`, `mono`. Each has a dark and a light version, like the built-in pictures.
 - `gradient: <angle>deg, <colour> <pos>%, <colour> <pos>%, ...`: a linear gradient with at least two stops, for example `gradient: 135deg, #1b2230 0%, #4a2c8a 100%`.
-- `mesh: <cols>x<rows>, <colour>, ...`: a mesh from 2x2 to 6x6, with one `#rrggbb` colour per point, row by row. Each preset is a 3x3 mesh; `agenthail ui show-defaults --docs` prints them to copy and edit.
+- `mesh: <cols>x<rows>, <colour>, ...`: a mesh from 2x2 to 6x6, with one `#rrggbb` colour per point, row by row. Each preset is a pair of 3x3 meshes; `agenthail ui show-defaults --docs` prints them to copy and edit.
+
+A background you write yourself, other than a built-in picture or preset, looks the same in dark and light. `agenthail ui get --resolved` shows both as `background` and `background.light`.
 
 ## The agenthail ui command
 
@@ -99,3 +102,13 @@ agenthail ui path
 - `path` prints where `ui.conf` is.
 
 An edit made by hand in a text editor is committed as your change once you save the file.
+
+## API
+
+Apps read and change `ui.conf` through the daemon, with the same checks as `agenthail ui`:
+
+- `GET /api/v1/ui?class=<kind>&device=<name>` (`read` scope) returns `values`, every key resolved for that device with `background` and `background.light` ready to draw; `chosen`, each key as `ui.conf` writes it for that device; `overrides`, the device (`mac` or `device:<name>`) of each value that comes from a `key@<device>` line; and `problems`.
+- `POST /api/v1/ui` (`settings` scope) with `{"action": "set", "set": ["key = value", ...]}`, `{"action": "unset", "unset": ["key@device", ...]}`, `{"action": "write", "text": ...}` or `{"action": "undo", "rev": ...}`, each with an optional `message`.
+- `GET /api/v1/ui/log` (`read` scope) lists changes.
+- `GET /api/v1/ui/background?path=<path>` (`read` scope) returns an image from `background`, including the built-in pictures under `art/`.
+- `POST /api/v1/ui/background?name=<file name>` (`settings` scope) stores the request body as a background image and returns `{"path"}` to use as `image: <path>`.

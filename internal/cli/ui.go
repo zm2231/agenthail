@@ -190,6 +190,9 @@ func (a *App) uiGet(store *uiconf.Store, parsed uiArgs) error {
 			}
 		}
 		fmt.Fprintf(os.Stdout, "%s = %v\n", key.Name, value)
+		if key.Name == "background" {
+			fmt.Fprintf(os.Stdout, "background.light = %v\n", values["background.light"])
+		}
 	}
 	return a.printUIProblems(state.Parsed.Problems, "")
 }

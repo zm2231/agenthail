@@ -260,24 +260,35 @@ func (s *Store) Undo(rev, author string) (State, Entry, error) {
 // ImportBackground copies an image into the repository so it is versioned
 // and follows the file, and returns the path to use in ui.conf.
 func (s *Store) ImportBackground(source string) (string, error) {
-	ext := strings.ToLower(filepath.Ext(source))
-	if !contains(imageExtensions, ext) {
-		return "", errors.New("background image must be " + strings.Join(imageExtensions, ", "))
+	if err := checkImageName(source); err != nil {
+		return "", err
 	}
 	file, err := os.Open(source)
 	if err != nil {
 		return "", err
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, maxImageBytes+1))
+	return s.ImportBackgroundData(filepath.Base(source), file)
+}
+
+// ImportBackgroundData stores an image read from body under a name that only
+// supplies its extension, and returns the path to use in ui.conf.
+func (s *Store) ImportBackgroundData(name string, body io.Reader) (string, error) {
+	if err := checkImageName(name); err != nil {
+		return "", err
+	}
+	data, err := io.ReadAll(io.LimitReader(body, maxImageBytes+1))
 	if err != nil {
 		return "", err
 	}
 	if len(data) > maxImageBytes {
 		return "", errors.New("choose an image smaller than 30 MB")
 	}
+	if len(data) == 0 {
+		return "", errors.New("the image is empty")
+	}
 	sum := sha256.Sum256(data)
-	rel := filepath.Join(backgroundsDir, hex.EncodeToString(sum[:])[:16]+ext)
+	rel := filepath.Join(backgroundsDir, hex.EncodeToString(sum[:])[:16]+strings.ToLower(filepath.Ext(name)))
 	if err := os.MkdirAll(filepath.Join(s.dir, backgroundsDir), 0o700); err != nil {
 		return "", err
 	}
@@ -287,15 +298,63 @@ func (s *Store) ImportBackground(source string) (string, error) {
 	return rel, nil
 }
 
-// Asset resolves a background path from ui.conf to a file inside the
-// repository's backgrounds folder; anything else is refused.
-func (s *Store) Asset(rel string) (string, error) {
-	clean := filepath.Clean(rel)
-	if filepath.IsAbs(clean) || filepath.Dir(clean) != backgroundsDir || !contains(imageExtensions, strings.ToLower(filepath.Ext(clean))) {
-		return "", errors.New("only images in the ui backgrounds folder are served")
+func checkImageName(name string) error {
+	if !contains(imageExtensions, strings.ToLower(filepath.Ext(name))) {
+		return errors.New("background image must be " + strings.Join(imageExtensions, ", "))
 	}
-	return filepath.Join(s.dir, clean), nil
+	return nil
 }
+
+// Asset is a background image ready to serve.
+type Asset struct {
+	io.ReadSeekCloser
+	Name     string
+	Modified time.Time
+	// Tag is set for built-in pictures, which change with a release under
+	// the same path.
+	Tag string
+}
+
+// OpenAsset opens a background path from ui.conf: an image in the
+// repository's backgrounds folder or a built-in picture. Anything else is
+// refused.
+func (s *Store) OpenAsset(rel string) (Asset, error) {
+	clean := filepath.ToSlash(filepath.Clean(rel))
+	if filepath.IsAbs(clean) || !contains(imageExtensions, strings.ToLower(filepath.Ext(clean))) {
+		return Asset{}, errAssetPath
+	}
+	switch filepath.Dir(clean) {
+	case backgroundsDir:
+		file, err := os.Open(filepath.Join(s.dir, clean))
+		if err != nil {
+			return Asset{}, err
+		}
+		info, err := file.Stat()
+		if err != nil {
+			file.Close()
+			return Asset{}, err
+		}
+		return Asset{ReadSeekCloser: file, Name: filepath.Base(clean), Modified: info.ModTime()}, nil
+	case artDir:
+		file, tag, err := openArt(clean)
+		if err != nil {
+			return Asset{}, err
+		}
+		seeker, ok := file.(io.ReadSeekCloser)
+		if !ok {
+			file.Close()
+			return Asset{}, errAssetPath
+		}
+		return Asset{ReadSeekCloser: seeker, Name: filepath.Base(clean), Tag: tag}, nil
+	}
+	return Asset{}, errAssetPath
+}
+
+var errAssetPath = errors.New("only images in the ui backgrounds folder and built-in pictures are served")
+
+// IsAssetPath reports whether err refused the path itself rather than a
+// missing file.
+func IsAssetPath(err error) bool { return errors.Is(err, errAssetPath) }
 
 func (s *Store) checkRev(rev string) error {
 	if strings.HasPrefix(rev, "-") {

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -31,7 +32,7 @@ func TestUIAPIReadsChangesAndUndoes(t *testing.T) {
 	if code := api.do(http.MethodGet, "/api/v1/ui?class=mac", "", &view); code != http.StatusOK {
 		t.Fatalf("get status=%d", code)
 	}
-	if view.Values["theme"] != "system" || view.Values["background"] != uiconf.Presets["aurora"] || len(view.Problems) != 0 {
+	if view.Values["theme"] != "system" || view.Values["background"] != "image: art/tide-dark.jpg" || view.Values["background.light"] != "image: art/tide-light.jpg" || view.Chosen["background"] != uiconf.DefaultBackground || len(view.Overrides) != 0 || len(view.Problems) != 0 {
 		t.Fatalf("initial view = %+v", view)
 	}
 	first := view.Rev
@@ -59,9 +60,14 @@ func TestUIAPIReadsChangesAndUndoes(t *testing.T) {
 	if view.Values["theme"] != "dark" || view.Values["texture"] != "grain" || view.Change == nil || view.Change.Author != uiconf.Person || view.Change.Message != "Dark phone with grain" {
 		t.Fatalf("after set = %+v change=%+v", view.Values, view.Change)
 	}
-	if code := api.do(http.MethodGet, "/api/v1/ui?class=mac", "", &view); code != http.StatusOK || view.Values["texture"] != "scanlines" {
-		t.Fatalf("mac texture = %v (status %d)", view.Values["texture"], code)
+	if view.Overrides["texture"] != "phone" || view.Chosen["texture"] != "grain" {
+		t.Fatalf("phone overrides = %v chosen texture %q", view.Overrides, view.Chosen["texture"])
 	}
+	var mac uiView
+	if code := api.do(http.MethodGet, "/api/v1/ui?class=mac", "", &mac); code != http.StatusOK || mac.Values["texture"] != "none" || mac.Overrides["texture"] != "" {
+		t.Fatalf("mac texture = %v overrides %v (status %d)", mac.Values["texture"], mac.Overrides, code)
+	}
+	view = mac
 	if events := uiEvents(d); len(events) != 1 || !strings.Contains(events[0], view.Rev) {
 		t.Fatalf("ui.changed events = %v, want one for %s", events, view.Rev)
 	}
@@ -99,11 +105,51 @@ func TestUIAPIScopesAndBackgroundPaths(t *testing.T) {
 	if code := reader.do(http.MethodPost, "/api/v1/ui", `{"action":"set","set":["theme = dark"]}`, nil); code != http.StatusUnauthorized {
 		t.Fatalf("read-scope post status=%d, want 401", code)
 	}
+	if code := reader.do(http.MethodPost, "/api/v1/ui/background?name=wall.png", "png bytes", nil); code != http.StatusUnauthorized {
+		t.Fatalf("read-scope upload status=%d, want 401", code)
+	}
 	owner := signinAPIClient{t: t, handler: handler, token: "secret"}
-	for _, path := range []string{"ui.conf", "../registry.db", "backgrounds/../ui.conf"} {
+	for _, path := range []string{"ui.conf", "../registry.db", "backgrounds/../ui.conf", "art/../ui.conf"} {
 		if code := owner.do(http.MethodGet, "/api/v1/ui/background?path="+path, "", nil); code != http.StatusBadRequest {
 			t.Errorf("background %q status=%d, want 400", path, code)
 		}
+	}
+
+	var uploaded struct {
+		Path string `json:"path"`
+	}
+	if code := owner.do(http.MethodPost, "/api/v1/ui/background?name=wall.PNG", "png bytes", &uploaded); code != http.StatusOK || !strings.HasPrefix(uploaded.Path, "backgrounds/") || !strings.HasSuffix(uploaded.Path, ".png") {
+		t.Fatalf("upload status=%d path=%q", code, uploaded.Path)
+	}
+	if code := owner.do(http.MethodPost, "/api/v1/ui?class=mac", `{"action":"set","set":["background = image: `+uploaded.Path+`"]}`, nil); code != http.StatusOK {
+		t.Fatalf("setting the uploaded image status=%d", code)
+	}
+	served := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/ui/background?path="+uploaded.Path, nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	handler.ServeHTTP(served, request)
+	if served.Code != http.StatusOK || served.Body.String() != "png bytes" {
+		t.Fatalf("uploaded image served %d %q", served.Code, served.Body.String())
+	}
+	var refused signinAPIError
+	if code := owner.do(http.MethodPost, "/api/v1/ui/background?name=notes.txt", "text", &refused); code != http.StatusUnprocessableEntity || refused.Error.Code != "background_refused" {
+		t.Fatalf("non-image upload status=%d %+v", code, refused)
+	}
+
+	art := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/ui/background?path=art/tide-dark.jpg", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	handler.ServeHTTP(art, request)
+	if art.Code != http.StatusOK || art.Header().Get("Content-Type") != "image/jpeg" || art.Header().Get("ETag") == "" || strings.Contains(art.Header().Get("Cache-Control"), "immutable") {
+		t.Fatalf("built-in picture: %d %v", art.Code, art.Header())
+	}
+	again := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/ui/background?path=art/tide-dark.jpg", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("If-None-Match", art.Header().Get("ETag"))
+	handler.ServeHTTP(again, request)
+	if again.Code != http.StatusNotModified {
+		t.Fatalf("an unchanged built-in picture was sent again: %d", again.Code)
 	}
 }
 
