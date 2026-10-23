@@ -229,7 +229,9 @@ When a usage limit refuses a turn, Claude writes an API error record with
 `quotaLimits.resetsAt`. A session whose latest turn is such a refusal carries
 `usageLimit{resetsAt}` on the session, its catalog row
 (`catalog_sessions.usage_limit`) and the dashboard projection, until the reset
-time passes or a later turn starts. `resetsAt` is absent when Claude did not
+time passes or a later turn starts. The daemon's status pass rereads a session
+whose limit has reset even when none of its files changed, so the row drops
+the limit within a second of `resetsAt`. `resetsAt` is absent when Claude did not
 say. The limit outranks a wait read from the process record, which is stale
 once the turn has ended. The clients list the session under Needs you with
 its reset time, and the transcript notice names it too.

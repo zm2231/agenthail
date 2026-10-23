@@ -123,8 +123,10 @@ type dashboardSession struct {
 	Holders           []surface.Holder           `json:"holders,omitempty"`
 	ObservedSubagents *surface.SubagentRollup    `json:"observedSubagents,omitempty"`
 	HiddenSubagents   *surface.SubagentRollup    `json:"hiddenSubagents,omitempty"`
-	Listed            bool                       `json:"listed"`
-	Host              *dashboardHost             `json:"host,omitempty"`
+	// LiveHiddenSubagents is the part of HiddenSubagents that Subagents counts.
+	LiveHiddenSubagents *surface.SubagentRollup `json:"liveHiddenSubagents,omitempty"`
+	Listed              bool                    `json:"listed"`
+	Host                *dashboardHost          `json:"host,omitempty"`
 }
 
 // dashboardPerson is what this host's sessions call the person, and whether
@@ -962,8 +964,8 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			}
 			mirrored.ObservedAt = record.ObservedAt
 			mirrored.Freshness = &record.Freshness
-			mirrored.HiddenSubagents = catalogSnapshot.Listing.HiddenSubagents(session.ID)
-			mirrored.Subagents = addSubagentRollups(mirrored.ObservedSubagents, mirrored.HiddenSubagents)
+			mirrored.HiddenSubagents, mirrored.LiveHiddenSubagents = catalogSnapshot.Listing.HiddenSubagents(session.ID), catalogSnapshot.Listing.LiveHiddenSubagents(session.ID)
+			mirrored.Subagents = addSubagentRollups(mirrored.ObservedSubagents, mirrored.LiveHiddenSubagents)
 			state.Sessions = append(state.Sessions, mirrored)
 			continue
 		}
@@ -996,8 +998,8 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 				entry.Holders = saved.Holders
 			}
 		}
-		entry.HiddenSubagents = catalogSnapshot.Listing.HiddenSubagents(session.ID)
-		entry.Subagents = addSubagentRollups(entry.ObservedSubagents, entry.HiddenSubagents)
+		entry.HiddenSubagents, entry.LiveHiddenSubagents = catalogSnapshot.Listing.HiddenSubagents(session.ID), catalogSnapshot.Listing.LiveHiddenSubagents(session.ID)
+		entry.Subagents = addSubagentRollups(entry.ObservedSubagents, entry.LiveHiddenSubagents)
 		local = append(local, len(state.Sessions))
 		state.Sessions = append(state.Sessions, entry)
 	}

@@ -546,7 +546,9 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 	for _, entry := range sessions {
 		live := entry.live
 		stamps := catalogFileStamps(live.files)
-		if entry.stamps != nil && equalStrings(entry.stamps, stamps) {
+		// A usage limit lifts at its reset time with no file change, so
+		// the row is reread then.
+		if entry.stamps != nil && equalStrings(entry.stamps, stamps) && !entry.session.UsageLimit.Lifted(time.Now()) {
 			continue
 		}
 		if !current(entry, func(live *catalogLiveSession) { live.stamps = stamps }) {
@@ -630,8 +632,8 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 	stored := d.storedListing(session.ID)
 	for attempt := 0; attempt < 3; attempt++ {
 		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, open, config)
-		row.HiddenSubagents, row.Listed = stored.HiddenSubagents, stored.Listed
-		row.Subagents = addSubagentRollups(row.ObservedSubagents, stored.HiddenSubagents)
+		row.HiddenSubagents, row.LiveHiddenSubagents, row.Listed = stored.HiddenSubagents, stored.LiveHiddenSubagents, stored.Listed
+		row.Subagents = addSubagentRollups(row.ObservedSubagents, stored.LiveHiddenSubagents)
 		if d.settleArchiveActivity([]dashboardSession{row}, view) {
 			d.catalogProjectUnarchived.Store(true)
 		}
@@ -724,6 +726,7 @@ type presenceOutputs struct {
 	current         bool
 	currentReason   string
 	hidden          *surface.SubagentRollup
+	liveHidden      *surface.SubagentRollup
 	subagents       *surface.SubagentRollup
 	listed          bool
 	archived        bool
@@ -739,13 +742,13 @@ type presencePending struct {
 
 func (o presenceOutputs) same(other presenceOutputs) bool {
 	return o.queueCount == other.queueCount && o.current == other.current && o.currentReason == other.currentReason &&
-		sameSubagentRollup(o.hidden, other.hidden) && sameSubagentRollup(o.subagents, other.subagents) &&
+		sameSubagentRollup(o.hidden, other.hidden) && sameSubagentRollup(o.liveHidden, other.liveHidden) && sameSubagentRollup(o.subagents, other.subagents) &&
 		o.listed == other.listed && o.archived == other.archived && o.projectArchived == other.projectArchived
 }
 
 func (o presenceOutputs) applyTo(row *dashboardSession) {
 	row.QueueCount, row.Current, row.CurrentReason = o.queueCount, o.current, o.currentReason
-	row.HiddenSubagents, row.Subagents, row.Listed = o.hidden, o.subagents, o.listed
+	row.HiddenSubagents, row.LiveHiddenSubagents, row.Subagents, row.Listed = o.hidden, o.liveHidden, o.subagents, o.listed
 }
 
 func (p *catalogPresence) known(id string, generation int64) bool {
@@ -810,9 +813,9 @@ func (d *Daemon) publishCatalogPresence() {
 		if err != nil {
 			continue
 		}
-		outputs := presenceOutputs{queueCount: counts[id], listed: read.Listing.Current(id), hidden: read.Listing.HiddenSubagents(id)}
+		outputs := presenceOutputs{queueCount: counts[id], listed: read.Listing.Current(id), hidden: read.Listing.HiddenSubagents(id), liveHidden: read.Listing.LiveHiddenSubagents(id)}
 		outputs.current, outputs.currentReason = presence(adapter, record.Session, row.projection.Open, outputs.queueCount)
-		outputs.subagents = addSubagentRollups(row.projection.ObservedSubagents, outputs.hidden)
+		outputs.subagents = addSubagentRollups(row.projection.ObservedSubagents, outputs.liveHidden)
 		if archived, _ := catalogViewArchive(&row.projection, view); archived {
 			candidate := row.projection
 			outputs.applyTo(&candidate)
@@ -993,8 +996,9 @@ func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surfa
 }
 
 type catalogStoredListing struct {
-	HiddenSubagents *surface.SubagentRollup `json:"hiddenSubagents"`
-	Listed          bool                    `json:"listed"`
+	HiddenSubagents     *surface.SubagentRollup `json:"hiddenSubagents"`
+	LiveHiddenSubagents *surface.SubagentRollup `json:"liveHiddenSubagents"`
+	Listed              bool                    `json:"listed"`
 }
 
 // storedListing carries a row's place in the session list and its hidden
@@ -1010,11 +1014,11 @@ func (d *Daemon) storedListing(id string) catalogStoredListing {
 	return stored
 }
 
-func addSubagentRollups(observed, hidden *surface.SubagentRollup) *surface.SubagentRollup {
-	if hidden == nil {
+func addSubagentRollups(observed, liveHidden *surface.SubagentRollup) *surface.SubagentRollup {
+	if liveHidden == nil {
 		return observed
 	}
-	sum := *hidden
+	sum := *liveHidden
 	if observed != nil {
 		sum.Count += observed.Count
 		sum.Working += observed.Working

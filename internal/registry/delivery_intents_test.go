@@ -604,3 +604,108 @@ func TestNoNoticeIsQueuedForASenderNothingReads(t *testing.T) {
 		})
 	}
 }
+
+func TestADeliveryProblemLastsUntilALaterMessageToItsTargetIsDelivered(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "sender", "target", "other")
+	queueID, failedID, err := r.QueueDeliveryWithIntent("target", "first", "first:1", surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failQueued(t, r, queueID)
+	if _, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: "other", Status: DeliveryIntentSent, Evidence: surface.EvidenceTransportAccepted}); err != nil {
+		t.Fatal(err)
+	}
+	if settled, err := r.SettleDeliveryProblems(); err != nil || settled != 0 {
+		t.Fatalf("a delivery to another target settled %d, %v", settled, err)
+	}
+	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 1 || problems[0].DeliveryID != failedID {
+		t.Fatalf("a delivery to another target cleared the problem: %+v, %v", problems, err)
+	}
+
+	later, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: "target", Status: DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 1 {
+		t.Fatalf("a message not yet delivered cleared the problem: %+v, %v", problems, err)
+	}
+	if changed, err := r.MarkDeliveryIntentSent(later.ID, "", surface.EvidenceTransportAccepted); err != nil || !changed {
+		t.Fatalf("mark sent changed=%v err=%v", changed, err)
+	}
+	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
+		t.Fatalf("a later delivery to the same target left the problem: %+v, %v", problems, err)
+	}
+	if settled, err := r.SettleDeliveryProblems(); err != nil || settled != 1 {
+		t.Fatalf("settled %d, %v", settled, err)
+	}
+	if settled, err := r.SettleDeliveryProblems(); err != nil || settled != 0 {
+		t.Fatalf("settled again %d, %v", settled, err)
+	}
+	window, err := r.CatalogEventsAfter(0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if events := catalogEventsOfType(window, "delivery.dismissed"); len(events) != 1 || !strings.Contains(string(events[0].Payload), fmt.Sprintf(`"deliveryId":%d`, failedID)) {
+		t.Fatalf("dismissed events = %+v", events)
+	}
+	assertFailureStaysInHistory(t, r, failedID, queueID)
+}
+
+func TestADeliveryFailureLeavesTheProblemsAfterADay(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "sender", "target", "other")
+	oldQueue, oldID, err := r.QueueDeliveryWithIntent("target", "old", "old:1", surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failQueued(t, r, oldQueue)
+	recentQueue, recentID, err := r.QueueDeliveryWithIntent("target", "recent", "recent:1", surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failQueued(t, r, recentQueue)
+	held, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: "other", Status: DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`UPDATE delivery_intents SET status=? WHERE id=?`, DeliveryIntentHeld, held.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`UPDATE delivery_intents SET updated_at=datetime('now','-25 hours') WHERE id IN (?,?)`, oldID, held.ID); err != nil {
+		t.Fatal(err)
+	}
+	problems, err := r.ListDeliveryProblems()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[int64]bool{}
+	for _, problem := range problems {
+		ids[problem.DeliveryID] = true
+	}
+	if len(problems) != 2 || !ids[recentID] || !ids[held.ID] {
+		t.Fatalf("problems = %+v", problems)
+	}
+	if settled, err := r.SettleDeliveryProblems(); err != nil || settled != 1 {
+		t.Fatalf("settled %d, %v", settled, err)
+	}
+	assertFailureStaysInHistory(t, r, oldID, oldQueue)
+}
+
+func assertFailureStaysInHistory(t *testing.T, r *Registry, deliveryID, queueID int64) {
+	t.Helper()
+	intent, err := r.DeliveryIntent(deliveryID)
+	if err != nil || intent.Status != DeliveryIntentFailed {
+		t.Fatalf("intent = %+v, %v", intent, err)
+	}
+	queued, err := r.ListQueue(true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range queued {
+		if item.ID == queueID {
+			return
+		}
+	}
+	t.Fatalf("queue list --all lost the failed message %d: %+v", queueID, queued)
+}

@@ -24,6 +24,9 @@ const (
 	defaultPollInterval      = 5 * time.Second
 	catalogDiscoveryInterval = 30 * time.Second
 	catalogStatusInterval    = time.Second
+	// deliveryProblemInterval is how often settled delivery failures leave
+	// the session rows.
+	deliveryProblemInterval = 10 * time.Second
 	// pendingLaunchLifetime holds a launched session's name while discovery
 	// looks for it, once per catalogDiscoveryInterval.
 	pendingLaunchLifetime = 5 * time.Minute
@@ -326,12 +329,18 @@ func (d *Daemon) runCatalog(ctx context.Context) {
 func (d *Daemon) runCatalogStatus(ctx context.Context) {
 	statusTicker := time.NewTicker(catalogStatusInterval)
 	defer statusTicker.Stop()
+	problemTicker := time.NewTicker(deliveryProblemInterval)
+	defer problemTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-statusTicker.C:
 			d.refreshCatalogStatus(ctx)
+		case <-problemTicker.C:
+			if _, err := d.Registry.SettleDeliveryProblems(); err != nil {
+				d.log.Printf("settle delivery problems: %s", err)
+			}
 		}
 	}
 }

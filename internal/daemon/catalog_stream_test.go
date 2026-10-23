@@ -776,8 +776,11 @@ func TestSnapshotListsTopLevelSessionsAndOnlyActiveSubagents(t *testing.T) {
 	if _, found := listed[working.ID]; !found {
 		t.Fatal("snapshot dropped a working subagent")
 	}
-	if got := listed[lead.ID].Subagents; got == nil || *got != (surface.SubagentRollup{Count: 4, Working: 1}) {
-		t.Fatalf("lead rollup=%+v, want its own two plus the two resting descendants", got)
+	if got := listed[lead.ID].Subagents; got == nil || *got != (surface.SubagentRollup{Count: 2, Working: 1}) {
+		t.Fatalf("lead rollup=%+v, want its own two and none of the resting descendants", got)
+	}
+	if got := listed[lead.ID].HiddenSubagents; got == nil || *got != (surface.SubagentRollup{Count: 2}) {
+		t.Fatalf("lead hidden subagents=%+v, want the two resting descendants to fetch", got)
 	}
 
 	page, err := d.dashboardState(context.Background(), registry.CatalogPageRequest{Scope: "all", Limit: 50, Now: time.Now()})
@@ -791,7 +794,7 @@ func TestSnapshotListsTopLevelSessionsAndOnlyActiveSubagents(t *testing.T) {
 	if _, found := paged[resting.ID]; found || page.TotalSessions != len(page.Sessions) {
 		t.Fatalf("page lists hidden subagents or miscounts: total=%d rows=%d", page.TotalSessions, len(page.Sessions))
 	}
-	if got := paged[lead.ID].Subagents; got == nil || got.Count != 4 {
+	if got := paged[lead.ID].Subagents; got == nil || got.Count != 2 {
 		t.Fatalf("paged lead rollup=%+v", got)
 	}
 
@@ -806,8 +809,11 @@ func TestSnapshotListsTopLevelSessionsAndOnlyActiveSubagents(t *testing.T) {
 	if len(children) != 2 || children[resting.ID].ID == "" || children[working.ID].ID == "" || children[orphan.ID].ID != "" {
 		t.Fatalf("parent page=%v, want every direct subagent of the lead", children)
 	}
-	if got := children[resting.ID].Subagents; got == nil || got.Count != 1 {
-		t.Fatalf("resting child rollup=%+v, want its resting grandchild", got)
+	if got := children[resting.ID].Subagents; got != nil {
+		t.Fatalf("resting child rollup=%+v, want none for a resting grandchild", got)
+	}
+	if got := children[resting.ID].HiddenSubagents; got == nil || got.Count != 1 {
+		t.Fatalf("resting child hidden subagents=%+v, want its resting grandchild", got)
 	}
 
 	response := serveDashboardRequest(dashboardRouter(d), http.MethodGet, "/api/v1/snapshot?limit=50&parentId="+working.ID, "")
@@ -936,8 +942,8 @@ func TestCatalogStreamShowsDevicesTheSessionListAndHostsEveryRow(t *testing.T) {
 	if device.types[resting.ID] != "session.removed" || device.types[buried.ID] != "session.removed" || device.types[working.ID] != "session.upserted" {
 		t.Fatalf("device stream=%v, want the subagents under a resting one removed and the working one listed", device.types)
 	}
-	if device.subagents == nil || *device.subagents != (surface.SubagentRollup{Count: 2, Working: 1}) {
-		t.Fatalf("device lead rollup=%+v, want the resting subagent and its busy child counted", device.subagents)
+	if device.subagents == nil || *device.subagents != (surface.SubagentRollup{Count: 1, Working: 1}) {
+		t.Fatalf("device lead rollup=%+v, want the busy child under the resting subagent counted and the resting one not", device.subagents)
 	}
 	host := read(stream(hostToken, 0, latest))
 	if host.types[resting.ID] != "session.upserted" || host.types[buried.ID] != "session.upserted" || host.types[working.ID] != "session.upserted" {

@@ -368,6 +368,11 @@ func assertV8JournalAndProblemsMigrated(t *testing.T, r *Registry) {
 	if _, _, err := r.SessionJournalBody("target", "body-ref", 0, 1); err == nil {
 		t.Fatal("old body remained after retention counted its bytes")
 	}
+	// The fixture's failure is dated when it was recorded; date it now so it
+	// is within the window the problem list shows.
+	if _, err := r.db.Exec(`UPDATE delivery_intents SET updated_at=datetime('now') WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
 	problems, err := r.ListDeliveryProblems()
 	if err != nil || len(problems) != 1 || problems[0].Reason != "transport failed" {
 		t.Fatalf("problems=%+v err=%v", problems, err)

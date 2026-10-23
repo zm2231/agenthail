@@ -93,18 +93,27 @@ func (o *claudeSubagentObserver) observeSession(ctx context.Context, session *su
 	return o.observe(ctx, session.ID, transcriptID, dir)
 }
 
+// rollup counts the subagents a session row shows: those working or active
+// within surface.ActiveWindow. The subagent list keeps every one.
 func (o *claudeSubagentObserver) rollup(ctx context.Context, session *surface.Session) (*surface.SubagentRollup, error) {
 	links, err := o.observeSession(ctx, session)
-	if err != nil || len(links) == 0 {
+	if err != nil {
 		return nil, err
 	}
-	rollup := &surface.SubagentRollup{Count: len(links)}
+	now := time.Now()
+	var rollup surface.SubagentRollup
 	for _, link := range links {
 		if link.Working {
 			rollup.Working++
+		} else if now.Sub(link.LastActive) > surface.ActiveWindow {
+			continue
 		}
+		rollup.Count++
 	}
-	return rollup, nil
+	if rollup.Count == 0 {
+		return nil, nil
+	}
+	return &rollup, nil
 }
 
 func (o *claudeSubagentObserver) observe(ctx context.Context, parentSessionID, transcriptID, dir string) ([]surface.ClaudeSubagentLink, error) {
