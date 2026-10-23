@@ -2,8 +2,13 @@ package surfaces
 
 import (
 	"context"
+	"errors"
+	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 const syntheticNotification = `<task-notification>\n<task-id>task-7</task-id>\n<tool-use-id>toolu_synthetic</tool-use-id>\n<output-file>/tmp/synthetic.output</output-file>\n<status>completed</status>\n<summary>Background build finished</summary>\n</task-notification>`
@@ -125,5 +130,33 @@ func TestClaudeMidTurnMessageIsInTheTimelineAtItsTime(t *testing.T) {
 	}
 	if strings.Join(texts, "|") != "user:Run the build|user:store it in the task|assistant:Stored." {
 		t.Fatalf("messages=%q", texts)
+	}
+}
+
+func TestClaudeStreamCarriesAMidTurnMessage(t *testing.T) {
+	path := writeTranscript(t, `{"type":"user","uuid":"u1","timestamp":"2026-10-23T08:29:00Z","origin":{"kind":"human"},"message":{"content":"Run the build"}}`)
+	session := seededClaudeStreamSession(t, path, "")
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = file.WriteString(`{"type":"assistant","uuid":"a1","timestamp":"2026-10-23T08:29:10Z","message":{"id":"m1","content":[{"type":"text","text":"building"}]}}
+{"type":"attachment","uuid":"q1","timestamp":"2026-10-23T08:29:27Z","attachment":{"type":"queued_command","prompt":"store it in the task","source_uuid":"cmd-1","delivery_id":"delivery-1","commandMode":"prompt","origin":{"kind":"human"}}}
+`)
+	file.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []surface.StreamEvent
+	err = NewClaude(nil, t.TempDir()).Stream(context.Background(), session, "", func(event surface.StreamEvent) {
+		if event.Text == "store it in the task" {
+			got = append(got, event)
+		}
+	}, 150*time.Millisecond)
+	if !errors.Is(err, surface.ErrStreamWindow) {
+		t.Fatalf("stream err=%v", err)
+	}
+	if len(got) != 1 || got[0].Kind != "message" || got[0].Role != "user" || got[0].Origin != "" || got[0].TurnID != "u1" || !got[0].Timestamp.Equal(time.Date(2026, 10, 23, 8, 29, 27, 0, time.UTC)) {
+		t.Fatalf("events=%+v", got)
 	}
 }

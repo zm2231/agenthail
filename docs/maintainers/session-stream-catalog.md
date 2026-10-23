@@ -119,7 +119,8 @@ that are not a task notification envelope, are user messages. The others carry
 
 - `task-notification`: `kind` `event`, `role` `system`, `body` the summary,
   `status` the task status, `callId` the tool use that started the task. The
-  item ID is `task-notification:<task-id>:<status>`.
+  item ID is `task-notification:<task-id>:<status>:<digest>`, where the
+  digest tells apart notifications of one task with the same status.
 - `peer`: `kind` `message`, `role` `peer`, `sender` the sending agent's name,
   `body` the message without its envelope. The item ID is `peer:<msg_id>`.
 - `auto-continuation` and any other origin: `kind` `event`, `role` `system`.
