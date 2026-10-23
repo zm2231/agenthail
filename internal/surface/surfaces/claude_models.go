@@ -144,7 +144,7 @@ func (c *Claude) loadModels(ctx context.Context) ([]surface.ModelOption, error) 
 	}
 	cmd.Stderr = nil
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start Claude model catalog: %w", err)
+		return nil, fmt.Errorf("start Claude model catalog: %w", startFailure(cmd, err))
 	}
 	defer func() {
 		_ = stdin.Close()
