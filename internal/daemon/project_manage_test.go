@@ -247,6 +247,16 @@ func TestFederationRenamesOneRepositoryProjectOnEveryHost(t *testing.T) {
 		node.daemon.discoverCatalog(context.Background())
 	}
 	projectID := storedProjection(t, local.reg, "local-a").Project.ID
+	// A rename reaches the paired hosts this host lists the project on, so it
+	// waits for this host to mirror the server's checkout.
+	awaitFederation(t, "one project with both checkouts", func() bool {
+		for _, project := range local.snapshot(t).Projects {
+			if project.ID == projectID {
+				return len(project.Checkouts) == 2
+			}
+		}
+		return false
+	})
 	renamed := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-rename", "projectId": projectID, "title": "Gadget sources"})
 	if renamed.Code != http.StatusOK || !strings.Contains(renamed.Body.String(), `"host":"vps","ok":true`) {
 		t.Fatalf("rename: %d %s", renamed.Code, renamed.Body)
