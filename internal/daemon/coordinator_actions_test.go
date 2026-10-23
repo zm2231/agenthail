@@ -36,7 +36,7 @@ func TestCoordinatorSetRefusesATakeoverAndNamesWhoChangedIt(t *testing.T) {
 	}
 
 	takeover := runDashboardAction(t, d, `{"action":"coordinator-set","sessionId":"to","name":"other-lead"}`)
-	if takeover.Code != http.StatusConflict || !strings.Contains(takeover.Body.String(), "@"+name) || !strings.Contains(takeover.Body.String(), "--replace") {
+	if takeover.Code != http.StatusConflict || !strings.Contains(takeover.Body.String(), "@"+name) || apiErrorCode(t, takeover) != "coordinator_exists" {
 		t.Fatalf("takeover: %d %s", takeover.Code, takeover.Body)
 	}
 	if current, _ := r.Coordinator(answer.Coordinator.ProjectID); current.SessionID != "from" {

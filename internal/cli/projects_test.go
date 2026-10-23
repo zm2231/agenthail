@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -114,5 +115,40 @@ func TestProjectListNamesEachProjectsLeadAsThisHostAddressesIt(t *testing.T) {
 	}
 	if lines["PROJECT"] != "LEAD" || lines["widget"] != "@widget-lead" || lines["api"] != "vps::@api-lead" || lines["notes"] != "-" || !strings.Contains(output, "conflict (2)") {
 		t.Fatalf("output=%q", output)
+	}
+}
+
+func TestProjectRenameNamesTheProjectOnEveryHost(t *testing.T) {
+	app, _, _, api := federatedCLIFixture(t, true)
+	api.snapshot = projectsSnapshot
+	api.response = `{"ok":true}`
+	output, err := captureStdout(t, func() error { return app.Run([]string{"project", "rename", "/work/widget", "Widget app"}) })
+	if err != nil || !strings.Contains(output, "renamed project widget to Widget app") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	actions, _ := api.recorded()
+	if len(actions) != 1 || actions[0]["action"] != "project-rename" || actions[0]["projectId"] != "repo:github.com/example/widget" || actions[0]["title"] != "Widget app" {
+		t.Fatalf("actions=%v", actions)
+	}
+	if err := app.Run([]string{"project", "rename", "widget"}); err == nil || !strings.Contains(err.Error(), "project rename") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestProjectRefusalsCarryTheFlagThatResolvesThem(t *testing.T) {
+	app, _, _, api := federatedCLIFixture(t, true)
+	api.responses = map[string]string{"coordinator-set": `{"error":{"code":"coordinator_exists","message":"the project already has coordinator @widget-lead; replace it to take over"}}`}
+	api.statuses = map[string]int{"coordinator-set": http.StatusConflict}
+	err := app.Run([]string{"coordinator", "set", "vps::@builder"})
+	if err == nil || err.Error() != "the project already has coordinator @widget-lead; replace it to take over (rerun with --replace)" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestHelpListsThreadCreateCwd(t *testing.T) {
+	app, _, _, _ := federatedCLIFixture(t, true)
+	output, err := captureStdout(t, func() error { return app.Run([]string{"help"}) })
+	if err != nil || !strings.Contains(output, `thread create <codex|claude> "msg" [--cwd <folder>]`) {
+		t.Fatalf("output=%q err=%v", output, err)
 	}
 }
