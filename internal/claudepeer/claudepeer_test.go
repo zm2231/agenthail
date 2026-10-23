@@ -213,6 +213,20 @@ func TestSendUsesControlSocketAndPreservesWrapper(t *testing.T) {
 	if !strings.Contains(sentBody.Content, "cross-session-message") || !strings.Contains(sentBody.Content, "from-session=\""+surface.PeerUUID(s.Surface, s.ID)+"\"") || strings.Contains(sentBody.Content, "from-mode") {
 		t.Fatalf("frame=%s", line)
 	}
+	reg, err = registry.Open(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	history, err := reg.ListHistory(10, s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range history {
+		if entry.SessionID == s.ID && entry.SourceSessionID == s.ID {
+			t.Fatalf("history=%+v, want no row from the sender to itself", history)
+		}
+	}
 }
 
 func TestClaudePeerFakeTarget(t *testing.T) {

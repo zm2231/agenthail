@@ -586,6 +586,10 @@ func TestDispatcherSteerPreservesContextSourceInIntent(t *testing.T) {
 	if err != nil || intent.SenderSessionID != "steer-source" || intent.Status != registry.DeliveryIntentSent {
 		t.Fatalf("intent=%+v err=%v", intent, err)
 	}
+	history, err := r.ListHistory(10, "steer-target")
+	if err != nil || len(history) != 1 || history[0].SourceSessionID != "steer-source" {
+		t.Fatalf("history=%+v err=%v, want the steer recorded from its sender", history, err)
+	}
 }
 
 func TestDispatcherQueuesSteerPolicyWhenOptionsNeedPreserving(t *testing.T) {
