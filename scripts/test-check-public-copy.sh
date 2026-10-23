@@ -65,16 +65,16 @@ tools() {
     ln -s "$(type -P "$tool")" "$dir/$tool"
   done
 }
-for missing in git grep perl; do
+for missing in git grep mktemp perl rm; do
   dir="$WORK/without-$missing"
-  for tool in bash env git grep perl; do
+  for tool in bash env git grep mktemp perl rm; do
     [ "$tool" = "$missing" ] || tools "$dir" "$tool"
   done
   check 2 PATH="$dir"
   grep -q "$missing is required" "$WORK/out" || fail "a missing $missing was not named: $(cat "$WORK/out")"
 done
 
-tools "$WORK/failing-git" bash env grep perl
+tools "$WORK/failing-git" bash env grep mktemp perl rm
 printf '#!/bin/sh\nexit 1\n' >"$WORK/failing-git/git"
 chmod +x "$WORK/failing-git/git"
 check 2 PATH="$WORK/failing-git"
