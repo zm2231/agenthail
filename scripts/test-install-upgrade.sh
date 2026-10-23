@@ -299,6 +299,8 @@ fi
 test -f "$SUPERVISED_HOME/.fake-agenthail-launchd-loaded"
 kill -0 "$OTHER_HOME_DAEMON"
 kill "$OTHER_HOME_DAEMON"
+wait "$OTHER_HOME_DAEMON" 2>/dev/null || true
+OTHER_HOME_DAEMON=""
 rm -f "$SUPERVISED_HOME/.fake-agenthail-launchd-loaded" "$SUPERVISED_HOME/.fake-agenthail-launchd-plist"
 
 install_from_source >"$TMP/source-install.log"
