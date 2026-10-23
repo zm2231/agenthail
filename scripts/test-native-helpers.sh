@@ -69,6 +69,7 @@ SOURCES=(
   macOS/SessionTabs.swift
   macOS/ShortcutStore.swift
   macOS/SlashCommand.swift
+  macOS/SnapshotBudget.swift
   macOS/SpotlightIndex.swift
   macOS/ToolRunSummary.swift
   macOS/TranscriptBlock.swift

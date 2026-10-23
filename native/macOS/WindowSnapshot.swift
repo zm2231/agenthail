@@ -35,14 +35,14 @@ struct MainWindowContent: View {
 @MainActor
 enum WindowSnapshot {
     static let defaultSize = CGSize(width: 1440, height: 900)
-    static let loadDeadline: Duration = .seconds(10)
     static let settle: Duration = .milliseconds(300)
 
     static func answer(_ request: SnapshotRequest, model: AgenthailModel, voice: VoiceController, api: AgenthailAPI) {
         if let device = request.device, !device.isEmpty, device != Host.current().localizedName { return }
         Task { @MainActor in
-            await catchUp(to: request.rev, model: model, api: api)
-            switch await capture(request, model: model, voice: voice) {
+            let budget = SnapshotBudget(expiresAt: request.expiresAt)
+            await catchUp(to: request.rev, model: model, api: api, budget: budget)
+            switch await capture(request, model: model, voice: voice, budget: budget) {
             case .success(let png): try? await api.uploadSnapshot(id: request.id, png: png)
             case .failure(let failure): try? await api.failSnapshot(id: request.id, reason: failure.message)
             }
@@ -50,26 +50,23 @@ enum WindowSnapshot {
     }
 
     /// A snapshot taken right after a ui.conf change must show it, background image included.
-    static func catchUp(to rev: String?, model: AgenthailModel, api: AgenthailAPI) async {
+    static func catchUp(to rev: String?, model: AgenthailModel, api: AgenthailAPI, budget: SnapshotBudget) async {
         guard let rev, !rev.isEmpty, model.interface.config.rev != rev else { return }
         model.interface.load(from: api)
-        let deadline = ContinuousClock.now + loadDeadline
-        while model.interface.config.rev != rev, ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(50))
-        }
+        await budget.wait { model.interface.config.rev == rev }
     }
 
-    static func capture(_ request: SnapshotRequest, model: AgenthailModel, voice: VoiceController) async -> Result<Data, WindowImage.Failure> {
+    static func capture(_ request: SnapshotRequest, model: AgenthailModel, voice: VoiceController, budget: SnapshotBudget) async -> Result<Data, WindowImage.Failure> {
         let size = request.width.flatMap { width in request.height.map { CGSize(width: width, height: $0) } }
         if request.session == nil, size == nil, let window = model.mainWindow, window.isVisible, !window.isMiniaturized {
             let live = WindowImage.png(of: window)
             if live != .failure(.empty) { return live }
         }
         let session = request.session ?? model.mainPane.selectedSessionID
-        return await offscreen(session: session, size: size ?? model.mainWindow?.frame.size ?? defaultSize, model: model, voice: voice)
+        return await offscreen(session: session, size: size ?? model.mainWindow?.frame.size ?? defaultSize, model: model, voice: voice, budget: budget)
     }
 
-    static func offscreen(session: String?, size: CGSize, model: AgenthailModel, voice: VoiceController) async -> Result<Data, WindowImage.Failure> {
+    static func offscreen(session: String?, size: CGSize, model: AgenthailModel, voice: VoiceController, budget: SnapshotBudget) async -> Result<Data, WindowImage.Failure> {
         guard WindowImage.system != nil else { return .failure(.unavailable) }
         let pane = model.openPane()
         defer { model.closePane(pane) }
@@ -91,15 +88,11 @@ enum WindowSnapshot {
             window.orderOut(nil)
             window.close()
         }
-        let deadline = ContinuousClock.now + loadDeadline
-        func loaded() -> Bool {
+        await budget.wait {
             let detail = resolved == nil || pane.detail?.session.id == resolved || pane.detailLoadError != nil
             return detail && probe.backdrop?.current == true
         }
-        while !loaded(), ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(50))
-        }
-        try? await Task.sleep(for: settle)
+        await budget.pause(settle)
         return WindowImage.png(of: window)
     }
 
