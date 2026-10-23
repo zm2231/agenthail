@@ -228,7 +228,9 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     /// Marks a session open in Instruments, from the switch until the
-    /// daemon's first page for it is shown or the open is abandoned.
+    /// daemon's first page for it is shown (`loaded`), the selection moves
+    /// off it (`left`), it is removed (`removed`), the pane closes
+    /// (`closed`), or it is shown again (`superseded`).
     private func beginOpenInterval(cached: Bool) {
         endOpenInterval("superseded")
         let id = Self.signposter.makeSignpostID()
