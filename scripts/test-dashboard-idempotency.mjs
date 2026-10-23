@@ -15,6 +15,7 @@ const responses = [];
 const context = {
   app: { selected: { id: "session-1" }, pendingIdempotency: new Map() },
   withHolder: (_sessionID, payload) => payload,
+  friendlyError: (error) => String(error),
   crypto: { randomUUID: (() => { let n = 0; return () => `key-${++n}`; })() },
   fetch: async (_url, request) => {
     calls.push({ key: request.headers["Idempotency-Key"], body: JSON.parse(request.body) });
@@ -79,6 +80,6 @@ assert.equal(calls[12].key, calls[13].key, "a create whose outcome is unknown mu
 const failedCreate = () => ({ ok: false, status: 502, text: async () => JSON.stringify({ ok: false, status: "failed", code: "create_failed", retryable: false, unknown: false, error: "model rejected" }) });
 responses.push(failedCreate(), ok());
 const failed = await context.runLogicalAction("session-create", "session-create", { surface: "codex", message: "no" }).catch((error) => error);
-assert.equal(context.creationFailureMessage(failed), "model rejected");
+assert.equal(context.creationFailureMessage(failed), "Error: model rejected");
 await context.runLogicalAction("session-create", "session-create", { surface: "codex", message: "no" });
 assert.notEqual(calls[14].key, calls[15].key, "a create that failed must clear its key");
