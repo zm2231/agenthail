@@ -666,6 +666,7 @@ func (r *Registry) QueueHostDelivery(sessionID, message, key string, request []b
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
+	r.signalChange(ChangeHostDeliveries)
 	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: message})
 	return id, nil
 }

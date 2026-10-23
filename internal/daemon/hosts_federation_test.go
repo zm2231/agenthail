@@ -772,17 +772,13 @@ func TestFederationTruncatedAnswerStaysUnknownAndReplaysByKey(t *testing.T) {
 	if send.Code != http.StatusOK || !strings.Contains(send.Body.String(), `"evidence":"unknown"`) || !strings.Contains(send.Body.String(), `"status":"submitted"`) {
 		t.Fatalf("truncated answer status=%d body=%s", send.Code, send.Body.String())
 	}
-	queue, err := local.reg.ListQueue(true, nil)
-	if err != nil || len(queue) != 1 || queue[0].Status != "inflight" {
-		t.Fatalf("held queue=%+v err=%v", queue, err)
-	}
 	host, _ := local.daemon.pairedHost(record.ID)
 	local.daemon.drainHostDeliveries(context.Background(), host)
 	local.daemon.drainHostDeliveries(context.Background(), host)
 	if got := remote.fake.delivered(); len(got) != 1 || got[0] != surface.CLILabel+"cut short" {
 		t.Fatalf("remote delivered=%v", got)
 	}
-	queue, err = local.reg.ListQueue(true, nil)
+	queue, err := local.reg.ListQueue(true, nil)
 	if err != nil || len(queue) != 1 || queue[0].Status != "delivered" {
 		t.Fatalf("queue after replay=%+v err=%v", queue, err)
 	}
@@ -837,7 +833,8 @@ func TestFederationUnconfirmedSendRetriesByReplayingItsKey(t *testing.T) {
 	if retry.Code != http.StatusOK {
 		t.Fatalf("retry status=%d body=%s", retry.Code, retry.Body.String())
 	}
-	if item, err := local.reg.QueueItem(id, nil); err != nil || item.Status != "pending" || item.HeldBy != registry.QueueHeldHostUnreachable {
+	// The retry wakes the host's delivery loop, which may already be trying it.
+	if item, err := local.reg.QueueItem(id, nil); err != nil || !(item.Status == "pending" && item.HeldBy == registry.QueueHeldHostUnreachable || item.Status == "inflight") {
 		t.Fatalf("retried item=%+v err=%v", item, err)
 	}
 	remote.gate.proxyDown.Store(false)

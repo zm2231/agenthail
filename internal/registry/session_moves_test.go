@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -57,8 +58,15 @@ func TestAMoveOutHoldsItsConversationsQueueAndHandsItToTheTarget(t *testing.T) {
 	if err := r.SetMoveState("move-1", MoveSent, "", MovePreparing); err != nil {
 		t.Fatal(err)
 	}
+	signal, err := r.ChangeSignal(ChangeHostDeliveries)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := r.CompleteMoveOut("move-1", testPlaceholder); err != nil {
 		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(signal); err != nil || len(data) == 0 {
+		t.Fatalf("the sends a move hands to the target did not touch the host delivery signal: %q err=%v", data, err)
 	}
 	if owner, err := r.SessionHost(moveConversation); err != nil || owner != moveTarget {
 		t.Fatalf("owner=%q err=%v", owner, err)

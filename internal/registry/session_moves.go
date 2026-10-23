@@ -436,6 +436,9 @@ func (r *Registry) CompleteMoveOut(moveID string, placeholder MovePlaceholder) (
 			held[item.ID] = HeldSend{QueueID: item.ID, Key: key, Request: request}
 		}
 		events, retry, err := r.completeMoveOutTx(move, items, held, placeholder)
+		if err == nil && !retry && len(held) > 0 {
+			r.signalChange(ChangeHostDeliveries)
+		}
 		if err != nil || !retry {
 			return events, err
 		}
