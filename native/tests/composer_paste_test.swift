@@ -60,14 +60,6 @@ struct ComposerPasteTest {
         pasteboard.clearContents()
         pasteboard.setData(Data("not an image".utf8), forType: .png)
         check(ComposerAttachments.pasted(from: pasteboard)?.problem == .unreadable("Pasted image.png"), "unreadable image bytes report a problem instead of pasting text")
-
-        let dragged = NSItemProvider()
-        dragged.registerDataRepresentation(forTypeIdentifier: UTType.png.identifier, visibility: .all) { $0(png, nil); return nil }
-        let file = NSItemProvider(object: notes as NSURL)
-        let words = NSItemProvider(object: "only words" as NSString)
-        let dropped = await ComposerAttachments.pasted(from: [dragged, file, words])
-        check(dropped?.attachments.map(\.name) == ["Pasted image.png", "notes.txt"], "dropped images and files attach in order")
-        check(await ComposerAttachments.pasted(from: [words]) == nil, "dropped text is not an attachment")
         print("composer paste tests passed")
     }
 

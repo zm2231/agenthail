@@ -97,18 +97,6 @@ enum ComposerAttachments {
         return ["http", "https", "data"].contains(scheme)
     }
 
-    // Nil means nothing offered is an attachment, so a paste stays text.
-    @MainActor static func pasted(from providers: [NSItemProvider]) async -> PastedAttachments? {
-        var pasted = PastedAttachments()
-        for provider in providers {
-            let types = provider.registeredTypeIdentifiers
-            let text = types.contains { UTType($0)?.conforms(to: .plainText) == true } ? await provider.loadedText() : nil
-            guard let type = pastedType(types, text: text) else { continue }
-            pasted.add(await provider.loadedData(type), type: type)
-        }
-        return pasted.isEmpty ? nil : pasted
-    }
-
     static func adding(_ new: [ComposerAttachment], to existing: [ComposerAttachment]) -> (attachments: [ComposerAttachment], problem: ComposerAttachmentProblem?) {
         var result = existing
         var problem: ComposerAttachmentProblem?
@@ -149,25 +137,5 @@ struct PastedAttachments {
         let name = "Pasted image\(images > 1 ? " \(images)" : "").\(UTType(type)?.preferredFilenameExtension ?? "png")"
         guard let data, let image = ComposerAttachments.image(data, name: name) else { throw .unreadable(name) }
         return image
-    }
-}
-
-private extension NSItemProvider {
-    @MainActor func loadedText() async -> String? {
-        await withCheckedContinuation { continuation in
-            _ = loadObject(ofClass: NSString.self) { object, _ in continuation.resume(returning: object as? String) }
-        }
-    }
-
-    @MainActor func loadedData(_ type: String) async -> Data? {
-        await withCheckedContinuation { continuation in
-            if type == UTType.fileURL.identifier {
-                loadItem(forTypeIdentifier: type) { item, _ in
-                    continuation.resume(returning: (item as? URL)?.dataRepresentation ?? item as? Data)
-                }
-            } else {
-                _ = loadDataRepresentation(forTypeIdentifier: type) { data, _ in continuation.resume(returning: data) }
-            }
-        }
     }
 }

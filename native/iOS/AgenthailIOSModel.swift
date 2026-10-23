@@ -1046,11 +1046,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         attachmentProblem = (problem ?? added.problem)?.message
     }
 
-    func paste(_ providers: [NSItemProvider]) async {
-        guard let pasted = await ComposerAttachments.pasted(from: providers) else {
-            addAttachments([], problem: .unreadable("The pasted image"))
-            return
-        }
+    func paste(_ pasted: PastedAttachments) {
         addAttachments(pasted.attachments, problem: pasted.problem)
     }
 
