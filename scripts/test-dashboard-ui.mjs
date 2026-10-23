@@ -536,7 +536,7 @@ for (const [name, set] of [["dark", dark], ["light", light]]) {
   const document = {
     createElement: element,
     body: { prepend() {} },
-    documentElement: { style: { setProperty: (name, value) => (properties[name] = value) }, toggleAttribute: (name, on) => (on ? attributes.add(name) : attributes.delete(name)) },
+    documentElement: { style: { setProperty: (name, value) => (properties[name] = value), removeProperty: (name) => delete properties[name] }, toggleAttribute: (name, on) => (on ? attributes.add(name) : attributes.delete(name)) },
   };
   const answers = [];
   const view = backdrop.createBackdrop({ document, measure: () => new Promise((resolve, reject) => answers.push({ resolve, reject })) });
@@ -570,8 +570,12 @@ for (const [name, set] of [["dark", dark], ["light", light]]) {
   answers[5].resolve(null);
   await blind;
   assert.equal(properties["--glass-content"], "0.18", "with no measurement, panes keep their settings over a solid scrim");
+  const cleared = () => !attributes.has("data-panes") && !attributes.has("data-glass-gap") && Object.keys(properties).every((name) => !name.startsWith("--glass-"));
   view.render({ ...look, glass: { ...glass, on: false } });
-  assert.equal(attributes.has("data-panes"), false, "glass off draws solid panes");
+  assert.ok(cleared(), "glass off draws solid panes and leaves no glass state behind");
+  view.render({ ...look, glass });
+  view.render({ ...look, spec: { kind: "none" }, glass });
+  assert.ok(cleared(), "and so does removing the background");
 }
 
 {
