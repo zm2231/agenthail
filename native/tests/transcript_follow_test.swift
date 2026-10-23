@@ -228,6 +228,17 @@ struct TranscriptFollowTest {
         spin(0.5)
         expectBottom(scroll, "layout that moves the offset while a resize settles does not stop following")
         expect(feed.following, "layout that moves the offset while a resize settles leaves the reader following")
+
+        feed.transcript = "M"
+        feed.rows = rows("M", 600)
+        spin(0.6)
+        move(scroll, to: 0)
+        NotificationCenter.default.post(name: .jumpToLatest, object: nil)
+        spin(0.05)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 3000))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        spin(1.5)
+        expect(!feed.following || abs(gap(scroll)) < 2, "a view at rest away from the bottom is not following, so Jump to latest shows; following=\(feed.following) gap=\(Int(gap(scroll)))")
     }
 
     @MainActor

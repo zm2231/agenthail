@@ -23,9 +23,11 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     @State private var phase: ScrollPhase = .idle
     @State private var generation = 0
     @State private var placedLeadingRow: String?
-    @State private var pass = LayoutPass()
+    @State private var layout = Layout()
 
     static var bottomSlack: CGFloat { 70 }
+    /// Longer than a jump's animation. A scroll moved mid-animation can leave the phase animating for good.
+    static var animationLimit: Duration { .milliseconds(500) }
 
     static func atBottom(_ geometry: ScrollGeometry) -> Bool {
         geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - bottomSlack
@@ -36,26 +38,39 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .scrollPosition($position)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .defaultScrollAnchor(following ? .bottom : nil, for: .sizeChanges)
-            .onScrollPhaseChange { _, new in phase = new }
+            .onScrollPhaseChange { _, new in
+                phase = new
+                layout.animationStart = new == .animating ? .now : nil
+                if new == .animating {
+                    let start = layout.animationStart
+                    Task { @MainActor in
+                        try? await Task.sleep(for: Self.animationLimit)
+                        if layout.animationStart == start { returnToBottom() }
+                    }
+                } else if new == .idle {
+                    returnToBottom()
+                }
+            }
             .onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { old, new in
                 let inserted = leadingRow != placedLeadingRow && placedLeadingRow.map(hasRow) == true
                 placedLeadingRow = leadingRow
+                layout.geometry = new
                 let resized = old.contentSize != new.contentSize || old.containerSize != new.containerSize
-                if resized { pass.markResized() }
+                if resized { layout.markResized() }
                 if !resized {
-                    if following, phase == .idle, pass.resized, !Self.atBottom(new) {
+                    if following, resting, layout.resized, !Self.atBottom(new) {
                         // Layout that moves the offset in the same pass as a resize, as a lazy stack re-measuring rows does, is not the reader leaving the bottom.
                         settle { $0.scrollTo(edge: .bottom) }
-                    } else if phase != .animating {
+                    } else if !animating {
                         // A jump's animation passes through offsets short of the bottom; they are not the reader leaving it.
                         following = Self.atBottom(new)
                     }
                 } else if following, phase == .idle || phase == .animating, !Self.atBottom(new) {
                     settle { $0.scrollTo(edge: .bottom) }
-                } else if !following, inserted, phase == .idle {
+                } else if !following, inserted, resting {
                     let target = max(new.contentSize.height - (old.contentSize.height - old.contentOffset.y), 0)
                     settle { $0.scrollTo(y: target) }
-                } else if !following, phase == .idle, Self.atBottom(new) {
+                } else if !following, resting, Self.atBottom(new) {
                     // Content that shrank to the reader's position, or now fits, leaves nothing to jump to.
                     following = true
                 }
@@ -69,6 +84,19 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             }
     }
 
+    private var animating: Bool {
+        guard phase == .animating, let start = layout.animationStart else { return false }
+        return start.duration(to: .now) < Self.animationLimit
+    }
+
+    private var resting: Bool { phase == .idle || (phase == .animating && !animating) }
+
+    // Updates during an animation are ignored, so one that comes to rest short of the bottom is checked once it has.
+    private func returnToBottom() {
+        guard following, let geometry = layout.geometry, !Self.atBottom(geometry) else { return }
+        settle { $0.scrollTo(edge: .bottom) }
+    }
+
     // Geometry callbacks run mid-layout, so scrolling waits for the next turn and is dropped if the transcript changed meanwhile.
     private func settle(_ move: @escaping (inout ScrollPosition) -> Void) {
         let scheduled = generation
@@ -79,9 +107,12 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     }
 }
 
-/// Whether the layout pass now running resized the transcript. A reference, so marking it does not redraw the transcript.
+/// The latest scroll geometry, when an animated scroll began, and whether the layout pass now running resized the transcript.
+/// A reference, so updating it does not redraw the transcript.
 @MainActor
-private final class LayoutPass {
+private final class Layout {
+    var geometry: ScrollGeometry?
+    var animationStart: ContinuousClock.Instant?
     private(set) var resized = false
 
     func markResized() {
