@@ -74,6 +74,10 @@ if [ "$GOOS_VALUE" = "darwin" ]; then
 	cp sidecar/sidecar.py sidecar/cookie.mjs sidecar/package.json sidecar/package-lock.json "$STAGE/sidecar/"
 fi
 "$ROOT/scripts/stage-claude-host.sh" "$STAGE/claude-host"
+"$ROOT/scripts/fetch-node.sh" "$GOOS_VALUE" "$GOARCH_VALUE" "$STAGE"
+if [ "$GOOS_VALUE" = "darwin" ]; then
+	codesign --verify --strict --verbose=2 "$STAGE/runtime/node/bin/node"
+fi
 cp -R skills "$STAGE/"
 find "$STAGE/skills" -name .DS_Store -delete
 test -f "$STAGE/skills/agenthail-operations/SKILL.md"

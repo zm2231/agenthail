@@ -5,13 +5,12 @@ import (
 	"encoding/json"
 	"os/exec"
 	"testing"
+
+	"github.com/zm2231/agenthail/internal/testnode"
 )
 
 func TestDesktopVoiceCursorRuntime(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("Node.js is required to execute the renderer bridge regression")
-	}
+	node := testnode.Path(t)
 	programs, err := json.Marshal(map[string]string{"hook": codexHookJS, "voice": codexVoiceEventsJS(0, "operator"), "all": codexEventsJS(0), "response": codexDynamicToolResponseJS("request-1", "operator", true, "Transferred")})
 	if err != nil {
 		t.Fatal(err)

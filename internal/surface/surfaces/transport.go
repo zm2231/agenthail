@@ -198,9 +198,13 @@ func loadCookieHeader(parent context.Context, source CookieSource) (string, erro
 	if entry, ok := cachedCookieHeader(key); ok {
 		return entry.header, entry.err
 	}
+	node, err := shippedNode()
+	if err != nil {
+		return "", fmt.Errorf("cookie bridge: %w", err)
+	}
 	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 	defer cancel()
-	cmd := processGroupCommand(ctx, "node", source.bridgeArgs()...)
+	cmd := processGroupCommand(ctx, node, source.bridgeArgs()...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	output, err := cmd.Output()

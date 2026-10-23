@@ -33,9 +33,7 @@ func newCookieFixture(t *testing.T) cookieFixture {
 		t.Fatal(err)
 	}
 	node := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(fixture.bridgeLog) + "\nprintf 'sid=fixture'\n"
-	if err := os.WriteFile(filepath.Join(dir, "node"), []byte(node), 0700); err != nil {
-		t.Fatal(err)
-	}
+	installNode(t, node)
 	sidecar := `import json, sys
 req = json.loads(sys.stdin.read())
 with open(` + pyQuote(fixture.sidecarLog) + `, "a") as log:
@@ -53,7 +51,6 @@ sys.stdout.write(json.dumps({"status": 200, "body": json.dumps(body), "error": "
 	if err := os.WriteFile(sidecarPath, []byte(sidecar), 0600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("AGENTHAIL_SIDECAR", sidecarPath)
 	return fixture
 }
@@ -295,9 +292,7 @@ func TestNotionBindingSwitchKeepsEachOperationOnOneAccount(t *testing.T) {
 	dir := t.TempDir()
 	log, started, release := filepath.Join(dir, "requests.log"), filepath.Join(dir, "a-started"), filepath.Join(dir, "a-release")
 	node := "#!/bin/sh\nwhile [ $# -gt 0 ]; do case \"$1\" in --profile-dir) shift; printf 'sid=%s' \"$(basename \"$1\")\";; esac; shift; done\n"
-	if err := os.WriteFile(filepath.Join(dir, "node"), []byte(node), 0700); err != nil {
-		t.Fatal(err)
-	}
+	installNode(t, node)
 	sidecar := `import json, os, sys, time
 req = json.loads(sys.stdin.read())
 headers, url = req["headers"], req["url"]
@@ -330,7 +325,6 @@ sys.stdout.write(json.dumps({"status": status, "body": json.dumps(body), "error"
 	if err := os.WriteFile(sidecarPath, []byte(sidecar), 0600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("AGENTHAIL_SIDECAR", sidecarPath)
 	t.Setenv("AGENTHAIL_NOTION_TZ", "")
 

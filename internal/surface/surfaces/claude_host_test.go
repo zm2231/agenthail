@@ -15,6 +15,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/claudepeer"
+	"github.com/zm2231/agenthail/internal/installdir"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
@@ -298,6 +299,7 @@ func TestTheClaudeHostInheritsAConfiguredPrimaryConfigDirAndDropsABlankOne(t *te
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_HOST", script)
+	installNode(t, "#!/bin/sh\n")
 	configured := filepath.Join(fixture.Home, "claude-main")
 	for value, want := range map[string][]string{"": nil, "  ": nil, configured: {"CLAUDE_CONFIG_DIR=" + configured}} {
 		t.Setenv("CLAUDE_CONFIG_DIR", value)
@@ -415,5 +417,48 @@ func TestAStreamWhoseSourceSawNoTranscriptReadsOneCreatedBeforeItStartedFromTheS
 		case <-ctx.Done():
 			t.Fatal("a reply written before the stream opened, after the seed found nothing, was skipped")
 		}
+	}
+}
+
+// installNode stands script in for the Node runtime of an install at a
+// temporary root, which the daemon runs in place of any node on PATH.
+func installNode(t *testing.T, script string) string {
+	t.Helper()
+	root := t.TempDir()
+	node := installdir.Node(root)
+	if err := os.MkdirAll(filepath.Dir(node), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(node, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	previous := installRoot
+	installRoot = func() (string, error) { return root, nil }
+	t.Cleanup(func() { installRoot = previous })
+	return node
+}
+
+func TestTheClaudeHostRunsTheNodeAgenthailShips(t *testing.T) {
+	fixture := claudetest.New(t)
+	script := filepath.Join(fixture.Home, "host.mjs")
+	if err := os.WriteFile(script, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CLAUDE_HOST", script)
+	onPath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(onPath, "node"), []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", onPath+string(os.PathListSeparator)+os.Getenv("PATH"))
+	node := installNode(t, "#!/bin/sh\n")
+	launch, err := ClaudeHostLaunch(fixture.Home, "test")
+	if err != nil || launch.Node != node {
+		t.Fatalf("node=%q err=%v, want the shipped %q", launch.Node, err, node)
+	}
+	if err := os.Remove(node); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ClaudeHostLaunch(fixture.Home, "test"); err == nil || !strings.Contains(err.Error(), node) || !strings.Contains(err.Error(), "reinstall Agenthail") {
+		t.Fatalf("a missing shipped Node fell back or was not explained: %v", err)
 	}
 }

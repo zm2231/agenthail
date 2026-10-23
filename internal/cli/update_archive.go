@@ -17,7 +17,7 @@ import (
 	"github.com/zm2231/agenthail/internal/daemon"
 )
 
-var archiveLayout = map[string]bool{"agenthail": true, "claude-host": true, "skills": true, "README.md": true, "LICENSE": true, "COMMERCIAL.md": true}
+var archiveLayout = map[string]bool{"agenthail": true, "claude-host": true, "runtime": true, "skills": true, "README.md": true, "LICENSE": true, "COMMERCIAL.md": true}
 
 func linuxArchiveName(tag, goarch string) string {
 	return "agenthail-" + tag + "-linux-" + goarch

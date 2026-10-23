@@ -406,13 +406,18 @@ for them. The model and permission mode change through the host instead.
 beside the `agenthail` binary as `claude-host/`. The SDK's bundled Claude
 binaries are optional dependencies and are omitted; the remaining dependencies
 are plain JavaScript, so one tree serves every platform, and the script fails
-if a native module appears. The Mac package runs the host with its bundled
-Node. Release archives and `install.sh` installs use `node` from `PATH`.
-`AGENTHAIL_CLAUDE_HOST` overrides the script path.
+if a native module appears. Every install ships Node 22 as
+`runtime/node/bin/node` beside `claude-host/`, and the daemon runs the host and
+the cookie bridge with that file only, never a `node` from `PATH`.
+`scripts/fetch-node.sh` pins the version and checksums and stages it for the
+Mac package, the release archives and `install.sh`; run it with no arguments
+in a checkout for source builds and tests. `AGENTHAIL_CLAUDE_HOST` overrides
+the script path.
 
 ## Tests
 
 ```bash
+scripts/fetch-node.sh
 npm ci --prefix claude-host --omit=optional
 npm test --prefix claude-host
 go test ./internal/claudehost/... ./internal/surface/surfaces/ ./internal/daemon/ -run 'Host|Ensure|Subscribe|Client' -race

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -214,21 +213,18 @@ func claudeHostDeliveryError(err error) error {
 func ClaudeHostLaunch(home, version string) (claudehost.Launch, error) {
 	script := strings.TrimSpace(os.Getenv("AGENTHAIL_CLAUDE_HOST"))
 	if script == "" {
-		executable, err := os.Executable()
-		if err == nil {
-			executable, err = filepath.EvalSymlinks(executable)
-		}
+		root, err := installRoot()
 		if err != nil {
 			return claudehost.Launch{}, err
 		}
-		script = filepath.Join(installdir.Of(executable), "claude-host", "host.mjs")
+		script = filepath.Join(root, "claude-host", "host.mjs")
 	}
 	if _, err := os.Stat(script); err != nil {
 		return claudehost.Launch{}, fmt.Errorf("the Claude host script is missing (set AGENTHAIL_CLAUDE_HOST): %w", err)
 	}
-	node, err := exec.LookPath("node")
+	node, err := shippedNode()
 	if err != nil {
-		return claudehost.Launch{}, fmt.Errorf("the Claude host needs node on PATH: %w", err)
+		return claudehost.Launch{}, err
 	}
 	claude, err := surface.ClaudeBinary(home)
 	if err != nil {
@@ -237,4 +233,29 @@ func ClaudeHostLaunch(home, version string) (claudehost.Launch, error) {
 	launch := claudehost.Launch{Node: node, Script: script, Claude: claude, Version: version, Env: claudeCommandEnv(home)}
 	launch.Agenthail = AgenthailExecutable()
 	return launch, nil
+}
+
+var installRoot = func() (string, error) {
+	executable, err := os.Executable()
+	if err == nil {
+		executable, err = filepath.EvalSymlinks(executable)
+	}
+	if err != nil {
+		return "", err
+	}
+	return installdir.Of(executable), nil
+}
+
+// shippedNode is the Node runtime Agenthail ships. A node on PATH is never
+// used: its version is whatever the machine happens to have.
+func shippedNode() (string, error) {
+	root, err := installRoot()
+	if err != nil {
+		return "", err
+	}
+	node := installdir.Node(root)
+	if _, err := os.Stat(node); err != nil {
+		return "", fmt.Errorf("the Node runtime Agenthail ships is missing at %s; reinstall Agenthail, or for a source build run scripts/fetch-node.sh", node)
+	}
+	return node, nil
 }
