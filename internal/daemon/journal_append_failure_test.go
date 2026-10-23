@@ -12,6 +12,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 	_ "modernc.org/sqlite"
 )
 
@@ -192,7 +193,7 @@ func TestDaemonSessionActivityRecoversReplayAfterTransientJournalFailure(t *test
 		t.Fatal(err)
 	}
 	defer subscription.Cancel()
-	waitFor(t, 5*time.Second, func() bool {
+	testkit.Eventually(t, "the condition", 5*time.Second, func() bool {
 		_, sourceErrors := journalRows(t, reg, from.ID)
 		return len(sourceErrors) > 0
 	})
@@ -213,7 +214,7 @@ func TestDaemonSessionActivityRecoversReplayAfterTransientJournalFailure(t *test
 		return body.Timeline
 	}
 	var timeline surface.SessionTimeline
-	waitFor(t, 5*time.Second, func() bool {
+	testkit.Eventually(t, "the condition", 5*time.Second, func() bool {
 		timeline = readTimeline()
 		return adapter.calls.Load() >= 2 && len(timeline.Items) > 0
 	})

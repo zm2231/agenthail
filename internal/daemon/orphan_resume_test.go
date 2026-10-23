@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/signin"
+	"github.com/zm2231/agenthail/internal/testkit"
 
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -165,7 +166,7 @@ func TestAPIPersonSendToEndedBackgroundJobResumesItInTheHostAndDeliversOnce(t *t
 	if code, body = f.sendAsPerson(t, "orphan-1", "hello"); code != http.StatusOK {
 		t.Fatalf("replay status=%d body=%v", code, body)
 	}
-	claudehosttest.WaitFor(t, "the turn", func() bool { return len(f.turns(t)) == 1 })
+	testkit.Eventually(t, "the turn", 15*time.Second, func() bool { return len(f.turns(t)) == 1 })
 	turn := f.host.Turns(t, orphanConversation)[0]
 	intent, err := f.r.DeliveryIntent(int64(body["result"].(map[string]any)["deliveryId"].(float64)))
 	if err != nil || turn.Text != "hello" || turn.UUID != intent.UUID || turnOrigin(t, turn) != "human" || f.resumes(t) != 1 || f.posts.count("hello") != 0 {
@@ -181,7 +182,7 @@ func TestAPIPersonSendToEndedBackgroundJobResumesItInTheHostAndDeliversOnce(t *t
 	if code, _ := f.sendAsPerson(t, "orphan-2", "next"); code != http.StatusOK || f.resumes(t) != 1 {
 		t.Fatalf("second send status=%d resumes=%d", code, f.resumes(t))
 	}
-	claudehosttest.WaitFor(t, "the second turn", func() bool { return len(f.turns(t)) == 2 })
+	testkit.Eventually(t, "the second turn", 15*time.Second, func() bool { return len(f.turns(t)) == 2 })
 }
 
 func TestAPIAgentSendToEndedBackgroundJobResumesItAndTakesItsSocket(t *testing.T) {
@@ -224,7 +225,7 @@ func TestAPISendHoldsForLiveUnreachableProcessThenResumesAfterItExits(t *testing
 	f.claude.RemoveRecord()
 	f.daemon.scanAndRelay(context.Background())
 	f.daemon.scanAndRelay(context.Background())
-	claudehosttest.WaitFor(t, "the held turn", func() bool { return len(f.turns(t)) == 1 })
+	testkit.Eventually(t, "the held turn", 15*time.Second, func() bool { return len(f.turns(t)) == 1 })
 	if f.resumes(t) != 1 || f.turns(t)[0] != "hello" {
 		t.Fatalf("resumes=%d turns=%q", f.resumes(t), f.turns(t))
 	}

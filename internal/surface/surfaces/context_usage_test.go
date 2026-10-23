@@ -12,6 +12,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func TestClaudeContextUsageTracksCompactionAndAppends(t *testing.T) {
@@ -30,7 +31,7 @@ func TestClaudeContextUsageTracksCompactionAndAppends(t *testing.T) {
 	if usage.UsedTokens != 42000 || usage.ContextWindow != 0 || usage.WindowEstimated || usage.CompactionCount != 1 || usage.ReclaimedTokens != 108000 || usage.Compacting {
 		t.Fatalf("usage=%+v", usage)
 	}
-	appendTestTranscript(t, path, `{"type":"user","timestamp":"2026-07-16T01:02:00Z","message":{"content":"/compact"}}`)
+	testkit.AppendLines(t, path, `{"type":"user","timestamp":"2026-07-16T01:02:00Z","message":{"content":"/compact"}}`)
 	usage, err = adapter.ContextUsage(context.Background(), session)
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +39,7 @@ func TestClaudeContextUsageTracksCompactionAndAppends(t *testing.T) {
 	if !usage.Compacting {
 		t.Fatalf("usage=%+v", usage)
 	}
-	appendTestTranscript(t, path,
+	testkit.AppendLines(t, path,
 		`{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-16T01:02:02Z","compactMetadata":{"preTokens":151000,"postTokens":41000}}`,
 		`{"type":"assistant","timestamp":"2026-07-16T01:02:04Z","message":{"model":"claude-opus-4-8[1m]","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":40000,"output_tokens":100}}}`,
 	)
@@ -49,7 +50,7 @@ func TestClaudeContextUsageTracksCompactionAndAppends(t *testing.T) {
 	if usage.Compacting || usage.UsedTokens != 41000 || usage.ContextWindow != 0 || usage.WindowEstimated || usage.CompactionCount != 2 {
 		t.Fatalf("usage=%+v", usage)
 	}
-	appendTestTranscript(t, path, `{"type":"user","timestamp":"2026-07-16T01:03:00Z","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}`)
+	testkit.AppendLines(t, path, `{"type":"user","timestamp":"2026-07-16T01:03:00Z","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}`)
 	usage, err = adapter.ContextUsage(context.Background(), session)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +58,7 @@ func TestClaudeContextUsageTracksCompactionAndAppends(t *testing.T) {
 	if !usage.Compacting {
 		t.Fatalf("usage=%+v", usage)
 	}
-	appendTestTranscript(t, path, `{"type":"system","subtype":"local_command","timestamp":"2026-07-16T01:03:03Z","content":"done"}`)
+	testkit.AppendLines(t, path, `{"type":"system","subtype":"local_command","timestamp":"2026-07-16T01:03:03Z","content":"done"}`)
 	usage, err = adapter.ContextUsage(context.Background(), session)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +109,7 @@ func TestClaudeContextUsageInvalidatesStaleConfiguredWindowAfterObservedModelSwi
 	if err != nil || usage.ContextWindow != 1_000_000 {
 		t.Fatalf("initial usage=%+v err=%v", usage, err)
 	}
-	appendTestTranscript(t, path,
+	testkit.AppendLines(t, path,
 		`{"type":"assistant","timestamp":"2026-07-16T01:01:00Z","message":{"model":"claude-sonnet-5-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":1000,"output_tokens":500}}}`,
 	)
 	usage, err = adapter.ContextUsage(context.Background(), session)
@@ -409,18 +410,6 @@ func codexTokenRecord(timestamp string, current, cumulative int64) string {
 func writeTestTranscript(t *testing.T, path string, records ...string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(stringsJoinLines(records)), 0600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func appendTestTranscript(t *testing.T, path string, records ...string) {
-	t.Helper()
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	if _, err := file.WriteString(stringsJoinLines(records)); err != nil {
 		t.Fatal(err)
 	}
 }

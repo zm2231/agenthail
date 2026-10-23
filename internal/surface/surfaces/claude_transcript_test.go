@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func writeTranscript(t *testing.T, content string) string {
@@ -91,7 +92,7 @@ func TestClaudeObserveFindsTurnBeforeToolHeavyTail(t *testing.T) {
 	if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "human" {
 		t.Fatalf("inflight observation=%+v err=%v", observation, err)
 	}
-	appendTestTranscript(t, path, `{"type":"assistant","uuid":"assistant","timestamp":"2026-08-06T01:00:00Z","message":{"id":"done","stop_reason":"end_turn","content":"complete"}}`, `{"type":"system","subtype":"stop_hook_summary"}`)
+	testkit.AppendLines(t, path, `{"type":"assistant","uuid":"assistant","timestamp":"2026-08-06T01:00:00Z","message":{"id":"done","stop_reason":"end_turn","content":"complete"}}`, `{"type":"system","subtype":"stop_hook_summary"}`)
 	observation, err = claude.Observe(context.Background(), session)
 	if err != nil || observation.Status != surface.StatusIdle || observation.CompletedTurnID != "done" || observation.Reply == nil || observation.Reply.UserText != "do the work" {
 		t.Fatalf("completed observation=%+v err=%v", observation, err)
@@ -133,7 +134,7 @@ func TestClaudeObserveRejectsOversizedAppendedRecord(t *testing.T) {
 	if _, err := claude.Observe(context.Background(), session); err != nil {
 		t.Fatal(err)
 	}
-	appendTestTranscript(t, path, strings.Repeat("x", maxClaudeTranscriptRecordBytes+1))
+	testkit.AppendLines(t, path, strings.Repeat("x", maxClaudeTranscriptRecordBytes+1))
 	if _, err := claude.Observe(context.Background(), session); err == nil {
 		t.Fatal("oversized appended record was buffered instead of rejected")
 	}

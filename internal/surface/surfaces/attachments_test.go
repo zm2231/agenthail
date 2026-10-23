@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 const testPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
@@ -156,7 +157,7 @@ func TestCodexAttachmentStaysFetchableAfterTranscriptGrows(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := firstAttachmentID(t, path, "codex")
-	appendTestTranscript(t, path, strings.Repeat(`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"later"}]}}`+"\n", 40000))
+	testkit.AppendLines(t, path, strings.Repeat(`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"later"}]}}`+"\n", 40000))
 	attachment, data, err := NewCodex("").ReadAttachment(context.Background(), &surface.Session{ID: "thread-indexed", Transcript: path}, id)
 	if err != nil || attachment == nil || attachment.ID != id || !bytes.Equal(data, mustAttachmentData(t)) {
 		t.Fatalf("attachment=%+v bytes=%d err=%v", attachment, len(data), err)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 // slowPoll raises the stream timer far above the wake bound the tests assert,
@@ -89,7 +90,7 @@ func TestAClaudeStreamWakesOnAnAppendAndFollowsAReplacedTranscript(t *testing.T)
 
 	seen := waits.Load()
 	appended := time.Now()
-	appendTestTranscript(t, path, claudeAssistantText("a1", "appended"))
+	testkit.AppendLines(t, path, claudeAssistantText("a1", "appended"))
 	awaitWokenText(t, texts, "appended", appended)
 	awaitWaitBeyond(t, waits, seen)
 
@@ -100,7 +101,7 @@ func TestAClaudeStreamWakesOnAnAppendAndFollowsAReplacedTranscript(t *testing.T)
 	awaitWaitBeyond(t, waits, seen)
 
 	later := time.Now()
-	appendTestTranscript(t, path, claudeAssistantText("a2", "appended to the replacement"))
+	testkit.AppendLines(t, path, claudeAssistantText("a2", "appended to the replacement"))
 	awaitWokenText(t, texts, "appended to the replacement", later)
 }
 
@@ -137,7 +138,7 @@ func TestACodexStreamWakesOnAnAppend(t *testing.T) {
 	})
 	awaitWaitBeyond(t, waits, 0)
 	appended := time.Now()
-	appendTestTranscript(t, path,
+	testkit.AppendLines(t, path,
 		`{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}`,
 		`{"type":"response_item","payload":{"id":"user-1","type":"message","role":"user","content":[{"type":"input_text","text":"woken by the append"}]}}`)
 	awaitWokenText(t, texts, "woken by the append", appended)

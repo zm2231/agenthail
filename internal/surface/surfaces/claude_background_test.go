@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost"
-	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func TestAHostSessionReportsTheBackgroundTasksItsHostLists(t *testing.T) {
@@ -30,7 +30,7 @@ func TestAHostSessionReportsTheBackgroundTasksItsHostLists(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sess *surface.Session
-	claudehosttest.WaitFor(t, "both tasks to be listed", func() bool {
+	testkit.Eventually(t, "both tasks to be listed", 15*time.Second, func() bool {
 		sess = listedSession(t, c, id)
 		return sess.BackgroundTasks != nil && len(sess.BackgroundTasks.Tasks) == 2
 	})
@@ -44,7 +44,7 @@ func TestAHostSessionReportsTheBackgroundTasksItsHostLists(t *testing.T) {
 	if sess.Status != surface.StatusIdle {
 		t.Fatalf("background work is its own fact; status = %s", sess.Status)
 	}
-	claudehosttest.WaitFor(t, "the tasks to end", func() bool {
+	testkit.Eventually(t, "the tasks to end", 15*time.Second, func() bool {
 		return listedSession(t, c, id).BackgroundTasks == nil
 	})
 }

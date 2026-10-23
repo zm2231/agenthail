@@ -26,6 +26,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func hostRegistry(t *testing.T) *registry.Registry {
@@ -41,7 +42,7 @@ func hostRegistry(t *testing.T) *registry.Registry {
 func hostedSession(t *testing.T, claude *surfaces.Claude, id string) surface.Session {
 	t.Helper()
 	var found surface.Session
-	claudehosttest.WaitFor(t, "the host session to be listed", func() bool {
+	testkit.Eventually(t, "the host session to be listed", 15*time.Second, func() bool {
 		sessions, err := claude.List(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -103,7 +104,7 @@ func TestAPersonsMessageToAHostSessionIsDeliveredUnderItsIntentUUID(t *testing.T
 	}
 	d.drainMessageQueue(ctx, claude, &session)
 
-	claudehosttest.WaitFor(t, "both turns", func() bool { return len(fixture.Turns(t, id)) == 2 })
+	testkit.Eventually(t, "both turns", 15*time.Second, func() bool { return len(fixture.Turns(t, id)) == 2 })
 	turns := fixture.Turns(t, id)
 	for i, want := range []struct{ uuid, text string }{{intent.UUID, "sent now"}, {queued.UUID, "sent from the queue"}} {
 		if turns[i].UUID != want.uuid || turns[i].Text != want.text || turnOrigin(t, turns[i]) != "human" {
@@ -290,7 +291,7 @@ func updateFromAProtocol1Host(t *testing.T, prompt string) {
 
 	fixture.Peer(t, opened.PID, prompt)
 	var request string
-	claudehosttest.WaitFor(t, "the session to wait on the request", func() bool {
+	testkit.Eventually(t, "the session to wait on the request", 15*time.Second, func() bool {
 		observation, err := d.observeTurn(ctx, claude, &session)
 		if err != nil || observation.WaitingOn == nil {
 			return false
@@ -301,7 +302,7 @@ func updateFromAProtocol1Host(t *testing.T, prompt string) {
 	if err := client.Drain(ctx); err != nil {
 		t.Fatal(err)
 	}
-	claudehosttest.WaitFor(t, "Claude to refuse the prompt", func() bool {
+	testkit.Eventually(t, "Claude to refuse the prompt", 15*time.Second, func() bool {
 		turns := fixture.Turns(t, id)
 		return len(turns) == 1 && strings.Contains(turns[0].Reply, ":error:")
 	})
@@ -342,12 +343,12 @@ func updateFromAProtocol1Host(t *testing.T, prompt string) {
 		t.Fatalf("turns while the stranded Claude runs = %+v, want none new", turns)
 	}
 	_ = syscall.Kill(opened.PID, syscall.SIGTERM)
-	claudehosttest.WaitFor(t, "the stranded Claude to exit", func() bool { return !claudehosttest.Alive(opened.PID) })
+	testkit.Eventually(t, "the stranded Claude to exit", 15*time.Second, func() bool { return !claudehosttest.Alive(opened.PID) })
 	receipt, err := d.dispatcher().DeliverWithOptions(ctx, claude, &session, "after it exited", "", surface.SendOptions{Author: surface.AuthorPerson})
 	if err != nil || receipt.Evidence != surface.EvidenceDelivered {
 		t.Fatalf("the next message after the stranded Claude exited = %+v, %v; want delivered", receipt, err)
 	}
-	claudehosttest.WaitFor(t, "the answer from the new host", func() bool {
+	testkit.Eventually(t, "the answer from the new host", 15*time.Second, func() bool {
 		turns := fixture.Turns(t, id)
 		return len(turns) == 2 && turns[1].Reply == "echo:after it exited" && turns[1].PID != opened.PID
 	})
@@ -447,7 +448,7 @@ func TestAnUpdateFromAProtocol2HostAnswersItsPromptThroughTheNewDaemon(t *testin
 			d := newTestDaemon(t, r, []surface.Surface{claude})
 			d.log = log.New(io.Discard, "", 0)
 			fixture.Peer(t, opened.PID, test.prompt)
-			claudehosttest.WaitFor(t, "the session to wait on the request", func() bool {
+			testkit.Eventually(t, "the session to wait on the request", 15*time.Second, func() bool {
 				observation, err := d.observeTurn(ctx, claude, &session)
 				return err == nil && observation.WaitingOn != nil
 			})
@@ -468,7 +469,7 @@ func TestAnUpdateFromAProtocol2HostAnswersItsPromptThroughTheNewDaemon(t *testin
 			if answer.Code != http.StatusOK {
 				t.Fatalf("answer through the retiring protocol 2 host = %d %s", answer.Code, answer.Body)
 			}
-			claudehosttest.WaitFor(t, "the answer to reach Claude and the old host to leave with its session", func() bool {
+			testkit.Eventually(t, "the answer to reach Claude and the old host to leave with its session", 15*time.Second, func() bool {
 				turns := fixture.Turns(t, id)
 				return len(turns) == 1 && turns[0].Reply == test.reply && !claudehosttest.Alive(old.PID) && !claudehosttest.Alive(opened.PID)
 			})
@@ -480,7 +481,7 @@ func TestAnUpdateFromAProtocol2HostAnswersItsPromptThroughTheNewDaemon(t *testin
 			if err != nil || receipt.Evidence != surface.EvidenceDelivered {
 				t.Fatalf("the next message = %+v, %v; want delivered", receipt, err)
 			}
-			claudehosttest.WaitFor(t, "the answer from this build's host", func() bool {
+			testkit.Eventually(t, "the answer from this build's host", 15*time.Second, func() bool {
 				turns := fixture.Turns(t, id)
 				return len(turns) == 2 && turns[1].Reply == "echo:after the update" && turns[1].PID != opened.PID
 			})
@@ -535,7 +536,7 @@ func TestAMessageClaudeHoldsIsADeliveryProblemAndItsSenderIsTold(t *testing.T) {
 		}
 		return nil
 	}
-	claudehosttest.WaitFor(t, "the held message to be a delivery problem", func() bool { return problem(registry.DeliveryIntentHeld) != nil })
+	testkit.Eventually(t, "the held message to be a delivery problem", 15*time.Second, func() bool { return problem(registry.DeliveryIntentHeld) != nil })
 	if held := problem(registry.DeliveryIntentHeld); held.SessionID != target || !strings.Contains(held.Reason, "permission") {
 		t.Fatalf("problem = %+v, want the target's held message with its cause", held)
 	}
@@ -557,7 +558,7 @@ func TestAMessageClaudeHoldsIsADeliveryProblemAndItsSenderIsTold(t *testing.T) {
 	if err := os.WriteFile(release, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	claudehosttest.WaitFor(t, "the hold to expire", func() bool { return problem(registry.DeliveryIntentFailed) != nil })
+	testkit.Eventually(t, "the hold to expire", 15*time.Second, func() bool { return problem(registry.DeliveryIntentFailed) != nil })
 	if !told("failure") {
 		t.Fatal("the sender was not told its message was dropped")
 	}
@@ -742,7 +743,7 @@ func TestAnOpenRequestStaysAnswerableThroughHostUpdates(t *testing.T) {
 			}
 			fixture.Peer(t, opened.PID, "TOOL")
 			var request surface.Request
-			claudehosttest.WaitFor(t, "the request to be listed", func() bool {
+			testkit.Eventually(t, "the request to be listed", 15*time.Second, func() bool {
 				state, err := claude.Requests(ctx, &session)
 				if err != nil || len(state.Requests) != 1 {
 					return false
@@ -775,7 +776,7 @@ func TestAnOpenRequestStaysAnswerableThroughHostUpdates(t *testing.T) {
 			if answer.Code != http.StatusOK {
 				t.Fatalf("answer after the updates = %d %s", answer.Code, answer.Body)
 			}
-			claudehosttest.WaitFor(t, "the answer to reach Claude", func() bool {
+			testkit.Eventually(t, "the answer to reach Claude", 15*time.Second, func() bool {
 				turns := fixture.Turns(t, id)
 				return len(turns) == 1 && turns[0].Reply == "tool:allow:"
 			})
@@ -802,10 +803,10 @@ func TestTheDaemonFollowsARetiringHostWhoseOldestEventsAreGone(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	claudehosttest.WaitFor(t, "the turns", func() bool { return len(fixture.Turns(t, id)) == 3 })
+	testkit.Eventually(t, "the turns", 15*time.Second, func() bool { return len(fixture.Turns(t, id)) == 3 })
 	fixture.Peer(t, opened.PID, "TOOL")
 	var request claudehost.Request
-	claudehosttest.WaitFor(t, "the request", func() bool {
+	testkit.Eventually(t, "the request", 15*time.Second, func() bool {
 		listing, err := client.List(ctx)
 		if err != nil {
 			return false
@@ -899,7 +900,7 @@ func retiringRequest(t *testing.T) (*claudehosttest.Fixture, surface.Session, su
 	session := hostedSession(t, claude, id)
 	fixture.Peer(t, opened.PID, "TOOL")
 	var request surface.Request
-	claudehosttest.WaitFor(t, "the request to be listed", func() bool {
+	testkit.Eventually(t, "the request to be listed", 15*time.Second, func() bool {
 		state, err := claude.Requests(ctx, &session)
 		if err != nil || len(state.Requests) != 1 {
 			return false
@@ -942,7 +943,7 @@ func TestARetiringHostThatDoesNotAnswerHidesNoOtherHostsRequest(t *testing.T) {
 	if answer.Code != http.StatusOK {
 		t.Fatalf("answer beside a silent host = %d %s", answer.Code, answer.Body)
 	}
-	claudehosttest.WaitFor(t, "the answer to reach Claude", func() bool {
+	testkit.Eventually(t, "the answer to reach Claude", 15*time.Second, func() bool {
 		turns := fixture.Turns(t, session.ID)
 		return len(turns) == 1 && turns[0].Reply == "tool:allow:"
 	})
@@ -997,7 +998,7 @@ func TestASessionWhoseRetiringHostDoesNotAnswerKeepsItsRequest(t *testing.T) {
 	}
 	stopped = false
 	var state surface.RequestState
-	claudehosttest.WaitFor(t, "the request once the host answers", func() bool {
+	testkit.Eventually(t, "the request once the host answers", 15*time.Second, func() bool {
 		state, err = claude.Requests(ctx, &session)
 		return err == nil && len(state.Requests) == 1 && state.Requests[0].ID == request.ID
 	})
@@ -1050,7 +1051,7 @@ func TestAStopReachesASessionPastARetiringHostThatDoesNotAnswer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("stop past a silent host = %v", err)
 			}
-			claudehosttest.WaitFor(t, "the session to close", func() bool {
+			testkit.Eventually(t, "the session to close", 15*time.Second, func() bool {
 				listCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 				defer cancel()
 				listing, err := client.List(listCtx)
@@ -1094,7 +1095,7 @@ func TestAHostRequestIsRecordedAsAnswerable(t *testing.T) {
 	d.log = log.New(io.Discard, "", 0)
 	fixture.Peer(t, opened.PID, "TOOL")
 	var observed *surface.Waiting
-	claudehosttest.WaitFor(t, "the session to wait on the request", func() bool {
+	testkit.Eventually(t, "the session to wait on the request", 15*time.Second, func() bool {
 		observation, err := d.observeTurn(ctx, claude, &session)
 		if err != nil || observation.WaitingOn == nil {
 			return false

@@ -18,6 +18,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 const (
@@ -182,8 +183,8 @@ func end(t *testing.T, c *coordinatorCLI, conversation string) {
 	spawns := c.host.Spawns(t, conversation)
 	pid := spawns[len(spawns)-1].PID
 	_ = syscall.Kill(pid, syscall.SIGKILL)
-	claudehosttest.WaitFor(t, "the Claude process to end", func() bool { return !claudehosttest.Alive(pid) })
-	claudehosttest.WaitFor(t, "the host to let the session go", func() bool {
+	testkit.Eventually(t, "the Claude process to end", 15*time.Second, func() bool { return !claudehosttest.Alive(pid) })
+	testkit.Eventually(t, "the host to let the session go", 15*time.Second, func() bool {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		listing, err := claudehost.NewClient(c.claude.Home).List(ctx)

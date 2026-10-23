@@ -15,11 +15,12 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
-	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func writeFixtureFile(t *testing.T, path, content string) {
@@ -419,7 +420,7 @@ func TestAMoveInItsAbortReachedFirstPlacesNothing(t *testing.T) {
 
 func waitForTranscript(t *testing.T, c *Claude, conversation string) {
 	t.Helper()
-	claudehosttest.WaitFor(t, "the conversation's transcript", func() bool {
+	testkit.Eventually(t, "the conversation's transcript", 15*time.Second, func() bool {
 		roots, _ := surface.ClaudeConfigRoots(c.home)
 		return len(c.transcripts.pass(roots)(conversation)) == 1
 	})

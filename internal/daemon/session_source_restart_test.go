@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 // scriptedStreamSurface runs one scripted stream per call.
@@ -61,7 +62,7 @@ func TestALiveSourceFollowsTheNextTurnAsSoonAsAStreamEndsWithItsTurn(t *testing.
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	waitFor(t, 5*time.Second, func() bool { return len(bodies()) == 2 })
+	testkit.Eventually(t, "the second stream", 5*time.Second, func() bool { return len(bodies()) == 2 })
 }
 
 func TestALiveSourceWaitsBeforeStreamingAgainWhenAStreamEndsAtOnceWithNothingNew(t *testing.T) {
@@ -82,7 +83,7 @@ func TestALiveSourceWaitsBeforeStreamingAgainWhenAStreamEndsAtOnceWithNothingNew
 				}
 				return surface.ErrStreamWindow
 			})
-			waitFor(t, 5*time.Second, func() bool { return adapter.calls.Load() >= test.calls })
+			testkit.Eventually(t, "the stream calls before the pause", 5*time.Second, func() bool { return adapter.calls.Load() >= test.calls })
 			time.Sleep(200 * time.Millisecond)
 			if calls := adapter.calls.Load(); calls != test.calls {
 				t.Fatalf("a stream that ended at once was called %d times before the pause ran out, want %d", calls, test.calls)

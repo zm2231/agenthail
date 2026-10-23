@@ -21,6 +21,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 const moveRemote = "https://example.com/acme/widget.git"
@@ -113,9 +114,9 @@ func startMovable(t *testing.T, node *moveNode) *surface.Session {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claudehosttest.WaitFor(t, "the first turn", func() bool { return len(node.host.Turns(t, session.ID)) == 1 })
+	testkit.Eventually(t, "the first turn", 15*time.Second, func() bool { return len(node.host.Turns(t, session.ID)) == 1 })
 	client := claudehost.NewClient(node.host.Home)
-	claudehosttest.WaitFor(t, "the first turn to end", func() bool {
+	testkit.Eventually(t, "the first turn to end", 15*time.Second, func() bool {
 		listing, err := client.List(context.Background())
 		if err != nil {
 			return false
@@ -226,7 +227,7 @@ func TestAnIdleClaudeSessionMovesToAPairedHostAndRunsThere(t *testing.T) {
 		t.Fatalf("target spawns=%+v", spawns)
 	}
 
-	claudehosttest.WaitFor(t, "the held send to reach the target", func() bool {
+	testkit.Eventually(t, "the held send to reach the target", 15*time.Second, func() bool {
 		source.daemon.drainHostDeliveries(context.Background(), mustPairedHost(t, source, record.ID))
 		return peers.Count("sent while moving") == 1
 	})

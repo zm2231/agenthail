@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
+	"github.com/zm2231/agenthail/internal/testkit"
 	"github.com/zm2231/agenthail/internal/testnode"
 )
 
@@ -89,7 +90,7 @@ func TestEnsureStartsOneHostAndARestartedDaemonAttachesToIt(t *testing.T) {
 	if result, err := client.Send(ctx, claudehost.SendRequest{SessionID: sessionID, UUID: message, Text: "after restart", Origin: &claudehost.Origin{Kind: "human"}}); err != nil || !result.Accepted || result.Duplicate {
 		t.Fatalf("send = %+v, %v", result, err)
 	}
-	claudehosttest.WaitFor(t, "the turn", func() bool { return slices.Equal(uuids(f.Turns(t, sessionID)), []string{message}) })
+	testkit.Eventually(t, "the turn", 15*time.Second, func() bool { return slices.Equal(uuids(f.Turns(t, sessionID)), []string{message}) })
 }
 
 func TestDaemonsEnsuringAtOnceShareOneHost(t *testing.T) {
@@ -203,7 +204,7 @@ func hostLog(t *testing.T, home string) string {
 func listed(t *testing.T, client claudehost.Client, sessionID string, requests int) claudehost.Session {
 	t.Helper()
 	var found claudehost.Session
-	claudehosttest.WaitFor(t, fmt.Sprintf("session %s listed with %d requests", sessionID, requests), func() bool {
+	testkit.Eventually(t, fmt.Sprintf("session %s listed with %d requests", sessionID, requests), 15*time.Second, func() bool {
 		listing, err := client.List(context.Background())
 		if err != nil {
 			return false
@@ -277,7 +278,7 @@ func TestReplacingTheHostKeepsAPendingRequestAnswerableAndItsSessionReachable(t 
 			if outcome, err := client.Respond(ctx, sessionID, request.RequestID, test.decision); err != nil || outcome != test.outcome {
 				t.Fatalf("respond after the update = %q, %v; want %s", outcome, err, test.outcome)
 			}
-			claudehosttest.WaitFor(t, "the old host to finish the turns and leave", func() bool {
+			testkit.Eventually(t, "the old host to finish the turns and leave", 15*time.Second, func() bool {
 				return !claudehosttest.Alive(oldHello.PID) && !claudehosttest.Alive(opened.PID)
 			})
 			if got := replies(f.Turns(t, sessionID)); !slices.Equal(got, []string{test.reply, "echo:after the update"}) {
@@ -294,7 +295,7 @@ func TestReplacingTheHostKeepsAPendingRequestAnswerableAndItsSessionReachable(t 
 			if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: sessionID, UUID: uuid.NewString(), Text: "on the new host"}); err != nil {
 				t.Fatal(err)
 			}
-			claudehosttest.WaitFor(t, "the turn on the new host", func() bool { return len(f.Turns(t, sessionID)) == 3 })
+			testkit.Eventually(t, "the turn on the new host", 15*time.Second, func() bool { return len(f.Turns(t, sessionID)) == 3 })
 		})
 	}
 }
@@ -321,7 +322,7 @@ func TestRetiredHostsLeaveWithTheirSessions(t *testing.T) {
 	if client, err = f.Manager(t, "3").Ensure(ctx); err != nil {
 		t.Fatal(err)
 	}
-	claudehosttest.WaitFor(t, "the host without sessions to leave", func() bool { return !claudehosttest.Alive(second.PID) })
+	testkit.Eventually(t, "the host without sessions to leave", 15*time.Second, func() bool { return !claudehosttest.Alive(second.PID) })
 	if !claudehosttest.Alive(first.PID) {
 		t.Fatal("the first host left while its session was busy")
 	}
@@ -331,7 +332,7 @@ func TestRetiredHostsLeaveWithTheirSessions(t *testing.T) {
 	if err := client.Interrupt(ctx, sessionID); err != nil {
 		t.Fatalf("interrupt the turn through the retiring host = %v", err)
 	}
-	claudehosttest.WaitFor(t, "the first host to leave after the turn", func() bool {
+	testkit.Eventually(t, "the first host to leave after the turn", 15*time.Second, func() bool {
 		return !claudehosttest.Alive(first.PID) && !claudehosttest.Alive(opened.PID)
 	})
 	if hosts := f.HostPIDs(); len(hosts) != 1 {
@@ -356,7 +357,7 @@ func TestEnsureStopsAProtocol1HostAndLeavesItsClaudeRunning(t *testing.T) {
 	if hello, err := client.Hello(ctx); err != nil || hello.Protocol != claudehost.Protocol || hello.PID == old.PID {
 		t.Fatalf("hello after the update = %+v, %v", hello, err)
 	}
-	claudehosttest.WaitFor(t, "the protocol 1 host to exit", func() bool { return !claudehosttest.Alive(old.PID) })
+	testkit.Eventually(t, "the protocol 1 host to exit", 15*time.Second, func() bool { return !claudehosttest.Alive(old.PID) })
 	if !claudehosttest.Alive(opened.PID) {
 		t.Fatal("the Claude the protocol 1 host ran was stopped with it")
 	}
@@ -525,7 +526,7 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 			}
 			// The host retires the idle session as it drains, and its Claude
 			// lingers after closing its output; a stop must still end it.
-			claudehosttest.WaitFor(t, "the retired session's Claude to close its output and linger", func() bool {
+			testkit.Eventually(t, "the retired session's Claude to close its output and linger", 15*time.Second, func() bool {
 				_, err := os.Stat(lingering + "." + strconv.Itoa(exiting.PID))
 				return err == nil
 			})
@@ -576,7 +577,7 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 			if outcome, err := client.Respond(ctx, asking, request.RequestID, test.decision); err != nil || outcome != test.outcome {
 				t.Fatalf("respond after the update = %q, %v; want %s", outcome, err, test.outcome)
 			}
-			claudehosttest.WaitFor(t, "the protocol 2 host to finish the turns and leave", func() bool {
+			testkit.Eventually(t, "the protocol 2 host to finish the turns and leave", 15*time.Second, func() bool {
 				return !claudehosttest.Alive(old.PID) && !claudehosttest.Alive(opened.PID)
 			})
 			if got := replies(f.Turns(t, asking)); !slices.Equal(got, []string{test.reply, "echo:after the update"}) {
@@ -594,7 +595,7 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 			if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: asking, UUID: uuid.NewString(), Text: "on the new host"}); err != nil {
 				t.Fatal(err)
 			}
-			claudehosttest.WaitFor(t, "the turn on the new host", func() bool { return len(f.Turns(t, asking)) == 3 })
+			testkit.Eventually(t, "the turn on the new host", 15*time.Second, func() bool { return len(f.Turns(t, asking)) == 3 })
 		})
 	}
 }
@@ -644,8 +645,8 @@ func TestCloseIdleRefusesAWorkingSessionAndLeavesItsTurnRunning(t *testing.T) {
 			if err := client.CloseIdle(ctx, sessionID); !claudehost.IsCode(err, "busy") {
 				t.Fatalf("idle-only close of a working session = %v, want busy", err)
 			}
-			claudehosttest.WaitFor(t, "the turn to finish", func() bool { return slices.Equal(replies(f.Turns(t, sessionID)), []string{"slow:1500"}) })
-			claudehosttest.WaitFor(t, "the session to go idle", func() bool { return listed(t, client, sessionID, 0).State == "idle" })
+			testkit.Eventually(t, "the turn to finish", 15*time.Second, func() bool { return slices.Equal(replies(f.Turns(t, sessionID)), []string{"slow:1500"}) })
+			testkit.Eventually(t, "the session to go idle", 15*time.Second, func() bool { return listed(t, client, sessionID, 0).State == "idle" })
 			if err := client.CloseIdle(ctx, sessionID); err != nil {
 				t.Fatalf("idle-only close of an idle session = %v", err)
 			}

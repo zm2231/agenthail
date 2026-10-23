@@ -18,6 +18,7 @@ import (
 	"github.com/zm2231/agenthail/internal/installdir"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func hostedClaude(t *testing.T) (*Claude, *claudehosttest.Fixture) {
@@ -33,7 +34,7 @@ func listedSession(t *testing.T, c *Claude, id string) *surface.Session {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	var found *surface.Session
-	claudehosttest.WaitFor(t, "the session to be listed on the host runtime", func() bool {
+	testkit.Eventually(t, "the session to be listed on the host runtime", 15*time.Second, func() bool {
 		c.host.listed = time.Time{}
 		sessions, err := c.List(ctx)
 		if err != nil {
@@ -98,7 +99,7 @@ func TestAPersonsTurnToAHostSessionCarriesTheIntentUUIDAndRunsOnce(t *testing.T)
 			t.Fatalf("result = %+v, want accepted with the intent uuid", result)
 		}
 	}
-	claudehosttest.WaitFor(t, "the turn", func() bool { return len(fixture.Turns(t, id)) == 1 })
+	testkit.Eventually(t, "the turn", 15*time.Second, func() bool { return len(fixture.Turns(t, id)) == 1 })
 	time.Sleep(200 * time.Millisecond)
 	turns := fixture.Turns(t, id)
 	if len(turns) != 1 || turns[0].UUID != message || turns[0].Text != "hello from a person" || origin(t, turns[0])["kind"] != "human" {
@@ -121,7 +122,7 @@ func TestAnAgentMessageToAHostSessionArrivesOverItsNativeSocket(t *testing.T) {
 	if _, err := c.Send(ctx, sess, "from another session"); err != nil {
 		t.Fatal(err)
 	}
-	claudehosttest.WaitFor(t, "the peer turn", func() bool { return len(fixture.Turns(t, target)) == 1 })
+	testkit.Eventually(t, "the peer turn", 15*time.Second, func() bool { return len(fixture.Turns(t, target)) == 1 })
 	turn := fixture.Turns(t, target)[0]
 	senderSocket := "uds:/tmp/cc-socks/" + strconv.Itoa(senderSession.PID) + ".sock"
 	if origin(t, turn)["kind"] != "peer" || origin(t, turn)["from"] != senderSocket || !strings.Contains(turn.Text, `from="`+senderSocket+`"`) || !strings.Contains(turn.Text, "from another session") {
@@ -143,7 +144,7 @@ func TestAnAgentMessageBetweenSessionsThatBypassPromptsRunsATurn(t *testing.T) {
 	if _, err := c.Send(surface.WithSourceSessionID(context.Background(), sender), sess, "from a bypassing session"); err != nil {
 		t.Fatal(err)
 	}
-	claudehosttest.WaitFor(t, "the peer turn", func() bool { return len(fixture.Turns(t, target)) == 1 })
+	testkit.Eventually(t, "the peer turn", 15*time.Second, func() bool { return len(fixture.Turns(t, target)) == 1 })
 	if turn := fixture.Turns(t, target)[0]; !strings.Contains(turn.Text, `from-mode="bypass"`) {
 		t.Fatalf("turn = %+v, want the sender's permission class stated", turn)
 	}
@@ -166,7 +167,7 @@ func TestSteerAndInterruptAHostSession(t *testing.T) {
 	if err := c.Interrupt(ctx, sess); err != nil {
 		t.Fatal(err)
 	}
-	claudehosttest.WaitFor(t, "both turns", func() bool { return len(fixture.Turns(t, id)) == 2 })
+	testkit.Eventually(t, "both turns", 15*time.Second, func() bool { return len(fixture.Turns(t, id)) == 2 })
 	turns := fixture.Turns(t, id)
 	if turns[0].Reply != "interrupted" || turns[1].Text != "steered" || turns[1].Priority != "now" {
 		t.Fatalf("turns = %+v, want the slow turn interrupted and the steer sent with priority now", turns)
@@ -199,12 +200,12 @@ func TestAPersonsTurnWaitsForAnOrphanedSessionAndThenResumesItOnce(t *testing.T)
 	held("while the host is down")
 	fixture.Start(t)
 	held("while a new host runs and the orphan still holds the session")
-	claudehosttest.WaitFor(t, "the orphaned CLI to finish its turn and exit", func() bool { return !claudehosttest.Alive(opened.PID) })
+	testkit.Eventually(t, "the orphaned CLI to finish its turn and exit", 15*time.Second, func() bool { return !claudehosttest.Alive(opened.PID) })
 	c.host.forget()
 	if _, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), uuid.NewString()), sess, "after", nil); err != nil {
 		t.Fatal(err)
 	}
-	claudehosttest.WaitFor(t, "the resumed turn", func() bool { return len(fixture.Turns(t, id)) >= 2 })
+	testkit.Eventually(t, "the resumed turn", 15*time.Second, func() bool { return len(fixture.Turns(t, id)) >= 2 })
 	var texts []string
 	for _, turn := range fixture.Turns(t, id) {
 		texts = append(texts, turn.Text)
@@ -257,7 +258,7 @@ func TestAHostSessionIsOpenWhileTheHostListsIt(t *testing.T) {
 	if err := client.Close(context.Background(), id); err != nil {
 		t.Fatal(err)
 	}
-	claudehosttest.WaitFor(t, "the host to stop listing the session", func() bool {
+	testkit.Eventually(t, "the host to stop listing the session", 15*time.Second, func() bool {
 		c.host.listed = time.Time{}
 		return !c.OpenSessions(context.Background(), []surface.Session{*sess})[id]
 	})

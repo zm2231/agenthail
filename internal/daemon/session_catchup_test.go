@@ -13,6 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func claudeTranscriptLine(t *testing.T, record map[string]any) string {
@@ -22,20 +23,6 @@ func claudeTranscriptLine(t *testing.T, record map[string]any) string {
 		t.Fatal(err)
 	}
 	return string(data) + "\n"
-}
-
-func appendClaudeTranscript(t *testing.T, path string, lines ...string) {
-	t.Helper()
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	for _, line := range lines {
-		if _, err := file.WriteString(line); err != nil {
-			t.Fatal(err)
-		}
-	}
 }
 
 type pageExchange struct {
@@ -95,7 +82,7 @@ func TestDashboardSessionPageShowsClaudeTurnsWrittenAfterItsSourceStopped(t *tes
 	}
 	first := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	second := first.Add(2 * time.Minute)
-	appendClaudeTranscript(t, path,
+	testkit.AppendFile(t, path,
 		claudeTranscriptLine(t, map[string]any{"type": "user", "uuid": "turn-one", "sessionId": conversation, "timestamp": first.Format(time.RFC3339Nano), "message": map[string]any{"role": "user", "content": "first question"}}),
 		claudeTranscriptLine(t, map[string]any{"type": "assistant", "uuid": "reply-one", "sessionId": conversation, "timestamp": first.Add(time.Second).Format(time.RFC3339Nano), "message": map[string]any{"id": "message-one", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": "first answer"}}}}),
 	)
@@ -122,7 +109,7 @@ func TestDashboardSessionPageShowsClaudeTurnsWrittenAfterItsSourceStopped(t *tes
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	appendClaudeTranscript(t, path,
+	testkit.AppendFile(t, path,
 		claudeTranscriptLine(t, map[string]any{"type": "user", "uuid": "turn-two", "sessionId": conversation, "timestamp": second.Format(time.RFC3339Nano), "origin": map[string]any{"kind": "peer", "name": "fixture peer", "body": "second question", "msg_id": "peer-two"}, "message": map[string]any{"role": "user", "content": "<cross-session-message from-name=\"fixture peer\">second question</cross-session-message>"}}),
 		claudeTranscriptLine(t, map[string]any{"type": "assistant", "uuid": "reply-two", "sessionId": conversation, "timestamp": second.Add(time.Second).Format(time.RFC3339Nano), "message": map[string]any{"id": "message-two", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": "second answer"}}}}),
 	)
@@ -149,7 +136,7 @@ func TestABuiltInCommandRunBetweenTurnsIsTheSessionPagesLatestExchange(t *testin
 		t.Fatal(err)
 	}
 	asked := time.Date(2026, 10, 23, 1, 47, 41, 0, time.UTC)
-	appendClaudeTranscript(t, path,
+	testkit.AppendFile(t, path,
 		claudeTranscriptLine(t, map[string]any{"type": "user", "uuid": "turn-one", "sessionId": conversation, "origin": map[string]any{"kind": "human"}, "timestamp": asked.Format(time.RFC3339Nano), "message": map[string]any{"role": "user", "content": "Reply with the single word READY."}}),
 		claudeTranscriptLine(t, map[string]any{"type": "assistant", "uuid": "reply-one", "sessionId": conversation, "timestamp": asked.Add(9 * time.Second).Format(time.RFC3339Nano), "message": map[string]any{"id": "message-one", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": "READY"}}}}),
 		claudeTranscriptLine(t, map[string]any{"type": "system", "subtype": "turn_duration", "durationMs": 9000, "sessionId": conversation, "timestamp": asked.Add(9 * time.Second).Format(time.RFC3339Nano)}),
@@ -165,7 +152,7 @@ func TestABuiltInCommandRunBetweenTurnsIsTheSessionPagesLatestExchange(t *testin
 	}
 
 	ran := asked.Add(8 * time.Minute)
-	appendClaudeTranscript(t, path,
+	testkit.AppendFile(t, path,
 		claudeTranscriptLine(t, map[string]any{"type": "user", "isMeta": true, "uuid": "caveat", "sessionId": conversation, "timestamp": ran.Format(time.RFC3339Nano), "message": map[string]any{"role": "user", "content": "<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request, and its output goes straight to the user.</local-command-caveat>"}}),
 		claudeTranscriptLine(t, map[string]any{"type": "user", "uuid": "command", "parentUuid": "caveat", "sessionId": conversation, "timestamp": ran.Format(time.RFC3339Nano), "message": map[string]any{"role": "user", "content": "<command-name>/context</command-name>\n            <command-message>context</command-message>\n            <command-args></command-args>"}}),
 		claudeTranscriptLine(t, map[string]any{"type": "system", "subtype": "local_command", "uuid": "output", "parentUuid": "command", "isMeta": false, "sessionId": conversation, "timestamp": ran.Add(time.Second).Format(time.RFC3339Nano), "content": "<local-command-stdout>## Context Usage\n\n**Tokens:** 40.9k / 500k (8%)</local-command-stdout>"}),

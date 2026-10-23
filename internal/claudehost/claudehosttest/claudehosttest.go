@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudehost"
-	"github.com/zm2231/agenthail/internal/claudetestenv"
+	"github.com/zm2231/agenthail/internal/testkit"
 	"github.com/zm2231/agenthail/internal/testnode"
 )
 
@@ -50,7 +50,7 @@ type Turn struct {
 func New(t testing.TB, home string) *Fixture {
 	t.Helper()
 	if home == "" {
-		claudetestenv.Isolate(t)
+		testkit.IsolateAgentEnv(t)
 		dir, err := os.MkdirTemp("", "ch")
 		if err != nil {
 			t.Fatal(err)
@@ -175,7 +175,7 @@ func (f *Fixture) startShippedHost(t testing.TB, script, version string, env ...
 	go func() { _ = cmd.Wait() }()
 	client := claudehost.NewClient(f.Home)
 	var hello claudehost.Hello
-	WaitFor(t, "the shipped host "+script, func() bool {
+	testkit.Eventually(t, "the shipped host "+script, 15*time.Second, func() bool {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		hello, err = client.Hello(ctx)
@@ -251,7 +251,7 @@ func (f *Fixture) OpenInMode(t testing.TB, client claudehost.Client, sessionID, 
 	}
 	session := reply.Result
 	record := filepath.Join(f.Home, ".claude", "sessions", strconv.Itoa(session.PID)+".json")
-	WaitFor(t, "the session record", func() bool { _, err := os.Stat(record); return err == nil })
+	testkit.Eventually(t, "the session record", 15*time.Second, func() bool { _, err := os.Stat(record); return err == nil })
 	return session
 }
 
@@ -341,7 +341,7 @@ func (f *Fixture) KillHost(t testing.TB) {
 		t.Fatal(err)
 	}
 	_ = syscall.Kill(hello.PID, syscall.SIGKILL)
-	WaitFor(t, "the host to exit", func() bool { return !Alive(hello.PID) })
+	testkit.Eventually(t, "the host to exit", 15*time.Second, func() bool { return !Alive(hello.PID) })
 }
 
 // Kill stops every host serving this home and every fake CLI started for it,
@@ -549,16 +549,6 @@ func tail(data []byte, limit int) []byte {
 		return data[len(data)-limit:]
 	}
 	return data
-}
-
-func WaitFor(t testing.TB, what string, done func() bool) {
-	t.Helper()
-	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(25 * time.Millisecond) {
-		if done() {
-			return
-		}
-	}
-	t.Fatalf("timed out waiting for %s", what)
 }
 
 func Alive(pid int) bool { return pid > 0 && syscall.Kill(pid, 0) == nil }
