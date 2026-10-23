@@ -41,11 +41,11 @@ struct TimelineGroup: Identifiable {
     static func isTurnDuration(_ item: TimelineItem) -> Bool { item.kind == "event" && item.title == "Turn duration" }
 
     /// Files the run changed, one per file, leaving out calls whose result failed.
-    var changes: [FileChange] {
-        FileChange.merged(invocations.flatMap { invocation -> [FileChange] in
+    var diffs: [FileDiff] {
+        FileDiff.merged(invocations.flatMap { invocation -> [FileDiff] in
             guard let call = invocation.items.first, call.kind == "toolCall",
                   !invocation.items.dropFirst().contains(where: ToolRunSummary.isFailure) else { return [] }
-            return ToolPresentation(name: call.title, text: call.text).changes
+            return ToolPresentation(name: call.title, text: call.text).diffs
         })
     }
 
@@ -94,7 +94,7 @@ struct CompactActivityGroup: View {
     var body: some View {
         if group.isActivity {
             let open = !group.folds || (rows.current(opened) ?? rows.isOpen(group.id) ?? false)
-            let changes = group.changes
+            let diffs = group.diffs
             VStack(alignment: .leading, spacing: 0) {
                 if group.folds {
                     Button { onInspect(); set(!open) } label: {
@@ -125,8 +125,8 @@ struct CompactActivityGroup: View {
                         .accessibilityIdentifier("collapse-activity-" + group.id)
                     }
                 }
-                if !changes.isEmpty {
-                    FileChips(changes: changes)
+                if !diffs.isEmpty {
+                    FileChips(run: group.id, diffs: diffs)
                         .padding(.leading, ToolLineLabel.indent)
                         .padding(.vertical, 4)
                 }
@@ -325,34 +325,64 @@ struct ToolOutput: View {
     }
 }
 
+/// The files a run changed. Tapping one shows what changed in it.
 struct FileChips: View {
-    let changes: [FileChange]
+    let run: String
+    let diffs: [FileDiff]
+    @State private var opened: [String: RowChoice<Bool>] = [:]
+    @Environment(\.transcriptRows) private var rows
 
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 6) {
-                ForEach(changes, id: \.path) { change in
-                    HStack(spacing: 5) {
-                        Text(change.name).foregroundStyle(.primary)
-                        if change.added > 0 { Text("+\(change.added)").foregroundStyle(.green) }
-                        if change.removed > 0 { Text("−\(change.removed)").foregroundStyle(.red) }
-                    }
-                    .font(.caption.monospaced())
-                    .lineLimit(1)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(SessionStyle.surface, in: RoundedRectangle(cornerRadius: 8))
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(change.name), \(change.added) added, \(change.removed) removed")
-                    .contextMenu {
-                        Button("Copy path", systemImage: "doc.on.doc") { UIPasteboard.general.string = change.path }
+        VStack(alignment: .leading, spacing: 8) {
+            ScrollView(.horizontal) {
+                HStack(spacing: 6) {
+                    ForEach(diffs, id: \.path) { file in
+                        let change = file.change
+                        let open = isOpen(file.path)
+                        Button {
+                            opened[file.path] = rows.choice(!open)
+                            rows.set(key(file.path), open: !open)
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text(change.name).foregroundStyle(.primary)
+                                if change.added > 0 { Text("+\(change.added)").foregroundStyle(.green) }
+                                if change.removed > 0 { Text("−\(change.removed)").foregroundStyle(.red) }
+                            }
+                            .font(.caption.monospaced())
+                            .lineLimit(1)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(open ? Color(uiColor: .tertiarySystemFill) : SessionStyle.surface, in: RoundedRectangle(cornerRadius: 8))
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(change.name), \(change.added) added, \(change.removed) removed")
+                        .accessibilityValue(open ? "Expanded" : "Collapsed")
+                        .accessibilityHint("Show what changed in this file")
+                        .accessibilityIdentifier("file-chip-" + change.name)
+                        .contextMenu {
+                            Button("Copy path", systemImage: "doc.on.doc") { UIPasteboard.general.string = change.path }
+                        }
                     }
                 }
             }
+            .scrollIndicators(.hidden)
+            .accessibilityIdentifier("file-chips")
+            ForEach(diffs.filter { isOpen($0.path) }, id: \.path) { file in
+                VStack(alignment: .leading, spacing: 4) {
+                    if diffs.count > 1 {
+                        Text(file.change.name).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    }
+                    DiffView(id: key(file.path), hunks: file.hunks)
+                }
+            }
         }
-        .scrollIndicators(.hidden)
-        .accessibilityIdentifier("file-chips")
     }
+
+    private func key(_ path: String) -> String { "chip-" + run + ":" + path }
+
+    private func isOpen(_ path: String) -> Bool { rows.current(opened[path]) ?? rows.isOpen(key(path)) ?? false }
 }
 
 /// A line between transcript entries for something that happened rather than something said.

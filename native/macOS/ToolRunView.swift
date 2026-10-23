@@ -15,7 +15,7 @@ struct ToolRunView: View {
         let entries = ToolRunSummary.entries(items)
         let folds = ToolRunSummary.folds(entries)
         let open = !folds || (rows.current(opened) ?? rows.isOpen(id) ?? false)
-        let changes = FileChange.merged(entries.flatMap(\.changes))
+        let diffs = FileDiff.merged(entries.flatMap(\.diffs))
         VStack(alignment: .leading, spacing: 2) {
             if folds {
                 let failed = items.filter(ToolRunSummary.isFailure).count
@@ -41,8 +41,8 @@ struct ToolRunView: View {
                     }
                 }
             }
-            if !changes.isEmpty {
-                FileChips(changes: changes)
+            if !diffs.isEmpty {
+                FileChips(run: id, diffs: diffs)
                     .padding(.top, DesktopSpace.xs)
                     .padding(.leading, ToolLineLabel.indent)
             }
@@ -144,7 +144,19 @@ struct ToolLine: View {
             if open {
                 VStack(alignment: .leading, spacing: 6) {
                     if !failed {
-                        CodeBlock(text: Self.fullInput(call.text), lineLimit: 40)
+                        let diffs = presentation.diffs
+                        if diffs.isEmpty {
+                            CodeBlock(text: Self.fullInput(call.text), lineLimit: 40)
+                        } else {
+                            ForEach(diffs, id: \.path) { file in
+                                if diffs.count > 1 {
+                                    Text(file.change.name)
+                                        .font(.system(size: DesktopType.meta, design: .monospaced))
+                                        .foregroundStyle(DesktopPalette.muted)
+                                }
+                                DiffView(id: call.id + ":" + file.path, hunks: file.hunks)
+                            }
+                        }
                         ShortenedNote(item: call)
                     }
                     if results.isEmpty {
@@ -300,34 +312,68 @@ struct ToolOutputBlock: View {
     }
 }
 
+/// The files a run changed. Clicking one shows what changed in it.
 struct FileChips: View {
-    let changes: [FileChange]
+    let run: String
+    let diffs: [FileDiff]
+    @State private var opened: [String: RowChoice<Bool>] = [:]
+    @Environment(\.transcriptRows) private var rows
+    @Environment(\.holdTranscriptPlace) private var holdPlace
 
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(changes, id: \.path) { change in
-                HStack(spacing: 5) {
-                    Text(change.name)
-                        .foregroundStyle(DesktopPalette.text)
-                    if change.added > 0 {
-                        Text("+\(change.added)").foregroundStyle(DesktopPalette.done)
+        VStack(alignment: .leading, spacing: DesktopSpace.xs) {
+            HStack(spacing: 6) {
+                ForEach(diffs, id: \.path) { file in
+                    let change = file.change
+                    let open = isOpen(file.path)
+                    Button {
+                        holdPlace()
+                        opened[file.path] = rows.choice(!open)
+                        rows.set(key(file.path), open: !open)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text(change.name)
+                                .foregroundStyle(DesktopPalette.text)
+                            if change.added > 0 {
+                                Text("+\(change.added)").foregroundStyle(DesktopPalette.done)
+                            }
+                            if change.removed > 0 {
+                                Text("−\(change.removed)").foregroundStyle(DesktopPalette.failed)
+                            }
+                        }
+                        .font(.system(size: DesktopType.meta, design: .monospaced))
+                        .lineLimit(1)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(open ? DesktopPalette.line : DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+                        .overlay(RoundedRectangle(cornerRadius: DesktopRadius.control).strokeBorder(DesktopPalette.line))
+                        .contentShape(Rectangle())
                     }
-                    if change.removed > 0 {
-                        Text("−\(change.removed)").foregroundStyle(DesktopPalette.failed)
+                    .buttonStyle(.plain)
+                    .help(change.path)
+                    .accessibilityLabel("\(change.name), \(change.added) added, \(change.removed) removed")
+                    .accessibilityValue(open ? "Expanded" : "Collapsed")
+                    .contextMenu {
+                        Button("Copy path") { copyToPasteboard(change.path) }
                     }
                 }
-                .font(.system(size: DesktopType.meta, design: .monospaced))
-                .lineLimit(1)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 2)
-                .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
-                .overlay(RoundedRectangle(cornerRadius: DesktopRadius.control).strokeBorder(DesktopPalette.line))
-                .help(change.path)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(change.name), \(change.added) added, \(change.removed) removed")
+            }
+            ForEach(diffs.filter { isOpen($0.path) }, id: \.path) { file in
+                VStack(alignment: .leading, spacing: 2) {
+                    if diffs.count > 1 {
+                        Text(file.change.name)
+                            .font(.system(size: DesktopType.meta, design: .monospaced))
+                            .foregroundStyle(DesktopPalette.muted)
+                    }
+                    DiffView(id: key(file.path), hunks: file.hunks)
+                }
             }
         }
     }
+
+    private func key(_ path: String) -> String { "chip-" + run + ":" + path }
+
+    private func isOpen(_ path: String) -> Bool { rows.current(opened[path]) ?? rows.isOpen(key(path)) ?? false }
 }
 
 struct CodeBlock: View {

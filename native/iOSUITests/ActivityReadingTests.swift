@@ -41,6 +41,30 @@ final class ActivityReadingTests: XCTestCase {
         capture("Reply with its turn footer", app)
     }
 
+    func testFileChipAndEditLineOpenTheDiff() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-reading"]
+        app.launch()
+        let timeline = app.scrollViews["session-timeline"]
+        XCTAssertTrue(timeline.waitForExistence(timeout: 10))
+        let chip = app.buttons["file-chip-Reconnect.swift"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 10), "the run that edited a file shows it as a chip")
+        for _ in 0..<4 where !chip.isHittable { timeline.swipeDown() }
+        chip.tapWhenReady()
+        let added = app.staticTexts.matching(NSPredicate(format: "label == %@", "Added: await session.restorePendingBuild()")).firstMatch
+        XCTAssertTrue(added.waitForExistence(timeout: 5), "tapping a file chip shows the lines it added")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", "Removed: let session = restore()")).firstMatch.exists, "and the lines it removed")
+        capture("File chip opens its diff", app)
+        chip.tapWhenReady()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: added)], timeout: 5), .completed, "tapping the chip again closes the diff")
+
+        let line = app.buttons["tool-edit-1"]
+        for _ in 0..<4 where !line.isHittable { timeline.swipeDown() }
+        line.tapWhenReady()
+        XCTAssertTrue(added.waitForExistence(timeout: 5), "an edit line opens to the same diff in place of the raw strings")
+        XCTAssertFalse(app.staticTexts["Added"].exists, "the separate before and after blocks are gone")
+    }
+
     private func capture(_ name: String, _ app: XCUIApplication) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name

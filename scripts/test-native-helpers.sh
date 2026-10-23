@@ -31,6 +31,8 @@ SOURCES=(
   MetadataOverlay.swift
   StatusRefreshPolicy.swift
   ToolPresentation.swift
+  TextDiff.swift
+  DiffPresentation.swift
   ToolRunSummary.swift
   TranscriptRows.swift
   TurnClock.swift

@@ -41,6 +41,8 @@ let package = Package(
                 "MetadataOverlay.swift",
                 "EventRetryBackoff.swift",
                 "ToolPresentation.swift",
+                "TextDiff.swift",
+                "DiffPresentation.swift",
                 "ToolRunSummary.swift",
                 "TranscriptRows.swift",
                 "TurnClock.swift",

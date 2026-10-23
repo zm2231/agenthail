@@ -38,7 +38,7 @@ final class ActivityPresentationTests: XCTestCase {
             + call("e3", "Edit", ["file_path": "/work/Broken.swift", "old_string": "x", "new_string": "y"], status: "error")
             + call("e4", "Edit", ["file_path": "/work/App.swift", "old_string": "c", "new_string": ""])
         )
-        XCTAssertEqual(TimelineGroup.make(edits)[0].changes, [
+        XCTAssertEqual(TimelineGroup.make(edits)[0].diffs.map(\.change), [
             FileChange(path: "/work/App.swift", added: 2, removed: 2),
             FileChange(path: "/work/New.swift", added: 1, removed: 0),
         ])
