@@ -1,11 +1,12 @@
 import { createBackdrop, parseBackground } from "./ui-backdrop.js";
-import { foregroundOn, luminance, readableOnTint, readableText } from "./ui-contrast.js";
+import { foregroundOn, luminance, MARGIN, readableOnTint, readableSurface, readableText } from "./ui-contrast.js";
 
 const ACCENT_TOKENS = ["--accent", "--accent-soft", "--on-accent"];
 const SURFACES = ["--paper", "--panel", "--raised", "--hover"];
 const STORED = "agenthail.ui";
 const SOFT = 0.12;
 const ROLES = ["--ink", "--muted", "--quiet"];
+const COMPOSER_FLOOR = 0.2;
 
 export function resolveTheme(theme, prefersDark) {
   if (theme === "dark" || theme === "light") return theme;
@@ -67,9 +68,14 @@ export function applyTheme(document, values, prefersDark, colourOf, target = 4.5
   return theme;
 }
 
-export function backdropLook(values, theme, { sessionOpen, highContrast, colourOf, width, height, scale = 1 }) {
+export function backdropLook(values, theme, { sessionOpen, highContrast, reducedTransparency, colourOf, width, height, scale = 1 }) {
   const number = (key, fallback) => (Number.isFinite(values[key]) ? values[key] : fallback);
-  const ground = colourOf("var(--paper)");
+  const ground = colourOf("var(--paper)") || (theme === "dark" ? [0, 0, 0] : [1, 1, 1]);
+  const texts = ROLES.map((token) => colourOf(`var(${token})`)).filter(Boolean);
+  const target = effectiveTarget(values, highContrast);
+  const readable = highContrast || values["glass.readability"] !== "off";
+  const choice = values["glass.tint"];
+  const tint = (choice === "accent" ? colourOf("var(--accent)") : parseHex(choice)) || ground;
   return {
     spec: parseBackground(theme === "light" ? values["background.light"] : values.background),
     fit: values["background.fit"],
@@ -80,10 +86,24 @@ export function backdropLook(values, theme, { sessionOpen, highContrast, colourO
     textureStrength: number("texture.strength", 0),
     textureSpacing: number("texture.spacing", 3),
     polarity: theme,
-    ground: ground || (theme === "dark" ? [0, 0, 0] : [1, 1, 1]),
-    roles: ROLES.map((token) => colourOf(`var(${token})`)).filter(Boolean).map(luminance),
-    target: effectiveTarget(values, highContrast),
-    readable: highContrast || values["glass.readability"] !== "off",
+    ground,
+    roles: texts.map(luminance),
+    target,
+    readable,
+    glass: {
+      on: values.glass !== "off" && !reducedTransparency,
+      tint: readable ? readableSurface(tint, texts, ground, target + MARGIN) : tint,
+      edge: colourOf("var(--ink)") || (theme === "dark" ? [1, 1, 1] : [0, 0, 0]),
+      panes: {
+        content: number("glass.opacity", 0.18),
+        sidebar: number("glass.sidebar.opacity", 0.45),
+        chrome: number("glass.chrome.opacity", 0),
+        float: readable ? Math.max(number("glass.composer.opacity", 0.5), COMPOSER_FLOOR) : number("glass.composer.opacity", 0.5),
+      },
+      blur: number("glass.blur", 30),
+      border: number("glass.border", 0.08),
+      gutter: number("glass.gutter", 8),
+    },
     width,
     height,
     scale,
@@ -144,6 +164,7 @@ export function workerMeasure(worker) {
 export function start({ document, fetch, EventSource, matchMedia, storage, colourOf, backdrop, viewport, MutationObserver, addEventListener, debounce = 150 }) {
   const scheme = matchMedia("(prefers-color-scheme: dark)");
   const contrast = matchMedia("(prefers-contrast: more)");
+  const transparency = matchMedia("(prefers-reduced-transparency: reduce)");
   let values = {};
   try {
     values = JSON.parse(storage?.getItem(STORED) || "{}");
@@ -158,6 +179,7 @@ export function start({ document, fetch, EventSource, matchMedia, storage, colou
     const look = backdropLook(values, theme, {
       sessionOpen: document.documentElement.hasAttribute("data-session-open"),
       highContrast: contrast.matches,
+      reducedTransparency: transparency.matches,
       colourOf,
       ...size,
     });
@@ -187,6 +209,7 @@ export function start({ document, fetch, EventSource, matchMedia, storage, colou
   let resizeTimer = null;
   scheme.addEventListener?.("change", apply);
   contrast.addEventListener?.("change", apply);
+  transparency.addEventListener?.("change", apply);
   if (backdrop) {
     if (MutationObserver) new MutationObserver(apply).observe(document.documentElement, { attributes: true, attributeFilter: ["data-session-open"] });
     addEventListener?.("resize", () => {

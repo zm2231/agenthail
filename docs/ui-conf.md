@@ -87,6 +87,8 @@ The dashboard reads the `web` device's settings and follows every change as it i
 - `theme` and `theme.accent` work as in the apps. `system` follows the browser's light or dark preference.
 - `background`, `background.light`, `background.fit`, `background.position`, `background.dim`, `background.opacity`, `background.session-opacity`, `texture`, `texture.strength` and `texture.spacing` draw the background, loaded from the daemon. `background.session-opacity` applies on the Conversations view.
 - `desktop` shows the plain window colour, since a browser cannot show the desktop.
+- While a background is drawn, `glass` makes the panes translucent: the top bar takes `glass.chrome.opacity`, the Conversations list `glass.sidebar.opacity`, the conversation and settings cards `glass.opacity`, and the composer, menus, dialogs and notices `glass.composer.opacity`, all blurred by `glass.blur` with hairlines at `glass.border`. `glass.gutter` spaces the list from the conversation; `0` joins them. `glass = off`, or the browser's reduced transparency preference, draws solid panes.
+- `glass.tint` works as in the apps. A tint that would leave text below `contrast.target` is moved toward the ground colour until text reads on it, and a pane's tint rises above its opacity where the background behind it needs more.
 - Text keeps `contrast.target`. Text colours that would miss it on the dashboard's own surfaces are lifted toward white in dark, or black in light, until they reach it. Over a background, the dashboard measures the whole window and lays its own ground colour over it as much as the least readable spot needs; `glass.readability = off` turns that layer off. With the browser's increased contrast preference, the target is 7.
 
 ## The agenthail ui command

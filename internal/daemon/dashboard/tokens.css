@@ -2585,3 +2585,36 @@ html[data-backdrop] body {
 html[data-backdrop] .ui-backdrop {
   display: block;
 }
+html[data-backdrop]:not([data-panes]) :is(.topbar, .conversation-rail, .notebook) {
+  background: var(--paper);
+  backdrop-filter: none;
+}
+html[data-panes] :is(.topbar, .conversation-rail, .notebook, .settings-card, .composer form, .slash-menu, .voice-dialog, .toast, .project-menu-items, .host-picker-menu) {
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-color: rgb(var(--glass-edge) / var(--glass-border));
+}
+html[data-panes] .topbar {
+  background: rgb(var(--glass-tint) / var(--glass-chrome));
+}
+html[data-panes] .conversation-rail {
+  padding-left: 24px;
+  background: rgb(var(--glass-tint) / var(--glass-sidebar));
+}
+html[data-panes] :is(.notebook, .settings-card) {
+  background: rgb(var(--glass-tint) / var(--glass-content));
+}
+html[data-panes] .notebook {
+  padding-right: 32px;
+}
+html[data-panes] :is(.composer form, .slash-menu, .voice-dialog, .toast, .project-menu-items, .host-picker-menu) {
+  background: rgb(var(--glass-tint) / var(--glass-float));
+}
+html[data-panes][data-glass-gap] .conversation-layout {
+  gap: var(--glass-gutter);
+  padding-bottom: var(--glass-gutter);
+}
+html[data-panes][data-glass-gap] :is(.conversation-rail, .notebook) {
+  border: 1px solid rgb(var(--glass-edge) / var(--glass-border));
+  border-radius: var(--radius);
+}
