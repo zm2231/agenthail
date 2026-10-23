@@ -414,8 +414,8 @@ func TestDispatcherDefiniteSendFailureFailsPreEffectIntent(t *testing.T) {
 	if err != nil || len(problems) != 1 || problems[0].SessionID != session.ID || problems[0].Status != registry.DeliveryIntentFailed {
 		t.Fatalf("problems=%+v err=%v", problems, err)
 	}
-	if got := r.QueueCount(registry.OperatorSessionID); got != 1 {
-		t.Fatalf("expected one durable failure notice, got %d", got)
+	if got := r.QueueCount(registry.OperatorSessionID); got != 0 {
+		t.Fatalf("%d failure notices queued for the operator, which no session reads", got)
 	}
 }
 

@@ -139,6 +139,9 @@ func (a *App) cmdSignin(args []string) error {
 		if answer.Problem != "" {
 			fmt.Printf("  problem: %s\n", answer.Problem)
 		}
+		if answer.Unavailable != "" {
+			fmt.Printf("  unavailable: %s\n", answer.Unavailable)
+		}
 		return nil
 	case "rm", "remove":
 		if len(positional) != 1 {
@@ -186,6 +189,9 @@ func (a *App) signinList(ctx context.Context, jsonOut bool) error {
 		fmt.Printf("  %-7s %s\n", consumer.ID, describeSignin(consumer))
 		if consumer.Problem != "" {
 			fmt.Printf("          problem: %s\n", consumer.Problem)
+		}
+		if consumer.Unavailable != "" {
+			fmt.Printf("          unavailable: %s\n", consumer.Unavailable)
 		}
 	}
 	fmt.Printf("  change: agenthail signin use <%s> <profile|auto|none>\n", consumerList())

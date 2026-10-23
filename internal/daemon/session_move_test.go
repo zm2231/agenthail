@@ -8,11 +8,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -111,11 +113,32 @@ func startMovable(t *testing.T, node *moveNode) *surface.Session {
 		t.Fatal(err)
 	}
 	claudehosttest.WaitFor(t, "the first turn", func() bool { return len(node.host.Turns(t, session.ID)) == 1 })
+	client := claudehost.NewClient(node.host.Home)
+	claudehosttest.WaitFor(t, "the first turn to end", func() bool {
+		listing, err := client.List(context.Background())
+		if err != nil {
+			return false
+		}
+		i := slices.IndexFunc(listing.Sessions, func(s claudehost.Session) bool { return s.SessionID == session.ID })
+		return i >= 0 && listing.Sessions[i].State == "idle"
+	})
 	listed := hostedSession(t, node.claude, session.ID)
 	if err := node.reg.RegisterSession(listed); err != nil {
 		t.Fatal(err)
 	}
 	return &listed
+}
+
+// Claude records a turn before it ends it, so a session that has just taken
+// its first turn may still be working; a movable session is one that has
+// finished it.
+func TestAStartedSessionIsMovableOnceItsFirstTurnEnds(t *testing.T) {
+	t.Setenv("FAKE_CLAUDE_IDLE_AFTER_MS", "1500")
+	source, _, _, _ := movePair(t)
+	session := startMovable(t, source)
+	if _, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "server"}); err != nil {
+		t.Fatalf("moving a session startMovable returned = %v", err)
+	}
 }
 
 func claudeTranscriptIn(t *testing.T, home, conversation string) string {
@@ -149,10 +172,13 @@ func TestAnIdleClaudeSessionMovesToAPairedHostAndRunsThere(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	peers := claudetest.ListenPeerManager(t, target.host.Home)
 	result, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "server"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The source hands held sends to the target as soon as it reconnects.
+	source.daemon.drainHostDeliveries(context.Background(), mustPairedHost(t, source, record.ID))
 	if result.Move.State != registry.MoveDone || result.Stopped != "host" || result.Alias != "builder" {
 		t.Fatalf("result=%+v", result)
 	}
@@ -199,7 +225,6 @@ func TestAnIdleClaudeSessionMovesToAPairedHostAndRunsThere(t *testing.T) {
 		t.Fatalf("target spawns=%+v", spawns)
 	}
 
-	peers := claudetest.ListenPeerManager(t, target.host.Home)
 	claudehosttest.WaitFor(t, "the held send to reach the target", func() bool {
 		source.daemon.drainHostDeliveries(context.Background(), mustPairedHost(t, source, record.ID))
 		return peers.Count("sent while moving") == 1

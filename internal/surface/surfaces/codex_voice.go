@@ -98,13 +98,13 @@ func (v *CodexVoice) Poll(ctx context.Context, after voice.Cursor, threadID stri
 	return voice.Batch{Cursor: voice.Cursor{Source: conn.target, Position: wire.Cursor}, Events: wire.Events, Lost: wire.Lost || conn.target != after.Source}, nil
 }
 
-func (v *CodexVoice) RespondDynamicToolCall(ctx context.Context, requestID string, success bool, text string) error {
+func (v *CodexVoice) RespondDynamicToolCall(ctx context.Context, requestID, threadID string, success bool, text string) error {
 	conn, err := v.Codex.dial(ctx)
 	if err != nil {
 		return err
 	}
 	defer conn.close()
-	value, err := conn.evaluate(ctx, codexDynamicToolResponseJS(requestID, success, text), 3*time.Second)
+	value, err := conn.evaluate(ctx, codexDynamicToolResponseJS(requestID, threadID, success, text), 3*time.Second)
 	if err != nil {
 		return err
 	}
@@ -115,5 +115,5 @@ func (v *CodexVoice) RespondDynamicToolCall(ctx context.Context, requestID strin
 }
 
 func codexVoiceEventsJS(after int64, threadID string) string {
-	return fmt.Sprintf(`(()=>{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b)throw Error('Codex event bridge unavailable');const after=%d;return JSON.stringify({cursor:b.sequence,lost:after>b.sequence||(b.events.length>0&&b.events[0].sequence>after+1),events:b.events.filter(e=>e.sequence>after&&e.params.threadId===%s&&((e.method.startsWith('thread/realtime/')&&e.method!=='thread/realtime/outputAudio/delta')||e.method==='item/tool/call'||e.method==='turn/started'||(e.method==='item/completed'&&e.params.item?.type==='agentMessage'&&e.params.item?.phase==='final_answer')))})})()`, after, strconvQuote(threadID))
+	return fmt.Sprintf(`(()=>{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b)throw Error('Codex event bridge unavailable');const after=%d;return JSON.stringify({cursor:b.sequence,lost:after>b.sequence||(b.events.length>0&&b.events[0].sequence>after+1),events:b.events.filter(e=>e.sequence>after&&e.params.threadId===%s&&((e.method.startsWith('thread/realtime/')&&e.method!=='thread/realtime/outputAudio/delta')||(e.method==='item/tool/call'&&b.toolRequests instanceof Map&&b.toolRequests.has(String(e.params.requestId)))||e.method==='turn/started'||(e.method==='item/completed'&&e.params.item?.type==='agentMessage'&&e.params.item?.phase==='final_answer')))})})()`, after, strconvQuote(threadID))
 }

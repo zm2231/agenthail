@@ -1401,6 +1401,9 @@ struct SettingsView: View {
                             if let problem = consumer.problem {
                                 Text(problem).font(.footnote).foregroundStyle(.orange).textSelection(.enabled)
                             }
+                            if let unavailable = consumer.unavailable {
+                                Text(unavailable).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                            }
                         }
                     }
                     ForEach(host.peers) { peer in

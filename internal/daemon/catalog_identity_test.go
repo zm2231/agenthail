@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -134,6 +135,8 @@ func TestCatalogIdentityKeepsTheKnownProjectWhenGitFails(t *testing.T) {
 	}
 	t.Setenv("PATH", t.TempDir())
 	later := time.Now().Add(catalogIdentityTTL)
+	cache.identity(context.Background(), surface.Session{Cwd: repo}, later, noStoredProject)
+	cache.wait()
 	failed := cache.identity(context.Background(), surface.Session{Cwd: repo}, later, noStoredProject)
 	if failed.UnavailableReason == "" || failed.Project == nil || failed.Project.ID != resolved.Project.ID {
 		t.Fatalf("failed=%+v resolved=%+v", failed, resolved.Project)
@@ -158,7 +161,10 @@ func TestCatalogIdentityKeepsTheProjectWhenGitRefusesTheRepository(t *testing.T)
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin)
-	refused := cache.identity(context.Background(), surface.Session{Cwd: repo}, time.Now().Add(catalogIdentityTTL), noStoredProject)
+	later := time.Now().Add(catalogIdentityTTL)
+	cache.identity(context.Background(), surface.Session{Cwd: repo}, later, noStoredProject)
+	cache.wait()
+	refused := cache.identity(context.Background(), surface.Session{Cwd: repo}, later, noStoredProject)
 	if refused.UnavailableReason == "" || refused.Project == nil || refused.Project.ID != resolved.Project.ID {
 		t.Fatalf("refused=%+v resolved=%+v", refused, resolved.Project)
 	}
@@ -237,5 +243,114 @@ func TestChangingOriginMovesTheProject(t *testing.T) {
 	later := cache.identity(context.Background(), surface.Session{Cwd: repo}, time.Now(), noStoredProject)
 	if before.ID != "repo:github.com/example/gadget" || later.Project == nil || later.Project.ID != "repo:github.com/someone-else/gadget" {
 		t.Fatalf("before=%+v later=%+v", before, later.Project)
+	}
+}
+
+// gateGit puts a git on PATH that waits for the returned release before
+// running the real one.
+func gateGit(t *testing.T) (release func()) {
+	t.Helper()
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	gate := filepath.Join(bin, "open")
+	script := fmt.Sprintf("#!/bin/sh\nwhile [ ! -f %q ]; do sleep 0.02; done\nexec %q \"$@\"\n", gate, real)
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return func() {
+		if err := os.WriteFile(gate, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestExpiredIdentitiesRefreshInTheBackgroundOnePerPathWithinTheBound(t *testing.T) {
+	cache := newCatalogIdentityCache()
+	now := time.Now()
+	var repos []string
+	for range catalogIdentityRefreshes + 2 {
+		repo := catalogTestRepo(t)
+		repos = append(repos, repo)
+		cache.identity(context.Background(), surface.Session{Cwd: repo}, now, noStoredProject)
+	}
+	release := gateGit(t)
+	defer cache.wait()
+	defer release()
+	later := now.Add(catalogIdentityTTL)
+	started := time.Now()
+	for range 2 {
+		for _, repo := range repos {
+			if identity := cache.identity(context.Background(), surface.Session{Cwd: repo}, later, noStoredProject); identity.Project == nil {
+				t.Fatalf("expired identity was not served: %+v", identity)
+			}
+		}
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("lookups waited on git for %s", elapsed)
+	}
+	cache.mu.Lock()
+	refreshing := len(cache.refreshing)
+	cache.mu.Unlock()
+	if refreshing != catalogIdentityRefreshes {
+		t.Fatalf("refreshing=%d want %d", refreshing, catalogIdentityRefreshes)
+	}
+	release()
+	cache.wait()
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	refreshed := 0
+	for _, repo := range repos {
+		path, _ := catalogSessionPath(repo)
+		if cache.entries[path].resolvedAt.Equal(later) {
+			refreshed++
+		}
+	}
+	if refreshed != catalogIdentityRefreshes || len(cache.refreshing) != 0 || len(cache.slots) != 0 {
+		t.Fatalf("refreshed=%d refreshing=%d slots=%d", refreshed, len(cache.refreshing), len(cache.slots))
+	}
+}
+
+func TestAWorkspaceWhoseGitFailsIsNotReadAgainBeforeItExpires(t *testing.T) {
+	repo := catalogTestRepo(t)
+	bin := t.TempDir()
+	log := filepath.Join(bin, "calls")
+	script := fmt.Sprintf("#!/bin/sh\necho x >> %q\necho 'fatal: detected dubious ownership in repository' >&2\nexit 128\n", log)
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	calls := func() int {
+		raw, _ := os.ReadFile(log)
+		return len(raw) / 2
+	}
+	cache := newCatalogIdentityCache()
+	now := time.Now()
+	failed := cache.identity(context.Background(), surface.Session{Cwd: repo}, now, noStoredProject)
+	if failed.UnavailableReason == "" {
+		t.Fatalf("failed=%+v", failed)
+	}
+	before := calls()
+	if again := cache.identity(context.Background(), surface.Session{Cwd: repo}, now.Add(time.Minute), noStoredProject); again.UnavailableReason == "" || calls() != before {
+		t.Fatalf("failed workspace read again: %d git calls", calls()-before)
+	}
+}
+
+func TestAnUntrackedFileInANewFolderMakesTheCheckoutDirty(t *testing.T) {
+	repo := catalogTestRepo(t)
+	if clean := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, time.Now(), noStoredProject); clean.Checkout.Dirty {
+		t.Fatalf("clean checkout reads dirty: %+v", clean.Checkout)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "notes", "drafts"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "notes", "drafts", "idea.md"), []byte("idea\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if dirty := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, time.Now(), noStoredProject); !dirty.Checkout.Dirty {
+		t.Fatalf("untracked file did not make the checkout dirty: %+v", dirty.Checkout)
 	}
 }

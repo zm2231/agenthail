@@ -34,8 +34,13 @@ func (d *Daemon) startClaudePeers(ctx context.Context) (func(), error) {
 	return func() { cancel(); <-done; manager.Close() }, nil
 }
 
-// runClaudePeerRegistration advertises peers at startup, whenever discovery
-// commits a session change, and every 30 seconds so idle peers age out.
+// claudePeerChangeSettle is how long registration waits after a session
+// change, so a burst of discovery commits is advertised in one pass.
+var claudePeerChangeSettle = time.Second
+
+// runClaudePeerRegistration advertises peers at startup, shortly after
+// discovery commits a session change, and every 30 seconds so idle peers age
+// out.
 func (d *Daemon) runClaudePeerRegistration(ctx context.Context, advertise func(context.Context, []surface.Session) map[string]error, retire func(time.Time)) {
 	changed, watching := d.watchCatalogSessions(ctx)
 	defer func() { <-watching }()
@@ -49,15 +54,24 @@ func (d *Daemon) runClaudePeerRegistration(ctx context.Context, advertise func(c
 			return
 		case <-ticker.C:
 		case <-changed:
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(claudePeerChangeSettle):
+			}
+			select {
+			case <-changed:
+			default:
+			}
 		}
 	}
 }
 
 // watchCatalogSessions signals after discovery commits a session change, so a
 // newly discovered agent becomes a peer without waiting for the next tick. It
-// subscribes before returning, and resubscribes before signalling a dropped
-// subscription, so no commit falls between a pass and the subscription. The
-// second channel closes once the watch has ended with ctx.
+// subscribes before returning, and resubscribes before signalling a follower
+// that fell behind the journal, so no commit falls between a pass and the
+// subscription. The second channel closes once the watch has ended with ctx.
 func (d *Daemon) watchCatalogSessions(ctx context.Context) (<-chan struct{}, <-chan struct{}) {
 	changed := make(chan struct{}, 1)
 	watching := make(chan struct{})
@@ -67,21 +81,32 @@ func (d *Daemon) watchCatalogSessions(ctx context.Context) (<-chan struct{}, <-c
 		default:
 		}
 	}
-	stream, cancel := d.subscribeCatalogSessions(ctx, signal)
+	follower := d.subscribeCatalogSessions(ctx, signal)
 	go func() {
 		defer close(watching)
-		for stream != nil {
+		for follower != nil {
 			select {
 			case <-ctx.Done():
-				cancel()
+				follower.Cancel()
 				return
-			case event, open := <-stream:
-				if !open {
-					cancel()
-					stream, cancel = d.subscribeCatalogSessions(ctx, signal)
-					signal()
-				} else if strings.HasPrefix(event.Type, "session.") {
-					signal()
+			case <-follower.Wake:
+				for {
+					events, err := follower.read(catalogStreamBatch)
+					if err != nil {
+						follower.Cancel()
+						follower = d.subscribeCatalogSessions(ctx, signal)
+						signal()
+						break
+					}
+					for _, event := range events {
+						if strings.HasPrefix(event.Type, "session.") {
+							signal()
+							break
+						}
+					}
+					if len(events) < catalogStreamBatch {
+						break
+					}
 				}
 			}
 		}
@@ -89,19 +114,18 @@ func (d *Daemon) watchCatalogSessions(ctx context.Context) (<-chan struct{}, <-c
 	return changed, watching
 }
 
-func (d *Daemon) subscribeCatalogSessions(ctx context.Context, signal func()) (<-chan registry.CatalogEvent, func()) {
+func (d *Daemon) subscribeCatalogSessions(ctx context.Context, signal func()) *catalogFollower {
 	for ctx.Err() == nil {
 		_, latest, err := d.Registry.CatalogState()
 		if err == nil {
 			var window registry.CatalogEventWindow
-			var stream <-chan registry.CatalogEvent
-			var cancel func()
-			window, stream, cancel, err = d.catalog.subscribe(latest)
+			var follower *catalogFollower
+			window, follower, err = d.catalog.subscribe(latest)
 			if err == nil {
 				if len(window.Events) > 0 {
 					signal()
 				}
-				return stream, cancel
+				return follower
 			}
 		}
 		d.logRuntimeError("claude-peers:catalog", err)
@@ -110,14 +134,15 @@ func (d *Daemon) subscribeCatalogSessions(ctx context.Context, signal func()) (<
 		case <-time.After(catalogDiscoveryInterval):
 		}
 	}
-	return nil, func() {}
+	return nil
 }
 
 // registerRecentClaudePeers reads the catalog that discovery commits instead
 // of listing surfaces again, so a failing surface is listed once per
 // discovery pass and stale rows are not proxied.
 func (d *Daemon) registerRecentClaudePeers(ctx context.Context, advertise func(context.Context, []surface.Session) map[string]error) {
-	snapshot, err := d.Registry.CatalogSnapshot()
+	now := time.Now()
+	sessions, err := d.Registry.CatalogActiveSessions(now.Add(-surface.ActiveWindow))
 	if err != nil {
 		d.logRuntimeError("claude-peers:catalog", err)
 		return
@@ -126,9 +151,8 @@ func (d *Daemon) registerRecentClaudePeers(ctx context.Context, advertise func(c
 	for _, adapter := range d.Surfaces {
 		configured[adapter.Name()] = true
 	}
-	now := time.Now()
 	var eligible []surface.Session
-	for _, record := range snapshot.Sessions {
+	for _, record := range sessions {
 		session := record.Session
 		if record.Freshness.Stale || !surface.RecentlyActive(session, now) {
 			continue

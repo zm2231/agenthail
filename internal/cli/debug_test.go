@@ -86,6 +86,22 @@ func TestDebugHeapReportsADaemonError(t *testing.T) {
 	}
 }
 
+func TestDebugHeapTreatsAFlagAsAUsageErrorNotADirectory(t *testing.T) {
+	serveFakeDebugSocket(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("a flag reached the daemon: %s", r.URL.Path)
+	})
+	t.Chdir(t.TempDir())
+	app := &App{catalogDaemonRunning: func() bool { return true }}
+	for _, flag := range []string{"--help", "-h"} {
+		if err := app.Run([]string{"debug", "heap", flag}); err == nil || !strings.Contains(err.Error(), "usage") {
+			t.Fatalf("%s: err=%v", flag, err)
+		}
+		if _, err := os.Stat(flag); !os.IsNotExist(err) {
+			t.Fatalf("%s left a directory: %v", flag, err)
+		}
+	}
+}
+
 func TestDebugHeapNeedsARunningDaemon(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	app := &App{catalogDaemonRunning: func() bool { return false }}

@@ -239,10 +239,12 @@ func TestRunCatalogPublishesStatusWithinTwoSeconds(t *testing.T) {
 	}
 	// Let the first status tick record the post-discovery stamps.
 	time.Sleep(catalogStatusInterval + 100*time.Millisecond)
-	window, events, unsubscribe, err := d.catalog.subscribe(latestCatalogSeq(t, store))
+	window, eventsFollower, err := d.catalog.subscribe(latestCatalogSeq(t, store))
 	if err != nil || window.Gap {
 		t.Fatalf("subscribe gap=%v err=%v", window.Gap, err)
 	}
+	events := followCatalog(t, eventsFollower)
+	unsubscribe := eventsFollower.Cancel
 	defer unsubscribe()
 	started := time.Now()
 	source.writeStatus(t, "from", surface.StatusBusy)
@@ -259,6 +261,149 @@ func TestRunCatalogPublishesStatusWithinTwoSeconds(t *testing.T) {
 			t.Fatal("busy status did not reach the catalog stream within 2s")
 		}
 	}
+}
+
+func TestStatusPassPublishesWhileDiscoveryIsBlocked(t *testing.T) {
+	d, store, source := localStatusFixture(t)
+	var blocking atomic.Bool
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	source.duringList = func() {
+		if !blocking.Load() {
+			return
+		}
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.runCatalog(ctx)
+	}()
+	defer func() {
+		close(release)
+		cancel()
+		<-done
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(catalogStatusEvents(t, store, 0, "from")) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("initial discovery did not publish")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(catalogStatusInterval + 100*time.Millisecond)
+	blocking.Store(true)
+	d.requestCatalogDiscovery()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("discovery did not start")
+	}
+	after := latestCatalogSeq(t, store)
+	source.writeStatus(t, "from", surface.StatusBusy)
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		if statuses := catalogStatusEvents(t, store, after, "from"); len(statuses) > 0 && statuses[len(statuses)-1] == string(surface.StatusBusy) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("busy status did not publish within 2s while discovery was blocked")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestAStatusPublishCannotOutliveTheDiscoveryThatDroppedItsSession(t *testing.T) {
+	d, _, source := localStatusFixture(t)
+	d.discoverCatalog(context.Background())
+	d.refreshCatalogStatus(context.Background())
+	var armed atomic.Bool
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	d.catalogSelected = func(id string) {
+		if id == "from" && armed.CompareAndSwap(true, false) {
+			close(entered)
+			<-release
+		}
+	}
+	source.sessions = map[string]surface.Session{"to": source.sessions["to"]}
+	source.writeStatus(t, "from", surface.StatusBusy)
+	armed.Store(true)
+	statusDone := make(chan struct{})
+	go func() {
+		defer close(statusDone)
+		d.refreshCatalogStatus(context.Background())
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("status pass did not publish")
+	}
+	discoveryDone := make(chan struct{})
+	go func() {
+		defer close(discoveryDone)
+		d.discoverCatalog(context.Background())
+	}()
+	select {
+	case <-discoveryDone:
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(release)
+	<-statusDone
+	<-discoveryDone
+	state, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range state.Sessions {
+		if session.ID == "from" {
+			t.Fatalf("dropped session was republished as %s", session.Status)
+		}
+	}
+}
+
+func TestStatusPassPublishesWhileDiscoveryWaitsOnAnotherSession(t *testing.T) {
+	d, store, source := localStatusFixture(t)
+	d.discoverCatalog(context.Background())
+	d.refreshCatalogStatus(context.Background())
+	// The observer holds a session's waiting lock while it reads that
+	// session's turn, which may take until its operation timeout.
+	unlock := d.lockWaiting("to")
+	discoveryDone := make(chan struct{})
+	go func() {
+		defer close(discoveryDone)
+		d.discoverCatalog(context.Background())
+	}()
+	defer func() {
+		unlock()
+		<-discoveryDone
+	}()
+	time.Sleep(200 * time.Millisecond)
+	after := latestCatalogSeq(t, store)
+	source.writeStatus(t, "from", surface.StatusBusy)
+	statusDone := make(chan struct{})
+	go func() {
+		defer close(statusDone)
+		d.refreshCatalogStatus(context.Background())
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if statuses := catalogStatusEvents(t, store, after, "from"); len(statuses) > 0 && statuses[len(statuses)-1] == string(surface.StatusBusy) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("busy status did not publish within 2s while discovery waited on another session")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	unlock()
+	unlock = func() {}
+	<-statusDone
 }
 
 var (
@@ -388,12 +533,18 @@ func TestCatalogIdentityCacheReusesResolvedCheckout(t *testing.T) {
 	if edited := cache.identity(context.Background(), session, now.Add(time.Minute), noStoredProject); edited.Checkout.Dirty || calls() != resolved {
 		t.Fatalf("working tree edit re-resolved before expiry: dirty=%v calls=%d", edited.Checkout.Dirty, calls()-resolved)
 	}
-	if expired := cache.identity(context.Background(), session, now.Add(catalogIdentityTTL), noStoredProject); !expired.Checkout.Dirty || calls() == resolved {
-		t.Fatalf("expired entry was reused: %+v", expired.Checkout)
+	if expired := cache.identity(context.Background(), session, now.Add(catalogIdentityTTL), noStoredProject); expired.Checkout.Dirty {
+		t.Fatalf("expired entry was not served while it refreshes: %+v", expired.Checkout)
+	}
+	cache.wait()
+	if refreshed := cache.identity(context.Background(), session, now.Add(catalogIdentityTTL), noStoredProject); !refreshed.Checkout.Dirty || calls() == resolved {
+		t.Fatalf("expired entry was not refreshed: %+v", refreshed.Checkout)
 	}
 
 	gitRun(t, repo, "checkout", "-q", "-b", "feature/cache")
 	switched := calls()
+	cache.identity(context.Background(), session, now.Add(catalogIdentityTTL), noStoredProject)
+	cache.wait()
 	if branch := cache.identity(context.Background(), session, now.Add(catalogIdentityTTL), noStoredProject); branch.Checkout.Branch != "feature/cache" || calls() == switched {
 		t.Fatalf("branch switch did not invalidate: %+v", branch.Checkout)
 	}
