@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,4 +104,26 @@ func toolOf(activity *surface.Activity) *surface.RunningTool {
 		return nil
 	}
 	return activity.Tool
+}
+
+func TestACodexTurnReadsTheSameAcrossTheRolloutReadChunks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout-synthetic.jsonl")
+	started := time.Now().Add(-5 * time.Minute).Truncate(time.Millisecond)
+	appendLine(t, path, codexRolloutRecord(started.Add(-time.Minute), "response_item", `{"type":"function_call","name":"earlier","call_id":"before"}`))
+	appendLine(t, path, codexRolloutRecord(started, "event_msg", `{"type":"task_started"}`))
+	appendLine(t, path, codexRolloutRecord(started.Add(time.Second), "response_item", `{"type":"custom_tool_call","name":"exec","call_id":"long"}`))
+	text := strings.Repeat("x", 1500)
+	for index := 0; int64(index*1600) < 3*codexStatusReadChunk; index++ {
+		appendLine(t, path, codexRolloutRecord(started.Add(2*time.Second), "response_item", `{"type":"message","content":"`+text+`"}`))
+	}
+	last := started.Add(3 * time.Second)
+	appendLine(t, path, codexRolloutRecord(last, "event_msg", `{"type":"token_count"}`))
+	if info, err := os.Stat(path); err != nil || info.Size() <= 2*codexStatusReadChunk {
+		t.Fatalf("the fixture must span several read chunks: %v %v", info, err)
+	}
+
+	local, err := (&Codex{}).LocalStatus(context.Background(), codexWorkingSession(path, surface.StatusIdle))
+	if err != nil || local.Status != surface.StatusBusy || local.Activity == nil || !local.Activity.BusySince.Equal(started) || !local.Activity.LastProgressAt.Equal(last) || local.Activity.Tool == nil || local.Activity.Tool.Name != "exec" {
+		t.Fatalf("status=%s activity=%+v tool=%+v err=%v", local.Status, local.Activity, toolOf(local.Activity), err)
+	}
 }
