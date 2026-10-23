@@ -705,7 +705,7 @@ func (c *Claude) process(ctx context.Context, record claudeSessionRecord, transc
 
 // applyRecordStatus takes status and last activity from Claude's session
 // record. The transcript decides only when the record does not report status,
-// and dates a working session's activity after the record's last write.
+// and dates a working session by its turn's last progress when that is later.
 func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, record map[string]any) {
 	if ts, ok := record["updatedAt"].(float64); ok && ts > 0 {
 		sess.LastActive = time.UnixMilli(int64(ts))
@@ -724,7 +724,9 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 			sess.Activity = observation.Activity
 		}
 	}
-	advanceBusyActivityFromTranscript(sess)
+	if sess.Activity != nil && sess.Activity.LastProgressAt.After(sess.LastActive) {
+		sess.LastActive = sess.Activity.LastProgressAt
+	}
 }
 
 // claudeRootTranscript returns a conversation's one transcript when it lies
