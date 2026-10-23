@@ -141,7 +141,6 @@ struct CompactActivityGroup: View {
     }
 }
 
-/// "◆ Run swift test": the shape every tool, reasoning and output line shares.
 /// The control at the end of an open run or tool, the full row wide and at least 44 points tall to tap.
 struct CollapseLabel: View {
     let title: String
@@ -154,6 +153,7 @@ struct CollapseLabel: View {
     }
 }
 
+/// "◆ Run swift test": the shape every tool, reasoning and output line shares.
 struct ToolLineLabel: View {
     let verb: String
     let object: String
