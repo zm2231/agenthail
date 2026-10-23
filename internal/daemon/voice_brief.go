@@ -45,11 +45,15 @@ func (b voiceBriefs) BriefSource(ctx context.Context, session *surface.Session) 
 		} else {
 			src.Goal = goal
 		}
+	} else {
+		src.Missing = append(src.Missing, "goal: this session does not report one")
 	}
 	if usage, ok := adapter.(surface.ContextUsageProvider); ok {
 		if current, err := usage.ContextUsage(ctx, session); err != nil {
 			missing("compactions", err)
-		} else if current != nil {
+		} else if current == nil {
+			src.Missing = append(src.Missing, "compactions: not reported yet")
+		} else {
 			count := current.CompactionCount
 			src.Compactions = &count
 		}

@@ -76,6 +76,17 @@ realtime session, so a call transferred to a session after it started keeps the
 prompt it started with; the transfer tells the model in a developer message not
 to do the work.
 
+A session-bound call also gets a brief of its session as its first item, and a
+transfer appends the same brief to its developer message. The host builds it
+without a model call, from the session's own records: its status, goal,
+compaction count and newest exchanges from the session journal, newest first,
+within 6 KB. Each part it shortens, leaves out or could not read is named in
+the brief, and the brief tells the model that anything not in it is unknown.
+The call state's `brief` records what the call was given: the session, when it
+was read, the journal position, the size, the number of exchanges and the
+omitted parts. The reads behind a brief are bounded to three seconds, and a
+brief that could not be read still lets the call start.
+
 ## Conversation and work flow
 
 ```text
