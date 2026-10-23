@@ -60,7 +60,10 @@ func (d *Daemon) publishWaiting(ctx context.Context, sessionID string, waiting *
 	}
 	session.WaitingOn = waiting
 	if waiting != nil {
+		// A turn waiting on the person is not quiet; the next status pass
+		// reads its activity again once the wait ends.
 		session.Status = surface.StatusBusy
+		session.Activity = nil
 	}
 	config, err := LoadDashboardConfig()
 	if err != nil {
