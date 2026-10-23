@@ -46,7 +46,7 @@ struct SnapshotEtagTest {
         check(SnapshotTagProtocol.paths.last == "/api/v1/snapshot?fresh=1" && SnapshotTagProtocol.sentTags.last == .some(nil), "a fresh snapshot names none: \(SnapshotTagProtocol.paths)")
         SnapshotTagProtocol.currentTag = "\"two\""
         let changed = try? await api.snapshot()
-        check(changed?.catalogSeq == 4 && SnapshotTagProtocol.sentTags.last == "\"one\"", "a changed snapshot is fetched in full: \(SnapshotTagProtocol.sentTags)")
+        check(changed?.catalogSeq == 4 && SnapshotTagProtocol.sentTags.last == .some(nil), "a fresh snapshot, which carries no tag, leaves none to name: \(SnapshotTagProtocol.sentTags)")
         _ = try? await api.snapshot()
         check(SnapshotTagProtocol.sentTags.last == "\"two\"", "the next snapshot names the newest one: \(SnapshotTagProtocol.sentTags)")
         print("ok")
