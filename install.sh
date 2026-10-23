@@ -265,12 +265,18 @@ if [ -n "$SERVICE_PROGRAM" ]; then
 		fi
 	fi
 fi
-if [ -f "$SERVICE_PLIST" ] && [ "$SERVICE_MANAGED" -eq 1 ]; then
+SERVICE_LOADED_PLIST="$(launchctl print "gui/$UID/com.agenthail.daemon" 2>/dev/null | awk '/^\tpath = /{sub(/^\tpath = /, ""); print; exit}' || true)"
+SERVICE_OF_THIS_HOME=1
+if [ -n "$SERVICE_LOADED_PLIST" ] && [ "$SERVICE_LOADED_PLIST" != "$SERVICE_PLIST" ] && ! [ "$SERVICE_LOADED_PLIST" -ef "$SERVICE_PLIST" ]; then
+	echo "agenthail: leaving the supervised daemon loaded from $SERVICE_LOADED_PLIST unchanged"
+	SERVICE_OF_THIS_HOME=0
+fi
+if [ "$SERVICE_OF_THIS_HOME" -eq 1 ] && [ -f "$SERVICE_PLIST" ] && [ "$SERVICE_MANAGED" -eq 1 ]; then
 	echo "agenthail: stopping supervised daemon for upgrade"
 	launchctl bootout "gui/$UID/com.agenthail.daemon" >/dev/null 2>&1 || true
 	REINSTALL_SERVICE=1
 	RUNTIME_STOPPED=1
-elif [ -f "$SERVICE_PLIST" ]; then
+elif [ "$SERVICE_OF_THIS_HOME" -eq 1 ] && [ -f "$SERVICE_PLIST" ]; then
 	echo "agenthail: leaving unrelated supervised daemon unchanged ($SERVICE_PROGRAM)"
 elif [ -n "$EXISTING_WRAPPER" ] && [ -x "$EXISTING_WRAPPER" ]; then
 	DAEMON_STATUS="$("$EXISTING_WRAPPER" daemon status 2>/dev/null || true)"

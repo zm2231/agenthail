@@ -16,7 +16,7 @@ import (
 
 // fakeLaunchd stands in for launchctl. bootstrap starts the fake daemon, as
 // RunAtLoad does, and print reports the pid launchd supervises for the loaded
-// label. With orphan set, launchd reports another pid, as when it abandons a
+// label and the plist it was loaded from. With orphan set, launchd reports another pid, as when it abandons a
 // half-started instance that still runs.
 type fakeLaunchd struct {
 	t     *testing.T
@@ -54,14 +54,16 @@ loaded() { [ -f "$dir/label" ] && [ "${1##*/}" = "$(cat "$dir/label")" ]; }
 case "$1" in
 print)
 	loaded "$2" || exit 1
+	echo "	path = $(cat "$dir/path")"
 	echo "	pid = $(cat "$dir/service-pid")" ;;
 bootstrap)
 	echo com.agenthail.daemon > "$dir/label"
+	echo "$3" > "$dir/path"
 	start ;;
 bootout)
 	loaded "$2" || exit 0
 	stop
-	rm -f "$dir/label" "$dir/service-pid" ;;
+	rm -f "$dir/label" "$dir/path" "$dir/service-pid" ;;
 kickstart)
 	loaded "$3" || exit 113
 	stop
@@ -74,7 +76,8 @@ exit 0
 	return f
 }
 
-// supervise loads label with a daemon already running under it.
+// supervise loads label from this HOME's LaunchAgents with a daemon already
+// running under it.
 func (f *fakeLaunchd) supervise(label string) int {
 	f.t.Helper()
 	cmd := exec.Command(filepath.Join(f.dir, "agenthail"), "daemon-run")
@@ -86,6 +89,7 @@ func (f *fakeLaunchd) supervise(label string) int {
 	f.write("pids", strconv.Itoa(pid)+"\n")
 	f.write("service-pid", strconv.Itoa(pid))
 	f.write("label", label)
+	f.write("path", launchAgentPath(label))
 	if running, ok := waitForDaemonPID(0, 5*time.Second); !ok || running != pid {
 		f.t.Fatalf("fake daemon = %d, %v; want %d", running, ok, pid)
 	}
@@ -118,12 +122,16 @@ func (f *fakeLaunchd) stop() {
 }
 
 func (f *fakeLaunchd) kickstarted() bool {
+	return f.called("kickstart")
+}
+
+func (f *fakeLaunchd) called(command string) bool {
 	f.t.Helper()
 	calls, err := os.ReadFile(f.calls)
 	if err != nil && !os.IsNotExist(err) {
 		f.t.Fatal(err)
 	}
-	return strings.Contains(string(calls), "kickstart")
+	return strings.Contains(string(calls), command)
 }
 
 func writeExecutable(t *testing.T, path, content string) {
@@ -172,10 +180,68 @@ func TestLaunchdRestartWaitsForTheDaemonLaunchdStarts(t *testing.T) {
 				t.Fatalf("restart: %v\n%s", err, out)
 			}
 			pid, running := daemon.IsRunning()
-			service, loaded := launchdServicePID(label)
-			if !running || pid == before || !loaded || service != pid || !strings.Contains(out, "(pid "+strconv.Itoa(pid)+")") {
-				t.Fatalf("restart reported %q; daemon %d (was %d), launchd pid %d", out, pid, before, service)
+			service, loaded := launchdServiceJob(label)
+			if !running || pid == before || !loaded || service.pid != pid || !strings.Contains(out, "(pid "+strconv.Itoa(pid)+")") {
+				t.Fatalf("restart reported %q; daemon %d (was %d), launchd pid %d", out, pid, before, service.pid)
 			}
 		})
+	}
+}
+
+// A command run with another HOME, such as a test or a scratch install, must
+// manage that HOME's daemon and leave the user's launchd service running.
+func TestLaunchdServiceOfAnotherHomeIsLeftAlone(t *testing.T) {
+	for _, label := range []string{daemonLaunchdLabel, homebrewDaemonLaunchdLabel} {
+		t.Run(label, func(t *testing.T) {
+			fake := newFakeLaunchd(t)
+			live := fake.supervise(label)
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			if err := os.MkdirAll(filepath.Join(home, ".agenthail"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			unsupervisedDaemonExecutable = func() (string, error) { return filepath.Join(fake.dir, "agenthail"), nil }
+			t.Cleanup(func() { unsupervisedDaemonExecutable = os.Executable })
+
+			if (launchdService{}).Loaded() {
+				t.Fatal("the other HOME's service counts as this HOME's")
+			}
+			out, err := captureStdout(t, launchdService{}.Restart)
+			pid, running := daemon.IsRunning()
+			if running {
+				fake.write("pids", strconv.Itoa(pid)+"\n")
+			}
+			if err != nil || !running || pid == live {
+				t.Fatalf("restart = %v, daemon %d, %v (service daemon %d)\n%s", err, pid, running, live, out)
+			}
+			if out, err := captureStdout(t, launchdService{}.Install); err == nil || !strings.Contains(err.Error(), launchAgentPath(label)) {
+				t.Fatalf("install from another HOME = %v\n%s", err, out)
+			}
+			if label == daemonLaunchdLabel {
+				if out, err := captureStdout(t, launchdService{}.Uninstall); err == nil {
+					t.Fatalf("uninstall from another HOME succeeded\n%s", out)
+				}
+			}
+			if fake.called("kickstart") || fake.called("bootout") || fake.called("bootstrap") {
+				t.Fatal("a command run with another HOME changed the launchd service")
+			}
+			if err := syscall.Kill(live, 0); err != nil {
+				t.Fatalf("service daemon %d stopped: %v", live, err)
+			}
+		})
+	}
+}
+
+func TestParseLaunchdJobReadsOnlyTheJobsOwnFields(t *testing.T) {
+	output := "gui/501/com.agenthail.daemon = {\n" +
+		"\tactive count = 1\n" +
+		"\tendpoints = {\n\t\tpath = /nested/endpoint\n\t\tpid = 7\n\t}\n" +
+		"\tpath = /Users/a/Library/LaunchAgents/com.agenthail.daemon.plist\n" +
+		"\tstdout path = /Users/a/.agenthail/daemon.log\n" +
+		"\tpid = 52272\n" +
+		"}\n"
+	job := parseLaunchdJob(output)
+	if job.path != "/Users/a/Library/LaunchAgents/com.agenthail.daemon.plist" || job.pid != 52272 {
+		t.Fatalf("parsed %+v", job)
 	}
 }

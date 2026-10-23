@@ -14,6 +14,8 @@ Agenthail runs on Linux as a headless daemon for Claude Code and Codex. The daem
 
 Without an installed service, `start`, `stop` and `restart` manage an unsupervised daemon on every OS.
 
+A service belongs to the HOME whose unit or plist it runs. systemd user units are found under that HOME's config directory. launchd labels belong to the macOS user, so `launchdService` counts a loaded label as its service only when `launchctl print` shows it was loaded from this HOME's `~/Library/LaunchAgents`. A command run with another HOME, such as a test or a scratch install, therefore manages that HOME's unsupervised daemon; `install` and `uninstall` refuse rather than replace the other HOME's job, and `install.sh` leaves it loaded.
+
 ## The systemd unit
 
 `daemon install` writes:
