@@ -23,7 +23,7 @@ const context = {
     return next;
   },
 };
-vm.runInNewContext(`${source.slice(start, end)}\nglobalThis.runLogicalAction = logicalAction;\nglobalThis.deliveryStatusLabel = deliveryStatusLabel;`, context);
+vm.runInNewContext(`${source.slice(start, end)}\nglobalThis.runLogicalAction = logicalAction;\nglobalThis.deliveryStatusLabel = deliveryStatusLabel;\nglobalThis.creationFailureMessage = creationFailureMessage;`, context);
 
 const ok = (body = { ok: true }) => ({ ok: true, json: async () => body });
 const httpFailure = () => ({ ok: false, status: 502, text: async () => "typed failure" });
@@ -67,3 +67,18 @@ assert.equal(calls[10].key, calls[11].key, "create retry must not depend on the 
 assert.equal(calls[10].body.action, "session-create");
 assert.equal(calls[10].body.sessionId, "");
 assert.equal(calls[11].body.sessionId, "");
+
+const unknownCreate = () => ({ ok: false, status: 502, text: async () => JSON.stringify({ ok: false, status: "unknown", code: "create_unknown", retryable: false, unknown: true, error: "initial turn outcome is ambiguous" }) });
+responses.push(unknownCreate(), ok());
+const unknown = await context.runLogicalAction("session-create", "session-create", { surface: "codex", message: "maybe" }).catch((error) => error);
+assert.equal(unknown.code, "create_unknown");
+assert.equal(context.creationFailureMessage(unknown), "Agenthail can't tell whether this session started; check the sidebar before trying again.");
+await context.runLogicalAction("session-create", "session-create", { surface: "codex", message: "maybe" });
+assert.equal(calls[12].key, calls[13].key, "a create whose outcome is unknown must keep its key");
+
+const failedCreate = () => ({ ok: false, status: 502, text: async () => JSON.stringify({ ok: false, status: "failed", code: "create_failed", retryable: false, unknown: false, error: "model rejected" }) });
+responses.push(failedCreate(), ok());
+const failed = await context.runLogicalAction("session-create", "session-create", { surface: "codex", message: "no" }).catch((error) => error);
+assert.equal(context.creationFailureMessage(failed), "model rejected");
+await context.runLogicalAction("session-create", "session-create", { surface: "codex", message: "no" });
+assert.notEqual(calls[14].key, calls[15].key, "a create that failed must clear its key");
