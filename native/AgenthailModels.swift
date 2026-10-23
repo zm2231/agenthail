@@ -768,7 +768,6 @@ struct SessionFamily: Identifiable, Equatable {
 
     let root: SessionState
     let members: [Member]
-    let subagentCount: Int
     let workingSubagents: Int
 
     var id: String { root.id }
@@ -891,7 +890,6 @@ enum SessionFamilies {
             return SessionFamily(
                 root: root,
                 members: members,
-                subagentCount: counted.count + observed.count,
                 workingSubagents: counted.filter { $0.session.isWorking }.count + observed.working
             )
         }
@@ -906,8 +904,7 @@ enum SessionFamilies {
     }
 
     static func subagentSummary(_ family: SessionFamily) -> String {
-        let noun = family.subagentCount == 1 ? "subagent" : "subagents"
-        return family.workingSubagents > 0 ? "\(family.subagentCount) \(noun), \(family.workingSubagents) working" : "\(family.subagentCount) \(noun)"
+        "\(family.workingSubagents) \(family.workingSubagents == 1 ? "subagent" : "subagents") working"
     }
 
     static func label(_ session: SessionState) -> String {
@@ -1339,6 +1336,7 @@ struct SessionMetadata: Decodable {
     let models: [ModelOption]?
     let claudeRuns: [ClaudeRunObservation]?
     let claudeSubagents: [ClaudeSubagentLink]?
+    var claudeSubagentsTotal: Int? = nil
     let errors: [String: String]?
 }
 
@@ -1385,6 +1383,7 @@ struct SessionDetail: Decodable {
     var models: [ModelOption]?
     var claudeRuns: [ClaudeRunObservation]?
     var claudeSubagents: [ClaudeSubagentLink]?
+    var claudeSubagentsTotal: Int?
     var metadataErrors: [String: String]?
     var timeline: SessionTimeline?
     let readSource: String?

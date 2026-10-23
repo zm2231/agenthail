@@ -29,6 +29,7 @@ SOURCES=(
   ProjectActions.swift
   SessionTree.swift
   MetadataOverlay.swift
+  ClaudeSubagentList.swift
   StatusRefreshPolicy.swift
   ToolPresentation.swift
   TextDiff.swift

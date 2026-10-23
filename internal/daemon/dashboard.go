@@ -2270,12 +2270,13 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 			}
 			return filtered, err
 		}
+		allSubagents := r.URL.Query().Get("subagents") == "all"
 		requests["claudeSubagents"] = func() (any, error) {
 			links, err := observer.ObserveClaudeSubagents(ctx, session)
-			if links == nil {
-				links = []surface.ClaudeSubagentLink{}
+			if err != nil {
+				return nil, err
 			}
-			return links, err
+			return newClaudeSubagentPage(links, allSubagents), nil
 		}
 	}
 	response := map[string]any{"sessionId": session.ID}
@@ -2295,6 +2296,9 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 			delete(requests, result.field)
 			if result.err != nil {
 				errorsByField[result.field] = "Metadata unavailable."
+			} else if page, ok := result.value.(claudeSubagentPage); ok {
+				response[result.field] = page.links
+				response["claudeSubagentsTotal"] = page.total
 			} else {
 				response[result.field] = result.value
 			}

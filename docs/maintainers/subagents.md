@@ -58,7 +58,17 @@ every hidden subagent row, so clients know there are rows to fetch. Catalog rows
 `/api/v1/catalog-events`) carry both fields as `subagent` and `subagents`.
 `/api/v1/session-metadata` lists a Claude session's subagents in
 `claudeSubagents` with `agentType`, `description`, `toolUseId`, `depth`,
-`working`, and `lastActive`.
+`working`, `lastActive`, and `transcriptPath`: the working ones first, then the
+eight most recently active. `claudeSubagentsTotal` counts every subagent the
+session has, and `subagents=all` returns all of them in the same order. A paired
+host forwards the query to the host that runs the session. A host from before
+this paging returns its whole list and no total; clients then take the list's
+length as the total and collapse it themselves.
+
+The rollup's `count` is a snapshot of the subagents active within the last 24
+hours as of the session's last read, and an idle session is not read again when
+that window moves. Clients therefore show only `working` on session rows; the
+inspectors show the total from the metadata they just fetched.
 
 Clients compute a Codex parent's rollup from the subagent rows they hold plus
 the row's `subagents`: every listed descendant counts, and a busy descendant
@@ -98,9 +108,12 @@ agenthail send @lead/Ada/Euclid "status?"
 
 ## Clients
 
-`agenthail list` prints each subagent below its parent with its nickname, and
-`--json` rows carry `subagent` and the computed `subagents` rollup. The list
-limit counts families. The Mac sidebar and the iOS session list nest Codex
-subagents under their parent, collapsed by default, with the working count
-rolled into the parent row; the Mac inspector lists a session's subagents.
+`agenthail list` prints each subagent below its parent with its nickname and
+names a row's working subagents, and `--json` rows carry `subagent` and the
+computed `subagents` rollup. The list limit counts families. The Mac sidebar
+and the iOS session list nest Codex subagents under their parent, collapsed by
+default, with the working count rolled into the parent row. The Mac and iPhone
+inspectors and the web dashboard list a Claude session's subagents by
+description (else type, else ID), working ones first, then the recent ones, with
+the rest behind Show earlier.
 A subagent shown outside its family reads as `<Parent name> > <nickname>`.

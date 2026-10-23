@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -102,4 +103,17 @@ func catalogSubagentRollup(record registry.CatalogSessionState) *surface.Subagen
 		return nil
 	}
 	return projection.Subagents
+}
+
+// workingSubagentsLabel names a row's working subagents. The rollup's count
+// is the subagents active in the last day as of the row's last read, which an
+// idle row does not refresh, so the list shows only the working ones.
+func workingSubagentsLabel(rollup *surface.SubagentRollup) string {
+	if rollup == nil || rollup.Working == 0 {
+		return ""
+	}
+	if rollup.Working == 1 {
+		return "1 subagent working"
+	}
+	return fmt.Sprintf("%d subagents working", rollup.Working)
 }

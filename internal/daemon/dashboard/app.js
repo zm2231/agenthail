@@ -1503,17 +1503,21 @@ async function selectSession(id, focus = false) {
     detail.transcriptWarning = detail.readError || "";
     app.history = detail;
     renderChat();
-    const metadataSeq = detail.journalSeq;
-    fetch(`/api/session-metadata?id=${encodeURIComponent(id)}`)
-      .then((result) => { if (!result.ok) throw Error("Metadata unavailable"); return result.json(); })
-      .then((metadata) => { if (app.selected?.id === id && app.history === detail) { applySessionMetadata(detail, metadata, metadataSeq); renderChat(); } })
-      .catch(() => {});
+    app.allSubagents = false;
+    loadSessionMetadata(id, detail);
     if (focus && mobileConversationView())
       requestAnimationFrame(() => window.scrollTo(0, 0));
   } catch (error) {
     $("#chat-body").innerHTML =
       `<div class="empty-state"><h2>Could not load this conversation</h2><p>${escape(error.message)}</p></div>`;
   }
+}
+function loadSessionMetadata(id, detail) {
+  const metadataSeq = detail.journalSeq;
+  fetch(`/api/session-metadata?id=${encodeURIComponent(id)}${app.allSubagents ? "&subagents=all" : ""}`)
+    .then((result) => { if (!result.ok) throw Error("Metadata unavailable"); return result.json(); })
+    .then((metadata) => { if (app.selected?.id === id && app.history === detail) { applySessionMetadata(detail, metadata, metadataSeq); renderChat(); } })
+    .catch(() => {});
 }
 function applySessionMetadata(detail, metadata, initialSeq) {
   const {goal, context, ...other} = metadata;
@@ -1791,7 +1795,7 @@ function renderTimeline(items, session) {
   flush();
   return out.join("");
 }
-function timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents) {
+function timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents, claudeSubagentsTotal, allSubagents) {
   return JSON.stringify([
     session.id,
     exchanges,
@@ -1803,18 +1807,38 @@ function timelineSignature(session, exchanges, goal, capabilities, transcriptWar
     timeline,
     claudeRuns,
     claudeSubagents,
+    claudeSubagentsTotal,
+    allSubagents,
   ]);
 }
-function renderClaudeMetadata(claudeRuns, claudeSubagents) {
+const claudeSubagentsShown = 8;
+// A host from before subagent paging sends its whole list and no total.
+function claudeSubagentList(links, total, expanded) {
+  const ordered = links
+    .map((link, index) => ({ link, index }))
+    .sort((a, b) => (Boolean(b.link.working) - Boolean(a.link.working)) || ((Date.parse(b.link.lastActive || "") || 0) - (Date.parse(a.link.lastActive || "") || 0)) || (a.index - b.index))
+    .map(({ link }) => link);
+  const working = ordered.filter((link) => link.working).length;
+  const count = Math.max(Number.isInteger(total) ? total : ordered.length, ordered.length);
+  const shown = expanded ? ordered : ordered.slice(0, working + claudeSubagentsShown);
+  return { shown, working, total: count, earlier: count - shown.length };
+}
+function claudeSubagentTitle(link) {
+  return link.description || link.agentType || `Subagent ${String(link.agentId || "").slice(0, 8)}`;
+}
+function renderClaudeMetadata(claudeRuns, claudeSubagents, claudeSubagentsTotal, allSubagents = false) {
   if (!Array.isArray(claudeRuns) && !Array.isArray(claudeSubagents)) return "";
   const runs = Array.isArray(claudeRuns) ? claudeRuns : [];
-  const links = Array.isArray(claudeSubagents) ? claudeSubagents : [];
+  const list = claudeSubagentList(Array.isArray(claudeSubagents) ? claudeSubagents : [], claudeSubagentsTotal, allSubagents);
   const runRows = runs.map((run) => `<li>${run.jobId ? `<span>Job: ${escape(run.jobId)}</span>` : ""}${run.runType ? ` · <span>Type: ${escape(run.runType)}</span>` : ""}${run.providerState ? ` · <span>Provider state: ${escape(run.providerState)}</span>` : ""}${run.sessionId ? ` · <span>Session: ${escape(run.sessionId)}</span>` : ""}${run.resumeSessionId ? ` · <span>Resume session: ${escape(run.resumeSessionId)}</span>` : ""}${run.createdAt ? ` · <time datetime="${escape(run.createdAt)}">Created ${escape(run.createdAt)}</time>` : ""}${run.updatedAt ? ` · <time datetime="${escape(run.updatedAt)}">Updated ${escape(run.updatedAt)}</time>` : ""}${run.recordPath ? ` · <span>Record: ${escape(run.recordPath)}</span>` : ""}</li>`).join("");
-  const subagentRows = links.map((link) => `<li>${link.agentId ? `<span>Agent: ${escape(link.agentId)}</span>` : ""}${link.parentSessionId ? ` · <span>Parent: ${escape(link.parentSessionId)}</span>` : ""}${link.transcriptPath ? ` · <span>Transcript: ${escape(link.transcriptPath)}</span>` : ""}</li>`).join("");
-  return `<details class="session-details"><summary>Observed Claude runs</summary>${runRows ? `<ul>${runRows}</ul>` : "<p>No observed Claude runs.</p>"}</details><details class="session-details"><summary>Observed Claude subagents</summary>${subagentRows ? `<ul>${subagentRows}</ul>` : "<p>No observed Claude subagents.</p>"}</details>`;
+  const subagentRows = list.shown.map((link) => `<li><span>${escape(claudeSubagentTitle(link))}</span>${link.description && link.agentType ? ` · <span>${escape(link.agentType)}</span>` : ""}${link.working ? " · <span>Working</span>" : link.lastActive ? ` · <time datetime="${escape(link.lastActive)}">${escape(timeAgo(link.lastActive))}</time>` : ""}</li>`).join("");
+  const noun = list.total === 1 ? "subagent" : "subagents";
+  const summary = list.working ? `${list.working} working, ${list.total} ${noun} in all` : `${list.total} ${noun} in all`;
+  const earlier = list.earlier > 0 ? `<button class="soft-button" data-subagents-all type="button">Show ${list.earlier} earlier</button>` : "";
+  return `<details class="session-details"><summary>Observed Claude runs</summary>${runRows ? `<ul>${runRows}</ul>` : "<p>No observed Claude runs.</p>"}</details><details class="session-details"${allSubagents ? " open" : ""}><summary>Observed Claude subagents${list.total ? ` · ${escape(summary)}` : ""}</summary>${subagentRows ? `<ul>${subagentRows}</ul>${earlier}` : "<p>No observed Claude subagents.</p>"}</details>`;
 }
 function renderChat() {
-  const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context, transcriptWarning, claudeRuns, claudeSubagents } = app.history || {};
+  const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context, transcriptWarning, claudeRuns, claudeSubagents, claudeSubagentsTotal } = app.history || {};
   const session = app.selected;
   const controls = [];
   if (session.runtime?.focusable)
@@ -1882,9 +1906,9 @@ function renderChat() {
     `<details class="session-details"><summary>Conversation settings</summary>${settings.join("")}</details>`,
     remoteHostName(session) ? "" : `<details class="session-details"><summary>Voice</summary><p>Call this exact conversation through Codex Voice, or transfer an active call here.</p><button class="soft-button" type="button" data-voice-session="${escape(session.id)}">Call this session</button></details>`,
   ];
-  if (session.surface === "claude") toolRows.push(renderClaudeMetadata(claudeRuns, claudeSubagents));
+  if (session.surface === "claude") toolRows.push(renderClaudeMetadata(claudeRuns, claudeSubagents, claudeSubagentsTotal, app.allSubagents));
   const timeline = app.history?.timeline?.items || [];
-  const signature = timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents);
+  const signature = timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents, claudeSubagentsTotal, app.allSubagents);
   if (app.transcriptSignature === signature) return;
   const chatBody = $("#chat-body");
   const previousScrollTop = chatBody.scrollTop;
@@ -2701,6 +2725,11 @@ document.addEventListener("click", async (event) => {
       viewControl.disabled = false;
       await load();
     }
+    return;
+  }
+  if (event.target.closest("[data-subagents-all]") && app.selected && app.history) {
+    app.allSubagents = true;
+    loadSessionMetadata(app.selected.id, app.history);
     return;
   }
   const control = event.target.closest("[data-action]");

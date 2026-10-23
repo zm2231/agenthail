@@ -43,3 +43,16 @@ func TestListFamiliesNestsSubagentsAndCapsFamilies(t *testing.T) {
 		t.Fatalf("a session without subagents has a rollup: %+v", rollups["other"])
 	}
 }
+
+func TestListNamesOnlyWorkingSubagents(t *testing.T) {
+	for rollup, want := range map[*surface.SubagentRollup]string{
+		nil:                     "",
+		{Count: 72, Working: 0}: "",
+		{Count: 72, Working: 1}: "1 subagent working",
+		{Count: 3, Working: 2}:  "2 subagents working",
+	} {
+		if got := workingSubagentsLabel(rollup); got != want {
+			t.Errorf("rollup %+v: %q, want %q", rollup, got, want)
+		}
+	}
+}

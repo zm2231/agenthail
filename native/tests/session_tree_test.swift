@@ -57,14 +57,14 @@ struct SessionTreeTest {
         let families = SessionFamilies.build(family)
         expect(families.map(\.id) == ["lead", "orphan"], "subagents nest under a listed parent; an unlisted parent leaves a root: \(families.map(\.id))")
         expect(families[0].members.map(\.id) == ["ada", "euclid", "bo"] && families[0].members.map(\.depth) == [1, 2, 1], "members follow their parent depth-first")
-        expect(families[0].subagentCount == 3 && families[0].workingSubagents == 2 && families[0].isWorking, "the root rolls up every descendant and working count")
+        expect(families[0].workingSubagents == 2 && families[0].isWorking && SessionFamilies.subagentSummary(families[0]) == "2 subagents working", "the root rolls up its working descendants")
         expect(SessionFamilies.title(family[2], in: family) == "Build the parser > Ada > Euclid (reviewer)", "a standalone subagent reads as its parent chain: \(SessionFamilies.title(family[2], in: family))")
         expect(SessionFamilies.title(family[4], in: family) == "Dee" && SessionFamilies.label(family[1]) == "Ada", "subagent labels use the nickname")
 
         var claudeLead = session("claude-lead", status: "idle", lastActive: "2026-10-04T11:00:00Z", project: "fable", checkout: "wt", branch: "main")
         claudeLead.subagents = SubagentRollup(count: 4, working: 1)
         let claude = SessionFamilies.build([claudeLead])[0]
-        expect(claude.subagentCount == 4 && claude.workingSubagents == 1 && claude.isWorking, "observed Claude subagents roll into the parent row")
+        expect(claude.workingSubagents == 1 && claude.isWorking && SessionFamilies.subagentSummary(claude) == "1 subagent working", "only working observed Claude subagents roll into the parent row")
 
         let familyTree = SessionTree.build(family + [claudeLead], filter: .running, attention: [:])
         expect(families[1].isCurrent == false && families[0].isCurrent, "a family is current while any member works")
