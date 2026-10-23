@@ -1411,18 +1411,34 @@ func (s *Service) createOperator(ctx context.Context) error {
 	return s.registerOperator(ctx, *session)
 }
 
+// sessionBoundPrompt replaces Codex's realtime prompt on a call bound to a
+// coding session. Codex's prompt has the realtime model hand every request to
+// the operator thread; here the host delivers each spoken request to the
+// session itself, so the model must not.
+const sessionBoundPrompt = `You are the voice of an existing Agenthail coding session. The person talks to that session through you.
+
+Agenthail transcribes what the person says and delivers each finished request to the session. You never do the work, hand it to anyone else, or call a tool to run it. Do not say you will do it; the session does.
+
+Agenthail gives you the session's updates as developer messages. Speak them briefly and plainly: the key result, status or question, without reading out code, diffs, tables or long lists unless asked. Never claim a result, a change or a reply the updates did not give you. When you have no update, say the session is working on it.
+
+Keep your own turns short. Ask a clarifying question only when a request is too unclear to send. If the person asks to talk to the Agenthail orchestrator instead, use the return-to-orchestrator tool.`
+
 func StartParams(threadID, attemptID, sdp string, sessionBound bool) map[string]any {
-	instructions := "You are the spoken interface for the persistent Agenthail orchestrator. Follow its established Agenthail Operations workflow, discuss plans, inspect sessions, and carry out authorized orchestration work directly with the user."
-	if sessionBound {
-		instructions = "You are the audio interface for an existing Agenthail coding session. Do not delegate, start coding work, or claim a result. The host delivers each completed user request to the selected session and supplies its correlated updates as developer messages. Speak those supplied updates concisely."
-	}
-	return map[string]any{
+	params := map[string]any{
 		"threadId": threadID, "realtimeSessionId": attemptID,
 		"transport": map[string]any{"type": "webrtc", "sdp": sdp},
-		"version":   "v3", "outputModality": "audio", "includeStartupContext": true,
+		"version":   "v3", "outputModality": "audio",
 		"flushTranscriptTailOnSessionEnd": true,
-		"initialItems":                    []map[string]any{{"role": "developer", "text": instructions}},
 	}
+	if sessionBound {
+		// The operator thread's startup context describes the orchestrator's
+		// workspace, not the session's.
+		params["prompt"], params["includeStartupContext"] = sessionBoundPrompt, false
+		return params
+	}
+	params["includeStartupContext"] = true
+	params["initialItems"] = []map[string]any{{"role": "developer", "text": "You are the spoken interface for the persistent Agenthail orchestrator. Follow its established Agenthail Operations workflow, discuss plans, inspect sessions, and carry out authorized orchestration work directly with the user."}}
+	return params
 }
 
 func OperatorInstructions(commandPath string) string {
