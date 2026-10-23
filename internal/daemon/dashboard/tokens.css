@@ -10,6 +10,7 @@
   --rule: oklch(29% 0.014 45);
   --accent: oklch(72% 0.16 45);
   --accent-soft: oklch(72% 0.16 45/0.12);
+  --on-accent: var(--paper);
   --good: oklch(75% 0.13 155);
   --warn: oklch(80% 0.12 95);
   --bad: oklch(68% 0.18 25);
@@ -26,6 +27,29 @@
   --radius: 16px;
   --max: 1540px;
   --conversation-width: 1120px;
+}
+:root[data-theme="light"] {
+  --paper: oklch(97.5% 0.006 70);
+  --panel: oklch(99% 0.004 70);
+  --raised: oklch(95.5% 0.008 60);
+  --hover: oklch(93% 0.01 55);
+  --ink: oklch(22% 0.012 45);
+  --muted: oklch(41% 0.012 50);
+  --quiet: oklch(47% 0.012 50);
+  --rule: oklch(87% 0.01 55);
+  --accent: oklch(53% 0.17 38);
+  --accent-soft: oklch(53% 0.17 38/0.12);
+  --good: oklch(48% 0.12 155);
+  --warn: oklch(50% 0.11 80);
+  --bad: oklch(50% 0.19 25);
+  --focus: oklch(50% 0.13 240);
+  --glass: oklch(97.5% 0.006 70/0.94);
+  --good-ring: oklch(48% 0.12 155/0.12);
+  --code: oklch(95% 0.006 70);
+  --composer: oklch(99% 0.004 70/0.96);
+  --shadow-soft: oklch(30% 0.02 45/0.1);
+  --shadow: oklch(30% 0.02 45/0.16);
+  --shadow-strong: oklch(30% 0.02 45/0.2);
 }
 * {
   box-sizing: border-box;
@@ -1462,7 +1486,7 @@ select {
   border: 0;
   border-radius: 12px;
   background: var(--accent);
-  color: var(--paper);
+  color: var(--on-accent);
   font-weight: 800;
 }
 .send-button:disabled {
@@ -1523,7 +1547,7 @@ select {
 }
 .primary-button {
   background: var(--accent);
-  color: var(--paper);
+  color: var(--on-accent);
 }
 .operation-tabs {
   display: flex;
