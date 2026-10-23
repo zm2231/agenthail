@@ -209,6 +209,9 @@ func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waitin
 			desktopMessage = fmt.Sprintf("%s: %s", d.resolveDisplay(sessionID), request.Prompt())
 			mobile.RequestID = request.ID
 			actions = request.Actions()
+			d.log.Printf("announce %s waiting on request %s", d.resolveDisplay(sessionID), request.ID)
+		} else {
+			d.log.Printf("announce %s waiting on %s with no request to answer here", d.resolveDisplay(sessionID), questionID)
 		}
 		// The desktop notification goes through a helper app that can take
 		// seconds to start, so the phone is told alongside it.
@@ -266,8 +269,8 @@ func (d *Daemon) waitingRequest(ctx context.Context, session surface.Session, wa
 	if err != nil {
 		return surface.Request{}, false
 	}
-	responder, ok := adapter.(surface.Responder)
-	if !ok || !surface.EffectiveCapabilities(adapter, &session).Respond {
+	responder, ok := sessionResponder(adapter, &session)
+	if !ok {
 		return surface.Request{}, false
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

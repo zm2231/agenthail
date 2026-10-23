@@ -68,8 +68,10 @@ func sessionResponder(adapter surface.Surface, session *surface.Session) (surfac
 	return responder, ok && !surface.IsReadOnlySession(session)
 }
 
-// respond answers one open request and records who answered it. A request
-// that was already answered or has expired is a conflict, never a retry.
+// respond answers one open request and records who answered it. The history
+// entry is written in the background, since the registry may be busy and the
+// answer has already been delivered. A request that was already answered or
+// has expired is a conflict, never a retry.
 // Either way the turn is observed again and the session's catalog row
 // published before the reply, so a client reading right after sees it no
 // longer waiting on the request.
@@ -106,7 +108,15 @@ func (d *Daemon) respond(ctx context.Context, w http.ResponseWriter, adapter sur
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "request-" + outcome, SessionID: session.ID, Message: requestID, Result: "answered by " + actor})
+	entry := registry.HistoryEntry{Kind: "request-" + outcome, SessionID: session.ID, Message: requestID, Result: "answered by " + actor}
+	record := func(context.Context) {
+		if err := d.Registry.RecordHistory(entry); err != nil {
+			d.log.Printf("record the answer to %s: %s", d.resolveDisplay(session.ID), err)
+		}
+	}
+	if !d.background.start(record) {
+		record(ctx)
+	}
 	d.observeAfterAnswer(adapter, session)
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": map[string]string{"requestId": requestID, "outcome": outcome}})
 }
