@@ -98,6 +98,49 @@ final class VoiceTests: XCTestCase {
 
 
     @MainActor
+    func testFollowingTheLatestActivityMovesOnlyForNewWords() throws {
+        let model = VoiceOperatorModel(api: VoiceFixtureAPI(), audio: VoiceFixtureAudio())
+        func state(_ events: String) throws -> VoiceState {
+            try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"connected","attemptId":"a","events":[\#(events)],"occupied":false,"truncated":false}"#.utf8))
+        }
+        let spoken = #"{"sequence":1,"method":"thread/realtime/transcript/done","params":{"role":"user","text":"Check the build."}}"#
+        model.state = try state(spoken)
+        let first = model.latestContentMarker
+        model.state = try state(spoken + #",{"sequence":2,"method":"voice/input-state","params":{"muted":"true"}}"#)
+        XCTAssertEqual(model.latestContentMarker, first)
+        model.state = try state(spoken + #",{"sequence":3,"method":"thread/realtime/transcript/done","params":{"role":"assistant","text":"Checking it now."}}"#)
+        XCTAssertNotEqual(model.latestContentMarker, first)
+        model.close()
+    }
+
+
+    @MainActor
+    func testAnActivityAttachmentLoadsOnlyForTheSessionStillShown() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [VoiceAttachmentURLProtocol.self]
+        let timeline = AgenthailAPI(baseURL: URL(string: "https://attach.test")!, token: "token", session: URLSession(configuration: configuration))
+        let model = VoiceOperatorModel(api: VoiceFixtureAPI(), timelineAPI: timeline, audio: VoiceFixtureAudio())
+        let shown = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        let other = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.replacingOccurrences(of: #""id":"demo""#, with: #""id":"other""#).utf8))
+        let item = try JSONDecoder().decode(TimelineItem.self, from: Data(#"{"id":"r","kind":"toolResult","title":"Result","text":"","truncated":false,"attachment":{"id":"image-1","mediaType":"image/png"}}"#.utf8))
+        model.detail = shown
+        let loaded = await model.activityAttachment(item)
+        XCTAssertEqual(loaded, Data("image-bytes".utf8))
+        XCTAssertEqual(VoiceAttachmentURLProtocol.gate.lastSession, "demo")
+
+        VoiceAttachmentURLProtocol.gate.hold()
+        let switched = Task { await model.activityAttachment(item) }
+        for _ in 0..<500 where !VoiceAttachmentURLProtocol.gate.isWaiting { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(VoiceAttachmentURLProtocol.gate.isWaiting)
+        model.detail = other
+        VoiceAttachmentURLProtocol.gate.release()
+        let result = await switched.value
+        XCTAssertNil(result)
+        model.close()
+    }
+
+
+    @MainActor
     func testHeartbeatUsesAcceptedAttemptAndStopsOnHangup() async throws {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
         let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
@@ -581,6 +624,42 @@ private final class VoiceURLProtocol: URLProtocol, @unchecked Sendable {
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type":"application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(Self.state.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private final class VoiceAttachmentGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var held: DispatchSemaphore?
+    private var waiting = false
+    private var session: String?
+    var isWaiting: Bool { lock.withLock { waiting } }
+    var lastSession: String? { lock.withLock { session } }
+    func hold() { lock.withLock { held = DispatchSemaphore(value: 0) } }
+    func release() { lock.withLock { held }?.signal() }
+    func pass(session id: String?) {
+        let semaphore = lock.withLock { () -> DispatchSemaphore? in
+            session = id
+            waiting = held != nil
+            return held
+        }
+        semaphore?.wait()
+        lock.withLock { waiting = false; held = nil }
+    }
+}
+
+private final class VoiceAttachmentURLProtocol: URLProtocol, @unchecked Sendable {
+    static let gate = VoiceAttachmentGate()
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "attach.test" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let session = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "sessionId" }?.value
+        Self.gate.pass(session: session)
+        let body = Data("image-bytes".utf8)
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "image/png", "Content-Length": "\(body.count)"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}

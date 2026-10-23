@@ -65,6 +65,9 @@ final class VoiceOperatorModel: ObservableObject {
 #if DEBUG
         if preview {
             state = try? JSONDecoder().decode(VoiceState.self, from: Data(Self.previewState.utf8))
+#if os(iOS)
+            detail = try? JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.previewDetailJSON.utf8))
+#endif
             ready = true
             return
         }
@@ -177,6 +180,21 @@ final class VoiceOperatorModel: ObservableObject {
     private func stopPollingIfIdle() {
         guard visibleScreens == 0, !hasLocalCall, !hostHangupPending, !hostHangupUnconfirmed else { return }
         polling?.cancel(); polling = nil
+    }
+
+    // Only new words follow the latest activity; call events such as a
+    // heartbeat or mute change nothing on screen.
+    var latestContentMarker: String {
+        let transcript = state?.transcripts.last
+        let item = detail?.timeline?.items.last
+        return "\(transcript?.id ?? ""):\(transcript?.text ?? ""):\(item?.id ?? ""):\(item?.text ?? "")"
+    }
+
+    func activityAttachment(_ item: TimelineItem) async -> Data? {
+        guard let timelineAPI, let id = detail?.session.id, let attachment = item.attachment else { return nil }
+        let data = try? await timelineAPI.sessionAttachment(sessionID: id, id: attachment.id)
+        guard !Task.isCancelled, !closed, detail?.session.id == id else { return nil }
+        return data
     }
 
     // Timeline reads run beside the state poll, so a slow read never delays

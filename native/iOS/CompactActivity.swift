@@ -60,10 +60,6 @@ struct TimelineGroup: Identifiable {
         return groups
     }
 
-    static func newestFirst(_ items: [TimelineItem]) -> [TimelineGroup] {
-        Array(make(items).reversed())
-    }
-
     var invocations: [TimelineGroup] {
         var groups: [TimelineGroup] = []
         var calls: [String: Int] = [:]
