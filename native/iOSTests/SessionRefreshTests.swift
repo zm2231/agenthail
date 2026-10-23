@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import XCTest
 @testable import Agenthail
@@ -36,6 +37,40 @@ final class SessionRefreshTests: XCTestCase {
         await model.refreshSession("computer::demo")
 
         XCTAssertEqual(model.olderActivity.map(\.id), ["earlier", "fell-off"])
+    }
+
+    @MainActor
+    func testARowStreamedWhileARefreshIsInFlightSurvivesIt() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(journalSeq: 10)
+        let model = makeModel()
+        model.selectedSessionID = "computer::demo"
+        await model.refreshSession("computer::demo")
+        SessionRefreshProtocol.state.holdDetail()
+        let refresh = Task { await model.refreshSession("computer::demo") }
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.detailHeld }
+        model.applySessionStreamEvent(try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":11,"type":"item","data":{"itemId":"live","version":1,"kind":"message","op":"upsert","role":"assistant","title":"assistant","ts":"2026-10-03T12:00:00Z","body":"arrived during the read","truncated":false}}"#.utf8)))
+        SessionRefreshProtocol.state.releaseDetail()
+        _ = await refresh.value
+
+        XCTAssertEqual(model.selectedDetail?.timeline?.items.filter { $0.id == "live" }.count, 1)
+        XCTAssertEqual(model.sessionStreamCursor, 11)
+    }
+
+    @MainActor
+    func testARefreshThatAddsNoEarlierRowsLeavesOlderActivityAlone() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        let model = makeModel()
+        model.selectedSessionID = "computer::demo"
+        await model.refreshSession("computer::demo")
+        model.olderActivity = [TimelineItem(id: "earlier", kind: "message", role: "assistant", title: "assistant", text: "earlier", timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)]
+        var emissions = 0
+        let watching = model.$olderActivity.dropFirst().sink { _ in emissions += 1 }
+        defer { watching.cancel() }
+
+        await model.refreshSession("computer::demo")
+
+        XCTAssertEqual(emissions, 0)
     }
 
     @MainActor
@@ -242,6 +277,9 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         private var holdingDetail = false
         private var snapshotWaiting = false
         private var detailWaiting = false
+        private var seq: Int?
+        var journalSeq: Int? { condition.withLock { seq } }
+        func set(journalSeq value: Int?) { condition.withLock { seq = value } }
 
         var detailFetches: Int { condition.withLock { fetches } }
         var streamUnsupported: Bool { condition.withLock { unsupported } }
@@ -250,7 +288,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         func reset(streamUnsupported: Bool) {
             condition.withLock {
                 fetches = 0; unsupported = streamUnsupported; detail = "busy"; snapshot = "busy"
-                holdingSnapshot = false; holdingDetail = false; snapshotWaiting = false; detailWaiting = false; passing = 0
+                holdingSnapshot = false; holdingDetail = false; snapshotWaiting = false; detailWaiting = false; passing = 0; seq = nil
                 canStream = true; streams = 0
                 condition.broadcast()
             }
@@ -275,12 +313,13 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
             condition.lock(); defer { condition.unlock() }
             fetches += 1
             let status = detail
+            let journalSeq = seq
             if holdingDetail {
                 detailWaiting = true
                 while holdingDetail { condition.wait() }
                 detailWaiting = false
             }
-            return SessionRefreshProtocol.detail(status: status)
+            return SessionRefreshProtocol.detail(status: status, journalSeq: journalSeq)
         }
 
         func snapshotResponse() -> String {
@@ -298,8 +337,9 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
     }
 
     static let state = State()
-    static func detail(status: String) -> String {
+    static func detail(status: String, journalSeq: Int? = nil) -> String {
         var object = try! JSONSerialization.jsonObject(with: Data(SessionPreview.detailJSON.utf8)) as! [String: Any]
+        if let journalSeq { object["journalSeq"] = journalSeq }
         for key in ["context", "goal", "model", "models"] { object.removeValue(forKey: key) }
         var session = object["session"] as! [String: Any]
         session["status"] = status
