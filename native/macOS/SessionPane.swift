@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import os
 
 @MainActor
 final class SessionPane: ObservableObject, Identifiable {
@@ -7,7 +8,11 @@ final class SessionPane: ObservableObject, Identifiable {
     let restoresSelection: Bool
     unowned let model: AgenthailModel
 
-    @Published private(set) var selectedSessionID: String?
+    @Published private(set) var selectedSessionID: String? {
+        didSet {
+            if selectedSessionID != oldValue { endOpenInterval("left") }
+        }
+    }
     @Published private(set) var tabs = SessionTabs() {
         didSet {
             if restoresSelection, tabs != oldValue, let data = try? JSONEncoder().encode(tabs) {
@@ -66,6 +71,8 @@ final class SessionPane: ObservableObject, Identifiable {
     private var streamUnsupported = false
     private var detailReloadTask: Task<Void, Never>?
     private var detailLoadTask: Task<Void, Never>?
+    private static let signposter = OSSignposter(subsystem: "com.agenthail.app", category: "SessionOpen")
+    private var openInterval: (id: OSSignpostID, state: OSSignpostIntervalState)?
     @Published private(set) var detailLoadError: String?
     private var olderTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
@@ -220,6 +227,22 @@ final class SessionPane: ObservableObject, Identifiable {
         selectedSessionID = nil
     }
 
+    /// Marks a session open in Instruments, from the switch until the
+    /// daemon's first page for it is shown (`loaded`), the selection moves
+    /// off it (`left`), it is removed (`removed`), the pane closes
+    /// (`closed`), or it is shown again (`superseded`).
+    private func beginOpenInterval(cached: Bool) {
+        endOpenInterval("superseded")
+        let id = Self.signposter.makeSignpostID()
+        openInterval = (id, Self.signposter.beginInterval("Session open", id: id, "cached \(cached)"))
+    }
+
+    private func endOpenInterval(_ outcome: String) {
+        guard let openInterval else { return }
+        Self.signposter.endInterval("Session open", openInterval.state, "\(outcome, privacy: .public)")
+        self.openInterval = nil
+    }
+
     private func reconcileTabs(_ sessions: [SessionState]) {
         if tabs.tabs.isEmpty, let selected = selectedSessionID {
             tabs.open(selected, keep: true)
@@ -254,6 +277,7 @@ final class SessionPane: ObservableObject, Identifiable {
         dropUnpublishedDetail()
         detail = model.cachedDetail(id)
         detailStale = detail != nil
+        beginOpenInterval(cached: detail != nil)
         detailRefreshFailed = false
         detailLoadError = nil
         detailReloadPending = false
@@ -267,6 +291,7 @@ final class SessionPane: ObservableObject, Identifiable {
 
     func close() {
         closed = true
+        endOpenInterval("closed")
         streamAwaitsCursor = false
         sessionStreamTask?.cancel()
         detailReloadTask?.cancel()
@@ -315,6 +340,7 @@ final class SessionPane: ObservableObject, Identifiable {
             if older != olderItems { olderItems = older }
             dropUnpublishedDetail()
             detail = merged
+            endOpenInterval("loaded")
             detailStale = false
             detailRefreshFailed = false
             model.detailLoaded(merged, for: id)
@@ -327,6 +353,7 @@ final class SessionPane: ObservableObject, Identifiable {
         } catch {
             guard !closed, sessionLoadIsCurrent(id, selectedID: selectedSessionID), removedSession?.id != id, !error.isCancellation else { return true }
             detailLoadError = AgenthailAPIError.userMessage(error)
+            if let openInterval { Self.signposter.emitEvent("Session open failed", id: openInterval.id) }
             if detail?.session.id == id {
                 detailStale = true
                 detailRefreshFailed = true
@@ -565,6 +592,7 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     private func freezeRemovedSession() {
+        endOpenInterval("removed")
         streamAwaitsCursor = false
         sessionStreamTask?.cancel()
         dropUnpublishedDetail()
