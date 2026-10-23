@@ -97,3 +97,25 @@ func TestASessionsCommandsAreOneJournalRowThatIsNoTimelineItem(t *testing.T) {
 		t.Fatalf("row = %+v", row)
 	}
 }
+
+func TestAStreamThatStartsOverWithTheSameCommandsLeavesTheirRowAsItIs(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	listed := func() *surface.RuntimeCommands {
+		return &surface.RuntimeCommands{Commands: []surface.RuntimeCommand{{Name: "review", Description: "Review", Insert: "/review"}}}
+	}
+	source.append(surface.StreamEvent{ID: "commands", ProviderKey: "commands", Version: 1, Operation: "replace", Kind: "commands", Commands: listed()})
+	stored, found, err := reg.SessionJournalEntryByProviderKey(from.ID, "state:commands")
+	if err != nil || !found {
+		t.Fatalf("found=%v err=%v", found, err)
+	}
+	source.append(surface.StreamEvent{ID: "commands", ProviderKey: "commands", Version: 1, Operation: "replace", Kind: "commands", Commands: listed()})
+	again, _, err := reg.SessionJournalEntryByProviderKey(from.ID, "state:commands")
+	if err != nil || again.Seq != stored.Seq || string(again.Payload) != string(stored.Payload) {
+		t.Fatalf("row seq %d -> %d, want the same row", stored.Seq, again.Seq)
+	}
+	source.append(surface.StreamEvent{ID: "commands", ProviderKey: "commands", Version: 1, Operation: "replace", Kind: "commands", Commands: &surface.RuntimeCommands{Commands: []surface.RuntimeCommand{}, Unavailable: "gone"}})
+	if changed, _, _ := reg.SessionJournalEntryByProviderKey(from.ID, "state:commands"); changed.Seq == stored.Seq {
+		t.Fatal("a changed list left the row as it was")
+	}
+}

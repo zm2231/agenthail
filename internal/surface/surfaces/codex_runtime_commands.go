@@ -56,11 +56,3 @@ func codexSkillDescription(skill map[string]any) string {
 	}
 	return str(skill, "description")
 }
-
-func (c *Codex) emitCommands(ctx context.Context, sess *surface.Session, onEvent func(surface.StreamEvent), version uint64) {
-	commands, err := c.Commands(ctx, sess)
-	if err != nil || commands == nil {
-		return
-	}
-	onEvent(surface.StreamEvent{ID: "commands", ProviderKey: "commands", Version: version, Operation: "replace", Kind: "commands", Commands: commands})
-}

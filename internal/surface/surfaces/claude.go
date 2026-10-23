@@ -1241,7 +1241,13 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 }
 
 func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
-	var commands claudeCommandsStream
+	var commands *commandsWatch
+	if uuid == "" {
+		onEvent = serializedEvents(onEvent)
+		listed := *sess
+		commands = watchCommands(ctx, func(ctx context.Context) (*surface.RuntimeCommands, error) { return c.Commands(ctx, &listed) }, onEvent)
+		defer commands.Stop()
+	}
 	path, err := c.sessionTranscript(sess)
 	if err != nil {
 		return err
@@ -1386,7 +1392,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			if changed {
 				onEvent(surface.StreamEvent{ID: "goal", ProviderKey: "goal", Version: version, Operation: "replace", Kind: "goal", Goal: goal})
 			}
-			commands.emit(ctx, c, sess, onEvent)
+			commands.Refresh()
 		}
 		finish(turns.settle(func(at time.Time) bool { return c.settledAfter(sess, at) }))
 		if turns.closing.TurnID != "" {

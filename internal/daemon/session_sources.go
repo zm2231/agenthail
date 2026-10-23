@@ -1245,6 +1245,9 @@ func mergeSeedField(target *string, value string) {
 }
 
 func (s *sessionSource) append(event surface.StreamEvent) {
+	if event.Kind == "commands" && s.commandsStored(event.Commands) {
+		return
+	}
 	if event.Context != nil {
 		current := s.session
 		if refreshed, err := s.manager.registry.Session(s.session.ID); err == nil {
@@ -1514,4 +1517,18 @@ func unavailableOf(commands *surface.RuntimeCommands) string {
 		return ""
 	}
 	return commands.Unavailable
+}
+
+// Each stream starts its commands over, so a list already in the journal is
+// left as it is.
+func (s *sessionSource) commandsStored(commands *surface.RuntimeCommands) bool {
+	entry, found, err := s.manager.registry.SessionJournalEntryByProviderKey(s.session.ID, "state:commands")
+	if err != nil || !found {
+		return false
+	}
+	var stored sessionJournalPayload
+	if json.Unmarshal(entry.Payload, &stored) != nil {
+		return false
+	}
+	return slices.Equal(stored.Commands, commandsOf(commands)) && stored.Unavailable == unavailableOf(commands)
 }
