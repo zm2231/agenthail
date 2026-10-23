@@ -25,7 +25,7 @@ type ClaudeConfigRoot struct {
 	SignedInAs    *ClaudeLogin `json:"signedInAs,omitempty"`
 	Signin        string       `json:"signin,omitempty"`
 	SigninProblem string       `json:"signinProblem,omitempty"`
-	Usage         *ClaudeUsage `json:"usage,omitempty"`
+	Usage         *Usage       `json:"usage,omitempty"`
 	UsageProblem  string       `json:"usageProblem,omitempty"`
 	Error         string       `json:"error,omitempty"`
 }
@@ -38,13 +38,14 @@ type ClaudeLogin struct {
 	OrganizationID string `json:"-"`
 }
 
-// ClaudeUsage is a login's limits as claude.ai reported them at FetchedAt.
-type ClaudeUsage struct {
-	FetchedAt time.Time          `json:"fetchedAt"`
-	Limits    []ClaudeUsageLimit `json:"limits,omitempty"`
+// Usage is an account's limits as its provider last reported them, at
+// FetchedAt: claude.ai for a Claude login, the newest rollout for Codex.
+type Usage struct {
+	FetchedAt time.Time     `json:"fetchedAt"`
+	Limits    []UsageWindow `json:"limits,omitempty"`
 }
 
-type ClaudeUsageLimit struct {
+type UsageWindow struct {
 	Kind     string    `json:"kind"`
 	Group    string    `json:"group,omitempty"`
 	Scope    string    `json:"scope,omitempty"`
@@ -53,7 +54,7 @@ type ClaudeUsageLimit struct {
 	ResetsAt time.Time `json:"resetsAt,omitzero"`
 }
 
-func (u *ClaudeUsage) Exhausted(now time.Time) (time.Time, bool) {
+func (u *Usage) Exhausted(now time.Time) (time.Time, bool) {
 	if u == nil {
 		return time.Time{}, false
 	}

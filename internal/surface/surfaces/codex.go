@@ -32,6 +32,8 @@ type Codex struct {
 	contextState map[string]*codexContextState
 	sweepMu      sync.Mutex
 	lastSweep    time.Time
+	usageMu      sync.Mutex
+	usageReads   map[string]*codexUsageRead
 }
 
 func NewCodex(remoteURL string) *Codex {

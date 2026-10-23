@@ -19,19 +19,11 @@ struct ClaudeConfigRootOption: Decodable, Hashable, Identifiable {
     struct Login: Decodable, Hashable {
         var email: String? = nil
     }
-    struct Usage: Decodable, Hashable {
-        struct Limit: Decodable, Hashable {
-            let kind: String
-            let percent: Double
-            var resetsAt: String? = nil
-        }
-        var limits: [Limit]? = nil
-    }
     let name: String
     let root: String
     let primary: Bool
     var signedInAs: Login? = nil
-    var usage: Usage? = nil
+    var usage: ProviderUsage? = nil
     var id: String { root }
     var choice: String { primary ? "" : root }
     var signedIn: Bool { signedInAs != nil }
@@ -135,9 +127,25 @@ struct SessionConfigRoot: Codable, Hashable {
 
 /// One config root's current usage, read from claude.ai after the new-session
 /// form has shown the roots.
+/// An account's limits as its provider last reported them, at fetchedAt.
+struct ProviderUsage: Decodable, Hashable {
+    struct Limit: Decodable, Hashable {
+        let kind: String
+        let percent: Double
+        var resetsAt: String? = nil
+    }
+    var fetchedAt: String? = nil
+    var limits: [Limit]? = nil
+}
+
 struct ClaudeRootUsage: Decodable {
     let root: String
-    var usage: ClaudeConfigRootOption.Usage? = nil
+    var usage: ProviderUsage? = nil
+    var usageProblem: String? = nil
+}
+
+struct CodexUsage: Decodable {
+    var usage: ProviderUsage? = nil
     var usageProblem: String? = nil
 }
 

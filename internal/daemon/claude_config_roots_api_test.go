@@ -66,9 +66,9 @@ func TestClaudeRootsAPIReportsEachRootsSigninAndLiveUsage(t *testing.T) {
 		t.Fatalf("the new-session form must get the roots without waiting on claude.ai: calls=%d roots=%+v", claudeCalls.Load()-before, options.ClaudeConfigRoots)
 	}
 	var usage struct {
-		Root         string               `json:"root"`
-		Usage        *surface.ClaudeUsage `json:"usage"`
-		UsageProblem string               `json:"usageProblem"`
+		Root         string         `json:"root"`
+		Usage        *surface.Usage `json:"usage"`
+		UsageProblem string         `json:"usageProblem"`
 	}
 	if code := api.do(http.MethodGet, "/api/v1/session-options/claude-usage?root="+url.QueryEscape(options.ClaudeConfigRoots[0].Root), "", &usage); code != http.StatusOK {
 		t.Fatalf("claude-usage status=%d", code)
@@ -93,8 +93,8 @@ func TestClaudeRootUsageSaysALoginHasNoProfileWithoutNamingTheProfiles(t *testin
 	})}
 	api := signinAPIClient{t: t, handler: d.dashboardHandler(&dashboardServer{token: "secret"}), token: "secret"}
 	var usage struct {
-		Usage        *surface.ClaudeUsage `json:"usage"`
-		UsageProblem string               `json:"usageProblem"`
+		Usage        *surface.Usage `json:"usage"`
+		UsageProblem string         `json:"usageProblem"`
 	}
 	if code := api.do(http.MethodGet, "/api/v1/session-options/claude-usage?root="+url.QueryEscape(filepath.Join(home, ".claude")), "", &usage); code != http.StatusOK {
 		t.Fatalf("status=%d", code)

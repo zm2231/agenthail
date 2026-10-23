@@ -44,6 +44,7 @@ SOURCES=(
   macOS/InterfaceStore.swift
   macOS/Backdrop.swift
   macOS/BoundedDock.swift
+  macOS/UsageMeters.swift
   macOS/CatalogPosition.swift
   macOS/ComposerKeys.swift
   macOS/ComposerNSTextView.swift
