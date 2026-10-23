@@ -74,6 +74,17 @@ struct ToolActivityVectorsTest {
         ("parallel calls", [item("a", "toolCall", turn: "t1"), item("b", "toolCall", turn: "t1"), item("d", "done", turn: "t1", status: "cancelled"), item("c", "toolCall", turn: "t2")], true),
     ]
 
+    static let outputs: [String] = [
+        "",
+        "ok",
+        (1...30).map { "line \($0)" }.joined(separator: "\n"),
+        (1...24).map { "line \($0)" }.joined(separator: "\n") + "\n",
+        String(repeating: "x", count: 5000),
+        String(repeating: "👍🏽", count: 3100),
+        "first\r\nsecond\nthird",
+        "e\u{301}\n" + String(repeating: "é", count: 2999),
+    ]
+
     static func vectors() throws -> [String: Any] {
         let presentations: [[String: Any]] = calls.map { name, text in
             let tool = ToolPresentation(name: name, text: text)
@@ -93,7 +104,10 @@ struct ToolActivityVectorsTest {
                     "states": Dictionary(uniqueKeysWithValues: calls.map { ($0.id, states[$0.id].rawValue) })]
         }
         let labels = Dictionary(uniqueKeysWithValues: [ToolCallState.running, .interrupted, .failed, .unrecorded, .later].map { ($0.rawValue, $0.label) })
-        return ["calls": presentations, "states": states, "labels": labels]
+        let previews: [[String: Any]] = outputs.map { text in
+            ["text": text, "preview": ToolRunSummary.outputPreview(text), "lines": text.split(separator: "\n", omittingEmptySubsequences: false).count]
+        }
+        return ["calls": presentations, "states": states, "labels": labels, "outputs": previews]
     }
 
     static func main() throws {

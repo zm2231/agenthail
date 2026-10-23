@@ -2399,9 +2399,6 @@ select {
   gap: 10px;
 }
 
-.copy-output {
-  margin: 8px 0 4px;
-}
 .attached-files {
   display: flex;
   flex-wrap: wrap;
@@ -2568,4 +2565,44 @@ select {
   padding: 8px 12px;
   border-left: 3px solid var(--warn);
   color: var(--muted);
+}
+.tool-result-head,
+.tool-result-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+}
+.tool-result-head .tool-result-label {
+  margin-right: auto;
+}
+.tool-control,
+.tool-collapse {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tool-control:hover,
+.tool-collapse:hover {
+  color: var(--ink);
+}
+.tool-output.paged {
+  max-height: none;
+}
+.tool-collapse {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 28px;
+  margin-bottom: 4px;
+  text-align: left;
+}
+.tool-collapse::before {
+  content: "⌃";
+  margin-right: 6px;
+  color: var(--quiet);
 }

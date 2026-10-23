@@ -1685,7 +1685,7 @@ function renderTimelineItem(item, session, turnEnd = null) {
     const until = resets ? ` Resets ${new Date(resets).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.` : "";
     return `<div class="timeline-item timeline-notice" role="status" ${attributes}><strong>${escape(item.title || "Notice")}</strong> ${escape(item.text || "")}${escape(until)}${metadata}</div>`;
   }
-  if (toolKinds.includes(kind)) return renderToolRun([item]);
+  if (toolKinds.includes(kind)) return renderToolRun([item], session);
   const title = item.title || "Unknown timeline item";
   const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';
   return `<article class="turn timeline-item timeline-${kindClass} timeline-unknown" ${attributes}><header class="turn-header"><span class="turn-label">${escape(title)}</span><span class="timeline-kind">${escape(kind)}</span></header>${metadata}<div class="turn-content">${body}</div></article>`;
@@ -1713,18 +1713,58 @@ const foldToolsAfter = 6;
 function isFailedTool(item) {
   return item.status === "failed" || item.status === "error";
 }
-function renderToolLine(line, failed, attributes, body, open) {
-  const object = line.object ? `<span class="tool-object${line.code ? " code" : ""}">${escape(line.object)}</span>` : "";
-  return `<details class="timeline-item tool-line${failed ? " failed" : ""}" ${attributes}${open ? " open" : ""}><summary><span class="tool-mark" aria-hidden="true">◆</span><span class="tool-verb">${escape(line.verb)}</span>${object}${failed ? '<span class="tool-failed">failed</span>' : ""}</summary><div class="tool-body">${body}</div></details>`;
+// What the reader opened, closed or paged in tool activity, by session and row, so a re-render keeps it.
+const toolRows = new Map();
+function toolRowKey(session, id) {
+  return `${session?.id || ""} ${id}`;
 }
-function renderToolOutput(result) {
+function renderToolLine(line, failed, attributes, body, key, open, collapse = "") {
+  const object = line.object ? `<span class="tool-object${line.code ? " code" : ""}">${escape(line.object)}</span>` : "";
+  const end = collapse ? renderCollapse(collapse) : "";
+  return `<details class="timeline-item tool-line${failed ? " failed" : ""}" ${attributes} data-row="${escape(key)}"${(toolRows.get(key) ?? open) ? " open" : ""}><summary><span class="tool-mark" aria-hidden="true">◆</span><span class="tool-verb">${escape(line.verb)}</span>${object}${failed ? '<span class="tool-failed">failed</span>' : ""}</summary><div class="tool-body">${body}${end}</div></details>`;
+}
+function renderCollapse(title) {
+  return `<button class="tool-collapse" type="button" data-collapse-row>${escape(title)}</button>`;
+}
+function renderToolOutput(result, session) {
   const metadata = renderTimelineMetadata(result);
   const failed = isFailedTool(result);
-  const body = result.text ? `<pre class="tool-output${failed ? " failed" : ""}">${escape(result.text)}</pre>` : '<p class="timeline-empty">The tool returned an empty result.</p>';
-  const copy = result.text ? `<button class="soft-button copy-output" type="button" data-copy-text="${escape(result.text)}">Copy output</button>` : "";
-  return `<div class="tool-result" ${timelineItemAttributes(result)}><div class="tool-result-label">${failed ? "Error output" : "Output"}</div>${body}${copy}${metadata}</div>`;
+  const key = toolRowKey(session, `output:${result.id}`);
+  const text = result.text || "";
+  const lines = tools.outputLines(text);
+  const preview = tools.outputPreview(text);
+  const shown = preview.length < text.length ? Math.min(toolRows.get(key) || 0, lines.length) : 0;
+  const more = shown < lines.length ? `<button class="tool-control" type="button" data-output-show="${shown + tools.outputPage}">${shown ? `Show ${Math.min(tools.outputPage, lines.length - shown)} more lines` : `Show all ${lines.length} lines`}</button>` : "";
+  const paging = preview.length < text.length ? more + (shown ? '<button class="tool-control" type="button" data-output-show="0">Show less</button>' : "") : "";
+  const copy = text ? `<button class="tool-control" type="button" data-copy-text="${escape(text)}">Copy output</button>` : "";
+  const body = text ? `<pre class="tool-output${failed ? " failed" : ""}${shown ? " paged" : ""}">${escape(shown ? lines.slice(0, shown).join("\n") : preview)}</pre>` : '<p class="timeline-empty">The tool returned an empty result.</p>';
+  // The pages can run long, so the same controls follow them; Show less there brings the output's top back.
+  const end = shown ? `<div class="tool-result-controls">${more}<button class="tool-control" type="button" data-output-show="0" data-reveal>Show less</button></div>` : "";
+  return `<div class="tool-result" ${timelineItemAttributes(result)} data-row="${escape(key)}"><div class="tool-result-head"><span class="tool-result-label">${failed ? "Error output" : "Output"}</span>${paging}${copy}</div>${body}${end}${metadata}</div>`;
 }
-function renderToolRun(items, states = new Map()) {
+// Pages a tool's output in place, without re-rendering the transcript around it.
+function showToolOutput(button) {
+  const block = button.closest(".tool-result[data-row]");
+  const result = (app.history?.timeline?.items || []).find((item) => item.id === block?.dataset.timelineItem);
+  if (!block || !result) return;
+  toolRows.set(block.dataset.row, Number(button.dataset.outputShow) || 0);
+  const reveal = button.hasAttribute("data-reveal");
+  block.outerHTML = renderToolOutput(result, app.selected);
+  if (reveal) $("#chat-body").querySelector(`.tool-result[data-row="${CSS.escape(block.dataset.row)}"]`)?.scrollIntoView({ block: "nearest" });
+}
+// Folds the row a bottom control belongs to and scrolls its header back into view.
+function collapseToolRow(button) {
+  const row = button.closest("details[data-row]");
+  if (!row) return;
+  row.open = false;
+  toolRows.set(row.dataset.row, false);
+  row.querySelector(":scope > summary")?.scrollIntoView({ block: "nearest" });
+}
+function rememberToolRow(event) {
+  const row = event.target;
+  if (row.matches?.("details[data-row]")) toolRows.set(row.dataset.row, row.open);
+}
+function renderToolRun(items, session, states = new Map()) {
   const entries = [];
   const calls = new Map();
   for (const item of items) {
@@ -1742,15 +1782,15 @@ function renderToolRun(items, states = new Map()) {
     const attributes = timelineItemAttributes(item);
     if (item.kind === "reasoning") {
       const body = item.text ? `<div class="turn-content">${markdown(item.text)}</div>` : '<p class="timeline-empty">No recorded content.</p>';
-      return renderToolLine({ verb: "Thought", object: tools.firstLine(item.text), code: false }, false, attributes, body + renderTimelineMetadata(item), false);
+      return renderToolLine({ verb: "Thought", object: tools.firstLine(item.text), code: false }, false, attributes, body + renderTimelineMetadata(item), toolRowKey(session, item.id), false);
     }
     if (item.kind === "toolResult") {
-      return renderToolLine({ verb: "Output", object: tools.firstLine(item.text), code: true }, isFailedTool(item), attributes, renderToolOutput(item), isFailedTool(item));
+      return renderToolLine({ verb: "Output", object: tools.firstLine(item.text), code: true }, isFailedTool(item), attributes, renderToolOutput(item, session), toolRowKey(session, item.id), isFailedTool(item));
     }
     const failed = isFailedTool(item) || results.some(isFailedTool);
     const input = item.text ? `<pre class="tool-input">${escape(tools.readableInput(item.text))}</pre>` : '<p class="timeline-empty">No recorded input.</p>';
-    const outputs = results.length ? results.map(renderToolOutput).join("") : `<p class="timeline-empty">${escape(tools.callStateLabels[states.get(item.id) || "unrecorded"])}</p>`;
-    return renderToolLine(tools.toolLine(item), failed, attributes, (failed ? "" : input + renderTimelineMetadata(item)) + outputs, failed);
+    const outputs = results.length ? results.map((result) => renderToolOutput(result, session)).join("") : `<p class="timeline-empty">${escape(tools.callStateLabels[states.get(item.id) || "unrecorded"])}</p>`;
+    return renderToolLine(tools.toolLine(item), failed, attributes, (failed ? "" : input + renderTimelineMetadata(item)) + outputs, toolRowKey(session, item.id), failed, "Collapse tool");
   });
   const changes = [];
   for (const { item, results } of entries) {
@@ -1770,7 +1810,8 @@ function renderToolRun(items, states = new Map()) {
   if (callCount <= foldToolsAfter) return `<section class="tool-run">${lines.join("")}${chips}</section>`;
   const failures = entries.filter(({ item, results }) => isFailedTool(item) || results.some(isFailedTool)).length;
   const summary = `<summary><span class="tool-mark" aria-hidden="true">◆</span><span class="tool-verb">${escape(toolRunLabel(entries))}</span>${failures ? `<span class="tool-failed">${failures} failed</span>` : ""}</summary>`;
-  return `<section class="tool-run"><details class="tool-line tool-fold">${summary}<div class="tool-fold-lines">${lines.join("")}</div></details>${chips}</section>`;
+  const key = toolRowKey(session, `run:${entries[0].item.id}`);
+  return `<section class="tool-run"><details class="tool-line tool-fold" data-row="${escape(key)}"${toolRows.get(key) ? " open" : ""}>${summary}<div class="tool-fold-lines">${lines.join("")}${renderCollapse("Collapse activity")}</div></details>${chips}</section>`;
 }
 function toolRunLabel(entries) {
   const counts = new Map();
@@ -1792,7 +1833,7 @@ function renderTimeline(items, session) {
   let run = [];
   const states = tools.toolCallStates(items, session.status === "busy" || Boolean(session.waitingOn));
   const flush = () => {
-    if (run.length) out.push(renderToolRun(run, states));
+    if (run.length) out.push(renderToolRun(run, session, states));
     run = [];
   };
   for (let index = 0; index < items.length; index += 1) {
@@ -2547,6 +2588,10 @@ function renderSlashMenu() {
     .join("");
 }
 document.addEventListener("click", async (event) => {
+  const outputShow = event.target.closest("[data-output-show]");
+  if (outputShow) return showToolOutput(outputShow);
+  const collapseRow = event.target.closest("[data-collapse-row]");
+  if (collapseRow) return collapseToolRow(collapseRow);
   const copyOutput = event.target.closest("[data-copy-text]");
   if (copyOutput) {
     try {
@@ -2793,6 +2838,8 @@ $("#message").addEventListener("input", () => {
   syncComposerAction();
 });
 $("#steer-message").addEventListener("click", () => send("steer"));
+// toggle does not bubble, so the transcript listens for it on the way down.
+$("#chat-body").addEventListener("toggle", rememberToolRow, true);
 $("#composer").addEventListener("submit", (event) => {
   event.preventDefault();
   send();

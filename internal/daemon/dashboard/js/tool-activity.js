@@ -199,3 +199,26 @@ export function toolCallStates(items, active) {
   for (const call of open) states.set(call.id, active ? "running" : "unrecorded");
   return states;
 }
+
+// Output lines as ToolRunSummary splits them: "\r\n" is one Swift character, so it does not end a line.
+export function outputLines(text) {
+  return String(text ?? "").split(/(?<!\r)\n/);
+}
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+// The first 24 lines, then at most 3000 characters, as ToolRunSummary.outputPreview.
+export function outputPreview(text) {
+  const head = outputLines(text).slice(0, 24).join("\n");
+  let preview = "";
+  let count = 0;
+  for (const { segment } of graphemes.segment(head)) {
+    if (count === 3000) break;
+    preview += segment;
+    count += 1;
+  }
+  return preview;
+}
+
+// Lines each "Show more" adds, as the Mac's ToolOutputBlock.page.
+export const outputPage = 500;
