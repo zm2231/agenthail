@@ -214,11 +214,12 @@ func TestLaunchdServiceOfAnotherHomeIsLeftAlone(t *testing.T) {
 			if err != nil || !running || pid == live {
 				t.Fatalf("restart = %v, daemon %d, %v (service daemon %d)\n%s", err, pid, running, live, out)
 			}
+			if out, err := captureStdout(t, launchdService{}.Install); err == nil || !strings.Contains(err.Error(), launchAgentPath(label)) {
+				t.Fatalf("install from another HOME = %v\n%s", err, out)
+			}
 			if label == daemonLaunchdLabel {
-				for _, op := range []func() error{launchdService{}.Install, launchdService{}.Uninstall} {
-					if out, err := captureStdout(t, op); err == nil {
-						t.Fatalf("install or uninstall from another HOME succeeded\n%s", out)
-					}
+				if out, err := captureStdout(t, launchdService{}.Uninstall); err == nil {
+					t.Fatalf("uninstall from another HOME succeeded\n%s", out)
 				}
 			}
 			if fake.called("kickstart") || fake.called("bootout") || fake.called("bootstrap") {
@@ -228,5 +229,19 @@ func TestLaunchdServiceOfAnotherHomeIsLeftAlone(t *testing.T) {
 				t.Fatalf("service daemon %d stopped: %v", live, err)
 			}
 		})
+	}
+}
+
+func TestParseLaunchdJobReadsOnlyTheJobsOwnFields(t *testing.T) {
+	output := "gui/501/com.agenthail.daemon = {\n" +
+		"\tactive count = 1\n" +
+		"\tendpoints = {\n\t\tpath = /nested/endpoint\n\t\tpid = 7\n\t}\n" +
+		"\tpath = /Users/a/Library/LaunchAgents/com.agenthail.daemon.plist\n" +
+		"\tstdout path = /Users/a/.agenthail/daemon.log\n" +
+		"\tpid = 52272\n" +
+		"}\n"
+	job := parseLaunchdJob(output)
+	if job.path != "/Users/a/Library/LaunchAgents/com.agenthail.daemon.plist" || job.pid != 52272 {
+		t.Fatalf("parsed %+v", job)
 	}
 }

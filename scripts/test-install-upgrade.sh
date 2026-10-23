@@ -282,6 +282,16 @@ test "$(plutil -extract EnvironmentVariables.AGENTHAIL_PYTHON raw -o - "$SUPERVI
 test "$(plutil -extract EnvironmentVariables.AGENTHAIL_CLAUDE_BIN raw -o - "$SUPERVISED_PLIST")" = "$SUPERVISED_HOME/custom Claude & tools/claude"
 test "$(plutil -extract ProcessType raw -o - "$SUPERVISED_PLIST")" = Standard
 
+echo "/Users/another-user/Library/LaunchAgents/com.agenthail.daemon.plist" >"$SUPERVISED_HOME/.fake-agenthail-launchd-plist"
+install_once "$SUPERVISED_HOME" "$SUPERVISED_BIN" "$SUPERVISED_DATA_1" >"$TMP/other-home-service.log"
+grep -Fq 'leaving the supervised daemon loaded from /Users/another-user/Library/LaunchAgents/com.agenthail.daemon.plist unchanged' "$TMP/other-home-service.log"
+if grep -Fq 'supervised daemon for upgrade' "$TMP/other-home-service.log" || grep -Fq 'reinstalling supervised daemon' "$TMP/other-home-service.log"; then
+	echo "error: install with another HOME's launchd service loaded replaced that service" >&2
+	exit 1
+fi
+test -f "$SUPERVISED_HOME/.fake-agenthail-launchd-loaded"
+echo "$SUPERVISED_PLIST" >"$SUPERVISED_HOME/.fake-agenthail-launchd-plist"
+
 install_from_source >"$TMP/source-install.log"
 strings "$SOURCE_DATA/agenthail" | grep -F 'https://relay.example.test' >/dev/null
 HOME="$SOURCE_HOME" PATH="$FAKE_BIN:$SOURCE_BIN:/opt/homebrew/bin:/usr/bin:/bin" agenthail daemon status >/dev/null
@@ -291,4 +301,5 @@ echo "fresh install rollback: OK"
 echo "custom wrapper upgrade: OK"
 echo "post-activation rollback: OK"
 echo "wrapper collision safety: OK"
+echo "another HOME's launchd service: OK"
 echo "source relay configuration: OK"

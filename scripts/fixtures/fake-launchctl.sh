@@ -2,6 +2,7 @@
 set -euo pipefail
 
 STATE="$HOME/.fake-agenthail-launchd-loaded"
+LOADED_PLIST="$HOME/.fake-agenthail-launchd-plist"
 PIDFILE="$HOME/.agenthail/daemon.pid"
 
 case "${1:-}" in
@@ -9,6 +10,7 @@ case "${1:-}" in
 		case "${2:-}" in
 			*com.agenthail.daemon*)
 				test -f "$STATE"
+				echo "	path = $(cat "$LOADED_PLIST")"
 				echo "	pid = $(cat "$HOME/.fake-agenthail-launchd-last-pid")"
 				;;
 			*) exit 1 ;;
@@ -27,7 +29,7 @@ case "${1:-}" in
 				sleep 0.05
 			done
 		fi
-		rm -f "$STATE"
+		rm -f "$STATE" "$LOADED_PLIST"
 		;;
 	bootstrap)
 		plist="${3:?missing plist path}"
@@ -35,6 +37,7 @@ case "${1:-}" in
 		mkdir -p "$HOME/.agenthail"
 		"$program" daemon-run >>"$HOME/.agenthail/fake-launchd.log" 2>&1 &
 		echo "$!" >"$HOME/.fake-agenthail-launchd-last-pid"
+		echo "$plist" >"$LOADED_PLIST"
 		touch "$STATE"
 		;;
 	kickstart)

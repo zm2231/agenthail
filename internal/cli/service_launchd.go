@@ -167,8 +167,10 @@ func (launchdService) Install() error {
 	if homebrewDaemonManaged() {
 		return fmt.Errorf("daemon is managed by Homebrew; use 'brew services restart agenthail'")
 	}
-	if err := refuseOtherHomesService(daemonLaunchdLabel, "install"); err != nil {
-		return err
+	for _, label := range []string{daemonLaunchdLabel, homebrewDaemonLaunchdLabel} {
+		if err := refuseOtherHomesService(label, "install a second Agenthail service"); err != nil {
+			return err
+		}
 	}
 	domain := fmt.Sprintf("gui/%d", os.Getuid())
 	_ = exec.Command("launchctl", "bootout", domain+"/"+daemonLaunchdLabel).Run()
@@ -230,7 +232,7 @@ func (launchdService) Uninstall() error {
 	if homebrewDaemonManaged() {
 		return fmt.Errorf("daemon is managed by Homebrew; use 'brew services stop agenthail'")
 	}
-	if err := refuseOtherHomesService(daemonLaunchdLabel, "uninstall"); err != nil {
+	if err := refuseOtherHomesService(daemonLaunchdLabel, "uninstall it"); err != nil {
 		return err
 	}
 	domain := fmt.Sprintf("gui/%d", os.Getuid())
@@ -313,14 +315,14 @@ func (job launchdJob) belongsToThisHome(label string) bool {
 	return job.path == "" || samePath(job.path, launchAgentPath(label))
 }
 
-// refuseOtherHomesService stops action from booting out a label another HOME
-// loaded; launchd holds one job per label for the user.
+// refuseOtherHomesService refuses action while another HOME's job holds label;
+// launchd holds one job per label for the user.
 func refuseOtherHomesService(label, action string) error {
 	job, loaded := printLaunchdJob(label)
 	if !loaded || job.belongsToThisHome(label) {
 		return nil
 	}
-	return fmt.Errorf("launchd service %s runs the daemon from %s, not this HOME's %s; refusing to %s it", label, job.path, launchAgentPath(label), action)
+	return fmt.Errorf("launchd service %s runs the daemon from %s, not this HOME's %s; refusing to %s", label, job.path, launchAgentPath(label), action)
 }
 
 func samePath(a, b string) bool {
@@ -332,9 +334,14 @@ func samePath(a, b string) bool {
 	return errA == nil && errB == nil && resolvedA == resolvedB
 }
 
+// parseLaunchdJob reads the job's own fields, which launchctl print indents by
+// one tab; nested sections such as endpoints have their own path and pid.
 func parseLaunchdJob(output string) launchdJob {
 	var job launchdJob
 	for _, line := range strings.Split(output, "\n") {
+		if !strings.HasPrefix(line, "\t") || strings.HasPrefix(line, "\t\t") {
+			continue
+		}
 		line = strings.TrimSpace(line)
 		if value, ok := strings.CutPrefix(line, "path = "); ok && job.path == "" {
 			job.path = strings.TrimSpace(value)
