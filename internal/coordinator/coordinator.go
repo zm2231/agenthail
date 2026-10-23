@@ -154,7 +154,7 @@ func (s Service) deliver(ctx context.Context, spec registry.CoordinatorSpec, mes
 	// A new conversation's first turn is text, so attached files are named
 	// by their stored paths.
 	composed, _ := options.Uploads.Compose(message, false)
-	return s.start(ctx, spec, previous, reason, composed)
+	return s.start(ctx, spec, previous, reason, options.Sender(), composed)
 }
 
 // Restart starts a new conversation for a message the outbox holds for
@@ -186,7 +186,7 @@ func (s Service) Restart(ctx context.Context, session *surface.Session, message 
 	if reason == "" || current == nil || current.ID != session.ID {
 		return nil, false, nil
 	}
-	outcome, err := s.start(ctx, spec, current.ID, reason, message)
+	outcome, err := s.start(ctx, spec, current.ID, reason, surface.SendOptions{SourceSessionID: surface.SourceSessionID(ctx)}.Sender(), message)
 	return outcome, true, err
 }
 
@@ -260,7 +260,7 @@ func (s Service) queueUnavailable(session *surface.Session, message string, opti
 	return &Outcome{Receipt: receipt, Session: session}, nil
 }
 
-func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previous, reason, message string) (*Outcome, error) {
+func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previous, reason, sender, message string) (*Outcome, error) {
 	adapter := s.Adapters.ForSurface(surface.SurfaceKind(spec.Surface))
 	starter, ok := adapter.(surface.SessionStarter)
 	if adapter == nil || !ok {
@@ -291,7 +291,7 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	}
 	outcome := &Outcome{Session: session, Started: true, Previous: previous, Reason: reason}
 	if startErr != nil {
-		intent, intentErr := s.Registry.RecordSessionCreationIntent(session.ID, messageUUID, message)
+		intent, intentErr := s.Registry.RecordSessionCreationIntent(session.ID, sender, messageUUID, message)
 		if intentErr != nil {
 			return nil, errors.Join(startErr, intentErr)
 		}

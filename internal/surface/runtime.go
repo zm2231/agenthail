@@ -3,6 +3,8 @@ package surface
 import (
 	"fmt"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 // RuntimeKind is what currently carries a session's conversation. A surface
@@ -20,10 +22,54 @@ const (
 	RuntimeCodexDesktop     RuntimeKind = "codex-desktop"
 	RuntimeCodexAppServer   RuntimeKind = "codex-app-server"
 	RuntimeNotionWeb        RuntimeKind = "notion-web"
-	// RuntimeOperator marks Agenthail's own pseudo-sessions (the operator and
-	// peer bridges), which no adapter serves.
+	// RuntimeOperator marks Agenthail's own pseudo-sessions (the person, the
+	// Agenthail CLI and unrepliable senders), which no adapter serves.
 	RuntimeOperator RuntimeKind = "agenthail"
 )
+
+const (
+	// PersonSessionID sends what the person who runs this Agenthail wrote in
+	// any of their apps when no session of theirs sent it.
+	PersonSessionID = "agenthail-person"
+	// CLISessionID sends what agenthail send, a script or an API call sent
+	// from outside any session. A terminal is not proof of a person.
+	CLISessionID = "agenthail-cli"
+)
+
+// SourcelessSender is who sent a message that has no source session.
+func SourcelessSender(author Author) string {
+	if author == AuthorPerson {
+		return PersonSessionID
+	}
+	return CLISessionID
+}
+
+func (o SendOptions) Sender() string {
+	if o.SourceSessionID != "" {
+		return o.SourceSessionID
+	}
+	return SourcelessSender(o.Author)
+}
+
+// AgenthailSender returns the pseudo-session for the person or the Agenthail
+// CLI, or false for any other id. personName names the person.
+func AgenthailSender(id, personName string) (Session, bool) {
+	switch id {
+	case PersonSessionID:
+		return Session{ID: id, Surface: "person", RuntimeKind: RuntimeOperator, Name: personName, Status: StatusIdle}, true
+	case CLISessionID:
+		return Session{ID: id, Surface: "cli", RuntimeKind: RuntimeOperator, Name: "Agenthail CLI", Status: StatusIdle}, true
+	}
+	return Session{}, false
+}
+
+// CLILabel marks a message the Agenthail CLI sent as a turn, so the session
+// does not take a script's words for the person's.
+const CLILabel = "[from Agenthail CLI, no reply route] "
+
+func PeerUUID(kind SurfaceKind, id string) string {
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(string(kind)+":"+id)).String()
+}
 
 // Adapters resolves the adapter that serves a session.
 type Adapters []Surface
@@ -90,8 +136,11 @@ type NoReplyRouteError struct {
 }
 
 func (e NoReplyRouteError) Error() string {
-	if e.Host == "" {
-		return fmt.Sprintf("not delivered: %s is the Agenthail operator, which sends messages that have no session behind them (from the CLI, the dashboard or a script), and no session reads it. Send to the session that should act on this directly.", e.SessionID)
+	switch {
+	case e.SessionID == PersonSessionID:
+		return fmt.Sprintf("not delivered: %s is the person, who reads this session. Put your answer in your reply.", e.SessionID)
+	case e.Host == "":
+		return fmt.Sprintf("not delivered: %s is the Agenthail CLI, which sends messages from outside any session (agenthail send, a script or an API call), and no session reads it. Send to the session that should act on this directly.", e.SessionID)
 	}
 	ref := e.Host + "::" + e.Sender
 	return fmt.Sprintf("not delivered: %s has no reply route and no session reads it. It stands in for %s, session %s on host %s, which sent here without a route back. Send to the original sender directly: agenthail send %s \"<message>\" (this works from a machine paired with that host).", e.SessionID, e.Name, e.Sender, e.Host, ref)

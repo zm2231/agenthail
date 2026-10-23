@@ -113,7 +113,7 @@ func TestHeadlessCodexDashboardCreatesAndDrivesAThreadOnTheDaemon(t *testing.T) 
 	if code, body := fixture.action(t, map[string]any{"action": "send", "sessionId": id, "message": "Now finish it"}); code != http.StatusOK {
 		t.Fatalf("send status=%d body=%v", code, body)
 	}
-	if thread := fixture.thread(t, id); len(thread.Turns) != 2 || thread.Turns[1].User != "Now finish it" {
+	if thread := fixture.thread(t, id); len(thread.Turns) != 2 || thread.Turns[1].User != surface.CLILabel+"Now finish it" {
 		t.Fatalf("thread=%+v", thread)
 	}
 	if commands := fixture.lifecycle.Commands(); len(commands) != 1 {
@@ -144,7 +144,7 @@ func TestHeadlessCodexSendAfterAgenthailAndDaemonRestartsResumesTheThread(t *tes
 		t.Fatalf("send status=%d body=%v", code, body)
 	}
 	thread := fixture.thread(t, id)
-	if len(thread.Turns) != 3 || thread.Turns[2].User != "After a daemon crash" {
+	if len(thread.Turns) != 3 || thread.Turns[2].User != surface.CLILabel+"After a daemon crash" {
 		t.Fatalf("thread=%+v", thread)
 	}
 	if resumes := fixture.lifecycle.Daemon().Calls("thread/resume"); len(resumes) != 1 || resumes[0]["threadId"] != id {

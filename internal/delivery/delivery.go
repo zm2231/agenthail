@@ -147,11 +147,18 @@ func (d Dispatcher) goalReceipt(session *surface.Session, label string, err erro
 	return &Receipt{Evidence: surface.EvidenceDelivered, SessionID: session.ID}, nil
 }
 
-func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session *surface.Session, message string) (*Receipt, error) {
+func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session *surface.Session, message string, author surface.Author) (*Receipt, error) {
 	target := session.Name
 	if target == "" {
 		target = session.ID
 	}
+	sourceID := surface.SendOptions{SourceSessionID: surface.SourceSessionID(ctx), Author: author}.Sender()
+	if d.Registry != nil {
+		if err := d.Registry.EnsureSender(sourceID); err != nil {
+			return nil, fmt.Errorf("persist delivery source: %w", err)
+		}
+	}
+	ctx = surface.WithSourceSessionID(ctx, sourceID)
 	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
 		return nil, err
 	}
@@ -160,17 +167,10 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 		return nil, err
 	}
 	if observation != nil && observation.WaitingOn != nil && d.Registry != nil {
-		return d.queueForWaiting(ctx, session, message, target, observation.WaitingOn)
+		return d.queueForWaiting(session, message, target, sourceID, observation.WaitingOn)
 	}
 	var intent *registry.DeliveryIntent
 	if d.Registry != nil {
-		sourceID := surface.SourceSessionID(ctx)
-		if sourceID == "" {
-			if err := d.Registry.EnsureOperatorSession(); err != nil {
-				return nil, fmt.Errorf("persist operator delivery source: %w", err)
-			}
-			sourceID = registry.OperatorSessionID
-		}
 		var err error
 		intent, err = d.Registry.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: sourceID, TargetSessionID: session.ID, Message: message, Status: registry.DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
 		if err != nil {
@@ -211,14 +211,7 @@ func (d Dispatcher) steer(ctx context.Context, adapter surface.Surface, session 
 
 // queueForWaiting holds a steer for a turn that is waiting on its user, so the
 // message cannot land in the middle of the question. It steers once answered.
-func (d Dispatcher) queueForWaiting(ctx context.Context, session *surface.Session, message, target string, waiting *surface.Waiting) (*Receipt, error) {
-	sourceID := surface.SourceSessionID(ctx)
-	if sourceID == "" {
-		if err := d.Registry.EnsureOperatorSession(); err != nil {
-			return nil, fmt.Errorf("persist operator delivery source: %w", err)
-		}
-		sourceID = registry.OperatorSessionID
-	}
+func (d Dispatcher) queueForWaiting(session *surface.Session, message, target, sourceID string, waiting *surface.Waiting) (*Receipt, error) {
 	options := surface.SendOptions{SourceSessionID: sourceID, BusyDelivery: string(deliverypolicy.Steer)}
 	queueID, deliveryID, err := d.Registry.QueueDeliveryWithIntent(session.ID, message, "", options)
 	if err != nil {
@@ -246,11 +239,11 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if err := options.TurnOptions.Validate(adapter.Name()); err != nil {
 		return nil, surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
 	}
-	if options.SourceSessionID == "" && d.Registry != nil {
-		if err := d.Registry.EnsureOperatorSession(); err != nil {
-			return nil, fmt.Errorf("persist operator delivery source: %w", err)
+	if d.Registry != nil {
+		options.SourceSessionID = options.Sender()
+		if err := d.Registry.EnsureSender(options.SourceSessionID); err != nil {
+			return nil, fmt.Errorf("persist delivery source: %w", err)
 		}
-		options.SourceSessionID = registry.OperatorSessionID
 	}
 	ctx = surface.WithSourceSessionID(ctx, options.SourceSessionID)
 	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
@@ -392,12 +385,6 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 func (d Dispatcher) prepareIntent(sourceID, targetID, message string) (*registry.DeliveryIntent, error) {
 	if d.Registry == nil {
 		return nil, nil
-	}
-	if sourceID == "" {
-		if err := d.Registry.EnsureOperatorSession(); err != nil {
-			return nil, fmt.Errorf("persist operator delivery source: %w", err)
-		}
-		sourceID = registry.OperatorSessionID
 	}
 	intent, err := d.Registry.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: sourceID, TargetSessionID: targetID, Message: message, Status: registry.DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
 	if err != nil {

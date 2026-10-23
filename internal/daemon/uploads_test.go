@@ -182,7 +182,7 @@ func TestQueuedSendKeepsItsAttachments(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.drainMessageQueue(context.Background(), adapter, session)
-	if len(adapter.images) != 1 || len(adapter.images[0]) != 1 || adapter.images[0][0].MediaType != "image/png" || adapter.sent[len(adapter.sent)-1] != "when free" {
+	if len(adapter.images) != 1 || len(adapter.images[0]) != 1 || adapter.images[0][0].MediaType != "image/png" || adapter.sent[len(adapter.sent)-1] != surface.CLILabel+"when free" {
 		t.Fatalf("drained images=%+v sent=%q", adapter.images, adapter.sent)
 	}
 }
@@ -205,7 +205,7 @@ func TestFederationUploadLandsOnTheHostThatOwnsTheSession(t *testing.T) {
 		t.Fatalf("send status=%d body=%s", send.Code, send.Body.String())
 	}
 	delivered := remote.fake.delivered()
-	if len(delivered) != 1 || delivered[0] != "read this\n\nAttached file: "+remotePath {
+	if len(delivered) != 1 || delivered[0] != surface.CLILabel+"read this\n\nAttached file: "+remotePath {
 		t.Fatalf("remote delivered=%q", delivered)
 	}
 }

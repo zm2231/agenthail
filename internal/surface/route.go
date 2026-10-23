@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Route is the transport a message takes. It is derived from the target and
@@ -52,6 +53,9 @@ func (r Route) Validate(adapter Surface, options SendOptions) error {
 func (r Route) Send(ctx context.Context, adapter Surface, session *Session, message string, options SendOptions) (*SendResult, error) {
 	router, native := adapter.(ImageRouter)
 	message, options.Images = options.Uploads.Compose(message, native && router.NativeImages(session, r))
+	if _, routed := adapter.(Router); !routed {
+		message = LabelCLI(ctx, message)
+	}
 	if r == RouteHumanTurn {
 		return adapter.(HumanTurnSender).SendHumanTurn(ctx, session, message, options.Images)
 	}
@@ -59,4 +63,15 @@ func (r Route) Send(ctx context.Context, adapter Surface, session *Session, mess
 		return adapter.(OptionSender).SendWithOptions(ctx, session, message, options)
 	}
 	return adapter.Send(ctx, session, message)
+}
+
+// LabelCLI marks a message the Agenthail CLI sends as a turn. An adapter with
+// more than one route labels it where it knows the transport, because the
+// peer route names its sender in its own envelope. A channel post already
+// names its sender.
+func LabelCLI(ctx context.Context, message string) string {
+	if SourceSessionID(ctx) == CLISessionID && message != "" && !strings.HasPrefix(message, "[from ") {
+		return CLILabel + message
+	}
+	return message
 }

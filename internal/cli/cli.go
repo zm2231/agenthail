@@ -2660,7 +2660,7 @@ func (a *App) cmdSteer(args []string) error {
 	if strings.TrimSpace(message) == "" {
 		return fmt.Errorf("message is empty")
 	}
-	receipt, err := (delivery.Dispatcher{Registry: a.registry()}).Steer(ctx, surf, sess, message)
+	receipt, err := (delivery.Dispatcher{Registry: a.registry()}).Steer(ctx, surf, sess, message, "")
 	if err != nil {
 		return err
 	}

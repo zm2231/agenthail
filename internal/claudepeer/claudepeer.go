@@ -174,7 +174,7 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 	if err != nil {
 		return fmt.Errorf("read process start: %w", err)
 	}
-	claudeID := canonicalID(c.Session.Surface, c.Session.ID)
+	claudeID := surface.PeerUUID(c.Session.Surface, c.Session.ID)
 	socketPath := filepath.Join(c.SocketDir, strconv.Itoa(pid)+".sock")
 	controlPath := c.ControlPath
 	if controlPath == "" {
@@ -486,10 +486,6 @@ func normalizeConfig(c Config) (Config, error) {
 		c.Generation = "direct"
 	}
 	return c, nil
-}
-
-func canonicalID(kind surface.SurfaceKind, id string) string {
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(string(kind)+":"+id)).String()
 }
 
 func status(s surface.Session) string {
@@ -1473,10 +1469,16 @@ func peerContent(hostName string, session surface.Session, socket, fromMode, mes
 	if runes := []rune(name); len(runes) > 64 {
 		name = string(runes[:64]) + "…"
 	}
+	switch session.ID {
+	case surface.PersonSessionID:
+		message = session.Name + " wrote this in Agenthail. They read your reply here in this session; answer in your reply, not with SendMessage.\n\n" + message
+	case surface.CLISessionID:
+		message = "Sent with agenthail send from outside any session; no one reads replies to it.\n\n" + message
+	}
 	message = closingPeerTag.ReplaceAllString(message, `<\$1`)
 	mode := ""
 	if fromMode == "bypass" || fromMode == "prompting" {
 		mode = ` from-mode="` + fromMode + `"`
 	}
-	return fmt.Sprintf("<cross-session-message from=\"uds:%s\" from-session=\"%s\" from-name=\"%s\"%s>\n%s\n</cross-session-message>", socket, canonicalID(session.Surface, session.ID), name, mode, message)
+	return fmt.Sprintf("<cross-session-message from=\"uds:%s\" from-session=\"%s\" from-name=\"%s\"%s>\n%s\n</cross-session-message>", socket, surface.PeerUUID(session.Surface, session.ID), name, mode, message)
 }

@@ -24,7 +24,6 @@ import (
 )
 
 const (
-	OperatorID           = "agenthail-operator"
 	managerRequestBytes  = 128 << 10
 	managerReplyBytes    = 128 << 10
 	workerReadyBytes     = 8 << 10
@@ -290,7 +289,7 @@ var errPeerPoolFull = errors.New("Claude peer pool is full")
 // least useful peer rather than failing the delivery.
 func (m *Manager) Ensure(ctx context.Context, id string) error {
 	if id == "" {
-		id = OperatorID
+		id = surface.CLISessionID
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -362,25 +361,28 @@ func (m *Manager) ensureLocked(ctx context.Context, id string, send bool) error 
 	}
 	if len(m.children) >= m.peerLimit {
 		// An advertised session may only displace a peer outside the
-		// advertised set; a sender may displace any peer but the operator.
+		// advertised set; a sender may displace any peer but the person's or
+		// the CLI's.
 		victim := m.evictionCandidateLocked(send)
 		if victim == "" {
 			if !send {
 				return errPeerPoolFull
 			}
-			return fmt.Errorf("Claude peer limit (%d) reached by the operator peer alone", m.peerLimit)
+			return fmt.Errorf("Claude peer limit (%d) reached by Agenthail's own peers alone", m.peerLimit)
 		}
 		m.retireChildLocked(victim)
 	}
-	var session *surface.Session
-	var err error
-	if id == OperatorID {
-		session = &surface.Session{ID: id, Surface: "agenthail", RuntimeKind: surface.RuntimeOperator, Name: "operator", Status: surface.StatusIdle}
-	} else {
-		session, err = m.registry.Session(id)
-		if err != nil {
-			return fmt.Errorf("load sender %q: %w", id, err)
+	own := agenthailSender(id)
+	if own {
+		if err := m.registry.EnsureSender(id); err != nil {
+			return err
 		}
+	}
+	session, err := m.registry.Session(id)
+	if err != nil {
+		return fmt.Errorf("load sender %q: %w", id, err)
+	}
+	if !own {
 		if session.Status == surface.StatusOffline {
 			return fmt.Errorf("sender %q is offline", id)
 		}
@@ -390,11 +392,6 @@ func (m *Manager) ensureLocked(ctx context.Context, id string, send bool) error 
 			} else if aliasErr != nil && !errors.Is(aliasErr, sql.ErrNoRows) {
 				return fmt.Errorf("load sender handle: %w", aliasErr)
 			}
-		}
-	}
-	if id == OperatorID {
-		if err := m.registry.RegisterSession(*session); err != nil {
-			return err
 		}
 	}
 	hostName, err := m.owningHostName(id)
@@ -486,10 +483,17 @@ func (m *Manager) ensureLocked(ctx context.Context, id string, send bool) error 
 	return nil
 }
 
+// agenthailSender reports whether id is the person or the Agenthail CLI, whose
+// peers are never retired or replaced.
+func agenthailSender(id string) bool {
+	_, ok := surface.AgenthailSender(id, "")
+	return ok
+}
+
 // owningHostName names the paired host that owns a session, empty for this
 // host's own sessions.
 func (m *Manager) owningHostName(id string) (string, error) {
-	if id == OperatorID {
+	if agenthailSender(id) {
 		return "", nil
 	}
 	hostID, err := m.registry.SessionHost(id)
@@ -505,12 +509,12 @@ func (m *Manager) owningHostName(id string) (string, error) {
 
 func (m *Manager) Send(ctx context.Context, sourceID, targetSocket, message string) (*surface.SendResult, error) {
 	if sourceID == "" {
-		sourceID = OperatorID
+		sourceID = surface.CLISessionID
 	}
 	if err := claudepeer.ValidateSend(sourceID, targetSocket, message); err != nil {
 		return nil, err
 	}
-	if sourceID != OperatorID {
+	if !agenthailSender(sourceID) {
 		session, err := m.registry.Session(sourceID)
 		if err != nil {
 			return nil, surface.DeliveryUnavailable(fmt.Errorf("load sender %q: %w", sourceID, err))
@@ -525,7 +529,7 @@ func (m *Manager) Send(ctx context.Context, sourceID, targetSocket, message stri
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("register Claude peer: %w", err))
 	}
 	replySocket := ""
-	if sourceID != OperatorID {
+	if !agenthailSender(sourceID) {
 		session, err := m.registry.Session(sourceID)
 		if err != nil {
 			return nil, surface.DeliveryUnavailable(fmt.Errorf("load sender %q: %w", sourceID, err))
@@ -632,7 +636,7 @@ func (m *Manager) RetireInactive(now time.Time, maxIdle time.Duration) {
 	m.mu.Lock()
 	var retired []*child
 	for id, entry := range m.children {
-		if id == OperatorID {
+		if agenthailSender(id) {
 			continue
 		}
 		select {
@@ -687,12 +691,13 @@ func (m *Manager) RetireInactive(now time.Time, maxIdle time.Duration) {
 
 // evictionCandidateLocked picks the peer a new peer replaces: the least
 // recently used peer outside the advertised set, else, when advertised peers
-// may be replaced, the lowest ranked one. The operator peer is never replaced.
+// may be replaced, the lowest ranked one. The person's and the CLI's peers
+// are never replaced.
 func (m *Manager) evictionCandidateLocked(replaceAdvertised bool) string {
 	victim, victimRank := "", -1
 	var victimUsed time.Time
 	for id, entry := range m.children {
-		if id == OperatorID {
+		if agenthailSender(id) {
 			continue
 		}
 		rank, advertised := m.advertised[id]
@@ -883,7 +888,7 @@ func managerRequestError(request managerRequest, err error) error {
 
 func Send(ctx context.Context, home, sourceID, socket, message string) (*surface.SendResult, error) {
 	if sourceID == "" {
-		sourceID = OperatorID
+		sourceID = surface.CLISessionID
 	}
 	if err := claudepeer.ValidateSend(sourceID, socket, message); err != nil {
 		return nil, err

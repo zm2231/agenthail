@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os/user"
 	"strings"
 	"time"
 
@@ -17,22 +18,41 @@ const sqlRandomUUID = `lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || 
 
 type DeliveryIntentStatus string
 
-const OperatorSessionID = "agenthail-operator"
-
 // readsNotices reports whether a sender has a session that reads a delivery
-// notice. The operator and an unrepliable sender have none, so a notice queued
-// to them would stay pending forever.
+// notice. The person reads the target session itself, and the Agenthail CLI
+// and an unrepliable sender have no session, so a notice queued to them would
+// stay pending forever.
 func readsNotices(senderSessionID string) bool {
-	return senderSessionID != "" && senderSessionID != OperatorSessionID && !surface.IsUnrepliableSender(senderSessionID)
+	if _, ok := surface.AgenthailSender(senderSessionID, ""); ok {
+		return false
+	}
+	return senderSessionID != "" && !surface.IsUnrepliableSender(senderSessionID)
 }
 
-func (r *Registry) EnsureOperatorSession() error {
-	if _, err := r.Session(OperatorSessionID); err == nil {
+// EnsureSender records the person or the Agenthail CLI the first time either
+// sends, and does nothing for any other sender.
+func (r *Registry) EnsureSender(id string) error {
+	sender, ok := surface.AgenthailSender(id, PersonName())
+	if !ok {
+		return nil
+	}
+	if _, err := r.Session(id); err == nil {
 		return nil
 	} else if err != sql.ErrNoRows {
 		return err
 	}
-	return r.RegisterSession(surface.Session{ID: OperatorSessionID, Surface: surface.SurfaceKind("agenthail"), RuntimeKind: surface.RuntimeOperator, Name: "Agenthail operator"})
+	return r.RegisterSession(sender)
+}
+
+// PersonName is the person's name as the account they run Agenthail under
+// gives it.
+func PersonName() string {
+	if account, err := user.Current(); err == nil {
+		if name, _, _ := strings.Cut(account.Name, ","); strings.TrimSpace(name) != "" {
+			return strings.TrimSpace(name)
+		}
+	}
+	return "The person"
 }
 
 // EnsureUnrepliableSender records a session on a host this daemon has not
@@ -239,15 +259,16 @@ func (r *Registry) RecordDeliveryIntent(input DeliveryIntentInput) (*DeliveryInt
 	return intent, tx.Commit()
 }
 
-// RecordSessionCreationIntent records a new session's first message under the
-// uuid it was sent with, so the intent names the turn it may have started.
-func (r *Registry) RecordSessionCreationIntent(sessionID, messageUUID, message string) (*DeliveryIntent, error) {
-	if err := r.EnsureOperatorSession(); err != nil {
+// RecordSessionCreationIntent records a new session's first message from its
+// creator under the uuid it was sent with, so the intent names the turn it may
+// have started.
+func (r *Registry) RecordSessionCreationIntent(sessionID, creatorID, messageUUID, message string) (*DeliveryIntent, error) {
+	if err := r.EnsureSender(creatorID); err != nil {
 		return nil, err
 	}
 	return r.RecordDeliveryIntent(DeliveryIntentInput{
 		UUID:            messageUUID,
-		SenderSessionID: OperatorSessionID,
+		SenderSessionID: creatorID,
 		TargetSessionID: sessionID,
 		Message:         message,
 		Status:          DeliveryIntentSubmitted,

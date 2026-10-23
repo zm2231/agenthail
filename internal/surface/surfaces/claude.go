@@ -1033,6 +1033,7 @@ func peerSlashCommand(sess *surface.Session, message string) error {
 }
 
 func (c *Claude) postWhenIdle(ctx context.Context, sess *surface.Session, message string, images surface.Uploads) (*surface.SendResult, error) {
+	message = surface.LabelCLI(ctx, message)
 	observation, err := c.Observe(ctx, sess)
 	if err != nil {
 		return nil, err

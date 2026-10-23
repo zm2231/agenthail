@@ -81,7 +81,7 @@ func TestFederationRoutesEverySessionActionToTheOwningHost(t *testing.T) {
 			t.Fatalf("fork answer is not host-qualified: %s", response.Body.String())
 		}
 	}
-	want := []string{"compact", "model:gpt-remote", "goal:ship it", "goal-clear", "fork:gpt-fork", "native-queue:list", "lifecycle:status", "when idle"}
+	want := []string{"compact", "model:gpt-remote", "goal:ship it", "goal-clear", "fork:gpt-fork", "native-queue:list", "lifecycle:status", surface.CLILabel + "when idle"}
 	if got := remote.fake.delivered(); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("remote applied %v, want %v", got, want)
 	}
@@ -288,7 +288,7 @@ func TestFederationStopsReplayingHeldSendsOnceTheHostIsIncompatible(t *testing.T
 	release()
 	<-done
 
-	if got := remote.fake.delivered(); strings.Join(got, "|") != "first" {
+	if got := remote.fake.delivered(); strings.Join(got, "|") != surface.CLILabel+"first" {
 		t.Fatalf("host received %v after it became incompatible", got)
 	}
 	if item, err := local.reg.QueueItem(ids[1], nil); err != nil || item.Status != "pending" {

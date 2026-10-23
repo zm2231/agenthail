@@ -54,7 +54,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 33
+	schemaVersion   = 34
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -455,6 +455,11 @@ func migrateTx(tx *sql.Tx) error {
 	}
 	if version < 19 {
 		if err := recordObservedSubagents(tx); err != nil {
+			return err
+		}
+	}
+	if version < 34 {
+		if err := splitOperator(tx); err != nil {
 			return err
 		}
 	}

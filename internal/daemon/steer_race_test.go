@@ -52,7 +52,7 @@ func TestBusySteerWhoseTurnEndsFirstIsSentAsTheNextTurn(t *testing.T) {
 		t.Fatalf("status=%d body=%v", code, body)
 	}
 	got := fixture.thread(t, id)
-	if len(got.Turns) != 2 || got.Turns[0].User != "First task" || got.Turns[1].User != "Second task" || len(fixture.lifecycle.Daemon().Calls("turn/steer")) != 0 {
+	if len(got.Turns) != 2 || got.Turns[0].User != "First task" || got.Turns[1].User != surface.CLILabel+"Second task" || len(fixture.lifecycle.Daemon().Calls("turn/steer")) != 0 {
 		t.Fatalf("thread=%+v steers=%d", got, len(fixture.lifecycle.Daemon().Calls("turn/steer")))
 	}
 	if r.QueueCount(id) != 0 {

@@ -359,7 +359,7 @@ func awaitReplayed(t *testing.T, local, remote *federationNode, host *pairedHost
 		return len(remote.fake.delivered()) > 0
 	})
 	local.daemon.drainHostDeliveries(context.Background(), host)
-	if got := remote.fake.delivered(); len(got) != 1 || got[0] != message {
+	if got := remote.fake.delivered(); len(got) != 1 || got[0] != surface.CLILabel+message {
 		t.Fatalf("remote delivered=%v", got)
 	}
 }
@@ -426,7 +426,7 @@ func TestFederationMirrorsReadsAndDrivesRemoteSessions(t *testing.T) {
 	if steer.Code != http.StatusOK {
 		t.Fatalf("steer status=%d body=%s", steer.Code, steer.Body.String())
 	}
-	if got := remote.fake.delivered(); len(got) != 2 || got[0] != "hello remote" || got[1] != "steer:turn left" {
+	if got := remote.fake.delivered(); len(got) != 2 || got[0] != surface.CLILabel+"hello remote" || got[1] != "steer:"+surface.CLILabel+"turn left" {
 		t.Fatalf("remote delivered=%v", got)
 	}
 	if got := local.fake.delivered(); len(got) != 0 {
@@ -631,7 +631,7 @@ func TestFederationUnreachableHostKeepsRowsAndDeliversHeldSendOnce(t *testing.T)
 	})
 	host, _ := local.daemon.pairedHost(record.ID)
 	local.daemon.drainHostDeliveries(context.Background(), host)
-	if got := remote.fake.delivered(); len(got) != 1 || got[0] != "held for vps" {
+	if got := remote.fake.delivered(); len(got) != 1 || got[0] != surface.CLILabel+"held for vps" {
 		t.Fatalf("remote delivered=%v", got)
 	}
 	queue, err := local.reg.ListQueue(true, nil)
@@ -737,7 +737,7 @@ func TestFederationTruncatedAnswerStaysUnknownAndReplaysByKey(t *testing.T) {
 	host, _ := local.daemon.pairedHost(record.ID)
 	local.daemon.drainHostDeliveries(context.Background(), host)
 	local.daemon.drainHostDeliveries(context.Background(), host)
-	if got := remote.fake.delivered(); len(got) != 1 || got[0] != "cut short" {
+	if got := remote.fake.delivered(); len(got) != 1 || got[0] != surface.CLILabel+"cut short" {
 		t.Fatalf("remote delivered=%v", got)
 	}
 	queue, err = local.reg.ListQueue(true, nil)

@@ -427,7 +427,7 @@ func TestFailedPersistedRelayCompletionDoesNotNotifyTheRelaySource(t *testing.T)
 func TestDeliveryProblemFlagsTheSenderUntilItIsTold(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "sender", "target")
-	if err := r.EnsureOperatorSession(); err != nil {
+	if err := r.EnsureSender(surface.PersonSessionID); err != nil {
 		t.Fatal(err)
 	}
 	attention := func(id int64) (string, bool) {
@@ -470,7 +470,7 @@ func TestDeliveryProblemFlagsTheSenderUntilItIsTold(t *testing.T) {
 	if flagged, listed := attention(agent.ID); !listed || flagged != "" {
 		t.Fatalf("told sender still flagged %q listed=%v", flagged, listed)
 	}
-	person, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: OperatorSessionID, TargetSessionID: "target", Status: DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
+	person, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: surface.PersonSessionID, TargetSessionID: "target", Status: DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -538,7 +538,10 @@ func TestNoNoticeIsQueuedForASenderNothingReads(t *testing.T) {
 		"unrepliable": func(r *Registry) (string, error) {
 			return r.EnsureUnrepliableSender("h0123456789ab", "worker-1", "vps/builder")
 		},
-		"operator": func(r *Registry) (string, error) { return OperatorSessionID, r.EnsureOperatorSession() },
+		"person": func(r *Registry) (string, error) {
+			return surface.PersonSessionID, r.EnsureSender(surface.PersonSessionID)
+		},
+		"cli": func(r *Registry) (string, error) { return surface.CLISessionID, r.EnsureSender(surface.CLISessionID) },
 	}
 	for name, ensure := range senders {
 		t.Run(name, func(t *testing.T) {

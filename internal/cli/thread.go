@@ -128,7 +128,7 @@ func (a *App) cmdThread(args []string) error {
 	output := threadCreateOutput{OK: startErr == nil, Session: session, Delivery: deliveryResult, Alias: request.alias}
 	if startErr != nil {
 		if session != nil {
-			intent, intentErr := a.registry().RecordSessionCreationIntent(session.ID, messageUUID, request.message)
+			intent, intentErr := a.registry().RecordSessionCreationIntent(session.ID, surface.SendOptions{SourceSessionID: creator}.Sender(), messageUUID, request.message)
 			if intentErr != nil {
 				output.Status = "storage_failed"
 				output.Retryable = false

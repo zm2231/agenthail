@@ -111,6 +111,9 @@ func (c *Claude) remoteEvents(ctx context.Context, sess *surface.Session, after 
 
 func (c *Claude) Control(ctx context.Context, sess *surface.Session, control surface.ControlRequest) (*surface.ControlResult, error) {
 	value := strings.TrimSpace(control.Value)
+	if control.Action == "steer" {
+		value = surface.LabelCLI(ctx, value)
+	}
 	if err := validateClaudeControl(control.Action, value); err != nil {
 		return nil, err
 	}
