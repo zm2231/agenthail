@@ -33,6 +33,10 @@ struct DashboardSnapshotTest {
         var problemChange = transportOnlyChange
         problemChange.deliveryProblems = [DeliveryProblem(deliveryId: 7, sessionId: "s1", sourceSessionId: "s2", attentionSessionId: "s2", message: "Run the tests", reason: "target_not_writable", status: nil, at: "2026-10-04 12:00:00")]
         precondition(!current.hasSamePresentation(as: problemChange))
+        var renamed = transportOnlyChange
+        renamed.person = PersonState(name: "Ada", set: true)
+        precondition(!current.hasSamePresentation(as: renamed), "a new name for the person is shown")
+        precondition(try! JSONDecoder().decode(PersonState.self, from: Data(#"{"name":"Ada Lovelace","set":false}"#.utf8)) == PersonState(name: "Ada Lovelace", set: false))
 
         let child = try! JSONDecoder().decode(SessionState.self, from: Data(#"{"id":"child","surface":"codex","name":"Review","status":"busy","queueCount":0,"open":false,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"compact":true,"model":true,"interrupt":true,"steer":true},"subagent":{"parentId":"root","rootId":"root","depth":2,"nickname":"Euclid","role":"reviewer"}}"#.utf8))
         precondition(child.subagent == SubagentIdentity(parentId: "root", rootId: "root", depth: 2, nickname: "Euclid", role: "reviewer"))

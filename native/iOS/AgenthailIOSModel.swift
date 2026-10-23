@@ -13,6 +13,7 @@ struct PairedHostStatus: Identifiable, Equatable {
     let signin: [SigninConsumerState]
     let peers: [HostHealth]
     let notifications: String
+    var person: PersonState? = nil
 }
 
 @MainActor
@@ -213,7 +214,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             PairedHostStatus(id: connection.id, name: connection.name, address: connection.credential.endpoint.host ?? "",
                              reachable: connection.reachable, reconnecting: connection.reconnecting, error: connection.connectionError,
                              surfaces: (connection.snapshot?.surfaces ?? []).filter(\.needsAttention), signin: connection.snapshot?.signin ?? [],
-                             peers: connection.snapshot?.daemon.hosts ?? [], notifications: pushStatus[connection.id] ?? "Not enabled")
+                             peers: connection.snapshot?.daemon.hosts ?? [], notifications: pushStatus[connection.id] ?? "Not enabled",
+                             person: connection.snapshot?.person)
         }
         creationHosts = catalog.hosts.map { host in
             CreationHost(id: host.id, name: host.name, state: catalog.target(forHost: host.id) == nil ? (host.state == "connected" ? "unreachable" : host.state) : "connected")

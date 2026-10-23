@@ -1481,6 +1481,13 @@ struct SettingsView: View {
                             }
                         }
                     }
+                    if let person = host.person {
+                        VStack(alignment: .leading, spacing: 4) {
+                            LabeledContent("Your name", value: person.name)
+                            Text(person.set ? "Set in Settings on \(host.name) or with agenthail person name." : "\(host.name)'s account name. Set yours in Settings on \(host.name) or with agenthail person name.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
                     if model.hosts.count > 1 { LabeledContent("Notifications", value: host.notifications) }
                     Button("Reconnect") { model.reconnect(host: host.id) }
                     Button("Remove \(host.name)", role: .destructive) { model.removeHost(host.id) }

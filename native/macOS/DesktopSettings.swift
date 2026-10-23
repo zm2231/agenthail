@@ -46,6 +46,7 @@ struct GeneralSettings: View {
     @ObservedObject var model: AgenthailModel
     @AppStorage(SpotlightIndex.preferenceKey) private var spotlightSessions = true
     @ObservedObject private var shortcuts = ShortcutStore.shared
+    @State private var personName = ""
 
     var body: some View {
         Form {
@@ -66,6 +67,30 @@ struct GeneralSettings: View {
                     Button("Restart Agenthail") { model.restartDaemon() }
                     Button("Login Item Settings…") { _ = NativeCommand.run(["service", "settings"]) }
                 }
+            }
+            if let person = model.snapshot?.person {
+                Section {
+                    TextField("Your name", text: $personName, prompt: Text(person.name))
+                        .onSubmit { savePersonName(person) }
+                    HStack {
+                        Button("Save") { savePersonName(person) }
+                            .disabled(PersonNameDraft.submission(personName, current: person) == nil)
+                        if person.set {
+                            Button("Use This Account's Name") {
+                                personName = ""
+                                model.setPersonName("")
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Your name")
+                } footer: {
+                    Text(person.set ? "Agents on this computer see what you write in Agenthail as from \(person.name)." : "Agents on this computer see what you write in Agenthail as from \(person.name), this account's name, until you set yours.")
+                        .font(.system(size: DesktopType.secondary))
+                        .foregroundStyle(DesktopPalette.text2)
+                }
+                .onAppear { personName = PersonNameDraft.field(for: person) }
+                .onChange(of: person) { _, current in personName = PersonNameDraft.field(for: current) }
             }
             Section("Sending while an agent works") {
                 Picker(shortcuts.label(.send) ?? "Send", selection: Binding(get: { model.busyDelivery }, set: { model.setBusyDelivery($0) })) {
@@ -100,6 +125,10 @@ struct GeneralSettings: View {
             SettingsError(model: model)
         }
         .formStyle(.grouped)
+    }
+
+    private func savePersonName(_ person: PersonState) {
+        if let name = PersonNameDraft.submission(personName, current: person) { model.setPersonName(name) }
     }
 
     private var connectionLabel: String {
