@@ -47,13 +47,15 @@ final class ComposerNSTextView: NSTextView {
 
     static let lineHeight = font.ascender - font.descender + font.leading
 
+    /// Measures the text apart from the view: SwiftUI asks during its layout
+    /// pass, and resizing or laying out the view there makes AppKit schedule
+    /// another constraints pass for every keystroke until the window aborts.
     func fittingHeight(width: CGFloat, lines: ClosedRange<Int>) -> CGFloat {
-        if frame.width != width { setFrameSize(NSSize(width: width, height: frame.height)) }
-        var used: CGFloat = 0
-        if let layout = textLayoutManager {
-            layout.ensureLayout(for: layout.documentRange)
-            used = ceil(layout.usageBoundsForTextContainer.height + textContainerInset.height * 2)
-        }
+        let measured = NSMutableAttributedString(string: string, attributes: [.font: Self.font])
+        if string.isEmpty || string.hasSuffix("\n") { measured.append(NSAttributedString(string: " ", attributes: [.font: Self.font])) }
+        let padding = (textContainer?.lineFragmentPadding ?? 0) * 2
+        let bounds = measured.boundingRect(with: NSSize(width: max(width - padding - textContainerInset.width * 2, 1), height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading])
+        let used = ceil(bounds.height + textContainerInset.height * 2)
         return ceil(min(max(used, Self.lineHeight * CGFloat(lines.lowerBound)), Self.lineHeight * CGFloat(lines.upperBound)))
     }
 
