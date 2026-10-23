@@ -122,8 +122,8 @@ struct UIConfig: Codable, Equatable {
     var border: Double { number("glass.border", 0.08) }
     var gutter: Double { number("glass.gutter", 8) }
 
-    var texture: String { text("texture", "scanlines") }
-    var textureStrength: Double { number("texture.strength", 0.35) }
+    var texture: String { text("texture", "none") }
+    var textureStrength: Double { number("texture.strength", 0.2) }
     var textureSpacing: Double { number("texture.spacing", 3) }
 
     var scrimTint: String { text("scrim.tint", "auto") }
