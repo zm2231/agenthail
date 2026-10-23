@@ -142,6 +142,7 @@ struct AppearanceSettings: View {
             swatch(selected: custom, help: "Any colour") {
                 Circle()
                     .fill(custom ? AnyShapeStyle(color(current)) : AnyShapeStyle(DesktopPalette.fill))
+                    .overlay(Circle().strokeBorder(DesktopPalette.text2.opacity(custom ? 0 : 0.6), lineWidth: 1))
                     .overlay {
                         if !custom { Image(systemName: "plus").font(.system(size: 9, weight: .bold)).foregroundStyle(DesktopPalette.text) }
                     }
