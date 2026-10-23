@@ -236,6 +236,28 @@ say. The limit outranks a wait read from the process record, which is stale
 once the turn has ended. The clients list the session under Needs you with
 its reset time, and the transcript notice names it too.
 
+## Activity of a working turn
+
+A working session also carries `activity{busySince, lastProgressAt,
+tool{name, startedAt}, noProcess}` on the session and the dashboard projection,
+which federates it to paired hosts. It never changes the session's status and
+nothing acts on it; it lets a client say how long a working turn has been
+quiet.
+
+`busySince` is when the open turn started. `lastProgressAt` is its newest
+transcript record, or the session record's `statusUpdatedAt` when that is
+later. `tool` is the turn's newest tool call without a result yet, so a long
+build reads as running Bash since it started rather than as stuck. A session
+record that says idle clears `activity`, as does a wait on the person.
+`noProcess` marks a turn the transcript leaves open when there is neither a
+pid nor a live session record for the conversation, so nothing is running it.
+
+The status pass republishes a row for its activity only when the turn, the
+tool or `noProcess` changed, or `lastProgressAt` moved by a minute or more
+(`surface.ActivityProgressStep`). After ten minutes without progress the Mac,
+iOS and web clients add `no activity for 12 min · running Bash since 10:02`
+(or `· no Claude process`) to Working, as plain secondary text.
+
 ## Background tasks
 
 A turn can end with work still running: a Bash call run in the background, an

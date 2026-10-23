@@ -110,6 +110,25 @@ final class HostCatalogTests: XCTestCase {
         XCTAssertNil(direct.route(for: "new"))
     }
 
+    func testAQuietWorkingSessionFromTheWireSaysHowLongAndWhatItRuns() throws {
+        let wire = #"{"id":"s1","surface":"claude","name":"builder","status":"busy","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"host":{"id":"self","name":"self","state":"local"},"activity":{"busySince":"2026-10-23T10:00:00Z","lastProgressAt":"2026-10-23T10:02:00Z","tool":{"name":"Bash","startedAt":"2026-10-23T10:02:00Z"}}}"#
+        let row = try JSONDecoder().decode(SessionState.self, from: Data(wire.utf8))
+        let catalog = HostCatalog(hosts: [host("hlaptop", "laptop", reachable: true, sessions: [row])])
+        let session = try XCTUnwrap(catalog.sessions.first)
+        let now = try XCTUnwrap(SessionTree.parseTimestamp("2026-10-23T10:14:30Z"))
+        let since = try XCTUnwrap(SessionTree.parseTimestamp("2026-10-23T10:02:00Z")).formatted(date: .omitted, time: .shortened)
+        XCTAssertEqual(session.workingLabel(now: now), "Working · no activity for 12 min · running Bash since \(since)")
+        XCTAssertEqual(session.workingLabel(now: now.addingTimeInterval(-5 * 60)), "Working")
+
+        let orphan = try JSONDecoder().decode(RawSession.self, from: Data(#"{"id":"s2","surface":"claude","name":"held","status":"busy","lastActive":"2026-10-23T05:07:57Z","activity":{"lastProgressAt":"2026-10-23T05:07:57Z","noProcess":true}}"#.utf8))
+        XCTAssertEqual(orphan.workingLabel(now: now), "Working · no activity for 5 hr 6 min · no Claude process")
+
+        var live = SessionLiveState(row, lastActive: "2026-10-23T10:00:00Z")
+        XCTAssertEqual(live.activity, row.activity)
+        live.activity = nil
+        XCTAssertNil(live.activity)
+    }
+
     private func host(_ id: String, _ name: String, reachable: Bool, sessions: [SessionState]) -> PairedHostView {
         PairedHostView(id: id, name: name, reachable: reachable, snapshot: Self.snapshot(sessions))
     }

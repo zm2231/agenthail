@@ -92,7 +92,7 @@ console.log("dashboard projects view tests passed");
 const metaStart = source.indexOf("function conversationMeta(");
 const metaEnd = source.indexOf("function surfaceIcon(", metaStart);
 assert(metaStart >= 0 && metaEnd > metaStart);
-const metaContext = { backgroundWaiting: () => false, statusLabel: (status) => status, timeAgo: () => "now" };
+const metaContext = { backgroundWaiting: () => false, statusLabel: (status) => status, workingLabel: () => "Working", timeAgo: () => "now" };
 vm.runInNewContext(source.slice(metaStart, metaEnd), metaContext);
 const meta = (configRoot) => vm.runInContext(`conversationMeta(${JSON.stringify({ status: "busy", queueCount: 0, claudeConfigRoot: configRoot })})`, metaContext);
 assert(meta({ name: "work", root: "/w", signedInAs: "work@example.com" }).includes("config folder work · currently signed in as work@example.com"), "a session's config folder shows its current login");
