@@ -18,10 +18,17 @@ const maxFillerWords = 4
 
 func voiceOnly(text string) bool {
 	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
-		return !unicode.IsLetter(r) && r != '\''
+		return unicode.IsSpace(r) || unicode.IsPunct(r) && r != '\''
 	})
 	if len(words) == 0 || len(words) > maxFillerWords {
 		return false
+	}
+	for _, word := range words {
+		for _, r := range word {
+			if !unicode.IsLetter(r) && r != '\'' {
+				return false
+			}
+		}
 	}
 	for len(words) > 0 {
 		matched := false

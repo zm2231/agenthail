@@ -24,6 +24,11 @@ func TestOnlyFillerIsVoiceOnly(t *testing.T) {
 		"um uh hmm thanks thanks":   false,
 		"Run the reconnect tests":   false,
 		"":                          false,
+		"um2":                       false,
+		"um 2":                      false,
+		"um +":                      false,
+		"um-hmm":                    true,
+		"Thanks, Ελένη":             false,
 		"...":                       false,
 	} {
 		if got := voiceOnly(text); got != want {
@@ -83,5 +88,49 @@ func TestMutedFillerIsHeldAsMuted(t *testing.T) {
 	v := f.View()
 	if !hasEventWith(v, "voice/delegation/held", "messageId", "voice-transcript:50") || hasEvent(v, "voice/utterance/voice-only") {
 		t.Fatalf("events=%+v", v.Events)
+	}
+}
+
+func TestHeldFillerLeavesTheCallsTextBudgetAlone(t *testing.T) {
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Fieldnotes build", Transport: "desktop"}}
+	f := targetSelected(t, target)
+	events := make([]Event, 130)
+	for i := range events {
+		events[i] = Event{Sequence: int64(100 + i), Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "user", "text": "Thanks."}}
+	}
+	f.observe(events...)
+	f.observe(Event{Sequence: 300, Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "user", "text": "um 2"}})
+	waitFor(t, "the request with a number to reach the session", func() bool { return len(target.sends()) == 1 })
+	if sends := target.sends(); !reflect.DeepEqual(sends, []string{"um 2"}) {
+		t.Fatalf("sends=%q", sends)
+	}
+	apply(t, f, Action{Action: "transfer", TargetID: ""})
+	// The delivered request took one of the call's 128 messages; the held
+	// filler took none.
+	for i := range 127 {
+		if _, err := f.Apply(Action{Action: "text", AttemptID: "call-a", MessageID: fmt.Sprintf("typed-%d", i), Text: "Now run the tests"}); err != nil {
+			t.Fatalf("held filler used the call's text budget: text %d: %v", i, err)
+		}
+	}
+}
+
+func TestAMutedTranscriptSeenTwiceIsHeldOnce(t *testing.T) {
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Fieldnotes build", Transport: "desktop"}}
+	f := targetSelected(t, target)
+	muted := true
+	apply(t, f, Action{Action: "input-state", AttemptID: "call-a", Muted: &muted, InputRevision: 1})
+	spoken := Event{Sequence: 60, Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "user", "text": "Push the branch"}}
+	f.observe(spoken)
+	muted = false
+	apply(t, f, Action{Action: "input-state", AttemptID: "call-a", Muted: &muted, InputRevision: 2})
+	f.observe(spoken)
+	held := 0
+	for _, event := range f.View().Events {
+		if event.Method == "voice/delegation/held" && event.Params["messageId"] == "voice-transcript:60" {
+			held++
+		}
+	}
+	if held != 1 || len(target.sends()) != 0 {
+		t.Fatalf("held=%d sends=%q", held, target.sends())
 	}
 }
