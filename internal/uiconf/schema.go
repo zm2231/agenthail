@@ -45,7 +45,7 @@ func color(name, def, doc string, words ...string) Key {
 }
 
 // DefaultBackground is what fills the window until ui.conf says otherwise.
-const DefaultBackground = "art: field"
+const DefaultBackground = "none"
 
 // Keys lists every setting in the order show-defaults prints them.
 var Keys = []Key{

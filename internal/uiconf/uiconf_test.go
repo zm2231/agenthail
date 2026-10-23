@@ -77,8 +77,11 @@ func TestResolveFillsDefaultsAndExpandsPresets(t *testing.T) {
 			t.Fatalf("missing default for %s", key.Name)
 		}
 	}
-	if values["background"] != "image: art/field-dark.jpg" || values["background.light"] != "image: art/field-light.jpg" {
-		t.Fatalf("default background = %v, light %v", values["background"], values["background.light"])
+	for _, class := range deviceClasses {
+		values := Parse("").Resolve(Device{Class: class})
+		if values["background"] != "none" || values["background.light"] != "none" {
+			t.Fatalf("%s default background = %v, light %v", class, values["background"], values["background.light"])
+		}
 	}
 	tide := Parse("background = art: tide").Resolve(Device{Class: "mac"})
 	if tide["background"] != "image: art/tide-dark.jpg" || tide["background.light"] != "image: art/tide-light.jpg" {

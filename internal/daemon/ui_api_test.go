@@ -33,7 +33,7 @@ func TestUIAPIReadsChangesAndUndoes(t *testing.T) {
 	if code := api.do(http.MethodGet, "/api/v1/ui?class=mac", "", &view); code != http.StatusOK {
 		t.Fatalf("get status=%d", code)
 	}
-	if view.Values["theme"] != "system" || view.Values["background"] != "image: art/field-dark.jpg" || view.Values["background.light"] != "image: art/field-light.jpg" || view.Chosen["background"] != uiconf.DefaultBackground || len(view.Overrides) != 0 || len(view.Problems) != 0 {
+	if view.Values["theme"] != "system" || view.Values["background"] != "none" || view.Values["background.light"] != "none" || view.Chosen["background"] != "none" || len(view.Overrides) != 0 || len(view.Problems) != 0 {
 		t.Fatalf("initial view = %+v", view)
 	}
 	first := view.Rev
@@ -151,7 +151,7 @@ func TestUIAPIScopesAndBackgroundPaths(t *testing.T) {
 	var presets struct {
 		Presets []uiconf.Choice `json:"presets"`
 	}
-	if code := reader.do(http.MethodGet, "/api/v1/ui/presets", "", &presets); code != http.StatusOK || len(presets.Presets) != len(uiconf.ArtNames)+len(uiconf.PresetNames) || presets.Presets[0] != (uiconf.Choice{Value: uiconf.DefaultBackground, Name: "Field", Dark: "image: art/field-dark.jpg", Light: "image: art/field-light.jpg"}) {
+	if code := reader.do(http.MethodGet, "/api/v1/ui/presets", "", &presets); code != http.StatusOK || len(presets.Presets) != len(uiconf.ArtNames)+len(uiconf.PresetNames) || presets.Presets[0] != (uiconf.Choice{Value: "art: tide", Name: "Tide", Dark: "image: art/tide-dark.jpg", Light: "image: art/tide-light.jpg"}) {
 		t.Fatalf("presets status=%d %+v", code, presets.Presets)
 	}
 

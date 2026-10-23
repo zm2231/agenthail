@@ -170,6 +170,9 @@ struct AppearanceSettings: View {
 
     private var backgroundGrid: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: DesktopSpace.m), count: 5), spacing: DesktopSpace.m) {
+            tile("None", selected: chosenBackground == "none") {
+                BackgroundSwatch(background: .none, thumbnails: thumbnails, api: model.api)
+            } action: { write(draft.set("background", "none", label: "no background")) }
             ForEach(presets) { preset in
                 tile(preset.name, selected: chosenBackground == preset.value) {
                     BackgroundSwatch(background: preset.background(dark: dark), thumbnails: thumbnails, api: model.api)
@@ -178,9 +181,6 @@ struct AppearanceSettings: View {
             tile("Desktop", selected: chosenBackground == "desktop") {
                 BackgroundSwatch(background: .desktop, thumbnails: thumbnails, api: model.api)
             } action: { write(draft.set("background", "desktop", label: "background to the desktop picture")) }
-            tile("None", selected: chosenBackground == "none") {
-                BackgroundSwatch(background: .none, thumbnails: thumbnails, api: model.api)
-            } action: { write(draft.set("background", "none", label: "no background")) }
             tile("Image…", selected: chosenBackground.hasPrefix("image:")) {
                 if case .image = config.background(dark: dark), chosenBackground.hasPrefix("image:") {
                     BackgroundSwatch(background: config.background(dark: dark), thumbnails: thumbnails, api: model.api)
