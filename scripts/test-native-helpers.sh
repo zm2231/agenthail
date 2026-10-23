@@ -31,6 +31,10 @@ SOURCES=(
   MetadataOverlay.swift
   StatusRefreshPolicy.swift
   ToolPresentation.swift
+  ToolRunSummary.swift
+  TranscriptRows.swift
+  TurnClock.swift
+  TimelineMetadata.swift
   TurnSettings.swift
   UIConfig.swift
   PaletteTokens.swift
@@ -72,10 +76,8 @@ SOURCES=(
   macOS/SlashCommand.swift
   macOS/SnapshotBudget.swift
   macOS/SpotlightIndex.swift
-  macOS/ToolRunSummary.swift
   macOS/TranscriptBlock.swift
   macOS/TranscriptFollow.swift
-  macOS/TranscriptRows.swift
   macOS/VoiceController.swift
   macOS/WindowBackdrop.swift
   macOS/WindowImage.swift

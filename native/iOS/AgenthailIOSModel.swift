@@ -40,6 +40,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
     }
     @Published private(set) var hosts: [PairedHostStatus] = []
+    /// Which transcript rows were opened in each session, kept while the app runs.
+    let rowMemory = TranscriptRowMemory()
     @Published private(set) var creationHosts: [CreationHost] = []
     @Published private(set) var projects: [String: ListedProject] = [:]
     @Published private(set) var holderPicks: [String: HolderPin] = [:]

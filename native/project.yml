@@ -42,6 +42,10 @@ targets:
       - path: MetadataOverlay.swift
       - path: EventRetryBackoff.swift
       - path: ToolPresentation.swift
+      - path: ToolRunSummary.swift
+      - path: TranscriptRows.swift
+      - path: TurnClock.swift
+      - path: TimelineMetadata.swift
       - path: VoiceAPI.swift
       - path: VoiceAudioBridge.swift
       - path: VoiceCallDiagnostics.swift
