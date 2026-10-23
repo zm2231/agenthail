@@ -56,12 +56,34 @@ check 1
 rm "$REPO/docs/untracked.md"
 check 0
 
-mkdir -p "$WORK/bin"
-for tool in bash env git grep; do
-  ln -s "$(type -P "$tool")" "$WORK/bin/$tool"
+# tools <dir> <tool...>: a PATH directory holding only the named tools.
+tools() {
+  local dir="$1" tool
+  shift
+  mkdir -p "$dir"
+  for tool in "$@"; do
+    ln -s "$(type -P "$tool")" "$dir/$tool"
+  done
+}
+for missing in git grep perl; do
+  dir="$WORK/without-$missing"
+  for tool in bash env git grep perl; do
+    [ "$tool" = "$missing" ] || tools "$dir" "$tool"
+  done
+  check 2 PATH="$dir"
+  grep -q "$missing is required" "$WORK/out" || fail "a missing $missing was not named: $(cat "$WORK/out")"
 done
-check 2 PATH="$WORK/bin"
-grep -q perl "$WORK/out" || fail "a missing perl was not named: $(cat "$WORK/out")"
+
+tools "$WORK/failing-git" bash env grep perl
+printf '#!/bin/sh\nexit 1\n' >"$WORK/failing-git/git"
+chmod +x "$WORK/failing-git/git"
+check 2 PATH="$WORK/failing-git"
+grep -q 'git could not list' "$WORK/out" || fail "a failing git listing was not reported: $(cat "$WORK/out")"
+
+(cd "$REPO" && echo "plain text" >docs/tracked.md && git add docs/tracked.md && rm docs/tracked.md)
+check 2
+grep -q 'docs/tracked.md' "$WORK/out" || fail "a tracked file missing from the worktree was not named: $(cat "$WORK/out")"
+(cd "$REPO" && git rm -q --cached docs/tracked.md)
 
 mv "$REPO/SECURITY.md" "$WORK/SECURITY.md"
 check 2

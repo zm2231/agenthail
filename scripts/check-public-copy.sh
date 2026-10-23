@@ -50,15 +50,22 @@ placeholder_volumes='work|My Shared Files'
 # name machine paths on purpose. A guard's own case pattern for every
 # volume, /Volumes/*), is not a machine path.
 machine_paths() {
-  git ls-files -z --cached --others --exclude-standard -- "${public_source[@]}" ':!scripts/check-public-copy.sh' ':!scripts/test-check-public-copy.sh' |
-    PLACEHOLDER_USERS="$placeholder_users" PLACEHOLDER_VOLUMES="$placeholder_volumes" perl -0 -e '
+  local list status=0
+  list="$(mktemp "${TMPDIR:-/tmp}/agenthail-public-copy.XXXXXX")"
+  git ls-files -z --cached --others --exclude-standard -- "${public_source[@]}" ':!scripts/check-public-copy.sh' ':!scripts/test-check-public-copy.sh' >"$list" || status=$?
+  if [ "$status" != 0 ] || [ ! -s "$list" ]; then
+    rm -f "$list"
+    echo "$0: git could not list the public source (exit $status)" >&2
+    exit 2
+  fi
+  PLACEHOLDER_USERS="$placeholder_users" PLACEHOLDER_VOLUMES="$placeholder_volumes" perl -0 -e '
       my ($users, $volumes) = @ENV{qw(PLACEHOLDER_USERS PLACEHOLDER_VOLUMES)};
       my $pattern = qr{(?i:/(?:Users|home)/(?!(?:$users)(?![A-Za-z0-9._-]))[a-z][a-z0-9._-]*)|/Volumes/(?!(?:$volumes)(?:/|\x27|"|$)|\*\))|/persist/|\btail[0-9a-f]{4,}\.ts\.net|\b[A-Z][a-z]+(?:\x27s |\xe2\x80\x99s |s-)(?:Mac|MacBook|iPhone|iPad)\b|session_[[:alnum:]]{12,}};
       my $found = 0;
-      while (my $file = <STDIN>) {
+      while (my $file = <>) {
         chomp $file;
-        next unless -f $file;
-        next if -B $file;
+        die "$file: listed by git but missing from the worktree\n" unless -e $file;
+        next if -d $file || -B $file;
         open(my $in, "<", $file) or die "$file: $!\n";
         local $/ = "\n";
         while (my $line = <$in>) {
@@ -70,7 +77,9 @@ machine_paths() {
         close $in;
       }
       exit($found ? 0 : 1);
-    '
+    ' "$list" || status=$?
+  rm -f "$list"
+  return "$status"
 }
 
 if matches machine_paths; then

@@ -72,6 +72,8 @@ jobs:
         run: |
           scripts/test-check-public-copy.sh
           scripts/check-public-copy.sh
+      - name: Runner hook tests
+        run: scripts/test-ci-runner-job-started.sh
       - name: Push relay tests
         working-directory: push-relay
         run: |

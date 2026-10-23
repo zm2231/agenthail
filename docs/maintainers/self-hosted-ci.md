@@ -9,7 +9,7 @@ On an ordinary pull request `changes`, `verify` and `verify-linux` run, and `ios
 The `runs-on` expression in a workflow comes from the pull request, so a fork can change it. Two controls that a pull request cannot change keep fork code off the runners:
 
 - The repository requires approval before workflows run for every outside contributor (`fork-pr-contributor-approval` set to `all_external_contributors`).
-- Each runner runs `scripts/ci-runner-job-started.sh` as its job-started hook. It fails any pull request job whose head repository is not this repository, before any step runs. The runner reads the hook from a copy outside the repository, so a pull request cannot edit it.
+- Each runner runs `scripts/ci-runner-job-started.sh` as its job-started hook. It fails any pull request job whose head repository is not this repository, before any step runs, and fails any job whose event it cannot read, so a missing `jq` or a malformed event never lets a job through. The runner reads the hook from a copy outside the repository, so a pull request cannot edit it.
 
 ## Runner setup
 
