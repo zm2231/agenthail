@@ -740,30 +740,31 @@ type Exchange struct {
 }
 
 type StreamEvent struct {
-	Role             string         `json:"role,omitempty"`
-	Origin           string         `json:"origin,omitempty"`
-	Sender           string         `json:"sender,omitempty"`
-	Title            string         `json:"title,omitempty"`
-	Status           string         `json:"status,omitempty"`
-	ResetsAt         string         `json:"resetsAt,omitempty"`
-	CallID           string         `json:"callId,omitempty"`
-	Attachment       *Attachment    `json:"attachment,omitempty"`
-	Files            []AttachedFile `json:"files,omitempty"`
-	Truncated        bool           `json:"truncated,omitempty"`
-	TruncationReason string         `json:"truncationReason,omitempty"`
-	ID               string         `json:"id,omitempty"`
-	ProviderKey      string         `json:"providerKey,omitempty"`
-	Cursor           uint64         `json:"cursor,omitempty"`
-	Version          uint64         `json:"version,omitempty"`
-	Operation        string         `json:"operation,omitempty"`
-	Final            bool           `json:"final,omitempty"`
-	TurnID           string         `json:"turnId,omitempty"`
-	Timestamp        time.Time      `json:"timestamp,omitempty"`
-	Kind             string         `json:"kind"`
-	Text             string         `json:"text"`
-	Context          *ContextUsage  `json:"context,omitempty"`
-	Goal             *GoalState     `json:"goal,omitempty"`
-	Turn             *TurnMetadata  `json:"turn,omitempty"`
+	Role             string           `json:"role,omitempty"`
+	Origin           string           `json:"origin,omitempty"`
+	Sender           string           `json:"sender,omitempty"`
+	Title            string           `json:"title,omitempty"`
+	Status           string           `json:"status,omitempty"`
+	ResetsAt         string           `json:"resetsAt,omitempty"`
+	CallID           string           `json:"callId,omitempty"`
+	Attachment       *Attachment      `json:"attachment,omitempty"`
+	Files            []AttachedFile   `json:"files,omitempty"`
+	Truncated        bool             `json:"truncated,omitempty"`
+	TruncationReason string           `json:"truncationReason,omitempty"`
+	ID               string           `json:"id,omitempty"`
+	ProviderKey      string           `json:"providerKey,omitempty"`
+	Cursor           uint64           `json:"cursor,omitempty"`
+	Version          uint64           `json:"version,omitempty"`
+	Operation        string           `json:"operation,omitempty"`
+	Final            bool             `json:"final,omitempty"`
+	TurnID           string           `json:"turnId,omitempty"`
+	Timestamp        time.Time        `json:"timestamp,omitempty"`
+	Kind             string           `json:"kind"`
+	Text             string           `json:"text"`
+	Context          *ContextUsage    `json:"context,omitempty"`
+	Goal             *GoalState       `json:"goal,omitempty"`
+	Commands         *RuntimeCommands `json:"commands,omitempty"`
+	Turn             *TurnMetadata    `json:"turn,omitempty"`
 }
 
 type StreamEventClass string
@@ -859,6 +860,28 @@ const AutoCompactSourceRuntime = "runtime"
 
 type ContextUsageProvider interface {
 	ContextUsage(ctx context.Context, sess *Session) (*ContextUsage, error)
+}
+
+// RuntimeCommand is a command or skill the session's runtime runs when a
+// person's message starts with Insert, "/name" or "$name".
+type RuntimeCommand struct {
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	ArgumentHint string `json:"argumentHint"`
+	Insert       string `json:"insert"`
+}
+
+// RuntimeCommands is what a person can run in a session from its composer.
+// Unavailable, when set, says why the route a person's message takes runs no
+// commands, and Commands is then empty.
+type RuntimeCommands struct {
+	Commands    []RuntimeCommand `json:"commands"`
+	Unavailable string           `json:"unavailable"`
+}
+
+// CommandsProvider lists the commands a person's message to the session runs.
+type CommandsProvider interface {
+	Commands(ctx context.Context, sess *Session) (*RuntimeCommands, error)
 }
 
 // GoalUpdate is the typed control payload supported by Codex thread/goal/set.

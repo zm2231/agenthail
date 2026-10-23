@@ -293,6 +293,7 @@ function startLiveStream() {
     if (item.kind === "source-error") { app.history.transcriptWarning = item.reason || "Live updates are unavailable."; renderChat(); return; }
     if (item.kind === "context" && item.context) { app.history.context = item.context; renderContextUsage(item.context); return; }
     if (item.kind === "goal") { app.history.goal = item.goal || null; renderChat(); return; }
+    if (item.kind === "commands") return;
     if (!item.itemId || item.op === "reset") return;
     app.history.transcriptWarning = "";
     const items = applyStreamedRow(app.history.timeline?.items || [], envelope);
