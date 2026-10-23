@@ -299,6 +299,7 @@ func TestTheClaudeHostInheritsAConfiguredPrimaryConfigDirAndDropsABlankOne(t *te
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_HOST", script)
+	installNode(t, "#!/bin/sh\n")
 	configured := filepath.Join(fixture.Home, "claude-main")
 	for value, want := range map[string][]string{"": nil, "  ": nil, configured: {"CLAUDE_CONFIG_DIR=" + configured}} {
 		t.Setenv("CLAUDE_CONFIG_DIR", value)
