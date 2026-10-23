@@ -468,3 +468,53 @@ func TestAQueueConflictRereadsTheStopReleasedWithItsNotice(t *testing.T) {
 		t.Fatalf("published row: queue=%d limitResume=%+v", row.QueueCount, row.LimitResume)
 	}
 }
+
+func TestTheNextPresencePassRepairsAStopPublishedBeforeACancel(t *testing.T) {
+	f := newLimitFixture(t, "worker")
+	refusedAt := time.Now().Add(-time.Minute).Truncate(time.Second)
+	if err := f.r.RecordLimitStop(f.fake.sessions["worker"], "/roots/work", surface.LimitStop{TurnID: "u1", RefusedAt: refusedAt, ResetsAt: refusedAt.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := f.d.limitResumeRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved, err := f.r.TransitionLimitResume("worker", "u1", limitWaiting, registry.LimitResumeCanceled, time.Now()); err != nil || !moved {
+		t.Fatalf("moved=%v err=%v", moved, err)
+	}
+	view, err := f.d.loadCatalogViewState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.d.publishCatalogSession(context.Background(), f.fake, f.fake.sessions["worker"], catalogIdentity{}, "", 0, stale["worker"], false, DashboardConfig{}, view, time.Now().UTC(), nil, nil) {
+		t.Fatal("the session was not published")
+	}
+	latest := func() *dashboardLimitResume {
+		t.Helper()
+		window, err := f.r.CatalogEventsAfter(0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stop *dashboardLimitResume
+		for _, event := range window.Events {
+			if event.EntityID != "worker" || event.Type != "session.upserted" {
+				continue
+			}
+			var payload struct {
+				Session dashboardSession `json:"session"`
+			}
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			stop = payload.Session.LimitResume
+		}
+		return stop
+	}
+	if stop := latest(); stop == nil || stop.State != registry.LimitResumeWaiting {
+		t.Fatalf("the stale publish did not land: %+v", stop)
+	}
+	f.d.publishCatalogPresence()
+	if stop := latest(); stop == nil || stop.State != registry.LimitResumeCanceled {
+		t.Fatalf("the presence pass left the stale stop: %+v", stop)
+	}
+}
