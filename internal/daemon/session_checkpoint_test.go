@@ -105,7 +105,7 @@ func newCheckpointFixture(t *testing.T) *checkpointFixture {
 func (f *checkpointFixture) start(t *testing.T) *sessionSource {
 	t.Helper()
 	f.adapter.pages, f.adapter.forward = 0, 0
-	source := &sessionSource{manager: newSessionSourceManager(f.registry), session: f.session, adapter: f.adapter, epoch: "checkpoint", ctx: context.Background(), appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source := &sessionSource{manager: newSessionSourceManager(f.registry), session: f.session, adapter: f.adapter, epoch: "checkpoint", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	if err := source.loadSeed(); err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +342,7 @@ func TestAFailedMergeIntoAJournalRowKeepsTheSourceFromRecordingACheckpoint(t *te
 		t.Fatal("no journal row for answer 2")
 	}
 	allow := rejectJournalWrites(t, f.registry, row.ProviderKey)
-	source := &sessionSource{manager: newSessionSourceManager(f.registry), session: f.session, adapter: f.adapter, epoch: "checkpoint", ctx: context.Background(), appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source := &sessionSource{manager: newSessionSourceManager(f.registry), session: f.session, adapter: f.adapter, epoch: "checkpoint", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	item := surface.TimelineItem{ID: row.ItemID, Kind: row.Kind, Role: row.Role, Text: row.Body, TurnID: "another-turn"}
 	if !source.mergeSeedIntoAuthoritativeRow(row.ProviderKey, "upsert", item) {
 		t.Fatal("the item did not match its journal row")
