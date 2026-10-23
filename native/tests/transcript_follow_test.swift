@@ -36,6 +36,7 @@ struct Transcript: View {
             .padding(24)
         }
         .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, hasRow: { id in feed.rows.contains { $0.id == id } }, position: $position, following: $following)
+        .safeAreaInset(edge: .top, spacing: 0) { Color.gray.frame(height: 44) }
         .safeAreaInset(edge: .bottom, spacing: 0) { Color.gray.frame(height: feed.inset) }
         .onChange(of: following) { feed.following = following }
         .onReceive(NotificationCenter.default.publisher(for: .jumpToLatest)) { _ in

@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// Stops following the live edge, so a row a person expands or collapses stays under the pointer.
+/// Stops following the live edge and holds the current offset, so a row a person expands or collapses stays under the pointer.
 /// Equal for the life of a transcript, so rows that read it are not re-rendered on every scroll update.
 struct HoldTranscriptPlace: Equatable {
-    fileprivate var following: Binding<Bool>?
+    fileprivate var hold: (@MainActor () -> Void)?
 
-    func callAsFunction() { following?.wrappedValue = false }
+    @MainActor func callAsFunction() { hold?() }
 
-    static func == (lhs: Self, rhs: Self) -> Bool { (lhs.following == nil) == (rhs.following == nil) }
+    static func == (lhs: Self, rhs: Self) -> Bool { (lhs.hold == nil) == (rhs.hold == nil) }
 }
 
 extension EnvironmentValues {
@@ -28,6 +28,11 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     static var bottomSlack: CGFloat { 70 }
     /// Longer than a jump's animation. A scroll moved mid-animation can leave the phase animating for good.
     static var animationLimit: Duration { .milliseconds(500) }
+
+    /// `scrollTo(y:)` measures from below the top inset, such as the conversation header; content offsets include it.
+    static func scrollY(_ offset: CGFloat, in geometry: ScrollGeometry) -> CGFloat {
+        offset + geometry.contentInsets.top
+    }
 
     static func atBottom(_ geometry: ScrollGeometry) -> Bool {
         geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - bottomSlack
@@ -51,10 +56,13 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                     returnToBottom()
                 }
             }
-            .onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { old, new in
+            .onScrollGeometryChange(for: ScrollGeometry.self) { geometry in
+                // The action is not called for every change, so the latest geometry is kept as it is read.
+                layout.geometry = geometry
+                return geometry
+            } action: { old, new in
                 let inserted = leadingRow != placedLeadingRow && placedLeadingRow.map(hasRow) == true
                 placedLeadingRow = leadingRow
-                layout.geometry = new
                 let resized = old.contentSize != new.contentSize || old.containerSize != new.containerSize
                 if resized { layout.markResized() }
                 if !resized {
@@ -69,13 +77,13 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                     settle { $0.scrollTo(edge: .bottom) }
                 } else if !following, inserted, resting {
                     let target = max(new.contentSize.height - (old.contentSize.height - old.contentOffset.y), 0)
-                    settle { $0.scrollTo(y: target) }
+                    settle { $0.scrollTo(y: Self.scrollY(target, in: new)) }
                 } else if !following, resting, Self.atBottom(new) {
                     // Content that shrank to the reader's position, or now fits, leaves nothing to jump to.
                     following = true
                 }
             }
-            .environment(\.holdTranscriptPlace, HoldTranscriptPlace(following: $following))
+            .environment(\.holdTranscriptPlace, HoldTranscriptPlace(hold: holdPlace))
             .onChange(of: transcript) {
                 generation &+= 1
                 placedLeadingRow = leadingRow
@@ -90,6 +98,12 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     }
 
     private var resting: Bool { phase == .idle || (phase == .animating && !animating) }
+
+    // A scroll position still at the bottom edge keeps the bottom in place as content grows, even when not following.
+    private func holdPlace() {
+        following = false
+        if let geometry = layout.geometry { position.scrollTo(y: Self.scrollY(geometry.contentOffset.y, in: geometry)) }
+    }
 
     // Updates during an animation are ignored, so one that comes to rest short of the bottom is checked once it has.
     private func returnToBottom() {
