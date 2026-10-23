@@ -65,7 +65,11 @@ func New(t testing.TB, home string) *Fixture {
 		}
 	}
 	t.Cleanup(func() {
-		if left := f.Kill(); len(left) > 0 {
+		left, err := f.Kill()
+		if err != nil {
+			t.Errorf("find the hosts for %s: %v", f.Home, err)
+		}
+		if len(left) > 0 {
 			t.Errorf("processes for %s outlived the test: %v", f.Home, left)
 		}
 	})
@@ -348,8 +352,9 @@ func (f *Fixture) KillHost(t testing.TB) {
 // whether or not a host still answers, since hosts and CLIs run in their own
 // sessions and nothing else stops them. It waits for them to exit and returns
 // any that did not.
-func (f *Fixture) Kill() []int {
-	pids := append(f.HostPIDs(), f.cliPIDs()...)
+func (f *Fixture) Kill() ([]int, error) {
+	hosts, err := f.hostPIDs()
+	pids := append(hosts, f.cliPIDs()...)
 	for _, pid := range pids {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}
@@ -370,18 +375,31 @@ func (f *Fixture) Kill() []int {
 			_ = os.Remove(filepath.Join("/tmp/cc-socks", strconv.Itoa(pid)+".sock"))
 		}
 	}
-	return left
+	return left, err
 }
 
 // HostPIDs are the running host processes serving this home.
-func (f *Fixture) HostPIDs() []int {
+func (f *Fixture) HostPIDs(t testing.TB) []int {
+	t.Helper()
+	pids, err := f.hostPIDs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pids
+}
+
+func (f *Fixture) hostPIDs() ([]int, error) {
+	running, err := processes()
+	if err != nil {
+		return nil, err
+	}
 	var pids []int
-	for pid, command := range processes() {
+	for pid, command := range running {
 		if f.isHost(command) {
 			pids = append(pids, pid)
 		}
 	}
-	return pids
+	return pids, nil
 }
 
 func (f *Fixture) isHost(command string) bool {
@@ -422,10 +440,10 @@ func commandLine(pid int) string {
 	return strings.TrimSpace(string(output))
 }
 
-func processes() map[int]string {
+func processes() (map[int]string, error) {
 	output, err := stdout("ps", "-axo", "pid=,command=")
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("list processes: %w", err)
 	}
 	out := map[int]string{}
 	for _, line := range strings.Split(string(output), "\n") {
@@ -437,7 +455,7 @@ func processes() map[int]string {
 			out[pid] = strings.Join(fields[1:], " ")
 		}
 	}
-	return out
+	return out, nil
 }
 
 // Diagnose describes the host serving this home, for a test that timed out
@@ -449,8 +467,8 @@ func processes() map[int]string {
 func (f *Fixture) Diagnose(pid int, lastErr error) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "last error: %v\n", lastErr)
-	pids := f.HostPIDs()
-	fmt.Fprintf(&b, "expected host pid %d alive=%v; hosts serving this home: %v\n", pid, Alive(pid), pids)
+	pids, err := f.hostPIDs()
+	fmt.Fprintf(&b, "expected host pid %d alive=%v; hosts serving this home: %v (err=%v)\n", pid, Alive(pid), pids, err)
 	if pid > 0 && !slices.Contains(pids, pid) {
 		pids = append([]int{pid}, pids...)
 	}
@@ -531,10 +549,9 @@ func command(name string, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
+// stdout runs ps without a deadline: a listing slowed by load must not read as no processes.
 func stdout(name string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	return exec.CommandContext(ctx, name, args...).Output()
+	return exec.Command(name, args...).Output()
 }
 
 func head(data []byte, limit int) []byte {

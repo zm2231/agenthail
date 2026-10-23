@@ -124,7 +124,7 @@ func TestDaemonsEnsuringAtOnceShareOneHost(t *testing.T) {
 	if len(seen) != 1 {
 		t.Fatalf("hosts = %v, want one", seen)
 	}
-	if running := f.HostPIDs(); len(running) != 1 {
+	if running := f.HostPIDs(t); len(running) != 1 {
 		t.Fatalf("host processes = %v, want one", running)
 	}
 	if starts := strings.Count(hostLog(t, f.Home), "listening"); starts != 1 {
@@ -335,7 +335,7 @@ func TestRetiredHostsLeaveWithTheirSessions(t *testing.T) {
 	testkit.Eventually(t, "the first host to leave after the turn", 15*time.Second, func() bool {
 		return !claudehosttest.Alive(first.PID) && !claudehosttest.Alive(opened.PID)
 	})
-	if hosts := f.HostPIDs(); len(hosts) != 1 {
+	if hosts := f.HostPIDs(t); len(hosts) != 1 {
 		t.Fatalf("hosts = %v, want only the current one", hosts)
 	}
 }
