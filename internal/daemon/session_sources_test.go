@@ -195,7 +195,8 @@ func TestLegacySeedCheckpointNeverAcceptsReplacementAcrossRetries(t *testing.T) 
 
 type restartingSource struct {
 	*daemonSurface
-	calls atomic.Int32
+	calls     atomic.Int32
+	restarted chan struct{}
 }
 
 type contextRefreshSurface struct {
@@ -365,6 +366,10 @@ func TestSessionJournalBodyBudgetKeepsPreviewWithoutDeadReference(t *testing.T) 
 func (s *restartingSource) Stream(ctx context.Context, _ *surface.Session, _ string, _ func(surface.StreamEvent), _ time.Duration) error {
 	if s.calls.Add(1) == 1 {
 		return nil
+	}
+	select {
+	case s.restarted <- struct{}{}:
+	default:
 	}
 	<-ctx.Done()
 	return ctx.Err()
@@ -606,6 +611,12 @@ func TestSessionSourceKeepsUnsupportedTailOpenWithoutRetryNoise(t *testing.T) {
 	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
 	if err != nil || len(window.Entries) != 1 {
 		t.Fatalf("window=%+v err=%v", window, err)
+	}
+	// The source calls Stream from its own goroutine after seeding, so wait for that call rather than for a fixed time.
+	select {
+	case <-adapter.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the source never asked the provider to stream")
 	}
 	time.Sleep(50 * time.Millisecond)
 	if calls := adapter.calls.Load(); calls != 1 {
@@ -1262,7 +1273,7 @@ func TestObservationHoldsActiveTurnSourceUntilIdle(t *testing.T) {
 
 func TestHeldSourceRestartsAfterUpstreamEnds(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
-	adapter := &restartingSource{daemonSurface: fake}
+	adapter := &restartingSource{daemonSurface: fake, restarted: make(chan struct{}, 1)}
 	adapter.caps.Stream = true
 	manager := newTestSourceManager(t, registry)
 	release, err := manager.hold(&from, adapter, "active-turn")
@@ -1270,12 +1281,11 @@ func TestHeldSourceRestartsAfterUpstreamEnds(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	deadline := time.Now().Add(2 * time.Second)
-	for adapter.calls.Load() < 2 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if calls := adapter.calls.Load(); calls < 2 {
-		t.Fatalf("stream calls=%d", calls)
+	// The restart follows sessionStreamRestartPause; the bound only decides how long a failure takes to report.
+	select {
+	case <-adapter.restarted:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("stream calls=%d", adapter.calls.Load())
 	}
 }
 
