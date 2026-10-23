@@ -922,8 +922,9 @@ struct TranscriptView: View {
             .frame(maxWidth: 700)
             .padding(.horizontal, DesktopSpace.xxl)
             .padding(.top, 28)
-            .padding(.bottom, 12 + MessageActions.height)
+            .padding(.bottom, 12)
             .frame(maxWidth: .infinity)
+            .environment(\.transcriptRows, TranscriptRows(memory: pane.rowMemory, session: session.id))
         }
         .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, hasRow: { id in pane.timelineItems.contains { $0.id == id } }, position: $position, following: $following)
         .onScrollGeometryChange(for: Bool.self) { geometry in
@@ -1030,21 +1031,28 @@ struct TranscriptView: View {
 struct TranscriptBlockView: View {
     let block: TranscriptBlock
     var onEdit: ((String) -> Void)? = nil
-    @State private var expanded = false
+    @State private var opened: RowChoice<Bool>?
+    @Environment(\.transcriptRows) private var rows
     @Environment(\.holdTranscriptPlace) private var holdPlace
 
     private var note: String? { block.truncated ? TimelineMetadata.shortened : nil }
+    private var expanded: Bool { rows.current(opened) ?? rows.isOpen(block.id) ?? false }
 
     var body: some View {
         switch block.kind {
         case .user(let text, let files):
-            UserBubble(text: text, receipt: note, files: files, onEdit: onEdit)
+            let envelope = PeerEnvelope(text)
+            if let sender = envelope.sender {
+                PeerMessage(sender: sender, text: envelope.body, time: TurnClock.time(block.timestamp), note: note)
+            } else {
+                UserBubble(text: text, receipt: note, time: TurnClock.time(block.timestamp), files: files, onEdit: onEdit, row: block.id)
+            }
         case .assistant(let text):
-            AssistantReply(text: text, note: note)
+            AssistantReply(text: text, note: note, footer: block.finished.map { TurnClock.footer(duration: $0, at: block.timestamp) })
         case .peer(let sender, let text):
-            UserBubble(text: text, receipt: note, sender: sender)
+            PeerMessage(sender: sender, text: text, time: TurnClock.time(block.timestamp), note: note)
         case .tools(let items):
-            ToolRunView(items: items, expanded: $expanded)
+            ToolRunView(id: block.id, items: items)
         default:
             VStack(alignment: .leading, spacing: DesktopSpace.xs) {
                 record
@@ -1057,6 +1065,13 @@ struct TranscriptBlockView: View {
         }
     }
 
+    private func toggle() {
+        holdPlace()
+        let next = !expanded
+        opened = rows.choice(next)
+        rows.set(block.id, open: next)
+    }
+
     @ViewBuilder private var record: some View {
         switch block.kind {
         case .user, .assistant, .peer, .tools:
@@ -1066,25 +1081,27 @@ struct TranscriptBlockView: View {
                 .font(.system(size: DesktopType.meta))
                 .foregroundStyle(DesktopPalette.muted)
         case .notice(let text):
-            Button { holdPlace(); expanded.toggle() } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: "info.circle")
+            Button(action: toggle) {
+                HStack(spacing: DesktopSpace.s) {
+                    Rectangle().fill(DesktopPalette.line).frame(width: 18, height: 1)
                     Text(text)
                         .lineLimit(expanded ? nil : 1)
                         .multilineTextAlignment(.leading)
+                        .layoutPriority(1)
+                    Rectangle().fill(DesktopPalette.line).frame(minWidth: 18, maxWidth: .infinity, maxHeight: 1)
                 }
                 .font(.system(size: DesktopType.meta))
                 .foregroundStyle(DesktopPalette.muted)
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(expanded ? "" : text)
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
         case .image(let attachment):
             AttachmentImageView(attachment: attachment)
         case .instructions(let text):
             VStack(alignment: .leading, spacing: 6) {
-                Button { holdPlace(); expanded.toggle() } label: {
+                Button(action: toggle) {
                     HStack(spacing: 6) {
                         Image(systemName: expanded ? "chevron.down" : "chevron.right")
                         Text("Instructions")
@@ -1176,77 +1193,120 @@ struct AttachmentImageView: View {
 struct UserBubble: View {
     let text: String
     let receipt: String?
+    var time: String? = nil
     var files: [AttachedFile] = []
-    var sender: String? = nil
     var failure: String? = nil
     var onEdit: ((String) -> Void)? = nil
     var onRetry: (() -> Void)? = nil
-    @State private var expanded = false
+    /// The transcript row this message is, so "Show more" is remembered with the session's other rows.
+    var row: String? = nil
+    @State private var opened: RowChoice<Bool>?
+    @Environment(\.transcriptRows) private var rows
     @Environment(\.holdTranscriptPlace) private var holdPlace
     @State private var editing = false
     @State private var hovering = false
 
+    private var expanded: Bool { rows.current(opened) ?? row.flatMap { rows.isOpen("more-" + $0) } ?? false }
+
     var body: some View {
-        let envelope = sender.map { PeerEnvelope(sender: $0, body: text) } ?? PeerEnvelope(text)
         VStack(alignment: .trailing, spacing: 5) {
-            if let sender = envelope.sender {
-                Text("From \(sender)")
-                    .font(.system(size: DesktopType.caption))
-                    .foregroundStyle(DesktopPalette.text2)
-            }
             if editing, let onEdit {
-                MessageEditor(text: envelope.body, onCancel: { editing = false }, onSend: { edited in
+                MessageEditor(text: text, onCancel: { editing = false }, onSend: { edited in
                     editing = false
                     onEdit(edited)
                 })
             } else {
-                bubble(envelope.body)
+                bubble
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
-        .overlay(alignment: .bottomTrailing) {
-            if !editing {
-                MessageActions(text: envelope.body, revealed: hovering, onEdit: onEdit == nil ? nil : { editing = true })
-                    .offset(y: MessageActions.height)
-            }
-        }
         .padding(.leading, 120)
         .onHover { hovering = $0 }
     }
 
-    @ViewBuilder private func bubble(_ message: String) -> some View {
-        Text(message)
-            .font(.system(size: DesktopType.prose))
-            .lineSpacing(DesktopType.proseLineSpacing)
-            .lineLimit(expanded ? nil : 8)
-            .textSelection(.enabled)
-            .padding(.horizontal, 13)
-            .padding(.vertical, 9)
-            .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
-        if message.split(separator: "\n", omittingEmptySubsequences: false).count > 8 || message.count > 700 {
-            Button(expanded ? "Show less" : "Show more") { holdPlace(); expanded.toggle() }
+    @ViewBuilder private var bubble: some View {
+        if !files.isEmpty {
+            HStack(spacing: DesktopSpace.s) {
+                ForEach(Array(files.enumerated()), id: \.offset) { _, file in AttachedFileChip(file: file) }
+            }
+        }
+        if !text.isEmpty {
+            Text(text)
+                .font(.system(size: DesktopType.prose))
+                .lineSpacing(DesktopType.proseLineSpacing)
+                .lineLimit(expanded ? nil : 8)
+                .textSelection(.enabled)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 9)
+                .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
+        }
+        if text.split(separator: "\n", omittingEmptySubsequences: false).count > 8 || text.count > 700 {
+            Button(expanded ? "Show less" : "Show more") {
+                holdPlace()
+                opened = rows.choice(!expanded)
+                if let row { rows.set("more-" + row, open: !expanded) }
+            }
                 .buttonStyle(.plain)
                 .font(.system(size: DesktopType.meta))
                 .foregroundStyle(DesktopPalette.text2)
         }
-        if let failure {
-            HStack(spacing: 6) {
+        HStack(spacing: DesktopSpace.s) {
+            MessageActions(text: text, revealed: hovering, onEdit: onEdit == nil ? nil : { editing = true })
+            if let failure {
                 Image(systemName: "exclamationmark.circle")
+                    .foregroundStyle(DesktopPalette.failed)
                 Text("Not sent · \(failure)")
+                    .foregroundStyle(DesktopPalette.failed)
                     .lineLimit(2)
                 if let onRetry {
                     Button("Retry", action: onRetry)
                         .buttonStyle(.plain)
                         .foregroundStyle(DesktopPalette.accentText)
                 }
+            } else {
+                let status = [receipt, time].compactMap { $0 }.joined(separator: " · ")
+                if !status.isEmpty { Text(status) }
             }
-            .font(.system(size: DesktopType.caption))
-            .foregroundStyle(DesktopPalette.failed)
-        } else if let receipt {
-            Text(receipt)
-                .font(.system(size: DesktopType.caption))
-                .foregroundStyle(DesktopPalette.text2)
         }
+        .font(.system(size: DesktopType.caption))
+        .foregroundStyle(DesktopPalette.text2)
+    }
+}
+
+/// A message another agent sent this session: on the reader's side, marked by a rule and its sender.
+struct PeerMessage: View {
+    let sender: String
+    let text: String
+    var time: String? = nil
+    var note: String? = nil
+    @State private var hovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: DesktopSpace.s) {
+                Text(sender)
+                    .font(.system(size: DesktopType.meta, weight: .semibold))
+                    .foregroundStyle(DesktopPalette.working)
+                let status = [time, note].compactMap { $0 }.joined(separator: " · ")
+                if !status.isEmpty {
+                    Text(status)
+                        .font(.system(size: DesktopType.caption))
+                        .foregroundStyle(DesktopPalette.muted)
+                }
+                MessageActions(text: text, revealed: hovering)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("From \(sender)")
+            Text(text)
+                .font(.system(size: DesktopType.prose))
+                .lineSpacing(DesktopType.proseLineSpacing)
+                .foregroundStyle(DesktopPalette.text)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.leading, DesktopSpace.m)
+        .overlay(alignment: .leading) { Rectangle().fill(DesktopPalette.working).frame(width: 2) }
+        .onHover { hovering = $0 }
     }
 }
 
@@ -1300,260 +1360,44 @@ struct AttachedFileChip: View {
 struct AssistantReply: View {
     let text: String
     var note: String? = nil
+    /// "Finished 3:13 · 6:10 PM" when this reply ended its turn; Copy sits on that line.
+    var footer: String? = nil
     @State private var hovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DesktopSpace.xs) {
+        VStack(alignment: .leading, spacing: DesktopSpace.s) {
+            HStack(spacing: DesktopSpace.s) {
+                Image(systemName: "sparkle")
+                    .font(.system(size: 10))
+                    .foregroundStyle(DesktopPalette.muted)
+                    .accessibilityHidden(true)
+                if footer == nil {
+                    MessageActions(text: text, revealed: hovering)
+                }
+            }
+            .frame(height: MessageActions.height)
             StructuredText(markdown: text)
                 .font(.system(size: DesktopType.prose))
                 .lineSpacing(DesktopType.proseLineSpacing)
                 .foregroundStyle(DesktopPalette.text)
                 .textual.textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-            if let note {
-                Text(note)
-                    .font(.system(size: DesktopType.caption))
-                    .foregroundStyle(DesktopPalette.muted)
-            }
-        }
-            .overlay(alignment: .bottomLeading) {
-                MessageActions(text: text, revealed: hovering)
-                    .offset(y: MessageActions.height)
-            }
-            .onHover { hovering = $0 }
-    }
-}
-
-struct ToolRunView: View {
-    let items: [TimelineItem]
-    @Binding var expanded: Bool
-    @Environment(\.holdTranscriptPlace) private var holdPlace
-
-    var body: some View {
-        let entries = ToolRunSummary.entries(items)
-        let failed = items.filter(ToolRunSummary.isFailure).count
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                holdPlace()
-                expanded.toggle()
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: DesktopType.caption, weight: .semibold))
-                    Text(ToolRunSummary.label(items))
-                    if failed > 0 {
-                        Text("· \(failed) failed").foregroundStyle(DesktopPalette.failed)
-                    }
-                }
-                .font(.system(size: DesktopType.body))
-                .foregroundStyle(DesktopPalette.text2)
-            }
-            .buttonStyle(.plain)
-            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-            if expanded {
-                ForEach(entries) { entry in
-                    switch entry {
-                    case .call(let call, let results):
-                        ToolCallRow(call: call, results: results)
-                    case .output(let result):
-                        ToolOutputBlock(result: result)
-                            .padding(.leading, 21)
-                            .contextMenu {
-                                if let id = result.callId, !id.isEmpty {
-                                    Button("Copy call ID") { copyToPasteboard(id) }
-                                }
-                            }
-                    case .reasoning(let item):
-                        ReasoningRow(item: item)
-                    }
-                }
-            }
-        }
-        .padding(.leading, DesktopSpace.m)
-        .overlay(alignment: .leading) { Rectangle().fill(DesktopPalette.line).frame(width: 2) }
-    }
-
-}
-
-struct ToolCallRow: View {
-    let call: TimelineItem
-    let results: [TimelineItem]
-    @State private var expanded = false
-    @Environment(\.holdTranscriptPlace) private var holdPlace
-
-    private var failed: Bool { results.contains(where: ToolRunSummary.isFailure) || ToolRunSummary.isFailure(call) }
-
-    static func fullInput(_ text: String) -> String {
-        guard let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any], !object.isEmpty else { return text }
-        let command = (object["command"] ?? object["cmd"]) as? String
-        let rest = object.filter { $0.key != "command" && $0.key != "cmd" }
-        var lines: [String] = command.map { ["$ " + $0] } ?? []
-        for key in rest.keys.sorted() {
-            let value = rest[key].map { value -> String in
-                if let string = value as? String { return string }
-                if JSONSerialization.isValidJSONObject(value), let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]) {
-                    return String(decoding: data, as: UTF8.self)
-                }
-                return "\(value)"
-            } ?? ""
-            lines.append("\(key): \(value)")
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    var body: some View {
-        let presentation = ToolPresentation(name: call.title, text: call.text)
-        let isCommand: Bool = { if case .command = presentation.content { return true } else { return false } }()
-        let firstLine = presentation.summary.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
-        VStack(alignment: .leading, spacing: DesktopSpace.xs) {
-            Button {
-                holdPlace()
-                expanded.toggle()
-            } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Image(systemName: presentation.symbol)
-                        .font(.system(size: DesktopType.caption))
-                        .frame(width: 14)
-                    Text(presentation.intent ?? presentation.title)
-                        .lineLimit(1)
-                        .layoutPriority(1)
-                    Text(isCommand ? "$ " + firstLine : firstLine)
-                        .font(.system(size: DesktopType.meta, design: .monospaced))
-                        .foregroundStyle(presentation.intent == nil ? DesktopPalette.text : DesktopPalette.muted)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                .font(.system(size: DesktopType.secondary))
-                .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.text2)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-            if expanded {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(Self.fullInput(call.text))
-                        .font(.system(size: DesktopType.meta, design: .monospaced))
-                        .foregroundStyle(DesktopPalette.text)
-                        .textSelection(.enabled)
-                        .lineLimit(40)
-                        .padding(DesktopSpace.s)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
-                    ShortenedNote(item: call)
-                    if results.isEmpty {
-                        Text("No result yet")
-                            .font(.system(size: DesktopType.meta))
+            if note != nil || footer != nil {
+                HStack(spacing: DesktopSpace.s) {
+                    let status = [note, footer].compactMap { $0 }.joined(separator: " · ")
+                    if !status.isEmpty {
+                        Text(status)
+                            .font(.system(size: DesktopType.caption))
                             .foregroundStyle(DesktopPalette.muted)
                     }
-                    ForEach(results) { result in
-                        ToolOutputBlock(result: result)
+                    if footer != nil {
+                        MessageActions(text: text, revealed: hovering)
                     }
                 }
-                .padding(.leading, 21)
             }
         }
-        .contextMenu {
-            Button("Copy input") { copyToPasteboard(call.text) }
-            if !results.isEmpty {
-                Button("Copy output") { copyToPasteboard(results.map(\.text).joined(separator: "\n\n")) }
-            }
-            if let id = call.callId, !id.isEmpty {
-                Button("Copy call ID") { copyToPasteboard(id) }
-            }
-        }
+        .onHover { hovering = $0 }
     }
-}
-
-struct ReasoningRow: View {
-    let item: TimelineItem
-    @State private var expanded = false
-    @Environment(\.holdTranscriptPlace) private var holdPlace
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: DesktopSpace.xs) {
-            Button {
-                holdPlace()
-                expanded.toggle()
-            } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Image(systemName: "brain")
-                        .font(.system(size: DesktopType.caption))
-                        .frame(width: 14)
-                    Text("Reasoning")
-                    Text(item.text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? "")
-                        .foregroundStyle(DesktopPalette.muted)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                .font(.system(size: DesktopType.secondary))
-                .foregroundStyle(DesktopPalette.text2)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-            if expanded {
-                VStack(alignment: .leading, spacing: DesktopSpace.xs) {
-                    StructuredText(markdown: item.text)
-                        .font(.system(size: DesktopType.body))
-                        .foregroundStyle(DesktopPalette.text2)
-                        .textual.textSelection(.enabled)
-                    ShortenedNote(item: item)
-                }
-                .padding(.leading, 21)
-            }
-        }
-    }
-}
-
-struct ToolOutputBlock: View {
-    let result: TimelineItem
-    @State private var showAll = false
-    @Environment(\.holdTranscriptPlace) private var holdPlace
-
-    var body: some View {
-        let failed = ToolRunSummary.isFailure(result)
-        let text = result.text
-        let preview = ToolRunSummary.outputPreview(text)
-        VStack(alignment: .leading, spacing: DesktopSpace.xs) {
-            HStack(spacing: 10) {
-                Text(failed ? "Error output" : "Output")
-                    .font(.system(size: DesktopType.caption, weight: .semibold))
-                    .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.muted)
-                Spacer()
-                if preview.count < text.count {
-                    Button(showAll ? "Show less output" : "Show full output") { holdPlace(); showAll.toggle() }
-                }
-                Button("Copy output") { copyToPasteboard(text) }
-            }
-            .font(.system(size: DesktopType.caption))
-            .buttonStyle(.link)
-            Text(text.isEmpty ? "The tool returned an empty result." : showAll ? text : preview)
-                .font(.system(size: DesktopType.meta, design: .monospaced))
-                .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.text)
-                .textSelection(.enabled)
-                .padding(DesktopSpace.s)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
-            ShortenedNote(item: result)
-        }
-    }
-}
-
-struct ShortenedNote: View {
-    let item: TimelineItem
-
-    var body: some View {
-        if let note = TimelineMetadata.note(item) {
-            Text(note)
-                .font(.system(size: DesktopType.caption))
-                .foregroundStyle(DesktopPalette.muted)
-        }
-    }
-}
-
-private func copyToPasteboard(_ text: String) {
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(text, forType: .string)
 }
 
 struct ComposerView: View {

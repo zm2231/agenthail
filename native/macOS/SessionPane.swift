@@ -6,6 +6,7 @@ import os
 final class SessionPane: ObservableObject, Identifiable {
     let id = UUID()
     let restoresSelection: Bool
+    let rowMemory = TranscriptRowMemory()
     unowned let model: AgenthailModel
 
     @Published private(set) var selectedSessionID: String? {

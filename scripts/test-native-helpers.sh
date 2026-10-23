@@ -29,6 +29,7 @@ SOURCES=(
   SessionTree.swift
   MetadataOverlay.swift
   StatusRefreshPolicy.swift
+  ToolPresentation.swift
   TurnSettings.swift
   UIConfig.swift
   VoiceAPI.swift
@@ -67,6 +68,7 @@ SOURCES=(
   macOS/ToolRunSummary.swift
   macOS/TranscriptBlock.swift
   macOS/TranscriptFollow.swift
+  macOS/TranscriptRows.swift
   macOS/VoiceController.swift
 )
 
