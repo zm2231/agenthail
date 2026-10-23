@@ -10,13 +10,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/sse"
 )
 
 type apiDeviceTokenContextKey struct{}
@@ -60,11 +60,10 @@ func requestingHostName(ctx context.Context) string {
 }
 
 const (
-	apiProtocolVersion   = 1
-	pairingLifetime      = 5 * time.Minute
-	apiRequestBodyLimit  = 140 << 10
-	eventKeepalivePeriod = 15 * time.Second
-	apiErrorBodyLimit    = 8 << 10
+	apiProtocolVersion  = 1
+	pairingLifetime     = 5 * time.Minute
+	apiRequestBodyLimit = 140 << 10
+	apiErrorBodyLimit   = 8 << 10
 )
 
 type apiVersionResponse struct {
@@ -170,13 +169,10 @@ func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "stream_unavailable", "Streaming is unavailable.")
 		return
 	}
-	after := parseEventCursor(r)
+	after, _ := sse.Cursor(r)
 	backlog, events, reset, cancel := d.events.subscribe(after)
 	defer cancel()
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache, no-transform")
-	w.Header().Set("Connection", "keep-alive")
-	writeSSEOpen(w)
+	sse.Open(w)
 	if reset {
 		writeSSEEvent(w, apiEvent{Type: "stream.reset", Timestamp: time.Now().UTC(), Data: json.RawMessage(`{"reason":"cursor_expired"}`)})
 	} else {
@@ -185,36 +181,15 @@ func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	flusher.Flush()
-	keepalive := time.NewTicker(eventKeepalivePeriod)
-	defer keepalive.Stop()
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case event, open := <-events:
-			if !open {
-				return
-			}
-			if !d.apiEventStreamAuthorized(r) {
-				return
-			}
-			writeSSEEvent(w, event)
-			flusher.Flush()
-		case <-keepalive.C:
-			if !d.apiEventStreamAuthorized(r) {
-				return
-			}
-			fmt.Fprint(w, ": keepalive\n\n")
-			flusher.Flush()
+	authorized := func() bool { return d.apiEventStreamAuthorized(r) }
+	sse.Follow(r.Context(), w, flusher, events, func(event apiEvent, open bool) bool {
+		if !open || !authorized() {
+			return false
 		}
-	}
-}
-
-// writeSSEOpen sends a comment as soon as a stream opens. URLSession returns
-// a streaming response only once body bytes arrive, so a client with nothing
-// to replay would otherwise wait for the first keepalive.
-func writeSSEOpen(w http.ResponseWriter) {
-	fmt.Fprint(w, ": connected\n\n")
+		writeSSEEvent(w, event)
+		flusher.Flush()
+		return true
+	}, authorized)
 }
 
 func (d *Daemon) apiEventStreamAuthorized(r *http.Request) bool {
@@ -414,15 +389,6 @@ func constantTokenEqual(left, right string) bool {
 		difference |= left[i] ^ right[i]
 	}
 	return difference == 0
-}
-
-func parseEventCursor(r *http.Request) uint64 {
-	value := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
-	if value == "" {
-		value = strings.TrimSpace(r.URL.Query().Get("after"))
-	}
-	cursor, _ := strconv.ParseUint(value, 10, 64)
-	return cursor
 }
 
 func writeSSEEvent(w io.Writer, event apiEvent) {

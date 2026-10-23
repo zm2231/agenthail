@@ -8,12 +8,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/sse"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -204,7 +203,7 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusInternalServerError, "stream_unavailable", "Streaming is unavailable.")
 		return
 	}
-	after, err := parseCatalogStreamCursor(r)
+	after, err := sse.Cursor(r)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_cursor", "The catalog stream cursor is invalid.")
 		return
@@ -219,10 +218,7 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 		writeDashboardJSON(w, http.StatusConflict, map[string]any{"error": map[string]any{"code": "stream_gap", "message": "The catalog stream cursor is no longer retained."}, "hostEpoch": window.HostEpoch, "earliestSeq": window.EarliestSeq, "latestSeq": window.LatestSeq})
 		return
 	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache, no-transform")
-	w.Header().Set("Connection", "keep-alive")
-	writeSSEOpen(w)
+	sse.Open(w)
 	mirror := catalogMirror(r.Context())
 	view := func(batch []registry.CatalogEvent) ([]registry.CatalogEvent, error) {
 		if mirror {
@@ -261,24 +257,9 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 	if !write(window.Events) || !follow() {
 		return
 	}
-	keepalive := time.NewTicker(eventKeepalivePeriod)
-	defer keepalive.Stop()
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-follower.Wake:
-			if !follow() {
-				return
-			}
-		case <-keepalive.C:
-			if !d.apiEventStreamAuthorized(r) {
-				return
-			}
-			fmt.Fprint(w, ": keepalive\n\n")
-			flusher.Flush()
-		}
-	}
+	sse.Follow(r.Context(), w, flusher, follower.Wake, func(struct{}, bool) bool {
+		return follow()
+	}, func() bool { return d.apiEventStreamAuthorized(r) })
 }
 
 const catalogStreamBatch = 256
@@ -308,17 +289,6 @@ func (d *Daemon) listedCatalogEvents(batch []registry.CatalogEvent) ([]registry.
 		listed = append(listed, event)
 	}
 	return listed, nil
-}
-
-func parseCatalogStreamCursor(r *http.Request) (uint64, error) {
-	value := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
-	if value == "" {
-		value = strings.TrimSpace(r.URL.Query().Get("after"))
-	}
-	if value == "" {
-		return 0, nil
-	}
-	return strconv.ParseUint(value, 10, 64)
 }
 
 func writeCatalogStreamEntry(w http.ResponseWriter, event registry.CatalogEvent) error {
