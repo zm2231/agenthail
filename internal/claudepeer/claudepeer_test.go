@@ -934,7 +934,7 @@ func TestPeerMessageForAHostsSessionIsHeldForThatHostWithItsSender(t *testing.T)
 		t.Fatal(err)
 	}
 	remote := surface.Session{ID: "remote-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "builder", Status: surface.StatusIdle}
-	if _, _, err := reg.ApplyHostCatalogRow("h0123456789ab", registry.HostCatalogRow{Session: remote, EntityID: "h0123456789ab::remote-a", Projection: []byte(`{"id":"h0123456789ab::remote-a"}`), ObservedAt: time.Now().UTC()}); err != nil {
+	if _, _, err := reg.ApplyHostCatalogRow("h0123456789ab", registry.HostCatalogRow{Session: remote, EntityID: "h0123456789ab::remote-a", Projection: []byte(`{"id":"h0123456789ab::remote-a","alias":"builder"}`), ObservedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	native := surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "reviewer", Status: surface.StatusIdle}
@@ -968,7 +968,7 @@ func TestPeerMessageForAHostsSessionIsHeldForThatHostWithItsSender(t *testing.T)
 		t.Fatal(err)
 	}
 	var peer sessionRecord
-	if err := json.Unmarshal(data, &peer); err != nil || peer.Name != "agenthail/codex: vps/builder" {
+	if err := json.Unmarshal(data, &peer); err != nil || peer.Name != "agenthail/codex: vps::@builder" {
 		t.Fatalf("peer name=%q err=%v", peer.Name, err)
 	}
 	sendFrames(t, worker.SocketPath,
@@ -1301,4 +1301,61 @@ func sendToFakeTarget(t *testing.T, socketDir string, send func(target string) e
 		t.Fatalf("invalid frame=%s: %v", line, err)
 	}
 	return body.Content
+}
+
+func TestAWorkerNamesItsSenderByTheAliasARepliesTo(t *testing.T) {
+	home, regPath := shortTempDir(t, "cp-home-"), filepath.Join(t.TempDir(), "registry.db")
+	socketDir := shortTempDir(t, "cp-socks-")
+	s := surface.Session{ID: "aliased-sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "a long working title", Status: surface.StatusIdle}
+	reg, err := registry.Open(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.RegisterSession(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetAlias("reviewer", s.ID); err != nil {
+		t.Fatal(err)
+	}
+	_ = reg.Close()
+	worker, _ := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: s, SocketDir: socketDir})
+	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(home), "sessions", strconv.Itoa(worker.PID)+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record sessionRecord
+	if err := json.Unmarshal(data, &record); err != nil || record.Name != "agenthail/claude: @reviewer" {
+		t.Fatalf("peer name=%q err=%v", record.Name, err)
+	}
+	child := exec.Command(os.Args[0], "-test.run=TestClaudePeerFakeTarget", "--")
+	child.Env = append(os.Environ(), "CLAUDEPEER_TARGET_DIR="+socketDir)
+	stdout, err := child.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer child.Process.Kill()
+	reader := bufio.NewReader(stdout)
+	var target Ready
+	readyLine, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(readyLine), &target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Send(context.Background(), worker.ControlPath, s.ID, target.SocketPath, "ready for review"); err != nil {
+		t.Fatal(err)
+	}
+	line, _ := reader.ReadString('\n')
+	var sent frame
+	var body messageBody
+	if err := json.Unmarshal([]byte(line), &sent); err != nil || json.Unmarshal(sent.Message, &body) != nil {
+		t.Fatalf("invalid frame=%s: %v", line, err)
+	}
+	if !strings.Contains(body.Content, `from-name="agenthail/claude: @reviewer"`) {
+		t.Fatalf("content=%q", body.Content)
+	}
 }
