@@ -135,6 +135,7 @@ final class WindowBackdrop: ObservableObject {
             }
         }.sorted { $0.id < $1.id }
         let texts = regions.filter { $0.value.region == .text || $0.value.region == .pane(.chrome) }.sorted { $0.key < $1.key }.map(\.value.rect)
+        let paneTexts = regions.filter { $0.value.region == .text }.sorted { $0.key < $1.key }.map(\.value.rect)
         return BackdropSpec(
             wallpaper: wallpaper,
             fit: config.backgroundFit,
@@ -156,6 +157,7 @@ final class WindowBackdrop: ObservableObject {
             scale: scale,
             panes: panes,
             texts: texts,
+            paneTexts: paneTexts,
             solidPanes: !config.glass || workspace.accessibilityDisplayShouldReduceTransparency,
             readability: config.readability || workspace.accessibilityDisplayShouldIncreaseContrast
         )

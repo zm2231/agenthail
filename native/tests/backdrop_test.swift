@@ -134,11 +134,11 @@ struct BackdropTest {
             (.light, [0x1D1D1F, 0x5F6066, 0x6E6E76].map(rgb), rgb(0xFFFFFF)),
         ]
         for (polarity, roles, ground) in cases {
-            func spec(texts: [CGRect], readability: Bool = true) -> BackdropSpec {
+            func spec(texts: [CGRect], paneTexts: [CGRect], readability: Bool = true) -> BackdropSpec {
                 BackdropSpec(wallpaper: .image(wallpaper), texture: "none", blur: 0, paneTint: ground, polarity: polarity, ground: ground, roles: roles, size: size, scale: scale,
-                             panes: [.init(id: "content", rect: pane, radius: 0, minimum: 0.1, strength: 1)], texts: texts, readability: readability)
+                             panes: [.init(id: "content", rect: pane, radius: 0, minimum: 0.1, strength: 1)], texts: texts, paneTexts: paneTexts, readability: readability)
             }
-            let local = BackdropRenderer.render(spec(texts: [text]))!
+            let local = BackdropRenderer.render(spec(texts: [text], paneTexts: [text]))!
             let bare = BackdropRenderer.render(BackdropSpec(wallpaper: .image(wallpaper), texture: "none", blur: 0, paneTint: ground, polarity: polarity, ground: ground, roles: roles, size: size, scale: scale))!
             let contrast = worst(local.image, scale: scale, in: [text], roles: roles)
             if contrast < 4.5 {
@@ -151,7 +151,13 @@ struct BackdropTest {
                 print("FAIL: \(polarity) pane away from text reads \(shown), want the background under the minimum tint, \(expected)")
                 failures += 1
             }
-            let off = BackdropRenderer.render(spec(texts: [text], readability: false))!
+            let chrome = BackdropRenderer.render(spec(texts: [text], paneTexts: []))!
+            let chromeFar = worst(chrome.image, scale: scale, in: [far], roles: roles)
+            if chromeFar < 4.5 {
+                print("FAIL: \(polarity) a pane with no text of its own reads at \(chromeFar):1 away from other text; it should stay text throughout")
+                failures += 1
+            }
+            let off = BackdropRenderer.render(spec(texts: [text], paneTexts: [text], readability: false))!
             let offText = mean(off.image, scale: scale, in: text)
             let offExpected = mean(bare.image, scale: scale, in: text) * 0.9 + ScrimField.luminance(ground.x, ground.y, ground.z) * 0.1
             if abs(offText - offExpected) > 0.03 {
