@@ -1082,6 +1082,8 @@ struct DashboardSnapshot: Decodable {
     let busyDelivery: String?
     var rekeyed: [String: String]? = nil
     var signin: [SigninConsumerState]? = nil
+    /// What this host's sessions call the person; an older host sends none.
+    var person: PersonState? = nil
 
     func hasSamePresentation(as other: DashboardSnapshot) -> Bool {
         daemon == other.daemon &&
@@ -1096,7 +1098,8 @@ struct DashboardSnapshot: Decodable {
             deliveryProblems == other.deliveryProblems &&
             codexRecentHours == other.codexRecentHours &&
             busyDelivery == other.busyDelivery &&
-            signin == other.signin
+            signin == other.signin &&
+            person == other.person
     }
 }
 
@@ -1307,6 +1310,12 @@ struct DashboardConfigState: Decodable {
     let listen: String
     let codexRecentHours: Int
     let busyDelivery: String
+}
+
+/// `set` is false while the name is the host account's own.
+struct PersonState: Decodable, Equatable {
+    let name: String
+    let set: Bool
 }
 
 struct DashboardSettingsState: Decodable {

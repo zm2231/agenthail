@@ -484,6 +484,21 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
+    /// Sets the name this host's sessions call the person; empty goes back
+    /// to the account's name.
+    func setPersonName(_ name: String) {
+        guard let api else { return }
+        Task {
+            do {
+                try await api.setPersonName(name.trimmingCharacters(in: .whitespacesAndNewlines))
+                operationError = nil
+                _ = await refresh(fresh: true)
+            } catch {
+                operationError = AgenthailAPIError.userMessage(error)
+            }
+        }
+    }
+
     func loadOperations() async {
         await loadDevices()
         guard let api else { return }

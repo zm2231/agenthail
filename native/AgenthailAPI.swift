@@ -365,6 +365,10 @@ final class AgenthailAPI: @unchecked Sendable {
         try await get("/api/v1/settings")
     }
 
+    func setPersonName(_ name: String) async throws {
+        let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "person-name", "personName": name])
+    }
+
     func updateDashboardConfig(busyDelivery: String, codexRecentHours: Int) async throws {
         let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "dashboard-config", "codexRecentHours": codexRecentHours, "busyDelivery": busyDelivery])
     }

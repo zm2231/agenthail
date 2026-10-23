@@ -127,6 +127,13 @@ type dashboardSession struct {
 	Host              *dashboardHost             `json:"host,omitempty"`
 }
 
+// dashboardPerson is what this host's sessions call the person, and whether
+// they set it or it is their account's name.
+type dashboardPerson struct {
+	Name string `json:"name"`
+	Set  bool   `json:"set"`
+}
+
 type dashboardState struct {
 	UpdatedAt          time.Time                   `json:"updatedAt"`
 	EventCursor        uint64                      `json:"eventCursor"`
@@ -150,6 +157,7 @@ type dashboardState struct {
 	Signin             []signin.Status             `json:"signin"`
 	Rekeyed            map[string]string           `json:"rekeyed,omitempty"`
 	Coordinators       []registry.CoordinatorEntry `json:"coordinators"`
+	Person             dashboardPerson             `json:"person"`
 	catalogPageApplied bool
 	catalogPageFilter  string
 	catalogPageOffset  int
@@ -332,6 +340,15 @@ func (d *Daemon) dashboardModelsHandler(w http.ResponseWriter, r *http.Request) 
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"models": models})
 }
 
+func (d *Daemon) person() (dashboardPerson, error) {
+	setting, err := d.Registry.PersonNameSetting()
+	if err != nil {
+		return dashboardPerson{}, err
+	}
+	name, err := d.Registry.PersonName()
+	return dashboardPerson{Name: name, Set: setting != ""}, err
+}
+
 func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	config, err := LoadDashboardConfig()
 	if err != nil {
@@ -357,6 +374,7 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		Action           string `json:"action"`
 		CodexRecentHours int    `json:"codexRecentHours"`
 		BusyDelivery     string `json:"busyDelivery"`
+		PersonName       string `json:"personName"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid settings request", http.StatusBadRequest)
@@ -375,6 +393,8 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		if err = SaveDashboardConfig(config); err == nil {
 			d.publishCatalogPresence()
 		}
+	case "person-name":
+		err = d.Registry.SetPersonName(request.PersonName)
 	case "notifications-enable":
 		_, err = EnableNotifications()
 	case "notifications-disable":
@@ -854,7 +874,11 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read coordinators: %w", err)
 	}
-	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Sessions: []dashboardSession{}, Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Signin: make([]signin.Status, 0, len(signin.Consumers)), Rekeyed: rekeyed}
+	person, err := d.person()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read the person's name: %w", err)
+	}
+	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Sessions: []dashboardSession{}, Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Signin: make([]signin.Status, 0, len(signin.Consumers)), Rekeyed: rekeyed, Person: person}
 	for _, consumer := range signin.Consumers {
 		state.Signin = append(state.Signin, d.signinConsumer(consumer))
 	}
