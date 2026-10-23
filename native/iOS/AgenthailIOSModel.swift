@@ -584,8 +584,17 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             creationRequestKey = UUID().uuidString
         }
         do {
-            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher, host: target.remote, idempotencyKey: creationRequestKey)
-            guard receipt.ok || receipt.unknown == true || receipt.accepted == true else { throw AgenthailAPIError.invalidResponse }
+            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher, host: target.remote, idempotencyKey: creationRequestKey, failureReceipts: true)
+            if receipt.outcomeUnknown && receipt.id == nil {
+                creationError = SessionCreationReceipt.unknownOutcomeMessage
+                return false
+            }
+            if !receipt.ok && !receipt.outcomeUnknown && receipt.accepted != true {
+                creationError = receipt.error ?? "The session didn't start."
+                // The daemon replays a stored failure under the same key, so a retry needs a new one.
+                if receipt.id == nil { creationRequestIdentity = nil; creationRequestKey = nil }
+                return false
+            }
             if receipt.status == "submitted" && receipt.id == nil {
                 creationWarning = "Submitted to \(receipt.launcher ?? launcher?.id ?? surface)."
                 return false
@@ -594,11 +603,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             if let created = receipt.id, !created.isEmpty {
                 let id = HostCatalog.qualify(target.remote ?? target.hostID, created)
                 let launched = receipt.launcher ?? launcher?.id ?? surface
-                deliveryStatus[id] = receipt.status == "submitted" || receipt.unknown == true ? "Submitted to \(launched)." : (surface == "claude" ? "Session started. Waiting for activity." : "Conversation started")
+                deliveryStatus[id] = receipt.status == "submitted" || receipt.outcomeUnknown ? "Submitted to \(launched)." : (surface == "claude" ? "Session started. Waiting for activity." : "Conversation started")
                 requestedSessionID = id
             }
             if receipt.id != nil { creationRequestIdentity = nil; creationRequestKey = nil }
             return true
+        } catch AgenthailAPIError.outcomeUnknown {
+            creationError = SessionCreationReceipt.unknownOutcomeMessage
+            return false
         } catch {
             if case AgenthailAPIError.unavailable(let detail) = error, detail == "Terminal sessions do not support advanced launch settings." {
                 creationError = detail

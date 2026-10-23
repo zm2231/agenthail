@@ -276,10 +276,14 @@ struct SessionCreationReceipt: Decodable {
     let warning: String?
     let session: RawSession?
     let sessionId: String?
+    let code: String?
     let error: String?
     let launcher: String?
     let location: SessionRuntime.Location?
     var id: String? { session?.id ?? sessionId }
+    /// Older daemons mark an unknown create with status "failed", so status alone never decides it.
+    var outcomeUnknown: Bool { unknown == true || code == "create_unknown" }
+    static let unknownOutcomeMessage = "Agenthail can't tell whether this session started. Check the sidebar before trying again."
 }
 
 struct APIVersion: Decodable {

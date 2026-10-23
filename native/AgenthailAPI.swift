@@ -685,11 +685,14 @@ final class AgenthailAPI: @unchecked Sendable {
                     message = detail
                 }
                 if let detail = object["error"] as? String, !detail.isEmpty {
-                    if object["unknown"] as? Bool == true { throw AgenthailAPIError.outcomeUnknown(detail) }
+                    if object["unknown"] as? Bool == true || object["code"] as? String == "create_unknown" { throw AgenthailAPIError.outcomeUnknown(detail) }
                     message = detail
                 }
                 if let error = object["error"] as? [String: Any], error["code"] as? String == "control_failed",
                    (object["result"] as? [String: Any])?["evidence"] as? String == "unknown" {
+                    throw AgenthailAPIError.outcomeUnknown(message)
+                }
+                if let error = object["error"] as? [String: Any], error["code"] as? String == "host_outcome_unknown" {
                     throw AgenthailAPIError.outcomeUnknown(message)
                 }
                 if let error = object["error"] as? [String: Any], error["code"] as? String == "stale" {

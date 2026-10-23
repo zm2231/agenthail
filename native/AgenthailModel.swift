@@ -349,13 +349,16 @@ final class AgenthailModel: ObservableObject {
             case .starting:
                 return .starting("Agenthail is still starting this session. It appears in the sidebar once it starts.")
             case .unconfirmed(let id):
-                if let id { await openCreatedSession(id, started: true) }
+                guard let id else { return .unconfirmed(SessionCreationReceipt.unknownOutcomeMessage) }
+                await openCreatedSession(id, started: true)
                 return .unconfirmed("This session may still be starting. It will appear in the sidebar when ready.")
             case .halted(let message):
                 return .halted(message)
             case .failed(let message):
                 return .failed(message)
             }
+        } catch AgenthailAPIError.outcomeUnknown {
+            return .unconfirmed(SessionCreationReceipt.unknownOutcomeMessage)
         } catch AgenthailAPIError.request(_, let message) {
             return .failed(message)
         } catch AgenthailAPIError.unavailable(let message) {
