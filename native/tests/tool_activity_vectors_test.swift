@@ -85,6 +85,45 @@ struct ToolActivityVectorsTest {
         "e\u{301}\n" + String(repeating: "é", count: 2999),
     ]
 
+    static let alignments: [([String], [String], Int)] = [
+        (["a", "b"], ["b", "a"], Alignment.cellLimit),
+        (["x", "a", "y"], ["y", "a", "x"], Alignment.cellLimit),
+        (["a", "b", "c"], ["c", "b", "a"], Alignment.cellLimit),
+        (["k", "a", "b", "k"], ["k", "b", "a", "k"], Alignment.cellLimit),
+        (["a", "x", "b", "x"], ["x", "a", "x", "b"], Alignment.cellLimit),
+        ([], ["a"], Alignment.cellLimit),
+        (["a"], [], Alignment.cellLimit),
+        (["p", "a", "b", "s"], ["p", "b", "c", "s"], 4),
+        (["p", "a", "b", "s"], ["p", "b", "c", "d", "s"], 4),
+        (["a", "b"], ["b", "a"], 3),
+    ]
+
+    static let edits: [(String, String)] = [
+        ("a\nb\nc", "a\nB\nc\nd\ne"),
+        ("let x = 1", "let y = 1"),
+        ("call(a)", "call(a, b)"),
+        ("    let changes: [FileChange]", "    let run: String\n    let diffs: [FileDiff]"),
+        ("alpha", "omega"),
+        ("café 👍🏽 old", "café 👍🏽 new"),
+        ((1...20).map { "line \($0)" }.joined(separator: "\n"), (1...20).map { $0 == 10 ? "line ten" : "line \($0)" }.joined(separator: "\n")),
+        ("a\r\nb\r\n", "a\r\nc\r\n"),
+        ("one two two three", "one two three three"),
+        ("x = f(a, b)\ny = 2", "y = 2\nx = f(b, a)"),
+        ("", "new\nfile\n"),
+        ("gone\n", ""),
+        (String(repeating: "x", count: TextDiff.markLimit + 1), String(repeating: "y", count: TextDiff.markLimit + 1)),
+    ]
+
+    static func row(_ entry: DiffEntry) -> [String: Any] {
+        switch entry.content {
+        case .line(let line):
+            let kind = switch line.kind { case .same: "same"; case .added: "added"; case .removed: "removed" }
+            return ["kind": kind, "text": line.text, "marks": line.marks.map { [$0.lowerBound, $0.upperBound] }]
+        case .folded(let count): return ["folded": count]
+        case .hunk: return ["hunk": true]
+        }
+    }
+
     static func vectors() throws -> [String: Any] {
         let presentations: [[String: Any]] = calls.map { name, text in
             let tool = ToolPresentation(name: name, text: text)
@@ -94,6 +133,7 @@ struct ToolActivityVectorsTest {
                 "verb": tool.verb, "object": object.text, "code": object.isCode,
                 "summary": tool.summary, "input": tool.readableInput,
                 "changes": tool.changes.map { ["path": $0.path, "added": $0.added, "removed": $0.removed] },
+                "diffs": tool.diffs.map { ["path": $0.path, "rows": DiffEntry.entries($0.hunks).map(row)] },
             ]
         }
         let states: [[String: Any]] = try timelines.map { name, items, active in
@@ -107,7 +147,16 @@ struct ToolActivityVectorsTest {
         let previews: [[String: Any]] = outputs.map { text in
             ["text": text, "preview": ToolRunSummary.outputPreview(text), "lines": text.split(separator: "\n", omittingEmptySubsequences: false).count]
         }
-        return ["calls": presentations, "states": states, "labels": labels, "outputs": previews]
+        let steps: [[String: Any]] = alignments.map { old, new, limit in
+            let names = Alignment.steps(old, new, limit: limit).map { step in
+                switch step { case .same: "same"; case .removed: "removed"; case .added: "added" }
+            }
+            return ["old": old, "new": new, "limit": limit, "steps": names]
+        }
+        let diffs: [[String: Any]] = edits.map { before, after in
+            ["before": before, "after": after, "rows": DiffEntry.entries([TextDiff(before: before, after: after)]).map(row)]
+        }
+        return ["calls": presentations, "states": states, "labels": labels, "outputs": previews, "alignments": steps, "diffs": diffs]
     }
 
     static func main() throws {

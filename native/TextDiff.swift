@@ -66,26 +66,22 @@ struct TextDiff: Equatable {
     }
 
     private static func matched(_ old: [String], _ new: [String]) -> [Line] {
-        let difference = new.difference(from: old)
-        let removed = Set(difference.removals.map(\.offset))
-        let inserted = Set(difference.insertions.map(\.offset))
-        var lines: [Line] = []
         var i = 0
         var j = 0
-        while i < old.count || j < new.count {
-            if i < old.count, removed.contains(i) || j == new.count {
-                lines.append(Line(kind: .removed, text: old[i]))
+        return Alignment.steps(old, new).map { step in
+            switch step {
+            case .removed:
                 i += 1
-            } else if j < new.count, inserted.contains(j) || i == old.count {
-                lines.append(Line(kind: .added, text: new[j]))
+                return Line(kind: .removed, text: old[i - 1])
+            case .added:
                 j += 1
-            } else {
-                lines.append(Line(kind: .same, text: new[j]))
+                return Line(kind: .added, text: new[j - 1])
+            case .same:
                 i += 1
                 j += 1
+                return Line(kind: .same, text: new[j - 1])
             }
         }
-        return lines
     }
 
     /// How much of a removed line must survive in an added one for the two to pair as an edit.
@@ -126,9 +122,19 @@ struct TextDiff: Equatable {
         guard old.count <= markLimit, new.count <= markLimit, visible > 0 else { return ([], [], 0) }
         let oldWords = words(old)
         let newWords = words(new)
-        let difference = newWords.map(\.text).difference(from: oldWords.map(\.text))
-        let removed = Set(difference.removals.map(\.offset))
-        let inserted = Set(difference.insertions.map(\.offset))
+        var removed = Set<Int>()
+        var inserted = Set<Int>()
+        var i = 0
+        var j = 0
+        for step in Alignment.steps(oldWords.map(\.text), newWords.map(\.text)) {
+            switch step {
+            case .removed: removed.insert(i)
+            case .added: inserted.insert(j)
+            case .same: break
+            }
+            if step != .added { i += 1 }
+            if step != .removed { j += 1 }
+        }
         let kept = oldWords.indices.filter { !removed.contains($0) && !oldWords[$0].text.allSatisfy(\.isWhitespace) }
         let common = kept.reduce(0) { $0 + oldWords[$1].range.count }
         return (ranges(oldWords, removed), ranges(newWords, inserted), Double(common) / Double(visible))
@@ -219,10 +225,56 @@ struct FileDiff: Equatable {
     }
 }
 
-private extension CollectionDifference.Change {
-    var offset: Int {
-        switch self {
-        case .insert(let offset, _, _), .remove(let offset, _, _): offset
+/// Matches two sequences by their longest common subsequence, taking a removal first where two matches
+/// are equally long, so a replaced line reads removed then added. Written out rather than taken from
+/// `difference(from:)`, whose pick among equal matches depends on the Swift runtime the OS ships; the
+/// dashboard's js/tool-activity.js runs the same steps and is checked against vectors from this one.
+enum Alignment {
+    enum Step: Equatable {
+        case same
+        case removed
+        case added
+    }
+
+    /// Comparisons allowed for what differs between the two; past this, it is all removed and then all added.
+    static let cellLimit = 4_000_000
+
+    static func steps<T: Equatable>(_ old: [T], _ new: [T], limit: Int = cellLimit) -> [Step] {
+        var prefix = 0
+        while prefix < old.count, prefix < new.count, old[prefix] == new[prefix] { prefix += 1 }
+        var suffix = 0
+        while suffix < old.count - prefix, suffix < new.count - prefix, old[old.count - 1 - suffix] == new[new.count - 1 - suffix] { suffix += 1 }
+        let a = Array(old[prefix..<(old.count - suffix)])
+        let b = Array(new[prefix..<(new.count - suffix)])
+        let n = a.count
+        let m = b.count
+        var steps = [Step](repeating: .same, count: prefix)
+        if n * m > limit {
+            steps += [Step](repeating: .removed, count: n) + [Step](repeating: .added, count: m)
+        } else {
+            // common[i * (m + 1) + j] is the length of the longest common subsequence of a[i...] and b[j...].
+            var common = [Int32](repeating: 0, count: (n + 1) * (m + 1))
+            for i in stride(from: n - 1, through: 0, by: -1) {
+                for j in stride(from: m - 1, through: 0, by: -1) {
+                    common[i * (m + 1) + j] = a[i] == b[j] ? common[(i + 1) * (m + 1) + j + 1] + 1 : max(common[(i + 1) * (m + 1) + j], common[i * (m + 1) + j + 1])
+                }
+            }
+            var i = 0
+            var j = 0
+            while i < n || j < m {
+                if i < n, j < m, a[i] == b[j] {
+                    steps.append(.same)
+                    i += 1
+                    j += 1
+                } else if i < n, j == m || common[(i + 1) * (m + 1) + j] >= common[i * (m + 1) + j + 1] {
+                    steps.append(.removed)
+                    i += 1
+                } else {
+                    steps.append(.added)
+                    j += 1
+                }
+            }
         }
+        return steps + [Step](repeating: .same, count: suffix)
     }
 }

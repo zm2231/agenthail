@@ -69,11 +69,11 @@ final class PhoneAppearanceTests: XCTestCase {
         try await load(appearance) { appearance.problem != nil }
 
         XCTAssertEqual(appearance.config.rev, "one")
-        XCTAssertEqual(appearance.wallpaper?.id, "backgrounds/sea.png")
+        XCTAssertEqual(Array(appearance.wallpapers.keys), ["backgrounds/sea.png"])
         XCTAssertTrue(appearance.active)
         let relaunched = PhoneAppearance(cache: cache)
         XCTAssertEqual(relaunched.config.rev, "one")
-        XCTAssertEqual(relaunched.wallpaper?.id, "backgrounds/sea.png")
+        XCTAssertEqual(Array(relaunched.wallpapers.keys), ["backgrounds/sea.png"])
     }
 
     func testAChangedConfigKeepsTheCachedBackgroundForTheNextLaunch() async throws {
@@ -88,7 +88,7 @@ final class PhoneAppearanceTests: XCTestCase {
 
         UIConfigURLProtocol.state.body = #"{"rev":"three","values":{"background":"none"},"chosen":{},"overrides":{},"problems":[]}"#
         try await load(appearance) { appearance.config.rev == "three" }
-        XCTAssertNil(appearance.wallpaper)
+        XCTAssertTrue(appearance.wallpapers.isEmpty)
 
         UIConfigURLProtocol.state.body = #"{"rev":"four","values":{"background":"image: backgrounds/sea.png"},"chosen":{},"overrides":{},"problems":[]}"#
         UIConfigURLProtocol.state.image = Self.png
@@ -96,8 +96,37 @@ final class PhoneAppearanceTests: XCTestCase {
 
         let relaunched = PhoneAppearance(cache: cache)
         XCTAssertEqual(relaunched.config.rev, "four")
-        XCTAssertEqual(relaunched.wallpaper?.id, "backgrounds/sea.png")
+        XCTAssertEqual(Array(relaunched.wallpapers.keys), ["backgrounds/sea.png"])
         XCTAssertTrue(relaunched.active)
+    }
+
+    func testLightAppearanceDrawsTheLightVariant() async throws {
+        UIConfigURLProtocol.state.body = #"{"rev":"one","values":{"background":"image: art/field-dark.jpg","background.light":"image: art/field-light.jpg"},"chosen":{},"overrides":{},"problems":[]}"#
+        UIConfigURLProtocol.state.image = Self.png
+        let appearance = PhoneAppearance(cache: cache)
+        try await load(appearance) { appearance.config.rev == "one" && appearance.wallpapers.count == 2 }
+
+        func drawn(_ appearance: PhoneAppearance, dark: Bool) -> String? {
+            var shown = key(.list)
+            shown.dark = dark
+            guard case .image(let image) = appearance.spec(shown).wallpaper else { return nil }
+            return image.id
+        }
+        XCTAssertEqual(drawn(appearance, dark: true), "art/field-dark.jpg")
+        XCTAssertEqual(drawn(appearance, dark: false), "art/field-light.jpg")
+        var light = key(.list)
+        light.dark = false
+        XCTAssertNotEqual(appearance.file(light), appearance.file(key(.list)), "each variant keeps its own rendered file")
+
+        let relaunched = PhoneAppearance(cache: cache)
+        XCTAssertEqual(drawn(relaunched, dark: false), "art/field-light.jpg", "both variants come back from the cache")
+        XCTAssertTrue(relaunched.active)
+    }
+
+    func testABackgroundWithoutATextureLineDrawsNoTexture() throws {
+        let appearance = PhoneAppearance(cache: nil)
+        appearance.preview(try config(["background": "mesh: 2x2, #102030, #203040, #304050, #405060"]))
+        XCTAssertEqual(appearance.spec(key(.list)).texture, "none", "the daemon's default texture is none")
     }
 
     func testEachSurfaceUsesItsOwnPaneAndStrength() throws {

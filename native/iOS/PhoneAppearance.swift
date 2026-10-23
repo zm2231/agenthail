@@ -1,3 +1,4 @@
+import CryptoKit
 import ImageIO
 import SwiftUI
 import UIKit
@@ -81,7 +82,7 @@ final class PhoneAppearance: ObservableObject {
     }
 
     @Published private(set) var config = UIConfig.defaults
-    @Published private(set) var wallpaper: WallpaperImage?
+    @Published private(set) var wallpapers: [String: WallpaperImage] = [:]
     @Published private(set) var rendered: [Key: BackdropImage] = [:]
     @Published private(set) var problem: String?
     private var pending: Set<Key> = []
@@ -95,8 +96,10 @@ final class PhoneAppearance: ObservableObject {
         if let cache, let data = try? Data(contentsOf: cache.appendingPathComponent("ui.json")),
            let saved = try? JSONDecoder().decode(UIConfig.self, from: data) {
             config = saved
-            if case .image(let path) = saved.background, let image = try? Data(contentsOf: cache.appendingPathComponent("wallpaper")) {
-                wallpaper = WallpaperImage.decode(image, id: path, maxPixels: Self.maxPixels)
+            for path in saved.imagePaths {
+                if let image = try? Data(contentsOf: cache.appendingPathComponent(Self.wallpaperFile(path))) {
+                    wallpapers[path] = WallpaperImage.decode(image, id: path, maxPixels: Self.maxPixels)
+                }
             }
         }
     }
@@ -109,12 +112,7 @@ final class PhoneAppearance: ObservableObject {
     static var deviceKind: String { UIDevice.current.userInterfaceIdiom == .pad ? "tablet" : "phone" }
 
     var active: Bool {
-        guard config.glass else { return false }
-        switch config.background {
-        case .none, .desktop: return false
-        case .image(let path): return wallpaper?.id == path
-        case .linear, .mesh: return true
-        }
+        config.glass && (wallpaperSpec(dark: true) != nil || wallpaperSpec(dark: false) != nil)
     }
 
     var colorScheme: ColorScheme? {
@@ -136,26 +134,31 @@ final class PhoneAppearance: ObservableObject {
             do {
                 let loaded = try await api.uiConfig(device: UIDevice.current.name, kind: Self.deviceKind)
                 if Task.isCancelled { return }
-                var wallpaper = wallpaperID(loaded) == nil ? nil : self.wallpaper
-                var wallpaperData: Data?
-                if case .image(let path) = loaded.background, wallpaper?.id != path {
+                var wallpapers: [String: WallpaperImage] = [:]
+                var fetched: [String: Data] = [:]
+                for path in loaded.imagePaths {
+                    if let kept = self.wallpapers[path] {
+                        wallpapers[path] = kept
+                        continue
+                    }
                     let data = try await api.uiBackground(path: path)
                     let maxPixels = Self.maxPixels
-                    wallpaper = await Task.detached { WallpaperImage.decode(data, id: path, maxPixels: maxPixels) }.value
+                    let image = await Task.detached { WallpaperImage.decode(data, id: path, maxPixels: maxPixels) }.value
                     if Task.isCancelled { return }
-                    guard wallpaper != nil else {
+                    guard let image else {
                         self.problem = "The background image \(path) can't be read."
                         return
                     }
-                    wallpaperData = data
+                    wallpapers[path] = image
+                    fetched[path] = data
                 }
-                if loaded != config || wallpaper != self.wallpaper {
+                if loaded != config || wallpapers != self.wallpapers {
                     config = loaded
-                    self.wallpaper = wallpaper
+                    self.wallpapers = wallpapers
                     rendered = [:]
                     recent = []
                     pending = []
-                    save(loaded, wallpaper: wallpaperData)
+                    save(loaded, wallpapers: fetched)
                 }
                 problem = nil
             } catch {
@@ -165,33 +168,38 @@ final class PhoneAppearance: ObservableObject {
         }
     }
 
-    func preview(_ config: UIConfig, wallpaper: WallpaperImage? = nil) {
+    func preview(_ config: UIConfig, wallpapers: [WallpaperImage] = []) {
         self.config = config
-        self.wallpaper = wallpaper
+        self.wallpapers = Dictionary(wallpapers.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         rendered = [:]
         recent = []
         pending = []
     }
 
-    private func save(_ config: UIConfig, wallpaper: Data?) {
+    private func save(_ config: UIConfig, wallpapers fetched: [String: Data]) {
         guard let cache else { return }
         let files = FileManager.default
         try? files.createDirectory(at: cache, withIntermediateDirectories: true)
-        for file in (try? files.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)) ?? [] where file.pathExtension == "png" {
-            try? files.removeItem(at: file)
+        let kept = Set(config.imagePaths.map(Self.wallpaperFile))
+        for file in (try? files.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)) ?? [] {
+            let name = file.lastPathComponent
+            if file.pathExtension == "png" || (name.hasPrefix("wallpaper") && !kept.contains(name)) {
+                try? files.removeItem(at: file)
+            }
         }
-        let image = cache.appendingPathComponent("wallpaper")
-        if let wallpaper {
-            try? wallpaper.write(to: image, options: .atomic)
-        } else if wallpaperID(config) == nil {
-            try? files.removeItem(at: image)
+        for (path, data) in fetched {
+            try? data.write(to: cache.appendingPathComponent(Self.wallpaperFile(path)), options: .atomic)
         }
         try? JSONEncoder().encode(config).write(to: cache.appendingPathComponent("ui.json"), options: .atomic)
     }
 
-    private func wallpaperID(_ config: UIConfig) -> String? {
-        if case .image(let path) = config.background { return path }
-        return nil
+    private static func wallpaperFile(_ path: String) -> String {
+        "wallpaper-" + SHA256.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func wallpaperID(dark: Bool) -> String {
+        if case .image(let path) = config.background(dark: dark) { return path }
+        return ""
     }
 
     private func renderScale(_ key: Key) -> CGFloat {
@@ -199,7 +207,7 @@ final class PhoneAppearance: ObservableObject {
     }
 
     func file(_ key: Key) -> URL? {
-        let name = [config.rev, wallpaper?.id ?? "", "\(key.surface)", "\(Int(key.size.width))x\(Int(key.size.height))@\(renderScale(key))",
+        let name = [config.rev, wallpaperID(dark: key.dark), "\(key.surface)", "\(Int(key.size.width))x\(Int(key.size.height))@\(renderScale(key))",
                     key.dark ? "dark" : "light", key.solid ? "solid" : "glass", "\(key.target)", key.readable ? "readable" : "plain"].joined(separator: "-")
         let safe = name.map { $0.isLetter || $0.isNumber || $0 == "." || $0 == "-" || $0 == "@" ? $0 : "_" }
         return cache?.appendingPathComponent(String(safe) + ".png")
@@ -277,7 +285,7 @@ final class PhoneAppearance: ObservableObject {
             texts = [CGRect(x: 0, y: 0, width: key.size.width, height: min(160, key.size.height))]
         }
         return BackdropSpec(
-            wallpaper: wallpaperSpec ?? .linear(angle: 0, stops: []),
+            wallpaper: wallpaperSpec(dark: dark) ?? .linear(angle: 0, stops: []),
             fit: config.backgroundFit,
             position: config.backgroundPosition,
             dim: Float(config.backgroundDim),
@@ -302,11 +310,11 @@ final class PhoneAppearance: ObservableObject {
         )
     }
 
-    private var wallpaperSpec: BackdropSpec.Wallpaper? {
+    private func wallpaperSpec(dark: Bool) -> BackdropSpec.Wallpaper? {
         func rgb(_ c: UIConfig.RGBColor) -> BackdropRGB { BackdropRGB(Float(c.red), Float(c.green), Float(c.blue)) }
-        switch config.background {
+        switch config.background(dark: dark) {
         case .none, .desktop: return nil
-        case .image(let path): return wallpaper?.id == path ? .image(wallpaper!) : nil
+        case .image(let path): return wallpapers[path].map { .image($0) }
         case .linear(let angle, let stops): return .linear(angle: Float(angle), stops: stops.map { BackdropStop(color: rgb($0.color), location: Float($0.location)) })
         case .mesh(let columns, let rows, let colors): return .mesh(columns: columns, rows: rows, colors: colors.map(rgb))
         }
@@ -431,7 +439,7 @@ private struct PhoneBackdropBody<Content: View>: View {
             .animation(.easeOut(duration: 0.25), value: rendered == nil)
             .task(id: keys) { request() }
             .onChange(of: appearance.config) { request() }
-            .onChange(of: appearance.wallpaper) { request() }
+            .onChange(of: appearance.wallpapers) { request() }
     }
 }
 

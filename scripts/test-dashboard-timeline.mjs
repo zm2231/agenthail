@@ -78,6 +78,8 @@ globalThis.toolRows = toolRows;
 globalThis.showToolOutput = showToolOutput;
 globalThis.collapseToolRow = collapseToolRow;
 globalThis.rememberToolRow = rememberToolRow;
+globalThis.toggleFileChip = toggleFileChip;
+globalThis.showToolDiff = showToolDiff;
 globalThis.timelineSignature = timelineSignature;
 globalThis.renderClaudeMetadata = renderClaudeMetadata;
 ${source.slice(metadataStart, metadataEnd)}
@@ -187,6 +189,45 @@ assert.equal(revealed.length, 0, "paging forward keeps the reader's place");
 context.showToolOutput(button({ outputShow: "0" }, { "data-reveal": "" }));
 assert.equal(context.toolRows.get("session-1 output:o-result"), 0);
 assert.equal(JSON.stringify(revealed), JSON.stringify([{ block: "nearest" }]), "Show less from the bottom scrolls the output into view");
+
+// An edit shows what it changed, and the run's chips open that file's diff in place.
+const editRun = [
+  { id: "e-1", kind: "toolCall", title: "Edit", text: JSON.stringify({ file_path: "/w/a.swift", old_string: "let x = 1", new_string: "let y = 1" }) },
+  { id: "e-2", kind: "toolCall", title: "Write", text: JSON.stringify({ file_path: "/w/b.md", content: "one\ntwo\n" }) },
+  { id: "e-3", kind: "toolCall", title: "Edit", text: JSON.stringify({ file_path: "/w/a.swift", old_string: "a", new_string: "b" }) },
+];
+let editHTML = context.renderTimeline(editRun, session);
+assert(editHTML.includes('<div class="diff-line removed"><span class="diff-sign" aria-hidden="true">−</span><span class="diff-text"><span class="sr-only">Removed: </span>let <mark>x</mark> = 1</span></div>'), "an edit line shows its diff with the changed word marked");
+assert(!editHTML.includes('class="tool-input"'), "an edit shows its diff instead of its raw input");
+assert(editHTML.includes('data-chip="/w/a.swift" aria-expanded="false"') && editHTML.includes('aria-label="a.swift, 2 added, 2 removed"'), "a file edited twice is one chip with both edits counted");
+const chipBlock = { dataset: { block: "session-1 chips:e-1" }, outerHTML: "" };
+context.toggleFileChip({ dataset: { chip: "/w/a.swift" }, closest: () => chipBlock });
+assert(chipBlock.outerHTML.includes('data-chip="/w/a.swift" aria-expanded="true"') && (chipBlock.outerHTML.match(/class="tool-diff"/g) || []).length === 1, "a chip opens its file's diff in place");
+assert(chipBlock.outerHTML.includes('<div class="diff-note">⋯</div>'), "the file's two edits show as two hunks");
+editHTML = context.renderTimeline(editRun, session);
+assert(editHTML.includes('data-chip="/w/a.swift" aria-expanded="true"'), "an open chip stays open across renders");
+context.toggleFileChip({ dataset: { chip: "/w/a.swift" }, closest: () => chipBlock });
+assert(!chipBlock.outerHTML.includes('class="tool-diff"'), "the chip closes again");
+const bigWrite = [{ id: "w-big", kind: "toolCall", title: "Write", text: JSON.stringify({ file_path: "/w/big.txt", content: Array.from({ length: 900 }, (_, index) => `row ${index}`).join("\n") }) }];
+const bigHTML = context.renderTimeline(bigWrite, session);
+assert.equal((bigHTML.match(/<div class="diff-line /g) || []).length, 400, "a long diff lays out 400 rows at first");
+assert(bigHTML.includes('data-diff-show="800">Show 400 more lines'), "and offers the next 400");
+const diffBlock = { dataset: { block: "session-1 diff:w-big:/w/big.txt" }, outerHTML: "" };
+context.showToolDiff({ dataset: { diffShow: "800" }, closest: () => diffBlock });
+assert.equal((diffBlock.outerHTML.match(/<div class="diff-line /g) || []).length, 800, "Show more adds a page in place");
+assert(diffBlock.outerHTML.includes(">Show 100 more lines<"), "the last page offers what is left");
+
+// An unchanged call's diffs are worked out once, however often the transcript renders.
+const patchText = `*** Begin Patch\n*** Update File: big.txt\n@@\n${Array.from({ length: 300 }, (_, index) => `-old ${index}\n+new ${index}`).join("\n")}\n*** End Patch`;
+const patchRun = Array.from({ length: 7 }, (_, index) => ({ id: `p-${index}`, kind: "toolCall", title: "apply_patch", text: index ? JSON.stringify({ command: `step ${index}` }) : patchText }));
+let derived = 0;
+const realTools = context.tools;
+context.tools = { ...realTools, toolDiffs: (call) => { derived += 1; return realTools.toolDiffs(call); }, toolLine: (call, diffs) => { if (call.title === "apply_patch") assert(diffs, "a patch's line reuses its cached diffs"); return realTools.toolLine(call, diffs); } };
+context.renderTimeline(patchRun, session);
+const firstRender = derived;
+context.renderTimeline(patchRun, session);
+context.tools = realTools;
+assert(firstRender > 0 && derived === firstRender, `a second render derives no diffs again (${firstRender} then ${derived - firstRender})`);
 
 // Collapse from the bottom closes the row and scrolls its header into view.
 const summaryRevealed = [];

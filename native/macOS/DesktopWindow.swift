@@ -941,14 +941,16 @@ struct TranscriptView: View {
         let canResend = pane.removedSession?.id != session.id && session.capabilities.send && !session.isReadOnly
         let layout = DesktopColumns.transcript(pane: paneWidth)
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 if (pane.olderCursor ?? 0) > 0 || pane.olderError != nil {
                     olderControl
+                        .padding(.bottom, DesktopSpace.s)
                 }
                 if let error = pane.detail?.readError {
                     Text(error)
                         .font(.system(size: DesktopType.body))
                         .foregroundStyle(DesktopPalette.text2)
+                        .padding(.bottom, DesktopSpace.s)
                 }
                 if blocks.isEmpty && sends.isEmpty && !session.isWorking && pane.detail != nil && (pane.olderCursor ?? 0) == 0 {
                     VStack(spacing: 6) {
@@ -961,14 +963,16 @@ struct TranscriptView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.top, 60)
                 }
-                ForEach(blocks) { block in
+                ForEach(Array(blocks.enumerated()), id: \.element.id) { index, block in
                     TranscriptBlockView(block: block, onEdit: canResend ? { resend($0) } : nil)
+                        .padding(.top, TranscriptBlock.gap(above: block.kind, after: index > 0 ? blocks[index - 1].kind : nil))
                 }
-                ForEach(sends) { send in
+                ForEach(Array(sends.enumerated()), id: \.element.id) { index, send in
                     UserBubble(text: send.text, receipt: send.status, files: send.files, failure: send.failure, onEdit: canResend ? { text in
                         if send.failure != nil { model.discardSend(send, in: session.id) }
                         resend(text, attachments: send.failure != nil ? send.attachments : [])
                     } : nil, onRetry: send.failure == nil || !canResend ? nil : { model.retrySend(send, in: session.id) })
+                    .padding(.top, TranscriptBlock.gap(above: .user(send.text, files: []), after: index > 0 ? .user(sends[index - 1].text, files: []) : blocks.last?.kind))
                 }
                 if session.isWaitingOnBackground, let background = session.backgroundTasks {
                     HStack(spacing: DesktopSpace.s) {
@@ -977,6 +981,7 @@ struct TranscriptView: View {
                     }
                     .font(.system(size: DesktopType.body))
                     .foregroundStyle(DesktopPalette.text2)
+                    .padding(.top, DesktopSpace.m)
                 }
             }
             .frame(maxWidth: DesktopColumns.reading)

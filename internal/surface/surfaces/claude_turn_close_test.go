@@ -407,8 +407,18 @@ func TestAClosingTurnClearsWhenItsTranscriptIsRewrittenAtTheSameSizeAndTime(t *t
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
-		t.Fatal(err)
+	// Linux stamps ctime from a coarse clock; retry until it moves.
+	for {
+		if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+			t.Fatal(err)
+		}
+		rewritten, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if changed := transcriptChangeTime(rewritten); changed == "" || changed != transcriptChangeTime(info) {
+			break
+		}
 	}
 	resume <- struct{}{}
 	nextPass()

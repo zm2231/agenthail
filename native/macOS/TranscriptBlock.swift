@@ -82,6 +82,22 @@ struct TranscriptBlock: Identifiable, Equatable {
         flushTools()
         return blocks
     }
+
+    static func gap(above block: Kind, after previous: Kind?) -> CGFloat {
+        guard let previous else { return 0 }
+        if block.isMessageIn { return DesktopSpace.xl }
+        if previous.isMessageIn { return DesktopSpace.m }
+        return DesktopSpace.s
+    }
+}
+
+extension TranscriptBlock.Kind {
+    var isMessageIn: Bool {
+        switch self {
+        case .user, .peer: true
+        default: false
+        }
+    }
 }
 
 func stripImageMarkers(_ text: String) -> (text: String, images: Int) {

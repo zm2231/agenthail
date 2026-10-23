@@ -44,16 +44,17 @@ struct SessionPreview: View {
         AppearanceScope(appearance: model.appearance) { previewBody }
             .onAppear {
                 guard let config = Self.previewAppearance else { return }
-                model.appearance.preview(config, wallpaper: Self.previewWallpaper(config))
+                model.appearance.preview(config, wallpapers: Self.previewWallpapers(config))
             }
     }
 
     /// An `image:` backdrop is read from the path in the argument, which the
     /// harness places inside the app's own container.
-    static func previewWallpaper(_ config: UIConfig) -> WallpaperImage? {
-        guard case .image(let path) = config.background, let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+    static func previewWallpapers(_ config: UIConfig) -> [WallpaperImage] {
         let screen = UIScreen.main.nativeBounds.size
-        return WallpaperImage.decode(data, id: path, maxPixels: Int(max(screen.width, screen.height)))
+        return config.imagePaths.compactMap { path in
+            (try? Data(contentsOf: URL(fileURLWithPath: path))).flatMap { WallpaperImage.decode($0, id: path, maxPixels: Int(max(screen.width, screen.height))) }
+        }
     }
 
     static var previewAppearance: UIConfig? {
