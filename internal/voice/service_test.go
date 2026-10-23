@@ -179,7 +179,7 @@ func (p *fixtureProvider) Poll(_ context.Context, after Cursor, _ string) (Batch
 	return b, nil
 }
 
-func (p *fixtureProvider) RespondDynamicToolCall(_ context.Context, requestID string, success bool, text string) error {
+func (p *fixtureProvider) RespondDynamicToolCall(_ context.Context, requestID, _ string, success bool, text string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.toolCalls = append(p.toolCalls, struct {
