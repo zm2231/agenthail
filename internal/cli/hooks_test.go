@@ -433,8 +433,16 @@ func TestHooksInstallSetsRemoteControlAtStartupInEveryRootOnlyWhenAsked(t *testi
 	if output, err = run("install"); err != nil || strings.Contains(output, "--remote-control on") {
 		t.Fatalf("a set root still gets the hint: %s", output)
 	}
-	if output, err = run("install", "--remote-control", "off"); err != nil || gjson.GetBytes(mustRead(t, primary), "remoteControlAtStartup").Type != gjson.False {
-		t.Fatalf("off: err=%v output=%s", err, output)
+	if output, err = run("--remote-control", "off", "install"); err != nil || gjson.GetBytes(mustRead(t, primary), "remoteControlAtStartup").Type != gjson.False {
+		t.Fatalf("off before the action: err=%v output=%s", err, output)
+	}
+	for _, args := range [][]string{{"install", "--remote-control", "yes"}, {"install", "--remote-control"}, {"install", "codex", "--remote-control", "on"}, {"status", "--remote-control", "on"}, {"uninstall", "--remote-control", "on"}} {
+		if _, err := run(args...); err == nil {
+			t.Fatalf("%v: err=%v", args, err)
+		}
+		if gjson.GetBytes(mustRead(t, primary), "remoteControlAtStartup").Type != gjson.False {
+			t.Fatalf("%v changed the setting", args)
+		}
 	}
 	if output, err = run("status"); err != nil || strings.Count(output, "Remote Control at startup off") != 2 {
 		t.Fatalf("status: err=%v output=%s", err, output)

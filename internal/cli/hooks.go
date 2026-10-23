@@ -164,12 +164,17 @@ func cancelWhenOrphaned(ctx context.Context, parent int, cancel func()) {
 func (a *App) cmdHooks(args []string) error {
 	usage := errors.New("usage: agenthail hooks install [--remote-control on|off] | uninstall|status [codex]")
 	var remoteControl *bool
-	if len(args) == 3 && args[0] == "install" && args[1] == "--remote-control" {
-		if args[2] != "on" && args[2] != "off" {
+	if hasFlag(args, "--remote-control") {
+		value := flagVal(args, "--remote-control")
+		if value != "on" && value != "off" {
 			return usage
 		}
-		on := args[2] == "on"
-		remoteControl, args = &on, args[:1]
+		on := value == "on"
+		remoteControl = &on
+	}
+	args = stripFlags(args)
+	if remoteControl != nil && (len(args) != 1 || args[0] != "install") {
+		return usage
 	}
 	if len(args) < 1 || len(args) > 2 || (args[0] != "install" && args[0] != "uninstall" && args[0] != "status") || (len(args) == 2 && args[1] != "codex") {
 		return usage
